@@ -254,4 +254,4 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 
 ## Releases
 
-Maintainers: see [RELEASING.md](RELEASING.md) for the npm, container image, and Helm chart release flows.
+Releases are cut by the maintainers; contributors do not need to do anything release-specific.

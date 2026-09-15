@@ -12,6 +12,7 @@ import { Pool } from 'pg';
 import { ulid } from 'ulid';
 
 import { createDb } from '../../../../src/db/postgres/client';
+import { ensureTrueforgeSchema } from '../../../../src/db/postgres/schema';
 import type { Database } from '../../../../src/db/postgres/types';
 
 const ADMIN_URL_ENV = 'PG_STORE_TESTS_ADMIN_URL';
@@ -74,6 +75,9 @@ describePg('20260914_000001_space_format migration', () => {
       statementTimeoutMs: 60_000,
       idleInTransactionSessionTimeoutMs: 60_000,
     });
+    // createDb pins search_path to the trueforge schema; the app creates that schema before it
+    // migrates, so a fresh database needs the same bootstrap before any migration can create a table.
+    await ensureTrueforgeSchema(db);
   }, 120_000);
 
   afterEach(async () => {

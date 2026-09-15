@@ -677,8 +677,6 @@ pnpm --filter @truefoundry/trueforge-ui test
 pnpm --filter @truefoundry/trueforge-ui build
 ```
 
-Publishing: see [RELEASING.md](../../RELEASING.md#releasing-truefoundrytrueforge-ui).
-
 ---
 
 ## License

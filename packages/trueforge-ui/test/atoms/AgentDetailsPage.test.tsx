@@ -19,6 +19,16 @@ import type {
 } from '@/server/types.js';
 import { SlotsProvider, type SlotOverrides } from '@/theme/SlotsProvider.js';
 import { createMockAgentUIServer, createMockScheduleServer } from '../server/mockServer.js';
+// Every agent-details tab this page renders by default is a React.lazy slot over one of these
+// modules (see theme/defaultSlots.ts). Loading them with the test file means each lazy import
+// resolves from the module cache, so tab content renders within findBy's default wait instead of
+// racing a cold module transform on a busy machine.
+import '@/atoms/agent-details/AgentCodeSnippets.js';
+import '@/atoms/agent-details/AgentMetricChart.js';
+import '@/atoms/agent-details/AgentOverview.js';
+import '@/atoms/agent-details/AgentSessionEventTimeline.js';
+import '@/atoms/agent-details/AgentSessionEventTimelineChart.js';
+import '@/atoms/schedules/SchedulesPage.js';
 
 const intersectionObservers: IntersectionObserverMock[] = [];
 

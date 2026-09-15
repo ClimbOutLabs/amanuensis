@@ -50,7 +50,9 @@ function findChromiumExecutable(): string {
   return executable;
 }
 
-test('320px composer keeps a touch-usable Send control inside the viewport', { timeout: 60_000 }, async () => {
+const RENDER_TIMEOUT_MS = 45_000;
+
+test('320px composer keeps a touch-usable Send control inside the viewport', { timeout: 120_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
   const server = await createServer({
     configFile: false,
@@ -73,11 +75,17 @@ test('320px composer keeps a touch-usable Send control inside the viewport', { t
       isMobile: true,
     });
     const page = await context.newPage();
-    await page.goto(`http://127.0.0.1:${address.port}/tests/fixtures/composer-mobile.fixture.html`);
+    // The fixture renders after its module graph loads, and a cold Vite dependency optimization
+    // can hold the page's `load` event past Playwright's default. Wait for the document, then for
+    // each control to render, instead of sampling visibility once before React has mounted.
+    await page.goto(`http://127.0.0.1:${address.port}/tests/fixtures/composer-mobile.fixture.html`, {
+      waitUntil: 'domcontentloaded',
+      timeout: RENDER_TIMEOUT_MS,
+    });
 
     assert.equal(await page.evaluate(() => window.innerWidth), 320);
     for (const name of ['Add-ons (2)', 'Select model', 'Select reasoning effort', 'Send message']) {
-      assert.equal(await page.getByRole('button', { name }).isVisible(), true, `${name} should be visible`);
+      await page.getByRole('button', { name }).waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
     }
 
     const send = page.getByRole('button', { name: 'Send message' });
@@ -97,7 +105,7 @@ test('320px composer keeps a touch-usable Send control inside the viewport', { t
     assert.equal(await page.locator('body').getAttribute('data-submitted'), 'true');
 
     const cancel = page.getByRole('button', { name: 'Cancel' });
-    assert.equal(await cancel.isVisible(), true);
+    await cancel.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
     const cancelBox = await cancel.boundingBox();
     assert.ok(cancelBox != null, 'Cancel should have browser geometry while running');
     assert.ok(cancelBox.x >= 0, `Cancel starts outside viewport: ${cancelBox.x}`);
@@ -107,7 +115,7 @@ test('320px composer keeps a touch-usable Send control inside the viewport', { t
 
     await cancel.tap();
     assert.equal(await page.locator('body').getAttribute('data-cancelled'), 'true');
-    assert.equal(await page.getByRole('button', { name: 'Send message' }).isVisible(), true);
+    await page.getByRole('button', { name: 'Send message' }).waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
   } finally {
     await browser?.close();
     await server.close();

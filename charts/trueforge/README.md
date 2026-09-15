@@ -11,7 +11,6 @@ Postgres and Redis.
 
 Chart `version` / `appVersion` / `image.tag` are maintained on `main` (chart-release
 bot PR or human). Publishing is gated by git tag `charts/trueforge@<version>`.
-See [`RELEASING.md`](../../RELEASING.md).
 
 ## Dev defaults (read before exposing)
 

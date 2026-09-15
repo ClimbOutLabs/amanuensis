@@ -117,7 +117,7 @@ pnpm test
 
 `pnpm verify` runs the private-data scan plus all checks above. The Git pre-push hook is change-aware: it always scans the pushed tree for private data, then runs formatting, linting, type checks, or policy tests selected from the changed files. It does not always run the full verification suite.
 
-Useful targeted commands include `pnpm test:trueforge-core`, `pnpm test:trueforge`, `pnpm test:frontend`, and `pnpm smoke`. Read [AGENTS.md](AGENTS.md) and any package-local `AGENTS.md` before changing code. Published-package or frontend changes require a changeset; generated SDK and OpenAPI files are not edited by hand.
+Useful targeted commands include `pnpm test:trueforge-core`, `pnpm test:trueforge`, `pnpm test:frontend`, and `pnpm smoke`. Read [AGENTS.md](AGENTS.md) and any package-local `AGENTS.md` before changing code. Generated SDK and OpenAPI files are not edited by hand.
 
 ## Further reading
 

@@ -371,6 +371,11 @@ export async function startInertMcpServer(): Promise<InertMcpServer> {
 
   function makeHttpServer(): Server {
     return createServer((req, res) => {
+      // No keep-alive: `stop()` then `start()` on the same port can run with no I/O turn in
+      // between, so the client's HTTP pool may not have seen the old socket close yet and
+      // would reuse it for the next request ("fetch failed"). A fresh connection per request
+      // makes a restart indistinguishable from a server that was never down.
+      res.setHeader('connection', 'close');
       void dispatch(req, res).catch((error: unknown) => {
         if (!res.headersSent) {
           res.writeHead(500, { 'content-type': 'application/json' });

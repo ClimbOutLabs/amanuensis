@@ -28,10 +28,7 @@ d421135d`) lands on main, recording that we contain upstream up to the
 ## Cadence
 
 Weekly, plus on demand before starting large local features that touch
-upstream surfaces. The scheduled workflow
-(.github/workflows/upstream-sync.yml) checks drift every Monday and opens a
-draft PR when the merge is clean, or an issue with the conflict manifest
-when it is not. Small and often beats big and rare.
+upstream surfaces. Small and often beats big and rare.
 
 ## One-time setup (per clone)
 
@@ -67,8 +64,6 @@ happens to be checked out), merges `upstream/main`, auto-resolves every
 remaining conflicts grouped by their DIVERGENCE.md policy. If a branch for
 that upstream date already exists locally or on origin, the script refuses
 and tells you to resume it instead; it never resets in-progress sync work.
-The scheduled workflow applies the same rule: while a sync PR is open, its
-branch is never recreated or force-pushed.
 
 Then by hand:
 
@@ -88,11 +83,3 @@ Then by hand:
    not drive the sync reviews it). Merge with a merge commit.
 6. Rebuild running deployments from main afterwards; verify feature markers
    inside the image before swapping containers.
-
-## Public release
-
-After each sync PR merges into main, the updated tree is published to the public
-repository as a single squashed commit with private material removed. See
-docs/PUBLIC_RELEASE.md for the manifest, rewrite rules, and export command.
-The public history is one commit per sync by design; there are no branches or
-history visible to the public.

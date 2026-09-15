@@ -106,10 +106,10 @@ services:
 
   # Schedule controller: runs the periodic control loops (schedule dispatch) as a separate service.
   controller:
-    build:
-      context: .
-      dockerfile: Dockerfile.dev
+    # Runs the image the `server` service builds. Building it here too makes Compose build
+    # the same tag twice in parallel, and the second export fails with "already exists".
     image: truefoundry-server:latest
+    pull_policy: never
     command: ['node', 'dist/controller-main.js']
     environment:
       NODE_ENV: production

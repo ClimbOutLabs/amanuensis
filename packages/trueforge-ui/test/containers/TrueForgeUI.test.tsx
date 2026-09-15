@@ -276,7 +276,7 @@ describe('TrueForgeUI', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Select Sandbox first');
   });
 
-  it('keeps configuration editors out of Save Agent', async () => {
+  it('summarizes model, connectors, and skills in Save Agent with their own editors', async () => {
     const getModels = vi.fn(async () => [
       {
         id: 'openai-main/gpt-4.1',
@@ -301,8 +301,9 @@ describe('TrueForgeUI', () => {
     const saveDialog = await screen.findByRole('dialog', { name: 'Save agent' });
     expect(within(saveDialog).getByLabelText('Agent name')).toBeInTheDocument();
     expect(within(saveDialog).getByLabelText('Description')).toBeInTheDocument();
-    expect(within(saveDialog).queryByRole('button', { name: 'Edit Model' })).not.toBeInTheDocument();
-    expect(within(saveDialog).queryByRole('button', { name: 'Edit Connectors' })).not.toBeInTheDocument();
+    expect(within(saveDialog).getByRole('button', { name: 'Edit Model' })).toBeInTheDocument();
+    expect(within(saveDialog).getByRole('button', { name: 'Edit Connectors' })).toBeInTheDocument();
+    expect(within(saveDialog).getByRole('button', { name: 'Edit Skills' })).toBeInTheDocument();
     expect(getModels).toHaveBeenCalled();
     expect(getMcp).toHaveBeenCalled();
     expect(getSkills).toHaveBeenCalled();
@@ -778,13 +779,17 @@ describe('SidebarLayout', () => {
 
 describe('DrawerLayout a11y', () => {
   it('exposes New Chat and New Agent actions', () => {
+    // TrueForgeUIShell always mounts layouts inside AgentConfigInstructionsProvider; the
+    // agent config drawer in DrawerLayout reads it, so the harness provides it the same way.
     render(
       <SlotsProvider>
         <ShellModeProvider>
           <RuntimeHarness messages={[]}>
-            <div className="h-96">
-              <DrawerLayout />
-            </div>
+            <AgentConfigInstructionsProvider>
+              <div className="h-96">
+                <DrawerLayout />
+              </div>
+            </AgentConfigInstructionsProvider>
           </RuntimeHarness>
         </ShellModeProvider>
       </SlotsProvider>,

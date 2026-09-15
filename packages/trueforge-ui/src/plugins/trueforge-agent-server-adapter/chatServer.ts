@@ -592,14 +592,7 @@ export function createHarnessChatServer(
       // Named (reference) sessions reject agent updates server-side. `metadata` is a full
       // replace on the wire, so callers (e.g. AgentDetailsPreferenceContext) must merge it
       // with the session's existing metadata themselves before calling this.
-      //
-      // `title` is accepted by the wire schema (UpdateSessionRequestSchema) and forwarded by
-      // the PATCH handler, but `packages/trueforge-sdk` has not been regenerated for it yet
-      // (Fern regen is Linux-only) so `TrueForgeApi.UpdateSessionRequest` does not declare the
-      // field. The generated request serializer forwards unrecognized object keys
-      // (`unrecognizedObjectKeys: "passthrough"`), so this still reaches the server today; the
-      // intersection type below is only to keep this call type-checked until the SDK catches up.
-      const request: TrueForgeApi.UpdateSessionRequest & { title?: string } = {
+      const request: TrueForgeApi.UpdateSessionRequest = {
         ...(agentSpec === undefined ? {} : { agent: { spec: toHarnessAgentSpec(agentSpec) } }),
         ...(metadata === undefined ? {} : { metadata }),
         ...(title === undefined ? {} : { title }),

@@ -139,7 +139,11 @@ describe('formatMemoryBlock', () => {
           canonical_name: 'Robin',
           observations: [{ text: "is Alex's wife", mentioned_at: '2026-08-01' }],
         },
-        { name: 'Biscuit', canonical_name: 'Biscuit', observations: [{ text: 'is a cat', mentioned_at: '2026-08-02' }] },
+        {
+          name: 'Biscuit',
+          canonical_name: 'Biscuit',
+          observations: [{ text: 'is a cat', mentioned_at: '2026-08-02' }],
+        },
       ],
       budgetTokens: 2048,
     });
@@ -151,7 +155,7 @@ describe('formatMemoryBlock', () => {
         "[world, 2026-08-14] Alex's wife is named Robin.",
         '[experience, 2026-08-30] Had coffee with Robin at the cafe.',
         "People: Robin: is Alex's wife | Biscuit: is a cat",
-        '(memory: 2 items, 2 entities; 38 tokens of 2048 budget)',
+        '(memory: 2 items, 2 entities; 39 tokens of 2048 budget)',
         '</aman-memory>',
       ].join('\n'),
     );

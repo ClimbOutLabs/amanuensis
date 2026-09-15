@@ -9,4 +9,6 @@ import type * as TrueForge from "../../../../index.js";
 export interface UpdateSessionRequest {
     agent?: TrueForge.SessionAgentSpecBody;
     metadata?: TrueForge.SessionMetadata;
+    /** New chat title. Trimmed; must be non-empty after trimming. */
+    title?: string;
 }

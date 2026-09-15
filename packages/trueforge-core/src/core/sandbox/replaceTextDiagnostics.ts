@@ -45,7 +45,7 @@ const NEAREST_PASSAGE_TIE_MARGIN_FLOOR = 3;
 // `lowerBoundEditDistance`), so this is a hard safety cap for when many candidates tie on the
 // bound, not the primary way candidates get narrowed — it prevents quadratic behavior when a
 // large old_text or file has many repeated lines.
-const MAX_SCORED_CANDIDATES = 8;
+export const MAX_SCORED_CANDIDATES = 8;
 
 /** Every index in `haystack` where `needle` occurs (overlap-tolerant forward scan). */
 function allIndicesOf(haystack: string, needle: string): number[] {

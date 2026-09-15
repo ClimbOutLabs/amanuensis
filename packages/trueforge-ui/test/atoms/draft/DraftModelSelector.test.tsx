@@ -151,7 +151,7 @@ describe('DraftModelSelector', () => {
     agentSpec = { model: { name: 'local-llama/assistant-q-6' } };
     renderSelector();
 
-    await waitFor(() => expect(screen.getByTitle('Select model')).toHaveTextContent('psychagent-q-6'));
+    await waitFor(() => expect(screen.getByTitle('Select model')).toHaveTextContent('assistant-q-6'));
     expect(updateAgentSpec).not.toHaveBeenCalled();
   });
 

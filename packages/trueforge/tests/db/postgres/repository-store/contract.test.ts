@@ -1,6 +1,7 @@
 import { sql } from 'kysely';
 
 import { PostgresRepositoryStore } from '../../../../src/db/postgres/repository-store/PostgresRepositoryStore';
+import { TRUEFORGE_SCHEMA } from '../../../../src/db/postgres/schema';
 import { json } from '../../../../src/db/postgres/sqlExpressions';
 import { runRepositoryStoreContractSuite } from '../../repositoryStoreContractSuite';
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../testDatabase';
@@ -103,7 +104,7 @@ describePg('PostgresRepositoryStore', () => {
     const rows = await sql<{ table_name: string; column_name: string }>`
       SELECT table_name, column_name
       FROM information_schema.columns
-      WHERE table_schema = 'public'
+      WHERE table_schema = ${TRUEFORGE_SCHEMA}
         AND table_name IN ('repository', 'session', 'repository_verify_command', 'repository_verify_command_proposal')
     `.execute(env.db);
     const columns = new Map<string, string[]>();

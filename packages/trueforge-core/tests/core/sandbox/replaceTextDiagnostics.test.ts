@@ -1,4 +1,6 @@
-import { matchReplaceText } from '../../../src/core/sandbox/replaceTextDiagnostics';
+import { diff_match_patch as DiffMatchPatch } from 'diff-match-patch';
+
+import { MAX_SCORED_CANDIDATES, matchReplaceText } from '../../../src/core/sandbox/replaceTextDiagnostics';
 
 describe('matchReplaceText', () => {
   it('returns exact_match for a unique exact occurrence', () => {
@@ -168,27 +170,31 @@ describe('matchReplaceText', () => {
   });
 
   it('does not exhibit quadratic behavior on large files with repeated lines (regression test)', () => {
-    // With a file of ~200,000 identical lines and old_text of similar lines, the diagnostic
-    // builder must score candidates cheaply on per-line matches before materializing and diffing,
-    // otherwise it becomes quadratic and times out. The cheap-scoring approach keeps this well
-    // under 2000ms.
+    // With a file of ~200,000 identical lines and old_text of similar lines, every line is an
+    // anchor occurrence. The diagnostic builder must rank those candidates by a cheap lower bound
+    // and run the expensive exact diff on at most MAX_SCORED_CANDIDATES of them; diffing every
+    // candidate is the quadratic behavior this guards against. Counting exact scorings checks that
+    // directly and does not depend on how loaded the machine running the test is.
     const repeatedLine = 'const x = 1;\n';
     const largeFileContent = repeatedLine.repeat(200000);
     const oldText = (repeatedLine.repeat(1000) + 'const x = 999;\n').slice(0, -1); // Same lines + different last line
     const path = 'large-file.ts';
 
-    const startTime = Date.now();
-    const result = matchReplaceText({ fileContent: largeFileContent, oldText, path });
-    const elapsed = Date.now() - startTime;
+    const exactScorings = jest.spyOn(DiffMatchPatch.prototype, 'diff_levenshtein');
+    try {
+      const result = matchReplaceText({ fileContent: largeFileContent, oldText, path });
 
-    expect(result.status).toBe('no_match');
-    if (result.status === 'no_match') {
-      expect(result.rejection).toContain(path);
-      expect(result.rejection).toContain('Nearest passage');
-      expect(result.rejection).toContain('Diff');
+      expect(result.status).toBe('no_match');
+      if (result.status === 'no_match') {
+        expect(result.rejection).toContain(path);
+        expect(result.rejection).toContain('Nearest passage');
+        expect(result.rejection).toContain('Diff');
+      }
+      expect(exactScorings.mock.calls.length).toBeGreaterThan(0);
+      expect(exactScorings.mock.calls.length).toBeLessThanOrEqual(MAX_SCORED_CANDIDATES);
+    } finally {
+      exactScorings.mockRestore();
     }
-    // Assert wall time is well under 2000ms to ensure the cheap-scoring optimization is working
-    expect(elapsed).toBeLessThan(2000);
   });
 
   it('does not discard a passage two characters away in favor of decoys with more equal lines (regression test)', () => {
