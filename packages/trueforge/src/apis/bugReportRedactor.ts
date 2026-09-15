@@ -560,6 +560,8 @@ function turnErrorMessage(cause: AbnormalHandoffCause | undefined): string {
   switch (cause) {
     case 'iteration_limit':
       return 'The turn ended because it reached the per-turn step limit.';
+    case 'loop_detected':
+      return 'The turn ended because the agent was stuck repeating itself.';
     case 'client_cancelled':
     case 'server_cancelled':
       return 'The turn ended because it was cancelled.';

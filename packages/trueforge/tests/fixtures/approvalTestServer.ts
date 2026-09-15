@@ -43,6 +43,7 @@ import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAu
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
+import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
 import { INERT_SERVER_NAME, startInertMcpServer, type InertMcpServer } from './inertMcpServer';
 import { startScriptedModelServer, type ScriptedModelServer } from './scriptedModelServer';
 
@@ -98,6 +99,7 @@ function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): O
     sessionStore,
     sessions: new Sessions({ sessionStore }),
     activeTurns: new ActiveTurnRegistry(),
+    turnDrains: new TurnDrainRegistry(),
     requestReplyRouter: new RequestReplyRouter(),
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),

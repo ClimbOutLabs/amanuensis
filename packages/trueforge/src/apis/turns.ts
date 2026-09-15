@@ -66,7 +66,7 @@ import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtif
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { HindsightClient } from '../runtime/memory/hindsightClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
-import { submitRetain } from '../runtime/memory/memoryRetain';
+import { submitRetainWithVerification } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
 import { mintPeeredTurnId } from '../runtime/peeringIds';
 import {
@@ -93,6 +93,7 @@ import {
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
 import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
+import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
@@ -174,6 +175,8 @@ export interface TurnsRouterDeps {
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   activeTurns: ActiveTurnRegistry;
+  /** Tracks in-flight turn event drains so shutdown can wait for them. */
+  turnDrains: TurnDrainRegistry;
   resolveModelProviderStore: (c: Context, runAsAgent?: AgentRecord) => IModelProviderStore;
   resolveMcpServerStore: (c: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore;
   resolveSkillStore: (c: Context) => ISkillStore;
@@ -203,7 +206,10 @@ const CONFIGURED_MODELS_PROMPT_LIMIT = 20;
  * stores; callers must resolve them from the request context (e.g. schedule `resolveTurnDeps(c, agent)`)
  * so TrueFoundry mode stays token-bound for models, MCP, and skills.
  */
-export type BeginTurnExecutionDeps = Pick<TurnsRouterDeps, 'activeTurns' | 'eventSubscriptions' | 'logger'> & {
+export type BeginTurnExecutionDeps = Pick<
+  TurnsRouterDeps,
+  'activeTurns' | 'turnDrains' | 'eventSubscriptions' | 'logger'
+> & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
   mcpServerStore: IMcpServerWithAuthStore;
@@ -613,8 +619,8 @@ function formatAssistantMessageText(
  * Re-reads the just-completed turn for its sandbox id, resolves the tenant's sandbox provider,
  * and hands both to `submitArtifactPersistence`. Kept separate from that function (which only
  * needs a provider and a sandbox id it already has) because resolving those two is itself
- * fallible in ways that must never surface as a turn failure, the same fire-and-forget contract as
- * `submitRetain`: this never throws.
+ * fallible in ways that must never surface as a turn failure — the same never-throw contract as
+ * `submitRetainWithVerification`: this never throws.
  */
 async function resolveAndSubmitArtifactPersistence(params: {
   turnArtifactStore: ITurnArtifactStore;
@@ -673,15 +679,21 @@ async function resolveAndSubmitArtifactPersistence(params: {
   }
 }
 
-export async function drainTurnEvents(input: {
+/**
+ * Inputs for drainTurnEvents. `turnDrains` tracks the drain so shutdown can wait for
+ * the TURN_DONE submissions (memory retain, profile learning, artifact persistence) instead
+ * of dropping them when a SIGTERM lands in the drain window.
+ */
+export interface DrainTurnEventsInput {
   trackedStream: AsyncIterable<TurnStreamingEvent>;
   turnEventStream: EventSubscription<TurnStreamingEvent>;
   sessionId: string;
   turnId: string;
   executionDeadline: TurnExecutionDeadline;
   logger: Logger;
+  turnDrains: TurnDrainRegistry;
   onEvent?: (event: TurnStreamingEvent, sequenceNumber: number) => Promise<void>;
-  /** Present only when a memory provider resolved for this turn; retain is fire-and-forget. */
+  /** Present only when a memory provider resolved for this turn; the drain awaits the retain. */
   memory?:
     | {
         client: HindsightClient;
@@ -689,7 +701,7 @@ export async function drainTurnEvents(input: {
         sessionTitle: string | undefined;
       }
     | undefined;
-  /** Present only when profile learning is enabled; the pass is fire-and-forget. */
+  /** Present only when profile learning is enabled; the drain awaits the pass. */
   profileLearning?: ProfileLearningDrainMember | undefined;
   /**
    * Present on every turn (unconditionally, unlike memory/profile learning): a turn that never
@@ -705,7 +717,15 @@ export async function drainTurnEvents(input: {
         tenantId: string;
       }
     | undefined;
-}): Promise<void> {
+}
+
+export async function drainTurnEvents(input: DrainTurnEventsInput): Promise<void> {
+  const drain = runTurnEventDrain(input);
+  input.turnDrains.track({ sessionId: input.sessionId, turnId: input.turnId, drain });
+  return drain;
+}
+
+async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
   const {
     trackedStream,
     turnEventStream,
@@ -737,7 +757,9 @@ export async function drainTurnEvents(input: {
       await onEvent?.(event, sequenceNumber);
       if (event.type === EventType.TURN_DONE && event.state.status === 'done') {
         if (memory !== undefined) {
-          void submitRetain({
+          // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
+          // it, and the verification pass inside retries a failed retain once.
+          await submitRetainWithVerification({
             client: memory.client,
             sessionId,
             turnId,
@@ -752,19 +774,19 @@ export async function drainTurnEvents(input: {
         if (profileLearning !== undefined) {
           // The assistant's reply is deliberately not passed here: it is not a source of facts
           // about the user, so the learning pass only ever sees the user's own turn text.
-          void submitProfileLearning({
+          // Awaited so the tracked drain covers the pass; the pass writes its audit event to
+          // the turnEventStream (how an open tab sees it without reloading the turn).
+          await submitProfileLearning({
             ...profileLearning,
             sessionId,
             turnId,
             completedAt: event.state.completed_at,
-            // The pass writes its audit event after this drain has finished; the stream is how
-            // an open tab sees that event without reloading the turn.
             turnEventStream,
             logger,
           });
         }
         if (artifacts !== undefined) {
-          void resolveAndSubmitArtifactPersistence({
+          await resolveAndSubmitArtifactPersistence({
             ...artifacts,
             sessionId,
             turnId,
@@ -793,7 +815,7 @@ export async function drainTurnEvents(input: {
   }
 }
 
-/** Inputs for {@link drainTurnEvents} produced by {@link beginTurnExecution}. */
+/** Inputs for drainTurnEvents, produced by beginTurnExecution. */
 export interface TurnEventDrainInput {
   trackedStream: AsyncIterable<TurnStreamingEvent>;
   turnEventStream: EventSubscription<TurnStreamingEvent>;
@@ -801,6 +823,7 @@ export interface TurnEventDrainInput {
   turnId: string;
   executionDeadline: TurnExecutionDeadline;
   logger: Logger;
+  turnDrains: TurnDrainRegistry;
   memory?:
     | {
         client: HindsightClient;
@@ -897,6 +920,7 @@ export async function beginTurnExecution(params: {
       turnId: turn.id,
       executionDeadline,
       logger: deps.logger,
+      turnDrains: deps.turnDrains,
       memory:
         deps.memoryClient === undefined
           ? undefined
@@ -1389,7 +1413,8 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     const sessionTitleForMemory = session.record.title ?? deriveSessionTitle(body.input);
 
     // Resolved before the turn exists, like the memory provider above: the pass itself runs
-    // fire-and-forget after TURN_DONE and every failure inside it silently no-ops. Read off the
+    // after TURN_DONE (awaited by the tracked drain) and every failure inside it silently
+    // no-ops. Read off the
     // profile already loaded for the personalization context, so learning left off (the default)
     // costs nothing here, not even the model-FQN lookup. The pass re-reads the switch itself, so
     // a user who turns it off mid-turn is still obeyed.
@@ -1704,6 +1729,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       turnId: turn.id,
       executionDeadline,
       logger: deps.logger,
+      turnDrains: deps.turnDrains,
       memory:
         memoryClient === undefined
           ? undefined

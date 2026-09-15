@@ -1,6 +1,17 @@
 import winston from 'winston';
-import { HindsightClient, type RetainOutcome } from '../../../../src/runtime/memory/hindsightClient';
-import { buildRetainItem, retainOperationId, submitRetain } from '../../../../src/runtime/memory/memoryRetain';
+import {
+  HindsightClient,
+  type GetOperationOutcome,
+  type RetainOutcome,
+  type RetryOperationOutcome,
+} from '../../../../src/runtime/memory/hindsightClient';
+import {
+  buildRetainItem,
+  retainOperationId,
+  submitRetain,
+  submitRetainWithVerification,
+  type SubmitRetainParams,
+} from '../../../../src/runtime/memory/memoryRetain';
 
 describe('buildRetainItem', () => {
   it('builds the expected item shape', () => {
@@ -206,5 +217,146 @@ describe('submitRetain', () => {
         logger: makeLogger(),
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('submitRetainWithVerification', () => {
+  function makeLogger() {
+    return winston.createLogger({ silent: true });
+  }
+
+  type GetOperationSpy = jest.SpyInstance<Promise<GetOperationOutcome>, Parameters<HindsightClient['getOperation']>>;
+  type RetryOperationSpy = jest.SpyInstance<
+    Promise<RetryOperationOutcome>,
+    Parameters<HindsightClient['retryOperation']>
+  >;
+
+  /**
+   * A real client with `retain`, `getOperation`, and `retryOperation` scripted on the instance,
+   * mirroring the `submitRetain` harness above. Its fetch rejects so an unscripted call can never
+   * reach the network.
+   */
+  function verifyingClient(): {
+    client: HindsightClient;
+    retain: jest.SpyInstance<Promise<RetainOutcome>, Parameters<HindsightClient['retain']>>;
+    getOperation: GetOperationSpy;
+    retryOperation: RetryOperationSpy;
+  } {
+    const client = new HindsightClient({
+      apiBase: 'https://hindsight.test.example',
+      bank: 'aman',
+      headers: {},
+      fetchImpl: () => Promise.reject(new Error('retain tests must not reach the network')),
+    });
+    return {
+      client,
+      retain: jest.spyOn(client, 'retain'),
+      getOperation: jest.spyOn(client, 'getOperation'),
+      retryOperation: jest.spyOn(client, 'retryOperation'),
+    };
+  }
+
+  function submitParams(client: HindsightClient): SubmitRetainParams {
+    return {
+      client,
+      sessionId: 's1',
+      turnId: 't1',
+      userText: 'hi',
+      assistantText: 'hello',
+      completedAt: '2026-08-30T12:00:00.000Z',
+      sessionTitle: undefined,
+      logger: makeLogger(),
+    };
+  }
+
+  it('verifies an accepted submission with one status check and does not resubmit', async () => {
+    const { client, retain, getOperation, retryOperation } = verifyingClient();
+    retain.mockResolvedValue({ ok: true });
+    getOperation.mockResolvedValue({ ok: true, status: 'completed' });
+
+    await submitRetainWithVerification(submitParams(client));
+
+    expect(retain).toHaveBeenCalledTimes(1);
+    expect(getOperation).toHaveBeenCalledTimes(1);
+    expect(getOperation.mock.calls[0]?.[0]).toBe(retainOperationId({ sessionId: 's1', turnId: 't1' }));
+    expect(retryOperation).not.toHaveBeenCalled();
+  });
+
+  it('retries once via retryOperation when the operation failed', async () => {
+    const { client, retain, getOperation, retryOperation } = verifyingClient();
+    retain.mockResolvedValue({ ok: true });
+    getOperation.mockResolvedValue({ ok: true, status: 'failed' });
+    retryOperation.mockResolvedValue({ ok: true });
+
+    await submitRetainWithVerification(submitParams(client));
+
+    expect(retain).toHaveBeenCalledTimes(1);
+    expect(retryOperation).toHaveBeenCalledTimes(1);
+    expect(retryOperation.mock.calls[0]?.[0]).toBe(retainOperationId({ sessionId: 's1', turnId: 't1' }));
+  });
+
+  it('resubmits the exact exchange once when the operation is unknown', async () => {
+    const { client, retain, getOperation, retryOperation } = verifyingClient();
+    retain.mockResolvedValue({ ok: true });
+    getOperation.mockResolvedValue({ ok: true, status: 'unknown' });
+
+    await submitRetainWithVerification(submitParams(client));
+
+    expect(retain).toHaveBeenCalledTimes(2);
+    expect(retain.mock.calls[1]?.[0]?.operationId).toBe(retainOperationId({ sessionId: 's1', turnId: 't1' }));
+    expect(retryOperation).not.toHaveBeenCalled();
+  });
+
+  it('resubmits once when the initial submission failed and the operation is unknown', async () => {
+    const { client, retain, getOperation } = verifyingClient();
+    retain.mockResolvedValue({ ok: false, reason: 'timeout' });
+    getOperation.mockResolvedValue({ ok: true, status: 'unknown' });
+
+    await submitRetainWithVerification(submitParams(client));
+
+    expect(retain).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not resubmit when a failed submission actually landed', async () => {
+    const { client, retain, getOperation, retryOperation } = verifyingClient();
+    retain.mockResolvedValue({ ok: false, reason: 'timeout' });
+    getOperation.mockResolvedValue({ ok: true, status: 'completed' });
+
+    await submitRetainWithVerification(submitParams(client));
+
+    expect(retain).toHaveBeenCalledTimes(1);
+    expect(retryOperation).not.toHaveBeenCalled();
+  });
+
+  it('leaves a still-running operation alone without retrying', async () => {
+    const { client, retain, getOperation, retryOperation } = verifyingClient();
+    retain.mockResolvedValue({ ok: true });
+    getOperation.mockResolvedValue({ ok: true, status: 'running' });
+
+    await submitRetainWithVerification(submitParams(client));
+
+    expect(retain).toHaveBeenCalledTimes(1);
+    expect(retryOperation).not.toHaveBeenCalled();
+  });
+
+  it('never throws when every step fails', async () => {
+    const { client, retain, getOperation, retryOperation } = verifyingClient();
+    retain.mockRejectedValue(new Error('network down'));
+    getOperation.mockResolvedValue({ ok: false, code: 'timeout', reason: 'timeout' });
+    retryOperation.mockRejectedValue(new Error('network down'));
+
+    await expect(submitRetainWithVerification(submitParams(client))).resolves.toBeUndefined();
+    // Initial submission plus the one deterministic resubmission for an unreadable status.
+    expect(retain).toHaveBeenCalledTimes(2);
+  });
+
+  it('is a no-op when there is nothing to retain', async () => {
+    const { client, retain, getOperation } = verifyingClient();
+
+    await expect(
+      submitRetainWithVerification({ ...submitParams(client), userText: '', assistantText: '' }),
+    ).resolves.toBeUndefined();
+    expect(retain).not.toHaveBeenCalled();
+    expect(getOperation).not.toHaveBeenCalled();
   });
 });

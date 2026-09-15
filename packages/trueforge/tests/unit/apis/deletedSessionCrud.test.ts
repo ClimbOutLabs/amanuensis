@@ -24,6 +24,7 @@ import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/Sqlite
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
+import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { ListSessionsResponseSchema } from '../../../src/schemas/session';
 
 describe('public CRUD after session deletion', () => {
@@ -74,6 +75,7 @@ describe('public CRUD after session deletion', () => {
         sessions,
         sessionStore,
         activeTurns,
+        turnDrains: new TurnDrainRegistry(),
         resolveModelProviderStore: () => modelProviderStore,
         resolveMcpServerStore: () => mcpServerStore,
         resolveSkillStore: () => skillStore,

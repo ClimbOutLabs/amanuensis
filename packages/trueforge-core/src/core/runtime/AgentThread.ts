@@ -1036,6 +1036,12 @@ export class AgentThread {
   // for every turn and latches true the first time the grounding nudge fires,
   // so a turn gets at most one.
   private groundingNudgeSentThisTurn = false;
+  // When a loop guard fires, the turn gets one bounded recovery pass: a host
+  // note telling the model to write its final answer from gathered results
+  // instead of ending with no answer. This latches true so a second guard
+  // fire in the same turn ends the turn with the loop_detected error.
+  // Same single-turn lifetime as groundingNudgeSentThisTurn above.
+  private loopRecoveryAttemptedThisTurn = false;
   // A fresh AgentThread instance is built per turn AND per approval/tool-response
   // continuation of the same turn (the harness rebuilds from the preceding
   // snapshot either way), so this cannot simply start empty in the constructor:
@@ -1496,6 +1502,31 @@ export class AgentThread {
       ...(handoffCause === undefined ? {} : { handoff_cause: handoffCause }),
       ...(output && { output }),
     };
+  }
+
+  /**
+   * One bounded recovery pass when a loop guard fires. The first fire in a
+   * turn appends a host note telling the model to write its final answer from
+   * what it has gathered and lets the turn continue; a second fire (the model
+   * repeated itself after the note) ends the turn with the loop_detected
+   * error. This keeps a stuck turn from ending with no answer at all.
+   */
+  private *recoverFromLoopOrExit(input: {
+    recoveryNote: string;
+    errorMessage: string;
+  }): Generator<AgentThreadEvent, StepOutcome, unknown> {
+    if (this.loopRecoveryAttemptedThisTurn) {
+      yield this.generateErrorEvent(input.errorMessage, undefined, 'loop_detected');
+      return 'exit';
+    }
+    this.loopRecoveryAttemptedThisTurn = true;
+    yield* this.appendToContext({
+      context: [internalSystemMessage(input.recoveryNote)],
+      output: [],
+      currentContextUsage: undefined,
+      usage: undefined,
+    });
+    return 'continue';
   }
 
   /** Builds an abnormal terminal handoff after normal execution has stopped. */
@@ -2823,28 +2854,28 @@ export class AgentThread {
     // accepted by the consumer, just like the context itself.
     this.toolCallMemo = nextToolCallMemo;
     if (nextToolCallMemo.consecutiveEmptyInspectionBatches >= EMPTY_INSPECTION_STOP_AT) {
-      yield this.generateErrorEvent(
-        'The model made five consecutive inspections that returned no matches, ignoring the earlier host note about it, so the turn was stopped. Do not keep rephrasing the same search; use the evidence already collected or change strategy.',
-        undefined,
-        'iteration_limit',
-      );
-      return 'exit';
+      return yield* this.recoverFromLoopOrExit({
+        recoveryNote:
+          'Your inspections keep returning no matches. Write your final answer now based on what you have found so far, stating clearly what was not found. Do not make any more tool calls — just answer.',
+        errorMessage:
+          'The model made five consecutive inspections that returned no matches, ignoring the earlier host note about it, so the turn was stopped. Do not keep rephrasing the same search; use the evidence already collected or change strategy.',
+      });
     }
     if (nextToolCallMemo.consecutiveNoProgressBatches >= NO_PROGRESS_STOP_AT) {
-      yield this.generateErrorEvent(
-        'The model made five consecutive tool calls that were blocked before they ran, ignoring the earlier host note about it, so the turn was stopped. Retrying differently-shaped arguments will not help; read the actual blocking error, fix its root cause, or ask the user.',
-        undefined,
-        'iteration_limit',
-      );
-      return 'exit';
+      return yield* this.recoverFromLoopOrExit({
+        recoveryNote:
+          'Your tool calls keep getting blocked before they run. Write your final answer now: explain what you tried, what blocked it, and what you know so far. Do not make any more tool calls — just answer.',
+        errorMessage:
+          'The model made five consecutive tool calls that were blocked before they ran, ignoring the earlier host note about it, so the turn was stopped. Retrying differently-shaped arguments will not help; read the actual blocking error, fix its root cause, or ask the user.',
+      });
     }
     if (nextToolCallMemo.consecutiveFailedBatches >= FAILED_BATCH_STOP_AT) {
-      yield this.generateErrorEvent(
-        'The model made five consecutive tool calls that all failed, ignoring the earlier host note about it, so the turn was stopped. Trying another variant will not help; the tool or environment is not working. Report what failed and what is already known.',
-        undefined,
-        'iteration_limit',
-      );
-      return 'exit';
+      return yield* this.recoverFromLoopOrExit({
+        recoveryNote:
+          'Your tool calls keep failing. Write your final answer now: report what you tried, what failed, and what you have learned so far. Do not make any more tool calls — just answer.',
+        errorMessage:
+          'The model made five consecutive tool calls that all failed, ignoring the earlier host note about it, so the turn was stopped. Trying another variant will not help; the tool or environment is not working. Report what failed and what is already known.',
+      });
     }
     // Hard cap, one stage past the INSPECTION_WARNING_LIMIT nudge above: that nudge fires once
     // and does not itself stop a long run of interleaved successes and failures, so without this
@@ -2852,20 +2883,18 @@ export class AgentThread {
     // stops growing the moment editObserved flips true (see the `if (!nextToolCallMemo.editObserved)`
     // block above), so a structured edit resets this guard the same way it resets the nudge.
     if (!nextToolCallMemo.editObserved && nextToolCallMemo.inspectionCallsBeforeEdit >= INSPECTION_STOP_LIMIT) {
-      yield this.generateErrorEvent(
-        'The model ran 30 inspection commands in this request without making an edit, so the request was stopped. Say which file or symbol to change, or ask it to summarise what it found so far.',
-        undefined,
-        'iteration_limit',
-      );
-      return 'exit';
+      return yield* this.recoverFromLoopOrExit({
+        recoveryNote:
+          'You have made many inspections without making progress. Write your final answer now summarizing what you found. Do not make any more tool calls — just answer.',
+        errorMessage:
+          'The model ran 30 inspection commands in this request without making an edit, so the request was stopped. Say which file or symbol to change, or ask it to summarise what it found so far.',
+      });
     }
     if (repeatedSignature !== undefined) {
-      yield this.generateErrorEvent(
-        `The model made the same ${repeatedSignature.function.name} call four times in this request, ignoring the earlier host note about it, so the turn was stopped. Repeating it will not change the result; use what it returned, change approach, or ask the user.`,
-        undefined,
-        'iteration_limit',
-      );
-      return 'exit';
+      return yield* this.recoverFromLoopOrExit({
+        recoveryNote: `You keep making the same ${repeatedSignature.function.name} call. Write your final answer now using what it already returned. Do not make any more tool calls — just answer.`,
+        errorMessage: `The model made the same ${repeatedSignature.function.name} call four times in this request, ignoring the earlier host note about it, so the turn was stopped. Repeating it will not change the result; use what it returned, change approach, or ask the user.`,
+      });
     }
 
     const repeatedReads = toolCallResults.filter(shouldStopAfterMemoizedReplay);
@@ -2894,30 +2923,28 @@ export class AgentThread {
       repeatedSideEffects.length > 0 ||
       blockedFallback
     ) {
-      yield this.generateErrorEvent(
-        selectRepeatedActionStopMessage({
+      return yield* this.recoverFromLoopOrExit({
+        recoveryNote:
+          'You are repeating actions without gaining new information. Write your final answer now based on everything you have gathered so far. Do not make any more tool calls — just answer.',
+        errorMessage: selectRepeatedActionStopMessage({
           repeatedDeniedApproval: nextToolCallMemo.repeatedDeniedApproval,
           repeatedSideEffects: repeatedSideEffects.length > 0,
           blockedFallback,
           repeatedVerification,
           repeatedGithubFileRead,
         }),
-        undefined,
-        'iteration_limit',
-      );
-      return 'exit';
+      });
     }
     for (const name of unavailableToolNames) {
       unavailableToolsSeen.add(name);
     }
 
     if (repeatedUnavailableToolNames.length > 0) {
-      yield this.generateErrorEvent(
-        `The model repeated unavailable ${repeatedUnavailableToolNames.length === 1 ? 'tool' : 'tools'} ${repeatedUnavailableToolNames.join(', ')} after receiving a corrective result, so the turn was stopped.`,
-        undefined,
-        'iteration_limit',
-      );
-      return 'exit';
+      return yield* this.recoverFromLoopOrExit({
+        recoveryNote:
+          'You keep calling tools that are not available. Write your final answer now without them, using what you already know. Do not make any more tool calls — just answer.',
+        errorMessage: `The model repeated unavailable ${repeatedUnavailableToolNames.length === 1 ? 'tool' : 'tools'} ${repeatedUnavailableToolNames.join(', ')} after receiving a corrective result, so the turn was stopped.`,
+      });
     }
 
     if (authRequirementInfo.length > 0) {

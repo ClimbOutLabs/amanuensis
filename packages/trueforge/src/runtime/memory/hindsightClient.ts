@@ -195,6 +195,18 @@ export interface RetainOutcome {
 
 export type GetOperationOutcome = { ok: true; status: string } | MemoryFailure;
 
+/**
+ * Canonical reading of provider operation statuses. `getOperation` returns the
+ * raw provider string; these are the only interpretations the host relies on.
+ */
+export function isOperationCompletedStatus(status: string): boolean {
+  return status === 'completed' || status === 'success' || status === 'succeeded';
+}
+
+export function isOperationFailedStatus(status: string): boolean {
+  return status === 'failed' || status === 'error';
+}
+
 /** The bank's operator-set profile; every field optional on the wire, so every field optional here. */
 export interface BankProfile {
   name: string | undefined;

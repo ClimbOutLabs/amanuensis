@@ -56,10 +56,15 @@ describe('AgentThread unknown tool logging', () => {
   });
 
   it('stops after the model repeats the same unavailable tool', async () => {
+    // The repeated-unavailable-tool guard now routes through the shared bounded-recovery path
+    // (recoverFromLoopOrExit): its first firing in a turn only appends a corrective note and lets
+    // the turn continue, so the model gets one more chance before a second repeat actually stops
+    // the turn with loop_detected. That's three model calls, not two.
     const create = jest
       .fn()
       .mockImplementationOnce(() => unknownToolStream({ toolName: UNKNOWN_TOOL_NAME, callId: 'call-unknown-1' }))
       .mockImplementationOnce(() => unknownToolStream({ toolName: UNKNOWN_TOOL_NAME, callId: 'call-unknown-2' }))
+      .mockImplementationOnce(() => unknownToolStream({ toolName: UNKNOWN_TOOL_NAME, callId: 'call-unknown-3' }))
       .mockImplementation(() => finalAnswerStream());
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
@@ -85,7 +90,7 @@ describe('AgentThread unknown tool logging', () => {
       events.push(event);
     }
 
-    expect(create).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenCalledTimes(3);
     const correctiveResult = events.find(
       event => event.type === 'tool.response.v2' && event.tool_call_id === 'call-unknown-1',
     );

@@ -26,6 +26,7 @@ import {
   type ProfileLearningDrainMember,
   type ProfileLearningPassConfig,
 } from '../../../src/runtime/profileLearning';
+import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
 
 function makeLogger() {
@@ -873,6 +874,7 @@ describe('drainTurnEvents profile learning trigger', () => {
       finalization_buffer_ms: 1_000,
     });
     executionDeadline.arm();
+    const turnDrains = new TurnDrainRegistry();
     await drainTurnEvents({
       trackedStream: stream(),
       turnEventStream: registry.get('stream-1'),
@@ -880,10 +882,11 @@ describe('drainTurnEvents profile learning trigger', () => {
       turnId: 't1',
       executionDeadline,
       logger: makeLogger(),
+      turnDrains,
       profileLearning: params.member,
     });
-    // The pass is fire-and-forget; give its microtasks and timers a beat to run.
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // The drain awaits the learning pass, so by the time it resolves the pass (and its
+    // audit event write) has finished.
   }
 
   async function makeMember() {

@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
-import { toUiTurnDoneMetrics, toUiTurnState } from '@/plugins/trueforge-agent-server-adapter/toUiTurnState.js';
+import {
+  toUiEventItem,
+  toUiTurnDoneMetrics,
+  toUiTurnState,
+} from '@/plugins/trueforge-agent-server-adapter/toUiTurnState.js';
+import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
 describe('toUiTurnState', () => {
   it('fills optional SDK token fields so TurnDoneMetrics is complete', () => {
@@ -39,5 +44,22 @@ describe('toUiTurnState', () => {
         },
       },
     );
+  });
+
+  it('excludes aman.skill.used from UI event items (host skill-telemetry, not a presentation event)', () => {
+    // Regression: the server emits aman.skill.used when an agent reads or
+    // executes inside a mounted skill. The vendor union has no shape for it,
+    // so the adapter must drop it rather than fail response validation.
+    // The checked-in SDK union predates aman.skill.used, so this fixture cannot be constructed as
+    // a real TrueForgeApi.SessionEventItem; widen through `unknown`, same as the vendor-boundary
+    // fixtures in skillUsedEventExclusion.test.ts and modelProviderCatalog.test.ts.
+    const item = {
+      turnId: 'turn-1',
+      event: {
+        type: 'aman.skill.used',
+        skill: 'test-skill',
+      },
+    } as unknown as TrueForgeApi.SessionEventItem;
+    assert.equal(toUiEventItem(item), undefined);
   });
 });

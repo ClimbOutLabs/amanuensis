@@ -24,6 +24,7 @@ import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/Sqlite
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
+import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
 
 /** Parsed rather than built literally, so config defaults match what the create route stores. */
@@ -49,6 +50,7 @@ async function buildApp(options?: { sandboxProvider?: SandboxProvider | undefine
       sessions,
       sessionStore,
       activeTurns: new ActiveTurnRegistry(),
+      turnDrains: new TurnDrainRegistry(),
       resolveModelProviderStore: () => new SqliteModelProviderStore(db),
       resolveMcpServerStore: () =>
         new McpServerWithAuthStore({

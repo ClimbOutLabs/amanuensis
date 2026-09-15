@@ -2,7 +2,14 @@ import { z } from 'zod';
 
 /** Why a turn stopped before it could provide its ordinary final response. */
 export const AbnormalHandoffCauseSchema = z
-  .enum(['client_cancelled', 'server_cancelled', 'iteration_limit', 'fatal_error', 'model_stream_fault'])
+  .enum([
+    'client_cancelled',
+    'server_cancelled',
+    'iteration_limit',
+    'fatal_error',
+    'model_stream_fault',
+    'loop_detected',
+  ])
   .describe('Host-classified reason the turn produced an abnormal handoff.');
 
 export const HandoffChangedFileSchema = z.object({

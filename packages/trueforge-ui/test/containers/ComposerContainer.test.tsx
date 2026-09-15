@@ -11,8 +11,10 @@ import {
   CustomActionRenderersProvider,
   type CustomActionRendererProps,
 } from '@/server/CustomActionRenderersContext.js';
+import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider } from '@/server/ShellModeContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
+import { createMockAgentUIServer } from '../server/mockServer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
 /** Stands in for the chat runtime's own restore (`onPreTurnFailure` in
@@ -30,6 +32,7 @@ function RestoreTextButton({ text }: { text: string }) {
 const agentSpecState: { agentSpec: { model: { name: string } } | undefined } = {
   agentSpec: { model: { name: 'test/model' } },
 };
+const updateAgentSpec = vi.hoisted(() => vi.fn());
 const cancelRun = vi.hoisted(() => vi.fn<() => Promise<void>>());
 
 const toolResponsesState = vi.hoisted(() => ({
@@ -52,6 +55,7 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryToolResponses: () => toolResponsesState,
   useTrueFoundryApprovals: () => approvalsState,
   useTrueFoundryAgentSpec: () => ({ agentSpec: agentSpecState.agentSpec }),
+  useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
 }));
 
 function SecretSelectProbe({ onSubmit }: CustomActionRendererProps) {
@@ -141,6 +145,7 @@ describe('ComposerContainer', () => {
     approvalsState.pending = [];
     cancelRun.mockReset();
     cancelRun.mockResolvedValue();
+    updateAgentSpec.mockReset();
     window.sessionStorage.clear();
   });
 
@@ -920,5 +925,35 @@ describe('ComposerContainer', () => {
     expect(await screen.findByText('cancel request failed')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     resolvePendingSubmit?.();
+  });
+
+  it('shows the model and capabilities selectors in a plain New Chat composer', async () => {
+    const server = createMockAgentUIServer({
+      getModels: async () => [
+        {
+          id: 'gpt-4.1',
+          name: 'openai/gpt-4.1',
+          provider: { name: 'OpenAI' },
+          properties: { reasoningEfforts: ['low', 'high'] },
+        },
+      ],
+    });
+
+    render(
+      <ServerProvider server={server}>
+        <ShellModeProvider agentConfig={{ mode: 'AgentComposer', defaultAgentSpec: { model: { name: 'test/model' } } }}>
+          <RuntimeHarness messages={[]}>
+            <ComposerBusyProvider>
+              <ComposerContainer />
+            </ComposerBusyProvider>
+          </RuntimeHarness>
+        </ShellModeProvider>
+      </ServerProvider>,
+    );
+
+    // A plain New Chat (mutable, not the agent builder) must still show the capabilities picker
+    // (connectors / skills / sandbox) and the model picker in the composer.
+    expect(screen.getByRole('button', { name: /Add-ons/ })).toBeInTheDocument();
+    expect(await screen.findByTitle('Select model')).toBeInTheDocument();
   });
 });

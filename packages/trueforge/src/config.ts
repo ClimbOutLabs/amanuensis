@@ -598,6 +598,12 @@ export interface SharedServerConfiguration {
    */
   GRACEFUL_TIMEOUT_SECONDS: number;
   /**
+   * Max milliseconds shutdown waits for in-flight turn event drains (memory retain,
+   * profile learning, artifact persistence) before tearing down the database.
+   * Env: `TURN_DRAIN_SHUTDOWN_TIMEOUT_MS`. Default 30000.
+   */
+  TURN_DRAIN_SHUTDOWN_TIMEOUT_MS: number;
+  /**
    * Max seconds a single turn may execute before it is cancelled with
    * `server-execution-timeout`. Env: `SERVER_EXECUTION_TIMEOUT_SECONDS`. Default 600 (10 minutes).
    */
@@ -1060,6 +1066,11 @@ const shared: SharedServerConfiguration = {
     envKey: 'GRACEFUL_TIMEOUT_SECONDS',
     raw: getEnv('GRACEFUL_TIMEOUT_SECONDS'),
     defaultValue: 30,
+  }),
+  TURN_DRAIN_SHUTDOWN_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'TURN_DRAIN_SHUTDOWN_TIMEOUT_MS',
+    raw: getEnv('TURN_DRAIN_SHUTDOWN_TIMEOUT_MS'),
+    defaultValue: 30_000,
   }),
   SERVER_EXECUTION_TIMEOUT_SECONDS: serverExecutionTimeoutSeconds,
   TURN_STREAM_TTL_SECONDS: parsePositiveInt({

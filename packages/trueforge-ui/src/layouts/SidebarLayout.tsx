@@ -54,7 +54,15 @@ function isRecentHistoryVisible({ overlayOpen, mode }: { overlayOpen: boolean; m
  * in one scrolling flex column instead of two separately-boxed groups that can paint over
  * each other on a short viewport.
  */
-function SidebarNavItems(): ReactNode {
+function SidebarNavItems({
+  showHistoryToggle = false,
+  historyCollapsed = false,
+  onToggleHistoryCollapsed,
+}: {
+  showHistoryToggle?: boolean;
+  historyCollapsed?: boolean;
+  onToggleHistoryCollapsed?: () => void;
+}): ReactNode {
   const aui = useAui();
   const shell = useOptionalShellMode();
   const AgentsLibraryButton = useSlot('AgentsLibraryButton');
@@ -75,6 +83,7 @@ function SidebarNavItems(): ReactNode {
     !mode.isCreateAgent &&
     shell?.historyAgentFilter?.intent !== 'try-agent';
   const newAgentSelected = !overlayOpen && mode != null && shellIsCreateAgent(mode);
+  const historyToggleLabel = historyCollapsed ? 'Show recent chats' : 'Hide recent chats';
 
   const handleNewChat = () => {
     shell?.setLibraryOpen(false);
@@ -113,6 +122,19 @@ function SidebarNavItems(): ReactNode {
         >
           <Icon name="square-pen" size={14} />
           <span className="text-center">New Chat</span>
+        </button>
+      ) : null}
+      {showHistoryToggle ? (
+        <button
+          type="button"
+          aria-label={historyToggleLabel}
+          aria-pressed={historyCollapsed}
+          title={historyToggleLabel}
+          className={auiButtonClass({ variant: 'ghost', className: railActionButtonClassName })}
+          onClick={onToggleHistoryCollapsed}
+        >
+          <Icon name={historyCollapsed ? 'panel-left-open' : 'panel-left-close'} size={14} />
+          <span className="text-center">{historyToggleLabel}</span>
         </button>
       ) : null}
       {showNewActions && shell?.isComposerEnabled ? (
@@ -162,7 +184,6 @@ function SidebarRail({
   const chrome = resolveBrandChrome(brand);
   const BrandLogo = useSlot('BrandLogo');
   const UserAvatar = useSlot('UserAvatar');
-  const historyToggleLabel = historyCollapsed ? 'Show recent chats' : 'Hide recent chats';
 
   return (
     <aside
@@ -187,20 +208,11 @@ function SidebarRail({
           a consistent gap, so on a short viewport the column scrolls (min-h-0 + overflow-y-auto)
           instead of the footer actions painting over the nav buttons or vice versa. */}
       <nav className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto p-1" aria-label="Sidebar">
-        <SidebarNavItems />
-        {showHistoryToggle ? (
-          <button
-            type="button"
-            aria-label={historyToggleLabel}
-            aria-pressed={historyCollapsed}
-            title={historyToggleLabel}
-            className={auiButtonClass({ variant: 'ghost', className: railActionButtonClassName })}
-            onClick={onToggleHistoryCollapsed}
-          >
-            <Icon name={historyCollapsed ? 'panel-left-open' : 'panel-left-close'} size={14} />
-            <span className="text-center">{historyToggleLabel}</span>
-          </button>
-        ) : null}
+        <SidebarNavItems
+          showHistoryToggle={showHistoryToggle}
+          historyCollapsed={historyCollapsed}
+          onToggleHistoryCollapsed={onToggleHistoryCollapsed}
+        />
         <ShellActions labeled className="flex-col" />
         <UserAvatar labeled className="mt-1" />
       </nav>

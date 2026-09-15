@@ -207,7 +207,7 @@
             "$ref": "#/components/schemas/ResponseFormat"
           },
           "skills": {
-            "description": "Skills used in this agent.",
+            "description": "Optional name-only skill references. Skills mount into the sandbox and are advertised in the <skills> prompt section only when `config.sandbox.enabled` is true — listing skills with the sandbox disabled is rejected (422), so a spec can never silently advertise skills the agent cannot reach.",
             "items": {
               "$ref": "#/components/schemas/Skill"
             },
@@ -291,6 +291,41 @@
           "auth",
           "models",
           "type"
+        ],
+        "type": "object"
+      },
+      "AppBugReportBundle": {
+        "properties": {
+          "build": {
+            "$ref": "#/components/schemas/BuildIdentity"
+          },
+          "config_flags": {
+            "$ref": "#/components/schemas/BugReportConfigFlags"
+          },
+          "generated_at": {
+            "description": "ISO 8601 timestamp when this bundle was assembled.",
+            "type": "string"
+          },
+          "redaction": {
+            "$ref": "#/components/schemas/BugReportRedaction"
+          },
+          "schema_version": {
+            "description": "Bundle format version.",
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          "user_description": {
+            "description": "The reporter's typed description, verbatim.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "generated_at",
+          "build",
+          "user_description",
+          "config_flags",
+          "redaction"
         ],
         "type": "object"
       },
@@ -714,6 +749,21 @@
           "event_type",
           "code",
           "message"
+        ],
+        "type": "object"
+      },
+      "BugReportHandoff": {
+        "properties": {
+          "issue_url": {
+            "description": "Host-configured issue-tracker URL bug reports hand off to (the bug_report.yml template), or null when the host disabled the handoff.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "issue_url"
         ],
         "type": "object"
       },
@@ -1617,6 +1667,27 @@
         ],
         "type": "object"
       },
+      "CreateAppBugReportRequest": {
+        "properties": {
+          "description": {
+            "description": "Optional free-text description of what went wrong; included in the bundle verbatim.",
+            "maxLength": 8000,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CreateAppBugReportResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AppBugReportBundle"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "CreateMCPServerRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1994,6 +2065,11 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteSpaceResponse": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
       "DeleteVerifyCommandProposalResponse": {
         "properties": {},
         "type": "object"
@@ -2230,6 +2306,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/AvailableMCPServer"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetBugReportHandoffResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BugReportHandoff"
           }
         },
         "required": [
@@ -2630,6 +2717,14 @@
             "minLength": 1,
             "pattern": "^https:\\/\\/(github\\.com\\/[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+|gitlab\\.com\\/[A-Za-z0-9._-]+(?:\\/[A-Za-z0-9._-]+)+)(\\/|\\.git)?$",
             "type": "string"
+          },
+          "when_to_use": {
+            "description": "Trigger phrases describing when the agent should use the skill.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -6078,7 +6173,8 @@
           },
           "sandbox": {
             "enabled": false,
-            "file_downloads": true
+            "file_downloads": true,
+            "skill_prompt_mode": "advertise"
           }
         },
         "properties": {
@@ -6134,7 +6230,8 @@
       "SandboxConfig": {
         "default": {
           "enabled": false,
-          "file_downloads": true
+          "file_downloads": true,
+          "skill_prompt_mode": "advertise"
         },
         "properties": {
           "enabled": {
@@ -6145,6 +6242,15 @@
             "default": true,
             "description": "Allow downloading agent-produced files via the turn download endpoint. Default: true.",
             "type": "boolean"
+          },
+          "skill_prompt_mode": {
+            "default": "advertise",
+            "description": "How mounted skills are presented in the <skills> prompt section: 'advertise' lists name/description/path and the agent reads SKILL.md itself; 'inline' embeds preloaded SKILL.md content so the agent skips that read. Default: 'advertise'.",
+            "enum": [
+              "advertise",
+              "inline"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -6728,6 +6834,9 @@
           },
           {
             "$ref": "#/components/schemas/ProfileLearnedPersistedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/SkillUsedPersistedEvent"
           }
         ]
       },
@@ -7211,6 +7320,45 @@
             "$ref": "#/components/schemas/TrueFoundryRegistrySkill"
           }
         ]
+      },
+      "SkillUsedPersistedEvent": {
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 event timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the event (monotonic ULID).",
+            "type": "string"
+          },
+          "kind": {
+            "description": "'skill_read': an exec referenced <skillsDir>/<name>/SKILL.md. 'skill_dir_exec': an exec ran with a skill directory as cwd.",
+            "enum": [
+              "skill_read",
+              "skill_dir_exec"
+            ],
+            "type": "string"
+          },
+          "skill_name": {
+            "description": "Name of the mounted skill the agent reached for.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Emitted when the agent uses a mounted skill.",
+            "enum": [
+              "aman.skill.used"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "skill_name",
+          "kind",
+          "id",
+          "created_at"
+        ],
+        "type": "object"
       },
       "SkillVersion": {
         "additionalProperties": false,
@@ -8682,7 +8830,8 @@
                   "server_cancelled",
                   "iteration_limit",
                   "fatal_error",
-                  "model_stream_fault"
+                  "model_stream_fault",
+                  "loop_detected"
                 ],
                 "type": "string"
               },
@@ -8935,7 +9084,8 @@
                   "server_cancelled",
                   "iteration_limit",
                   "fatal_error",
-                  "model_stream_fault"
+                  "model_stream_fault",
+                  "loop_detected"
                 ],
                 "type": "string"
               },
@@ -9141,6 +9291,7 @@
             "agent.context.compaction": "#/components/schemas/ContextCompactionEvent",
             "aman.memory.recall": "#/components/schemas/MemoryRecallPersistedEvent",
             "aman.profile.learned": "#/components/schemas/ProfileLearnedPersistedEvent",
+            "aman.skill.used": "#/components/schemas/SkillUsedPersistedEvent",
             "document.ingestion": "#/components/schemas/DocumentIngestionEvent",
             "mcp.auth_required": "#/components/schemas/MCPAuthRequiredEvent",
             "mcp.initialize": "#/components/schemas/MCPInitializeEvent",
@@ -9207,6 +9358,9 @@
           },
           {
             "$ref": "#/components/schemas/ProfileLearnedPersistedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/SkillUsedPersistedEvent"
           },
           {
             "$ref": "#/components/schemas/ContextCompactionEvent"
@@ -10847,6 +11001,76 @@
           "auth"
         ],
         "x-fern-sdk-method-name": "me"
+      }
+    },
+    "/api/v1/bug-reports": {
+      "post": {
+        "description": "Assembles a redacted diagnostic bundle without a session: build identity, non-secret config flags, and the optional description supplied in the request body, included verbatim. No session, trace, or chat data is collected, so there is nothing session-bound to redact — see the response `redaction` field. Usable wherever a session-based report is not available (e.g. outside a chat).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAppBugReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAppBugReportResponse"
+                }
+              }
+            },
+            "description": "Redacted app-level bug-report bundle."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          }
+        },
+        "summary": "Generate a redacted app-level bug-report bundle",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "bug_reports"
+        ],
+        "x-fern-sdk-method-name": "create"
+      }
+    },
+    "/api/v1/bug-reports/handoff": {
+      "get": {
+        "description": "Returns the host-configured issue-tracker URL bug reports hand off to (the bug_report.yml template), or null when the host disabled the handoff via BUG_REPORT_HANDOFF_URL.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetBugReportHandoffResponse"
+                }
+              }
+            },
+            "description": "The handoff target, or null when unconfigured."
+          }
+        },
+        "summary": "Get the bug-report issue-tracker handoff target",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "bug_reports"
+        ],
+        "x-fern-sdk-method-name": "get_handoff"
       }
     },
     "/api/v1/capabilities": {
@@ -16515,7 +16739,14 @@
           }
         ],
         "responses": {
-          "204": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSpaceResponse"
+                }
+              }
+            },
             "description": "Space deleted."
           },
           "401": {

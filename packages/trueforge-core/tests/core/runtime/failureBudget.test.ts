@@ -175,7 +175,9 @@ describe('failure budget', () => {
 
     const events = await runThread(toolSet, create);
 
-    expect(toolSet.callTool).toHaveBeenCalledTimes(5);
+    // Five failures trigger the guard; the recovery pass runs a sixth call,
+    // which fails too, so the turn still ends with the loop_detected error.
+    expect(toolSet.callTool).toHaveBeenCalledTimes(6);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'internal.agent.done',
@@ -183,7 +185,7 @@ describe('failure budget', () => {
         error: expect.stringContaining('five consecutive tool calls that all failed'),
         // A deliberate host guard stop, not an unrecoverable model/provider error: TurnHandle
         // maps a root_agent_error with no handoff_cause to 'fatal_error', so this must be set.
-        handoff_cause: 'iteration_limit',
+        handoff_cause: 'loop_detected',
       }),
     );
     // The request that follows the third failure (index 3) carries the nudge; the one before it
@@ -206,7 +208,9 @@ describe('failure budget', () => {
 
     const events = await runThread(toolSet, create);
 
-    expect(create).toHaveBeenCalledTimes(5);
+    // Five failures trigger the guard; the recovery pass runs a sixth model
+    // call, which fails too, so the turn still ends with the loop error.
+    expect(create).toHaveBeenCalledTimes(6);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'internal.agent.done',
@@ -262,7 +266,7 @@ describe('failed-batch nudge', () => {
         type: 'internal.agent.done',
         status: 'error',
         error: expect.stringContaining('ignoring the earlier host note'),
-        handoff_cause: 'iteration_limit',
+        handoff_cause: 'loop_detected',
       }),
     );
   });
@@ -333,14 +337,9 @@ describe('failed-batch nudge', () => {
     }
 
     expect(toolSet.callTool).toHaveBeenCalledTimes(5);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: InternalEventType.AGENT_DONE,
-        status: 'error',
-        error: expect.stringContaining('five consecutive tool calls that all failed'),
-        handoff_cause: 'iteration_limit',
-      }),
-    );
+    // With loop recovery, the fifth failure triggers a final-answer pass
+    // instead of an immediate error; the model answers, so the turn succeeds.
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
     // Compaction wiped the note before the fourth failure's request was built, so that request
     // must not carry it.
     expect(JSON.stringify(requests[3]?.messages)).not.toContain(noteText);
@@ -422,15 +421,9 @@ describe('failed-batch nudge', () => {
       events.push(event);
     }
 
-    // Verify the stop occurred
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'internal.agent.done',
-        status: 'error',
-        error: expect.stringContaining('five consecutive tool calls that all failed'),
-        handoff_cause: 'iteration_limit',
-      }),
-    );
+    // With loop recovery, the fifth failure triggers a final-answer pass
+    // instead of an immediate error; the model answers, so the turn succeeds.
+    expect(events.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'done' });
 
     // Most importantly: the failed-batch note should appear in context before the stop,
     // not be suppressed by the no-progress batch classification
@@ -551,13 +544,16 @@ describe('repeat budget', () => {
 
     const events = await runThread(toolSet, create);
 
-    expect(create).toHaveBeenCalledTimes(6);
+    // Seven provider calls: the a:2 variant's fourth occurrence triggers the
+    // guard, the recovery pass runs a fifth identical call, and the guard
+    // fires again to end the turn.
+    expect(create).toHaveBeenCalledTimes(7);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'internal.agent.done',
         status: 'error',
         error: expect.stringContaining('the same run call four times in this request'),
-        handoff_cause: 'iteration_limit',
+        handoff_cause: 'loop_detected',
       }),
     );
 
@@ -625,7 +621,9 @@ describe('repeat budget', () => {
 
     const events = await runThread(toolSet, create);
 
-    expect(create).toHaveBeenCalledTimes(8);
+    // Ten provider calls: the fourth identical run triggers the guard, the
+    // recovery pass runs another call, and the guard fires again to end the turn.
+    expect(create).toHaveBeenCalledTimes(10);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'internal.agent.done',
@@ -633,7 +631,7 @@ describe('repeat budget', () => {
         error: expect.stringContaining('the same run call four times in this request'),
         // A deliberate host guard stop, not an unrecoverable model/provider error: TurnHandle
         // maps a root_agent_error with no handoff_cause to 'fatal_error', so this must be set.
-        handoff_cause: 'iteration_limit',
+        handoff_cause: 'loop_detected',
       }),
     );
   });
@@ -713,15 +711,11 @@ describe('repeat budget', () => {
     });
     const { events: afterEvents } = await runThreadInstance(toolSet, afterCreate, pausedToolCallMemo, true);
 
-    expect(afterCreate).toHaveBeenCalledTimes(2);
-    expect(afterEvents).toContainEqual(
-      expect.objectContaining({
-        type: 'internal.agent.done',
-        status: 'error',
-        error: expect.stringContaining('the same run call four times in this request'),
-        handoff_cause: 'iteration_limit',
-      }),
-    );
+    // Three calls after the pause: the identical-call counts combine across the
+    // pause (2 before + 3 after). The guard triggers recovery on the fourth
+    // occurrence, and the turn ends safely without looping forever.
+    expect(afterCreate).toHaveBeenCalledTimes(3);
+    expect(afterEvents.at(-1)).toMatchObject({ type: 'internal.agent.done' });
   });
 
   it("keeps a connector's own intent argument in the signature", async () => {
@@ -834,13 +828,10 @@ describe('repeat budget', () => {
     }
 
     expect(events.filter(event => event.type === EventType.THREAD_CREATED)).toHaveLength(3);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: InternalEventType.AGENT_DONE,
-        status: 'error',
-        error: expect.stringContaining('four times in this request'),
-      }),
-    );
+    // With loop recovery, the fourth identical spawn triggers a recovery note
+    // rather than an immediate error. The turn still ends safely (with an error)
+    // without running forever.
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'error' });
   });
 
   it('keeps a mixed batch in order when a client-side call in it is still open', async () => {
@@ -1108,15 +1099,15 @@ describe('repeat budget', () => {
       events.push(event);
     }
 
-    // Four provider calls: the turn does not stop early, and does not run a fifth time either —
-    // the fourth occurrence of the same call stops it.
-    expect(create).toHaveBeenCalledTimes(4);
+    // Five provider calls: four identical calls trigger the guard, the recovery
+    // pass runs a fifth identical call, and the guard fires again to end the turn.
+    expect(create).toHaveBeenCalledTimes(5);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: InternalEventType.AGENT_DONE,
         status: 'error',
         error: expect.stringContaining('the same run call four times in this request'),
-        handoff_cause: 'iteration_limit',
+        handoff_cause: 'loop_detected',
       }),
     );
 
@@ -1281,8 +1272,9 @@ describe('repeat budget', () => {
 
     const events = await runThread(toolSet, create);
 
-    // Stops at the fifth consecutive failed batch, never reaching a sixth call.
-    expect(toolSet.callTool).toHaveBeenCalledTimes(5);
+    // Five failures trigger the guard; the recovery pass runs a sixth call,
+    // which fails too, so the turn still ends with an error.
+    expect(toolSet.callTool).toHaveBeenCalledTimes(6);
     expect(events.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'error' });
   });
 
@@ -1351,13 +1343,15 @@ describe('repeat budget', () => {
     });
     const identicalEvents = await runThread(toolSet, identicalCommandCreate);
 
-    expect(toolSet.callTool).toHaveBeenCalledTimes(4);
+    // Five calls: four identical trigger the guard, the recovery pass runs a
+    // fifth identical call, and the guard fires again to end the turn.
+    expect(toolSet.callTool).toHaveBeenCalledTimes(5);
     expect(identicalEvents).toContainEqual(
       expect.objectContaining({
         type: InternalEventType.AGENT_DONE,
         status: 'error',
         error: expect.stringContaining('the same exec call four times in this request'),
-        handoff_cause: 'iteration_limit',
+        handoff_cause: 'loop_detected',
       }),
     );
   });
@@ -1441,18 +1435,11 @@ describe('pre-edit discovery hard cap', () => {
 
     const events = await runThreadWithRoom(toolSet, create);
 
-    // The 30th call trips the cap before the model is asked for a 31st.
-    expect(create).toHaveBeenCalledTimes(30);
+    // The 30th call trips the cap; with loop recovery the model gets a final
+    // answer pass instead of an immediate error, and answers successfully.
+    expect(create).toHaveBeenCalledTimes(31);
     expect(toolSet.callTool).toHaveBeenCalledTimes(30);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: InternalEventType.AGENT_DONE,
-        status: 'error',
-        error:
-          'The model ran 30 inspection commands in this request without making an edit, so the request was stopped. Say which file or symbol to change, or ask it to summarise what it found so far.',
-        handoff_cause: 'iteration_limit',
-      }),
-    );
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
   });
 
   it('resets the pre-edit inspection count once a structured edit succeeds, so later inspection does not trip the cap', async () => {

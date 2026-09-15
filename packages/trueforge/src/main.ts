@@ -96,6 +96,7 @@ import { PACKAGE_VERSION } from './packageVersion';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { TurnDrainRegistry } from './runtime/turnDrains';
 import { printStandaloneStartupBanner } from './startupBanner';
 import {
   parsePerServerMcpHeaders,
@@ -544,6 +545,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   }
 
   const activeTurns = new ActiveTurnRegistry();
+  const turnDrains = new TurnDrainRegistry();
   const requestReplyRouter = new RequestReplyRouter();
   const eventSubscriptions = new EventSubscriptionRegistry<TurnStreamingEvent>(redis);
   const sessions = new Sessions({ sessionStore });
@@ -636,6 +638,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sessionMetricsStore,
     sessions,
     activeTurns,
+    turnDrains,
     redis,
     requestReplyRouter,
     eventSubscriptions,
@@ -645,7 +648,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     authorizer,
   });
 
-  return { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore };
+  return { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnDrains };
 }
 
 try {
@@ -681,12 +684,13 @@ try {
     logger.info('TrueForge starting', { mode: 'distributed' });
   }
 
-  const { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore } = configuration.STANDALONE
-    ? await createServerRuntime(
-        await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
-        logger,
-      )
-    : await createServerRuntime(await createDistributedPersistence({ configuration, logger }), logger);
+  const { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnDrains } =
+    configuration.STANDALONE
+      ? await createServerRuntime(
+          await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
+          logger,
+        )
+      : await createServerRuntime(await createDistributedPersistence({ configuration, logger }), logger);
 
   if (
     mountFrontend(app, {
@@ -856,6 +860,13 @@ try {
       // closed covers the gap where the registry is empty before that late track().
       await activeTurns.shutdownAndWait(CancellationReason.Abandoned);
       await closed;
+      // Wait for detached turn drains (memory retain, profile learning, artifact persistence)
+      // with a bounded timeout so a stuck provider call cannot hang shutdown forever. This
+      // runs before the Redis/DB teardown below because drains still dual-write events.
+      if (turnDrains.size > 0) {
+        logger.info(`Waiting for ${String(turnDrains.size)} in-flight turn drains before shutdown`);
+      }
+      await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       clearInterval(commandExecutionRecoveryTimer);
       // Stop serving peer requests (waits for in-flight replies), then close
       // the clients this process owns: the subscriber duplicate and the primary.

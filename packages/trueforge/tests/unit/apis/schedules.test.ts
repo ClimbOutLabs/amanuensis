@@ -17,6 +17,7 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
+import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import {
   CreateScheduleRunResponseSchema,
   ListScheduleRunsResponseSchema,
@@ -67,6 +68,7 @@ function stubTurnExecutionDeps(agentStore: SqliteAgentStore, scheduleStore: Sqli
     sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
     agentStore,
     activeTurns: new ActiveTurnRegistry(),
+    turnDrains: new TurnDrainRegistry(),
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: winston.createLogger({ silent: true }),
     resolveModelProviderStore: () => ({}) as never,

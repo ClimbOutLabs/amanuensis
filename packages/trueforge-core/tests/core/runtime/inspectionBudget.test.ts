@@ -411,7 +411,9 @@ describe('repository inspection budget', () => {
     const events = [];
     for await (const event of thread.execute()) events.push(event);
 
-    expect(create).toHaveBeenCalledTimes(5);
+    // Six calls: five empty inspections trigger the guard, the recovery pass
+    // runs a sixth inspection, and the guard fires again to end the turn.
+    expect(create).toHaveBeenCalledTimes(6);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'internal.agent.done',
@@ -539,14 +541,9 @@ describe('empty-inspection nudge', () => {
     expect(JSON.stringify(requests[3]?.messages)).toContain(`3 ${noteText}`);
     const finalMessages = JSON.stringify(requests.at(-1)?.messages);
     expect(finalMessages.split(noteText)).toHaveLength(2); // one occurrence splits into two parts
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'internal.agent.done',
-        status: 'error',
-        error: expect.stringContaining('ignoring the earlier host note'),
-        handoff_cause: 'iteration_limit',
-      }),
-    );
+    // With loop recovery, the fifth empty inspection triggers a final-answer
+    // pass instead of an immediate error; the model answers, so the turn succeeds.
+    expect(events.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'done' });
   });
 
   it('resets the nudge state when an inspection finds something, so a later streak nudges again', async () => {
@@ -625,14 +622,9 @@ describe('empty-inspection nudge', () => {
     const events: unknown[] = [];
     for await (const event of thread.execute()) events.push(event);
 
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: InternalEventType.AGENT_DONE,
-        status: 'error',
-        error: expect.stringContaining('five consecutive inspections'),
-        handoff_cause: 'iteration_limit',
-      }),
-    );
+    // With loop recovery, the fifth empty inspection triggers a final-answer
+    // pass instead of an immediate error; the model answers, so the turn succeeds.
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
     expect(JSON.stringify(requests[3]?.messages)).not.toContain(noteText);
     expect(JSON.stringify(requests[4]?.messages)).toContain(noteText);
   });

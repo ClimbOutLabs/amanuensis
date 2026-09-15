@@ -161,14 +161,15 @@ describe('SidebarLayout rail layout', () => {
     localStorage.clear();
   });
 
-  it('renders every rail entry as a sibling of the next in one scrolling flex column, Spaces then the toggle', () => {
+  it('renders every rail entry as a sibling of the next in one scrolling flex column, New Chat then toggle then Build Agent', () => {
     renderSidebarLayoutWithSpaces();
 
     const nav = screen.getByRole('navigation', { name: 'Sidebar' });
     expect(nav).toHaveClass('overflow-y-auto', 'min-h-0', 'flex-col');
 
-    const spaces = screen.getByRole('button', { name: 'Spaces' });
+    const newChat = screen.getByRole('button', { name: 'Start new chat' });
     const toggle = screen.getByRole('button', { name: 'Hide recent chats' });
+    const buildAgent = screen.getByRole('button', { name: 'Start new agent' });
 
     // The entry for each (its own wrapper, if the atom renders one, or the button itself)
     // is a direct child of the same flex column, not split across a separately-boxed
@@ -182,16 +183,19 @@ describe('SidebarLayout rail layout', () => {
       }
       return current;
     };
-    const spacesEntry = entryIn(nav, spaces);
+    const newChatEntry = entryIn(nav, newChat);
     const toggleEntry = entryIn(nav, toggle);
-    expect(spacesEntry.parentElement).toBe(nav);
+    const buildAgentEntry = entryIn(nav, buildAgent);
+    expect(newChatEntry.parentElement).toBe(nav);
     expect(toggleEntry.parentElement).toBe(nav);
+    expect(buildAgentEntry.parentElement).toBe(nav);
 
-    // Document order: Spaces (a nav button) precedes the history toggle (a footer action),
-    // as plain siblings rather than elements absolutely positioned over one another.
-    expect(spaces.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Document order: New Chat, toggle, Build Agent as plain siblings rather than elements
+    // absolutely positioned over one another.
+    expect(newChat.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(toggle.compareDocumentPosition(buildAgent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    for (const el of [nav, spaces, toggle]) {
+    for (const el of [nav, newChat, toggle, buildAgent]) {
       expect(el).not.toHaveStyle({ position: 'absolute' });
     }
   });

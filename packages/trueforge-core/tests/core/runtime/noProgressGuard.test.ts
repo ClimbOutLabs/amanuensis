@@ -105,14 +105,10 @@ describe('no-progress guard', () => {
       events.push(event);
     }
 
-    expect(create).toHaveBeenCalledTimes(5);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'internal.agent.done',
-        status: 'error',
-        error: expect.stringContaining('five consecutive tool calls that were blocked before they ran'),
-      }),
-    );
+    // With loop recovery, the fifth blocked batch triggers a final-answer pass
+    // instead of an immediate error; the model answers, so the turn succeeds.
+    expect(create).toHaveBeenCalledTimes(6);
+    expect(events.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'done' });
   });
 
   it('does not stop before five consecutive blocked-before-dispatch batches', async () => {
@@ -184,14 +180,9 @@ describe('no-progress nudge', () => {
     expect(JSON.stringify(requests[3]?.messages)).toContain(`3 ${noteText}`);
     const finalMessages = JSON.stringify(requests.at(-1)?.messages);
     expect(finalMessages.split(noteText)).toHaveLength(2); // one occurrence splits into two parts
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'internal.agent.done',
-        status: 'error',
-        error: expect.stringContaining('ignoring the earlier host note'),
-        handoff_cause: 'iteration_limit',
-      }),
-    );
+    // With loop recovery, the fifth blocked batch triggers a final-answer pass
+    // instead of an immediate error; the model answers, so the turn succeeds.
+    expect(events.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'done' });
   });
 
   it('resets the nudge state when a call runs, so a later streak nudges again', async () => {
@@ -282,14 +273,9 @@ describe('no-progress nudge', () => {
       events.push(event);
     }
 
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: InternalEventType.AGENT_DONE,
-        status: 'error',
-        error: expect.stringContaining('five consecutive tool calls that were blocked before they ran'),
-        handoff_cause: 'iteration_limit',
-      }),
-    );
+    // With loop recovery, the fifth blocked batch triggers a final-answer pass
+    // instead of an immediate error; the model answers, so the turn succeeds.
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
     expect(JSON.stringify(requests[3]?.messages)).not.toContain(noteText);
     expect(JSON.stringify(requests[4]?.messages)).toContain(noteText);
   });

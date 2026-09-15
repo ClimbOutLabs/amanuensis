@@ -821,6 +821,57 @@ ${SECRET_API_KEY}`,
     expect(serialized).not.toContain(SECRET_API_KEY);
   });
 
+  it('names loop_detected distinctly from iteration_limit when a turn loops', () => {
+    const at = (seconds: number) => `2026-01-01T00:04:${String(seconds).padStart(2, '0')}.000Z`;
+    const events = [
+      {
+        type: 'turn.created',
+        created_at: at(0),
+        input: [{ type: 'user.message', content: 'go' }],
+        state: { status: 'running' },
+      },
+      {
+        type: 'turn.done',
+        created_at: at(9),
+        state: {
+          status: 'error',
+          message: `Provider exploded at ${HOME_PATH} with ${SECRET_API_KEY}`,
+          completed_at: at(9),
+          handoff: { cause: 'loop_detected', evidence: { repository: null } },
+        },
+      },
+    ];
+    const bundle = buildBugReportBundle({
+      build: { version: '0.1.4' },
+      session: {
+        id: 's5',
+        agentName: null,
+        model: null,
+        createdAt: at(0),
+        connectors: [],
+        skills: [],
+        sandboxEnabled: true,
+      },
+      description: undefined,
+      events: [...events].reverse().map(event => ({ turn_id: 'turn-5', event })),
+      configFlags: { sandbox_enabled: true, skill_enabled: false, settings_enabled: true },
+    });
+    expect(bundle.recent_errors).toEqual([
+      {
+        turn_id: 'turn-5',
+        event_type: 'turn.done',
+        code: 'loop_detected',
+        message: expect.stringContaining('stuck repeating itself'),
+      },
+    ]);
+    expect(bundle.summary[0]).toContain('stuck repeating itself. (loop_detected)');
+    // Must not be confused with the step-limit message.
+    expect(bundle.summary[0]).not.toContain('per-turn step limit');
+    const serialized = JSON.stringify(bundle);
+    expect(serialized).not.toContain(HOME_PATH);
+    expect(serialized).not.toContain(SECRET_API_KEY);
+  });
+
   it('defaults user_description to an empty string when none was given', () => {
     const bundle = buildBugReportBundle({
       build: { version: '0.1.0' },

@@ -34,6 +34,7 @@ import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-st
 import type { Database } from '../../../src/db/sqlite/types';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
+import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 
 /** Standalone caller identity, spelled out as a plain string where a store expects one. */
@@ -132,6 +133,7 @@ describe('turns', () => {
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
+          turnDrains: new TurnDrainRegistry(),
           tokenStore,
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),
@@ -215,6 +217,7 @@ describe('turns', () => {
           sessions: new Sessions({ sessionStore }),
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
+          turnDrains: new TurnDrainRegistry(),
           tokenStore: new SqliteOAuthTokenStore(db),
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, new SqliteOAuthTokenStore(db)),
@@ -429,6 +432,7 @@ describe('turns', () => {
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
+          turnDrains: new TurnDrainRegistry(),
           tokenStore,
           resolveModelProviderStore: () => modelProviderStore,
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),
@@ -560,6 +564,7 @@ describe('turns', () => {
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
+          turnDrains: new TurnDrainRegistry(),
           tokenStore: new SqliteOAuthTokenStore(db),
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, new SqliteOAuthTokenStore(db)),
@@ -668,6 +673,7 @@ describe('turns', () => {
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
+          turnDrains: new TurnDrainRegistry(),
           tokenStore,
           resolveModelProviderStore: () => modelProviderStore,
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),
@@ -756,6 +762,7 @@ describe('turns', () => {
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
+          turnDrains: new TurnDrainRegistry(),
           tokenStore,
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),

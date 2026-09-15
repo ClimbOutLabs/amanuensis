@@ -9,6 +9,7 @@
 import type { Logger } from 'winston';
 import configuration from '../../config';
 import type { HindsightClient, RetainItem } from './hindsightClient';
+import { isOperationCompletedStatus, isOperationFailedStatus } from './hindsightClient';
 import { uuidv5 } from './uuidv5';
 
 /** Fixed namespace for every operation id this host mints, in the style of RFC 4122's example namespaces. */
@@ -32,7 +33,7 @@ export const MEMORY_ORIGIN_METADATA_KEY = 'origin';
  */
 export type AmanMemoryOrigin = 'user_stated' | 'tool_ingested';
 
-/** The one origin the recall screen trusts as the user's own voice (see {@link AmanMemoryOrigin}). */
+/** The one origin the recall screen trusts as the user's own voice (see AmanMemoryOrigin above). */
 export const USER_STATED_ORIGIN = 'user_stated';
 
 /** Deterministic retain operation id for one turn's exchange. */
@@ -100,9 +101,16 @@ export interface SubmitRetainParams {
  * state) is the retry path for a submission that never reached the provider.
  */
 export async function submitRetain(params: SubmitRetainParams): Promise<void> {
+  await attemptRetainSubmission(params);
+}
+
+/** Outcome of one retain submission attempt; `skipped` means there was nothing to retain. */
+type RetainSubmissionResult = 'submitted' | 'failed' | 'skipped';
+
+async function attemptRetainSubmission(params: SubmitRetainParams): Promise<RetainSubmissionResult> {
   const item = buildRetainItem(params);
   if (item === undefined) {
-    return;
+    return 'skipped';
   }
   try {
     const outcome = await params.client.retain({
@@ -116,11 +124,91 @@ export async function submitRetain(params: SubmitRetainParams): Promise<void> {
         turnId: params.turnId,
         reason: outcome.reason,
       });
+      return 'failed';
     }
+    return 'submitted';
   } catch (error) {
     params.logger.warn('Memory retain submission threw unexpectedly', {
       sessionId: params.sessionId,
       turnId: params.turnId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return 'failed';
+  }
+}
+
+/**
+ * Retain submission with one bounded verification pass, for the turn event drain.
+ *
+ * The drain's submission used to be single-shot: when it failed, the only retry was the next
+ * turn's sweep, so a session's final turn could lose its memory silently. After the submission
+ * settles, this runs one sweep-equivalent pass over the deterministic operation id: one status
+ * check, then at most one recovery — retryOperation for a failed op, or a resubmission of the
+ * exact exchange when the op is missing or unreadable. The deterministic id makes resubmission
+ * idempotent, and a queued or running op is left for the next sweep. Never throws; a
+ * still-unverified op is logged with its operation id rather than dropped silently.
+ */
+export async function submitRetainWithVerification(params: SubmitRetainParams): Promise<void> {
+  const result = await attemptRetainSubmission(params);
+  if (result === 'skipped') {
+    return;
+  }
+  const operationId = retainOperationId({ sessionId: params.sessionId, turnId: params.turnId });
+  const timeoutMs = configuration.MEMORY_RETAIN_TIMEOUT_MS;
+  try {
+    const check = await params.client.getOperation(operationId, timeoutMs);
+    if (check.ok) {
+      if (isOperationCompletedStatus(check.status)) {
+        return;
+      }
+      if (isOperationFailedStatus(check.status)) {
+        const retried = await params.client.retryOperation(operationId, timeoutMs);
+        if (!retried.ok) {
+          params.logger.warn('Memory retain retry failed for failed operation', {
+            sessionId: params.sessionId,
+            turnId: params.turnId,
+            operationId,
+          });
+        }
+        return;
+      }
+      if (check.status === 'unknown') {
+        // Vanished (or never landed): resubmit the exact exchange once.
+        const retryResult = await attemptRetainSubmission(params);
+        if (retryResult !== 'submitted') {
+          params.logger.warn('Memory retain unverified after single retry pass', {
+            sessionId: params.sessionId,
+            turnId: params.turnId,
+            operationId,
+          });
+        }
+        return;
+      }
+      // Still queued/running (or an unrecognized status): leave it for the next turn's sweep.
+      params.logger.debug('Memory retain operation still pending after drain submission', {
+        sessionId: params.sessionId,
+        turnId: params.turnId,
+        operationId,
+        status: check.status,
+      });
+      return;
+    }
+    // Status unreadable: one deterministic resubmission is safe and may recover a submission
+    // whose response was lost.
+    const retryResult = await attemptRetainSubmission(params);
+    if (retryResult !== 'submitted') {
+      params.logger.warn('Memory retain unverified after single retry pass', {
+        sessionId: params.sessionId,
+        turnId: params.turnId,
+        operationId,
+        reason: check.reason,
+      });
+    }
+  } catch (error) {
+    params.logger.warn('Memory retain verification pass threw unexpectedly', {
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      operationId,
       reason: error instanceof Error ? error.message : String(error),
     });
   }

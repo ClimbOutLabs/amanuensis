@@ -1,7 +1,7 @@
 'use client';
 
 import { Icon } from '../../icons/Icon.js';
-import { shellIsMutable, useOptionalShellMode } from '../../server/ShellModeContext.js';
+import { shellIsCreateAgent, useOptionalShellMode } from '../../server/ShellModeContext.js';
 import { useSlot } from '../../theme/SlotsProvider.js';
 import { ActivePersonaIndicator } from '../ActivePersonaIndicator.js';
 import type { ComposerLeftSectionProps, ComposerRightSectionProps } from '../ComposerSections.js';
@@ -18,7 +18,7 @@ export function DraftComposerLeftSection({ disabled, isRunning, onAttach }: Comp
   const DraftComposerActionsMenu = useSlot('DraftComposerActionsMenu');
   const compact = useCompactLayout();
   const isMobile = useIsMobile();
-  const isBuilder = shell != null && shellIsMutable(shell.mode);
+  const isBuilder = shell != null && shellIsCreateAgent(shell.mode);
   const compactActions = [
     {
       id: 'agent-config',
@@ -70,7 +70,7 @@ export function DraftComposerLeftSection({ disabled, isRunning, onAttach }: Comp
 export function DraftComposerRightSection({ disabled, isRunning }: ComposerRightSectionProps) {
   const shell = useOptionalShellMode();
   const DraftModelSelector = useSlot('DraftModelSelector');
-  const isBuilder = shell != null && shellIsMutable(shell.mode);
+  const isBuilder = shell != null && shellIsCreateAgent(shell.mode);
 
   return (
     <div className="flex min-w-0 items-center gap-1">

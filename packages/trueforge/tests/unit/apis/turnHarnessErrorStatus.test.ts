@@ -23,6 +23,7 @@ import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/Sqlite
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
+import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 
 async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response> {
   const db = createSqliteDb(':memory:');
@@ -78,6 +79,7 @@ async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response
       sessions,
       sessionStore,
       activeTurns: new ActiveTurnRegistry(),
+      turnDrains: new TurnDrainRegistry(),
       tokenStore,
       resolveModelProviderStore: () => modelProviderStore,
       resolveMcpServerStore: () =>

@@ -26,6 +26,7 @@ import type {
   UserMessageContent,
 } from '../../server/types.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
+import { isSkillUsedEvent } from './skillUsedEvent.js';
 import { toUiSessionEvent, toUiTurnState, toUiStreamingEvent as toUiVendorStreamingEvent } from './toUiTurnState.js';
 import type { HarnessAgentSpec, HarnessMcpServerMount, HarnessSkillMount } from './types.js';
 
@@ -221,6 +222,10 @@ function toUiEventItem(item: TrueForgeApi.SessionEventItem): SessionEventItem | 
   // UI actually renders them from (SPEC.md I5); these two stay excluded here only.
   if (item.event.type === 'aman.memory.recall') return undefined;
   if (item.event.type === 'aman.profile.learned') return undefined;
+  // `aman.skill.used` is host skill-telemetry, not a presentation event: the vendor union has no
+  // ingestion case for it, same as the memory/profile passthrough events above. The checked-in
+  // SDK union predates this event, so compare via the widened string type.
+  if (isSkillUsedEvent(item.event)) return undefined;
   // Agent context compaction is an informational event: the vendor union has no ingestion case for it.
   if (item.event.type === 'agent.context.compaction') return undefined;
   // Same reason: `document.ingestion` (see UserInputMessage.ts / AgentThread.ts) postdates this
@@ -239,6 +244,9 @@ function toUiStreamingEvent(event: TrueForgeApi.TurnStreamingEvent): TurnStreami
   // needing this stream.
   if (event.type === 'aman.memory.recall') return undefined;
   if (event.type === 'aman.profile.learned') return undefined;
+  // Same closed-union constraint as `toUiEventItem` above: `aman.skill.used` has no vendor
+  // ingestion case either, so it is excluded from this typed stream too.
+  if (isSkillUsedEvent(event)) return undefined;
   // Same informational-event exclusion as `toUiEventItem` above: the vendor union has no
   // ingestion case for compaction, and it can now arrive mid-turn on the live stream too.
   if (event.type === 'agent.context.compaction') return undefined;

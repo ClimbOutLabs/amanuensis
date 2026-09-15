@@ -58,6 +58,7 @@ import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { minIntervalSeconds, nextTriggerAfter } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { resolveSandboxProvider } from '../runtime/sessionResources';
+import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import {
   InvalidCronError,
   SCHEDULE_MIN_INTERVAL_SECONDS,
@@ -73,6 +74,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   sessions: Sessions<SessionCustom, TurnCustom>;
   activeTurns: ActiveTurnRegistry;
+  /** Tracks in-flight turn event drains so shutdown can wait for them. */
+  turnDrains: TurnDrainRegistry;
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
   logger: Logger;
   resolveModelProviderStore: (c: Context, runAsAgent?: AgentRecord) => IModelProviderStore<TTransaction>;
@@ -128,6 +131,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     userRef: prepared.userRef,
     deps: {
       activeTurns: deps.activeTurns,
+      turnDrains: deps.turnDrains,
       eventSubscriptions: deps.eventSubscriptions,
       agentStore: deps.agentStore,
       modelProviderStore: deps.resolveModelProviderStore(c, prepared.agent),
