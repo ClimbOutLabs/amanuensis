@@ -97,8 +97,8 @@ importers:
         specifier: 0.18.7
         version: 0.18.7
       monaco-editor:
-        specifier: ^0.52.0
-        version: 0.52.2
+        specifier: ^0.56.0
+        version: 0.56.0
       react:
         specifier: ^19.3.0
         version: 19.3.0
@@ -147,7 +147,7 @@ importers:
         version: 2.5.3(rollup@4.62.2)
       vite-plugin-monaco-editor-esm:
         specifier: ^2.0.2
-        version: 2.0.3(monaco-editor@0.52.2)
+        version: 2.0.3(monaco-editor@0.56.0)
 
   packages/trueforge:
     dependencies:
@@ -261,8 +261,8 @@ importers:
         specifier: ^4.0.44
         version: 4.0.53(zod@4.6.2)
       '@ai-sdk/google':
-        specifier: ^4.0.53
-        version: 4.0.68(zod@4.6.2)
+        specifier: ^4.0.69
+        version: 4.0.69(zod@4.6.2)
       '@ai-sdk/moonshotai':
         specifier: ^3.0.41
         version: 3.0.49(zod@4.6.2)
@@ -297,8 +297,8 @@ importers:
         specifier: ^2.11.0
         version: 2.11.0(@opentelemetry/api@1.9.1)
       ai:
-        specifier: ^7.0.82
-        version: 7.0.98(zod@4.6.2)
+        specifier: ^7.0.99
+        version: 7.0.99(zod@4.6.2)
       bash-parser:
         specifier: ^0.5.0
         version: 0.5.0
@@ -401,13 +401,13 @@ importers:
         version: 5.3.0
       '@openuidev/react-headless':
         specifier: ^0.9.13
-        version: 0.9.13(ai@7.0.98(zod@4.6.2))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
+        version: 0.9.13(ai@7.0.99(zod@4.6.2))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@openuidev/react-lang':
         specifier: ^0.2.15
         version: 0.2.15(@modelcontextprotocol/sdk@1.30.0(supports-color@8.1.1)(zod@4.6.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(zod@4.6.2)
       '@openuidev/react-ui':
         specifier: ^0.13.10
-        version: 0.13.10(@openuidev/react-headless@0.9.13(ai@7.0.98(zod@4.6.2))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0))))(@openuidev/react-lang@0.2.15(@modelcontextprotocol/sdk@1.30.0(supports-color@8.1.1)(zod@4.6.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(zod@4.6.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@8.1.1)(zod@4.6.2)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
+        version: 0.13.10(@openuidev/react-headless@0.9.13(ai@7.0.99(zod@4.6.2))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0))))(@openuidev/react-lang@0.2.15(@modelcontextprotocol/sdk@1.30.0(supports-color@8.1.1)(zod@4.6.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(zod@4.6.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@8.1.1)(zod@4.6.2)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@truefoundry/assistant-ui-runtime':
         specifier: 0.1.37
         version: 0.1.37(patch_hash=c16c91834386c36b3c42ef546a049a7028b7a1267578f664cb46d55a08eecfcc)(@assistant-ui/tap@0.9.5(@types/react@19.3.0)(react@19.3.0))(@types/react@19.3.0)(assistant-cloud@0.1.35(redis@5.12.1(@opentelemetry/api@1.9.1)))(react@19.3.0)(redis@5.12.1(@opentelemetry/api@1.9.1))(truefoundry-gateway-sdk@0.4.2)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
@@ -583,14 +583,14 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/gateway@4.0.79':
-    resolution: {integrity: sha512-OJ+vdhqeDXoWGZWHF5mtnvE4gjk3/qfDV1+4dLCplERLNhY3w6KJcIoF5Q6sSKcm+74sruOWxl6CeREAaPDuEQ==}
+  '@ai-sdk/gateway@4.0.80':
+    resolution: {integrity: sha512-6t+07o8lSthpKf64Xb1qHWR2bWvJ3Fd2oFvS9fQc45p31bi2OUqan246e/ojAmZpWCiMPjKyQ4TBr4MYytnTiQ==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/google@4.0.68':
-    resolution: {integrity: sha512-q1JawqjgBVgDsI0R1RIksrPeS5wiZCb6oTtzZpy40OrE/8zhBkYf349PXeMh2vG4WTleysMZbgBiRM3A6oldxg==}
+  '@ai-sdk/google@4.0.69':
+    resolution: {integrity: sha512-clIivD3RQwutykzKQ8CV+BXIA6EX3xcrfJyXXvAni2SlR9JVATSRbu+JFK/j25a330aZ6WiDwbGyD/u951qXOg==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -4161,8 +4161,8 @@ packages:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
 
-  ai@7.0.98:
-    resolution: {integrity: sha512-ewAwn7VNGHOVLlRWeAK2jdfycJiP/eRNZMd9QWRmG08vc3o5wm7YyXTtjdwDriUGSkZogFpAOBGh/m5UwYOJSw==}
+  ai@7.0.99:
+    resolution: {integrity: sha512-Ov+3j/nSajaVH5hO8C94wN9wisG5tAJ8HWsLV9d/+nlzrRGUh3oYO3Kp1fRyUNWjAWLSpGLHLPaHCdfxb307Vg==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -6382,9 +6382,6 @@ packages:
   module-details-from-path@1.0.4:
     resolution: {integrity: sha512-EGWKgxALGMgzvxYF1UyGTy0HXX/2vHLkw6+NvDKW2jypWbHpjQuj4UMcqQWXHERJhVGKikolT06G3bcKe4fi7w==}
 
-  monaco-editor@0.52.2:
-    resolution: {integrity: sha512-GEQWEZmfkOGLdd3XK8ryrfWz3AIP8YymVXiPHEdewrUq7mh0qrKrfHLNCXcbB6sTnMLnOZ3ztSiKcciFUkIJwQ==}
-
   monaco-editor@0.56.0:
     resolution: {integrity: sha512-sXboRm3BeBeLm938eaiyLMe0OxzfXIlZvbv4ir/jVgQy1zDhWjgmny0WoN45fuDKhCCQsYMbBJrv/A6jd8aCUg==}
 
@@ -8059,14 +8056,14 @@ snapshots:
       '@ai-sdk/provider-utils': 5.0.40(zod@4.6.2)
       zod: 4.6.2
 
-  '@ai-sdk/gateway@4.0.79(zod@4.6.2)':
+  '@ai-sdk/gateway@4.0.80(zod@4.6.2)':
     dependencies:
       '@ai-sdk/provider': 4.0.14
       '@ai-sdk/provider-utils': 5.0.40(zod@4.6.2)
       '@vercel/oidc': 3.2.0
       zod: 4.6.2
 
-  '@ai-sdk/google@4.0.68(zod@4.6.2)':
+  '@ai-sdk/google@4.0.69(zod@4.6.2)':
     dependencies:
       '@ai-sdk/provider': 4.0.14
       '@ai-sdk/provider-utils': 5.0.40(zod@4.6.2)
@@ -9930,14 +9927,14 @@ snapshots:
 
   '@openuidev/observability@0.0.4': {}
 
-  '@openuidev/react-headless@0.9.13(ai@7.0.98(zod@4.6.2))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))':
+  '@openuidev/react-headless@0.9.13(ai@7.0.99(zod@4.6.2))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))':
     dependencies:
       '@ag-ui/core': 0.0.53
       '@openuidev/observability': 0.0.4
       react: 19.3.0
       zustand: 5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0))
     optionalDependencies:
-      ai: 7.0.98(zod@4.6.2)
+      ai: 7.0.99(zod@4.6.2)
 
   '@openuidev/react-lang@0.2.15(@modelcontextprotocol/sdk@1.30.0(supports-color@8.1.1)(zod@4.6.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(zod@4.6.2)':
     dependencies:
@@ -9950,10 +9947,10 @@ snapshots:
       '@modelcontextprotocol/sdk': 1.30.0(supports-color@8.1.1)(zod@4.6.2)
       react-dom: 19.3.0(react@19.3.0)
 
-  '@openuidev/react-ui@0.13.10(@openuidev/react-headless@0.9.13(ai@7.0.98(zod@4.6.2))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0))))(@openuidev/react-lang@0.2.15(@modelcontextprotocol/sdk@1.30.0(supports-color@8.1.1)(zod@4.6.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(zod@4.6.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@8.1.1)(zod@4.6.2)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))':
+  '@openuidev/react-ui@0.13.10(@openuidev/react-headless@0.9.13(ai@7.0.99(zod@4.6.2))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0))))(@openuidev/react-lang@0.2.15(@modelcontextprotocol/sdk@1.30.0(supports-color@8.1.1)(zod@4.6.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(zod@4.6.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@8.1.1)(zod@4.6.2)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))':
     dependencies:
       '@floating-ui/react-dom': 2.1.9(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@openuidev/react-headless': 0.9.13(ai@7.0.98(zod@4.6.2))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
+      '@openuidev/react-headless': 0.9.13(ai@7.0.99(zod@4.6.2))(react@19.3.0)(zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.6.0(react@19.3.0)))
       '@openuidev/react-lang': 0.2.15(@modelcontextprotocol/sdk@1.30.0(supports-color@8.1.1)(zod@4.6.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(zod@4.6.2)
       '@radix-ui/react-accordion': 1.2.20(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@radix-ui/react-aspect-ratio': 1.1.15(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -11850,9 +11847,9 @@ snapshots:
 
   agent-base@7.1.4: {}
 
-  ai@7.0.98(zod@4.6.2):
+  ai@7.0.99(zod@4.6.2):
     dependencies:
-      '@ai-sdk/gateway': 4.0.79(zod@4.6.2)
+      '@ai-sdk/gateway': 4.0.80(zod@4.6.2)
       '@ai-sdk/provider': 4.0.14
       '@ai-sdk/provider-utils': 5.0.40(zod@4.6.2)
       zod: 4.6.2
@@ -14622,8 +14619,6 @@ snapshots:
 
   module-details-from-path@1.0.4: {}
 
-  monaco-editor@0.52.2: {}
-
   monaco-editor@0.56.0:
     dependencies:
       dompurify: 3.4.8
@@ -16156,9 +16151,9 @@ snapshots:
     transitivePeerDependencies:
       - rollup
 
-  vite-plugin-monaco-editor-esm@2.0.3(monaco-editor@0.52.2):
+  vite-plugin-monaco-editor-esm@2.0.3(monaco-editor@0.56.0):
     dependencies:
-      monaco-editor: 0.52.2
+      monaco-editor: 0.56.0
 
   vite-plugin-svgr@5.2.0(rollup@4.62.2)(supports-color@8.1.1)(typescript@5.9.3)(vite@6.4.3(@types/node@20.19.43)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.50.0)(tsx@4.23.13)(yaml@2.9.1)):
     dependencies:

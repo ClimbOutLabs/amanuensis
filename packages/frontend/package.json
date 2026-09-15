@@ -31,7 +31,7 @@
     "@truefoundry/trueforge-sdk": "workspace:*",
     "@truefoundry/trueforge-ui": "workspace:*",
     "katex": "0.18.7",
-    "monaco-editor": "^0.52.0",
+    "monaco-editor": "^0.56.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.3",
