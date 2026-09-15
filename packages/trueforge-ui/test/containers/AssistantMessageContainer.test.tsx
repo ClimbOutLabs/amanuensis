@@ -1,14 +1,10 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type RespondToToolApprovalOptions, type ThreadMessageLike } from '@assistant-ui/react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
-
-beforeEach(() => {
-  window.localStorage.clear();
-});
 
 function renderAssistantMessage(
   messages: ThreadMessageLike[],
@@ -297,7 +293,7 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
   });
 
-  it('summarizes completed tool turns as one faint line and starts collapsed', () => {
+  it('summarizes completed tool turns as one faint line, collapsed with no chat-level preference stored', () => {
     renderAssistantMessage([
       {
         role: 'assistant',
@@ -316,17 +312,13 @@ describe('AssistantMessageContainer', () => {
       },
     ]);
 
-    const toggle = screen.getByTestId('assistant-message-agent-internals-toggle');
-    expect(toggle).toHaveTextContent(/2 steps · 1 tool/);
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const internals = getAgentInternals();
+    expect(internals).toHaveTextContent(/2 steps · 1 tool/);
+    expect(internals.querySelector('[hidden]')).not.toBeNull();
     expect(screen.queryByTestId('assistant-message-agent-internals-attention')).not.toBeInTheDocument();
-
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByTestId('assistant-message-agent-internals')).toBeVisible();
   });
 
-  it('auto-expands with an attention dot when a tool errored', () => {
+  it('renders the content with an attention dot when a tool errored, with no chat-level preference stored', () => {
     renderAssistantMessage([
       {
         role: 'assistant',
@@ -347,7 +339,8 @@ describe('AssistantMessageContainer', () => {
       },
     ]);
 
-    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).toHaveAttribute('aria-expanded', 'true');
+    const internals = getAgentInternals();
+    expect(internals.querySelector('[hidden]')).toBeNull();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
   });
 });

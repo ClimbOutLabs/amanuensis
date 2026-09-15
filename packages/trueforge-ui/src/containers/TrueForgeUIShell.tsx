@@ -17,6 +17,7 @@ import { LibrarySessionShareBoot } from '../routing/LibrarySessionShareBoot.js';
 import { RemoteIdRouteBridge } from '../routing/RemoteIdRouteBridge.js';
 import { ResolvedRoutesProvider } from '../routing/ResolvedRoutesContext.js';
 import type { ResolvedRoutes, RoutesConfig } from '../routing/types.js';
+import { AgentDetailsPreferenceProvider } from '../server/AgentDetailsPreferenceContext.js';
 import { ChatFolderProvider, type ChatFolderStore } from '../server/ChatFolderContext.js';
 import { CustomActionRenderersProvider, type CustomActionRenderers } from '../server/CustomActionRenderersContext.js';
 import { ServerProvider } from '../server/ServerContext.js';
@@ -352,17 +353,19 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
       <CurrentUserProvider currentUser={currentUser}>
         <CustomActionRenderersProvider renderers={customActionRenderers}>
           <ServerProvider server={server}>
-            <SandboxRuntimeUpgradeProvider upgrade={upgradeSandboxRuntime}>
-              <ChatFolderProvider store={chatFolders}>
-                <SpaceProvider store={spaces}>
-                  {resolvedRoutes != null ? (
-                    <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
-                  ) : (
-                    visibilityTree
-                  )}
-                </SpaceProvider>
-              </ChatFolderProvider>
-            </SandboxRuntimeUpgradeProvider>
+            <AgentDetailsPreferenceProvider>
+              <SandboxRuntimeUpgradeProvider upgrade={upgradeSandboxRuntime}>
+                <ChatFolderProvider store={chatFolders}>
+                  <SpaceProvider store={spaces}>
+                    {resolvedRoutes != null ? (
+                      <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
+                    ) : (
+                      visibilityTree
+                    )}
+                  </SpaceProvider>
+                </ChatFolderProvider>
+              </SandboxRuntimeUpgradeProvider>
+            </AgentDetailsPreferenceProvider>
           </ServerProvider>
         </CustomActionRenderersProvider>
       </CurrentUserProvider>

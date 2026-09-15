@@ -221,7 +221,6 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'useBugReport',
   'useCatalogServer',
   'useComposerBusyState',
-  'useAgentInternalsPreference',
   'useRuntimeConnectivity',
   'useComposerDraft',
   'ComposerDraftScopeProvider',

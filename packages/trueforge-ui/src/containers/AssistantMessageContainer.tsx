@@ -13,7 +13,7 @@ import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runti
 import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js';
 import { AgentInternalsDisclosure } from '../atoms/agent-chat/AgentInternalsDisclosure.js';
 import { MemoryContextCard } from '../atoms/agent-chat/MemoryContextCard.js';
-import { useAgentInternalsPreference } from '../hooks/useAgentInternalsPreference.js';
+import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit } from '../utils/computeAgentStepsSplit.js';
 import { parseToolResultDisposition } from '../utils/toolCallParsing.js';
@@ -122,7 +122,8 @@ export function AssistantMessageContainer() {
   const createdAt = useAuiState(s => s.message.createdAt);
   const messageStatus = useAuiState(s => s.message.status?.type);
   const isMessageRunning = messageStatus === 'running';
-  const { showAgentInternals, setShowAgentInternals } = useAgentInternalsPreference();
+  const sessionId = useAuiState(s => s.threadListItem.remoteId ?? undefined);
+  const { visibility: agentDetailsVisibility } = useAgentDetailsVisibility(sessionId);
   const { copy, isCopied } = useActionBarCopy({
     copyToClipboard: text => navigator.clipboard.writeText(text),
   });
@@ -199,10 +200,7 @@ export function AssistantMessageContainer() {
             isRunning={isMessageRunning}
             attention={attention}
             lockOpen={messageStatus === 'requires-action'}
-            defaultExpanded={showAgentInternals}
-            showPreferenceToggle
-            preferenceOn={showAgentInternals}
-            onPreferenceChange={setShowAgentInternals}
+            expanded={agentDetailsVisibility === 'expanded'}
             dataTestPrefix="assistant-message"
           >
             <MemoryContextCard

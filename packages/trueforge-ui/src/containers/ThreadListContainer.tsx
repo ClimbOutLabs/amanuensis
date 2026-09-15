@@ -61,7 +61,9 @@ function ThreadListItemRow({
   const agentName = readThreadAgentName(custom);
   const sidebarNavOpen = shell?.libraryOpen === true || shell?.sessionsOpen === true || shell?.schedulesOpen === true;
   const canDelete = canDeleteSession && remoteId != null && canDeleteResource(remoteId);
-  const showActions = remoteId != null && (canDelete || chatFolders !== null);
+  // The "Show agent details" item is always available for any remote session, so the actions
+  // menu itself is no longer gated on delete/folder support.
+  const showActions = remoteId != null;
   const currentFolderId = remoteId == null ? null : (chatFolders?.assignments.get(remoteId) ?? null);
 
   return (
