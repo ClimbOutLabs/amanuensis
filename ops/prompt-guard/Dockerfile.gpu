@@ -1,0 +1,35 @@
+# GPU backend for the Prompt Guard sidecar, running Meta's official fp32
+# weights through transformers on CUDA. See ADR.md ("GPU backend on official
+# weights") for why this base image was chosen over a plain CUDA devel image:
+# aarch64 CUDA 13 torch wheels exist upstream but were not validated on this
+# host, while this image's torch+CUDA is already confirmed working here.
+FROM vllm/vllm-openai:v0.27.1
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/tmp/huggingface \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    TRANSFORMERS_NO_ADVISORY_WARNINGS=1 \
+    TOKENIZERS_PARALLELISM=false \
+    PROMPT_GUARD_HOST=0.0.0.0 \
+    PROMPT_GUARD_BACKEND=torch
+
+# The base image ships torch+CUDA and transformers already matched to this
+# host (see requirements-gpu.txt for the exact versions verified on the
+# GPU host, an aarch64 host with an NVIDIA GPU). Nothing further is
+# pip-installed here by default.
+COPY requirements-gpu.txt /tmp/requirements-gpu.txt
+
+RUN useradd --create-home --uid 10001 promptguard
+
+WORKDIR /app
+COPY prompt_guard.py ./
+
+USER promptguard
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s CMD python3 -c \
+  "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"
+
+ENTRYPOINT ["python3", "prompt_guard.py"]

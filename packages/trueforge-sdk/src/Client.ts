@@ -19,6 +19,7 @@ import { SessionRepositoryClient } from "./api/resources/sessionRepository/clien
 import { SessionsClient } from "./api/resources/sessions/client/Client.js";
 import { SettingsClient } from "./api/resources/settings/client/Client.js";
 import { SkillsClient } from "./api/resources/skills/client/Client.js";
+import { SpacesClient } from "./api/resources/spaces/client/Client.js";
 import type { BaseClientOptions, BaseRequestOptions } from "./BaseClient.js";
 import { type NormalizedClientOptionsWithAuth, normalizeClientOptionsWithAuth } from "./BaseClient.js";
 import * as core from "./core/index.js";
@@ -48,6 +49,7 @@ export class TrueForge {
     protected _sessionPersonas: SessionPersonasClient | undefined;
     protected _sessionRepository: SessionRepositoryClient | undefined;
     protected _skills: SkillsClient | undefined;
+    protected _spaces: SpacesClient | undefined;
     protected _catalogs: CatalogsClient | undefined;
     protected _settings: SettingsClient | undefined;
 
@@ -121,6 +123,10 @@ export class TrueForge {
 
     public get skills(): SkillsClient {
         return (this._skills ??= new SkillsClient(this._options));
+    }
+
+    public get spaces(): SpacesClient {
+        return (this._spaces ??= new SpacesClient(this._options));
     }
 
     public get catalogs(): CatalogsClient {

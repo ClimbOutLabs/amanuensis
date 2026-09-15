@@ -225,6 +225,8 @@ export type BeginTurnExecutionDeps = Pick<TurnsRouterDeps, 'activeTurns' | 'even
   memorySettings?: MemoryProviderSettings | undefined;
   previousTurnId?: string | null;
   sessionTitle?: string | undefined;
+  /** From CreateTurnRequest.client_timezone; absent for callers with no HTTP client (e.g. schedule run-now). */
+  clientTimezone?: string | undefined;
 };
 
 /**
@@ -255,6 +257,8 @@ function createTurnResolver(deps: {
   previousTurnId?: string | null;
   sessionTitle?: string | undefined;
   spaceStore: ISpaceStore;
+  /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
+  clientTimezone?: string | undefined;
 }): SpaceTurnResourceResolver {
   const {
     mcpServerStore,
@@ -280,6 +284,7 @@ function createTurnResolver(deps: {
     previousTurnId,
     sessionTitle,
     spaceStore,
+    clientTimezone,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -432,6 +437,7 @@ function createTurnResolver(deps: {
       },
       logger,
       boundRepository,
+      clientTimezone,
       compactionThresholdTokensDefault: configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS,
       toolDispatchMaxConcurrency: configuration.TOOL_DISPATCH_MAX_CONCURRENCY,
       toolCallTimeoutMs: configuration.TOOL_CALL_TIMEOUT_MS,
@@ -850,6 +856,7 @@ export async function beginTurnExecution(params: {
     memorySettings: deps.memorySettings,
     previousTurnId: deps.previousTurnId ?? null,
     sessionTitle: deps.sessionTitle,
+    clientTimezone: deps.clientTimezone,
   });
 
   // First turn only: derive the title from the first user message. The store
@@ -1453,6 +1460,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       previousTurnId,
       sessionTitle: sessionTitleForMemory,
       spaceStore: deps.spaceStore,
+      clientTimezone: body.client_timezone,
     });
 
     // First turn only: derive the title from the first user message. The store

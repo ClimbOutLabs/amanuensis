@@ -236,7 +236,8 @@ describe('ThemeProvider', () => {
           '--text-primary': '#1a1a18',
           '--card-bg': '#ffffff',
           '--primary-button-bg': '#c96442',
-          '--font-agent-ui': 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+          '--font-agent-ui': "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+          '--font-display': "ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif",
           '--radius': '1rem',
           '--composer-radius': '1rem',
           '--user-message-bg': '#e5e0d6',
@@ -461,10 +462,10 @@ describe('ThemeProvider', () => {
     );
 
     expect(getThemeRoot(trueforge.container).style.getPropertyValue('--font-agent-ui')).toBe(
-      '"Google Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+      `'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif`,
     );
-    expect(getThemeRoot(trueforge.container).style.getPropertyValue('--sidebar-text')).toBe('#263755');
-    expect(getThemeRoot(trueforge.container).style.getPropertyValue('--radius')).toBe('0.375rem');
+    expect(getThemeRoot(trueforge.container).style.getPropertyValue('--sidebar-text')).toBe('#2c2a26');
+    expect(getThemeRoot(trueforge.container).style.getPropertyValue('--radius')).toBe('0.65rem');
     expect(screen.getByRole('heading', { name: 'How can I help you today?' })).toHaveClass('font-semibold');
     trueforge.unmount();
 

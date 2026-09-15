@@ -46,7 +46,9 @@ function sortSpaces(spaces: readonly Space[]): Space[] {
 
 /**
  * Loads the space list on mount and refreshes it on window focus, so a space the model created or
- * updated in another tab (or earlier in this one) shows current data without a manual reload.
+ * updated in another tab shows current data without a manual reload. The in-tab loop (chat → the
+ * model creates or updates a space → the user opens Spaces without the tab losing focus) is not
+ * covered here: `SpacesView` refreshes on every open and selection change instead.
  */
 export function SpaceProvider({ store, children }: { store?: SpaceStore; children: ReactNode }) {
   const [spaces, setSpaces] = useState<readonly Space[]>([]);

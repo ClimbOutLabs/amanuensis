@@ -2,33 +2,56 @@
 
 from __future__ import annotations
 
-import hmac
 import hashlib
+import hmac
 import json
 import logging
 import math
 import os
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Protocol, Sequence
+from typing import Any, Callable, Protocol, Sequence
 
 
 LOGGER = logging.getLogger("prompt_guard")
-MODEL_ID = "gravitee-io/Llama-Prompt-Guard-2-86M-onnx"
-MODEL_REVISION = "45a05fbd5337a864edc608f994911f009c37ca57"
-MODEL_FILE = "model.quant.onnx"
-MODEL_FILES_SHA256 = {
+
+# ONNX backend (default): a third-party quantized mirror. Evaluated but not
+# adopted as a production security control; see ADR.md.
+ONNX_MODEL_ID = "gravitee-io/Llama-Prompt-Guard-2-86M-onnx"
+ONNX_MODEL_REVISION = "45a05fbd5337a864edc608f994911f009c37ca57"
+ONNX_MODEL_FILE = "model.quant.onnx"
+ONNX_MODEL_FILES_SHA256 = {
     "config.json": "a39ae60b9b718b72bbe3f359ad07ddf6909dcb09ccff936c00a488ceb4e983a6",
     "tokenizer.json": "870798f0e3bb05c636bf62be904b2d8f48ace4785e9c1d71a8a67bd0586c941d",
     "tokenizer_config.json": "d5cff0d149f1084504aa8cbdd941289a011ec7f027519feb49e397c58b564398",
     "special_tokens_map.json": "b2f1b2f15f29a6b6d9d6ea4eca1675d2c231a71477f151d48f79cc83a625ba21",
-    MODEL_FILE: "3ca25030566076c92c19168a64d6e203e4397cd936f55dd0345b4d3c6fbd9744",
+    ONNX_MODEL_FILE: "3ca25030566076c92c19168a64d6e203e4397cd936f55dd0345b4d3c6fbd9744",
 }
+
+# torch backend: Meta's official fp32 weights, downloaded once by the operator
+# from https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M outside
+# huggingface-cli (a manual, gated download has no recorded HF revision hash),
+# so these content hashes are the provenance guarantee for this backend.
+TORCH_MODEL_ID = "meta-llama/Llama-Prompt-Guard-2-86M"
+TORCH_MODEL_REVISION = "operator-downloaded (no huggingface-cli revision recorded)"
+TORCH_MODEL_FILE = "model.safetensors"
+TORCH_MODEL_FILES_SHA256 = {
+    "config.json": "cd54ac39a1f2c3c5146bd5295b34038f8b4d9069e2f844450da014a523bb7653",
+    "tokenizer.json": "3e7e96867c2acdd575f0862c74822e05d1d15b93d9d9a4a2144b1ce83ae3339f",
+    "tokenizer_config.json": "fa09cf22b9d723377f95706967f789ca1a8267e1412385705e1ed51ce0559189",
+    "special_tokens_map.json": "9463f61e1b109a8eb4688b829260d7c6b1e6dff04c98ff7269bb89e2b92369b9",
+    TORCH_MODEL_FILE: "e72017dbbe89c1232dcbc4a74ce0c389db5b468c42afd05850347b2a8c5f6b09",
+}
+
 WINDOW_SIZE = 512
 DEFAULT_WINDOW_STRIDE = 256
 DEFAULT_MAX_BODY_BYTES = 1_048_576
+# Matches the host screens' MEMORY_SCREEN_MAX_CONCURRENCY default of 8.
+TOKENIZER_POOL_SIZE = 8
 
 
 class TokenizerLike(Protocol):
@@ -45,9 +68,7 @@ class TokenizerLike(Protocol):
 
 
 class ScorerLike(Protocol):
-    def score_window(
-        self, input_ids: Sequence[int], attention_mask: Sequence[int]
-    ) -> float: ...
+    def score_windows(self, windows: Sequence[Sequence[int]]) -> list[float]: ...
 
 
 class ServiceError(Exception):
@@ -101,6 +122,12 @@ class Settings:
     window_stride: int
     max_body_bytes: int
     onnx_threads: int
+    backend: str
+    batch_size: int
+    cache_size: int
+    max_inflight: int
+    torch_dtype: str
+    torch_device: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -110,6 +137,10 @@ class Settings:
         model_path = os.environ.get("PROMPT_GUARD_MODEL_PATH", "")
         if not model_path:
             raise RuntimeError("PROMPT_GUARD_MODEL_PATH must point to a mounted model directory")
+
+        backend = os.environ.get("PROMPT_GUARD_BACKEND", "onnx").strip().lower()
+        if backend not in ("onnx", "torch"):
+            raise RuntimeError("PROMPT_GUARD_BACKEND must be 'onnx' or 'torch'")
 
         port = _positive_int_env("PROMPT_GUARD_PORT", 8080)
         max_body_bytes = _positive_int_env(
@@ -122,6 +153,15 @@ class Settings:
         if window_stride >= WINDOW_SIZE:
             raise RuntimeError("PROMPT_GUARD_WINDOW_STRIDE must be less than 512")
 
+        default_batch_size = 16 if backend == "torch" else 1
+        batch_size = _positive_int_env("PROMPT_GUARD_BATCH_SIZE", default_batch_size)
+        cache_size = _nonnegative_int_env("PROMPT_GUARD_CACHE_SIZE", 4096)
+        max_inflight = _positive_int_env("PROMPT_GUARD_MAX_INFLIGHT", 4)
+        torch_dtype = os.environ.get("PROMPT_GUARD_TORCH_DTYPE", "bf16").strip().lower()
+        if torch_dtype not in ("bf16", "fp16", "fp32"):
+            raise RuntimeError("PROMPT_GUARD_TORCH_DTYPE must be 'bf16', 'fp16', or 'fp32'")
+        torch_device = os.environ.get("PROMPT_GUARD_TORCH_DEVICE", "auto").strip().lower()
+
         return cls(
             bearer_token=token,
             host=os.environ.get("PROMPT_GUARD_HOST", "127.0.0.1"),
@@ -130,6 +170,12 @@ class Settings:
             window_stride=window_stride,
             max_body_bytes=max_body_bytes,
             onnx_threads=onnx_threads,
+            backend=backend,
+            batch_size=batch_size,
+            cache_size=cache_size,
+            max_inflight=max_inflight,
+            torch_dtype=torch_dtype,
+            torch_device=torch_device,
         )
 
 
@@ -196,6 +242,7 @@ def classify_text(
     tokenizer: TokenizerLike,
     scorer: ScorerLike,
     window_stride: int,
+    inflight_semaphore: "threading.Semaphore | None" = None,
 ) -> Classification:
     if not isinstance(text, str) or not text.strip():
         raise BadRequest("text must be a non-empty string")
@@ -226,13 +273,18 @@ def classify_text(
         if not windows:
             raise ModelError("tokenizer produced no input tokens")
 
-        scores = [
-            scorer.score_window(window, [1] * len(window)) for window in windows
-        ]
+        if inflight_semaphore is not None:
+            with inflight_semaphore:
+                scores = scorer.score_windows(windows)
+        else:
+            scores = scorer.score_windows(windows)
+        if len(scores) != len(windows):
+            raise ModelError("scorer returned a different number of scores than windows")
         score = max(float(window_score) for window_score in scores)
     except ServiceError:
         raise
     except Exception as exc:
+        LOGGER.exception("classification failed")
         raise ModelError() from exc
 
     if not math.isfinite(score) or not 0 <= score <= 1:
@@ -247,6 +299,59 @@ def classify_text(
     )
 
 
+class ContentCache:
+    """A thread-safe LRU cache keyed by sha256(model_id + text).
+
+    Keeps repeated recalled memories or tool outputs from being rescored on
+    every turn. `size == 0` disables caching entirely (get always misses).
+    """
+
+    def __init__(self, size: int) -> None:
+        self._size = size
+        self._lock = threading.Lock()
+        self._entries: "OrderedDict[str, Classification]" = OrderedDict()
+        self.hits = 0
+        self.misses = 0
+
+    @staticmethod
+    def key_for(model_id: str, text: str) -> str:
+        digest = hashlib.sha256()
+        digest.update(model_id.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(text.encode("utf-8"))
+        return digest.hexdigest()
+
+    def get(self, key: str) -> Classification | None:
+        if self._size <= 0:
+            return None
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                self.misses += 1
+                return None
+            self._entries.move_to_end(key)
+            self.hits += 1
+            return entry
+
+    def put(self, key: str, value: Classification) -> None:
+        if self._size <= 0:
+            return
+        with self._lock:
+            self._entries[key] = value
+            self._entries.move_to_end(key)
+            while len(self._entries) > self._size:
+                self._entries.popitem(last=False)
+
+    def stats(self) -> dict[str, int]:
+        with self._lock:
+            return {
+                "hits": self.hits,
+                "misses": self.misses,
+                "size": len(self._entries),
+                "max_size": self._size,
+            }
+
+
 class Runtime:
     def __init__(
         self,
@@ -257,6 +362,12 @@ class Runtime:
         window_stride: int,
         max_body_bytes: int,
         model_error: Exception | None = None,
+        tokenizer_factory: Callable[[], TokenizerLike] | None = None,
+        cache: ContentCache | None = None,
+        model_id: str = "",
+        max_inflight: int = 4,
+        backend: str = "onnx",
+        device: str = "cpu",
     ) -> None:
         self.bearer_token = bearer_token
         self.tokenizer = tokenizer
@@ -264,18 +375,46 @@ class Runtime:
         self.window_stride = window_stride
         self.max_body_bytes = max_body_bytes
         self.model_error = model_error
+        self.backend = backend
+        self.device = device
+        # The HuggingFace fast tokenizer keeps mutable truncation state and raises
+        # "Already borrowed" when two threads use one instance at once. Each server thread
+        # gets its own copy, loaded from the same verified files, so requests stay parallel.
+        self._tokenizer_factory = tokenizer_factory
+        # The HTTP server runs one thread per connection, so a per-thread cache would reload on
+        # every request; a pool of loaded tokenizers is borrowed and returned instead.
+        self._tokenizer_pool: list[TokenizerLike] = []
+        self._pool_lock = threading.Lock()
+        self.cache = cache if cache is not None else ContentCache(0)
+        self.model_id = model_id
+        self._inflight_semaphore = threading.Semaphore(max(1, max_inflight))
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "Runtime":
         try:
-            scorer = OnnxPromptGuardScorer(settings)
-            return cls(
+            scorer: ScorerLike
+            model_id: str
+            if settings.backend == "torch":
+                scorer = TorchPromptGuardScorer(settings)
+                model_id = TORCH_MODEL_ID
+            else:
+                scorer = OnnxPromptGuardScorer(settings)
+                model_id = ONNX_MODEL_ID
+            runtime = cls(
                 bearer_token=settings.bearer_token,
                 tokenizer=scorer.tokenizer,
                 scorer=scorer,
                 window_stride=settings.window_stride,
                 max_body_bytes=settings.max_body_bytes,
+                tokenizer_factory=scorer.new_tokenizer,
+                cache=ContentCache(settings.cache_size),
+                model_id=model_id,
+                max_inflight=settings.max_inflight,
+                backend=settings.backend,
+                device=getattr(scorer, "device", "cpu"),
             )
+            runtime.prewarm_tokenizers(TOKENIZER_POOL_SIZE)
+            return runtime
         except Exception as exc:
             LOGGER.exception("Prompt Guard model failed to load")
             return cls(
@@ -285,94 +424,109 @@ class Runtime:
                 window_stride=settings.window_stride,
                 max_body_bytes=settings.max_body_bytes,
                 model_error=exc,
+                cache=ContentCache(settings.cache_size),
+                max_inflight=settings.max_inflight,
+                backend=settings.backend,
             )
 
     @property
     def ready(self) -> bool:
         return self.tokenizer is not None and self.scorer is not None
 
+    def prewarm_tokenizers(self, count: int) -> None:
+        """Load tokenizers ahead of the first burst so no request pays the load cost."""
+        if self._tokenizer_factory is None:
+            return
+        with self._pool_lock:
+            while len(self._tokenizer_pool) < count:
+                self._tokenizer_pool.append(self._tokenizer_factory())
+
+    def _borrow_tokenizer(self) -> TokenizerLike | None:
+        if self._tokenizer_factory is None:
+            return self.tokenizer
+        with self._pool_lock:
+            if self._tokenizer_pool:
+                return self._tokenizer_pool.pop()
+        return self._tokenizer_factory()
+
+    def _return_tokenizer(self, tokenizer: TokenizerLike) -> None:
+        if self._tokenizer_factory is None:
+            return
+        with self._pool_lock:
+            self._tokenizer_pool.append(tokenizer)
+
     def classify(self, text: str, threshold: float) -> Classification:
         if not self.ready:
             raise ModelError() from self.model_error
-        tokenizer = self.tokenizer
+
+        cache_key = None
+        if isinstance(text, str):
+            cache_key = ContentCache.key_for(self.model_id, text)
+            cached = self.cache.get(cache_key)
+            if cached is not None:
+                label = "malicious" if cached.score >= 0.5 else "benign"
+                return Classification(
+                    label=label, score=cached.score, flagged=cached.score >= float(threshold)
+                )
+
+        tokenizer = self._borrow_tokenizer()
         scorer = self.scorer
         if tokenizer is None or scorer is None:
             raise ModelError() from self.model_error
-        return classify_text(
-            text,
-            threshold,
-            tokenizer=tokenizer,
-            scorer=scorer,
-            window_stride=self.window_stride,
-        )
-
-
-class OnnxPromptGuardScorer:
-    """Loads the quantized ONNX model and exposes malicious probability per window."""
-
-    def __init__(self, settings: Settings) -> None:
-        import numpy as np
-        import onnxruntime as ort
-        from transformers import AutoConfig, AutoTokenizer
-
-        self._np = np
-        model_dir = Path(settings.model_path)
-        if not model_dir.is_dir():
-            raise RuntimeError(
-                f"{MODEL_ID} requires PROMPT_GUARD_MODEL_PATH to be a directory"
-            )
-        model_path = model_dir / MODEL_FILE
-        verify_model_directory(model_dir)
-
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            str(model_dir),
-            local_files_only=True,
-        )
-        config = AutoConfig.from_pretrained(
-            str(model_dir),
-            local_files_only=True,
-        )
-        self._labels = _config_labels(config)
-
-        session_options = ort.SessionOptions()
-        session_options.intra_op_num_threads = settings.onnx_threads
-        session_options.inter_op_num_threads = 1
-        self.session = ort.InferenceSession(
-            model_path,
-            sess_options=session_options,
-            providers=["CPUExecutionProvider"],
-        )
-
-    def score_window(
-        self, input_ids: Sequence[int], attention_mask: Sequence[int]
-    ) -> float:
-        np = self._np
-        feed: dict[str, Any] = {}
-        length = len(input_ids)
-        for model_input in self.session.get_inputs():
-            name = model_input.name
-            if name == "input_ids":
-                feed[name] = np.asarray([input_ids], dtype=np.int64)
-            elif name == "attention_mask":
-                feed[name] = np.asarray([attention_mask], dtype=np.int64)
-            elif name == "token_type_ids":
-                feed[name] = np.zeros((1, length), dtype=np.int64)
-            elif name == "position_ids":
-                feed[name] = np.asarray([list(range(length))], dtype=np.int64)
-            else:
-                raise ModelError(f"unsupported ONNX input: {name}")
-
         try:
-            outputs = self.session.run(None, feed)
-            if not outputs:
-                raise ModelError("model returned no outputs")
-            return _malicious_probability(
-                np.asarray(outputs[0], dtype=np.float64), self._labels
+            result = classify_text(
+                text,
+                threshold,
+                tokenizer=tokenizer,
+                scorer=scorer,
+                window_stride=self.window_stride,
+                inflight_semaphore=self._inflight_semaphore,
             )
-        except ModelError:
-            raise
-        except Exception as exc:
-            raise ModelError() from exc
+        finally:
+            self._return_tokenizer(tokenizer)
+
+        if cache_key is not None:
+            self.cache.put(cache_key, result)
+        return result
+
+
+class BatchScoringScorer:
+    """Shared batching and padding for window-level scoring.
+
+    Subclasses implement `_score_batch`, which receives windows already
+    padded to a common length within the batch plus their attention masks,
+    and returns one malicious-probability float per row in the same order.
+    """
+
+    def __init__(self, batch_size: int, pad_token_id: int) -> None:
+        self.batch_size = max(1, batch_size)
+        self.pad_token_id = pad_token_id
+
+    def score_windows(self, windows: Sequence[Sequence[int]]) -> list[float]:
+        results: list[float] = []
+        windows = list(windows)
+        for start in range(0, len(windows), self.batch_size):
+            batch = windows[start : start + self.batch_size]
+            padded, masks = self._pad_batch(batch)
+            results.extend(self._score_batch(padded, masks))
+        return results
+
+    def _pad_batch(
+        self, batch: Sequence[Sequence[int]]
+    ) -> tuple[list[list[int]], list[list[int]]]:
+        max_length = max(len(window) for window in batch)
+        padded: list[list[int]] = []
+        masks: list[list[int]] = []
+        for window in batch:
+            pad_count = max_length - len(window)
+            padded.append(list(window) + [self.pad_token_id] * pad_count)
+            masks.append([1] * len(window) + [0] * pad_count)
+        return padded, masks
+
+    def _score_batch(
+        self, padded_windows: list[list[int]], attention_masks: list[list[int]]
+    ) -> list[float]:
+        raise NotImplementedError
 
 
 def _config_labels(config: Any) -> list[str]:
@@ -391,8 +545,9 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def verify_model_file(path: Path) -> None:
-    expected_sha256 = MODEL_FILES_SHA256.get(path.name)
+def verify_model_file(path: Path, hashes: dict[str, str] | None = None) -> None:
+    hash_map = hashes if hashes is not None else ONNX_MODEL_FILES_SHA256
+    expected_sha256 = hash_map.get(path.name)
     if expected_sha256 is None:
         raise RuntimeError(f"unrecognized model file: {path.name}")
     if not path.is_file():
@@ -401,9 +556,10 @@ def verify_model_file(path: Path) -> None:
         raise RuntimeError(f"SHA-256 mismatch for {path.name}")
 
 
-def verify_model_directory(model_dir: Path) -> None:
-    for name in sorted(MODEL_FILES_SHA256):
-        verify_model_file(model_dir / name)
+def verify_model_directory(model_dir: Path, hashes: dict[str, str] | None = None) -> None:
+    hash_map = hashes if hashes is not None else ONNX_MODEL_FILES_SHA256
+    for name in sorted(hash_map):
+        verify_model_file(model_dir / name, hash_map)
 
 
 def _malicious_probability(values: Any, labels: Sequence[str]) -> float:
@@ -434,6 +590,183 @@ def _malicious_label_index(labels: Sequence[str], output_count: int) -> int:
     return 1 if output_count > 1 else 0
 
 
+class OnnxPromptGuardScorer(BatchScoringScorer):
+    """Loads the quantized ONNX model and exposes malicious probability per window."""
+
+    def __init__(self, settings: Settings) -> None:
+        import numpy as np
+        import onnxruntime as ort
+        from transformers import AutoConfig, AutoTokenizer
+
+        self._np = np
+        model_dir = Path(settings.model_path)
+        if not model_dir.is_dir():
+            raise RuntimeError(
+                f"{ONNX_MODEL_ID} requires PROMPT_GUARD_MODEL_PATH to be a directory"
+            )
+        model_path = model_dir / ONNX_MODEL_FILE
+        verify_model_directory(model_dir, ONNX_MODEL_FILES_SHA256)
+
+        self._model_dir = model_dir
+        self.tokenizer = self.new_tokenizer()
+        config = AutoConfig.from_pretrained(
+            str(model_dir),
+            local_files_only=True,
+        )
+        self._labels = _config_labels(config)
+        self.device = "cpu"
+
+        session_options = ort.SessionOptions()
+        session_options.intra_op_num_threads = settings.onnx_threads
+        session_options.inter_op_num_threads = 1
+        self.session = ort.InferenceSession(
+            model_path,
+            sess_options=session_options,
+            providers=["CPUExecutionProvider"],
+        )
+        pad_token_id = getattr(self.tokenizer, "pad_token_id", None) or 0
+        super().__init__(settings.batch_size, pad_token_id)
+
+    def new_tokenizer(self) -> TokenizerLike:
+        """A fresh tokenizer from the verified model files; one per server thread."""
+        from transformers import AutoTokenizer
+
+        return AutoTokenizer.from_pretrained(str(self._model_dir), local_files_only=True)
+
+    def _score_batch(
+        self, padded_windows: list[list[int]], attention_masks: list[list[int]]
+    ) -> list[float]:
+        np = self._np
+        batch_size = len(padded_windows)
+        length = len(padded_windows[0]) if padded_windows else 0
+        feed: dict[str, Any] = {}
+        for model_input in self.session.get_inputs():
+            name = model_input.name
+            if name == "input_ids":
+                feed[name] = np.asarray(padded_windows, dtype=np.int64)
+            elif name == "attention_mask":
+                feed[name] = np.asarray(attention_masks, dtype=np.int64)
+            elif name == "token_type_ids":
+                feed[name] = np.zeros((batch_size, length), dtype=np.int64)
+            elif name == "position_ids":
+                feed[name] = np.asarray(
+                    [list(range(length))] * batch_size, dtype=np.int64
+                )
+            else:
+                raise ModelError(f"unsupported ONNX input: {name}")
+
+        try:
+            outputs = self.session.run(None, feed)
+            if not outputs:
+                raise ModelError("model returned no outputs")
+            logits = np.asarray(outputs[0], dtype=np.float64)
+            return [
+                _malicious_probability(logits[row], self._labels)
+                for row in range(batch_size)
+            ]
+        except ModelError:
+            raise
+        except Exception as exc:
+            raise ModelError() from exc
+
+
+class TorchPromptGuardScorer(BatchScoringScorer):
+    """Loads Meta's official fp32 safetensors and runs batched GPU (or CPU) inference."""
+
+    def __init__(self, settings: Settings) -> None:
+        import torch
+        from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer
+
+        self._torch = torch
+        model_dir = Path(settings.model_path)
+        if not model_dir.is_dir():
+            raise RuntimeError(
+                f"{TORCH_MODEL_ID} requires PROMPT_GUARD_MODEL_PATH to be a directory"
+            )
+        verify_model_directory(model_dir, TORCH_MODEL_FILES_SHA256)
+
+        self._model_dir = model_dir
+        self.tokenizer = self.new_tokenizer()
+        config = AutoConfig.from_pretrained(str(model_dir), local_files_only=True)
+        self._labels = _config_labels(config)
+
+        if settings.torch_device == "auto":
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = settings.torch_device
+        if self.device.startswith("cuda") and not torch.cuda.is_available():
+            LOGGER.warning(
+                "PROMPT_GUARD_TORCH_DEVICE requested cuda but no GPU is visible; falling back to cpu"
+            )
+            self.device = "cpu"
+
+        if self.device == "cpu" and settings.torch_dtype != "fp32":
+            LOGGER.warning(
+                "torch backend on cpu ignores PROMPT_GUARD_TORCH_DTYPE=%s and uses fp32",
+                settings.torch_dtype,
+            )
+            self._dtype = torch.float32
+        elif settings.torch_dtype == "bf16":
+            self._dtype = torch.bfloat16
+        elif settings.torch_dtype == "fp16":
+            self._dtype = torch.float16
+        else:
+            self._dtype = torch.float32
+
+        LOGGER.info(
+            "Prompt Guard torch backend loading on device=%s dtype=%s", self.device, self._dtype
+        )
+        try:
+            # transformers >= 4.56 renamed this kwarg from torch_dtype to dtype.
+            self.model = AutoModelForSequenceClassification.from_pretrained(
+                str(model_dir),
+                local_files_only=True,
+                dtype=self._dtype,
+            )
+        except TypeError:
+            self.model = AutoModelForSequenceClassification.from_pretrained(
+                str(model_dir),
+                local_files_only=True,
+                torch_dtype=self._dtype,
+            )
+        self.model.to(self.device)
+        self.model.eval()
+        LOGGER.info(
+            "Prompt Guard torch backend ready: cuda_available=%s device=%s",
+            torch.cuda.is_available(),
+            self.device,
+        )
+
+        pad_token_id = getattr(self.tokenizer, "pad_token_id", None) or 0
+        super().__init__(settings.batch_size, pad_token_id)
+
+    def new_tokenizer(self) -> TokenizerLike:
+        from transformers import AutoTokenizer
+
+        return AutoTokenizer.from_pretrained(str(self._model_dir), local_files_only=True)
+
+    def _score_batch(
+        self, padded_windows: list[list[int]], attention_masks: list[list[int]]
+    ) -> list[float]:
+        torch = self._torch
+        try:
+            input_ids = torch.tensor(padded_windows, dtype=torch.long, device=self.device)
+            attention_mask = torch.tensor(
+                attention_masks, dtype=torch.long, device=self.device
+            )
+            with torch.no_grad():
+                outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+            logits = outputs.logits.to(torch.float64).cpu().numpy()
+            return [
+                _malicious_probability(logits[row], self._labels)
+                for row in range(logits.shape[0])
+            ]
+        except ModelError:
+            raise
+        except Exception as exc:
+            raise ModelError() from exc
+
+
 class PromptGuardHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -461,7 +794,13 @@ class PromptGuardRequestHandler(BaseHTTPRequestHandler):
         if not self.runtime.ready:
             self._write_error(ModelError())
             return
-        self._write_json(HTTPStatus.OK, {"status": "ok"})
+        payload: dict[str, Any] = {
+            "status": "ok",
+            "backend": self.runtime.backend,
+            "device": self.runtime.device,
+            "cache": self.runtime.cache.stats(),
+        }
+        self._write_json(HTTPStatus.OK, payload)
 
     def do_POST(self) -> None:
         if self.path != "/classify":
@@ -556,7 +895,13 @@ def main() -> None:
 
     runtime = Runtime.from_settings(settings)
     with PromptGuardHTTPServer((settings.host, settings.port), runtime) as server:
-        LOGGER.info("Prompt Guard sidecar listening on %s:%s", settings.host, settings.port)
+        LOGGER.info(
+            "Prompt Guard sidecar listening on %s:%s (backend=%s device=%s)",
+            settings.host,
+            settings.port,
+            settings.backend,
+            runtime.device,
+        )
         server.serve_forever()
 
 

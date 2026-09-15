@@ -58,6 +58,8 @@ import {
   sandboxCommandUsesUnstructuredOperation,
   sandboxCommandWebEgressRejection,
   sandboxInvocationPolicy,
+  sandboxVerifyCommandUsesInlineEval,
+  sandboxVerifyCommandUsesUnsafeSyntax,
   type SandboxCommandEffect,
   type SandboxInvocationPurpose,
 } from './commandClassification';
@@ -72,6 +74,7 @@ import { dirname, join, posix, relative } from 'node:path';
 import { convertOpenAIPatchToGitDiff, detectApplyPatchFormat } from './openaiPatchFormat';
 import { matchReplaceText } from './replaceTextDiagnostics';
 import type { ISkillMounter } from './skills/ISkillMounter';
+import { detectSkillUsedEvents } from './skills/skillEvents';
 import {
   extractStructuredEditPaths,
   repositoryRelativeStructuredEditPath,
@@ -1554,6 +1557,21 @@ function sandboxExecPreflightFailure(input: {
   ) {
     return "Unstructured shell redirection, heredocs, tee, and inline Python evaluation are not allowed for inspect, edit, or execute-purpose exec calls. Use read_file for inspection, write_file for a new file, apply_patch/replace_text for an edit, or run a checked-in script. To trim long output, use the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell pipe.";
   }
+  // Verification has to stay observable: redirection, substitution, and
+  // backgrounding hide what the check actually ran, so a green result would
+  // not prove the repository was verified.
+  if (input.purpose === 'verify' && sandboxVerifyCommandUsesUnsafeSyntax(input.command)) {
+    return "Verification commands must not use shell redirection, command substitution, backgrounding, or malformed quoting. Run the check in the foreground with observable output; trim long output with the exec tool's output.head_lines, output.tail_lines or output.grep fields instead of a shell redirect.";
+  }
+  // A "verify" label must not cover opaque code: inline evaluators, heredocs,
+  // and tee would let arbitrary code execution ride on a verification
+  // approval. Run a checked-in script so the verification step stays reviewable.
+  if (
+    input.purpose === 'verify' &&
+    (sandboxCommandUsesUnstructuredOperation(input.command) || sandboxVerifyCommandUsesInlineEval(input.command))
+  ) {
+    return 'Inline code evaluation (python -c, node -e), heredocs, and tee are not allowed for verify-purpose exec calls. Put the check in a script and run the script so the verification step stays reviewable.';
+  }
   const webEgressRejection = sandboxCommandWebEgressRejection({
     command: input.command,
     webConnectorAttached: input.webConnectorAttached,
@@ -2833,6 +2851,11 @@ export class Sandbox extends LocalToolMCP {
     const first = await this.ensureSandboxCreated(signal);
     try {
       await this.ensureSandboxInitialized(signal);
+      // Skill prerequisites gate skill availability in the prompt, so they are
+      // resolved here — whenever the sandbox becomes ready — rather than after
+      // the first exec call. Runs once per Sandbox (guarded by
+      // prerequisitesChecked), including on freshly created sandboxes.
+      await this.checkPrerequisites({ sandboxId: this.providerSandboxId(first.sandboxInfo.sandbox_id) });
       return first;
     } catch (error) {
       throwIfSignalAborted(signal);
@@ -2841,6 +2864,7 @@ export class Sandbox extends LocalToolMCP {
       }
       const recreated = await this.recreateAfterUnavailable(signal);
       await this.ensureSandboxInitialized(signal);
+      await this.checkPrerequisites({ sandboxId: this.providerSandboxId(recreated.sandboxInfo.sandbox_id) });
       return recreated;
     }
   }
@@ -3870,15 +3894,19 @@ export class Sandbox extends LocalToolMCP {
     }
   }
 
-  /** Check prerequisites for skills in the sandbox and cache the results. */
-  private async checkPrerequisites(): Promise<void> {
+  /**
+   * Check prerequisites for skills in the sandbox and cache the results. Runs
+   * from ensureReadySandbox once the sandbox is live, so it also covers freshly
+   * created sandboxes (there is no "existing" id on the first turn).
+   */
+  private async checkPrerequisites(input: { sandboxId: string }): Promise<void> {
     if (this.prerequisitesChecked) {
       // Already checked
       return;
     }
 
-    // Only check if there are skills and a sandbox is available
-    if (!this.skillMounter || this.existingSandboxId === undefined) {
+    // Only check if there are skills; the sandbox is guaranteed live here.
+    if (!this.skillMounter) {
       this.prerequisitesChecked = true;
       return;
     }
@@ -3927,7 +3955,7 @@ export class Sandbox extends LocalToolMCP {
         .join('; ');
 
       const result = await this.provider.exec({
-        sandboxId: this.providerSandboxId(this.existingSandboxId),
+        sandboxId: input.sandboxId,
         command: checkCommands,
         cwd: '/',
         env: {},
@@ -4009,8 +4037,15 @@ export class Sandbox extends LocalToolMCP {
     }
     const sandboxCreatedFlag = Boolean(sandboxCreated);
     const rawId = this.providerSandboxId(sandboxInfo.sandbox_id);
-    // Check prerequisites once after sandbox is ready
-    await this.checkPrerequisites();
+    // Host-side skill-use telemetry: the prompt advertises mounted skills, so
+    // detect when the model actually reaches for one. Cheap string matching on
+    // the authored command and chosen cwd; runs on every exec.
+    const skillUsedEvents = detectSkillUsedEvents({
+      command: resolvedInput.command,
+      cwd: resolvedInput.cwd,
+      skillsDir: this.provider.getSkillsDir(rawId),
+      skillNames: this.skillMounter?.skillNames() ?? [],
+    });
     const codeModeEnv = await this.ensureCodeModeStarted(rawId);
     const mcpClientEnv = injectMCPClientEnv({
       env: input.env,
@@ -4047,6 +4082,7 @@ export class Sandbox extends LocalToolMCP {
         sandboxCreated: sandboxCreatedFlag,
         sandboxInfo,
         verificationReceiptCandidate: execution.verificationReceiptCandidate,
+        events: skillUsedEvents.length > 0 ? skillUsedEvents : undefined,
       };
     } catch (error) {
       // A provider disconnect after the target command (or atomic commit) has
@@ -4101,6 +4137,7 @@ export class Sandbox extends LocalToolMCP {
         sandboxCreated: true,
         sandboxInfo: recreated.sandboxInfo,
         verificationReceiptCandidate: retryExecution.verificationReceiptCandidate,
+        events: skillUsedEvents.length > 0 ? skillUsedEvents : undefined,
       };
     }
   }

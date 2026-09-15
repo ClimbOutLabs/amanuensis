@@ -7,9 +7,8 @@ const createdAt = new Date('2026-04-05T14:03:02.000Z');
 
 function expectedTime(date: Date): string {
   return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
-    second: '2-digit',
     hour12: true,
   }).format(date);
 }

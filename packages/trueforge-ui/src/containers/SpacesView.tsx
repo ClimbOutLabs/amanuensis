@@ -423,6 +423,16 @@ function SpaceDetailPage({ spaceId, onDeleted }: { spaceId: string; onDeleted: (
 export function SpacesView() {
   const shell = useShellMode();
   const { spacesOpen, selectedSpaceId, openSpaces, closeSpaces } = shell;
+  // Hooks must run before the early return below. The space list is also loaded on provider
+  // mount and on window focus, but neither covers the normal loop — chat → the model creates or
+  // updates a space → this view opens without the tab ever losing focus — so refresh on every
+  // open and on every selection change. Refreshing behind an already-populated list does not
+  // flash a loading state (see `SpaceProvider.load`). Depend on the stable `refresh` callback
+  // only: the context value's identity changes on every load, which would re-trigger this.
+  const { refresh } = useOptionalSpaces() ?? {};
+  useEffect(() => {
+    if (spacesOpen) refresh?.();
+  }, [spacesOpen, selectedSpaceId, refresh]);
 
   if (!spacesOpen) return null;
 

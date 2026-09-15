@@ -1627,3 +1627,26 @@ export function sandboxVerifyCommandMasksExitStatus(command: string): boolean {
 export function sandboxVerifyCommandUsesUnsafeSyntax(command: string): boolean {
   return tokenize(stripFileDescriptorMerges(command)).some(candidate => candidate.unsafe);
 }
+
+const INLINE_EVAL_INTERPRETERS = new Set(['node', 'deno', 'bun']);
+const INLINE_EVAL_FLAGS = new Set(['-e', '--eval']);
+
+/**
+ * `node -e` / `deno --eval` style inline evaluation hides the executed code
+ * from review exactly like `python -c` does (which the unstructured-operation
+ * check already covers). The verify purpose must run reviewable code, so this
+ * stays a verify-scoped signal; other purposes keep their existing
+ * classification.
+ */
+export function sandboxVerifyCommandUsesInlineEval(command: string): boolean {
+  return tokenize(commandForTokenizing(command)).some(candidate => {
+    const resolved = resolveEnvironmentCommand(candidate.tokens);
+    if (resolved.unsafe || resolved.commandTokens.length === 0) {
+      return false;
+    }
+    if (!INLINE_EVAL_INTERPRETERS.has(commandName(resolved.commandTokens))) {
+      return false;
+    }
+    return resolved.commandTokens.slice(1).some(token => INLINE_EVAL_FLAGS.has(token));
+  });
+}

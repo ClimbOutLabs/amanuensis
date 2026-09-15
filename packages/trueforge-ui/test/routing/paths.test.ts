@@ -23,19 +23,23 @@ describe('resolveRoutesConfig', () => {
       agent: '/agents/:agentName',
       session: '/sessions/:sessionId',
       sessionsBrowser: '/sessions',
+      spaces: '/spaces',
+      space: '/spaces/:spaceId',
     });
   });
 
   it('honors overrides and disabled places', () => {
     const resolved = resolveRoutesConfig({
       basename: '/app',
-      paths: { root: '/home', settings: false, agent: '/a/:agentName' },
+      paths: { root: '/home', settings: false, agent: '/a/:agentName', spaces: false },
     });
     expect(resolved.basename).toBe('/app');
     expect(resolved.root).toBe('/home');
     expect(resolved.settings).toBeNull();
     expect(resolved.agent).toBe('/a/:agentName');
     expect(resolved.session).toBe('/sessions/:sessionId');
+    expect(resolved.spaces).toBeNull();
+    expect(resolved.space).toBe('/spaces/:spaceId');
   });
 
   it('normalizes trailing slashes but keeps root', () => {
@@ -58,20 +62,25 @@ describe('buildPath', () => {
     expect(buildPath({ type: 'agent', agentName: 'code-helper' }, routes)).toBe('/agents/code-helper');
     expect(buildPath({ type: 'session', sessionId: 'abc123' }, routes)).toBe('/sessions/abc123');
     expect(buildPath({ type: 'sessionsBrowser' }, routes)).toBe('/sessions');
+    expect(buildPath({ type: 'spaces' }, routes)).toBe('/spaces');
+    expect(buildPath({ type: 'space', spaceId: 's-1' }, routes)).toBe('/spaces/s-1');
   });
 
   it('encodes param values', () => {
     expect(buildPath({ type: 'agent', agentName: 'a/b c' }, routes)).toBe('/agents/a%2Fb%20c');
+    expect(buildPath({ type: 'space', spaceId: 'a/b c' }, routes)).toBe('/spaces/a%2Fb%20c');
   });
 
   it('returns null for disabled places', () => {
     const disabled = resolveRoutesConfig({
-      paths: { settings: false, library: false, libraryAgent: false, agent: false },
+      paths: { settings: false, library: false, libraryAgent: false, agent: false, spaces: false, space: false },
     });
     expect(buildPath({ type: 'settings' }, disabled)).toBeNull();
     expect(buildPath({ type: 'library' }, disabled)).toBeNull();
     expect(buildPath({ type: 'libraryAgent', agentId: 'x' }, disabled)).toBeNull();
     expect(buildPath({ type: 'agent', agentName: 'x' }, disabled)).toBeNull();
+    expect(buildPath({ type: 'spaces' }, disabled)).toBeNull();
+    expect(buildPath({ type: 'space', spaceId: 'x' }, disabled)).toBeNull();
   });
 
   it('builds an absolute resume href with basename and cleared share search', () => {
@@ -137,6 +146,8 @@ describe('matchPath', () => {
     expect(matchPath('/agents/a%2Fb', routes)).toEqual({ type: 'agent', agentName: 'a/b' });
     expect(matchPath('/sessions', routes)).toEqual({ type: 'sessionsBrowser' });
     expect(matchPath('/sessions/xyz', routes)).toEqual({ type: 'session', sessionId: 'xyz' });
+    expect(matchPath('/spaces', routes)).toEqual({ type: 'spaces' });
+    expect(matchPath('/spaces/s%2F1', routes)).toEqual({ type: 'space', spaceId: 's/1' });
   });
 
   it('returns null for unknown paths', () => {
@@ -149,11 +160,20 @@ describe('matchPath', () => {
     expect(matchPath('/sessions/%', routes)).toBeNull();
     expect(matchPath('/sessions/%E0%A4%A', routes)).toBeNull();
     expect(matchPath('/agents/100%', routes)).toBeNull();
+    expect(matchPath('/spaces/%', routes)).toBeNull();
   });
 
   it('does not match disabled places', () => {
-    const disabled = resolveRoutesConfig({ paths: { session: false } });
+    const disabled = resolveRoutesConfig({ paths: { session: false, spaces: false, space: false } });
     expect(matchPath('/sessions/xyz', disabled)).toBeNull();
+    expect(matchPath('/spaces', disabled)).toBeNull();
+    expect(matchPath('/spaces/xyz', disabled)).toBeNull();
+  });
+
+  it('keeps the spaces list and space detail distinct by segment count', () => {
+    // A bare `/spaces/:spaceId` template never matches the one-segment list path.
+    expect(matchPath('/spaces', routes)).toEqual({ type: 'spaces' });
+    expect(matchPath('/spaces/', routes)).toEqual({ type: 'spaces' });
   });
 
   it('round-trips build and match', () => {
@@ -167,6 +187,8 @@ describe('matchPath', () => {
       { type: 'agent' as const, agentName: 'weird name/1' },
       { type: 'session' as const, sessionId: 'sess 9' },
       { type: 'sessionsBrowser' as const },
+      { type: 'spaces' as const },
+      { type: 'space' as const, spaceId: 's 9/x' },
     ]) {
       const path = buildPath(place, routes);
       if (path == null) throw new Error(`Expected a path for ${place.type}`);
@@ -203,5 +225,9 @@ describe('placesEqual', () => {
     expect(placesEqual({ type: 'agent', agentName: 'a' }, { type: 'agent', agentName: 'b' })).toBe(false);
     expect(placesEqual({ type: 'libraryAgent', agentId: 'a' }, { type: 'libraryAgent', agentId: 'a' })).toBe(true);
     expect(placesEqual({ type: 'session', sessionId: '1' }, { type: 'root' })).toBe(false);
+    expect(placesEqual({ type: 'spaces' }, { type: 'spaces' })).toBe(true);
+    expect(placesEqual({ type: 'space', spaceId: 'a' }, { type: 'space', spaceId: 'a' })).toBe(true);
+    expect(placesEqual({ type: 'space', spaceId: 'a' }, { type: 'space', spaceId: 'b' })).toBe(false);
+    expect(placesEqual({ type: 'space', spaceId: 'a' }, { type: 'spaces' })).toBe(false);
   });
 });

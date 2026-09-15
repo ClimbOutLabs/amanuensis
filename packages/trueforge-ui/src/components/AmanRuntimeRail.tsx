@@ -1,7 +1,6 @@
 import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, type FC } from 'react';
 
-import { MascotAnimator } from '../atoms/MascotAnimator.js';
 import type { MemoryBankStatus } from './AmanSetupContext.js';
 import {
   PersonalizationProvider,
@@ -123,11 +122,11 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
     <aside className="aman-runtime-rail" aria-label="Amanuensis runtime status">
       <div className="aman-runtime-rail__avatar-card">
         {avatarSrc ? (
-          <MascotAnimator src={avatarSrc} alt="Amanuensis avatar" className="aman-runtime-rail__avatar" />
+          <img src={avatarSrc} alt="Amanuensis avatar" className="aman-runtime-rail__avatar" />
         ) : (
-          <div className="aman-runtime-rail__avatar-fallback" role="img" aria-label="Amanuensis avatar">
+          <span className="aman-runtime-rail__avatar-fallback" role="img" aria-label="Amanuensis avatar">
             A
-          </div>
+          </span>
         )}
       </div>
 

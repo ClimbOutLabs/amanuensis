@@ -35,6 +35,21 @@ export type CreateHarnessChatServerOptions = CreateTrueForgeClientOptions & {
   client?: TrueForge;
 };
 
+/**
+ * The browser's IANA timezone, read once per call so a clock change or DST transition between
+ * turns is picked up. `Intl.DateTimeFormat` is universally available in supported browsers, but
+ * `resolvedOptions().timeZone` can still throw in a locked-down or non-browser environment
+ * (e.g. some test runners); undefined then lets the server fall back to UTC, same as an
+ * omitted field.
+ */
+function resolveClientTimezone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return undefined;
+  }
+}
+
 function causedByAbort(error: unknown): boolean {
   let current = error;
   for (let depth = 0; depth < 3; depth += 1) {
@@ -567,11 +582,13 @@ export function createHarnessChatServer(
       const seenTurnDone = { done: false };
       let turnId: string | undefined;
       try {
+        const clientTimezone = resolveClientTimezone();
         const stream = await client.sessions.createTurnStream(
           sessionId,
           {
             ...(input === undefined ? {} : { input: toHarnessInput(input) }),
             ...(previousTurnId === undefined ? {} : { previousTurnId }),
+            ...(clientTimezone === undefined ? {} : { clientTimezone }),
           },
           abortSignal === undefined ? undefined : { abortSignal },
         );

@@ -468,6 +468,9 @@ describe('validateAgentSpec', () => {
           model: { name: 'test-provider/test-model' },
           instructions: 'test',
           skills: [{ name: 'demo' }],
+          // Sandbox enabled so this exercises the provider check, not the
+          // skills-require-enabled-sandbox check.
+          config: { sandbox: { enabled: true } },
         }),
         tenant_id: 'default',
         ...stores,
@@ -606,6 +609,7 @@ describe('validateAgentSpec', () => {
           model: { name: 'test-provider/test-model' },
           instructions: 'test',
           skills: [{ name: 'agent-skill:acme/team-a/echo:3', preload: false }],
+          config: { sandbox: { enabled: true } },
         }),
         tenant_id: 'default',
         ...stores,

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -86,20 +86,24 @@ const DESIGNED_TRACKER: Space = {
   updated_at: '2026-09-12T00:00:00.000Z',
 };
 
-/** Mutable so a `delete` call is reflected by the next `list()`, the way the real HTTP store is. */
-function mockStore(initialSpaces: Space[]): SpaceStore {
-  const spaces = [...initialSpaces];
+/**
+ * Backed by the caller's array by reference: `delete` splices it (mirroring the server), and a
+ * test can push into or replace elements of it between renders to simulate the model creating or
+ * updating a space after the provider mounted. `list` hands back the live array; `SpaceProvider`
+ * sorts a copy, so the store's array itself is never reordered.
+ */
+function mockStore(backing: Space[]): SpaceStore {
   return {
-    list: vi.fn(async () => spaces),
+    list: vi.fn(async () => backing),
     get: vi.fn(async ({ spaceId }) => {
-      const found = spaces.find(space => space.id === spaceId);
+      const found = backing.find(space => space.id === spaceId);
       if (found === undefined) throw new Error(`Space not found: ${spaceId}`);
       return found;
     }),
     delete: vi.fn(async ({ spaceId }) => {
-      const index = spaces.findIndex(space => space.id === spaceId);
+      const index = backing.findIndex(space => space.id === spaceId);
       if (index === -1) throw new Error(`Space not found: ${spaceId}`);
-      spaces.splice(index, 1);
+      backing.splice(index, 1);
     }),
   };
 }
@@ -122,6 +126,26 @@ function OpenOnMount({ spaceId }: { spaceId?: string }) {
     openSpaces(spaceId ?? null);
   }, [openSpaces, spaceId]);
   return null;
+}
+
+type Shell = ReturnType<typeof useShellMode>;
+
+let shell: Shell;
+function CaptureShell() {
+  shell = useShellMode();
+  return null;
+}
+
+/** Leaves the view closed on mount so a test can open it later via `shell.openSpaces`. */
+function ManualHarness({ store }: { store: SpaceStore }) {
+  return (
+    <ShellModeProvider>
+      <SpaceProvider store={store}>
+        <CaptureShell />
+        <SpacesView />
+      </SpaceProvider>
+    </ShellModeProvider>
+  );
 }
 
 describe('SpacesView list page', () => {
@@ -284,6 +308,52 @@ describe('measureFrameContentHeight', () => {
   });
 });
 
+describe('SpacesView refresh on open', () => {
+  it('refreshes the space list when the view opens', async () => {
+    const store = mockStore([]);
+    render(<ManualHarness store={store} />);
+
+    await waitFor(() => expect(store.list).toHaveBeenCalledTimes(1));
+
+    act(() => shell.openSpaces());
+
+    await waitFor(() => expect(store.list).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows a space created after mount when the view opens, with no focus or visibility event', async () => {
+    const backing: Space[] = [];
+    const store = mockStore(backing);
+    render(<ManualHarness store={store} />);
+
+    await waitFor(() => expect(store.list).toHaveBeenCalledTimes(1));
+
+    // The model created a space during chat, after the provider mounted.
+    backing.push(SPAIN_HOUSES);
+
+    // No window focus or visibilitychange is fired here: opening the view itself refreshes.
+    act(() => shell.openSpaces());
+
+    expect(await screen.findByText('Spain houses')).toBeInTheDocument();
+  });
+
+  it('shows fresh data on the detail page when it opens', async () => {
+    const backing: Space[] = [{ ...SPAIN_HOUSES, body: 'Shortlist.' }];
+    const store = mockStore(backing);
+    render(<ManualHarness store={store} />);
+
+    act(() => shell.openSpaces(SPAIN_HOUSES.id));
+    expect(await screen.findByText('Shortlist.')).toBeInTheDocument();
+
+    // The model updated the space after the first open.
+    backing[0] = { ...SPAIN_HOUSES, body: 'Updated shortlist.', revision: 3 };
+
+    act(() => shell.closeSpaces());
+    act(() => shell.openSpaces(SPAIN_HOUSES.id));
+
+    expect(await screen.findByText('Updated shortlist.')).toBeInTheDocument();
+  });
+});
+
 describe('SpacesView list page html preview', () => {
   it('strips tags from an html body for the one-line preview', async () => {
     render(<Harness store={mockStore([DESIGNED_TRACKER])} />);
@@ -293,7 +363,6 @@ describe('SpacesView list page html preview', () => {
     expect(screen.queryByText(/<h1>/)).not.toBeInTheDocument();
   });
 });
-
 describe('SpacesView delete', () => {
   it('has no per-row delete control on the list page', async () => {
     render(<Harness store={mockStore([SPAIN_HOUSES])} />);

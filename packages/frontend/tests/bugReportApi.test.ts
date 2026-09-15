@@ -84,3 +84,75 @@ test('parses the opted-in chat and drops malformed messages', async () => {
     omitted_messages: 2,
   });
 });
+
+const appBundle = {
+  schema_version: 1,
+  generated_at: '2026-09-05T00:00:00.000Z',
+  build: { version: '0.1.4' },
+  user_description: 'It broke',
+  config_flags: { sandbox_enabled: true, skill_enabled: false, settings_enabled: true },
+  redaction: { stripped_fields: ['session.id and all session metadata (no session is attached)'], notes: 'app-level' },
+};
+
+test('posts to /api/v1/bug-reports and parses the app-level bundle without a session', async () => {
+  const capture: { url?: string; body?: string } = {};
+  const fetcher: typeof fetch = async (url, init) => {
+    capture.url = typeof url === 'string' ? url : url.toString();
+    capture.body = typeof init?.body === 'string' ? init.body : undefined;
+    return new Response(JSON.stringify({ data: appBundle }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  const api = createBugReportApi(fetcher);
+  const result = await api.generateAppBugReport({ description: 'It broke' });
+  assert.equal(capture.url, '/api/v1/bug-reports');
+  assert.deepEqual(JSON.parse(capture.body ?? '{}'), { description: 'It broke' });
+  assert.equal(result.user_description, 'It broke');
+  assert.equal(result.build.version, '0.1.4');
+  assert.deepEqual(result.config_flags, { sandbox_enabled: true, skill_enabled: false, settings_enabled: true });
+  assert.equal('session' in result, false);
+  assert.equal('trace' in result, false);
+  assert.equal('chat' in result, false);
+});
+
+test('rejects a malformed app-level bundle', async () => {
+  const fetcher: typeof fetch = async () =>
+    new Response(JSON.stringify({ data: { ...appBundle, config_flags: null } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  const api = createBugReportApi(fetcher);
+  await assert.rejects(() => api.generateAppBugReport({ description: '' }), /invalid/);
+});
+
+test('reads the handoff target, mapping null when the host disabled it', async () => {
+  const capture: { urls: string[] } = { urls: [] };
+  const fetcherFor =
+    (data: unknown): typeof fetch =>
+    async url => {
+      capture.urls.push(typeof url === 'string' ? url : url.toString());
+      return new Response(JSON.stringify({ data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+
+  const withUrl = createBugReportApi(
+    fetcherFor({ issue_url: 'https://github.com/acme/repo/issues/new?template=bug_report.yml' }),
+  );
+  assert.deepEqual(await withUrl.getBugReportHandoff(), {
+    issueUrl: 'https://github.com/acme/repo/issues/new?template=bug_report.yml',
+  });
+
+  const withoutUrl = createBugReportApi(fetcherFor({ issue_url: null }));
+  assert.equal(await withoutUrl.getBugReportHandoff(), null);
+  assert.equal(capture.urls[1], '/api/v1/bug-reports/handoff');
+});
+
+test('rejects a malformed handoff target', async () => {
+  const fetcher: typeof fetch = async () =>
+    new Response(JSON.stringify({ data: { issue_url: 42 } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  const api = createBugReportApi(fetcher);
+  await assert.rejects(() => api.getBugReportHandoff(), /invalid/);
+});

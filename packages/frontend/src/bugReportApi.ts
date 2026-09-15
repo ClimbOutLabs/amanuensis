@@ -1,4 +1,5 @@
 import type {
+  AppBugReportBundle,
   BugReportApi,
   BugReportBundle,
   BugReportChat,
@@ -172,6 +173,47 @@ function parseBundle(value: unknown): BugReportBundle {
   };
 }
 
+/**
+ * Structural, defensive parse of the app-level bundle from `POST /api/v1/bug-reports` — the same
+ * allowlist stance as `parseBundle`: an unrecognized field is ignored, a malformed required
+ * field rejects the whole bundle. Session-less by design: no session, trace, or chat.
+ */
+function parseAppBundle(value: unknown): AppBugReportBundle {
+  if (
+    !isRecord(value) ||
+    typeof value.schema_version !== 'number' ||
+    typeof value.generated_at !== 'string' ||
+    !isRecord(value.build) ||
+    typeof value.build.version !== 'string' ||
+    (value.build.ref !== undefined && typeof value.build.ref !== 'string') ||
+    typeof value.user_description !== 'string' ||
+    !isRecord(value.config_flags) ||
+    typeof value.config_flags.sandbox_enabled !== 'boolean' ||
+    typeof value.config_flags.skill_enabled !== 'boolean' ||
+    typeof value.config_flags.settings_enabled !== 'boolean' ||
+    !isRecord(value.redaction) ||
+    !isStringArray(value.redaction.stripped_fields) ||
+    typeof value.redaction.notes !== 'string'
+  ) {
+    throw new Error('The bug-report response was invalid.');
+  }
+  return {
+    schema_version: value.schema_version,
+    generated_at: value.generated_at,
+    build: {
+      version: value.build.version,
+      ...(typeof value.build.ref === 'string' ? { ref: value.build.ref } : {}),
+    },
+    user_description: value.user_description,
+    config_flags: {
+      sandbox_enabled: value.config_flags.sandbox_enabled,
+      skill_enabled: value.config_flags.skill_enabled,
+      settings_enabled: value.config_flags.settings_enabled,
+    },
+    redaction: { stripped_fields: value.redaction.stripped_fields, notes: value.redaction.notes },
+  };
+}
+
 /** The opt-in transcript, when the server carried one in a well-formed shape; otherwise left out. */
 function parseChat(value: unknown): BugReportChat | undefined {
   if (!isRecord(value) || !Array.isArray(value.messages) || typeof value.notes !== 'string') {
@@ -240,6 +282,41 @@ export function createBugReportApi(fetcher: typeof fetch): BugReportApi {
         throw new Error('The bug-report response was invalid.');
       }
       return parseBundle(body.data);
+    },
+
+    async generateAppBugReport({ description }: { description: string }) {
+      const response = await fetcher('/api/v1/bug-reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description }),
+      });
+      if (!response.ok) {
+        throw await readError(response);
+      }
+      const body = asUnknown(await response.json());
+      if (!isRecord(body) || !Object.hasOwn(body, 'data')) {
+        throw new Error('The bug-report response was invalid.');
+      }
+      return parseAppBundle(body.data);
+    },
+
+    async getBugReportHandoff() {
+      const response = await fetcher('/api/v1/bug-reports/handoff');
+      if (!response.ok) {
+        throw await readError(response);
+      }
+      const body = asUnknown(await response.json());
+      if (!isRecord(body) || !Object.hasOwn(body, 'data') || !isRecord(body.data)) {
+        throw new Error('The bug-report response was invalid.');
+      }
+      const issueUrl = body.data.issue_url;
+      if (issueUrl === null) {
+        return null;
+      }
+      if (typeof issueUrl !== 'string' || issueUrl === '') {
+        throw new Error('The bug-report response was invalid.');
+      }
+      return { issueUrl };
     },
   };
 }

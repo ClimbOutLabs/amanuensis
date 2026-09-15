@@ -6,6 +6,7 @@ import { getEmptyUsage } from '../../src/core/llm/LLMTypes';
 import type { AgentToolSchema, IToolSet, ListToolsResponse } from '../../src/core/mcp/IMCPServer';
 import type { SandboxProvider } from '../../src/core/sandbox/provider/Provider';
 import { Sandbox, type BoundRepository } from '../../src/core/sandbox/Sandbox';
+import type { ISkillMounter } from '../../src/core/sandbox/skills/ISkillMounter';
 import { NOOP_AGENT_TRACING } from '../../src/core/tracing/NoopAgentTracing';
 
 export const OBJECT_INPUT_SCHEMA = { type: 'object' as const, properties: {} };
@@ -61,6 +62,7 @@ export function makeStubPublicSandbox(
   options: {
     boundRepository?: BoundRepository | undefined;
     exec?: SandboxProvider['exec'] | undefined;
+    skillMounter?: ISkillMounter | undefined;
   } = {},
 ): Sandbox {
   const provider: SandboxProvider = {
@@ -86,6 +88,7 @@ export function makeStubPublicSandbox(
   return new Sandbox({
     provider,
     boundRepository: options.boundRepository,
+    skillMounter: options.skillMounter,
     blockDestructiveToolsInCodeMode: true,
     mcpRequestTimeoutMs: 60_000,
     mcpConnectTimeoutMs: 5_000,

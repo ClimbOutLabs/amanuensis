@@ -14,6 +14,7 @@ import {
   REQUIRE_APPROVAL_TOOLS_SELECTOR_TAGS,
   TOOLS_SELECTOR_TAGS,
 } from '../../core/mcp/toolSelectors';
+import { SkillPromptModeSchema } from '../../core/sandbox/skills/constants';
 
 export const DEFAULT_AGENT_CONFIG_ITERATION_LIMIT = 100;
 
@@ -171,6 +172,9 @@ const SandboxConfigSchema = z
       .boolean()
       .default(true)
       .describe('Allow downloading agent-produced files via the turn download endpoint. Default: true.'),
+    skill_prompt_mode: SkillPromptModeSchema.default('advertise').describe(
+      "How mounted skills are presented in the <skills> prompt section: 'advertise' lists name/description/path and the agent reads SKILL.md itself; 'inline' embeds preloaded SKILL.md content so the agent skips that read. Default: 'advertise'.",
+    ),
   })
   .openapi('SandboxConfig');
 
@@ -220,7 +224,7 @@ export const RuntimeConfigSchema = z
       .describe(
         `Max agent-loop iterations per turn (1–1024). Default: ${String(DEFAULT_AGENT_CONFIG_ITERATION_LIMIT)}.`,
       ),
-    sandbox: SandboxConfigSchema.default(() => ({ enabled: false, file_downloads: true })),
+    sandbox: SandboxConfigSchema.default(() => SandboxConfigSchema.parse({ enabled: false })),
     dynamic_sub_agents: DynamicSubAgentsConfigSchema.default(() => ({ enabled: true })),
     context_management: ContextManagementConfigSchema.default(() => ({
       compaction: { enabled: true },
@@ -313,7 +317,13 @@ export const AgentSpecSchema = z
       .optional()
       .describe('Optional MCP servers attached by configured name.'),
     response_format: ResponseFormatSchema.optional(),
-    skills: z.array(SkillSchema).max(MAX_AGENT_SKILLS).optional().describe('Skills used in this agent.'),
+    skills: z
+      .array(SkillSchema)
+      .max(MAX_AGENT_SKILLS)
+      .optional()
+      .describe(
+        'Optional name-only skill references. Skills mount into the sandbox and are advertised in the <skills> prompt section only when `config.sandbox.enabled` is true — listing skills with the sandbox disabled is rejected (422), so a spec can never silently advertise skills the agent cannot reach.',
+      ),
     // Factory must parse so nested RuntimeConfig field defaults materialize.
     config: RuntimeConfigSchema.default(() => RuntimeConfigSchema.parse({})),
   })

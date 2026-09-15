@@ -1,6 +1,7 @@
 /**
  * Wire schemas for the redacted per-session bug-report bundle
- * (`POST /api/v1/sessions/{session_id}/bug-report`).
+ * (`POST /api/v1/sessions/{session_id}/bug-report`), the app-level bundle
+ * (`POST /api/v1/bug-reports`), and the handoff target (`GET /api/v1/bug-reports/handoff`).
  *
  * Every field here is an allowlisted, structure-only projection of the session's events —
  * see `apis/bugReportRedactor.ts` for the assembly and redaction logic. Message text, memory
@@ -217,6 +218,57 @@ export const CreateSessionBugReportResponseSchema = z
   })
   .openapi('CreateSessionBugReportResponse');
 
+/**
+ * App-level bug-report bundle: `POST /api/v1/bug-reports`. Session-less by design — the report
+ * carries only build identity, the reporter's description, non-secret config flags, and the
+ * redaction notes. There is deliberately no `session`, `trace`, or `chat`: an app-level report
+ * has no session data to redact in the first place.
+ */
+export const AppBugReportBundleSchema = z
+  .object({
+    schema_version: z.number().int().positive().describe('Bundle format version.'),
+    generated_at: z.string().describe('ISO 8601 timestamp when this bundle was assembled.'),
+    build: BuildIdentitySchema,
+    user_description: z.string().describe("The reporter's typed description, verbatim."),
+    config_flags: BugReportConfigFlagsSchema,
+    redaction: BugReportRedactionSchema,
+  })
+  .openapi('AppBugReportBundle');
+
+export const CreateAppBugReportRequestSchema = z
+  .object({
+    description: z
+      .string()
+      .max(8000)
+      .optional()
+      .describe('Optional free-text description of what went wrong; included in the bundle verbatim.'),
+  })
+  .openapi('CreateAppBugReportRequest');
+
+export const CreateAppBugReportResponseSchema = z
+  .object({
+    data: AppBugReportBundleSchema,
+  })
+  .openapi('CreateAppBugReportResponse');
+
+export const BugReportHandoffSchema = z
+  .object({
+    issue_url: z
+      .string()
+      .nullable()
+      .describe(
+        'Host-configured issue-tracker URL bug reports hand off to (the bug_report.yml template), ' +
+          'or null when the host disabled the handoff.',
+      ),
+  })
+  .openapi('BugReportHandoff');
+
+export const GetBugReportHandoffResponseSchema = z
+  .object({
+    data: BugReportHandoffSchema,
+  })
+  .openapi('GetBugReportHandoffResponse');
+
 export type BugReportSession = z.infer<typeof BugReportSessionSchema>;
 export type BugReportTraceEventError = z.infer<typeof BugReportTraceEventErrorSchema>;
 export type BugReportTraceEvent = z.infer<typeof BugReportTraceEventSchema>;
@@ -228,3 +280,6 @@ export type BugReportChatMessage = z.infer<typeof BugReportChatMessageSchema>;
 export type BugReportChat = z.infer<typeof BugReportChatSchema>;
 export type BugReportBundle = z.infer<typeof BugReportBundleSchema>;
 export type CreateSessionBugReportRequest = z.infer<typeof CreateSessionBugReportRequestSchema>;
+export type AppBugReportBundle = z.infer<typeof AppBugReportBundleSchema>;
+export type CreateAppBugReportRequest = z.infer<typeof CreateAppBugReportRequestSchema>;
+export type GetBugReportHandoffResponse = z.infer<typeof GetBugReportHandoffResponseSchema>;

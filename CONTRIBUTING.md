@@ -32,8 +32,8 @@ For these reasons, we focus community contributions on issue reports, analysis, 
 
 ### Issue labels
 
-| Label                                                                                                                                          | Meaning                                                                  |
-| ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Label                                                                                                                                            | Meaning                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
 | [help-wanted](https://github.com/ClimbOutLabs/amanuensis/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22help%20wanted%22)                       | Well-scoped issue where community contributions are welcome.             |
 | [needs-maintainer-attention](https://github.com/ClimbOutLabs/amanuensis/issues?q=is%3Aissue%20state%3Aopen%20label%3Aneeds-maintainer-attention) | Issue needs discussion with maintainers before implementation can start. |
 

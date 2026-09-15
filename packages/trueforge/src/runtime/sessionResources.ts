@@ -10,6 +10,7 @@ import {
   type RemoteMcpHeaders,
   type RepositoryCommandSourceObserver,
   type SandboxProvider,
+  type SkillPromptMode,
   type VercelAILLMConfig,
   type VercelAIProviderConfig,
   type WorkspaceVerificationCoordinator,
@@ -499,6 +500,7 @@ export async function resolveGitSkills({
       path: git.path ?? '',
       ref: git.ref,
       requires: git.requires,
+      when_to_use: git.when_to_use,
     });
   }
   return resolved;
@@ -559,6 +561,12 @@ export function buildTurnSandbox(input: {
   githubConnectorAttached?: boolean | undefined;
   webConnectorAttached?: boolean | undefined;
   fileDownloadEnabled: boolean;
+  /**
+   * How mounted skills are presented in the <skills> prompt section. Defaults
+   * to 'advertise'. Wired from `spec.config.sandbox.skill_prompt_mode` by the
+   * caller (turns.ts); left unset here until that call site passes it through.
+   */
+  skillPromptMode?: SkillPromptMode | undefined;
   existingSandboxId?: string | undefined;
   boundRepository?: BoundRepository | undefined;
   loadBoundRepository?: (() => Promise<BoundRepository | undefined>) | undefined;
@@ -568,6 +576,10 @@ export function buildTurnSandbox(input: {
   tracing: AgentTracing;
 }): Sandbox {
   // Empty mounter still uploads requested-skills file so existing skills are cleaned up.
+  const skillMounter = new SkillMounter(
+    { skills: input.gitSkills },
+    { promptMode: input.skillPromptMode ?? 'advertise' },
+  );
   return new Sandbox({
     provider: input.provider,
     existingSandboxId: input.existingSandboxId,
@@ -584,7 +596,7 @@ export function buildTurnSandbox(input: {
     mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
     mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
     ocrLanguages: configuration.DOCUMENT_OCR_LANGUAGES,
-    skillMounter: new SkillMounter({ skills: input.gitSkills }),
+    skillMounter,
     tracing: input.tracing,
     logger: input.logger,
   });
@@ -648,7 +660,18 @@ export async function validateAgentSpec({
 
   const requestedSkills = spec.skills ?? [];
   if (requestedSkills.length > 0) {
+    // Unknown-skill validation runs first so the error stays specific to what
+    // is actually wrong with the request.
     await skillStore.validateAgentSkills({ tenant_id, skills: requestedSkills });
+    // Skills only reach the agent through the sandbox: the <skills> prompt
+    // section renders from the sandbox's skill mounter, and there is no
+    // sandbox at all when it is disabled. Fail loudly here instead of
+    // silently advertising nothing.
+    if (!spec.config.sandbox.enabled) {
+      throw new HTTPException(422, {
+        message: 'skills require config.sandbox.enabled: true',
+      });
+    }
   }
 
   const wantsSandbox = spec.config.sandbox.enabled;

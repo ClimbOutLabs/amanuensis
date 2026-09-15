@@ -16,7 +16,7 @@
  *   - CSS `expression(...)` and `-moz-binding` declarations.
  * `<style>` elements and inline `style` attributes are otherwise kept as written.
  *
- * The sandboxed iframe (`sandbox=""`, no `allow-scripts`) is the primary boundary; this sanitiser
+ * The sandboxed iframe (`sandbox="allow-same-origin"`, no `allow-scripts`) is the primary boundary; this sanitiser
  * is defense in depth so the srcdoc itself never carries anything live, and so a viewer who reads
  * the page source sees the same inert markup the sandbox already prevents from running.
  *

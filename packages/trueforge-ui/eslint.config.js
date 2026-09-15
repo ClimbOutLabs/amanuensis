@@ -18,6 +18,17 @@ export default tseslint.config(
     },
   },
   {
+    // Node utility scripts (e.g. the fonts.css generator) run outside src/test.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  {
     files: ['src/**/*.{ts,tsx}', 'test/**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2022,

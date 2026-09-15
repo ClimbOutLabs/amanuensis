@@ -68,6 +68,8 @@ export function ShellRouteSync({
 
   const snapshot: ShellSnapshot = {
     settingsOpen: shell.settingsOpen,
+    spacesOpen: shell.spacesOpen,
+    selectedSpaceId: shell.selectedSpaceId,
     libraryOpen: shell.libraryOpen,
     sessionsOpen: shell.sessionsOpen,
     libraryAgentId: shell.libraryAgentId,
@@ -189,6 +191,12 @@ export function ShellRouteSync({
         case 'settings':
           shell.setSettingsOpen(true);
           return;
+        case 'spaces':
+          shell.openSpaces(null);
+          return;
+        case 'space':
+          shell.openSpaces(target.spaceId);
+          return;
         case 'library':
           shell.setLibraryOpen(true);
           return;
@@ -217,6 +225,9 @@ export function ShellRouteSync({
           shell.setSettingsOpen(false);
           shell.setLibraryOpen(false);
           shell.setSchedulesOpen(false);
+          // Back (or any URL navigation) to a chat place leaves the spaces view too, in every
+          // shell mode: the per-mode chat navigation below does not all close spaces itself.
+          shell.closeSpaces();
           switch (shell.agentConfigMode) {
             case 'AgentLibrary':
               shell.openLibraryHome();
@@ -397,6 +408,10 @@ export function ShellRouteSync({
       if (urlPlace.type !== 'schedules' && shell.schedulesOpen) {
         // Leaving schedules via Back to a chat place.
         shell.setSchedulesOpen(false);
+      }
+      if (urlPlace.type !== 'spaces' && urlPlace.type !== 'space' && shell.spacesOpen) {
+        // Leaving Spaces via Back to a chat place.
+        shell.closeSpaces();
       }
       applyPlace(urlPlace);
     }

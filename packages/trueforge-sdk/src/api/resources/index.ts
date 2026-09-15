@@ -31,3 +31,5 @@ export * as sessions from "./sessions/index.js";
 export * as settings from "./settings/index.js";
 export * from "./skills/client/requests/index.js";
 export * as skills from "./skills/index.js";
+export * from "./spaces/client/requests/index.js";
+export * as spaces from "./spaces/index.js";

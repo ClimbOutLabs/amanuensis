@@ -94,9 +94,9 @@ export const ListTurnEventsRequestQuerySchema = z
 export const ListTurnEventsResponseSchema = z
   .object({
     // SessionEventSchema (agent-session, core) excludes passthrough events by design;
-    // aman.memory.recall and aman.profile.learned are passthrough events this package registers
-    // (see runtime/memory/memoryEvents.ts, runtime/profileLearning.ts), so the persisted stream
-    // this route lists can include them.
+    // aman.memory.recall, aman.profile.learned, and aman.skill.used are passthrough events
+    // this package registers (see runtime/memory/memoryEvents.ts, runtime/profileLearning.ts,
+    // schemas/skillEvents.ts), so the persisted stream this route lists can include them.
     data: z.array(SessionEventWithPassthroughSchema),
     pagination: TokenPaginationSchema,
   })

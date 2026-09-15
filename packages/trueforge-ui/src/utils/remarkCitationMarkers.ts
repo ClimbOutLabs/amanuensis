@@ -1,21 +1,37 @@
 /**
- * Remark plugin to transform citation markers like 【14†excerpts】 into markdown links.
+ * Remark plugin to transform citation markers like 【14†excerpts】 or 【a3f9c21e†excerpts】
+ * into markdown links.
  * The plugin respects code blocks and inline code, preserving markers within them unchanged.
  */
 
 import type { Text } from 'mdast';
 import { visit } from 'unist-util-visit';
 
-import { extractCitationMarkers, resolveCitationSource, type CitationSource } from './citationMarkers.js';
+import {
+  extractCitationMarkers,
+  renderCitationReplacement,
+  resolveCitationSource,
+  type CitationSource,
+} from './citationMarkers.js';
+
+/** Sources keyed by numeric or retrieval ID; arrays keep their documented lookup semantics. */
+export type CitationSourcesInput =
+  | Map<number | string, CitationSource>
+  | Map<string, CitationSource>
+  | Map<number, CitationSource>
+  | CitationSource[]
+  | null
+  | undefined;
 
 /**
- * Creates a remark plugin that transforms citation markers into markdown link text.
- * When a source with a URL is found, the marker becomes a markdown link.
- * When not found or source has no URL, the marker is removed from the text.
- * Markers inside code blocks and inline code spans are preserved unchanged
- * (this filtering is done by extractCitationMarkers via scanMarkdownSegments).
+ * Creates a remark plugin that transforms citation markers into markdown links.
+ * A resolved numeric source becomes its numbered link; a resolved retrieval-ID source becomes
+ * a human-readable link on the source title. A marker that cannot be resolved is removed
+ * from the text — raw IDs never render. Markers inside code blocks and inline code spans are
+ * preserved unchanged (this filtering is done by extractCitationMarkers via
+ * scanMarkdownSegments).
  */
-export function remarkCitationMarkers(citationSources?: Map<number, CitationSource> | CitationSource[] | null) {
+export function remarkCitationMarkers(citationSources?: CitationSourcesInput) {
   return (tree: any) => {
     // Walk the tree and replace citation markers in text nodes
     visit(tree, 'text', (node: Text) => {
@@ -29,17 +45,9 @@ export function remarkCitationMarkers(citationSources?: Map<number, CitationSour
       let text = node.value;
       for (const marker of markers) {
         const resolved = resolveCitationSource(marker, citationSources);
+        const replacement = renderCitationReplacement(marker, resolved);
 
-        let replacement: string;
-        if (resolved?.url) {
-          // Render as a markdown link when source is known and has URL
-          replacement = `[【${marker.sourceId}】](${resolved.url} "${resolved.title}")`;
-        } else {
-          // Remove the marker entirely when unresolved or source has no URL
-          replacement = '';
-        }
-
-        // Replace the marker with the link or remove it
+        // Replace the marker with the link, the title, or nothing when unresolvable
         text = text.slice(0, marker.start) + replacement + text.slice(marker.end);
       }
 

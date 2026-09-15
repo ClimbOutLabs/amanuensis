@@ -24,6 +24,7 @@ let configuration: typeof import('./config').default;
 let isOidcConfigured: typeof import('./config').isOidcConfigured;
 let isTrueFoundryModeEnabled: typeof import('./config').isTrueFoundryModeEnabled;
 let getTrueForgeAuthMode: typeof import('./config').getTrueForgeAuthMode;
+let assertNetworkAuthRequirement: typeof import('./config').assertNetworkAuthRequirement;
 let getPublicUiBasePath: typeof import('./config').getPublicUiBasePath;
 let TrueForgeAuthMode: typeof import('./config').TrueForgeAuthMode;
 
@@ -33,6 +34,7 @@ try {
     isOidcConfigured,
     isTrueFoundryModeEnabled,
     getTrueForgeAuthMode,
+    assertNetworkAuthRequirement,
     getPublicUiBasePath,
     TrueForgeAuthMode,
   } = await import('./config'));
@@ -557,6 +559,13 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   let authenticator;
   let authorizer: Authorizer;
   const mode = getTrueForgeAuthMode(configuration);
+  // Fail closed before the authenticator is built: a non-loopback standalone
+  // listener would serve the admin API to the network with no login.
+  assertNetworkAuthRequirement({
+    authMode: mode,
+    host: configuration.HOST,
+    requireAuth: configuration.REQUIRE_AUTH,
+  });
   if (mode === TrueForgeAuthMode.TrueFoundry) {
     if (serviceFoundryClient === undefined) {
       throw new Error('TrueFoundry mode requires TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL');

@@ -70,10 +70,15 @@ export function effectiveToolAdmissions(input: {
   return effective;
 }
 
-/** Server-owned eligibility for a durable chat-scoped approval. */
+/**
+ * Server-owned eligibility for a durable chat-scoped approval. This only gates
+ * which calls may *receive* chat scope; the scope's binding lives in the grant
+ * key: sandbox exec keys carry an invocation digest over (purpose, command,
+ * cwd, env) and registered-command keys carry the repository command id, so
+ * approving one invocation never authorizes a different one. A failed,
+ * unknown, or repository-mutating run never creates a commit receipt.
+ */
 export function allowsChatApproval(info: InternalToolCallInfo): boolean {
-  // Verification remains host-observed and exact-invocation scoped. A failed,
-  // unknown, or repository-mutating run never creates a commit receipt.
   return info.implementation_plan_grant !== undefined || info.effect === 'inspect' || info.effect === 'verify';
 }
 

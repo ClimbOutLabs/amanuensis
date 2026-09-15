@@ -4,6 +4,7 @@ import {
   CreateSpaceRequestSchema,
   CreateSpaceResponseSchema,
   DeleteSpaceRequestQuerySchema,
+  DeleteSpaceResponseSchema,
   GetSpaceResponseSchema,
   ListSpacesQuerySchema,
   ListSpacesResponseSchema,
@@ -98,7 +99,10 @@ export const deleteSpaceRoute = createRoute({
   'x-fern-sdk-method-name': 'delete',
   request: { params: SpaceIdParamsSchema, query: DeleteSpaceRequestQuerySchema },
   responses: {
-    204: { description: 'Space deleted.' },
+    200: {
+      content: { 'application/json': { schema: DeleteSpaceResponseSchema } },
+      description: 'Space deleted.',
+    },
     404: errorResponse('Space not found.'),
     409: staleResponse,
     401: protectedResponse,

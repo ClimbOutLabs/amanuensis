@@ -104,15 +104,14 @@ function ScreenStatusCard(props: {
       ) : null}
 
       <p className="mt-3 text-xs text-text-secondary">
-        Configure with{' '}
+        Server env:{' '}
         {props.envNames.map((name, index) => (
           <span key={name}>
-            {index === 0 ? null : index === props.envNames.length - 1 ? ' and ' : ', '}
+            {index === 0 ? null : ', '}
             <code>{name}</code>
           </span>
-        ))}{' '}
-        in the server&apos;s environment. The classifier URL and bearer token stay server-side and are never shown here.
-        {props.extraNote === undefined ? null : ` ${props.extraNote}`}
+        ))}
+        {props.extraNote === undefined ? null : `. ${props.extraNote}`}
       </p>
     </section>
   );
@@ -617,19 +616,19 @@ const MemorySettings = () => {
         <ScreenStatusCard
           headingId="memory-screen-heading"
           title="Recall screen"
-          description="Classifies what memory recall is about to inject into the model's context, before it reaches the model — so a note the host retained on its own cannot hijack an unrelated chat."
+          description="Screens what recall is about to inject into the model's context, so a note the host saved on its own can't hijack an unrelated chat."
           status={memoryScreen}
           enabledText="Recall screening is on"
           disabledText="Recall screening is off"
           unavailableText="Recall screening status unavailable"
           envNames={['MEMORY_SCREEN_URL', 'MEMORY_SCREEN_AUTH_TOKEN', 'MEMORY_SCREEN_THRESHOLD']}
-          extraNote="On/off is the switch above (defaulting to MEMORY_SCREEN_ENABLED when the bank has not set it), but it also needs the classifier sidecar deployed and reachable at MEMORY_SCREEN_URL. Set MEMORY_SCREEN_AUTH_TOKEN when the sidecar requires bearer auth."
+          extraNote="The classifier URL and bearer token stay server-side and are never shown here. Screening also needs the classifier sidecar deployed and reachable at MEMORY_SCREEN_URL — on/off is the switch above (the bank's own setting when set, else MEMORY_SCREEN_ENABLED)."
         />
 
         <ScreenStatusCard
           headingId="tool-output-screen-heading"
           title="Live tool-output screen"
-          description="Classifies open-world tool results before they are handed back to the model in the same turn. Suspicious output stays visible in the audit trail but is withheld from model context."
+          description="Screens open-world tool results before they're handed back to the model in the same turn. Suspicious output stays in the audit trail, out of model context."
           status={toolOutputScreen}
           enabledText="Tool-output screening is on"
           disabledText="Tool-output screening is off"
@@ -640,7 +639,7 @@ const MemorySettings = () => {
             'MEMORY_SCREEN_URL',
             'MEMORY_SCREEN_AUTH_TOKEN',
           ]}
-          extraNote="It reuses MEMORY_SCREEN_THRESHOLD and MEMORY_SCREEN_AUTH_TOKEN from the recall screen configuration."
+          extraNote="Reuses the recall screen's threshold, classifier URL, and bearer token."
         />
       </div>
 

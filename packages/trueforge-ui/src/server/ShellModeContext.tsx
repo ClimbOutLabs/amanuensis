@@ -115,6 +115,9 @@ type ShellModeContextValue = {
   openSpaces: (spaceId?: string | null) => void;
   /** Leaves the spaces view and returns to chat. */
   closeSpaces: () => void;
+  /** True when the user has hidden the recent-chats history panel. Persisted per browser. */
+  historyCollapsed: boolean;
+  setHistoryCollapsed: (collapsed: boolean) => void;
   /**
    * Bind from Agents (Try = immutable, Edit = mutable + agentSpec).
    * Prefer this over `selectAgent` / `openDraft` when both fields are available.
@@ -170,6 +173,21 @@ type ShellModeContextValue = {
 };
 
 const ShellModeContext = createContext<ShellModeContextValue | null>(null);
+
+const HISTORY_COLLAPSED_STORAGE_KEY = 'aui-history-collapsed';
+
+/** Returns the stored preference, or `false` when nothing is stored yet (default: expanded). */
+function readStoredHistoryCollapsed(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const stored = window.localStorage.getItem(HISTORY_COLLAPSED_STORAGE_KEY);
+    if (stored === 'true') return true;
+    if (stored === 'false') return false;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
 
 const FALLBACK_MUTABLE_SPEC: AgentSpec = {
   model: { name: 'openai-main/gpt-4.1' },
@@ -260,6 +278,7 @@ export function ShellModeProvider({
   const [pendingSessionEpoch, setPendingSessionEpoch] = useState(0);
   const [spacesOpen, setSpacesOpenState] = useState(false);
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
+  const [historyCollapsed, setHistoryCollapsedState] = useState(() => readStoredHistoryCollapsed());
   const settingsEnabled = isSettingsChromeEnabled({ catalog, capabilities });
   const settingsOpen = settingsEnabled && settingsOpenState;
   const sessionsEnabled = isSessionsChromeEnabled({ sessions: sessionsServer });
@@ -273,6 +292,15 @@ export function ShellModeProvider({
   const closeSpaces = useCallback(() => {
     setSpacesOpenState(false);
     setSelectedSpaceId(null);
+  }, []);
+
+  const setHistoryCollapsed = useCallback((collapsed: boolean) => {
+    setHistoryCollapsedState(collapsed);
+    try {
+      window.localStorage.setItem(HISTORY_COLLAPSED_STORAGE_KEY, String(collapsed));
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const setSessionsOpen = useCallback(
@@ -694,6 +722,8 @@ export function ShellModeProvider({
       selectedSpaceId,
       openSpaces,
       closeSpaces,
+      historyCollapsed,
+      setHistoryCollapsed,
       selectLibraryAgent,
       bindMutableAgent,
       selectAgent,
@@ -736,6 +766,8 @@ export function ShellModeProvider({
       selectedSpaceId,
       openSpaces,
       closeSpaces,
+      historyCollapsed,
+      setHistoryCollapsed,
       selectLibraryAgent,
       bindMutableAgent,
       selectAgent,

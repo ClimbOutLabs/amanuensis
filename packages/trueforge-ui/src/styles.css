@@ -19,6 +19,7 @@
  */
 @import 'github-markdown-css/github-markdown.css';
 @import './github-markdown-bridge.css';
+@import './fonts.css';
 
 /* ──────────────────────────────────────────────────────────────────────
  * Owned palette scoped to `.aui-theme-root` so host `:root` / `html.dark`
@@ -27,70 +28,58 @@
 @layer tfy-agent-ui-base {
   .aui-theme-root {
     box-sizing: border-box;
+    /* Fallback palette: matches the `trueforge` preset so surfaces without
+     * ThemeProvider tokens render the same product (single token truth). */
     --color-white: #ffffff;
     --color-black: #09090b;
-    --color-gray-100: #f4f4f5;
-    --color-gray-125: #f1f1f2;
-    --color-gray-150: #eeeef0;
-    --color-gray-200: #e4e4e7;
-    --color-gray-250: #e4e4e7;
-    --color-gray-275: #f4f4f5;
-    --color-gray-300: #d4d4d8;
-    --color-gray-400: #a1a1aa;
-    --color-gray-500: #71717a;
-    --color-gray-550: #62626a;
-    --color-gray-600: #52525b;
-    --color-gray-650: #494950;
-    --color-gray-700: #3f3f46;
-    --color-gray-750: #303036;
-    --color-gray-800: #27272a;
-    --color-gray-1000: #09090b;
-    --color-indigo-500: #6366f1;
-    --color-red-500: #ef4444;
-
-    --sidebar-bg: var(--color-white);
-    --topbar-bg: var(--color-white);
-    --primary-bg: var(--color-white);
-    --secondary-bg: var(--color-gray-100);
-    --border: var(--color-gray-250);
-    --input-box-bg: var(--color-white);
-    --input-border: var(--color-gray-250);
-    --text-primary: var(--color-gray-1000);
-    --text-secondary: var(--color-gray-550);
+    --font-agent-ui:
+      'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-display:
+      'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --sidebar-bg: #efe7d8;
+    --topbar-bg: #fbf8f2;
+    --primary-bg: #f7f2e8;
+    --secondary-bg: #ebe2d3;
+    --border: #d9ccb6;
+    --input-box-bg: #fffdf8;
+    --input-border: #d7c7aa;
+    --text-primary: #2c2a26;
+    --text-secondary: #746b5d;
     --sidebar-text: var(--text-primary);
-    --card-bg: var(--color-white);
-    --dropdown-selected-item-bg: var(--color-gray-125);
-    --dropdown-selected-item-text: var(--color-gray-1000);
-    --user-message-bg: var(--color-black);
-    --user-message-text: var(--color-white);
+    --text-xs: 0.75rem;
+    --text-sm: 0.8125rem;
+    --text-base: 0.9375rem;
+    --text-lg: 1.0625rem;
+    --text-xl: 1.25rem;
+    --text-2xl: 1.5rem;
+    --card-bg: #fffdf8;
+    --surface-elevated: #fffdf8;
+    --dropdown-selected-item-bg: #e9ddc9;
+    --dropdown-selected-item-text: #2c2a26;
+    --user-message-bg: #2c2a26;
+    --user-message-text: #fffdf8;
     --assistant-message-bg: transparent;
-    --assistant-message-text: var(--text-primary);
-    --primary-button-bg: var(--color-black);
-    --primary-button-hover: #27272a;
-    --primary-button-text: var(--color-white);
     --secondary-button-bg: var(--primary-bg);
-    --secondary-button-hover: var(--color-gray-200);
-    --secondary-button-text: var(--color-gray-1000);
     --ghost-button-bg: transparent;
-    --ghost-button-hover: var(--color-gray-125);
-    --ghost-button-text: var(--color-gray-1000);
-    --success-bg: #16a34a;
-    --success-text: var(--color-white);
-    --failure-bg: var(--color-red-500);
-    --failure-text: var(--color-white);
-    --warning-bg: #d97706;
-    --warning-text: var(--color-white);
+    --ghost-button-hover: #ebe2d3;
+    --ghost-button-text: #2c2a26;
+    --success-bg: #4b8060;
+    --success-text: #fffdf8;
+    --failure-bg: #a95445;
+    --failure-text: #fffdf8;
+    --warning-bg: #b5894c;
+    --warning-text: #fffdf8;
     /* Figma Agents approval banner (light 6747:4232): blue-50 / blue-500 / blue-600 */
     --approval-banner-bg: #eff6ff;
     --approval-banner-border: #3b82f6;
     --approval-banner-fg: #2563eb;
     --approval-banner-accent: #3b82f6;
-    --focus-ring: var(--color-black);
-    --radius: 0.375rem;
-    --composer-radius: 1.5rem;
-    --overlay: rgb(9 9 11 / 0.5);
-    --shadow-color: var(--color-black);
-    --scrollbar-thumb: var(--color-gray-550);
+    --focus-ring: #b5894c;
+    --radius: 0.65rem;
+    --composer-radius: 1.25rem;
+    --overlay: rgb(44 42 38 / 0.42);
+    --shadow-color: #2c2a26;
+    --scrollbar-thumb: #bda886;
     --chat-font-size: 0.875rem;
   }
 
@@ -101,64 +90,58 @@
   }
 
   .aui-theme-root.dark {
-    --color-gray-100: #101013;
-    --color-gray-125: #141417;
-    --color-gray-150: #18181b;
-    --color-gray-200: #1f1f22;
-    --color-gray-250: #27272a;
-    --color-gray-275: #343439;
-    --color-gray-300: #3f3f46;
-    --color-gray-400: #52525b;
-    --color-gray-500: #71717a;
-    --color-gray-550: #8c8c92;
-    --color-gray-600: #a1a1aa;
-    --color-gray-650: #b8b8be;
-    --color-gray-700: #d4d4d8;
-    --color-gray-750: #dfdfe2;
-    --color-gray-800: #ececee;
-    --color-gray-1000: #fdfdfd;
-
-    --sidebar-bg: var(--color-gray-200);
-    --topbar-bg: var(--color-gray-200);
-    --primary-bg: var(--color-gray-200);
-    --secondary-bg: var(--color-gray-250);
-    --border: var(--color-gray-275);
-    --input-box-bg: var(--color-gray-150);
-    --input-border: var(--color-gray-275);
-    --text-primary: var(--color-gray-1000);
-    --text-secondary: var(--color-gray-600);
+    --font-agent-ui:
+      'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-display:
+      'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --sidebar-bg: #221f19;
+    --topbar-bg: #221f19;
+    --primary-bg: #28241c;
+    --secondary-bg: #2f2a21;
+    --border: #3e382b;
+    --input-box-bg: #2f2a21;
+    --input-border: #3e382b;
+    --text-primary: #f2ecdd;
+    --text-secondary: #a89a7f;
     --sidebar-text: var(--text-primary);
-    --card-bg: var(--color-gray-150);
-    --dropdown-selected-item-bg: var(--color-gray-275);
-    --dropdown-selected-item-text: var(--color-gray-1000);
-    --user-message-bg: var(--color-indigo-500);
-    --user-message-text: var(--color-white);
+    --text-xs: 0.75rem;
+    --text-sm: 0.8125rem;
+    --text-base: 0.9375rem;
+    --text-lg: 1.0625rem;
+    --text-xl: 1.25rem;
+    --text-2xl: 1.5rem;
+    --card-bg: #2f2a21;
+    --surface-elevated: #38332a;
+    --dropdown-selected-item-bg: #3e382b;
+    --dropdown-selected-item-text: #f2ecdd;
+    --user-message-bg: #b5894c;
+    --user-message-text: #221f19;
     --assistant-message-bg: transparent;
-    --assistant-message-text: var(--text-primary);
-    --primary-button-bg: var(--color-indigo-500);
-    --primary-button-hover: #4f46e5;
-    --primary-button-text: var(--color-white);
-    --secondary-button-bg: var(--color-gray-250);
-    --secondary-button-hover: var(--color-gray-275);
-    --secondary-button-text: var(--color-gray-1000);
+    --assistant-message-text: #f2ecdd;
+    --primary-button-bg: #b5894c;
+    --primary-button-hover: #c69c5d;
+    --primary-button-text: #221f19;
+    --secondary-button-bg: #2f2a21;
+    --secondary-button-hover: #3e382b;
+    --secondary-button-text: #f2ecdd;
     --ghost-button-bg: transparent;
-    --ghost-button-hover: var(--color-gray-275);
-    --ghost-button-text: var(--color-gray-1000);
-    --success-bg: #4ade80;
-    --success-text: #052e16;
-    --failure-bg: var(--color-red-500);
-    --failure-text: var(--color-white);
-    --warning-bg: #fbbf24;
-    --warning-text: #422006;
+    --ghost-button-hover: #3e382b;
+    --ghost-button-text: #f2ecdd;
+    --success-bg: #4b8060;
+    --success-text: #f2ecdd;
+    --failure-bg: #a95445;
+    --failure-text: #f2ecdd;
+    --warning-bg: #b5894c;
+    --warning-text: #221f19;
     /* Figma Agents approval banner (dark 6748:1977): #202636 / blue-600 top / Base_gray/750 text */
     --approval-banner-bg: #202636;
     --approval-banner-border: #2563eb;
     --approval-banner-fg: #dfdfe2;
     --approval-banner-accent: #2563eb;
-    --focus-ring: var(--color-indigo-500);
-    --overlay: rgb(0 0 0 / 0.7);
+    --focus-ring: #b5894c;
+    --overlay: rgb(0 0 0 / 0.65);
     --shadow-color: #000000;
-    --scrollbar-thumb: var(--color-gray-600);
+    --scrollbar-thumb: #6e6350;
   }
 }
 
@@ -218,6 +201,16 @@
 /* trueforge: circular composer send control (icon-only up-arrow). */
 .aui-theme-root[data-preset='trueforge'] [data-slot='aui_composer-send'] {
   border-radius: 100%;
+}
+
+/*
+ * Display type: prose and welcome surfaces use the display face; chrome keeps
+ * the body face. Only the claude preset's display face is serif — for every
+ * other preset this is a no-op because both faces are the same stack.
+ */
+.aui-theme-root .aui-markdown.markdown-body,
+.aui-theme-root .aui-thread-welcome-message-inner {
+  font-family: var(--font-display);
 }
 
 /*
@@ -298,43 +291,30 @@
   color: var(--text-primary);
 }
 
+/* Static avatar, no box or tint: a plain image at the rail button hit-area footprint,
+   centered horizontally in the runtime rail (owner decision — no motion, no container). */
 .aman-runtime-rail__avatar-card {
-  position: relative;
-  display: block;
-  width: 10rem;
-  aspect-ratio: 1 / 1;
-  overflow: hidden;
-  border: 1px solid #d9c29a;
-  border-radius: 1.25rem;
-  background: linear-gradient(145deg, #fffdf8, #eee1cc);
-  box-shadow: 0 12px 30px rgb(63 48 30 / 0.1);
-}
-
-.aman-runtime-rail__avatar-glow {
-  position: absolute;
-  inset: 20% 14%;
-  border-radius: 999px;
-  background: #d9b576;
-  filter: blur(2.5rem);
-  opacity: 0.28;
-}
-
-.aman-runtime-rail__avatar,
-.aman-runtime-rail__avatar-fallback {
-  position: relative;
-  z-index: 1;
+  display: flex;
   width: 100%;
-  height: 100%;
+  justify-content: center;
+}
+
+.aman-runtime-rail__avatar {
+  width: 100%;
+  max-width: 15rem;
+  height: auto;
   object-fit: contain;
+  border-radius: var(--radius-sm);
 }
 
 .aman-runtime-rail__avatar-fallback {
+  width: 2.625rem;
+  height: 2.625rem;
+  object-fit: contain;
   display: grid;
   place-items: center;
-  border-radius: 2rem;
-  background: #2c2a26;
-  color: #f7f1e6;
-  font-size: 4rem;
+  color: var(--text-primary);
+  font-size: 1.25rem;
   font-weight: 700;
 }
 
@@ -414,10 +394,10 @@
   text-underline-offset: 2px;
 }
 
-/* Chat text with unified font sizing and line height. */
+/* Chat text: type-scale sizing with airy leading for reading rhythm. */
 .aman-chat-text {
-  font-size: var(--chat-font-size);
-  line-height: 1.5;
+  font-size: var(--text-base);
+  line-height: 1.65;
 }
 
 .aui-theme-root,
@@ -502,26 +482,9 @@
   --color-approval-banner-fg: var(--approval-banner-fg);
   --color-approval-banner-accent: var(--approval-banner-accent);
   --color-focus-ring: var(--focus-ring);
+  --color-surface-elevated: var(--surface-elevated);
   --color-white: var(--color-white);
   --color-black: var(--color-black);
-  --color-gray-100: var(--color-gray-100);
-  --color-gray-125: var(--color-gray-125);
-  --color-gray-150: var(--color-gray-150);
-  --color-gray-200: var(--color-gray-200);
-  --color-gray-250: var(--color-gray-250);
-  --color-gray-275: var(--color-gray-275);
-  --color-gray-300: var(--color-gray-300);
-  --color-gray-400: var(--color-gray-400);
-  --color-gray-500: var(--color-gray-500);
-  --color-gray-550: var(--color-gray-550);
-  --color-gray-600: var(--color-gray-600);
-  --color-gray-650: var(--color-gray-650);
-  --color-gray-700: var(--color-gray-700);
-  --color-gray-750: var(--color-gray-750);
-  --color-gray-800: var(--color-gray-800);
-  --color-gray-1000: var(--color-gray-1000);
-  --color-indigo-500: var(--color-indigo-500);
-  --color-red-500: var(--color-red-500);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -674,472 +637,4 @@
     color: transparent;
     animation: aui-text-shimmer 1.5s linear infinite;
   }
-}
-
-/* Mascot Animator: base component + animation states (shipped in this stylesheet so the
-   library build bundles it; a separate MascotAnimator.css next to the component never reached
-   the browser). */
-.mascot-animator__container {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
-.mascot-animator__image {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  will-change: transform;
-}
-
-.mascot-animator__halo {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: currentColor;
-  filter: blur(6px);
-  opacity: 0.35;
-  transform: scale(1.04);
-  pointer-events: none;
-  will-change: opacity;
-  z-index: 0;
-}
-
-.mascot-animator__glyphs {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  will-change: opacity;
-  z-index: 2;
-}
-
-/* Animation States */
-
-/* 1. Idle - slow breathing */
-.mascot-animator--idle .mascot-animator__image {
-  animation: mascot-breathing 4s ease-in-out infinite;
-}
-
-@keyframes mascot-breathing {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.02);
-  }
-}
-
-/* 2. Listening - lean toward composer with ear twitch */
-.mascot-animator--listening .mascot-animator__image {
-  animation: mascot-listening 1.2s ease-in-out infinite;
-}
-
-@keyframes mascot-listening {
-  0%,
-  100% {
-    transform: rotate(0deg);
-  }
-  50% {
-    transform: rotate(3deg);
-  }
-}
-
-.mascot-animator--listening .mascot-animator__glyphs {
-  animation: mascot-ear-twitch 3s steps(1, start) infinite;
-}
-
-@keyframes mascot-ear-twitch {
-  0%,
-  20% {
-    opacity: 0;
-  }
-  21%,
-  23% {
-    opacity: 1;
-  }
-  24%,
-  100% {
-    opacity: 0;
-  }
-}
-
-/* 3. Thinking - head tilt with floating dots */
-.mascot-animator--thinking .mascot-animator__image {
-  animation: mascot-thinking 2.4s ease-in-out infinite;
-}
-
-.mascot-animator--thinking.mascot-animator--variant-1 .mascot-animator__image {
-  animation: mascot-thinking-variant-1 2.4s ease-in-out infinite;
-}
-
-@keyframes mascot-thinking {
-  0%,
-  50%,
-  100% {
-    transform: rotate(0deg);
-  }
-  25% {
-    transform: rotate(-4deg);
-  }
-  75% {
-    transform: rotate(4deg);
-  }
-}
-
-@keyframes mascot-thinking-variant-1 {
-  0%,
-  25%,
-  100% {
-    transform: rotate(0deg);
-  }
-  50% {
-    transform: rotateY(15deg);
-  }
-}
-
-.mascot-animator--thinking .mascot-animator__glyphs {
-  animation: mascot-dots-float 2s ease-in-out infinite;
-}
-
-@keyframes mascot-dots-float {
-  0%,
-  100% {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  50% {
-    opacity: 1;
-    transform: translateY(-20px);
-  }
-}
-
-/* 4. Reading - page turn glyph and nod */
-.mascot-animator--reading .mascot-animator__image {
-  animation: mascot-nod 0.9s ease-in-out infinite;
-}
-
-@keyframes mascot-nod {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(3px);
-  }
-}
-
-.mascot-animator--reading .mascot-animator__glyphs {
-  animation: mascot-page-turn 1.6s ease-in-out infinite;
-}
-
-@keyframes mascot-page-turn {
-  0%,
-  100% {
-    opacity: 0;
-    transform: translateX(-10px) scaleX(0.5);
-  }
-  50% {
-    opacity: 1;
-    transform: translateX(0) scaleX(1);
-  }
-}
-
-/* 5. Searching - magnifier sweep with curious lean */
-.mascot-animator--searching .mascot-animator__image {
-  animation: mascot-curious-lean 1.6s ease-in-out infinite;
-}
-
-.mascot-animator--searching.mascot-animator--variant-1 .mascot-animator__image {
-  animation: mascot-curious-lean-variant-1 1.6s ease-in-out infinite;
-}
-
-@keyframes mascot-curious-lean {
-  0%,
-  100% {
-    transform: rotate(-2deg);
-  }
-  50% {
-    transform: rotate(2deg);
-  }
-}
-
-@keyframes mascot-curious-lean-variant-1 {
-  0%,
-  100% {
-    transform: translateX(0);
-  }
-  50% {
-    transform: translateX(4px);
-  }
-}
-
-.mascot-animator--searching .mascot-animator__glyphs {
-  animation: mascot-magnifier-sweep 1.6s ease-in-out infinite;
-}
-
-@keyframes mascot-magnifier-sweep {
-  0%,
-  100% {
-    opacity: 0;
-    transform: translateX(-15px) scale(0.8);
-  }
-  50% {
-    opacity: 1;
-    transform: translateX(10px) scale(1);
-  }
-}
-
-/* 6. Working - busy bob with sparkle */
-.mascot-animator--working .mascot-animator__image {
-  animation: mascot-busy-bob 0.5s ease-in-out infinite;
-}
-
-.mascot-animator--working.mascot-animator--variant-1 .mascot-animator__image {
-  animation: mascot-busy-bob-variant-1 0.5s ease-in-out infinite;
-}
-
-@keyframes mascot-busy-bob {
-  0%,
-  100% {
-    transform: translateY(-2px);
-  }
-  50% {
-    transform: translateY(2px);
-  }
-}
-
-@keyframes mascot-busy-bob-variant-1 {
-  0%,
-  100% {
-    transform: rotate(1deg);
-  }
-  50% {
-    transform: rotate(-1deg);
-  }
-}
-
-.mascot-animator--working .mascot-animator__glyphs {
-  animation: mascot-sparkle 1s ease-in-out infinite;
-}
-
-@keyframes mascot-sparkle {
-  0%,
-  100% {
-    opacity: 0;
-    transform: scale(0.5);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-/* 7. Waiting - patient blink */
-.mascot-animator--waiting .mascot-animator__image {
-  animation: mascot-idle 4s ease-in-out infinite;
-}
-
-@keyframes mascot-idle {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-}
-
-.mascot-animator--waiting .mascot-animator__glyphs {
-  animation: mascot-blink 4s steps(1, start) infinite;
-}
-
-@keyframes mascot-blink {
-  0%,
-  20% {
-    opacity: 0;
-  }
-  20%,
-  22% {
-    opacity: 1;
-  }
-  22%,
-  100% {
-    opacity: 0;
-  }
-}
-
-/* 8. Celebrating - bounce with confetti */
-.mascot-animator--celebrating .mascot-animator__image {
-  animation: mascot-bounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 1;
-}
-
-@keyframes mascot-bounce {
-  0% {
-    transform: translateY(0) scaleY(1);
-  }
-  50% {
-    transform: translateY(-10px) scaleY(0.94);
-    transform-origin: center;
-  }
-  100% {
-    transform: translateY(0) scaleX(1.08);
-  }
-}
-
-.mascot-animator--celebrating .mascot-animator__glyphs {
-  animation: mascot-confetti 2s ease-out;
-}
-
-@keyframes mascot-confetti {
-  0% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-30px) scale(0.5);
-  }
-}
-
-/* 9. Oops - shake with droop */
-.mascot-animator--oops .mascot-animator__image {
-  animation:
-    mascot-shake 0.4s ease-in-out infinite,
-    mascot-droop 1s ease-in-out 1;
-}
-
-@keyframes mascot-shake {
-  0%,
-  100% {
-    transform: translateX(-3px);
-  }
-  50% {
-    transform: translateX(3px);
-  }
-}
-
-@keyframes mascot-droop {
-  0% {
-    transform: rotate(0deg);
-  }
-  40% {
-    transform: rotate(-8deg);
-  }
-  100% {
-    transform: rotate(-8deg);
-  }
-}
-
-/* 10. Sleeping - deeper breath with Z glyph */
-.mascot-animator--sleeping .mascot-animator__image {
-  animation: mascot-sleep-breath 6s ease-in-out infinite;
-  opacity: 0.7;
-}
-
-@keyframes mascot-sleep-breath {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.03);
-  }
-}
-
-.mascot-animator--sleeping .mascot-animator__halo {
-  animation: mascot-dim-halo 6s ease-in-out infinite;
-}
-
-@keyframes mascot-dim-halo {
-  0%,
-  100% {
-    opacity: 0.15;
-  }
-  50% {
-    opacity: 0.2;
-  }
-}
-
-.mascot-animator--sleeping .mascot-animator__glyphs {
-  animation: mascot-z-drift 5s ease-in infinite;
-}
-
-@keyframes mascot-z-drift {
-  0%,
-  100% {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  50% {
-    opacity: 1;
-    transform: translateY(-30px);
-  }
-}
-
-/* Reduced motion - animations only use opacity and glyph changes */
-@media (prefers-reduced-motion: reduce) {
-  .mascot-animator--reduced-motion .mascot-animator__image,
-  .mascot-animator--reduced-motion .mascot-animator__glyphs,
-  .mascot-animator--reduced-motion .mascot-animator__halo {
-    animation: none !important;
-    transform: none !important;
-    opacity: 1;
-  }
-
-  .mascot-animator--reduced-motion.mascot-animator--waiting .mascot-animator__glyphs {
-    animation: mascot-blink-reduced 4s steps(1, start) infinite !important;
-  }
-
-  .mascot-animator--reduced-motion.mascot-animator--sleeping .mascot-animator__image {
-    opacity: 0.7;
-  }
-}
-
-@keyframes mascot-blink-reduced {
-  0%,
-  20% {
-    opacity: 0;
-  }
-  20%,
-  22% {
-    opacity: 1;
-  }
-  22%,
-  100% {
-    opacity: 0;
-  }
-}
-
-/* Paused state - all animations stop when tab is hidden */
-.mascot-animator--paused {
-  animation-play-state: paused;
-}
-
-.mascot-animator--paused .mascot-animator__image,
-.mascot-animator--paused .mascot-animator__glyphs,
-.mascot-animator--paused .mascot-animator__halo {
-  animation-play-state: paused;
-}
-
-/* MascotAnimator overrides in runtime rail: the card is the exact box (sized to the image,
-   no inner padding), so the container and image fill it at 100% and the card's own
-   overflow: hidden clips the halo layer to that same box. */
-.aman-runtime-rail__avatar-card .mascot-animator__container {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  z-index: 1;
-}
-
-.aman-runtime-rail__avatar-card .mascot-animator__image {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.aman-runtime-rail__avatar-card .mascot-animator__halo {
-  opacity: 0.28;
-  background: #d9b576;
 }

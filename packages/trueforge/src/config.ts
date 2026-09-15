@@ -12,6 +12,7 @@
  *   `redis://localhost:6379`).
  */
 import { existsSync } from 'node:fs';
+import { isIP } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -142,6 +143,27 @@ export function parseOidcAllowedEmails(raw: string | undefined): string[] {
 export function parseBuildRef(raw: string | undefined): string {
   const trimmed = raw?.trim();
   return trimmed === undefined || trimmed === '' ? UNSTAMPED_BUILD_REF : trimmed;
+}
+
+/**
+ * Parses the optional bug-report handoff URL. Blank means the host disabled the handoff
+ * (`null`); anything set must be a valid http(s) URL, failing fast at boot otherwise.
+ */
+function parseHandoffUrl(raw: string | undefined): string | null {
+  const trimmed = raw?.trim();
+  if (trimmed === undefined || trimmed === '') {
+    return null;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch (error) {
+    throw new Error(`BUG_REPORT_HANDOFF_URL must be a valid http(s) URL, got: ${trimmed}`, { cause: error });
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`BUG_REPORT_HANDOFF_URL must be a valid http(s) URL, got: ${trimmed}`);
+  }
+  return trimmed;
 }
 
 /**
@@ -483,10 +505,23 @@ export interface SharedServerConfiguration {
    * deployment can say which build it is. Env: `BUILD_REF`. Default `unknown`.
    */
   BUILD_REF: string;
+  /**
+   * Optional issue-tracker URL bug reports hand off to. The UI's "File on GitHub" button opens
+   * this URL with the generated report pre-filled; when unset, the handoff button is hidden.
+   * Env: `BUG_REPORT_HANDOFF_URL`. Default `null`.
+   */
+  BUG_REPORT_HANDOFF_URL: string | null;
   /** HTTP port the server listens on. Env: `PORT`. */
   PORT: number;
   /** HTTP bind address. Env: `HOST`. Default `localhost`; production images use `0.0.0.0`. */
   HOST: string;
+  /**
+   * Refuse startup when the server would listen on a non-loopback address without
+   * authentication (standalone mode grants every request the admin role). Env:
+   * `REQUIRE_AUTH`. Default `true`; set `false` to explicitly accept the risk, e.g.
+   * for the local-dev compose stack behind a loopback-published port.
+   */
+  REQUIRE_AUTH: boolean;
   /** Peering identity embedded in the turn ids this process mints; `local` in standalone mode. */
   EXECUTOR_ID: string;
   /**
@@ -728,6 +763,28 @@ export interface SharedServerConfiguration {
    */
   TOOL_OUTPUT_SCREEN_TIMEOUT_MS: number;
   /**
+   * Max tool-output classify calls in flight at once for one turn's tool batch. The tool-output
+   * screen previously classified results strictly one at a time, so a large parallel tool batch
+   * paid the full round-trip latency per result; bounding the fan-out keeps the small local
+   * classifier saturated without overwhelming it.
+   * Env: `TOOL_OUTPUT_SCREEN_MAX_CONCURRENCY`. Default 4.
+   */
+  TOOL_OUTPUT_SCREEN_MAX_CONCURRENCY: number;
+  /**
+   * How long a cached classifier verdict stays valid. Both the recall screen and the tool-output
+   * screen classify through the same sidecar, and the same memories and tool outputs recur across
+   * turns, so a process-wide cache of successful `/classify` verdicts (keyed by classifier URL,
+   * threshold, and exact text) avoids re-paying a network round trip plus a model run for a
+   * verdict that cannot change. Only `ok` verdicts are cached; timeouts and errors are retried.
+   * Env: `SCREEN_CLASSIFY_CACHE_TTL_MS`. Default 300000 (5 minutes).
+   */
+  SCREEN_CLASSIFY_CACHE_TTL_MS: number;
+  /**
+   * Maximum cached classifier verdicts; the oldest entry is evicted past this.
+   * Env: `SCREEN_CLASSIFY_CACHE_MAX_ENTRIES`. Default 2000.
+   */
+  SCREEN_CLASSIFY_CACHE_MAX_ENTRIES: number;
+  /**
    * Whether every turn also injects the memory bank's curated layer: its profile and the mental
    * models relevant to the recall query. Cheap reads with no model call behind them.
    * Env: `MEMORY_CURATED_ENABLED`. Default true.
@@ -946,8 +1003,10 @@ const shared: SharedServerConfiguration = {
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
   NODE_ENV: getEnv('NODE_ENV'),
   BUILD_REF: parseBuildRef(getEnv('BUILD_REF')),
+  BUG_REPORT_HANDOFF_URL: parseHandoffUrl(getEnv('BUG_REPORT_HANDOFF_URL')),
   PORT: port,
   HOST: host,
+  REQUIRE_AUTH: parseBoolean({ envKey: 'REQUIRE_AUTH', raw: getEnv('REQUIRE_AUTH'), defaultValue: true }),
   EXECUTOR_ID: standalone ? LOCAL_EXECUTOR_ID : randomAlphanumeric(6),
   MODEL_CATALOG_PATH: resolveOptionalPathEnv('MODEL_CATALOG_PATH'),
   MCP_CATALOG_PATH: resolveOptionalPathEnv('MCP_CATALOG_PATH'),
@@ -1129,6 +1188,21 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('TOOL_OUTPUT_SCREEN_TIMEOUT_MS'),
     defaultValue: 1500,
   }),
+  TOOL_OUTPUT_SCREEN_MAX_CONCURRENCY: parsePositiveInt({
+    envKey: 'TOOL_OUTPUT_SCREEN_MAX_CONCURRENCY',
+    raw: getEnv('TOOL_OUTPUT_SCREEN_MAX_CONCURRENCY'),
+    defaultValue: 4,
+  }),
+  SCREEN_CLASSIFY_CACHE_TTL_MS: parsePositiveInt({
+    envKey: 'SCREEN_CLASSIFY_CACHE_TTL_MS',
+    raw: getEnv('SCREEN_CLASSIFY_CACHE_TTL_MS'),
+    defaultValue: 300_000,
+  }),
+  SCREEN_CLASSIFY_CACHE_MAX_ENTRIES: parsePositiveInt({
+    envKey: 'SCREEN_CLASSIFY_CACHE_MAX_ENTRIES',
+    raw: getEnv('SCREEN_CLASSIFY_CACHE_MAX_ENTRIES'),
+    defaultValue: 2000,
+  }),
   MEMORY_CURATED_ENABLED: parseBoolean({
     envKey: 'MEMORY_CURATED_ENABLED',
     raw: getEnv('MEMORY_CURATED_ENABLED'),
@@ -1282,6 +1356,163 @@ export function getTrueForgeAuthMode(config: ServerConfiguration = configuration
     return TrueForgeAuthMode.Oidc;
   }
   return TrueForgeAuthMode.Standalone;
+}
+
+/**
+ * Normalise an IPv6 address by expanding ::, converting mixed IPv4 notation,
+ * stripping zone IDs, and lowercasing. Assumes input is pre-validated by isIP(),
+ * which guarantees well-formed IPv6 structure if called with validated input.
+ */
+function normaliseIpv6(addr: string): string {
+  const parts = addr.split('%');
+  const withoutZone = (parts[0] ?? '').toLowerCase();
+
+  if (!withoutZone.includes(':')) {
+    return withoutZone;
+  }
+
+  let processedAddr = withoutZone;
+  const lastColon = withoutZone.lastIndexOf(':');
+  const afterLastColon = withoutZone.substring(lastColon + 1);
+
+  if (afterLastColon.includes('.')) {
+    const ipv4Parts = afterLastColon.split('.');
+    if (ipv4Parts.length === 4) {
+      const num0 = parseInt(ipv4Parts[0] ?? '0', 10);
+      const num1 = parseInt(ipv4Parts[1] ?? '0', 10);
+      const num2 = parseInt(ipv4Parts[2] ?? '0', 10);
+      const num3 = parseInt(ipv4Parts[3] ?? '0', 10);
+      const hex1 = ((num0 << 8) | num1).toString(16).padStart(4, '0');
+      const hex2 = ((num2 << 8) | num3).toString(16).padStart(4, '0');
+      processedAddr = withoutZone.substring(0, lastColon) + ':' + hex1 + ':' + hex2;
+    }
+  }
+
+  const addrParts = processedAddr.split(':');
+  const doubleColonIndex = addrParts.findIndex((p, i) => p === '' && (addrParts[i + 1] ?? '') === '');
+
+  if (doubleColonIndex === -1) {
+    return addrParts.map(g => g.padStart(4, '0')).join(':');
+  }
+
+  const beforeDoubleColon = addrParts.slice(0, doubleColonIndex);
+  const afterDoubleColon = addrParts.slice(doubleColonIndex + 2);
+  const missingGroups = 8 - (beforeDoubleColon.length + afterDoubleColon.length);
+  const missingGroupsArray: string[] = [];
+  for (let i = 0; i < Math.max(0, missingGroups); i += 1) {
+    missingGroupsArray.push('0000');
+  }
+  const expanded = [...beforeDoubleColon, ...missingGroupsArray, ...afterDoubleColon];
+
+  return expanded.map(g => g.padStart(4, '0')).join(':');
+}
+
+/**
+ * Check if an IPv4 address is in the loopback range (127.0.0.0/8).
+ * Assumes input is already validated by isIP(); validates all octets for safety.
+ */
+function isIpv4Loopback(addr: string): boolean {
+  const parts = addr.split('.');
+  if (parts.length !== 4) {
+    return false;
+  }
+
+  const octets: number[] = [];
+  for (let i = 0; i < 4; i += 1) {
+    const part = parts[i] ?? '';
+    const octet = parseInt(part, 10);
+    if (Number.isNaN(octet) || octet < 0 || octet > 255) {
+      return false;
+    }
+    octets.push(octet);
+  }
+
+  return octets[0] === 127;
+}
+
+/**
+ * Check if an IPv6 address is the loopback address (::1).
+ */
+function isIpv6Loopback(addr: string): boolean {
+  const normalised = normaliseIpv6(addr);
+  return normalised === '0000:0000:0000:0000:0000:0000:0000:0001';
+}
+
+/**
+ * Check if an IPv4-mapped IPv6 address (::ffff:a.b.c.d) is loopback.
+ */
+function isIpv4MappedIpv6Loopback(addr: string): boolean {
+  const normalised = normaliseIpv6(addr);
+  if (!normalised.startsWith('0000:0000:0000:0000:0000:ffff:')) {
+    return false;
+  }
+  const hex1 = normalised.substring(
+    '0000:0000:0000:0000:0000:ffff:'.length,
+    '0000:0000:0000:0000:0000:ffff:'.length + 4,
+  );
+  const num1 = parseInt(hex1, 16);
+  const firstOctet = (num1 >> 8) & 0xff;
+
+  return firstOctet === 127;
+}
+
+/**
+ * Whether `host` only accepts loopback connections. A loopback listener is only
+ * reachable from local processes, so serving without authentication on it keeps
+ * the single-user trust model; anything else is a network listener.
+ * Recognises: localhost, 127.0.0.0/8, ::1 in any spelling, and ::ffff:127.x.x.x.
+ * Handles IPv6 zone IDs (e.g., ::1%eth0) by stripping them before validation.
+ */
+export function isLoopbackHost(host: string): boolean {
+  const trimmed = host.trim().toLowerCase();
+
+  if (trimmed === 'localhost') {
+    return true;
+  }
+
+  const withoutZone = trimmed.split('%')[0] ?? '';
+  const ipVersion = isIP(withoutZone);
+
+  if (ipVersion === 4) {
+    return isIpv4Loopback(withoutZone);
+  }
+
+  if (ipVersion === 6) {
+    return isIpv6Loopback(withoutZone) || isIpv4MappedIpv6Loopback(withoutZone);
+  }
+
+  return false;
+}
+
+export interface NetworkAuthRequirement {
+  authMode: TrueForgeAuthMode;
+  host: string;
+  requireAuth: boolean;
+}
+
+/**
+ * Refuse an unauthenticated network listener. In standalone mode the
+ * authenticator grants every request the admin role, so a non-loopback bind
+ * without OIDC or TrueFoundry would expose settings endpoints (model provider
+ * keys, MCP secrets) to anyone who can reach the port. Throws with remediation
+ * steps; main.ts calls this before listening.
+ */
+export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement): void {
+  if (!requirement.requireAuth) {
+    return;
+  }
+  if (requirement.authMode !== TrueForgeAuthMode.Standalone) {
+    return;
+  }
+  if (isLoopbackHost(requirement.host)) {
+    return;
+  }
+  throw new Error(
+    `Refusing to listen on ${requirement.host} without authentication: in standalone mode every request has the admin role, ` +
+      'so settings endpoints (model provider keys, MCP secrets) would be reachable by anyone on the network. ' +
+      'Configure OIDC (OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET), bind HOST=localhost for local-only use, ' +
+      'or set REQUIRE_AUTH=false to explicitly accept this risk.',
+  );
 }
 
 if (isTrueFoundryModeEnabled(configuration)) {

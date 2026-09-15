@@ -8,13 +8,17 @@ export const MemoryScreenCapability: core.serialization.ObjectSchema<
     serializers.MemoryScreenCapability.Raw,
     TrueForge.MemoryScreenCapability
 > = core.serialization.object({
+    configured: core.serialization.boolean(),
     enabled: core.serialization.boolean(),
+    reason: core.serialization.string().optional(),
     threshold: core.serialization.number().optional(),
 });
 
 export declare namespace MemoryScreenCapability {
     export interface Raw {
+        configured: boolean;
         enabled: boolean;
+        reason?: string | null;
         threshold?: number | null;
     }
 }

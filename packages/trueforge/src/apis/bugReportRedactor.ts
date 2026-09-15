@@ -22,6 +22,7 @@
 import type { AbnormalHandoffCause } from '@truefoundry/trueforge-core/core';
 import { AbnormalHandoffCauseSchema, ToolOutputTransformSchema } from '@truefoundry/trueforge-core/core';
 import type {
+  AppBugReportBundle,
   BugReportBundle,
   BugReportChat,
   BugReportChatMessage,
@@ -833,6 +834,45 @@ const REDACTION_NOTES: BugReportBundle['redaction'] = {
     'message text, memory-recall content, learned-profile text, tool arguments/results, and any credential, ' +
     'token, or auth-header value are never read into the bundle.',
 };
+
+/**
+ * Input for the app-level bug-report bundle. Nothing session-bound: build identity, the
+ * reporter's own text, and non-secret config flags.
+ */
+export interface BuildAppBugReportBundleInput {
+  build: BuildIdentity;
+  /** The reporter's own typed text; included verbatim (not subject to redaction). */
+  description: string | undefined;
+  configFlags: BugReportConfigFlags;
+  /** Override for deterministic tests; defaults to `new Date().toISOString()`. */
+  generatedAt?: string;
+}
+
+/** Manifest of what the app-level bundle excludes — there is nothing session-bound to redact. */
+const APP_REDACTION_NOTES: AppBugReportBundle['redaction'] = {
+  stripped_fields: [
+    'session.id and all session metadata (no session is attached)',
+    'session event trace (no events are collected)',
+    'chat transcript (no messages are collected)',
+  ],
+  notes:
+    "This app-level report collects nothing session-bound: build identity, the reporter's own " +
+    'description, non-secret config flags, and this note. Message text, tool arguments/results, ' +
+    'memory content, learned-profile text, and any credential, token, or auth-header value are ' +
+    'never read into the bundle.',
+};
+
+/** Assembles the redacted app-level bug-report bundle. Pure and synchronous — no I/O. */
+export function buildAppBugReportBundle(input: BuildAppBugReportBundleInput): AppBugReportBundle {
+  return {
+    schema_version: BUG_REPORT_SCHEMA_VERSION,
+    generated_at: input.generatedAt ?? new Date().toISOString(),
+    build: input.build,
+    user_description: input.description ?? '',
+    config_flags: input.configFlags,
+    redaction: APP_REDACTION_NOTES,
+  };
+}
 
 /** Assembles the redacted bug-report bundle for one session. Pure and synchronous — no I/O. */
 export function buildBugReportBundle(input: BuildBugReportBundleInput): BugReportBundle {

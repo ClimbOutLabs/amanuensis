@@ -16,6 +16,8 @@ const DEFAULTS = {
   agent: '/agents/:agentName',
   session: '/sessions/:sessionId',
   sessionsBrowser: '/sessions',
+  spaces: '/spaces',
+  space: '/spaces/:spaceId',
 } as const;
 
 function normalizePath(path: string): string {
@@ -43,6 +45,8 @@ export function resolveRoutesConfig(routes?: RoutesConfig): ResolvedRoutes {
     agent: resolveOptional(paths?.agent, DEFAULTS.agent),
     session: resolveOptional(paths?.session, DEFAULTS.session),
     sessionsBrowser: resolveOptional(paths?.sessionsBrowser, DEFAULTS.sessionsBrowser),
+    spaces: resolveOptional(paths?.spaces, DEFAULTS.spaces),
+    space: resolveOptional(paths?.space, DEFAULTS.space),
   };
 }
 
@@ -81,6 +85,10 @@ export function buildPath(place: RoutePlace, routes: ResolvedRoutes): string | n
       return routes.session == null ? null : fillTemplate(routes.session, place.sessionId);
     case 'sessionsBrowser':
       return routes.sessionsBrowser;
+    case 'spaces':
+      return routes.spaces;
+    case 'space':
+      return routes.space == null ? null : fillTemplate(routes.space, place.spaceId);
   }
 }
 
@@ -210,6 +218,13 @@ export function matchPath(pathname: string, routes: ResolvedRoutes): RoutePlace 
   if (routes.buildAgent != null && normalized === routes.buildAgent) {
     return { type: 'buildAgent' };
   }
+  if (routes.spaces != null && normalized === routes.spaces) {
+    return { type: 'spaces' };
+  }
+  if (routes.space != null) {
+    const spaceId = matchTemplate(routes.space, segments);
+    if (spaceId != null) return { type: 'space', spaceId };
+  }
   if (routes.agent != null) {
     const agentName = matchTemplate(routes.agent, segments);
     if (agentName != null) return { type: 'agent', agentName };
@@ -245,5 +260,6 @@ export function placesEqual(a: RoutePlace, b: RoutePlace): boolean {
   if (a.type === 'agent' && b.type === 'agent') return a.agentName === b.agentName;
   if (a.type === 'libraryAgent' && b.type === 'libraryAgent') return a.agentId === b.agentId;
   if (a.type === 'session' && b.type === 'session') return a.sessionId === b.sessionId;
+  if (a.type === 'space' && b.type === 'space') return a.spaceId === b.spaceId;
   return true;
 }

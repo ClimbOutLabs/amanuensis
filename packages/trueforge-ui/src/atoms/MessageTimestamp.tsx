@@ -12,10 +12,10 @@ function toDate(createdAt: Date | string | undefined): Date | null {
 }
 
 function formatTime(date: Date): string {
+  // Compact clock time; the full date (with seconds) lives in the tooltip.
   return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
-    second: '2-digit',
     hour12: true,
   }).format(date);
 }
@@ -44,7 +44,7 @@ export function MessageTimestamp({ createdAt, className }: MessageTimestampProps
   }
 
   return (
-    <LightTooltip title={formatFullDate(date)} size="fit" side="bottom">
+    <LightTooltip title={formatFullDate(date)} size="fit">
       <span className={cn('text-xs font-medium cursor-pointer leading-normal shrink-0 text-text-secondary', className)}>
         {formatTime(date)}
       </span>

@@ -57,6 +57,14 @@ export interface AgentDefinition {
         contextLength: number | undefined;
       }
     | undefined;
+  /**
+   * IANA timezone name the client sent with the turn (e.g. via
+   * Intl.DateTimeFormat().resolvedOptions().timeZone), used to report local time from
+   * get_current_datetime and in the ambient current-date section. Undefined when the client
+   * sent none, or the resolver has no client to ask; both the tool and the section fall back
+   * to UTC.
+   */
+  clientTimezone?: string | undefined;
   instruction?: string | undefined;
   messages?: readonly LLMUserMessage[] | undefined;
   modelParams?: ModelParams | undefined;

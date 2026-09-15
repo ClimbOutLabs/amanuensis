@@ -15,6 +15,24 @@ export type BugReportBundle = serialization.BugReportBundle.Raw;
 export type BugReportChatMessage = serialization.BugReportChatMessage.Raw;
 export type BugReportChat = serialization.BugReportChat.Raw;
 
+/**
+ * App-level bug-report bundle: the wire contract (snake_case) for `POST /api/v1/bug-reports`.
+ * Session-less by design — build identity, the reporter's description, non-secret config
+ * flags, and the redaction notes. No session id, no trace, no chat: there is nothing
+ * session-bound here to redact. The single canonical owner is `AppBugReportBundleSchema` in
+ * `packages/trueforge/src/schemas/bugReport.ts` (the exact same fields off the session
+ * bundle); this names those fields off the generated SDK's projection of that canonical
+ * shape until the SDK regenerates with the new endpoint — then prefer
+ * `serialization.AppBugReportBundle.Raw`.
+ */
+export type AppBugReportBundle = Pick<
+  BugReportBundle,
+  'schema_version' | 'generated_at' | 'build' | 'user_description' | 'config_flags' | 'redaction'
+>;
+
+/** The configured issue-tracker handoff, or null when the host disabled it. */
+export type BugReportHandoffTarget = { issueUrl: string } | null;
+
 export type BugReportApi = {
   /** Fetches the redacted bundle for one session from `POST /api/v1/sessions/{id}/bug-report`. */
   generateBugReport: (input: {
@@ -22,6 +40,13 @@ export type BugReportApi = {
     description: string;
     includeChat: boolean;
   }) => Promise<BugReportBundle>;
+  /**
+   * Fetches the redacted app-level bundle from `POST /api/v1/bug-reports`. Needs no session,
+   * so bug reporting works outside a chat too.
+   */
+  generateAppBugReport: (input: { description: string }) => Promise<AppBugReportBundle>;
+  /** The issue-tracker URL bug reports hand off to, from `GET /api/v1/bug-reports/handoff`. */
+  getBugReportHandoff: () => Promise<BugReportHandoffTarget>;
 };
 
 const BugReportContext = createContext<BugReportApi | null>(null);

@@ -187,4 +187,18 @@ describe('AmanRuntimeRail', () => {
     expect(await screen.findByRole('heading', { name: 'Mira' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Personalize assistant' })).not.toBeInTheDocument();
   });
+
+  it('renders the avatar as a plain, static image with no animator wrapper classes', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail avatarSrc="/aman-avatar.png" />
+      </RuntimeHarness>,
+    );
+
+    const avatar = screen.getByRole('img', { name: 'Amanuensis avatar' });
+    expect(avatar.tagName).toBe('IMG');
+    expect(avatar.className).not.toMatch(/mascot-animator/);
+    expect(avatar.parentElement?.querySelector('.mascot-animator__container')).toBeNull();
+    expect(avatar.parentElement?.querySelector('.mascot-animator__halo')).toBeNull();
+  });
 });

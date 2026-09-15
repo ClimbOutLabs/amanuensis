@@ -6,6 +6,8 @@
  * Bounds match the API's validation; the draft holds strings so a half-typed number is not lost.
  */
 import { Button } from '@/atoms/primitives/Button.js';
+import { Tooltip } from '@/atoms/primitives/Tooltip.js';
+import { Icon } from '@/icons/Icon.js';
 import {
   MEMORY_RECALL_MIN_SCORE_LIMITS,
   MEMORY_SETTINGS_LIMITS,
@@ -111,7 +113,7 @@ const FIELDS: readonly TuningField[] = [
     label: 'Mental models per turn',
     ...MEMORY_SETTINGS_LIMITS.curatedMaxModels,
     step: 1,
-    help: '',
+    help: 'How many matching mental models are injected on each turn.',
   },
   {
     key: 'curatedMaxTokens',
@@ -119,7 +121,7 @@ const FIELDS: readonly TuningField[] = [
     label: 'Mental model token budget',
     ...MEMORY_SETTINGS_LIMITS.curatedMaxTokens,
     step: 64,
-    help: '',
+    help: 'Total tokens the injected mental models may use on each turn.',
   },
   {
     key: 'reflectEnabled',
@@ -127,14 +129,19 @@ const FIELDS: readonly TuningField[] = [
     label: 'Reflect layer',
     help: 'Ask the bank to reflect when the question asks for a summary, briefing, recommendation or comparison. Spends model calls.',
   },
-  { key: 'reflectBudget', kind: 'budget', label: 'Reflect effort', help: '' },
+  {
+    key: 'reflectBudget',
+    kind: 'budget',
+    label: 'Reflect effort',
+    help: 'How much effort a reflection may spend: low, mid, or high.',
+  },
   {
     key: 'reflectMaxTokens',
     kind: 'number',
     label: 'Reflect answer token cap',
     ...MEMORY_SETTINGS_LIMITS.reflectMaxTokens,
     step: 64,
-    help: '',
+    help: 'Token cap for a single reflection answer.',
   },
   {
     key: 'reflectTimeoutMs',
@@ -266,12 +273,27 @@ const MemoryTuningForm = (props: {
         each turn actually used is recorded on that turn's recall event.
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        {FIELDS.map(field => (
-          <div key={field.key}>
-            <label className="text-sm text-text-primary">
-              {field.label}
+        {FIELDS.map(field => {
+          const inputId = `memory-tuning-${field.key}`;
+          return (
+            <div key={field.key}>
+              <div className="flex items-center gap-1.5">
+                <label htmlFor={inputId} className="text-sm text-text-primary">
+                  {field.label}
+                </label>
+                <Tooltip content={field.help} className="max-w-64 whitespace-normal">
+                  <button
+                    type="button"
+                    aria-label={`${field.label}: more info`}
+                    className="inline-flex text-text-secondary transition-colors hover:text-text-primary"
+                  >
+                    <Icon name="info" className="size-3.5" />
+                  </button>
+                </Tooltip>
+              </div>
               {field.kind === 'number' ? (
                 <input
+                  id={inputId}
                   className={INPUT_CLASS}
                   type="number"
                   min={field.min}
@@ -286,6 +308,7 @@ const MemoryTuningForm = (props: {
                 />
               ) : (
                 <select
+                  id={inputId}
                   className={INPUT_CLASS}
                   value={draft[field.key]}
                   disabled={busy}
@@ -308,10 +331,9 @@ const MemoryTuningForm = (props: {
                   )}
                 </select>
               )}
-            </label>
-            {field.help !== '' ? <p className="mt-1 text-xs text-text-secondary">{field.help}</p> : null}
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </div>
       <div className="mt-3 flex items-center gap-3">
         <Button variant="secondary" size="small" type="button" disabled={busy} onClick={onSave}>

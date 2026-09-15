@@ -2,10 +2,15 @@ import type { InstructionBuilder } from '../../InstructionBuilder';
 import type { SandboxInit } from '../provider/Provider';
 import { SKILL_DOWNLOAD_TIMEOUT_SECONDS, buildWriteAndRunScriptCommand } from '../Sandbox';
 import { sandboxScripts } from '../sandboxScripts.gen';
-import { SKILLS_PREAMBLE, getSkillPath, renderSkillPromptBody } from './constants';
+import { SKILLS_PREAMBLE, getSkillPath, renderSkillPromptBody, type SkillPromptMode } from './constants';
 import type { ISkillMounter } from './ISkillMounter';
 
-/** Git skill: sparse-cloned in the sandbox by skill_downloader.py (never preloaded). */
+// A git-sourced skill materialized by a sparse clone in the sandbox (git_downloader.py). By
+// default only name/description/path are advertised in the prompt and their SKILL.md is read
+// from disk at runtime; `SkillMounterOptions.promptMode: 'inline'` embeds preloaded SKILL.md
+// content instead (via `SkillMounterOptions.inlineContent`). Wire fields match the agent_spec
+// git mount (`url`/`path`/`name`/`ref`); the downloader resolves `ref` inside the sandbox
+// before fetching.
 export interface GitSkill {
   readonly type: 'git';
   readonly name: string;
@@ -18,6 +23,9 @@ export interface GitSkill {
   readonly ref: string;
   // Optional list of binary/command names required for this skill to function.
   readonly requires?: readonly string[] | undefined;
+  // Optional trigger phrases describing when the agent should reach for this skill;
+  // rendered as `when_to_use:` lines so the model can match them against the task.
+  readonly when_to_use?: readonly string[] | undefined;
 }
 
 /** Registry skill: sandbox dir uses artifact `name`; AgentSpec stores `fqn`. */
@@ -66,25 +74,56 @@ function toRequestedSkill(skill: Skill): RequestedSkill {
   }
 }
 
-/** Inline SKILL.md for the prompt when the registry skill is preloaded; git never preloads. */
-function resolvePreloadContent(skill: Skill): string | null {
-  switch (skill.type) {
-    case 'registry':
-      return skill.preload ? skill.skillMdContent : null;
-    case 'git':
-      return null;
-    default: {
-      const _exhaustive: never = skill;
-      throw new Error(`unexpected skill: ${JSON.stringify(_exhaustive)}`);
-    }
-  }
+/** Prompt-rendering options for a SkillMounter. */
+export interface SkillMounterOptions {
+  /**
+   * 'advertise' (default) renders name/description/path and the model reads
+   * SKILL.md itself; 'inline' embeds preloaded SKILL.md content per skill so
+   * the model skips that read hop.
+   */
+  promptMode?: SkillPromptMode | undefined;
+  /** Preloaded SKILL.md content by skill name; rendered only in 'inline' mode. */
+  inlineContent?: ReadonlyMap<string, string> | undefined;
+}
+
+function isSkillArray(input: readonly Skill[] | { skills?: readonly Skill[] }): input is readonly Skill[] {
+  return Array.isArray(input);
 }
 
 export class SkillMounter implements ISkillMounter {
   private readonly skills: readonly Skill[];
+  private readonly promptMode: SkillPromptMode;
+  private readonly inlineContent: ReadonlyMap<string, string>;
 
-  constructor(input: { skills?: readonly Skill[] } = {}) {
-    this.skills = input.skills ?? [];
+  constructor(input: readonly Skill[] | { skills?: readonly Skill[] } = {}, options?: SkillMounterOptions) {
+    this.skills = isSkillArray(input) ? input : (input.skills ?? []);
+    // 'advertise' is the safe default: no SKILL.md bytes enter the prompt unless
+    // the caller opts into 'inline' and supplies preloaded content per skill.
+    this.promptMode = options?.promptMode ?? 'advertise';
+    // Clone: the caller may keep mutating the map they passed in.
+    this.inlineContent = new Map(options?.inlineContent);
+  }
+
+  skillNames(): readonly string[] {
+    return this.skills.map(skill => skill.name);
+  }
+
+  /**
+   * Inline SKILL.md for the prompt: a registry skill carries its own per-skill
+   * `preload` decision from the host regardless of `promptMode`; a git skill only
+   * preloads when the mounter's `promptMode` is 'inline' and content was supplied.
+   */
+  private resolvePreloadContent(skill: Skill): string | null {
+    switch (skill.type) {
+      case 'registry':
+        return skill.preload ? skill.skillMdContent : null;
+      case 'git':
+        return this.promptMode === 'inline' ? (this.inlineContent.get(skill.name) ?? null) : null;
+      default: {
+        const _exhaustive: never = skill;
+        throw new Error(`unexpected skill: ${JSON.stringify(_exhaustive)}`);
+      }
+    }
   }
 
   skillPrerequisites(): readonly { name: string; requires: readonly string[] }[] {
@@ -115,7 +154,8 @@ export class SkillMounter implements ISkillMounter {
       this.#addPromptSkill(builder, paths.skillsDir, {
         name: skill.name,
         description: skill.description,
-        preloadContent: resolvePreloadContent(skill),
+        when_to_use: skill.type === 'git' ? skill.when_to_use : undefined,
+        preloadContent: this.resolvePreloadContent(skill),
       });
     }
 
@@ -156,7 +196,12 @@ export class SkillMounter implements ISkillMounter {
   #addPromptSkill(
     builder: InstructionBuilder,
     skillsDir: string,
-    skill: { name: string; description: string; preloadContent: string | null },
+    skill: {
+      name: string;
+      description: string;
+      when_to_use?: readonly string[] | undefined;
+      preloadContent: string | null;
+    },
   ): void {
     builder.addSection(
       'skill',
@@ -164,6 +209,7 @@ export class SkillMounter implements ISkillMounter {
         path: getSkillPath({ skillsDir, skillName: skill.name }),
         name: skill.name,
         description: skill.description,
+        when_to_use: skill.when_to_use,
         preloadContent: skill.preloadContent,
       }),
     );

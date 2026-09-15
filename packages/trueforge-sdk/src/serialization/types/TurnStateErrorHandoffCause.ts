@@ -7,8 +7,19 @@ import type * as serializers from "../index.js";
 export const TurnStateErrorHandoffCause: core.serialization.Schema<
     serializers.TurnStateErrorHandoffCause.Raw,
     TrueForge.TurnStateErrorHandoffCause
-> = core.serialization.enum_(["client_cancelled", "server_cancelled", "iteration_limit", "fatal_error"]);
+> = core.serialization.enum_([
+    "client_cancelled",
+    "server_cancelled",
+    "iteration_limit",
+    "fatal_error",
+    "model_stream_fault",
+]);
 
 export declare namespace TurnStateErrorHandoffCause {
-    export type Raw = "client_cancelled" | "server_cancelled" | "iteration_limit" | "fatal_error";
+    export type Raw =
+        | "client_cancelled"
+        | "server_cancelled"
+        | "iteration_limit"
+        | "fatal_error"
+        | "model_stream_fault";
 }

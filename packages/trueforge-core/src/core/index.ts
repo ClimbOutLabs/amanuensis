@@ -314,5 +314,11 @@ export type { StructuredEditPathRequest, StructuredEditPathResolution } from './
 
 // Skills: the ISkillMounter seam lets hosts plug in their own skill sources
 export { InstructionBuilder } from './InstructionBuilder';
-export { SKILLS_PREAMBLE, SkillMounter, getSkillPath, renderSkillPromptBody } from './sandbox/skills';
-export type { GitSkill, ISkillMounter, Skill } from './sandbox/skills';
+export {
+  SKILLS_PREAMBLE,
+  SkillMounter,
+  SkillPromptModeSchema,
+  getSkillPath,
+  renderSkillPromptBody,
+} from './sandbox/skills';
+export type { GitSkill, ISkillMounter, Skill, SkillMounterOptions, SkillPromptMode } from './sandbox/skills';

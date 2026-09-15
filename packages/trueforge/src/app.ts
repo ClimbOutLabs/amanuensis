@@ -14,6 +14,7 @@ import { createAgentImportRouter } from './apis/agentImport';
 import { createAgentsRouter } from './apis/agents';
 import { createAuthRouter } from './apis/auth';
 import { createBugReportRouter } from './apis/bugReport';
+import { createAppBugReportRouter } from './apis/bugReportApp';
 import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
@@ -531,6 +532,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createBugReportRouter({
         sessions: deps.sessions,
         agentStore: deps.agentStore,
+        sandboxProviderStore: deps.sandboxProviderStore,
+        mcpServerStore: deps.resolveMcpServerStore(),
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/bug-reports',
+    withAuth(
+      createAppBugReportRouter({
         sandboxProviderStore: deps.sandboxProviderStore,
         mcpServerStore: deps.resolveMcpServerStore(),
         resolveRequestContext,

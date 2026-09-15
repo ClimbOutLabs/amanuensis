@@ -127,6 +127,8 @@ export class TurnResourceResolver<
       toolCallTimeoutMs?: number | undefined;
       /** Resolved T2 binding, independent of whether this turn enables a sandbox. */
       boundRepository?: BoundRepository | undefined;
+      /** IANA timezone name the client sent with this turn. See ITurnResourceResolver.clientTimezone. */
+      clientTimezone?: string | undefined;
       /**
        * Host-configured model catalog for the model-identity section's
        * host-owned-facts list (e.g. IModelProviderStore.listModels, mapped and
@@ -174,6 +176,10 @@ export class TurnResourceResolver<
 
   get boundRepository(): BoundRepository | undefined {
     return this.deps.boundRepository;
+  }
+
+  get clientTimezone(): string | undefined {
+    return this.deps.clientTimezone;
   }
 
   /** Default: no-op tracing. Override to plug in a real tracer. */
@@ -349,6 +355,7 @@ export class TurnResourceResolver<
         modelSupportsVision: resolvedModel.modelSupportsVision,
         configuredModels,
         modelProperties: resolvedModel.modelProperties,
+        clientTimezone: this.deps.clientTimezone,
         // Sub-agents receive the delegated task as a user message; their system
         // prompt is SUB_AGENT_IDENTITY (added by AgentThread), not user instructions.
         instruction: agentInfo ? undefined : spec.instructions,

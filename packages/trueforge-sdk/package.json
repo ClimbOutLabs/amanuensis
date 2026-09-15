@@ -220,6 +220,17 @@
             },
             "default": "./dist/cjs/api/resources/skills/exports.js"
         },
+        "./spaces": {
+            "import": {
+                "types": "./dist/esm/api/resources/spaces/exports.d.mts",
+                "default": "./dist/esm/api/resources/spaces/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/spaces/exports.d.ts",
+                "default": "./dist/cjs/api/resources/spaces/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/spaces/exports.js"
+        },
         "./catalogs": {
             "import": {
                 "types": "./dist/esm/api/resources/catalogs/exports.d.mts",

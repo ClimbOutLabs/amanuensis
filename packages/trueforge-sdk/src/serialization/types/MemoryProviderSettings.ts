@@ -21,6 +21,7 @@ export const MemoryProviderSettings: core.serialization.ObjectSchema<
     reflectEnabled: core.serialization.property("reflect_enabled", core.serialization.boolean().optional()),
     reflectMaxTokens: core.serialization.property("reflect_max_tokens", core.serialization.number().optional()),
     reflectTimeoutMs: core.serialization.property("reflect_timeout_ms", core.serialization.number().optional()),
+    screenEnabled: core.serialization.property("screen_enabled", core.serialization.boolean().optional()),
 });
 
 export declare namespace MemoryProviderSettings {
@@ -37,5 +38,6 @@ export declare namespace MemoryProviderSettings {
         reflect_enabled?: boolean | null;
         reflect_max_tokens?: number | null;
         reflect_timeout_ms?: number | null;
+        screen_enabled?: boolean | null;
     }
 }

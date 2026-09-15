@@ -27,7 +27,7 @@ async function* finalAnswerStream(): AsyncGenerator<
   };
 }
 
-function makeThread(modelClient: ILLM, modelId?: string): AgentThread {
+function makeThread(modelClient: ILLM, modelId?: string, clientTimezone?: string): AgentThread {
   return new AgentThread({
     threadId: 'main',
     title: 'Main',
@@ -35,7 +35,14 @@ function makeThread(modelClient: ILLM, modelId?: string): AgentThread {
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),
-    definition: { modelClient, modelId, configuredModels: undefined, instruction: 'test', toolSets: [] },
+    definition: {
+      modelClient,
+      modelId,
+      configuredModels: undefined,
+      instruction: 'test',
+      toolSets: [],
+      clientTimezone,
+    },
     context: [{ role: 'user', content: 'hi' }],
   });
 }
@@ -87,6 +94,39 @@ describe('AgentThread ambient current date', () => {
     // Date only: a time-of-day component would change the prompt prefix every
     // turn and defeat provider prefix caching.
     expect(systemMessage?.content).not.toMatch(/Today's date is [^<]*\d{2}:\d{2}/);
+  });
+
+  it("adds the user's local date and zone when clientTimezone is set", async () => {
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+
+    // 2026-03-14T18:00:00Z is 2026-03-14 11:00 in Los Angeles (UTC-7, PDT).
+    const thread = makeThread(modelClient, undefined, 'America/Los_Angeles');
+    for await (const _event of thread.execute({ signal: new AbortController().signal })) {
+      // Draining is enough; the assertion is on the request sent to the model.
+    }
+
+    expect(create).toHaveBeenCalledTimes(1);
+    const request = create.mock.calls[0]?.[0];
+    const systemMessage = request?.messages.find(m => m.role === 'system');
+    expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (UTC)");
+    expect(systemMessage?.content).toContain("The user's local date is 2026-03-14 (America/Los_Angeles, UTC-07:00)");
+  });
+
+  it('falls back to UTC-only wording for an unrecognized clientTimezone', async () => {
+    const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+
+    const thread = makeThread(modelClient, undefined, 'Not/A_Zone');
+    for await (const _event of thread.execute({ signal: new AbortController().signal })) {
+      // Draining is enough; the assertion is on the request sent to the model.
+    }
+
+    expect(create).toHaveBeenCalledTimes(1);
+    const request = create.mock.calls[0]?.[0];
+    const systemMessage = request?.messages.find(m => m.role === 'system');
+    expect(systemMessage?.content).toContain("Today's date is 2026-03-14 (UTC)");
+    expect(systemMessage?.content).not.toContain("The user's local date is");
   });
 
   it('refreshes the date at request time when the thread crosses UTC midnight', async () => {

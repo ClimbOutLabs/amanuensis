@@ -3,6 +3,7 @@
 import {
   lazy,
   Suspense,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -47,7 +48,13 @@ function isRecentHistoryVisible({ overlayOpen, mode }: { overlayOpen: boolean; m
   return !overlayOpen && mode?.status === 'active' && !mode.isCreateAgent;
 }
 
-function SidebarNav(): ReactNode {
+/**
+ * Nav buttons only (New Chat through Spaces). Returned as plain siblings — not wrapped
+ * in their own `<nav>` — so the caller can lay them out as siblings of the footer actions
+ * in one scrolling flex column instead of two separately-boxed groups that can paint over
+ * each other on a short viewport.
+ */
+function SidebarNavItems(): ReactNode {
   const aui = useAui();
   const shell = useOptionalShellMode();
   const AgentsLibraryButton = useSlot('AgentsLibraryButton');
@@ -91,7 +98,7 @@ function SidebarNav(): ReactNode {
   };
 
   return (
-    <nav className="flex min-h-0 flex-1 flex-col items-center gap-1 p-1" aria-label="Sidebar">
+    <>
       {showNewActions ? (
         <button
           type="button"
@@ -128,7 +135,7 @@ function SidebarNav(): ReactNode {
       <SessionsBrowserButton compact />
       <SchedulesButton compact />
       <SpacesButton compact />
-    </nav>
+    </>
   );
 }
 
@@ -137,16 +144,25 @@ function SidebarRail({
   onNavigate,
   className,
   railRef,
+  showHistoryToggle = false,
+  historyCollapsed = false,
+  onToggleHistoryCollapsed,
   ...dialogProps
 }: {
   onNavigate?: () => void;
   className?: string;
   railRef?: Ref<HTMLElement>;
+  /** Whether the recent-chats history panel could be showing right now (controls toggle visibility). */
+  showHistoryToggle?: boolean;
+  /** Whether the user has hidden the recent-chats history panel. */
+  historyCollapsed?: boolean;
+  onToggleHistoryCollapsed?: () => void;
 } & Omit<ComponentPropsWithoutRef<'aside'>, 'children' | 'className'>): ReactNode {
   const brand = useBrand();
   const chrome = resolveBrandChrome(brand);
   const BrandLogo = useSlot('BrandLogo');
   const UserAvatar = useSlot('UserAvatar');
+  const historyToggleLabel = historyCollapsed ? 'Show recent chats' : 'Hide recent chats';
 
   return (
     <aside
@@ -167,11 +183,27 @@ function SidebarRail({
       <div className="flex h-14 w-full shrink-0 items-center justify-center text-text-primary">
         <BrandLogo variant={chrome.collapsedVariant} className={brandLogoClassName} />
       </div>
-      <SidebarNav />
-      <footer className="flex shrink-0 flex-col items-center border-border p-2">
+      {/* One scrolling flex column: nav buttons and footer actions are plain siblings with
+          a consistent gap, so on a short viewport the column scrolls (min-h-0 + overflow-y-auto)
+          instead of the footer actions painting over the nav buttons or vice versa. */}
+      <nav className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto p-1" aria-label="Sidebar">
+        <SidebarNavItems />
+        {showHistoryToggle ? (
+          <button
+            type="button"
+            aria-label={historyToggleLabel}
+            aria-pressed={historyCollapsed}
+            title={historyToggleLabel}
+            className={auiButtonClass({ variant: 'ghost', className: railActionButtonClassName })}
+            onClick={onToggleHistoryCollapsed}
+          >
+            <Icon name={historyCollapsed ? 'panel-left-open' : 'panel-left-close'} size={14} />
+            <span className="text-center">{historyToggleLabel}</span>
+          </button>
+        ) : null}
         <ShellActions labeled className="flex-col" />
         <UserAvatar labeled className="mt-1" />
-      </footer>
+      </nav>
     </aside>
   );
 }
@@ -199,7 +231,13 @@ export function SidebarLayout({ className }: { className?: string }) {
   const overlayOpen = settingsOpen || libraryOpen || sessionsOpen || schedulesOpen || spacesOpen;
   const showAgentConfig =
     shell != null && shellIsCreateAgent(shell.mode) && !overlayOpen && (!isMobile || shell.agentConfigOpen);
-  const showRecentHistory = isRecentHistoryVisible({ overlayOpen, mode: shell?.mode });
+  const recentHistoryAvailable = isRecentHistoryVisible({ overlayOpen, mode: shell?.mode });
+  const historyCollapsed = shell?.historyCollapsed === true;
+  const showRecentHistory = recentHistoryAvailable && !historyCollapsed;
+  const toggleHistoryCollapsed = useCallback(
+    () => shell?.setHistoryCollapsed(!historyCollapsed),
+    [shell, historyCollapsed],
+  );
   const hasChatHeaderContent = useChatHeaderContentVisible();
 
   useEffect(() => {
@@ -228,7 +266,12 @@ export function SidebarLayout({ className }: { className?: string }) {
 
   return (
     <div className={cn('relative flex h-full min-h-0 w-full min-w-0', className)}>
-      <SidebarRail className="hidden md:flex" />
+      <SidebarRail
+        className="hidden md:flex"
+        showHistoryToggle={recentHistoryAvailable}
+        historyCollapsed={historyCollapsed}
+        onToggleHistoryCollapsed={toggleHistoryCollapsed}
+      />
 
       {showAgentConfig ? (
         <aside
@@ -367,6 +410,9 @@ export function SidebarLayout({ className }: { className?: string }) {
             tabIndex={-1}
             onNavigate={() => setMobileNavOpen(false)}
             className="absolute inset-y-0 left-0 z-10 shadow-lg outline-none md:hidden"
+            showHistoryToggle={recentHistoryAvailable}
+            historyCollapsed={historyCollapsed}
+            onToggleHistoryCollapsed={toggleHistoryCollapsed}
           />
         </>
       ) : null}

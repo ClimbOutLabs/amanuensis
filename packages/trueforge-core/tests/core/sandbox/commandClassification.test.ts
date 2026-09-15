@@ -9,6 +9,7 @@ import {
   sandboxCommandWebEgressRejection,
   sandboxInvocationPolicy,
   sandboxVerifyCommandMasksExitStatus,
+  sandboxVerifyCommandUsesInlineEval,
   sandboxVerifyCommandUsesUnsafeSyntax,
 } from '../../../src/core/sandbox/commandClassification';
 import { sandboxCommandApprovalIdentity } from '../../../src/core/sandbox/Sandbox';
@@ -386,6 +387,15 @@ describe('sandbox command admission', () => {
     expect(sandboxVerifyCommandUsesUnsafeSyntax('./scripts/validate.sh 2>&1')).toBe(false);
     expect(sandboxVerifyCommandUsesUnsafeSyntax('./scripts/validate.sh 2>&1;')).toBe(false);
     expect(sandboxVerifyCommandUsesUnsafeSyntax('./scripts/validate.sh &> validation.log')).toBe(true);
+  });
+
+  it('detects inline interpreter evaluation on verification calls', () => {
+    expect(sandboxVerifyCommandUsesInlineEval("node -e 'process.exit(0)'")).toBe(true);
+    expect(sandboxVerifyCommandUsesInlineEval('node --eval "console.log(1)"')).toBe(true);
+    expect(sandboxVerifyCommandUsesInlineEval('deno -e "console.log(1)"')).toBe(true);
+    expect(sandboxVerifyCommandUsesInlineEval('node scripts/validate.mjs')).toBe(false);
+    expect(sandboxVerifyCommandUsesInlineEval('pnpm test')).toBe(false);
+    expect(sandboxVerifyCommandUsesInlineEval('node -v')).toBe(false);
   });
 
   it.each([

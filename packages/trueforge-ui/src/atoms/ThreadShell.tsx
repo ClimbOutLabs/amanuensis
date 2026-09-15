@@ -5,9 +5,9 @@ import { cn } from './lib/cn.js';
 const THREAD_CSS_VARS: CSSProperties & { '--thread-max-width': string; '--composer-padding': string } = {
   // Readable column width for both the message list and the composer (both consume this
   // same variable in ThreadViewportShell and ThreadComposerAreaShell below, so they can
-  // never drift apart). Uses the window width up to 1240px with 1rem side margins for a
-  // readable line length on wide screens without excessive gutters.
-  '--thread-max-width': 'min(1240px, 100% - 2rem)',
+  // never drift apart). Capped at ~48rem with 1rem side margins: chat-prose rhythm,
+  // not a full-viewport spread.
+  '--thread-max-width': 'min(48rem, 100% - 2rem)',
   '--composer-padding': '8px',
 };
 

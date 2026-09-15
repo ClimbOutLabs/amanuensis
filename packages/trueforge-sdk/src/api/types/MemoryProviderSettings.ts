@@ -30,4 +30,6 @@ export interface MemoryProviderSettings {
     reflectMaxTokens?: number;
     /** How long a turn waits for a reflection before continuing without it. Default MEMORY_REFLECT_TIMEOUT_MS. */
     reflectTimeoutMs?: number;
+    /** Screen recalled items and entity summaries with the Prompt Guard classifier before they reach the model. Has no effect when no classifier service is configured (`MEMORY_SCREEN_URL`). Default MEMORY_SCREEN_ENABLED. */
+    screenEnabled?: boolean;
 }

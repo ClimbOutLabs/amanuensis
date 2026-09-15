@@ -1,7 +1,7 @@
 /**
  * A space is a persistent, named, structured page the model creates and updates through
  * `create_space` / `update_space`, reads through `list_spaces` / `get_space`, and the UI renders
- * (see `packages/frontend/src/spaces`). Unlike a sandbox file, a space survives the turn and
+ * (see `packages/frontend/src/spaceStore.ts`). Unlike a sandbox file, a space survives the turn and
  * session that created it and is visible in the Spaces view without the user opening the chat
  * that produced it.
  *

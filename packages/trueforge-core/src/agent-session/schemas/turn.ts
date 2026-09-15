@@ -165,6 +165,17 @@ export const CreateTurnRequestSchema = z
       .optional()
       .default(true)
       .describe('When true (default), stream turn events as SSE. When false, return the running turn immediately.'),
+    client_timezone: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'IANA timezone name of the client (e.g. "America/Los_Angeles"), typically ' +
+          'Intl.DateTimeFormat().resolvedOptions().timeZone from the browser. Used to report local ' +
+          'time from get_current_datetime and in the ambient current-date context. An unrecognized ' +
+          'name and an omitted field both fall back to UTC.',
+      )
+      .openapi('ClientTimezoneInput'),
   })
   .superRefine((data, ctx) => {
     if (!data.input) {

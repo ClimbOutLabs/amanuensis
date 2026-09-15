@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractCitationMarkers, resolveCitationSource, type CitationSource } from '@/utils/citationMarkers.js';
+import {
+  buildCitationSourceIndex,
+  extractCitationMarkers,
+  extractSearchCitationSources,
+  renderCitationReplacement,
+  resolveCitationSource,
+  type CitationSource,
+  type CitationToolCall,
+} from '@/utils/citationMarkers.js';
 
 describe('extractCitationMarkers', () => {
   it('extracts a simple citation marker', () => {
@@ -122,5 +130,151 @@ describe('resolveCitationSource', () => {
     const marker = { sourceId: 2, text: '', start: 0, end: 0, descriptor: '' };
     const resolved = resolveCitationSource(marker, sources);
     expect(resolved?.title).toBe('Second Source');
+  });
+});
+
+describe('retrieval-ID citation markers', () => {
+  it('extracts a retrieval-ID marker', () => {
+    const markers = extractCitationMarkers('See the docs【a3f9c21e†excerpts】for details.');
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({
+      sourceId: 'a3f9c21e',
+      descriptor: 'excerpts',
+      text: '【a3f9c21e†excerpts】',
+    });
+  });
+
+  it('extracts a chunk-style retrieval ID with dashes and underscores', () => {
+    const markers = extractCitationMarkers('Context【chunk_9F-2a†L3-L9】here.');
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.sourceId).toBe('chunk_9F-2a');
+    expect(markers[0]?.descriptor).toBe('L3-L9');
+  });
+
+  it('still skips retrieval-ID markers inside code spans', () => {
+    const markers = extractCitationMarkers('text `【abc123†inline】code` more【def456†prose】');
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.sourceId).toBe('def456');
+  });
+
+  it('rejects malformed IDs', () => {
+    expect(extractCitationMarkers('bad【†x】')).toHaveLength(0);
+    expect(extractCitationMarkers('bad【 12†x】')).toHaveLength(0);
+    expect(extractCitationMarkers(`bad【${'a'.repeat(129)}†x】`)).toHaveLength(0);
+  });
+});
+
+describe('resolveCitationSource with retrieval IDs', () => {
+  const marker = (sourceId: number | string) => ({ sourceId, text: '', start: 0, end: 0, descriptor: '' });
+
+  it('resolves a retrieval ID from a string-keyed map', () => {
+    const sources = new Map<string, CitationSource>([
+      ['a3f9c21e', { id: 'a3f9c21e', title: 'Chunk A', url: 'https://example.com/a' }],
+    ]);
+    expect(resolveCitationSource(marker('a3f9c21e'), sources)?.title).toBe('Chunk A');
+  });
+
+  it('does not cross numeric and string key spaces', () => {
+    const sources = new Map<string, CitationSource>([['14', { id: '14', title: 'String fourteen' }]]);
+    expect(resolveCitationSource(marker(14), sources)).toBeNull();
+  });
+
+  it('buildCitationSourceIndex keeps the first source for a duplicated ID', () => {
+    const index = buildCitationSourceIndex([
+      { id: 1, title: 'First' },
+      { id: 1, title: 'Second' },
+    ]);
+    expect(index.size).toBe(1);
+    expect(index.get('n:1')?.title).toBe('First');
+  });
+});
+
+describe('renderCitationReplacement', () => {
+  const marker = (sourceId: number | string) => ({ sourceId, text: '', start: 0, end: 0, descriptor: '' });
+
+  it('renders a resolved numeric source as the established numbered link', () => {
+    expect(renderCitationReplacement(marker(14), { id: 14, title: 'Fourteen', url: 'https://example.com/14' })).toBe(
+      '[【14】](https://example.com/14 "Fourteen")',
+    );
+  });
+
+  it('renders a resolved retrieval ID as a human-readable link on the source title', () => {
+    expect(
+      renderCitationReplacement(marker('a3f9c21e'), {
+        id: 'a3f9c21e',
+        title: 'Chunk A',
+        url: 'https://example.com/a',
+      }),
+    ).toBe('[Chunk A](https://example.com/a)');
+  });
+
+  it('renders a URL-less retrieval source as the plain title', () => {
+    expect(renderCitationReplacement(marker('a3f9c21e'), { id: 'a3f9c21e', title: 'Chunk A' })).toBe('[Chunk A]');
+  });
+
+  it('removes unresolved markers and numeric sources without a URL — raw IDs never render', () => {
+    expect(renderCitationReplacement(marker('a3f9c21e'), null)).toBe('');
+    expect(renderCitationReplacement(marker(7), { id: 7, title: 'Seven' })).toBe('');
+    expect(renderCitationReplacement(marker('a3f9c21e'), null)).not.toContain('a3f9c21e');
+  });
+});
+
+function searchCall(toolName: string, argsText: string | undefined, result: unknown): CitationToolCall {
+  return { toolName, argsText, result };
+}
+
+function searchEnvelope(results: Array<Record<string, unknown>>): string {
+  return JSON.stringify({
+    schema_version: 'tool.response.v2',
+    outcome: { disposition: 'executed_ok' },
+    result: { results },
+  });
+}
+
+describe('extractSearchCitationSources', () => {
+  it('numbers web_search results 1..N with titles, falling back to the URL', () => {
+    const sources = extractSearchCitationSources([
+      searchCall(
+        'web_search',
+        undefined,
+        searchEnvelope([
+          { url: 'https://a.example/1', title: 'First result' },
+          { url: 'https://b.example/2' },
+          { title: 'No URL — skipped' },
+        ]),
+      ),
+    ]);
+    expect(sources).toEqual([
+      { id: 1, title: 'First result', url: 'https://a.example/1' },
+      { id: 2, title: 'https://b.example/2', url: 'https://b.example/2' },
+    ]);
+  });
+
+  it('resolves MCP call_tool through tool_name and caps at the first page of ten', () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ url: `https://x.example/${String(i)}` }));
+    const sources = extractSearchCitationSources([
+      searchCall('call_tool', JSON.stringify({ tool_name: 'web_search', input: {} }), searchEnvelope(many)),
+    ]);
+    expect(sources).toHaveLength(10);
+    expect(sources[0]).toMatchObject({ id: 1, url: 'https://x.example/0' });
+  });
+
+  it('ignores non-search tools, empty results, and non-envelope payloads', () => {
+    expect(
+      extractSearchCitationSources([searchCall('exec', undefined, searchEnvelope([{ url: 'https://a.example/1' }]))]),
+    ).toEqual([]);
+    expect(extractSearchCitationSources([searchCall('web_search', undefined, undefined)])).toEqual([]);
+    expect(extractSearchCitationSources([searchCall('web_search', undefined, 'not json')])).toEqual([]);
+    expect(
+      extractSearchCitationSources([searchCall('web_search', undefined, JSON.stringify({ results: [] }))]),
+    ).toEqual([]);
+  });
+
+  it('lets the latest search call win for a repeated number', () => {
+    const sources = extractSearchCitationSources([
+      searchCall('web_search', undefined, searchEnvelope([{ url: 'https://a.example/1', title: 'Old' }])),
+      searchCall('web_fetch', undefined, searchEnvelope([{ url: 'https://b.example/1', title: 'New' }])),
+    ]);
+    expect(sources).toEqual([{ id: 1, title: 'New', url: 'https://b.example/1' }]);
   });
 });

@@ -41,7 +41,7 @@ export type MarkdownProps = {
   /** When true, download actions in sandbox artifact blocks are hidden/disabled. */
   readOnly?: boolean;
   /** Citation sources for resolving model-emitted citation markers like 【14†excerpts】. */
-  citationSources?: Map<number, CitationSource> | CitationSource[] | null;
+  citationSources?: Map<number | string, CitationSource> | CitationSource[] | null;
   className?: string;
 };
 
@@ -174,7 +174,7 @@ function makeComponents(opts: {
  * Citation markers plugin always runs: sources only control whether markers become links
  * (when a matching source with URL is found) or are removed.
  */
-function createRemarkPlugins(citationSources?: Map<number, CitationSource> | CitationSource[] | null) {
+function createRemarkPlugins(citationSources?: Map<number | string, CitationSource> | CitationSource[] | null) {
   const plugins: PluggableList = [
     remarkGfm,
     remarkNormalizeProseTypography,

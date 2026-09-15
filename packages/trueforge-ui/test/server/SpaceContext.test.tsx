@@ -170,6 +170,31 @@ describe('SpaceProvider loading state', () => {
   });
 });
 
+describe('SpaceProvider refresh', () => {
+  it('re-fetches the list on an explicit refresh, so a space created after mount appears', async () => {
+    const backing: Space[] = [];
+    const list = vi.fn(async () => [...backing]);
+    const store: SpaceStore = { list, get: async () => SPAIN_HOUSES, delete: async () => {} };
+
+    render(
+      <SpaceProvider store={store}>
+        <Probe />
+      </SpaceProvider>,
+    );
+
+    await waitFor(() => expect(readProbe()).toBe('idle:0'));
+    expect(list).toHaveBeenCalledTimes(1);
+
+    // The model created a space after the provider mounted (e.g. during chat); no focus event
+    // is needed for an explicit refresh to pick it up.
+    backing.push(SPAIN_HOUSES);
+    act(() => screen.getByRole('button', { name: 'Refresh' }).click());
+
+    await waitFor(() => expect(readProbe()).toBe('idle:1'));
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+});
+
 function DeleteProbe({ spaceId }: { spaceId: string }) {
   const ctx = useOptionalSpaces();
   if (ctx == null) return null;

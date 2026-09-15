@@ -6,5 +6,6 @@ export const TurnStateErrorHandoffCause = {
     ServerCancelled: "server_cancelled",
     IterationLimit: "iteration_limit",
     FatalError: "fatal_error",
+    ModelStreamFault: "model_stream_fault",
 } as const;
 export type TurnStateErrorHandoffCause = (typeof TurnStateErrorHandoffCause)[keyof typeof TurnStateErrorHandoffCause];

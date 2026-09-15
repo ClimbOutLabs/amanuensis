@@ -169,3 +169,70 @@ describe('SkillMounter', () => {
     expect(rendered).not.toContain('json-processor: unavailable');
   });
 });
+
+describe('SkillMounter skill routing (track 2)', () => {
+  const SKILL_WITH_TRIGGERS = {
+    ...GIT_SKILL,
+    when_to_use: ['summarize a long document', 'extract action items from notes'],
+  };
+
+  it('tells the agent it MUST prefer a matching skill over generic tools', () => {
+    const rendered = renderSkills(new SkillMounter([GIT_SKILL]));
+
+    expect(rendered).toContain('MUST use that skill');
+    expect(rendered).toContain('MUST NOT substitute generic exec/file/MCP/web tools');
+  });
+
+  it('renders when_to_use triggers as bullet lines in the skill block', () => {
+    const rendered = renderSkills(new SkillMounter([SKILL_WITH_TRIGGERS]));
+
+    expect(rendered).toContain('when_to_use:');
+    expect(rendered).toContain('- summarize a long document');
+    expect(rendered).toContain('- extract action items from notes');
+  });
+
+  it('omits the when_to_use section when the skill declares no triggers', () => {
+    const rendered = renderSkills(new SkillMounter([GIT_SKILL]));
+
+    expect(rendered).not.toContain('when_to_use:');
+  });
+
+  it('inline mode embeds preloaded SKILL.md content so the agent skips the read hop', () => {
+    const content = '# Demo skill\n\nUse this to summarize documents.';
+    const mounter = new SkillMounter([GIT_SKILL], {
+      promptMode: 'inline',
+      inlineContent: new Map([[GIT_SKILL.name, content]]),
+    });
+    const rendered = renderSkills(mounter);
+
+    expect(rendered).toContain('SKILL.md content:');
+    expect(rendered).toContain(content);
+    // Name/description/path still advertised alongside the inlined content.
+    expect(rendered).toContain('git-skill');
+  });
+
+  it('advertise mode never embeds SKILL.md content, even when content is supplied', () => {
+    const mounter = new SkillMounter([GIT_SKILL], {
+      promptMode: 'advertise',
+      inlineContent: new Map([[GIT_SKILL.name, '# Demo skill']]),
+    });
+    const rendered = renderSkills(mounter);
+
+    expect(rendered).not.toContain('SKILL.md content:');
+    expect(rendered).toContain('git-skill');
+  });
+
+  it('inline mode falls back to advertising a skill with no preloaded content', () => {
+    const mounter = new SkillMounter([GIT_SKILL], { promptMode: 'inline' });
+    const rendered = renderSkills(mounter);
+
+    expect(rendered).not.toContain('SKILL.md content:');
+    expect(rendered).toContain('description: From git');
+  });
+
+  it('exposes mounted skill names for host-side telemetry', () => {
+    const mounter = new SkillMounter([GIT_SKILL, GIT_SKILL_WITH_REQUIRES]);
+
+    expect(mounter.skillNames()).toEqual(['git-skill', 'git-skill-tvly']);
+  });
+});

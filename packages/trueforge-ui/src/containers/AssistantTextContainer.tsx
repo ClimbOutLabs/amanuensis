@@ -12,6 +12,7 @@ import { useCallback, useMemo, useRef } from 'react';
 
 import { MARKDOWN_SMOOTH_BACKLOG_CHARS, useThrottledMarkdownText } from '../hooks/useThrottledMarkdownText.js';
 import { useSlot } from '../theme/SlotsProvider.js';
+import { extractSearchCitationSources, type CitationToolCall } from '../utils/citationMarkers.js';
 import { useToasterOptional } from './ToasterContainer.js';
 
 function filenameFromPath(path: string): string {
@@ -37,6 +38,22 @@ export function AssistantTextContainer() {
   const downloadRef = useRef({ downloadSandboxFile, toaster });
   downloadRef.current = { downloadSandboxFile, toaster };
   const partState = useAuiState(s => s.part as MessagePartState & (TextMessagePart | ReasoningMessagePart));
+  const messageParts = useAuiState(s => s.message.parts);
+
+  // Citation sources for model-emitted markers like 【14†excerpts】: the same message's
+  // web_search / web_fetch results carry the ID→title mapping the model cited against.
+  // Null when the message ran no searches, preserving the previous rendering exactly.
+  const citationSources = useMemo(() => {
+    const calls: CitationToolCall[] = [];
+    for (const part of messageParts) {
+      if (part.type !== 'tool-call') {
+        continue;
+      }
+      calls.push({ toolName: part.toolName, argsText: part.argsText, result: part.result });
+    }
+    const sources = extractSearchCitationSources(calls);
+    return sources.length > 0 ? sources : null;
+  }, [messageParts]);
 
   // Preserve the typewriter effect while it keeps pace. If its visible prefix falls too far
   // behind the raw stream, latch this part into bounded latest-prefix snapshots instead of
@@ -99,8 +116,9 @@ export function AssistantTextContainer() {
         isStreaming={isStreaming}
         onDownloadArtifact={handleDownloadArtifact}
         onFetchFile={handleFetchFile}
+        citationSources={citationSources}
       />
     ),
-    [Markdown, text, isStreaming, handleDownloadArtifact, handleFetchFile],
+    [Markdown, text, isStreaming, handleDownloadArtifact, handleFetchFile, citationSources],
   );
 }

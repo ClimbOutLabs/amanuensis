@@ -160,7 +160,7 @@ export function createSpacesRouter<TTransaction>(deps: SpacesRouterDeps<TTransac
     const created_by = deps.resolveRequestContext(c).subject.id;
     try {
       await deps.spaceStore.deleteSpace({ tenant_id: TENANT_ID, created_by, space_id, expected_revision });
-      return c.body(null, 204);
+      return c.json({}, 200);
     } catch (error) {
       if (error instanceof SpaceNotFoundError) {
         return c.json({ error: { message: error.message } }, 404);

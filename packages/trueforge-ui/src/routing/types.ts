@@ -13,7 +13,9 @@ export type RoutePlace =
   | { type: 'libraryAgent'; agentId: string }
   | { type: 'sessionsBrowser' }
   | { type: 'schedules' }
-  | { type: 'buildAgent' };
+  | { type: 'buildAgent' }
+  | { type: 'spaces' }
+  | { type: 'space'; spaceId: string };
 
 /**
  * Host-facing route path customization. Only honored when `withRouter`.
@@ -42,6 +44,10 @@ export type RoutesConfig = {
     session?: string | false;
     /** All-user sessions browser. `false` disables. Default `'/sessions'`. */
     sessionsBrowser?: string | false;
+    /** Spaces list. `false` keeps spaces out of the URL. Default `'/spaces'`. */
+    spaces?: string | false;
+    /** Space detail deep link. `false` disables. Default `'/spaces/:spaceId'`. */
+    space?: string | false;
   };
 };
 
@@ -57,6 +63,8 @@ export type ResolvedRoutes = {
   agent: string | null;
   session: string | null;
   sessionsBrowser: string | null;
+  spaces: string | null;
+  space: string | null;
 };
 
 /** Inputs for deriving the current place from shell + runtime state. */
@@ -66,6 +74,9 @@ export type ShellSnapshot = {
   sessionsOpen: boolean;
   libraryAgentId: string | null;
   schedulesOpen: boolean;
+  spacesOpen: boolean;
+  /** The open space's id, or null when the spaces list is showing. */
+  selectedSpaceId?: string | null;
   pendingSessionId?: string;
   /** Remote id of the active thread once a fresh chat is persisted. */
   activeRemoteId?: string;

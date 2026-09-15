@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, render, waitFor } from '@testing-library/react';
 import { StrictMode, useEffect, useState, type ReactNode } from 'react';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 
 import { resolveRoutesConfig } from '@/routing/paths.js';
@@ -23,6 +23,7 @@ let shell: Shell;
 let pathname = '';
 let search = '';
 let setRemoteId: (id: string | undefined) => void = () => undefined;
+let navigateTo: (path: string) => void = () => undefined;
 
 function CaptureShell() {
   shell = useShellMode();
@@ -37,6 +38,13 @@ function CaptureLocation() {
     pathname = location.pathname;
     search = location.search;
   }, [location.pathname, location.search]);
+  return null;
+}
+
+/** Lets a test drive the URL the way Back/Forward or a manual edit would. */
+function NavigateProbe() {
+  const navigate = useNavigate();
+  navigateTo = (path: string) => navigate(path);
   return null;
 }
 
@@ -114,6 +122,7 @@ function Harness({
       <ShellModeProvider agentConfig={agentConfig} initialSettingsOpen={initialSettingsOpen}>
         <CaptureShell />
         <CaptureLocation />
+        <NavigateProbe />
         <ShellRouteSync routes={routes} activeRemoteId={remoteId} initialSettingsOpen={initialSettingsOpen} />
       </ShellModeProvider>
     </SettingsCatalogProvider>
@@ -348,6 +357,58 @@ describe('ShellRouteSync', () => {
     await waitFor(() => expect(shell.settingsOpen).toBe(true));
     act(() => shell.setSettingsOpen(false));
     expect(pathname).toBe('/');
+  });
+
+  it('applies a spaces deep link on boot', () => {
+    renderSync({ initialEntries: ['/spaces'] });
+    expect(shell.spacesOpen).toBe(true);
+    expect(shell.selectedSpaceId).toBeNull();
+    expect(pathname).toBe('/spaces');
+  });
+
+  it('applies a space detail deep link on boot', () => {
+    renderSync({ initialEntries: ['/spaces/s-1'] });
+    expect(shell.spacesOpen).toBe(true);
+    expect(shell.selectedSpaceId).toBe('s-1');
+    expect(pathname).toBe('/spaces/s-1');
+  });
+
+  it('pushes the URL when the shell opens spaces and when it opens a space', () => {
+    renderSync({ initialEntries: ['/'] });
+    expect(pathname).toBe('/');
+    act(() => shell.openSpaces());
+    expect(pathname).toBe('/spaces');
+    act(() => shell.openSpaces('s-1'));
+    expect(pathname).toBe('/spaces/s-1');
+    act(() => shell.openSpaces(null));
+    expect(pathname).toBe('/spaces');
+    act(() => shell.closeSpaces());
+    expect(pathname).toBe('/');
+  });
+
+  // Back from the spaces view (or the detail page) lands on a chat place, which closes the view
+  // in every shell mode instead of leaving it stranded behind chat.
+  it('closes the spaces view when the URL navigates back to a chat place', () => {
+    renderSync({ initialEntries: ['/'] });
+    act(() => shell.openSpaces('s-1'));
+    expect(pathname).toBe('/spaces/s-1');
+    expect(shell.spacesOpen).toBe(true);
+
+    act(() => navigateTo('/'));
+    expect(shell.spacesOpen).toBe(false);
+    expect(shell.selectedSpaceId).toBeNull();
+    expect(pathname).toBe('/');
+  });
+
+  it('returns to the spaces list when the URL navigates back from a space detail', () => {
+    renderSync({ initialEntries: ['/'] });
+    act(() => shell.openSpaces('s-1'));
+    expect(pathname).toBe('/spaces/s-1');
+
+    act(() => navigateTo('/spaces'));
+    expect(shell.spacesOpen).toBe(true);
+    expect(shell.selectedSpaceId).toBeNull();
+    expect(pathname).toBe('/spaces');
   });
 
   it('unregisters /settings when settings capability is disabled', async () => {

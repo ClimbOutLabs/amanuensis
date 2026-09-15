@@ -3,6 +3,7 @@
 import type * as TrueForge from "../../../../../api/index.js";
 import * as core from "../../../../../core/index.js";
 import type * as serializers from "../../../../index.js";
+import { ClientTimezoneInput } from "../../../../types/ClientTimezoneInput.js";
 import { PreviousTurnIdInput } from "../../../../types/PreviousTurnIdInput.js";
 import { TurnInputItem } from "../../../../types/TurnInputItem.js";
 
@@ -10,12 +11,14 @@ export const CreateTurnSessionsRequest: core.serialization.Schema<
     serializers.CreateTurnSessionsRequest.Raw,
     TrueForge.CreateTurnSessionsRequest
 > = core.serialization.object({
+    clientTimezone: core.serialization.property("client_timezone", ClientTimezoneInput.optional()),
     input: core.serialization.list(TurnInputItem).optional(),
     previousTurnId: core.serialization.property("previous_turn_id", PreviousTurnIdInput.optional()),
 });
 
 export declare namespace CreateTurnSessionsRequest {
     export interface Raw {
+        client_timezone?: ClientTimezoneInput.Raw | null;
         input?: TurnInputItem.Raw[] | null;
         previous_turn_id?: PreviousTurnIdInput.Raw | null;
     }

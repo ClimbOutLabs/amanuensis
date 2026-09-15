@@ -24,9 +24,12 @@ export function deriveChatPlace(snapshot: ShellSnapshot): RoutePlace {
   return { type: 'root' };
 }
 
-/** Full place with overlay priority: settings, schedules, sessions, library, chat. */
+/** Full place with overlay priority: settings, spaces, schedules, sessions, library, chat. */
 export function derivePlace(snapshot: ShellSnapshot): RoutePlace {
   if (snapshot.settingsOpen) return { type: 'settings' };
+  if (snapshot.spacesOpen) {
+    return snapshot.selectedSpaceId != null ? { type: 'space', spaceId: snapshot.selectedSpaceId } : { type: 'spaces' };
+  }
   if (snapshot.schedulesOpen) return { type: 'schedules' };
   if (snapshot.sessionsOpen) return { type: 'sessionsBrowser' };
   if (snapshot.libraryOpen && snapshot.libraryAgentId != null) {

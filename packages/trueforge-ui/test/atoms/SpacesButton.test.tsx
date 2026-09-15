@@ -104,4 +104,22 @@ describe('SpacesButton', () => {
     expect(button).toBeDisabled();
     expect(button.getAttribute('title')).toContain('ShellModeProvider');
   });
+
+  it('displays a visible Spaces label when compact=true', async () => {
+    render(
+      <SlotsProvider>
+        <ShellModeProvider>
+          <SpaceProvider store={mockStore([SPAIN_HOUSES])}>
+            <SpacesButton compact={true} />
+          </SpaceProvider>
+        </ShellModeProvider>
+      </SlotsProvider>,
+    );
+
+    const button = await screen.findByRole('button', { name: 'Spaces' });
+    const label = button.querySelector('span.text-center');
+
+    expect(label).toBeInTheDocument();
+    expect(label).toHaveTextContent('Spaces');
+  });
 });

@@ -27,7 +27,7 @@ describe('ThreadRootShell', () => {
     const width = root.style.getPropertyValue('--thread-max-width');
     // Keeps the message list and composer column readable (roughly 880-960px) instead of
     // leaving very large, disproportionate gutters on wide viewports.
-    expect(width).toBe('min(1240px, 100% - 2rem)');
+    expect(width).toBe('min(48rem, 100% - 2rem)');
   });
 });
 

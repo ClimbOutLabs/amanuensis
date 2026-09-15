@@ -1351,6 +1351,11 @@
         ],
         "type": "object"
       },
+      "ClientTimezoneInput": {
+        "description": "IANA timezone name of the client (e.g. \"America/Los_Angeles\"), typically Intl.DateTimeFormat().resolvedOptions().timeZone from the browser. Used to report local time from get_current_datetime and in the ambient current-date context. An unrecognized name and an omitted field both fall back to UTC.",
+        "minLength": 1,
+        "type": "string"
+      },
       "CompactionConfig": {
         "additionalProperties": false,
         "default": {
@@ -1845,6 +1850,9 @@
       },
       "CreateTurnRequest": {
         "properties": {
+          "client_timezone": {
+            "$ref": "#/components/schemas/ClientTimezoneInput"
+          },
           "input": {
             "description": "Turn input items: user messages and/or approval/tool-response resumes. Do not mix user messages with approval or tool-response items.",
             "items": {

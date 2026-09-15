@@ -3,7 +3,7 @@
 import { Icon } from '../icons/Icon.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useOptionalSpaces } from '../server/SpaceContext.js';
-import { auiButtonClass } from './lib/buttonClasses.js';
+import { auiButtonClass, sidebarButtonRadiusClassName, sidebarRailButtonClassName } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 
 export type SpacesButtonProps = {
@@ -34,7 +34,7 @@ export function SpacesButton({ className, compact = false }: SpacesButtonProps) 
       : undefined;
 
   return (
-    <div className={cn('relative min-w-0', compact ? 'w-8' : 'w-full', className)}>
+    <div className={cn('relative min-w-0', compact ? 'flex justify-center' : 'w-full', className)}>
       <button
         type="button"
         disabled={!shellAvailable}
@@ -44,15 +44,19 @@ export function SpacesButton({ className, compact = false }: SpacesButtonProps) 
         className={auiButtonClass({
           variant: 'ghost',
           className: cn(
-            'h-8 rounded-md text-sm font-medium text-text-primary shadow-none hover:bg-ghost-button-hover hover:text-ghost-button-text',
-            compact ? 'w-8 !justify-center p-0' : 'w-full !justify-start px-2.5',
-            open && 'bg-dropdown-selected-item-bg text-dropdown-selected-item-text',
+            sidebarButtonRadiusClassName,
+            'font-normal text-sidebar-text shadow-none hover:bg-secondary-button-hover hover:text-ghost-button-text',
+            compact ? sidebarRailButtonClassName : 'h-8 w-full !justify-start px-2.5 text-sm',
+            open &&
+              'bg-primary-button-bg font-medium text-primary-button-text hover:bg-primary-button-hover hover:text-primary-button-text',
           ),
         })}
         onClick={() => shell?.openSpaces()}
       >
-        <Icon name="cube" />
-        {!compact ? (
+        <Icon name="cube" size={compact ? 14 : undefined} />
+        {compact ? (
+          <span className="text-center">Spaces</span>
+        ) : (
           <>
             <span className="truncate">
               Spaces
@@ -60,7 +64,7 @@ export function SpacesButton({ className, compact = false }: SpacesButtonProps) 
             </span>
             <Icon name="chevron-right" className="ml-auto size-3.5 shrink-0 opacity-60" />
           </>
-        ) : null}
+        )}
       </button>
     </div>
   );

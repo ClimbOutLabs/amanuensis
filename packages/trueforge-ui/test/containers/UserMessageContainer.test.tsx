@@ -95,7 +95,7 @@ describe('UserMessageContainer', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
-    expect(screen.getByText(/\d{1,2}:\d{2}:\d{2}/)).toBeInTheDocument();
+    expect(screen.getByText(/\d{1,2}:\d{2}/)).toBeInTheDocument();
   });
 
   it('hides the action bar while the thread is running', () => {

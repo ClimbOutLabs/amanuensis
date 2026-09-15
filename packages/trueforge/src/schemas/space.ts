@@ -173,6 +173,7 @@ export const UpdateSpaceResponseSchema = z
   .object({ data: SpaceMutationDataSchema })
   .strict()
   .openapi('UpdateSpaceResponse');
+export const DeleteSpaceResponseSchema = z.object({}).strict().openapi('DeleteSpaceResponse');
 
 export type SpaceStatus = z.infer<typeof SpaceStatusSchema>;
 export type SpaceContent = z.infer<typeof SpaceContentSchema>;

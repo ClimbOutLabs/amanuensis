@@ -99,17 +99,26 @@ export class DeferredTool extends LocalToolMCP {
   private readonly serverMap: Map<string, IToolSet>;
   private readonly tools: ToolDefinition[];
   private readonly logger: Logger;
+  /**
+   * Host (built-in, systemToolSets) tool providers, e.g. get_current_datetime. Their tools
+   * are called directly by name, never through call_tool, but a model that has just learned
+   * server tools live behind call_tool sometimes addresses a host tool the same way. See
+   * routeToHostTool.
+   */
+  private readonly hostToolSets: readonly IToolSet[];
 
   constructor(
     servers: readonly IToolSet[],
     options: {
       tracing: AgentTracing;
       logger: Logger;
+      hostToolSets?: readonly IToolSet[];
     },
   ) {
     super({ tracing: options.tracing });
     this.logger = options.logger.child({ module: 'DeferredTool' });
     this.serverMap = new Map(servers.map(s => [s.name, s]));
+    this.hostToolSets = options.hostToolSets ?? [];
     this.tools = this.buildTools();
   }
 
@@ -188,6 +197,57 @@ export class DeferredTool extends LocalToolMCP {
 
   private resolveServer(name: string): IToolSet | undefined {
     return this.serverMap.get(name);
+  }
+
+  /**
+   * Finds the host (systemToolSets) provider exposing `toolName`, if any. Host tools are
+   * normally called directly by name, not through call_tool, so this only runs after the
+   * named MCP server has already failed to resolve the name, so it never shadows a real
+   * server tool of the same name.
+   */
+  private async findHostToolProvider(toolName: string): Promise<IToolSet | undefined> {
+    for (const hostSet of this.hostToolSets) {
+      const listed = await hostSet.listTools();
+      if (isAuthRequired(listed)) {
+        continue;
+      }
+      if (listed.result.tools.some(t => t.name === toolName)) {
+        return hostSet;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Routes a call_tool invocation whose tool_name is not on the named MCP server, but matches
+   * a host tool instead, running the host tool directly rather than rejecting the call. Returns
+   * undefined when no host tool matches, so the caller falls back to the ordinary rejection.
+   */
+  private async routeToHostTool(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<CallToolResponse | undefined> {
+    const hostSet = await this.findHostToolProvider(toolName);
+    if (!hostSet) {
+      return undefined;
+    }
+    const response = await hostSet.callTool({ name: toolName, arguments: args });
+    return this.withHostRoutingNote(response, toolName);
+  }
+
+  /** Prepends a short note to a routed host-tool result, without disturbing its content. */
+  private withHostRoutingNote(response: CallToolResponse, toolName: string): CallToolResponse {
+    if (!isCallToolResponseResult(response)) {
+      return response;
+    }
+    const note = {
+      type: 'text' as const,
+      text: `Note: routed to the host tool '${toolName}'; it is not on the requested MCP server. Call ${toolName} directly next time instead of through ${CALL_TOOL_NAME}.`,
+    };
+    return {
+      ...response,
+      result: { ...response.result, content: [note, ...response.result.content] },
+    };
   }
 
   private serverNotFoundResponse(callerTool: string, mcpServer: string): CallToolResponse {
@@ -462,6 +522,10 @@ export class DeferredTool extends LocalToolMCP {
             return resolved;
           }
           if (!resolved.tools.some(t => t.name === input.tool_name)) {
+            const hostRoute = await this.routeToHostTool(input.tool_name, input.input);
+            if (hostRoute) {
+              return hostRoute;
+            }
             return toolResultResponse({
               text: JSON.stringify({
                 error: structuredEditRejection({

@@ -125,12 +125,6 @@ export function AssistantMessageContainer() {
           !isThreadRunning ? <MessageActionBar isCopied={isCopied} onCopy={copy} createdAt={createdAt} /> : undefined
         }
       >
-        <MemoryContextCard
-          recall={memoryContext?.recall}
-          profile={memoryContext?.profile}
-          unavailable={memoryContext == null && memoryContextHasError}
-          onRetry={retryMemoryContext}
-        />
         {ingestionStatusLine !== undefined && (
           <p className="mb-2 text-xs italic text-text-secondary" data-testid="document-ingestion-status">
             {ingestionStatusLine}
@@ -177,6 +171,13 @@ export function AssistantMessageContainer() {
             }
           }}
         </MessagePrimitive.GroupedParts>
+        {/* Memory audit trails the answer so the reply reads first and the machinery second. */}
+        <MemoryContextCard
+          recall={memoryContext?.recall}
+          profile={memoryContext?.profile}
+          unavailable={memoryContext == null && memoryContextHasError}
+          onRetry={retryMemoryContext}
+        />
       </AssistantMessageBubble>
     </MessagePrimitive.Root>
   );

@@ -1,4 +1,5 @@
 import {
+  buildAppBugReportBundle,
   buildBugReportBundle,
   extractChatTranscript,
   MAX_CHAT_MESSAGE_CHARS,
@@ -223,7 +224,11 @@ describe('buildBugReportBundle', () => {
     const stack: { path: string; value: unknown }[] = [{ path: '$', value: bundle }];
     const leaks: string[] = [];
     while (stack.length > 0) {
-      const { path, value } = stack.pop() as { path: string; value: unknown };
+      const next = stack.pop();
+      if (next === undefined) {
+        throw new Error('stack underflow: the length check above should prevent this');
+      }
+      const { path, value } = next;
       if (typeof value === 'string') {
         for (const needle of [...PLANTED_SECRETS, ...PLANTED_PERSONAL]) {
           if (value.includes(needle)) {
@@ -1054,5 +1059,41 @@ describe('buildBugReportBundle: document ingestion events', () => {
     const turn = bundle.trace[0];
     const ingestionEvent = turn?.events.find(event => event.type === 'document.ingestion');
     expect(ingestionEvent).toMatchObject({ type: 'document.ingestion', outcome: 'cancelled' });
+  });
+});
+
+describe('buildAppBugReportBundle', () => {
+  const baseInput = {
+    build: { version: '0.1.4' },
+    description: 'The widget wobbles',
+    configFlags: { sandbox_enabled: true, skill_enabled: false, settings_enabled: true },
+  };
+
+  it('assembles the app bundle with build identity, description, and config flags', () => {
+    const bundle = buildAppBugReportBundle({ ...baseInput, generatedAt: '2026-09-05T00:00:00.000Z' });
+    expect(bundle.schema_version).toBe(1);
+    expect(bundle.generated_at).toBe('2026-09-05T00:00:00.000Z');
+    expect(bundle.build.version).toBe('0.1.4');
+    expect(bundle.user_description).toBe('The widget wobbles');
+    expect(bundle.config_flags).toEqual({
+      sandbox_enabled: true,
+      skill_enabled: false,
+      settings_enabled: true,
+    });
+  });
+
+  it('carries no session, trace, or chat keys — there is nothing session-bound to redact', () => {
+    const bundle = buildAppBugReportBundle(baseInput);
+    expect(bundle).not.toHaveProperty('session');
+    expect(bundle).not.toHaveProperty('trace');
+    expect(bundle).not.toHaveProperty('chat');
+    // The redaction manifest deliberately names the omitted fields, so only the top-level
+    // keys are asserted here — not the serialized text.
+  });
+
+  it('documents what it strips in the redaction manifest', () => {
+    const bundle = buildAppBugReportBundle(baseInput);
+    expect(bundle.redaction.stripped_fields.length).toBeGreaterThan(0);
+    expect(bundle.redaction.notes).toContain('never read');
   });
 });

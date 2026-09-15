@@ -32,6 +32,11 @@ This release brings hardened sandbox tooling with multiple validation and recove
 - Verification commands can now run after an edit or commit in an otherwise unchanged workspace, while identical retries in a workspace that has not changed remain blocked (#11, #9)
 - Supervised coding execution now carries repository bindings, implementation-plan grants, verification commands, task checklists, and tool-result dispositions across approvals and continuations without losing state (#26, #7)
 - Cancelled turns now finish cleanly even when a model provider stops responding, and stream cleanup errors do not leave the turn stuck (#9)
+- FFmpeg is included in the sandbox image for audio and video processing (#163)
+- Sandbox image includes fifteen Tesseract OCR language packs; OCR defaults to English, Hindi, and Marathi (#167)
+- Tesseract language packs are configurable in the sandbox image at build time; OCR commands can specify language packs per call (#162)
+- File artifacts render download links for every markdown block shape the model writes: lists, colon format, bare paths, or bracketed links (#182)
+- Meta-tools (list_tools, get_tool_info, get_tool_output_schema) routed through call_tool now dispatch directly instead of failing; greeterless messages do not trigger tool use (#183)
 
 ## Context and compaction
 
@@ -42,6 +47,7 @@ This release brings hardened sandbox tooling with multiple validation and recove
 - Compaction no longer fails when the model copies the host's own host_owned_touched_paths notes from a previous summary; the host strips the copied subsection and uses its own authoritative record instead (#116)
 - The system prompt now carries today's date in YYYY-MM-DD format, so models do not assume training-era dates and reason years into the past when they need to recall something from "today"; the date changes once per day and provider prefix caching keeps working (#103)
 - Freshness questions (what is latest, what is current, what exists now) are grounded with host facts and retrieval checks, so claims about current state do not rely on training data (#104)
+- Model stream breaks trigger immediate context compaction and one retry; if a second break occurs, the turn ends with a clear explanation (#187)
 
 ## Memory
 
@@ -65,6 +71,8 @@ This release brings hardened sandbox tooling with multiple validation and recove
 - Hindsight memory uses LKOS protocol for secret references in configuration, so credentials are never stored in plaintext and can be rotated without application changes (#14)
 - Memory recall events are streamed to the model without breaking SDK-based clients that do not expect streaming in that context (#22)
 - vLLM prompt-cache usage is reported truthfully in the CLI and UI so users see the actual cost and cache behavior of their sessions (#13)
+- Settings now include a switch to enable or disable the recall screen per memory bank, giving users explicit control over memory filtering (#179)
+- Memory context cards display recalled memory as an injected block with a simpler, more direct label (#177)
 
 ## Documents and vision
 
@@ -92,6 +100,23 @@ This release brings hardened sandbox tooling with multiple validation and recove
 - Mobile and reasoning red-team blockers are cleared so the chat works smoothly on mobile devices and on models with extended reasoning capabilities (#52)
 - Turns continue running across mobile navigation instead of cancelling when the user switches tabs or backgrounds the app (#46)
 - The mobile rail stays out of the chat interface, keeping the composition and message areas undisrupted (#29)
+- Chat column uses up to 1240px window width with 1rem side margins, expanding the readable area on wider screens while remaining readable (#191)
+- Chat thread width is now 900px instead of 704px, cutting gutters roughly in half while keeping the column readable and centered (#181)
+- Tool error messages in the agent steps panel now wrap to multiple lines instead of overflowing horizontally (#180)
+- Mascot idle breathing animates visibly at panel size with larger scale, vertical drift, and occasional gentle tilts; listening and busy states animate more prominently (#178)
+- Mascot animation styles ship in the package stylesheet instead of being injected at runtime (#169)
+- Chat opens in light mode by default; the theme toggle and stored preference still override the default (#168)
+- Runtime panel no longer shows a fixed Runtime field; Build, Model, and Memory information remain (#175)
+
+## Spaces
+
+- Spaces are persistent records the model creates and updates during chat, with a dedicated full-page view in the sidebar (#171)
+- Spaces render as full pages with layout, typography, images from https or data URLs, and tables, instead of as modals with plain text (#176)
+- Spaces can be formatted as HTML pages with style blocks, real typography and layout, images, and tables; markdown is still the default (#186)
+- HTML space frames now size to their content and scroll wide tables inside the page instead of overflowing past the frame (#189)
+- HTML and markdown spaces are tracked with a format column in the database, backfilled as markdown for existing spaces (#188)
+- Space bodies accept markdown as an array of lines, one per element, so the model can format tables and structured content correctly (#172)
+- List and read tools for spaces allow the model to discover existing spaces before creating duplicates, and retrieve revisions to update them accurately (#173)
 
 ## Personas and profiles
 
@@ -139,6 +164,9 @@ This release brings hardened sandbox tooling with multiple validation and recove
 - Users can remove a model provider from the settings interface (#99, #91)
 - Connectors report when they are broken with specific diagnostics: memory-provider availability checks, connection tests, and preset configurations like Hindsight (#28)
 - MCP connector deletion is now non-blocking and the connection status reporting is honest, showing when a connector is unavailable or failed (#41)
+- Remote MCP servers now support pre-registered OAuth client authentication, expanding the connector ecosystem (#164)
+- Shipped skill catalog accepts and respects skill prerequisites, allowing connectors to declare their dependencies (#166)
+- Connectors picker now includes a toggle to enable or disable sandbox access per connector (#170)
 
 ## Rendering and display
 
@@ -164,9 +192,11 @@ This release brings hardened sandbox tooling with multiple validation and recove
 - The turn-error report now names the host cause (e.g., "provider response timeout", "sandbox service unavailable") instead of just reporting failure, so troubleshooting becomes actionable (#97)
 - Agent definitions are given required configuration keys so they load correctly (#112)
 - Personalization UI shows readable save errors and maintains stable input focus during preference editing, so errors are diagnosable and users do not lose text mid-keystroke (#39)
+- Hard stop at 30 inspection commands without an edit; no-match results from grep and similar commands now carry explicit feedback (#185)
 
 ## Build and release
 
+- Public export is generated as one squashed commit with all private material removed (#161)
 - The assistant-ui-runtime pnpm patch is expressed without file renames, making it portable across development environments (#137)
 
 ---

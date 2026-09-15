@@ -74,13 +74,15 @@ function readSessionPage(value: unknown): { sessions: SessionWire[]; nextPageTok
 
 export function createChatFolderStore(fetcher: typeof fetch): ChatFolderStore {
   const jsonHeaders = { 'content-type': 'application/json' };
+  // Server enforces max limit of 25 on session list queries (PAGE_LIMIT in trueforge/src/schemas/common.ts)
+  const SESSION_LIST_PAGE_LIMIT = 25;
   return {
     async load() {
       const folders = readFolders(await readJson(await fetcher('/api/v1/session-folders')));
       const assignments: { sessionId: string; folderId: string }[] = [];
       let pageToken: string | undefined;
       do {
-        const query = new URLSearchParams({ limit: '100', order: 'desc' });
+        const query = new URLSearchParams({ limit: String(SESSION_LIST_PAGE_LIMIT), order: 'desc' });
         if (pageToken !== undefined) {
           query.set('page_token', pageToken);
         }

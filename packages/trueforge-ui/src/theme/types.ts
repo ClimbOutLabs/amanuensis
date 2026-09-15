@@ -14,12 +14,23 @@ export type SemanticTokens = {
   secondaryBg: string;
   border: string;
   fontFamily: string;
+  /** Display face for prose, headings, and welcome surfaces. Chrome keeps `fontFamily`. */
+  fontDisplay: string;
   // Building blocks
   inputBoxBg: string;
   inputBorder: string;
   textPrimary: string;
   textSecondary: string;
+  // Type scale
+  textXs: string;
+  textSm: string;
+  textBase: string;
+  textLg: string;
+  textXl: string;
+  text2xl: string;
   cardBg: string;
+  /** Raised surface for layered UI (modals, popovers, elevated cards). */
+  surfaceElevated: string;
   dropdownSelectedItemBg: string;
   dropdownSelectedItemText: string;
   // Chat
@@ -166,11 +177,19 @@ export const TOKEN_CSS_VARS: Record<keyof SemanticTokens, string> = {
   secondaryBg: '--secondary-bg',
   border: '--border',
   fontFamily: '--font-agent-ui',
+  fontDisplay: '--font-display',
   inputBoxBg: '--input-box-bg',
   inputBorder: '--input-border',
   textPrimary: '--text-primary',
   textSecondary: '--text-secondary',
+  textXs: '--text-xs',
+  textSm: '--text-sm',
+  textBase: '--text-base',
+  textLg: '--text-lg',
+  textXl: '--text-xl',
+  text2xl: '--text-2xl',
   cardBg: '--card-bg',
+  surfaceElevated: '--surface-elevated',
   dropdownSelectedItemBg: '--dropdown-selected-item-bg',
   dropdownSelectedItemText: '--dropdown-selected-item-text',
   userMessageBg: '--user-message-bg',

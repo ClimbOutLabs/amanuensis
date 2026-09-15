@@ -265,6 +265,17 @@ describe('MemorySettings', () => {
     expect(timeout).toHaveAttribute('placeholder', 'Server default');
   });
 
+  it('keeps tuning help behind an info affordance instead of inline text', async () => {
+    renderMemory([hindsightAsProvider]);
+
+    await screen.findByLabelText('Recall timeout (milliseconds)');
+    // The explanatory text lives in the tooltip, not as a visible paragraph under the field.
+    expect(screen.queryByText(/Large banks search slower/)).not.toBeInTheDocument();
+    const info = screen.getByRole('button', { name: 'Recall timeout (milliseconds): more info' });
+    fireEvent.focus(info);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/Large banks search slower/);
+  });
+
   it('refuses an out-of-range tuning value before any write, and clearing every field restores the defaults', async () => {
     const provider = { ...hindsightAsProvider, memorySettings: { recallTimeoutMs: 2_500 } };
     const updateConnector = vi.fn().mockResolvedValue(hindsightAsProvider);
@@ -300,12 +311,12 @@ describe('MemorySettings', () => {
 
     expect(await screen.findByRole('heading', { name: 'How memory works' })).toBeInTheDocument();
     expect(screen.getByText(/recalls relevant memories before every model call/)).toBeInTheDocument();
-    expect(screen.getByText(/only its read tools, loaded upfront/)).toBeInTheDocument();
-    expect(screen.getByText(/aman\.memory\.recall event/)).toBeInTheDocument();
+    expect(screen.getByText(/read tools only, loaded upfront/)).toBeInTheDocument();
+    expect(screen.getByText(/aman\.memory\.recall/)).toBeInTheDocument();
     expect(screen.getByText(/HINDSIGHT_API_TENANT_API_KEY/)).toBeInTheDocument();
     // A chat that already mounted the bank cannot drop it now that it is unlisted. Stated here
     // rather than left as a control the user hunts for and never finds.
-    expect(screen.getByText(/start a new chat to be rid of it/)).toBeInTheDocument();
+    expect(screen.getByText(/start a new chat to drop it/)).toBeInTheDocument();
   });
 
   it('reports a healthy bank on Test connection', async () => {
@@ -528,7 +539,7 @@ describe('MemorySettings', () => {
 
       expect(await screen.findByText('Recall screening status unavailable')).toBeInTheDocument();
       expect(screen.queryByText('Recall screening is off')).not.toBeInTheDocument();
-      expect(screen.getByText(/Classifies what memory recall is about to inject/)).toBeInTheDocument();
+      expect(screen.getByText(/Screens what recall is about to inject/)).toBeInTheDocument();
       // Nothing to show for a screen whose status was never reported.
       expect(screen.queryByText('Threshold')).not.toBeInTheDocument();
       expect(screen.getByText(/MEMORY_SCREEN_ENABLED/)).toBeInTheDocument();
@@ -544,7 +555,7 @@ describe('MemorySettings', () => {
     });
 
     it('reads as off when the server reports MEMORY_SCREEN_ENABLED false', async () => {
-      renderMemory([parallelWeb], {}, capabilitiesWithMemoryScreen({ enabled: false }));
+      renderMemory([parallelWeb], {}, capabilitiesWithMemoryScreen({ enabled: false, configured: true }));
 
       expect(await screen.findByText('Recall screening is off')).toBeInTheDocument();
       expect(screen.queryByText('Recall screening status unavailable')).not.toBeInTheDocument();
@@ -552,7 +563,11 @@ describe('MemorySettings', () => {
     });
 
     it('reads as on and shows the threshold the server reports', async () => {
-      renderMemory([parallelWeb], {}, capabilitiesWithMemoryScreen({ enabled: true, threshold: 0.62 }));
+      renderMemory(
+        [parallelWeb],
+        {},
+        capabilitiesWithMemoryScreen({ enabled: true, configured: true, threshold: 0.62 }),
+      );
 
       expect(await screen.findByText('Recall screening is on')).toBeInTheDocument();
       expect(screen.getByText('Threshold')).toBeInTheDocument();
@@ -564,7 +579,7 @@ describe('MemorySettings', () => {
         [parallelWeb],
         {},
         capabilitiesWithScreens({
-          memoryScreen: { enabled: false },
+          memoryScreen: { enabled: false, configured: true },
           toolOutputScreen: { enabled: true, threshold: 0.62, timeoutMs: 2250 },
         }),
       );
@@ -612,7 +627,7 @@ describe('MemorySettings', () => {
         [parallelWeb],
         {},
         capabilitiesWithScreens({
-          memoryScreen: { enabled: true, threshold: 0.5 },
+          memoryScreen: { enabled: true, configured: true, threshold: 0.5 },
           toolOutputScreen: { enabled: true, threshold: 0.5 },
         }),
       );

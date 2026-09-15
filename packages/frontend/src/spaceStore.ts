@@ -15,6 +15,11 @@ async function readJson(response: Response): Promise<unknown> {
   return response.json();
 }
 
+function deleteUrl({ spaceId, expectedRevision }: { spaceId: string; expectedRevision: number }): string {
+  const query = new URLSearchParams({ expected_revision: String(expectedRevision) });
+  return `/api/v1/spaces/${encodeURIComponent(spaceId)}?${query.toString()}`;
+}
+
 async function readEmpty(response: Response): Promise<void> {
   if (!response.ok) {
     const detail = await response.text();
@@ -76,10 +81,16 @@ export function createSpaceStore(fetcher: typeof fetch): SpaceStore {
     },
 
     async delete({ spaceId, expectedRevision }) {
-      const query = new URLSearchParams({ expected_revision: String(expectedRevision) });
-      await readEmpty(
-        await fetcher(`/api/v1/spaces/${encodeURIComponent(spaceId)}?${query.toString()}`, { method: 'DELETE' }),
-      );
+      const first = await fetcher(deleteUrl({ spaceId, expectedRevision }), { method: 'DELETE' });
+      if (first.status !== 409) {
+        await readEmpty(first);
+        return;
+      }
+      // The revision the view held went stale between the last list load and this delete (the
+      // model may have updated the space while it was open). Refresh the revision once and retry
+      // with it before surfacing the conflict; a second 409 (or any other failure) surfaces as-is.
+      const fresh = readSpaceEnvelope(await readJson(await fetcher(`/api/v1/spaces/${encodeURIComponent(spaceId)}`)));
+      await readEmpty(await fetcher(deleteUrl({ spaceId, expectedRevision: fresh.revision }), { method: 'DELETE' }));
     },
   };
 }

@@ -58,8 +58,9 @@
   ],
   "scripts": {
     "sdk:build": "pnpm --filter @truefoundry/trueforge-sdk build",
-    "prebuild": "pnpm run sdk:build",
-    "build": "node ../../scripts/rm-path.mjs dist && tailwindcss --input src/build-styles.css --output dist/styles.css --minify && tsup",
+    "prebuild": "pnpm run sdk:build && pnpm run build:fonts",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tailwindcss --input src/build-styles.css --output dist/styles.css --minify && tsup",
+    "build:fonts": "node scripts/build-fonts.mjs",
     "dev:watch": "pnpm run \"/^(dev:watch:js|dev:watch:css)$/\"",
     "dev:watch:js": "tsup --watch",
     "dev:watch:css": "tailwindcss --input src/build-styles.css --output dist/styles.css --watch",
@@ -68,7 +69,7 @@
     "test": "vitest run && pnpm test:package",
     "test:package": "pnpm build && node test/packageExports.smoke.mjs",
     "test:coverage": "vitest run --coverage",
-    "pretypecheck": "pnpm -w run sdk:types",
+    "pretypecheck": "pnpm run sdk:build",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
     "lint": "eslint src test --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,md}\" \"test/**/*.{ts,tsx}\" \"*.md\" \"docs/**/*.md\" --config ../../.prettierrc"
@@ -94,6 +95,7 @@
   "dependencies": {
     "@assistant-ui/core": "0.2.22",
     "@assistant-ui/react": "0.14.27",
+    "@fontsource/inter-tight": "^5.3.0",
     "@openuidev/react-headless": "^0.9.4",
     "@openuidev/react-lang": "^0.2.9",
     "@openuidev/react-ui": "^0.13.2",

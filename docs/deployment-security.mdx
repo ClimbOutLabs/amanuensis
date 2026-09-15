@@ -8,7 +8,7 @@ TrueForge ships defaults tuned for a single user running it locally. This page d
 
 ## Everyone is admin without OIDC
 
-Standalone mode (`STANDALONE=true`, the local `npx` default) has no login screen and ignores OIDC even if the variables are set. Hosted mode (`STANDALONE=false`, Docker Compose or Kubernetes) also has no login screen unless you configure OIDC: with `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` all unset, every request is treated as one shared local admin identity. The server only logs a warning ("Auth is disabled; browser login is off") when it starts this way; it does not refuse to start.
+Standalone mode (`STANDALONE=true`, the local `npx` default) has no login screen and ignores OIDC even if the variables are set. Hosted mode (`STANDALONE=false`, Docker Compose or Kubernetes) also has no login screen unless you configure OIDC: with `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` all unset, every request is treated as one shared local admin identity. The server refuses to start when it would listen on a non-loopback address without authentication: standalone mode plus a non-`localhost` `HOST` aborts startup with an error naming your options (configure OIDC, bind `HOST=localhost`, or set `REQUIRE_AUTH=false` to explicitly accept the risk). Loopback binds keep the old behavior — a warning ("Auth is disabled; browser login is off") and normal startup — because only local processes can reach them.
 
 In practice this means anyone who can reach the app port has full admin access: they can read chat history, change settings, and use any configured model, MCP connector, or sandbox credential.
 
@@ -24,7 +24,7 @@ Once set, users sign in through your identity provider and are assigned `admin` 
 
 ## Do not expose the app port without OIDC
 
-Do not put the app port (`8790` in standalone mode, `8791` in the Compose topology) on a network interface reachable beyond `localhost`, or beyond hosts you trust on a private network, unless OIDC is configured. This applies to `docker-compose.yml`'s `8791:8790` mapping and to any port-forward, reverse proxy, or Tailscale/VPN exposure you add yourself. The default Compose file comments this on the port mapping as a reminder.
+Do not put the app port (`8790` in standalone mode, `8791` in the Compose topology) on a network interface reachable beyond `localhost`, or beyond hosts you trust on a private network, unless OIDC is configured. This applies to any port-forward, reverse proxy, or Tailscale/VPN exposure you add yourself. The default Compose file publishes `8791` on `127.0.0.1` only and sets `REQUIRE_AUTH=false` as an explicit, documented opt-out for that local-dev stack — do not copy that opt-out into a production deployment; configure OIDC there instead.
 
 ## Change the Postgres password
 
@@ -32,7 +32,7 @@ Do not put the app port (`8790` in standalone mode, `8791` in the Compose topolo
 
 ## Prompt Guard screens
 
-TrueForge can run recalled memories and live tool output past a classifier sidecar (`aman-content-screen`) that looks for prompt injection. Both screens are optional and off by default:
+TrueForge can run recalled memories and live tool output past a classifier sidecar (`aman-content-screen`) that looks for prompt injection. Both screens are optional and off by default. The sidecar supports a CPU (default) and a GPU backend behind the same HTTP contract; see `ops/prompt-guard/README.md`.
 
 - **Memory recall screen** (`MEMORY_SCREEN_ENABLED`, env default `false`): checks memories recalled from the memory bank before they reach the model. Turn it on per memory bank in **Settings → Memory**, using the "Screen recalled memories with Prompt Guard" switch under the active bank. The switch is disabled until a classifier URL (`MEMORY_SCREEN_URL`) is configured and reachable. Your own stated memories are never withheld by this screen; it applies to memories that came from tools, documents, or email.
 - **Tool output screen** (`TOOL_OUTPUT_SCREEN_ENABLED`, env default `false`): checks tool results from structurally open-world tools before they re-enter model context. This one is environment-only; there is no Settings switch. It uses the same classifier URL, bearer token, and threshold as the memory recall screen (`MEMORY_SCREEN_URL`, `MEMORY_SCREEN_AUTH_TOKEN`, `MEMORY_SCREEN_THRESHOLD`).

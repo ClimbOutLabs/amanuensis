@@ -59,7 +59,7 @@ describe('AssistantMessageContainer', () => {
       { isRunning: false },
     );
     expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
-    expect(screen.getByText(/\d{1,2}:\d{2}:\d{2}/)).toBeInTheDocument();
+    expect(screen.getByText(/\d{1,2}:\d{2}/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument();
   });
 

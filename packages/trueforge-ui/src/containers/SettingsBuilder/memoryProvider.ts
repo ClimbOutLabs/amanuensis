@@ -126,12 +126,12 @@ export const MEMORY_PROVIDER_URL_ERROR = 'A memory provider needs a single-bank 
  * makes a bank look healthy while every recall fails. The long version is in ops/memory/RUNBOOK.md.
  */
 export const MEMORY_PROVIDER_NOTES = [
-  'The host recalls relevant memories before every model call and retains every completed turn on its own. It is not a tool the model chooses to call.',
-  "Because the host does the retaining, the model is not given the bank's write tools: only its read tools, loaded upfront. That leaves nothing for the model to duplicate and no approval prompt to answer for a save that already happened.",
-  'The bank is not offered as a connector in chats or in the connectors list, so there is nothing to remember to leave unselected. It lives here instead. A chat or agent that already had it attached keeps working, and keeps the attachment: it is no longer listed anywhere it could be unselected, so start a new chat to be rid of it.',
-  'Each recalled block is visible byte for byte in the events API for that turn, as the aman.memory.recall event, so nothing reaches the model invisibly.',
-  'Hindsight can be configured so its MCP surface and its REST API validate different credentials, and memory speaks the REST API. Set HINDSIGHT_API_TENANT_API_KEY, with HINDSIGHT_API_TENANT_EXTENSION set to the builtin ApiKeyTenantExtension, to the same value the MCP surface accepts. Otherwise the bank reads as connected while every recall fails with HTTP 401 "Invalid API key".',
-  'Saving a bank runs a live recall against that REST API and reports what the provider said when it fails. Re-check any time with Test connection.',
+  'The host recalls relevant memories before every model call and retains each finished turn on its own — memory is not a tool the model chooses to call.',
+  "The model gets the bank's read tools only, loaded upfront — never its write tools. Nothing to duplicate, and no approval prompt for a save that already happened.",
+  'The bank never appears in the connectors list or chat pickers, so there is nothing to leave unselected — it lives here. Chats that already had it attached keep working; start a new chat to drop it.',
+  'Every recalled block is visible byte-for-byte in that turn’s events as aman.memory.recall — nothing reaches the model invisibly.',
+  'Hindsight can validate different credentials on its MCP surface and its REST API, and memory speaks the REST API. Set HINDSIGHT_API_TENANT_API_KEY (with HINDSIGHT_API_TENANT_EXTENSION set to the builtin ApiKeyTenantExtension) to the same value the MCP surface accepts — otherwise the bank looks connected while every recall fails with HTTP 401 "Invalid API key".',
+  'Saving a bank runs a live recall against the REST API and reports the provider’s error when it fails. Re-check any time with Test connection.',
 ];
 
 /** Joins a message the API wrote to a remediation line without doubling its punctuation. */

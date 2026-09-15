@@ -61,6 +61,17 @@ export const SkillRequiresSchema = z
   .array(z.string().trim().min(1))
   .describe('List of binary/command names required for this skill to function.');
 
+/**
+ * Trigger phrases describing when the agent should reach for the skill.
+ * Rendered as `when_to_use:` lines in the <skills> prompt section alongside
+ * the description, so the model can match them against the current task.
+ * Optional and backward compatible: existing manifests without this key keep
+ * validating unchanged, so no data migration is needed.
+ */
+export const SkillWhenToUseSchema = z
+  .array(z.string().trim().min(1))
+  .describe('Trigger phrases describing when the agent should use the skill.');
+
 /** Configured skill document persisted as `skill.manifest`. */
 const GitSkillSchema = z
   .object({
@@ -71,6 +82,7 @@ const GitSkillSchema = z
     ref: SkillGitRefSchema,
     description: SkillDescriptionSchema,
     requires: SkillRequiresSchema.optional(),
+    when_to_use: SkillWhenToUseSchema.optional(),
   })
   .strict()
   .openapi('GitSkill');

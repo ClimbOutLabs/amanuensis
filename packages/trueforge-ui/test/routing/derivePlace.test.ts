@@ -6,6 +6,7 @@ import type { ShellSnapshot } from '@/routing/types.js';
 function snap(partial: Partial<ShellSnapshot>): ShellSnapshot {
   return {
     settingsOpen: false,
+    spacesOpen: false,
     libraryOpen: false,
     sessionsOpen: false,
     libraryAgentId: null,
@@ -19,6 +20,31 @@ function snap(partial: Partial<ShellSnapshot>): ShellSnapshot {
 describe('derivePlace', () => {
   it('settings overlay wins over the chat place', () => {
     expect(derivePlace(snap({ settingsOpen: true, pendingSessionId: 'abc' }))).toEqual({ type: 'settings' });
+  });
+
+  it('settings overlay wins over the spaces view', () => {
+    expect(derivePlace(snap({ settingsOpen: true, spacesOpen: true, selectedSpaceId: 's-1' }))).toEqual({
+      type: 'settings',
+    });
+  });
+
+  it('open spaces view with no selection maps to the spaces list place', () => {
+    expect(derivePlace(snap({ spacesOpen: true }))).toEqual({ type: 'spaces' });
+  });
+
+  it('open spaces view with a selection maps to the space detail place', () => {
+    expect(derivePlace(snap({ spacesOpen: true, selectedSpaceId: 's-1' }))).toEqual({
+      type: 'space',
+      spaceId: 's-1',
+    });
+  });
+
+  it('spaces view wins over the chat place', () => {
+    expect(derivePlace(snap({ spacesOpen: true, pendingSessionId: 'abc' }))).toEqual({ type: 'spaces' });
+  });
+
+  it('closed spaces view with a stale selection still maps to the chat place', () => {
+    expect(derivePlace(snap({ spacesOpen: false, selectedSpaceId: 's-1' }))).toEqual({ type: 'root' });
   });
 
   it('library overlay wins over the chat place when settings is closed', () => {
@@ -46,6 +72,12 @@ describe('derivePlace', () => {
 
   it('settings wins over schedules when both are open', () => {
     expect(derivePlace(snap({ settingsOpen: true, schedulesOpen: true }))).toEqual({ type: 'settings' });
+  });
+
+  it('spaces view wins over schedules and library when open together', () => {
+    expect(derivePlace(snap({ spacesOpen: true, schedulesOpen: true, libraryOpen: true }))).toEqual({
+      type: 'spaces',
+    });
   });
 
   it('pendingSessionId maps to a session while no thread has reported yet', () => {

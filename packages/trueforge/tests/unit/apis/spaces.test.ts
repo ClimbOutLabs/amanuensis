@@ -186,8 +186,8 @@ describe('spaces API', () => {
       `/${created.data.space.id}?expected_revision=${String(created.data.space.revision)}`,
       { method: 'DELETE' },
     );
-    expect(deleteRes.status).toBe(204);
-    expect(await deleteRes.text()).toBe('');
+    expect(deleteRes.status).toBe(200);
+    expect(await deleteRes.json()).toEqual({});
 
     const getRes = await app.request(`/${created.data.space.id}`);
     expect(getRes.status).toBe(404);

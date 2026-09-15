@@ -64,7 +64,7 @@ export function builtinsFromSpec(input: {
   const config = spec.config;
   const checklistState = new TaskChecklistRequestState(compactionContext);
   const capabilities: AgentCapability[] = [
-    currentDateTime({ tracing }),
+    currentDateTime({ tracing, timezone: definition.clientTimezone }),
     repositoryBindingContext({
       boundRepository,
       sandboxAvailable,

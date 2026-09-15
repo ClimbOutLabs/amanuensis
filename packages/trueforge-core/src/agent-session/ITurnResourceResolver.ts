@@ -53,6 +53,13 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
   readonly toolCallTimeoutMs?: number | undefined;
   /** Host-resolved T2 repository binding, available even when the sandbox capability is disabled. */
   readonly boundRepository?: BoundRepository | undefined;
+  /**
+   * IANA timezone name the client sent with this turn (e.g. CreateTurnRequest.client_timezone),
+   * forwarded to AgentDefinition.clientTimezone by resolveAgentDefinition. Undefined when the
+   * client sent none; get_current_datetime and the ambient current-date section then fall back
+   * to UTC.
+   */
+  readonly clientTimezone?: string | undefined;
   /** Forwarded to AgentThread / orchestrator / RemoteMCP. */
   readonly logger: Logger;
   /** Called exactly once per run, before any other method. */

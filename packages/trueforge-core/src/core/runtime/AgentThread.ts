@@ -102,6 +102,7 @@ import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
+import { resolveLocalTime } from '../util/clientTimezone';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
 import type { AbnormalHandoff, AbnormalHandoffCause, AbnormalHandoffEvidence } from './AbnormalHandoff';
 import type { AgentDefinition } from './AgentDefinition';
@@ -1117,6 +1118,9 @@ export class AgentThread {
       this.deferredTool = new DeferredTool(this.definition.toolSets, {
         tracing: this.tracing,
         logger: input.logger,
+        // Lets call_tool route a mis-addressed host (built-in) tool name to the real
+        // host tool instead of failing. See DeferredTool's host-tool routing.
+        hostToolSets: this.systemToolSets,
       });
     }
 
@@ -1133,9 +1137,13 @@ export class AgentThread {
     // every turn, so provider prefix caching keeps working. The
     // get_current_datetime tool remains for precise time.
     this.instructionDateUtc = new Date().toISOString().slice(0, 10);
+    const local = resolveLocalTime(new Date(), this.definition.clientTimezone);
+    const localDateClause = local.isFallback
+      ? ''
+      : ` The user's local date is ${local.date} (${local.zone}, UTC${local.utcOffset}).`;
     builder.addSection(
       'current-date',
-      `Today's date is ${this.instructionDateUtc} (UTC). Reason about past and future relative to this date, not to your training data.`,
+      `Today's date is ${this.instructionDateUtc} (UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
     );
     // A model whose own release postdates its training data will otherwise
     // insist it doesn't exist, because nothing tells it what it is.

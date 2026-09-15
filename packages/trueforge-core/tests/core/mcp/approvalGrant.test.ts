@@ -13,6 +13,7 @@ import {
   mintImplementationPlanGrant,
   serializeImplementationPlanGrant,
 } from '../../../src/core/mcp/implementationPlanGrant';
+import { sandboxCommandApprovalIdentity } from '../../../src/core/sandbox/Sandbox';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -126,6 +127,32 @@ describe('chat approval grants', () => {
       implementationPlanGrants: new Set(),
     });
     expect(effective.has('call')).toBe(false);
+  });
+
+  it('does not let one verify invocation\'s chat grant admit a different verify invocation', () => {
+    const grantedIdentity = sandboxCommandApprovalIdentity({
+      purpose: 'verify',
+      command: 'npm test',
+      cwd: '/repo',
+      env: {},
+    });
+    const otherIdentity = sandboxCommandApprovalIdentity({
+      purpose: 'verify',
+      command: 'python -c "import os"',
+      cwd: '/repo',
+      env: {},
+    });
+    expect(grantedIdentity).not.toBe(otherIdentity);
+    const granted = { ...toolInfo('sandbox', grantedIdentity), effect: 'verify' as const };
+    const other = { ...toolInfo('sandbox', otherIdentity), effect: 'verify' as const };
+    const effective = effectiveApprovalDecisions({
+      calls: [toolCall('granted', granted), toolCall('other', other)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(granted)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(effective.get('granted')).toEqual({ status: 'allow', scope: 'chat' });
+    expect(effective.has('other')).toBe(false);
   });
 
   it('end-to-end: auto-approves a real read-only local MCP tool from a matching chat grant', async () => {

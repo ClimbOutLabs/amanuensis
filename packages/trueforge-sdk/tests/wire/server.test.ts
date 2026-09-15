@@ -26,7 +26,7 @@ describe("ServerClient", () => {
                     reflect_max_tokens: 1,
                     reflect_timeout_ms: 1,
                 },
-                memory_screen: { enabled: true, threshold: 1.1 },
+                memory_screen: { configured: true, enabled: true, reason: "reason", threshold: 1.1 },
                 sandbox: { enabled: true },
                 settings: { enabled: true },
                 skill: { enabled: true, reason: "reason" },
@@ -64,7 +64,9 @@ describe("ServerClient", () => {
                     reflectTimeoutMs: 1,
                 },
                 memoryScreen: {
+                    configured: true,
                     enabled: true,
+                    reason: "reason",
                     threshold: 1.1,
                 },
                 sandbox: {

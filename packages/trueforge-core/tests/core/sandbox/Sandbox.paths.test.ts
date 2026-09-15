@@ -3858,6 +3858,57 @@ describe('Sandbox provider-owned paths', () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
+  it('rejects verify-purpose commands with unsafe shell syntax before approval', async () => {
+    const exec = jest.fn(() => readyExec());
+    const sandbox = makeSandbox(makeProvider({ exec }));
+    for (const command of ['pnpm test > /tmp/test.log', 'echo $(pnpm test)', 'pnpm test &']) {
+      const wrapped = {
+        name: SANDBOX_EXEC_TOOL_NAME,
+        arguments: { intent: 'Run tests', purpose: 'verify', command, cwd: '/repo' },
+      };
+      await expect(sandbox.toolCallInfo(wrapped)).resolves.toEqual(
+        expect.objectContaining({ is_approval_required: false }),
+      );
+      const response = await sandbox.callTool(wrapped);
+      expect(JSON.stringify(response)).toContain('Verification commands must not use shell redirection');
+    }
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('rejects verify-purpose inline evaluation before approval', async () => {
+    const exec = jest.fn(() => readyExec());
+    const sandbox = makeSandbox(makeProvider({ exec }));
+    for (const command of ["python -c 'import sys; sys.exit(0)'", "node -e 'process.exit(0)'"]) {
+      const wrapped = {
+        name: SANDBOX_EXEC_TOOL_NAME,
+        arguments: { intent: 'Run tests', purpose: 'verify', command, cwd: '/repo' },
+      };
+      await expect(sandbox.toolCallInfo(wrapped)).resolves.toEqual(
+        expect.objectContaining({ is_approval_required: false }),
+      );
+      const response = await sandbox.callTool(wrapped);
+      expect(JSON.stringify(response)).toContain('not allowed for verify-purpose exec calls');
+    }
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('still permits observable verify-purpose commands', async () => {
+    const exec = jest.fn(() => readyExec());
+    const sandbox = makeSandbox(makeProvider({ exec }));
+    await expect(
+      sandbox.toolCallInfo({
+        name: SANDBOX_EXEC_TOOL_NAME,
+        arguments: {
+          intent: 'Run tests',
+          purpose: 'verify',
+          command: 'pnpm test 2>&1 | tail -20',
+          cwd: '/repo',
+        },
+      }),
+    ).resolves.toEqual(expect.objectContaining({ is_approval_required: true }));
+    expect(exec).not.toHaveBeenCalled();
+  });
+
   it('uploads user files to the provider uploads dir', async () => {
     const uploadFile = jest.fn().mockResolvedValue(undefined);
     const provider = makeProvider({ uploadFile });

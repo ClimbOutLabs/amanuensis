@@ -207,11 +207,13 @@ export type { AmanSetupState, MemoryBankStatus } from './components/AmanSetupCon
 export { AmanWelcome, amanSetupItems, amanWelcomeHeading } from './components/AmanWelcome.js';
 export { BugReportProvider, useBugReport, useOptionalBugReport } from './components/BugReportContext.js';
 export type {
+  AppBugReportBundle,
   BugReportApi,
   BugReportBundle,
   BugReportChat,
   BugReportChatMessage,
   BugReportError,
+  BugReportHandoffTarget,
   BugReportTraceEvent,
   BugReportTurnTrace,
 } from './components/BugReportContext.js';
@@ -616,8 +618,6 @@ export { DraftCompositeSelector } from './atoms/draft/DraftCompositeSelector.js'
 export type { DraftCompositeSelectorProps } from './atoms/draft/DraftCompositeSelector.js';
 export { DraftModelSelector } from './atoms/draft/DraftModelSelector.js';
 export type { DraftModelSelectorProps } from './atoms/draft/DraftModelSelector.js';
-export { MascotAnimator, mascotActionFor } from './atoms/MascotAnimator.js';
-export type { MascotAction, MascotAnimatorProps } from './atoms/MascotAnimator.js';
 export { SaveAgentButton } from './atoms/SaveAgentButton.js';
 export type { SaveAgentButtonProps } from './atoms/SaveAgentButton.js';
 export { SaveAgentForm } from './atoms/SaveAgentForm.js';

@@ -45,14 +45,19 @@ services:
       dockerfile: Dockerfile.dev
     image: truefoundry-server:latest
     ports:
-      # Host 8791 avoids conflict with host `pnpm dev` on 8790. This port is reachable
-      # from any interface and is unauthenticated unless OIDC_ISSUER_URL, OIDC_CLIENT_ID,
-      # and OIDC_CLIENT_SECRET are set (see docs/deployment-security.mdx). Do not expose
-      # it beyond localhost or a private network without OIDC configured.
-      - '8791:8790'
+      # Host 8791 avoids conflict with host `pnpm dev` on 8790. Published on
+      # loopback only: the app binds 0.0.0.0 inside the container, and without
+      # OIDC every request has the admin role (see docs/deployment-security.mdx).
+      # To expose it beyond localhost, configure OIDC and publish explicitly.
+      - '127.0.0.1:8791:8790'
     environment:
       # Wins over env_file / image defaults so a host .env cannot flip this.
       NODE_ENV: production
+      # The app sees HOST=0.0.0.0 inside the container, so the REQUIRE_AUTH
+      # startup guard needs this explicit opt-out. The loopback-only port
+      # mapping above is what keeps this stack's exposure local; production
+      # deployments MUST configure OIDC instead of copying this.
+      REQUIRE_AUTH: 'false'
       # Inside the container; host mapping above is 8791.
       PORT: 8790
       # Host-facing origin for MCP OAuth callbacks (mapped port, not container PORT).
