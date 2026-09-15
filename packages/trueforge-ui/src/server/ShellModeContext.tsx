@@ -72,7 +72,7 @@ export type SelectLibraryAgentRequest = {
 };
 
 export type SettingsSection =
-  'models' | 'model-roles' | 'connectors' | 'memory' | 'skills' | 'sandbox' | 'personalization';
+  'models' | 'model-roles' | 'connectors' | 'memory' | 'skills' | 'sandbox' | 'personalization' | 'personas';
 
 export type HistoryAgentFilter = {
   agentId?: string;

@@ -1,23 +1,34 @@
 // @vitest-environment jsdom
-import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
+import { ThreadPrimitive, type RespondToToolApprovalOptions, type ThreadMessageLike } from '@assistant-ui/react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
-function renderAssistantMessage(messages: ThreadMessageLike[], options?: { isRunning?: boolean }) {
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
+function renderAssistantMessage(
+  messages: ThreadMessageLike[],
+  options?: { isRunning?: boolean; onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void },
+) {
   return render(
-    <RuntimeHarness messages={messages} isRunning={options?.isRunning}>
+    <RuntimeHarness
+      messages={messages}
+      isRunning={options?.isRunning}
+      onRespondToToolApproval={options?.onRespondToToolApproval}
+    >
       <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
     </RuntimeHarness>,
   );
 }
 
-function getAgentStepsCard(): HTMLElement {
-  const card = document.querySelector('.aui-agent-steps-card');
-  if (!(card instanceof HTMLElement)) throw new Error('Expected an Agent steps card');
-  return card;
+function getAgentInternals(): HTMLElement {
+  const disclosure = screen.getByTestId('assistant-message-agent-internals');
+  if (!(disclosure instanceof HTMLElement)) throw new Error('Expected an agent internals disclosure');
+  return disclosure;
 }
 
 describe('AssistantMessageContainer', () => {
@@ -80,7 +91,7 @@ describe('AssistantMessageContainer', () => {
       { isRunning: true },
     );
 
-    expect(screen.getByText('Waiting for model')).toBeInTheDocument();
+    expect(screen.getByText(/Waiting for model/)).toBeInTheDocument();
   });
 
   it('labels a running turn as executing tools when a tool part is running', () => {
@@ -103,7 +114,7 @@ describe('AssistantMessageContainer', () => {
       { isRunning: true },
     );
 
-    expect(screen.getByText('Executing tools')).toBeInTheDocument();
+    expect(screen.getByText(/Executing tools/)).toBeInTheDocument();
   });
 
   it('labels a real message-level tool approval pause as waiting for approval', () => {
@@ -132,13 +143,13 @@ describe('AssistantMessageContainer', () => {
       },
     ]);
 
-    expect(screen.getByText('Waiting for approval')).toBeInTheDocument();
+    expect(screen.getByText(/Waiting for approval/)).toBeInTheDocument();
     expect(screen.getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Allow once' })).toBeInTheDocument();
     expect(screen.queryByText(/queue|position|ahead/i)).not.toBeInTheDocument();
   });
 
-  it('keeps the approval phase and controls inside Agent steps for an approval-only message', () => {
+  it('keeps the approval phase and controls inside the agent internals disclosure', () => {
     renderAssistantMessage([
       {
         role: 'assistant',
@@ -163,12 +174,12 @@ describe('AssistantMessageContainer', () => {
       },
     ]);
 
-    const card = getAgentStepsCard();
-    expect(within(card).getByText('Waiting for approval')).toBeInTheDocument();
-    expect(within(card).getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeInTheDocument();
+    const internals = getAgentInternals();
+    expect(within(internals).getByText(/1 step · 1 tool/)).toBeInTheDocument();
+    expect(within(internals).getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeInTheDocument();
   });
 
-  it('counts mixed-turn approval tools only inside the Agent steps card', () => {
+  it('counts mixed-turn approval tools only inside the agent internals disclosure', () => {
     renderAssistantMessage([
       {
         role: 'assistant',
@@ -202,77 +213,58 @@ describe('AssistantMessageContainer', () => {
       },
     ]);
 
-    const cardContent = within(getAgentStepsCard());
-    expect(cardContent.getByText(/2 tool calls/)).toBeInTheDocument();
+    const cardContent = within(getAgentInternals());
+    expect(cardContent.getByText(/2 steps · 2 tools/)).toBeInTheDocument();
     expect(cardContent.getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeInTheDocument();
     expect(cardContent.queryByText('The lookup is complete.')).not.toBeInTheDocument();
   });
 
-  it('reveals an arriving approval after the user collapsed Agent steps and forwards their decision', async () => {
+  it('forwards the approval decision from inside the agent internals disclosure', () => {
     const onRespondToToolApproval = vi.fn();
-    const runningMessage = {
-      id: 'message-approval-transition',
-      role: 'assistant',
-      content: [
+    renderAssistantMessage(
+      [
         {
-          type: 'tool-call',
-          toolCallId: 'tool-complete',
-          toolName: 'lookup_notes',
-          args: {},
-          argsText: '{}',
-          result: { ok: true },
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool-call',
+              toolCallId: 'tool-complete',
+              toolName: 'lookup_notes',
+              args: {},
+              argsText: '{}',
+              result: { ok: true },
+            },
+            {
+              type: 'tool-call',
+              toolCallId: 'tool-approval-1',
+              toolName: 'write_notes',
+              args: { path: 'notes.md' },
+              argsText: '{"path":"notes.md"}',
+              interrupt: { type: 'human', payload: {} },
+              approval: {
+                id: 'approval-1',
+                options: [
+                  { id: 'allow-once', kind: 'allow-once' },
+                  { id: 'deny', kind: 'reject-once' },
+                ],
+              },
+            },
+          ],
+          status: { type: 'requires-action', reason: 'tool-calls' },
         },
       ],
-      status: { type: 'running' },
-    } satisfies ThreadMessageLike;
-    const { rerender } = render(
-      <RuntimeHarness messages={[runningMessage]} isRunning onRespondToToolApproval={onRespondToToolApproval}>
-        <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-      </RuntimeHarness>,
+      { onRespondToToolApproval },
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /Agent steps/i }));
-    expect(screen.getByRole('button', { name: /Agent steps/i })).toHaveAttribute('aria-expanded', 'false');
-
-    rerender(
-      <RuntimeHarness
-        messages={[
-          {
-            ...runningMessage,
-            content: [
-              ...runningMessage.content,
-              {
-                type: 'tool-call',
-                toolCallId: 'tool-approval-transition',
-                toolName: 'write_notes',
-                args: { path: 'notes.md' },
-                argsText: '{"path":"notes.md"}',
-                interrupt: { type: 'human', payload: {} },
-                approval: {
-                  id: 'approval-transition',
-                  options: [
-                    { id: 'allow-once', kind: 'allow-once' },
-                    { id: 'deny', kind: 'reject-once' },
-                  ],
-                },
-              },
-            ],
-            status: { type: 'requires-action', reason: 'tool-calls' },
-          },
-        ]}
-        onRespondToToolApproval={onRespondToToolApproval}
-      >
-        <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
-      </RuntimeHarness>,
-    );
-
-    expect(await screen.findByText('Waiting for approval')).toBeVisible();
-    const card = within(getAgentStepsCard());
+    // The approval wait locks the disclosure open (no toggle) with an attention dot.
+    const internals = getAgentInternals();
+    expect(within(internals).queryByTestId('assistant-message-agent-internals-toggle')).not.toBeInTheDocument();
+    const card = within(internals);
     expect(card.getByRole('radio', { name: 'Allow once' })).toBeVisible();
     expect(card.getByRole('radio', { name: 'Deny' })).toBeVisible();
     fireEvent.click(card.getByRole('radio', { name: 'Allow once' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
-      expect.objectContaining({ approvalId: 'approval-transition', approved: true }),
+      expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );
   });
 
@@ -296,5 +288,66 @@ describe('AssistantMessageContainer', () => {
     ]);
 
     expect(screen.queryByText('Waiting for approval')).not.toBeInTheDocument();
+  });
+
+  it('renders no internals row for a clean text-only turn', () => {
+    renderAssistantMessage([{ role: 'assistant', content: 'just a plain answer' }]);
+
+    expect(screen.getByText('just a plain answer')).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+  });
+
+  it('summarizes completed tool turns as one faint line and starts collapsed', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          { type: 'reasoning', text: 'private reasoning' },
+          {
+            type: 'tool-call',
+            toolCallId: 'tool-done',
+            toolName: 'lookup_notes',
+            args: {},
+            argsText: '{}',
+            result: { ok: true },
+          },
+          { type: 'text', text: 'Here is what I found.' },
+        ],
+      },
+    ]);
+
+    const toggle = screen.getByTestId('assistant-message-agent-internals-toggle');
+    expect(toggle).toHaveTextContent(/2 steps · 1 tool/);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('assistant-message-agent-internals-attention')).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('assistant-message-agent-internals')).toBeVisible();
+  });
+
+  it('auto-expands with an attention dot when a tool errored', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'tool-err',
+            toolName: 'lookup_notes',
+            args: {},
+            argsText: '{}',
+            result: {
+              schema_version: 'tool.response.v2',
+              outcome: { disposition: 'executed_nonzero' },
+              result: { error: 'lookup failed' },
+            },
+          },
+        ],
+      },
+    ]);
+
+    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
   });
 });

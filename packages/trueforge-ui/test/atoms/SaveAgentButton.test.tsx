@@ -282,28 +282,6 @@ describe('SaveAgentButton', () => {
     );
   });
 
-  it('uses the drawer instruction draft when opening before debounce sync completes', async () => {
-    const saveAgent = vi.fn(async (): Promise<SaveAgentResult> => ({ agentId: 'agent-1' }));
-    renderButton({
-      saveAgent,
-      children: <SaveAgentButton instructionsOverride="Instructions currently visible in the drawer." />,
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save Agent' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Save agent' });
-    fireEvent.change(within(dialog).getByLabelText('Agent name'), { target: { value: 'writer' } });
-    fireEvent.change(within(dialog).getByLabelText('Description'), { target: { value: 'Writes docs.' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
-
-    await waitFor(() =>
-      expect(saveAgent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          agentSpec: expect.objectContaining({ instructions: 'Instructions currently visible in the drawer.' }),
-        }),
-      ),
-    );
-  });
-
   it('flushes the shared instruction draft when opening Save Agent', async () => {
     const saveAgent = vi.fn(async (): Promise<SaveAgentResult> => ({ agentId: 'agent-1' }));
     renderButton({

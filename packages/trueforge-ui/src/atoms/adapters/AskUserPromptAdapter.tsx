@@ -111,7 +111,9 @@ export function AskUserPrompt({
     if (!isSubmitAllDisabled) onSubmit();
   };
 
-  const answerInput = (
+  // Inside a selectable option row the textarea sits borderless so the row itself carries the
+  // selected/unselected frame; standalone it keeps its own input frame.
+  const renderAnswerInput = ({ framed }: { framed: boolean }) => (
     <textarea
       rows={1}
       value={currentAnswer.custom}
@@ -130,11 +132,20 @@ export function AskUserPrompt({
       placeholder={hasOptions ? 'Other' : 'Type your answer'}
       aria-label={hasOptions ? 'Other (custom answer)' : 'Your answer'}
       className={cn(
-        'field-sizing-content min-h-6 max-h-[3lh] w-full resize-none overflow-y-auto rounded border border-input-border bg-primary-bg px-2 py-0.5 text-[0.8125rem] leading-snug text-text-primary',
+        'field-sizing-content min-h-6 max-h-[3lh] w-full resize-none overflow-y-auto rounded px-2 py-0.5 text-[0.8125rem] leading-snug text-text-primary',
+        framed ? 'border border-input-border bg-primary-bg' : 'border border-transparent bg-transparent',
         'placeholder:text-[0.8125rem] focus:outline-none focus:ring-1 focus:ring-focus-ring',
       )}
     />
   );
+
+  const optionRowClass = ({ selected }: { selected: boolean }) =>
+    cn(
+      'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors',
+      selected ? 'border-primary-button-bg bg-primary-button-bg/10' : 'border-border bg-primary-bg',
+      !selected && !readOnly && 'hover:border-text-secondary/60',
+      readOnly ? 'cursor-default' : 'cursor-pointer',
+    );
 
   return (
     <div
@@ -142,9 +153,16 @@ export function AskUserPrompt({
       data-testid={dataTestPrefix ? `${dataTestPrefix}-question-card` : undefined}
     >
       <div className="flex items-center justify-between rounded-t-lg border border-primary-button-bg/30 bg-primary-button-bg/10 px-4 py-2">
-        <div className="font-sans text-sm font-medium text-primary-button-bg">
-          {totalQuestions > 1 ? 'Questions' : currentQuestion.question}
-        </div>
+        {isMultiQuestion ? (
+          <div
+            className="font-sans text-sm font-semibold text-primary-button-bg"
+            data-testid={dataTestPrefix ? `${dataTestPrefix}-queue-position` : undefined}
+          >
+            {`Question ${currentQuestionIndex + 1} of ${totalQuestions}`}
+          </div>
+        ) : (
+          <div className="font-sans text-sm font-semibold text-primary-button-bg">{currentQuestion.question}</div>
+        )}
         {readOnly ? (
           <div className="flex h-fit shrink-0 items-center gap-1 rounded border border-primary-button-bg/40 bg-primary-bg px-2 py-0.5 text-[0.6875rem] font-medium text-text-secondary">
             <span className="leading-tight">Unanswered</span>
@@ -170,9 +188,6 @@ export function AskUserPrompt({
             >
               <Icon name="chevron-right" size="0.75em" />
             </IconButton>
-            <div className="ml-1 rounded bg-primary-button-bg/20 px-2 py-1 font-sans text-xs font-medium text-text-primary">
-              <span> {currentQuestionIndex + 1} </span> <span> of </span> <span> {totalQuestions} </span>
-            </div>
           </div>
         )}
       </div>
@@ -180,12 +195,12 @@ export function AskUserPrompt({
       <div className="flex flex-col gap-4 rounded-b-lg border border-t-0 border-border px-4 py-3">
         <div className="flex flex-col gap-3">
           {isMultiQuestion && (
-            <div className="font-sans text-xs font-medium text-text-primary">
+            <div className="font-sans text-[0.9375rem] font-semibold leading-snug text-text-primary">
               {currentQuestion.question || 'What would you like to do?'}
             </div>
           )}
           <div
-            className="flex flex-col gap-3 overflow-visible"
+            className="flex flex-col gap-2 overflow-visible"
             role={hasOptions ? 'radiogroup' : undefined}
             aria-label={hasOptions ? currentQuestion.question || 'Answer options' : undefined}
             onKeyDown={handleAnswerKeyDown}
@@ -193,13 +208,7 @@ export function AskUserPrompt({
             {currentQuestion.options.map((opt, index) => {
               const isSelected = currentAnswer.radioValue === opt;
               return (
-                <label
-                  key={`${index}:${opt}`}
-                  className={cn(
-                    'flex w-fit items-start gap-x-2 overflow-visible',
-                    readOnly ? 'cursor-default' : 'cursor-pointer',
-                  )}
-                >
+                <label key={`${index}:${opt}`} className={optionRowClass({ selected: isSelected })}>
                   <input
                     type="radio"
                     value={opt}
@@ -207,9 +216,14 @@ export function AskUserPrompt({
                     name={`ask-user-question-option-${currentQuestion.id}`}
                     checked={isSelected}
                     onChange={() => handleOptionSelect(opt)}
-                    className="mt-0.5 accent-primary-button-bg"
+                    className="shrink-0 accent-primary-button-bg"
                   />
-                  <span className="min-w-0 font-sans text-[0.8125rem] font-medium leading-snug text-text-primary">
+                  <span
+                    className={cn(
+                      'min-w-0 font-sans text-[0.8125rem] leading-snug text-text-primary',
+                      isSelected ? 'font-semibold' : 'font-medium',
+                    )}
+                  >
                     {opt}
                   </span>
                 </label>
@@ -217,12 +231,7 @@ export function AskUserPrompt({
             })}
 
             {hasOptions ? (
-              <label
-                className={cn(
-                  'flex items-start gap-x-2 overflow-visible',
-                  readOnly ? 'cursor-default' : 'cursor-pointer',
-                )}
-              >
+              <label className={optionRowClass({ selected: isCustomSelected })}>
                 <input
                   type="radio"
                   disabled={readOnly || !currentQuestion.id}
@@ -230,12 +239,12 @@ export function AskUserPrompt({
                   name={`ask-user-question-option-${currentQuestion.id}`}
                   checked={isCustomSelected}
                   onChange={() => handleOptionSelect(ASK_USER_CUSTOM_OPTION)}
-                  className="mt-1 accent-primary-button-bg"
+                  className="shrink-0 accent-primary-button-bg"
                 />
-                <div className="min-w-0 flex-1">{answerInput}</div>
+                <div className="min-w-0 flex-1">{renderAnswerInput({ framed: false })}</div>
               </label>
             ) : (
-              answerInput
+              renderAnswerInput({ framed: true })
             )}
           </div>
         </div>
@@ -253,13 +262,13 @@ export function AskUserPrompt({
               <span />
             )}
             {isNextStep ? (
-              <Button.Primary type="button" size="small" onClick={goToNextQuestion} disabled={isSubmitDisabled}>
+              <Button type="button" size="small" onClick={goToNextQuestion} disabled={isSubmitDisabled}>
                 Next
-              </Button.Primary>
+              </Button>
             ) : (
-              <Button.Primary type="button" size="small" onClick={onSubmit} disabled={isSubmitAllDisabled}>
+              <Button type="button" size="small" onClick={onSubmit} disabled={isSubmitAllDisabled}>
                 Submit
-              </Button.Primary>
+              </Button>
             )}
           </div>
         )}

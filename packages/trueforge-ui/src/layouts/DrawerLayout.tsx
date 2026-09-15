@@ -13,7 +13,7 @@ import { Spinner } from '../atoms/primitives/Spinner.js';
 import { AgentConfigDrawerContainer } from '../containers/AgentConfigDrawerContainer.js';
 import { Thread } from '../containers/Thread.js';
 import { Icon } from '../icons/Icon.js';
-import { shellIsCreateAgent, useOptionalShellMode } from '../server/ShellModeContext.js';
+import { shellIsMutable, useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 
 const TruefoundrySettingsBuilder = lazy(() => import('../containers/SettingsBuilder/index.js'));
@@ -40,7 +40,7 @@ export function DrawerLayout({ className }: { className?: string }) {
   const schedulesOpen = shell?.schedulesOpen === true;
   const overlayOpen = settingsOpen || libraryOpen || sessionsOpen || schedulesOpen;
   const showAgentConfig =
-    shell != null && shellIsCreateAgent(shell.mode) && !overlayOpen && (!isMobile || shell.agentConfigOpen);
+    shell != null && shellIsMutable(shell.mode) && !overlayOpen && (!isMobile || shell.agentConfigOpen);
   const showNewActions = shell?.isNewChatEnabled !== false;
 
   const handleNewChat = () => {

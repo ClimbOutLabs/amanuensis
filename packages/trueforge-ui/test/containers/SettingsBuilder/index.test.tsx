@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
+import { PersonaProvider, type PersonaApi } from '@/components/PersonaContext.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import TruefoundrySettingsBuilder from '@/containers/SettingsBuilder/index.js';
 import { ServerProvider } from '@/server/ServerContext.js';
@@ -29,6 +30,10 @@ vi.mock('@/containers/SettingsBuilder/SkillSettings.js', () => ({
 
 vi.mock('@/containers/SettingsBuilder/SandboxSettings.js', () => ({
   default: () => <div>Sandbox settings content</div>,
+}));
+
+vi.mock('@/containers/SettingsBuilder/PersonaSettings.js', () => ({
+  default: () => <div>Persona settings content</div>,
 }));
 
 vi.mock('@/components/PersonalizationPanel.js', () => ({
@@ -82,10 +87,12 @@ function TestShell({
   server,
   children,
   personalization = false,
+  personas = false,
 }: {
   server?: AgentUIServer;
   children?: ReactNode;
   personalization?: boolean;
+  personas?: boolean;
 }) {
   const content = (
     <DraftCatalogProvider>
@@ -109,16 +116,25 @@ function TestShell({
   ) : (
     content
   );
-  return server === undefined ? (
-    personalizedContent
+  const personaApi: PersonaApi = {
+    listPersonas: async () => [],
+    createPersona: unavailable,
+    updatePersona: unavailable,
+    deletePersona: unavailable,
+    getSessionPersona: async () => null,
+    setSessionPersona: async () => null,
+  };
+  const personaContent = personas ? (
+    <PersonaProvider api={personaApi}>{personalizedContent}</PersonaProvider>
   ) : (
-    <ServerProvider server={server}>{personalizedContent}</ServerProvider>
+    personalizedContent
   );
+  return server === undefined ? personaContent : <ServerProvider server={server}>{personaContent}</ServerProvider>;
 }
 
 async function openSettings() {
+  fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
   await waitFor(() => {
-    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
     expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
   });
 }
@@ -130,7 +146,6 @@ describe('TruefoundrySettingsBuilder', () => {
     expect(screen.queryByRole('heading', { name: 'Settings' })).not.toBeInTheDocument();
 
     await openSettings();
-    expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument();
 
     rerender(<TestShell server={createServer({ catalog: false })} />);
     expect(screen.queryByRole('heading', { name: 'Settings' })).not.toBeInTheDocument();
@@ -153,7 +168,7 @@ describe('TruefoundrySettingsBuilder', () => {
 
     rerender(<TestShell server={createServer({ skills: true, sandbox: true })} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Skills' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
     await waitFor(() => {
       expect(screen.getByText('Skill settings content')).toBeInTheDocument();
     });
@@ -186,6 +201,26 @@ describe('TruefoundrySettingsBuilder', () => {
       expect(screen.getByText('Model settings content')).toBeInTheDocument();
     });
     expect(screen.queryByText('Model role settings content')).not.toBeInTheDocument();
+  });
+
+  it('shows personas as a native Settings section when the host provides a persona API', async () => {
+    const { unmount } = render(<TestShell server={createServer()} />);
+    await openSettings();
+
+    // No persona API wired: the section stays out of the nav entirely, since
+    // PersonaSettings requires a PersonaProvider.
+    expect(screen.queryByRole('button', { name: 'Personas' })).not.toBeInTheDocument();
+    unmount();
+
+    render(<TestShell server={createServer()} personas />);
+    await openSettings();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Personas' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Persona settings content')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Personas' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('shows personalization as a native Settings section when the host provides it', async () => {
@@ -235,21 +270,12 @@ describe('TruefoundrySettingsBuilder', () => {
     expect(parentKeyDown).not.toHaveBeenCalled();
   });
 
-  it('closes via the Back control', async () => {
-    render(<TestShell server={createServer()} />);
-    await openSettings();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-
-    expect(screen.queryByRole('heading', { name: 'Settings' })).not.toBeInTheDocument();
-  });
-
   async function expectCatalogsRefreshOnClose(close: () => void) {
     const getModels = vi.fn(async () => []);
     const getSkills = vi.fn(async () => []);
     const getMcp = vi.fn(async () => []);
     const getCapabilities = vi.fn(async () => ({
-      data: { sandbox: { enabled: true }, skill: { enabled: true }, settings: { enabled: true } },
+      data: { sandbox: { enabled: true }, skill: { enabled: true } },
     }));
     const server = createMockAgentUIServer({
       catalog: createMockCatalog(),
@@ -274,7 +300,7 @@ describe('TruefoundrySettingsBuilder', () => {
 
   it('refreshes composer catalogs when settings close', async () => {
     await expectCatalogsRefreshOnClose(() => {
-      fireEvent.keyDown(window, { key: 'Escape' });
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     });
   });
 
@@ -292,7 +318,7 @@ describe('TruefoundrySettingsBuilder', () => {
       expect(screen.getByText('Skill settings content')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Switch to agent' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.queryByRole('heading', { name: 'Settings' })).not.toBeInTheDocument();
 
     rerender(<TestShell server={createServer()} />);

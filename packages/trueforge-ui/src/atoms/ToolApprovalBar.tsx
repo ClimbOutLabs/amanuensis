@@ -1,11 +1,12 @@
 'use client';
 
-import { useId } from 'react';
+import { useEffect, useId, useState } from 'react';
 
 import { Icon } from '../icons/Icon.js';
 import { StepIconBox } from './agent-chat/StepIconBox.js';
 import { cn } from './lib/cn.js';
 import { Button } from './primitives/Button.js';
+import { CenteredModal } from './primitives/CenteredModal.js';
 
 export type ApprovalOption = {
   id: string;
@@ -75,6 +76,24 @@ export function ToolApprovalBar({
   const isApproved = status?.type === 'approved';
   const isDenied = status?.type === 'denied';
   const interactionsLocked = disabled && !isDecided;
+  // An approve option with a non-empty `grants` array (e.g. "Allow in this chat") needs an
+  // explicit confirmation before it takes effect; grant-less options apply immediately.
+  const [pendingGrantOption, setPendingGrantOption] = useState<ApprovalOption | null>(null);
+
+  // A host supplying a new `approveOptions` set (e.g. after a permission change) must not leave
+  // a stale option pending confirmation from the previous set.
+  useEffect(() => {
+    setPendingGrantOption(null);
+  }, [approveOptions]);
+
+  const handleApproveOptionChange = (option: ApprovalOption) => {
+    if (interactionsLocked) return;
+    if (option.grants && option.grants.length > 0) {
+      setPendingGrantOption(option);
+      return;
+    }
+    onSelect(option.id);
+  };
 
   const headingText = isApproved ? 'Tool Approved' : isDenied ? 'Tool Approval Denied' : 'Tool Approval Required for';
 
@@ -158,9 +177,7 @@ export function ToolApprovalBar({
                       value={option.id}
                       disabled={interactionsLocked}
                       checked={false}
-                      onChange={() => {
-                        if (!interactionsLocked) onSelect(option.id);
-                      }}
+                      onChange={() => handleApproveOptionChange(option)}
                       className="mt-0.5 accent-primary-button-bg"
                     />
                     <span className="min-w-0 font-sans text-[0.8125rem] font-medium leading-snug text-text-primary">
@@ -275,6 +292,61 @@ export function ToolApprovalBar({
           </div>
         </div>
       </div>
+
+      <CenteredModal
+        open={pendingGrantOption != null}
+        onOpenChange={open => {
+          if (!open) setPendingGrantOption(null);
+        }}
+        title={pendingGrantOption?.confirm?.title ?? 'Confirm this approval'}
+        description={pendingGrantOption?.confirm?.description}
+        contentSized
+        aria-label="Confirm permission grant"
+      >
+        {pendingGrantOption ? (
+          <div
+            className="flex flex-col gap-4 px-5 py-4"
+            data-testid={dataTestPrefix ? `${dataTestPrefix}-grant-confirm-dialog` : undefined}
+          >
+            <p className="font-sans text-sm leading-relaxed text-text-primary">
+              <span className="font-semibold">{pendingGrantOption.label}</span> grants the agent the following
+              permissions for this chat:
+            </p>
+            <ul className="flex flex-col gap-1.5" aria-label="Granted permissions">
+              {pendingGrantOption.grants?.map(grant => (
+                <li
+                  key={grant}
+                  className="rounded-md border border-border bg-secondary-bg px-2.5 py-1.5 font-mono text-xs text-text-primary"
+                >
+                  {grant}
+                </li>
+              ))}
+            </ul>
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="small"
+                onClick={() => setPendingGrantOption(null)}
+                data-testid={dataTestPrefix ? `${dataTestPrefix}-grant-cancel` : undefined}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="small"
+                onClick={() => {
+                  onSelect(pendingGrantOption.id);
+                  setPendingGrantOption(null);
+                }}
+                data-testid={dataTestPrefix ? `${dataTestPrefix}-grant-confirm` : undefined}
+              >
+                Confirm
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </CenteredModal>
     </div>
   );
 }

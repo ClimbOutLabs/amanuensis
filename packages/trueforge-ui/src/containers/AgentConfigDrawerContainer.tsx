@@ -14,7 +14,7 @@ import { useDraftCatalog } from '../atoms/draft/DraftCatalogProvider.js';
 import { withInitialUserMessages } from '../atoms/draft/agentConfigMessages.js';
 import { useResourcePermissions } from '../hooks/useResourcePermissions.js';
 import { useOptionalServer, useServerCapabilities } from '../server/ServerContext.js';
-import { shellIsCreateAgent, useShellMode } from '../server/ShellModeContext.js';
+import { shellIsMutable, useShellMode } from '../server/ShellModeContext.js';
 import type { AgentSpec, ConnectorState, McpToolSelection } from '../server/types.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 
@@ -35,7 +35,7 @@ export function AgentConfigDrawerContainer({ showClose = false }: { showClose?: 
   const AgentConfigPanel = useSlot('AgentConfigPanel');
   const AgentConfigEditors = useSlot('AgentConfigEditors');
   const [editor, setEditor] = useState<AgentConfigEditor | null>(null);
-  const isBuilder = shellIsCreateAgent(shell.mode);
+  const isBuilder = shellIsMutable(shell.mode);
   const { draft: instructionDraft, flush: flushInstructions } = useAgentConfigInstructions();
   const closeDrawer = useCallback(() => {
     flushInstructions();

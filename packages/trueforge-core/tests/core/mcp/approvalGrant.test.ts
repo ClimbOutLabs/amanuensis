@@ -13,9 +13,9 @@ import {
   mintImplementationPlanGrant,
   serializeImplementationPlanGrant,
 } from '../../../src/core/mcp/implementationPlanGrant';
-import { sandboxCommandApprovalIdentity } from '../../../src/core/sandbox/Sandbox';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
+import { sandboxCommandApprovalIdentity } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
 // RemoteMCP connects itself via connectRemoteMcp; mock it so a real ToolSet can be exercised
@@ -129,7 +129,7 @@ describe('chat approval grants', () => {
     expect(effective.has('call')).toBe(false);
   });
 
-  it('does not let one verify invocation\'s chat grant admit a different verify invocation', () => {
+  it("does not let one verify invocation's chat grant admit a different verify invocation", () => {
     const grantedIdentity = sandboxCommandApprovalIdentity({
       purpose: 'verify',
       command: 'npm test',

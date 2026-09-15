@@ -6,8 +6,8 @@ import { useDraftCatalog } from '@/atoms/draft/DraftCatalogProvider.js';
 import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
 import { cn } from '@/atoms/lib/cn.js';
 import { useCompactLayout } from '@/atoms/lib/CompactLayoutContext.js';
-import { PageHeader } from '@/atoms/PageHeader.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
+import { useOptionalPersonas } from '@/components/PersonaContext.js';
 import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
 import { Icon } from '@/icons/Icon.js';
 import { useOptionalCatalogServer, useOptionalRefreshServerCapabilities } from '@/server/ServerContext.js';
@@ -20,6 +20,7 @@ const ConnectorSettings = lazy(() => import('./ConnectorSettings.js'));
 const MemorySettings = lazy(() => import('./MemorySettings.js'));
 const SkillSettings = lazy(() => import('./SkillSettings.js'));
 const SandboxSettings = lazy(() => import('./SandboxSettings.js'));
+const PersonaSettings = lazy(() => import('./PersonaSettings.js'));
 const PersonalizationSettings = lazy(() =>
   import('@/components/PersonalizationPanel.js').then(module => ({ default: module.PersonalizationPanel })),
 );
@@ -43,6 +44,7 @@ const TruefoundrySettingsBuilder = () => {
   const hasSkills = catalog?.skillCatalog != null;
   const hasSandbox = catalog?.sandboxCatalog != null;
   const hasPersonalization = useOptionalPersonalization() != null;
+  const hasPersonas = useOptionalPersonas() != null;
 
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
@@ -67,7 +69,10 @@ const TruefoundrySettingsBuilder = () => {
     if (!hasPersonalization && section === 'personalization') {
       setSettingsOpen(settingsOpen, 'models');
     }
-  }, [hasSkills, hasSandbox, hasPersonalization, section, settingsOpen, setSettingsOpen]);
+    if (!hasPersonas && section === 'personas') {
+      setSettingsOpen(settingsOpen, 'models');
+    }
+  }, [hasSkills, hasSandbox, hasPersonalization, hasPersonas, section, settingsOpen, setSettingsOpen]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -109,27 +114,30 @@ const TruefoundrySettingsBuilder = () => {
     if (hasPersonalization) {
       baseSections.push({ id: 'personalization', label: 'Personalization', icon: 'robot' });
     }
+    // Gated on the persona API: PersonaSettings throws without a PersonaProvider,
+    // and the section would be an empty shell without one.
+    if (hasPersonas) {
+      baseSections.push({ id: 'personas', label: 'Personas', icon: 'robot' });
+    }
     return baseSections;
-  }, [hasSkills, hasSandbox, hasPersonalization]);
+  }, [hasSkills, hasSandbox, hasPersonalization, hasPersonas]);
 
   if (!settingsOpen || !catalog) return null;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-primary-bg">
-      <PageHeader
-        title="Settings"
-        start={
-          <button
-            type="button"
-            aria-label="Back"
-            title="Back"
-            className={auiButtonClass({ variant: 'ghost', size: 'icon' })}
-            onClick={closeSettings}
-          >
-            <Icon name="arrow-left" />
-          </button>
-        }
-      />
+      <header className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1.5">
+        <button
+          type="button"
+          aria-label="Back"
+          title="Back"
+          className={auiButtonClass({ variant: 'ghost', size: 'icon' })}
+          onClick={closeSettings}
+        >
+          <Icon name="arrow-left" />
+        </button>
+        <h1 className="text-lg font-semibold tracking-tight text-text-primary">Settings</h1>
+      </header>
 
       <div className={cn('flex min-h-0 flex-1 flex-col', !compact && 'md:flex-row')}>
         <nav
@@ -151,7 +159,7 @@ const TruefoundrySettingsBuilder = () => {
                 // Narrow panels scroll horizontally rather than crushing five labels together.
                 compact ? 'min-w-fit flex-none justify-center gap-1.5 px-2.5' : 'shrink-0',
                 section === item.id
-                  ? 'bg-primary-button-bg/10 text-primary-button-bg'
+                  ? 'bg-primary-button-bg text-primary-button-text'
                   : 'text-text-secondary hover:bg-ghost-button-hover/60 hover:text-text-primary',
               )}
               onClick={() => {
@@ -174,6 +182,7 @@ const TruefoundrySettingsBuilder = () => {
               {section === 'skills' && hasSkills ? <SkillSettings /> : null}
               {section === 'sandbox' && hasSandbox ? <SandboxSettings /> : null}
               {section === 'personalization' && hasPersonalization ? <PersonalizationSettings /> : null}
+              {section === 'personas' && hasPersonas ? <PersonaSettings /> : null}
             </Suspense>
           </div>
         </section>

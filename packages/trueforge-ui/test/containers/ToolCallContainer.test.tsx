@@ -555,7 +555,7 @@ describe('ToolCallContainer', () => {
     expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
   });
 
-  it('keeps a pending approval visible when completed agent steps are collapsed', () => {
+  it('keeps a pending approval visible — the disclosure locks open while approval waits', () => {
     renderPendingApprovalMessage([
       {
         type: 'tool-call',
@@ -574,42 +574,11 @@ describe('ToolCallContainer', () => {
       },
     ]);
 
-    fireEvent.click(screen.getByRole('button', { name: /Agent steps/i }));
-
-    expect(screen.getByRole('radio', { name: 'Allow once' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
-  });
-
-  it('shows the approval bar for a pending sandbox call', () => {
-    renderPendingApprovalMessage([
-      {
-        type: 'tool-call',
-        toolCallId: 'sandbox-1',
-        toolName: 'sandbox_exec',
-        args: {},
-        argsText: '{"command":"rm -rf output"}',
-        interrupt: { type: 'human', payload: {} },
-        approval: { id: 'sandbox-approval', approved: undefined },
-      },
-    ]);
-
-    expect(screen.getByRole('radio', { name: 'Allow once' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
-  });
-
-  it('shows the approval bar for a pending list_tools call', () => {
-    renderPendingApprovalMessage([
-      {
-        type: 'tool-call',
-        toolCallId: 'list-tools-1',
-        toolName: 'list_tools',
-        args: {},
-        argsText: '{"mcp_server":"github-team"}',
-        interrupt: { type: 'human', payload: {} },
-        approval: { id: 'list-tools-approval', approved: undefined },
-      },
-    ]);
-
+    // No collapse toggle while an approval is waiting — the controls the user
+    // must act on can never be hidden behind the trace.
+    expect(
+      screen.queryByRole('button', { name: /Expand agent details|Collapse agent details/ }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Allow once' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Deny' })).toBeInTheDocument();
   });

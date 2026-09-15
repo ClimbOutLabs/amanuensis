@@ -316,23 +316,32 @@ const ConnectorSettings = () => {
       closeApiKeyModal();
       setTimeout(() => {
         toaster?.showSuccess({
-          title: `${entry.name} connected`,
+          title: `${entry.name} ${existingConnector ? 'updated' : 'connected'}`,
         });
       }, 100);
     }, setFormError).catch(() => {});
   };
 
-  const handleMcpServerSubmit = async (draft: AddMcpServerDraft) => {
+  const handleAddMcpServer = async (draft: AddMcpServerDraft) => {
     setFormError(null);
     await runMutation(async () => {
-      if (editingConnector) {
-        await connectorCatalog.updateConnector({ id: editingConnector.id, ...draft });
-      } else {
-        await connectorCatalog.createConnector({ ...draft });
-      }
+      await connectorCatalog.createConnector({ ...draft });
     }, setFormError);
     setTimeout(() => {
-      toaster?.showSuccess({ title: `${draft.name} ${editingConnector ? 'updated' : 'added'}` });
+      toaster?.showSuccess({ title: `${draft.name} added` });
+    }, 0);
+  };
+
+  const handleEditMcpServer = async (draft: AddMcpServerDraft) => {
+    const connector = editingConnector;
+    if (!connector) return;
+    setFormError(null);
+    await runMutation(async () => {
+      const updated = await connectorCatalog.updateConnector({ id: connector.id, ...draft });
+      setSelectedConnector(current => (current?.id === updated.id ? updated : current));
+    }, setFormError);
+    setTimeout(() => {
+      toaster?.showSuccess({ title: `${draft.name} updated` });
     }, 0);
   };
 
@@ -499,9 +508,6 @@ const ConnectorSettings = () => {
         </span>
 
         <div className="min-w-0 flex-1">
-          {/* The connected-list row (the only place `content` renders today) adds its own
-              connection-test-aware badge below; a second, purely credential-based badge here
-              would duplicate that status rather than add information, so this stays name-only. */}
           <h5 className="truncate text-sm font-medium text-text-primary">{connector.name}</h5>
           <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary sm:truncate">{connector.description}</p>
         </div>
@@ -606,7 +612,8 @@ const ConnectorSettings = () => {
                 {connectorCheckStatus.message}
               </p>
             ) : null}
-            <Button.Secondary
+            <Button
+              variant="secondary"
               size="small"
               type="button"
               disabled={busy}
@@ -614,12 +621,11 @@ const ConnectorSettings = () => {
                 event.stopPropagation();
                 setFormError(null);
                 setEditingConnector(connector);
-                setAddMcpServerFormOpen(true);
               }}
             >
               <Icon name="pencil" className="size-3" />
               Edit
-            </Button.Secondary>
+            </Button>
             {connectorCatalog.deleteConnector != null ? (
               <Button
                 variant="ghost"
@@ -677,7 +683,8 @@ const ConnectorSettings = () => {
           <span className="hidden text-xs text-text-secondary sm:inline">
             {AUTH_TYPE_LABELS[entry.auth.type] ?? AUTH_TYPE_LABELS.none}
           </span>
-          <Button.Secondary
+          <Button
+            variant="secondary"
             size="small"
             type="button"
             disabled={busy}
@@ -686,11 +693,20 @@ const ConnectorSettings = () => {
             }}
           >
             {entry.auth.type === 'dcr' ? 'Add' : 'Connect'}
-          </Button.Secondary>
+          </Button>
         </div>
       </article>
     );
   };
+
+  const isReplacingKey = useMemo(() => {
+    return (
+      connectorAwaitingKey !== null &&
+      connectors.ordered.some(
+        (item: ConnectorListItem) => item.isConfigured && item.connector.id === connectorAwaitingKey.id,
+      )
+    );
+  }, [connectorAwaitingKey, connectors.ordered]);
 
   if (selectedConnector) {
     return (
@@ -705,23 +721,21 @@ const ConnectorSettings = () => {
           onEdit={() => {
             setFormError(null);
             setEditingConnector(selectedConnector);
-            setAddMcpServerFormOpen(true);
           }}
           onDisconnect={() => {
             handleDisconnect(selectedConnector);
           }}
         />
         <AddMcpServerForm
-          open={addMcpServerFormOpen}
+          open={editingConnector !== null}
           onOpenChange={open => {
-            setAddMcpServerFormOpen(open);
             if (!open) {
               setEditingConnector(null);
               setFormError(null);
             }
           }}
-          onSubmit={handleMcpServerSubmit}
           connector={editingConnector ?? undefined}
+          onSubmit={handleEditMcpServer}
           busy={busy}
           error={formError}
         />
@@ -744,6 +758,26 @@ const ConnectorSettings = () => {
         </p>
       ) : null}
 
+      {!loading && matchingConnected.length === 0 ? (
+        <section
+          aria-label="Getting started with connectors"
+          className="mt-4 rounded-xl border border-border bg-card-bg px-4 py-3"
+        >
+          <h4 className="text-sm font-semibold text-text-primary">Get connected in three steps</h4>
+          <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-text-secondary">
+            <li>
+              Find a connector in <span className="font-medium text-text-primary">Available</span> below and choose
+              Connect — most need an API key or token from that service.
+            </li>
+            <li>Add it to the current chat from the connector row so Aman can use its tools.</li>
+            <li>
+              Use <span className="font-medium text-text-primary">Test connection</span> to dial the connector and see
+              which tools answered.
+            </li>
+          </ol>
+        </section>
+      ) : null}
+
       {error ? (
         <p className="mt-3 rounded-md border border-failure-bg/30 bg-failure-bg/10 px-3 py-2 text-sm text-failure-bg">
           {error}
@@ -756,17 +790,17 @@ const ConnectorSettings = () => {
             <div className="flex-1">
               <SearchInput query={query} setQuery={setQuery} placeholder="Search connectors" />
             </div>
-            <Button.Secondary
+            <Button
+              variant="secondary"
               type="button"
               onClick={() => {
                 setFormError(null);
-                setEditingConnector(null);
                 setAddMcpServerFormOpen(true);
               }}
             >
               <Icon name="plus" size="1rem" className="mr-1" />
               Add MCP Server
-            </Button.Secondary>
+            </Button>
           </div>
 
           <div className="flex flex-1 flex-col gap-5 overflow-y-auto pb-1">
@@ -812,7 +846,7 @@ const ConnectorSettings = () => {
             onOpenChange={open => {
               if (!open) closeApiKeyModal();
             }}
-            title={`Connect ${connectorAwaitingKey?.name ?? 'connector'}`}
+            title={`${isReplacingKey ? 'Replace key for' : 'Connect'} ${connectorAwaitingKey?.name ?? 'connector'}`}
             description={connectorAwaitingKey?.url}
             contentSized
             className="md:max-w-xl"
@@ -856,27 +890,27 @@ const ConnectorSettings = () => {
               </div>
 
               <footer className="flex justify-end gap-2 border-t border-border px-5 py-4">
-                <Button.Ghost type="button" onClick={closeApiKeyModal} disabled={busy}>
+                <Button variant="ghost" type="button" onClick={closeApiKeyModal} disabled={busy}>
                   Cancel
-                </Button.Ghost>
-                <Button.Primary type="submit" disabled={!apiKey.trim() || busy}>
-                  Connect
-                </Button.Primary>
+                </Button>
+                <Button type="submit" disabled={!apiKey.trim() || busy}>
+                  {isReplacingKey ? 'Replace Key' : 'Connect'}
+                </Button>
               </footer>
             </form>
           </CenteredModal>
 
           <AddMcpServerForm
-            open={addMcpServerFormOpen}
+            open={addMcpServerFormOpen || editingConnector !== null}
             onOpenChange={open => {
-              setAddMcpServerFormOpen(open);
               if (!open) {
+                setAddMcpServerFormOpen(false);
                 setEditingConnector(null);
                 setFormError(null);
               }
             }}
-            onSubmit={handleMcpServerSubmit}
             connector={editingConnector ?? undefined}
+            onSubmit={editingConnector ? handleEditMcpServer : handleAddMcpServer}
             busy={busy}
             error={formError}
           />

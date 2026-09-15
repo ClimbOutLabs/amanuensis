@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type PropsWithChildren, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type PropsWithChildren } from 'react';
 
 import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -10,6 +10,12 @@ export interface AgentStepsContainerProps {
   thinkingCount: number;
   hasFinal: boolean;
   phase?: AgentStepsPhase;
+  /**
+   * Render the step rows without the accordion card. Used when an ancestor
+   * (e.g. AgentInternalsDisclosure) already provides the expand/collapse
+   * chrome, so the trace does not end up nested inside two accordions.
+   */
+  bare?: boolean;
 }
 
 /**
@@ -22,6 +28,7 @@ export function AgentStepsContainer({
   thinkingCount,
   hasFinal,
   phase,
+  bare = false,
 }: PropsWithChildren<AgentStepsContainerProps>) {
   const AgentStepsCard = useSlot('AgentStepsCard');
 
@@ -36,6 +43,10 @@ export function AgentStepsContainer({
     }
   }, [hasFinal, phase]);
 
+  if (bare) {
+    return <div className="aui-agent-steps-bare flex flex-col gap-2">{children}</div>;
+  }
+
   return (
     <AgentStepsCard
       toolCount={toolCount}
@@ -47,7 +58,7 @@ export function AgentStepsContainer({
         setExpanded(prev => !prev);
       }}
     >
-      {children as ReactNode}
+      {children}
     </AgentStepsCard>
   );
 }

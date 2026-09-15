@@ -59,7 +59,13 @@
     --user-message-bg: #2c2a26;
     --user-message-text: #fffdf8;
     --assistant-message-bg: transparent;
+    --assistant-message-text: var(--text-primary);
+    --primary-button-bg: #b5894c;
+    --primary-button-hover: #c69c5d;
+    --primary-button-text: var(--text-primary);
     --secondary-button-bg: var(--primary-bg);
+    --secondary-button-hover: var(--border);
+    --secondary-button-text: var(--text-primary);
     --ghost-button-bg: transparent;
     --ghost-button-hover: #ebe2d3;
     --ghost-button-text: #2c2a26;
@@ -152,15 +158,14 @@
  * brand names and sidebars), while `.aui-root` covers standalone thread
  * shells and consumer slot overrides. `.font-sans-flex` remains available
  * for explicitly portaled surfaces. All three override `--font-sans`.
- * Override `--font-agent-ui` in host CSS to brand the font. Default face is
- * Google Sans (loaded once via `ensureStyles`).
+ * Override `--font-agent-ui` in host CSS to brand the font (the SDK
+ * stylesheet does not load webfonts from a CDN).
  */
 .aui-theme-root,
 .aui-root,
 .font-sans-flex {
   --font-sans: var(
     --font-agent-ui,
-    'Google Sans',
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -172,7 +177,6 @@
   );
   font-family: var(
     --font-agent-ui,
-    'Google Sans',
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -198,11 +202,6 @@
   font-weight: 400;
 }
 
-/* trueforge: circular composer send control (icon-only up-arrow). */
-.aui-theme-root[data-preset='trueforge'] [data-slot='aui_composer-send'] {
-  border-radius: 100%;
-}
-
 /*
  * Display type: prose and welcome surfaces use the display face; chrome keeps
  * the body face. Only the claude preset's display face is serif — for every
@@ -219,7 +218,7 @@
  * buttons) inherits the host page color and goes unreadable in dark mode.
  */
 .aui-theme-root {
-  --thread-list-item-radius: 0.75rem;
+  --thread-list-item-radius: 0.5rem;
   color: var(--text-primary);
 }
 
@@ -339,13 +338,41 @@
   box-shadow: 0 0 0 4px rgb(181 137 76 / 0.14);
 }
 
+.aman-runtime-rail__status[data-status='degraded'] .aman-runtime-rail__status-dot {
+  background: #c06f2e;
+  box-shadow: 0 0 0 4px rgb(192 111 46 / 0.14);
+}
+
 .aman-runtime-rail__status[data-status='offline'] .aman-runtime-rail__status-dot {
-  background: #a95445;
-  box-shadow: 0 0 0 4px rgb(169 84 69 / 0.12);
+  background: #b0433a;
+  box-shadow: 0 0 0 4px rgb(176 67 58 / 0.14);
+}
+
+.aman-runtime-rail__latency {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.aman-runtime-rail__retry {
+  padding: 0.15rem 0.6rem;
+  border: 1px solid #d9c29a;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.aman-runtime-rail__retry:hover {
+  background: rgb(217 194 154 / 0.2);
 }
 
 .aman-runtime-rail__identity {
-  border-bottom: 1px solid var(--border);
   padding: 0.25rem 0 1rem;
 }
 
@@ -364,31 +391,34 @@
   line-height: 1.45;
 }
 
-.aman-runtime-rail__details {
+/* Grouped rail sections: small-caps label over one value line. The top border carries
+ * the separation the old identity divider used to provide. */
+.aman-runtime-rail__section {
   display: grid;
-  gap: 0.85rem;
+  gap: 0.375rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+
+.aman-runtime-rail__section-label {
   margin: 0;
-}
-
-.aman-runtime-rail__details > div {
-  display: grid;
-  gap: 0.25rem;
-}
-
-.aman-runtime-rail__details dt {
   color: var(--text-secondary);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.aman-runtime-rail__details dd {
+.aman-runtime-rail__section-value {
   overflow: hidden;
   margin: 0;
+  color: var(--text-primary);
+  font-size: 0.85rem;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.85rem;
 }
 
-.aman-runtime-rail__details dd a {
+.aman-runtime-rail__section-value a {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -431,22 +461,11 @@
   background: transparent;
 }
 
-.aui-theme-root .aui-scrollbar-hidden,
-.aui-root .aui-scrollbar-hidden {
-  scrollbar-width: none;
-}
-
-.aui-theme-root .aui-scrollbar-hidden::-webkit-scrollbar,
-.aui-root .aui-scrollbar-hidden::-webkit-scrollbar {
-  display: none;
-}
-
 /* ──────────────────────────────────────────────────────────────────────
  * Tailwind v4 `@theme inline` registrations.
  * ──────────────────────────────────────────────────────────────────── */
 @theme inline {
   --color-sidebar-bg: var(--sidebar-bg);
-  --color-sidebar-text: var(--sidebar-text);
   --color-topbar-bg: var(--topbar-bg);
   --color-primary-bg: var(--primary-bg);
   --color-secondary-bg: var(--secondary-bg);
@@ -477,10 +496,6 @@
   --color-failure-text: var(--failure-text);
   --color-warning-bg: var(--warning-bg);
   --color-warning-text: var(--warning-text);
-  --color-approval-banner-bg: var(--approval-banner-bg);
-  --color-approval-banner-border: var(--approval-banner-border);
-  --color-approval-banner-fg: var(--approval-banner-fg);
-  --color-approval-banner-accent: var(--approval-banner-accent);
   --color-focus-ring: var(--focus-ring);
   --color-surface-elevated: var(--surface-elevated);
   --color-white: var(--color-white);
@@ -489,9 +504,6 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  /* Between text-sm (0.875rem) and text-lg (1.125rem); Tailwind has no default text-md. */
-  --text-md: 1rem;
-  --text-md--line-height: 1.5rem;
 }
 
 /* Monaco embeds: blend into surrounding cards (transparent editor chrome). */
@@ -511,130 +523,19 @@
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .aui-bottom-sheet[open] {
+    animation: aui-bottom-sheet-enter 180ms ease-out;
+  }
+}
+
 .aui-bottom-sheet {
   height: min(70dvh, 30rem);
   max-height: 85dvh;
 }
 
-/* Dropdowns / popup cards: opacity + scale (not transform) so portal `style.transform` still positions. */
-@media (prefers-reduced-motion: no-preference) {
-  .aui-popup-enter {
-    animation: aui-popup-enter 140ms ease-out;
-  }
-}
-
-@keyframes aui-popup-enter {
+@keyframes aui-bottom-sheet-enter {
   from {
-    opacity: 0;
-    scale: 0.96;
-  }
-}
-
-/* Dialog slide: off-canvas when closed; @starting-style + allow-discrete for enter/exit.
-   Open state MUST be `none` (not translate(0)) so themePortalRoot fixed popovers/tooltips
-   keep the viewport as containing block and are not clipped by overflow-hidden. */
-@media (prefers-reduced-motion: no-preference) {
-  .aui-bottom-sheet,
-  .aui-side-drawer {
-    transition:
-      transform 200ms ease-out,
-      overlay 200ms ease-out allow-discrete,
-      display 200ms ease-out allow-discrete;
     transform: translateY(100%);
-  }
-
-  .aui-bottom-sheet[open],
-  .aui-side-drawer[open] {
-    transform: none;
-  }
-
-  @starting-style {
-    .aui-bottom-sheet[open],
-    .aui-side-drawer[open] {
-      transform: translateY(100%);
-    }
-  }
-
-  @media (min-width: 768px) {
-    .aui-side-drawer:not([data-compact])[data-anchor='right'] {
-      transform: translateX(100%);
-    }
-
-    .aui-side-drawer:not([data-compact])[data-anchor='right'][open] {
-      transform: none;
-    }
-
-    .aui-side-drawer:not([data-compact])[data-anchor='left'] {
-      transform: translateX(-100%);
-    }
-
-    .aui-side-drawer:not([data-compact])[data-anchor='left'][open] {
-      transform: none;
-    }
-
-    @starting-style {
-      .aui-side-drawer:not([data-compact])[data-anchor='right'][open] {
-        transform: translateX(100%);
-      }
-
-      .aui-side-drawer:not([data-compact])[data-anchor='left'][open] {
-        transform: translateX(-100%);
-      }
-    }
-  }
-}
-
-/* Tool-approval focus flash (composer banner nav). */
-@keyframes aui-approval-flash {
-  0%,
-  100% {
-    background-color: transparent;
-  }
-  15%,
-  40%,
-  65% {
-    background-color: color-mix(in srgb, var(--approval-banner-accent) 18%, transparent);
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .aui-approval-flash {
-    animation: aui-approval-flash 2s ease-in-out;
-    border-radius: 0.375rem;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .aui-approval-flash {
-    background-color: color-mix(in srgb, var(--approval-banner-accent) 18%, transparent);
-    border-radius: 0.375rem;
-  }
-}
-
-/* Left-to-right shimmer for assistant "Working..." indicator text. */
-@keyframes aui-text-shimmer {
-  from {
-    background-position: 100% center;
-  }
-  to {
-    background-position: -100% center;
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .aui-message-indicator-shimmer {
-    background-image: linear-gradient(
-      90deg,
-      var(--text-secondary) 0%,
-      var(--text-secondary) 40%,
-      var(--text-primary) 50%,
-      var(--text-secondary) 60%,
-      var(--text-secondary) 100%
-    );
-    background-size: 200% auto;
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: transparent;
-    animation: aui-text-shimmer 1.5s linear infinite;
   }
 }

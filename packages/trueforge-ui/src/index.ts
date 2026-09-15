@@ -153,6 +153,8 @@ export type {
   McpServer as McpAuthServer,
 } from './atoms/adapters/McpAuthPromptAdapter.js';
 export type { ReasoningCardProps } from './atoms/adapters/ReasoningCardAdapter.js';
+export { AgentInternalsDisclosure } from './atoms/agent-chat/AgentInternalsDisclosure.js';
+export type { AgentInternalsDisclosureProps } from './atoms/agent-chat/AgentInternalsDisclosure.js';
 export { MemoryContextCard } from './atoms/agent-chat/MemoryContextCard.js';
 export type { MemoryContextCardProps } from './atoms/agent-chat/MemoryContextCard.js';
 export { AttachmentCard, USER_MESSAGE_ATTACHMENT_PREVIEW_REM } from './atoms/AttachmentCard.js';
@@ -305,6 +307,8 @@ export { TrueFoundryChatProvider } from './containers/TrueFoundryChatProvider.js
 export type { TrueFoundryChatProviderProps } from './containers/TrueFoundryChatProvider.js';
 export { UserEditComposerContainer } from './containers/UserEditComposerContainer.js';
 export { UserMessageContainer } from './containers/UserMessageContainer.js';
+export { useAgentInternalsPreference } from './hooks/useAgentInternalsPreference.js';
+export type { AgentInternalsPreference } from './hooks/useAgentInternalsPreference.js';
 export { useApprovalNav } from './hooks/useApprovalNav.js';
 export type { ApprovalNavState } from './hooks/useApprovalNav.js';
 export { ComposerBusyProvider, useComposerBusyState } from './hooks/useComposerBusyState.js';
@@ -326,6 +330,8 @@ export { MCP_AUTH_POPUP_CHANNEL, useMCPAuth } from './hooks/useMcpAuth.js';
 export type { McpAuthCallback, McpAuthPopupMessage, UseMCPAuthOptions } from './hooks/useMcpAuth.js';
 export { useResourcePermissions } from './hooks/useResourcePermissions.js';
 export type { UseResourcePermissionsOptions, UseResourcePermissionsResult } from './hooks/useResourcePermissions.js';
+export { useRuntimeConnectivity } from './hooks/useRuntimeConnectivity.js';
+export type { RuntimeConnectivity, UseRuntimeConnectivityOptions } from './hooks/useRuntimeConnectivity.js';
 export {
   IMAGE_MAX_EDGE,
   IMAGE_PASSTHROUGH_BYTES,
@@ -408,7 +414,6 @@ export {
   DEFAULT_AGENT_CONFIG,
   ShellModeProvider,
   libraryAgentId,
-  shellIsCreateAgent,
   shellIsMutable,
   useOptionalShellMode,
   useShellMode,

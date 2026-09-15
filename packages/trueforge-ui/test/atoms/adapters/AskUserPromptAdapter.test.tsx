@@ -86,7 +86,7 @@ describe('AskUserPrompt', () => {
       />,
     );
 
-    expect(screen.getByText('Questions')).toBeInTheDocument();
+    expect(screen.getByText('Question 2 of 2')).toBeInTheDocument();
     expect(screen.getByText('Which region?')).toBeInTheDocument();
     expect(screen.getByText('Answer all questions to submit')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next question' })).toBeDisabled();
@@ -179,5 +179,54 @@ describe('AskUserPrompt', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Immediately' }));
     expect(onCurrentAnswerChange).not.toHaveBeenCalled();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('shows the queue position as "Question N of M" for multi-question prompts', () => {
+    render(
+      <AskUserPrompt
+        questions={[firstQuestion, secondQuestion]}
+        currentQuestion={secondQuestion}
+        currentQuestionIndex={1}
+        currentAnswer={{ radioValue: '', custom: '' }}
+        onSubmit={() => {}}
+        dataTestPrefix="ask"
+      />,
+    );
+
+    expect(screen.getByTestId('ask-queue-position')).toHaveTextContent('Question 2 of 2');
+  });
+
+  it('hides the queue position for a single question', () => {
+    render(
+      <AskUserPrompt
+        questions={[firstQuestion]}
+        currentQuestion={firstQuestion}
+        currentAnswer={{ radioValue: '', custom: '' }}
+        onSubmit={() => {}}
+        dataTestPrefix="ask"
+      />,
+    );
+
+    expect(screen.queryByTestId('ask-queue-position')).not.toBeInTheDocument();
+    expect(screen.getByText('How should this deploy?')).toBeInTheDocument();
+  });
+
+  it('highlights the selected option row distinctly from unselected rows', () => {
+    const onCurrentAnswerChange = vi.fn();
+    render(
+      <AskUserPrompt
+        questions={[firstQuestion]}
+        currentQuestion={firstQuestion}
+        currentAnswer={{ radioValue: 'Immediately', custom: '' }}
+        onCurrentAnswerChange={onCurrentAnswerChange}
+        onSubmit={() => {}}
+        dataTestPrefix="ask"
+      />,
+    );
+
+    const selectedRow = screen.getByRole('radio', { name: 'Immediately' }).closest('label');
+    const unselectedRow = screen.getByRole('radio', { name: 'Schedule it' }).closest('label');
+    expect(selectedRow).toHaveClass('border-primary-button-bg');
+    expect(unselectedRow).not.toHaveClass('border-primary-button-bg');
   });
 });

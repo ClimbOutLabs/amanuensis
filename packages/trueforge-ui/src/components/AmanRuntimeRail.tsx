@@ -1,6 +1,7 @@
 import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, type FC } from 'react';
 
+import { useRuntimeConnectivity } from '../hooks/useRuntimeConnectivity.js';
 import type { MemoryBankStatus } from './AmanSetupContext.js';
 import {
   PersonalizationProvider,
@@ -8,11 +9,12 @@ import {
   type PersonalizationApi,
 } from './PersonalizationContext.js';
 
-export type AmanRuntimeRailStatus = 'ready' | 'connecting' | 'offline';
+export type AmanRuntimeRailStatus = 'ready' | 'connecting' | 'offline' | 'degraded';
 
 export type AmanRuntimeRailProps = {
   avatarSrc?: string;
   modelName?: string;
+  /** Host-provided status wins; when omitted the rail probes `/healthz` itself. */
   status?: AmanRuntimeRailStatus;
   /** Package version of the server answering. Without it the build row is left out. */
   version?: string | undefined;
@@ -33,6 +35,7 @@ const STATUS_LABELS: Record<AmanRuntimeRailStatus, string> = {
   ready: 'Ready',
   connecting: 'Connecting',
   offline: 'Offline',
+  degraded: 'Degraded',
 };
 
 /** Enough of a commit SHA to compare against a branch or an image tag by eye. */
@@ -104,13 +107,17 @@ const MemoryRecallToggle: FC<{ memoryBank: MemoryBankStatus | null | undefined }
 const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   avatarSrc,
   modelName = 'Not configured',
-  status = 'ready',
+  status: statusOverride,
   version,
   buildRef,
   memoryBank,
   settingsHref,
 }) => {
   const profile = useOptionalPersonalization()?.profile;
+  // The host's explicit status always wins; otherwise the rail watches /healthz itself.
+  const selfProbed = statusOverride === undefined;
+  const connectivity = useRuntimeConnectivity({ enabled: selfProbed });
+  const status = statusOverride ?? connectivity.status;
   const statusLabel = STATUS_LABELS[status];
   const trimmedVersion = version?.trim();
   const build =
@@ -130,59 +137,107 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
         )}
       </div>
 
-      <div className="aman-runtime-rail__status" data-status={status}>
-        <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
-        <span>{statusLabel}</span>
-      </div>
-
-      <section className="aman-runtime-rail__identity" aria-labelledby="aman-runtime-rail-title">
+      <div className="aman-runtime-rail__identity">
         <h2 id="aman-runtime-rail-title">{profile?.assistant_name?.trim() || 'Amanuensis'}</h2>
         <p>A personal assistant with a little character.</p>
+      </div>
+
+      <section
+        className="aman-runtime-rail__section"
+        data-section="status"
+        aria-labelledby="aman-runtime-rail-status-label"
+      >
+        <h3 id="aman-runtime-rail-status-label" className="aman-runtime-rail__section-label">
+          Status
+        </h3>
+        <div className="aman-runtime-rail__status" data-status={status}>
+          <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
+          <span>{statusLabel}</span>
+          {selfProbed && connectivity.latencyMs != null && (
+            <span className="aman-runtime-rail__latency" title="Last /healthz round trip">
+              {Math.round(connectivity.latencyMs)} ms
+            </span>
+          )}
+          {selfProbed && (status === 'offline' || status === 'degraded') && (
+            <button
+              type="button"
+              className="aman-runtime-rail__retry"
+              onClick={connectivity.retry}
+              aria-label="Retry connectivity probe"
+            >
+              Retry
+            </button>
+          )}
+        </div>
       </section>
 
-      <dl className="aman-runtime-rail__details">
-        {build === undefined ? null : (
-          <div>
-            <dt>Build</dt>
-            <dd title={build.title}>{build.label}</dd>
-          </div>
-        )}
-        <div>
-          <dt>Model</dt>
-          <dd title={modelName}>{modelName}</dd>
+      <section
+        className="aman-runtime-rail__section"
+        data-section="model"
+        aria-labelledby="aman-runtime-rail-model-label"
+      >
+        <h3 id="aman-runtime-rail-model-label" className="aman-runtime-rail__section-label">
+          Model
+        </h3>
+        <div className="aman-runtime-rail__section-value" title={modelName}>
+          {modelName}
         </div>
-        {memoryBank === undefined ? null : (
-          <div>
-            <dt>Memory</dt>
-            {memoryBank === null ? (
-              <dd>
-                Off
-                {settingsHref === undefined ? null : (
-                  <>
-                    {' · '}
-                    <a href={settingsHref}>set up</a>
-                  </>
-                )}
-              </dd>
-            ) : memoryBank.connected ? (
-              <dd title={memoryBank.name}>
+      </section>
+
+      {memoryBank === undefined ? null : (
+        <section
+          className="aman-runtime-rail__section"
+          data-section="memory"
+          aria-labelledby="aman-runtime-rail-memory-label"
+        >
+          <h3 id="aman-runtime-rail-memory-label" className="aman-runtime-rail__section-label">
+            Memory
+          </h3>
+          {memoryBank === null ? (
+            <div className="aman-runtime-rail__section-value">
+              Off
+              {settingsHref === undefined ? null : (
+                <>
+                  {' · '}
+                  <a href={settingsHref}>set up</a>
+                </>
+              )}
+            </div>
+          ) : memoryBank.connected ? (
+            <>
+              <div className="aman-runtime-rail__section-value" title={memoryBank.name}>
                 {memoryBank.name} · on
-                <MemoryRecallToggle memoryBank={memoryBank} />
-              </dd>
-            ) : (
-              <dd title={memoryBank.name}>
-                {memoryBank.name} · needs sign-in
-                {settingsHref === undefined ? null : (
-                  <>
-                    {' · '}
-                    <a href={settingsHref}>sign in</a>
-                  </>
-                )}
-              </dd>
-            )}
+              </div>
+              <MemoryRecallToggle memoryBank={memoryBank} />
+            </>
+          ) : (
+            <div className="aman-runtime-rail__section-value" title={memoryBank.name}>
+              {memoryBank.name} · needs sign-in
+              {settingsHref === undefined ? null : (
+                <>
+                  {' · '}
+                  <a href={settingsHref}>sign in</a>
+                </>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {build === undefined ? null : (
+        <section
+          className="aman-runtime-rail__section"
+          data-section="session"
+          aria-labelledby="aman-runtime-rail-session-label"
+        >
+          <h3 id="aman-runtime-rail-session-label" className="aman-runtime-rail__section-label">
+            Session
+          </h3>
+          <div className="aman-runtime-rail__section-value" title={build.title}>
+            {build.label}
           </div>
-        )}
-      </dl>
+        </section>
+      )}
     </aside>
   );
 };

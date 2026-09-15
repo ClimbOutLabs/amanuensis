@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
@@ -9,6 +9,7 @@ import { RuntimeHarness } from '../containers/RuntimeHarness.js';
 
 let agentSpec: AgentSpec | null | undefined;
 const updateAgentSpec = vi.fn();
+const fetchMock = vi.fn();
 
 vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryAgentSpec: () => ({ agentSpec }),
@@ -19,6 +20,15 @@ describe('AmanRuntimeRail', () => {
   beforeEach(() => {
     agentSpec = undefined;
     updateAgentSpec.mockClear();
+    fetchMock.mockReset();
+    // The probe stays in flight unless a test overrides the mock, so sync tests
+    // never see a post-assertion status flip.
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('shows the assistant identity and runtime summary', () => {
@@ -34,20 +44,20 @@ describe('AmanRuntimeRail', () => {
     expect(screen.getByRole('img', { name: 'Amanuensis avatar' })).toHaveAttribute('src', '/aman-avatar.png');
   });
 
-  it('shows the version and a shortened build reference', () => {
+  it('shows the version and a shortened build reference in the session section', () => {
     render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail version="0.4.2" buildRef="4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90" />
       </RuntimeHarness>,
     );
 
-    expect(screen.getByText('Build')).toBeInTheDocument();
+    expect(screen.getByText('Session')).toBeInTheDocument();
     const value = screen.getByText('0.4.2 · 4f2a91c');
     expect(value).toBeInTheDocument();
     expect(value).toHaveAttribute('title', '0.4.2 · 4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90');
   });
 
-  it('leaves a tag-shaped build reference whole', () => {
+  it('leaves a tag-shaped build reference whole in the session section', () => {
     render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail version="0.4.2" buildRef="v0.4.2-rc1" />
@@ -57,25 +67,25 @@ describe('AmanRuntimeRail', () => {
     expect(screen.getByText('0.4.2 · v0.4.2-rc1')).toBeInTheDocument();
   });
 
-  it('shows the version alone when the build carries no reference', () => {
+  it('shows the version alone in the session section when the build carries no reference', () => {
     render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail version="0.4.2" />
       </RuntimeHarness>,
     );
 
-    expect(screen.getByText('Build')).toBeInTheDocument();
+    expect(screen.getByText('Session')).toBeInTheDocument();
     expect(screen.getByText('0.4.2')).toBeInTheDocument();
   });
 
-  it('leaves out the build row when the server reports no version', () => {
+  it('leaves out the session section when the server reports no version', () => {
     render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail buildRef="4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90" />
       </RuntimeHarness>,
     );
 
-    expect(screen.queryByText('Build')).not.toBeInTheDocument();
+    expect(screen.queryByText('Session')).not.toBeInTheDocument();
   });
 
   it('shows the memory bank in use', () => {
@@ -186,6 +196,66 @@ describe('AmanRuntimeRail', () => {
 
     expect(await screen.findByRole('heading', { name: 'Mira' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Personalize assistant' })).not.toBeInTheDocument();
+  });
+
+  it('groups the rail into labeled status, model, memory, and session sections', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail modelName="local-model" version="0.4.2" memoryBank={{ name: 'amantest', connected: true }} />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Status' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Model' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Memory' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Session' })).toBeInTheDocument();
+  });
+
+  it('shows the probe latency next to a ready status', async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail />
+      </RuntimeHarness>,
+    );
+
+    expect(await screen.findByText('Ready')).toBeInTheDocument();
+    expect(await screen.findByText(/\d+ ms/)).toBeInTheDocument();
+  });
+
+  it('lets an explicit status prop override the live probe', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail status="degraded" />
+      </RuntimeHarness>,
+    );
+
+    // The probe would report ready, but the host's status wins and no probing happens.
+    expect(screen.getByText('Degraded')).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+ ms/)).not.toBeInTheDocument();
+  });
+
+  it('shows a retry control when the live probe fails, and re-probes on retry', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network down'));
+    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail />
+      </RuntimeHarness>,
+    );
+
+    const retry = await screen.findByRole('button', { name: /retry/i });
+    expect(await screen.findByText('Offline')).toBeInTheDocument();
+
+    fireEvent.click(retry);
+
+    // The retry succeeds after a failure, so the rail reports degraded rather than ready.
+    expect(await screen.findByText('Degraded')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('renders the avatar as a plain, static image with no animator wrapper classes', () => {
