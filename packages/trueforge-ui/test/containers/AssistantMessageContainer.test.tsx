@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type RespondToToolApprovalOptions, type ThreadMessageLike } from '@assistant-ui/react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
+import { MemoryRecallProvider } from '@/components/MemoryRecallContext.js';
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
+import { MemoryTurnContextProvider } from '@/containers/MemoryTurnContextProvider.js';
+import { AgentDetailsPreferenceProvider } from '@/server/AgentDetailsPreferenceContext.js';
+import { ServerProvider } from '@/server/ServerContext.js';
+import { createMockAgentUIServer } from '../server/mockServer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
 function renderAssistantMessage(
@@ -342,5 +348,82 @@ describe('AssistantMessageContainer', () => {
     const internals = getAgentInternals();
     expect(internals.querySelector('[hidden]')).toBeNull();
     expect(screen.getByTestId('assistant-message-agent-internals-attention')).toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer memory recall visibility', () => {
+  const recallEvent: TrueForgeApi.MemoryRecallPersistedEvent = {
+    type: 'aman.memory.recall',
+    id: 'evt_recall_1',
+    createdAt: '2026-08-03T00:00:00.000Z',
+    injectedBlock: '<aman-memory>recalled fact</aman-memory>',
+    stats: {
+      items: 3,
+      entities: 1,
+      droppedOverBudget: 0,
+      droppedBelowThreshold: 0,
+      estimatedTokens: 42,
+      recallMs: 17,
+      budgetReason: 'normal',
+      outcome: 'ok',
+    },
+    sweep: { verified: 0, retried: 0, abandoned: 0, pending: 0 },
+  };
+
+  const messages: ThreadMessageLike[] = [
+    {
+      role: 'assistant',
+      content: 'here you go',
+      metadata: { custom: { turnId: 'trn_1' } },
+    },
+  ];
+
+  async function renderWithStoredPreference(agentDetails: 'expanded' | 'collapsed') {
+    const session = {
+      id: 'sess-1',
+      isMutable: true,
+      createdAt: '2026-08-03T00:00:00.000Z',
+      updatedAt: '2026-08-03T00:00:00.000Z',
+      metadata: { agent_details: agentDetails },
+    };
+    const server = createMockAgentUIServer({
+      getSession: vi.fn(async () => session),
+      updateSession: vi.fn(async () => session),
+    });
+    const listMemoryTurnContext = vi.fn(async () => [{ turnId: 'trn_1', recall: recallEvent }]);
+
+    const result = render(
+      <ServerProvider server={server}>
+        <AgentDetailsPreferenceProvider>
+          <MemoryRecallProvider api={{ listMemoryTurnContext }}>
+            <RuntimeHarness messages={messages} threadId="t1" remoteId="sess-1">
+              <MemoryTurnContextProvider>
+                <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+              </MemoryTurnContextProvider>
+            </RuntimeHarness>
+          </MemoryRecallProvider>
+        </AgentDetailsPreferenceProvider>
+      </ServerProvider>,
+    );
+    // Let the session preference and memory context both resolve.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    return result;
+  }
+
+  it('shows the "N recalled" segment and recall counts when agent details are expanded', async () => {
+    await renderWithStoredPreference('expanded');
+    const internals = getAgentInternals();
+    expect(within(internals).getByText(/3 recalled/)).toBeInTheDocument();
+    expect(within(internals).getByText('3 items, 1 entity')).toBeInTheDocument();
+  });
+
+  it('hides the "N recalled" segment and recall counts when agent details are collapsed', async () => {
+    await renderWithStoredPreference('collapsed');
+    expect(screen.queryByText(/recalled/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Recalled memory')).not.toBeInTheDocument();
   });
 });

@@ -11,7 +11,6 @@ import { useIsMobile } from '../atoms/lib/useIsMobile.js';
 import { BottomSheet } from '../atoms/primitives/BottomSheet.js';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../atoms/primitives/Dialog.js';
 import { Icon } from '../icons/Icon.js';
-import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useOptionalChatFolders, type ChatFolder } from '../server/ChatFolderContext.js';
 
 const deleteItemClass =
@@ -165,10 +164,6 @@ export function ThreadListItemActions({
   const compact = useCompactLayout();
   const isMobile = useIsMobile();
   const chatFolders = useOptionalChatFolders();
-  const { visibility: agentDetailsVisibility, setVisibility: setAgentDetailsVisibility } =
-    useAgentDetailsVisibility(sessionId);
-  const agentDetailsShown = agentDetailsVisibility === 'expanded';
-  const toggleAgentDetails = () => void setAgentDetailsVisibility(agentDetailsShown ? 'collapsed' : 'expanded');
   const [sheetOpen, setSheetOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
   const [portalContainer, setPortalContainer] = useState<HTMLElement>();
@@ -210,16 +205,6 @@ export function ThreadListItemActions({
         {sheetOpen ? (
           <BottomSheet open onOpenChange={setSheetOpen} aria-label="Session actions">
             <div className="flex flex-col gap-1 p-2" role="menu">
-              <button
-                type="button"
-                role="menuitemcheckbox"
-                aria-checked={agentDetailsShown}
-                className={menuItemClass}
-                onClick={toggleAgentDetails}
-              >
-                <Icon name="eye" className="size-3.5" />
-                Show agent details
-              </button>
               {chatFolders !== null ? (
                 <button
                   type="button"
@@ -265,15 +250,6 @@ export function ThreadListItemActions({
           sideOffset={4}
           className="font-sans-flex z-50 min-w-[10rem] rounded-md border border-border bg-card-bg p-1 text-text-primary shadow-md"
         >
-          <ThreadListItemMorePrimitive.Item
-            role="menuitemcheckbox"
-            aria-checked={agentDetailsShown}
-            className={menuItemClass}
-            onSelect={toggleAgentDetails}
-          >
-            <Icon name="eye" className="size-3.5" />
-            Show agent details
-          </ThreadListItemMorePrimitive.Item>
           {chatFolders !== null ? (
             <ThreadListItemMorePrimitive.Item className={menuItemClass} onSelect={() => setFolderOpen(true)}>
               <Icon name="folder" className="size-3.5" />

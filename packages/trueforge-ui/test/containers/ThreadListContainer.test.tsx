@@ -368,11 +368,36 @@ describe('ThreadListContainer', () => {
       throw new Error('Expected session actions button');
     }
     fireEvent.click(actionButton);
+    // "Show agent details" moved out of this menu to a header button next to Clear chat: it must
+    // not appear here (desktop dropdown or mobile sheet) any more.
+    expect(screen.queryByText('Show agent details')).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitemcheckbox')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => {
       expect(onDelete).toHaveBeenCalledWith('thread-1');
     });
+  });
+
+  it('hides the "..." actions menu entirely once "Show agent details" is its only reason to exist', () => {
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [
+          {
+            status: 'regular',
+            id: 'thread-1',
+            remoteId: 'session-1',
+            title: 'Remote session',
+          },
+        ],
+      },
+      // No delete permission and no chat-folders store: with the agent-details item gone, the
+      // menu would have nothing left to show, so the "..." trigger itself must not render either.
+      canDelete: false,
+    });
+
+    expect(screen.queryByRole('button', { name: 'Session actions' })).not.toBeInTheDocument();
   });
 
   it('clears chat selection highlight while a sidebar top nav tab is open', () => {

@@ -147,10 +147,15 @@ export function AssistantMessageContainer() {
   // dot and auto-expand; a clean completed turn with no tools, no thinking, no
   // memory, and no errors renders no internals row at all.
   const recall = memoryContext?.recall;
-  const recalledItems = recall?.stats.items ?? 0;
-  const hasMemory = recall != null || memoryContext?.profile != null;
-  const memoryFailed = memoryContext == null && memoryContextHasError;
+  const agentDetailsVisible = agentDetailsVisibility === 'expanded';
   const recallOutcomeBad = recall != null && (recall.stats.outcome === 'timeout' || recall.stats.outcome === 'error');
+  // The recalled-item count is part of "agent details": suppressed while the chat-level
+  // preference is collapsed, unless the recall itself needs attention (timeout/error). That
+  // exception matches the one AgentInternalsDisclosure already applies to its content.
+  const memoryVisible = recall != null && (agentDetailsVisible || recallOutcomeBad);
+  const recalledItems = memoryVisible ? (recall?.stats.items ?? 0) : 0;
+  const hasMemory = memoryVisible || memoryContext?.profile != null;
+  const memoryFailed = memoryContext == null && memoryContextHasError;
   const hasToolError = parts.some(isToolPartErrored);
   const attention = hasToolError || recallOutcomeBad || memoryFailed || phase === 'waiting-for-approval';
   const trivial = !isMessageRunning && toolCount === 0 && thinkingCount === 0 && !hasMemory && !attention;
@@ -208,6 +213,7 @@ export function AssistantMessageContainer() {
               profile={memoryContext?.profile}
               unavailable={memoryFailed}
               onRetry={retryMemoryContext}
+              agentDetailsVisible={agentDetailsVisible}
             />
             <MessagePrimitive.GroupedParts groupBy={groupBy}>
               {({ part, children }) => {
