@@ -23,7 +23,7 @@ import { useOptionalChatFolders } from '../server/ChatFolderContext.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
-import { ChatFolderSection, ThreadListItemActions } from './ChatFolderControls.js';
+import { ChatFolderSection, NewFolderButton, ThreadListItemActions } from './ChatFolderControls.js';
 
 /**
  * Simplified relative to the reference: renders threads in a single flat list
@@ -43,10 +43,12 @@ function ThreadListItemRow({
   onThreadOpen,
   canDeleteSession,
   canDeleteResource,
+  canRenameSession,
 }: {
   onThreadOpen?: () => void;
   canDeleteSession: boolean;
   canDeleteResource: (sessionId: string) => boolean;
+  canRenameSession: boolean;
 }) {
   const aui = useAui();
   const shell = useOptionalShellMode();
@@ -61,9 +63,10 @@ function ThreadListItemRow({
   const agentName = readThreadAgentName(custom);
   const sidebarNavOpen = shell?.libraryOpen === true || shell?.sessionsOpen === true || shell?.schedulesOpen === true;
   const canDelete = canDeleteSession && remoteId != null && canDeleteResource(remoteId);
-  // The "..." actions menu only has Delete and/or Move to folder left (the "Show agent
+  const canRename = canRenameSession && remoteId != null;
+  // The "..." actions menu holds Rename, Delete, and/or Move to folder (the "Show agent
   // details" item moved to a header button next to Clear chat), so it stays gated on those.
-  const showActions = remoteId != null && (canDelete || chatFolders !== null);
+  const showActions = remoteId != null && (canDelete || chatFolders !== null || canRename);
   const currentFolderId = remoteId == null ? null : (chatFolders?.assignments.get(remoteId) ?? null);
 
   return (
@@ -115,7 +118,13 @@ function ThreadListItemRow({
         }}
         actions={
           showActions && remoteId != null ? (
-            <ThreadListItemActions sessionId={remoteId} currentFolderId={currentFolderId} canDelete={canDelete} />
+            <ThreadListItemActions
+              sessionId={remoteId}
+              currentFolderId={currentFolderId}
+              canDelete={canDelete}
+              canRename={canRename}
+              title={title ?? 'New Chat'}
+            />
           ) : undefined
         }
       />
@@ -151,11 +160,13 @@ function ThreadListItemByIndex({
   onThreadOpen,
   canDeleteSession,
   canDeleteResource,
+  canRenameSession,
 }: {
   index: number;
   onThreadOpen?: () => void;
   canDeleteSession: boolean;
   canDeleteResource: (sessionId: string) => boolean;
+  canRenameSession: boolean;
 }) {
   const threadIds = useAuiState(s => s.threads.threadIds);
   const key = threadIds[index] ?? String(index);
@@ -165,6 +176,7 @@ function ThreadListItemByIndex({
         onThreadOpen={onThreadOpen}
         canDeleteSession={canDeleteSession}
         canDeleteResource={canDeleteResource}
+        canRenameSession={canRenameSession}
       />
     </ThreadListItemByIndexProvider>
   );
@@ -175,11 +187,13 @@ function ThreadListItemsByRecency({
   onThreadOpen,
   canDeleteSession,
   canDeleteResource,
+  canRenameSession,
 }: {
   indices: number[];
   onThreadOpen?: () => void;
   canDeleteSession: boolean;
   canDeleteResource: (sessionId: string) => boolean;
+  canRenameSession: boolean;
 }) {
   const threadIds = useAuiState(s => s.threads.threadIds);
   const threadItems = useAuiState(s => s.threads.threadItems);
@@ -195,6 +209,7 @@ function ThreadListItemsByRecency({
             onThreadOpen={onThreadOpen}
             canDeleteSession={canDeleteSession}
             canDeleteResource={canDeleteResource}
+            canRenameSession={canRenameSession}
           />
         ))}
       </>
@@ -228,6 +243,7 @@ function ThreadListItemsByRecency({
               onThreadOpen={onThreadOpen}
               canDeleteSession={canDeleteSession}
               canDeleteResource={canDeleteResource}
+              canRenameSession={canRenameSession}
             />
           ))}
         </ChatFolderSection>
@@ -242,6 +258,7 @@ function ThreadListItemsByRecency({
               onThreadOpen={onThreadOpen}
               canDeleteSession={canDeleteSession}
               canDeleteResource={canDeleteResource}
+              canRenameSession={canRenameSession}
             />
           ))}
         </section>
@@ -268,6 +285,7 @@ function RecentChatsSection({
 }) {
   const [expanded, setExpanded] = useState(true);
   const shell = useOptionalShellMode();
+  const chatFolders = useOptionalChatFolders();
   const activeRemoteId = useAuiState(s => s.threadListItem.remoteId);
   const historyFilterIntent = shell?.historyAgentFilter?.intent;
   const showFilter =
@@ -302,6 +320,7 @@ function RecentChatsSection({
           <h2 className="min-w-0 flex-1 truncate px-1.5 py-1 text-sm font-medium text-text-secondary">{heading}</h2>
         )}
         {showFilter ? <AgentHistoryFilterButton /> : null}
+        {chatFolders !== null ? <NewFolderButton /> : null}
       </div>
       {isOpen ? (
         <div
@@ -350,6 +369,9 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   const isIdle = shell?.mode.status === 'idle';
   const isRecentHistory = variant === 'recent-history';
   const canDeleteSession = typeof server?.deleteSession === 'function';
+  // `updateSession` is required on AgentChatServer, so any connected server can rename;
+  // this only gates on the server existing at all (mirrors `chatFolders !== null` above).
+  const canRenameSession = server !== null;
   const remoteSessionIds = useMemo(
     () => threadItems.flatMap(item => (item.remoteId == null ? [] : [item.remoteId])),
     [threadItems],
@@ -428,6 +450,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
           onThreadOpen={onThreadOpen}
           canDeleteSession={canDeleteSession}
           canDeleteResource={canDeleteResource}
+          canRenameSession={canRenameSession}
         />
       </ThreadListPrimitive.Root>
     );

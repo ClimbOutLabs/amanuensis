@@ -15,6 +15,18 @@ Key Features:
 - **Integration Settings** - Configure models, MCP servers, skills, and sandbox environments.
 - **Server Configuration** - Choose between TrueForge, a fully custom server, or TrueFoundry.
 
+## Chat history and organization
+
+The sidebar's chat history list supports renaming chats, filing them into folders, and controlling how much detail is shown per chat.
+
+**Rename a chat**: open a chat's **···** menu (the desktop dropdown, or the sheet on mobile/compact layouts) and choose **Rename**. Type the new title and press Enter, or click **Rename**, to save; Escape cancels without saving, and an empty title is rejected. Renaming updates the sidebar row immediately and persists to the session.
+
+**Folders**: click **New folder** next to the chat history header to create a folder. Move an existing chat into one from its **···** menu (**Move to folder**), which also lets you create a folder on the spot. Folders render as collapsible sections above the unfiled chats; each folder's own **···** button opens a dialog to rename or delete it, deleting a folder keeps its chats, just unfiled.
+
+**Agent details**: while a chat is open, the toggle next to **Clear chat** in the header shows or hides the agent's internal steps (reasoning, tool calls, subagents) for that chat. It only appears once the chat has a persisted session, and is hidden while the chat is idle or on a fresh, unsaved chat.
+
+A chat's **···** menu itself only appears when at least one of Rename, Delete, or Move to folder is actually available for it.
+
 {/* 
 ## Bundled UI
 

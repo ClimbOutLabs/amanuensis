@@ -63,6 +63,13 @@ export const UpdateSessionRequestSchema = z
   .object({
     agent: SessionAgentSpecBodySchema.optional(),
     metadata: SessionMetadataSchema.optional(),
+    title: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe('New chat title. Trimmed; must be non-empty after trimming.'),
   })
   .strict()
   .openapi('UpdateSessionRequest');

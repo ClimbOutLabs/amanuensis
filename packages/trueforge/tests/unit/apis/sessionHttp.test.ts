@@ -719,6 +719,37 @@ describe('sessions HTTP agent binding', () => {
     expect(omittedJson.data.metadata).toEqual({});
   });
 
+  it('PATCH title trims, rejects blank/oversized values, and round-trips', async () => {
+    const created = await app.request('/', jsonInit('POST', { agent: { spec: inlineSpec } }));
+    expect(created.status).toBe(201);
+    const createdJson = (await created.json()) as { data: { id: string; title: string | null } };
+    expect(createdJson.data.title).toBeNull();
+
+    const renamed = await app.request(`/${createdJson.data.id}`, jsonInit('PATCH', { title: '  Renamed chat  ' }));
+    expect(renamed.status).toBe(200);
+    const renamedJson = (await renamed.json()) as { data: { title: string | null } };
+    expect(renamedJson.data.title).toBe('Renamed chat');
+
+    const reread = await app.request(`/${createdJson.data.id}`);
+    const rereadJson = (await reread.json()) as { data: { title: string | null } };
+    expect(rereadJson.data.title).toBe('Renamed chat');
+
+    const blank = await app.request(`/${createdJson.data.id}`, jsonInit('PATCH', { title: '   ' }));
+    expect(blank.status).toBe(400);
+
+    const tooLong = await app.request(`/${createdJson.data.id}`, jsonInit('PATCH', { title: 'x'.repeat(201) }));
+    expect(tooLong.status).toBe(400);
+
+    const stillRenamed = await app.request(`/${createdJson.data.id}`);
+    const stillRenamedJson = (await stillRenamed.json()) as { data: { title: string | null } };
+    expect(stillRenamedJson.data.title).toBe('Renamed chat');
+
+    const omitPatch = await app.request(`/${createdJson.data.id}`, jsonInit('PATCH', {}));
+    expect(omitPatch.status).toBe(200);
+    const omitJson = (await omitPatch.json()) as { data: { title: string | null } };
+    expect(omitJson.data.title).toBe('Renamed chat');
+  });
+
   it('rejects invalid session metadata on create', async () => {
     const tooLongKey = await app.request(
       '/',

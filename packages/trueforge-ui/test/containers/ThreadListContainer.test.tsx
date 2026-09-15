@@ -6,7 +6,7 @@ import {
   type ThreadMessageLike,
 } from '@assistant-ui/react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { ThreadListRowProps } from '@/atoms/ThreadListRow.js';
@@ -43,6 +43,60 @@ function ThreadListRuntimeHarness({
   });
 
   return <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
+}
+
+/**
+ * Renders `ThreadListContainer` on a thread list adapter that actually applies `onRename` to
+ * its own state, mirroring how the real `RemoteThreadListAdapter` optimistically updates
+ * `threadData` regardless of what the host's `rename()` implementation does (it is a no-op in
+ * `@truefoundry/assistant-ui-runtime` today). `renderThreadList`'s static adapter has no such
+ * mechanism, so this harness is needed to test that a rename is reflected in the row.
+ */
+function RenamableThreadListHarness({
+  onUpdateSession,
+}: {
+  onUpdateSession: (request: { sessionId: string; title?: string }) => void;
+}) {
+  const [title, setTitle] = useState('Remote session');
+  const runtime = useExternalStoreRuntime<ThreadMessageLike>({
+    messages: [],
+    convertMessage: message => message,
+    onNew: async () => {},
+    adapters: {
+      threadList: {
+        threadId: 'thread-1',
+        threads: [{ status: 'regular', id: 'thread-1', remoteId: 'session-1', title }],
+        onRename: async (_threadId, newTitle) => {
+          setTitle(newTitle);
+        },
+      },
+    },
+  });
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <SlotsProvider overrides={{ ThreadListRow: ThreadListRowOverride }}>
+        <CompactLayoutProvider>
+          <ServerProvider
+            server={createMockAgentUIServer({
+              updateSession: async ({ sessionId, title: nextTitle }) => {
+                onUpdateSession({ sessionId, title: nextTitle });
+                return {
+                  id: sessionId,
+                  title: nextTitle ?? null,
+                  isMutable: true,
+                  createdAt: new Date(0).toISOString(),
+                  updatedAt: new Date(0).toISOString(),
+                };
+              },
+            })}
+          >
+            <ThreadListContainer />
+          </ServerProvider>
+        </CompactLayoutProvider>
+      </SlotsProvider>
+    </AssistantRuntimeProvider>
+  );
 }
 
 function ThreadListRowOverride({ title, active, onSelect, actions }: ThreadListRowProps) {
@@ -109,12 +163,17 @@ function renderThreadList({
   adapter,
   onThreadOpen,
   canDelete = false,
+  canRename = false,
+  onUpdateSession,
   variant,
   chatFolders,
 }: {
   adapter: ExternalStoreThreadListAdapter;
   onThreadOpen?: () => void;
   canDelete?: boolean;
+  canRename?: boolean;
+  /** Spy invoked with the rename request when the mock `updateSession` is called. */
+  onUpdateSession?: (request: { sessionId: string; title?: string }) => void;
   variant?: ThreadListContainerProps['variant'];
   chatFolders?: ChatFolderStore;
 }) {
@@ -133,12 +192,32 @@ function renderThreadList({
     </SlotsProvider>
   );
 
-  if (!canDelete) {
+  if (!canDelete && !canRename) {
     return render(list);
   }
 
   return render(
-    <ServerProvider server={createMockAgentUIServer({ deleteSession: async () => {} })}>{list}</ServerProvider>,
+    <ServerProvider
+      server={createMockAgentUIServer({
+        ...(canDelete ? { deleteSession: async () => {} } : {}),
+        ...(canRename
+          ? {
+              updateSession: async ({ sessionId, title }) => {
+                onUpdateSession?.({ sessionId, title });
+                return {
+                  id: sessionId,
+                  title: title ?? null,
+                  isMutable: true,
+                  createdAt: new Date(0).toISOString(),
+                  updatedAt: new Date(0).toISOString(),
+                };
+              },
+            }
+          : {}),
+      })}
+    >
+      {list}
+    </ServerProvider>,
   );
 }
 
@@ -379,7 +458,7 @@ describe('ThreadListContainer', () => {
     });
   });
 
-  it('hides the "..." actions menu entirely once "Show agent details" is its only reason to exist', () => {
+  it('shows the "..." actions menu when only Rename is available', () => {
     renderThreadList({
       adapter: {
         threadId: 'thread-1',
@@ -392,12 +471,192 @@ describe('ThreadListContainer', () => {
           },
         ],
       },
-      // No delete permission and no chat-folders store: with the agent-details item gone, the
-      // menu would have nothing left to show, so the "..." trigger itself must not render either.
+      // No delete permission and no chat-folders store, but a server (so Rename is available):
+      // the "..." trigger must still render.
       canDelete: false,
+      canRename: true,
+    });
+
+    const actionButton = screen.getByRole('button', { name: 'Session actions' });
+    fireEvent.click(actionButton);
+    expect(screen.getByRole('menuitem', { name: 'Rename' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Delete' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Move to folder')).not.toBeInTheDocument();
+  });
+
+  it('hides the "..." actions menu entirely when nothing is available', () => {
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [
+          {
+            status: 'regular',
+            id: 'thread-1',
+            remoteId: 'session-1',
+            title: 'Remote session',
+          },
+        ],
+      },
+      // No delete permission, no chat-folders store, and no server (so Rename is unavailable
+      // too): the "..." trigger itself must not render.
+      canDelete: false,
+      canRename: false,
     });
 
     expect(screen.queryByRole('button', { name: 'Session actions' })).not.toBeInTheDocument();
+  });
+
+  function openRenameDialog() {
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    return screen.getByRole('textbox', { name: 'Chat title' });
+  }
+
+  it('renames a chat: saving persists the title and updates the sidebar row immediately', async () => {
+    const onUpdateSession = vi.fn();
+    render(<RenamableThreadListHarness onUpdateSession={onUpdateSession} />);
+
+    const input = openRenameDialog();
+    fireEvent.change(input, { target: { value: 'Renamed chat' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+
+    await waitFor(() => {
+      expect(onUpdateSession).toHaveBeenCalledWith({ sessionId: 'session-1', title: 'Renamed chat' });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Renamed chat' })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('textbox', { name: 'Chat title' })).not.toBeInTheDocument();
+  });
+
+  it('renames a chat: Enter saves', async () => {
+    const onUpdateSession = vi.fn();
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [
+          {
+            status: 'regular',
+            id: 'thread-1',
+            remoteId: 'session-1',
+            title: 'Remote session',
+          },
+        ],
+      },
+      canRename: true,
+      onUpdateSession,
+    });
+
+    const input = openRenameDialog();
+    fireEvent.change(input, { target: { value: 'Renamed via Enter' } });
+    const form = input.closest('form');
+    if (form === null) {
+      throw new Error('Expected the rename input to be inside a form');
+    }
+    fireEvent.submit(form);
+
+    await waitFor(() => {
+      expect(onUpdateSession).toHaveBeenCalledWith({ sessionId: 'session-1', title: 'Renamed via Enter' });
+    });
+  });
+
+  it('renames a chat: Escape cancels without saving', () => {
+    const onUpdateSession = vi.fn();
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [
+          {
+            status: 'regular',
+            id: 'thread-1',
+            remoteId: 'session-1',
+            title: 'Remote session',
+          },
+        ],
+      },
+      canRename: true,
+      onUpdateSession,
+    });
+
+    const input = openRenameDialog();
+    fireEvent.change(input, { target: { value: 'Should not save' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(screen.queryByRole('textbox', { name: 'Chat title' })).not.toBeInTheDocument();
+    expect(onUpdateSession).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Remote session' })).toBeInTheDocument();
+  });
+
+  it('renames a chat: empty input is rejected, not submitted', () => {
+    const onUpdateSession = vi.fn();
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [
+          {
+            status: 'regular',
+            id: 'thread-1',
+            remoteId: 'session-1',
+            title: 'Remote session',
+          },
+        ],
+      },
+      canRename: true,
+      onUpdateSession,
+    });
+
+    const input = openRenameDialog();
+    fireEvent.change(input, { target: { value: '   ' } });
+
+    expect(screen.getByRole('button', { name: 'Rename' })).toBeDisabled();
+    const form = input.closest('form');
+    if (form === null) {
+      throw new Error('Expected the rename input to be inside a form');
+    }
+    fireEvent.submit(form);
+
+    expect(onUpdateSession).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox', { name: 'Chat title' })).toBeInTheDocument();
+  });
+
+  it('creates a new folder from the sidebar header and shows it in the list immediately', async () => {
+    const createFolder = vi.fn(async ({ name }: { name: string }) => ({ id: 'folder-new', name }));
+    renderThreadList({
+      adapter: {
+        threadId: 'thread-1',
+        threads: [
+          {
+            status: 'regular',
+            id: 'thread-1',
+            remoteId: 'session-1',
+            title: 'Remote session',
+          },
+        ],
+      },
+      chatFolders: {
+        load: async () => ({ folders: [], assignments: [] }),
+        createFolder,
+        renameFolder: async ({ folderId, name }) => ({ id: folderId, name }),
+        deleteFolder: async () => {},
+        setSessionFolder: async () => {},
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'New folder' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'New folder' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'New folder name' }), {
+      target: { value: 'Research' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(createFolder).toHaveBeenCalledWith({ name: 'Research' });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Research' })).toBeInTheDocument();
+    });
   });
 
   it('clears chat selection highlight while a sidebar top nav tab is open', () => {

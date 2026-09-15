@@ -9499,6 +9499,12 @@
           },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
+          },
+          "title": {
+            "description": "New chat title. Trimmed; must be non-empty after trimming.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
           }
         },
         "type": "object"
