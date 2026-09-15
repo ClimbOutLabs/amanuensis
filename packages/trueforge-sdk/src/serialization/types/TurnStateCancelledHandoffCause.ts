@@ -13,6 +13,7 @@ export const TurnStateCancelledHandoffCause: core.serialization.Schema<
     "iteration_limit",
     "fatal_error",
     "model_stream_fault",
+    "loop_detected",
 ]);
 
 export declare namespace TurnStateCancelledHandoffCause {
@@ -21,5 +22,6 @@ export declare namespace TurnStateCancelledHandoffCause {
         | "server_cancelled"
         | "iteration_limit"
         | "fatal_error"
-        | "model_stream_fault";
+        | "model_stream_fault"
+        | "loop_detected";
 }

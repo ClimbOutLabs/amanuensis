@@ -14,6 +14,10 @@ export const GitSkill: core.serialization.ObjectSchema<serializers.GitSkill.Raw,
         requires: core.serialization.list(core.serialization.string()).optional(),
         type: core.serialization.stringLiteral("git"),
         url: core.serialization.string(),
+        whenToUse: core.serialization.property(
+            "when_to_use",
+            core.serialization.list(core.serialization.string()).optional(),
+        ),
     });
 
 export declare namespace GitSkill {
@@ -25,5 +29,6 @@ export declare namespace GitSkill {
         requires?: string[] | null;
         type: "git";
         url: string;
+        when_to_use?: string[] | null;
     }
 }

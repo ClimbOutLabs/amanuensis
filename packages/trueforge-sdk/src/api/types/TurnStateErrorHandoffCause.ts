@@ -7,5 +7,6 @@ export const TurnStateErrorHandoffCause = {
     IterationLimit: "iteration_limit",
     FatalError: "fatal_error",
     ModelStreamFault: "model_stream_fault",
+    LoopDetected: "loop_detected",
 } as const;
 export type TurnStateErrorHandoffCause = (typeof TurnStateErrorHandoffCause)[keyof typeof TurnStateErrorHandoffCause];

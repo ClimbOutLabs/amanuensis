@@ -514,12 +514,20 @@ describe("SpacesClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
-        server.mockEndpoint().delete("/api/v1/spaces/space_id").respondWith().statusCode(200).build();
+        const rawResponseBody = {};
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/spaces/space_id")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
         const response = await client.spaces.delete("space_id", {
             expectedRevision: 1,
         });
-        expect(response).toEqual(undefined);
+        expect(response).toEqual({});
     });
 
     test("delete (2)", async () => {

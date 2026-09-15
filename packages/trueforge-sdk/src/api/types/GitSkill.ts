@@ -15,4 +15,6 @@ export interface GitSkill {
     type: "git";
     /** Full HTTPS URL of a GitHub or GitLab repository. */
     url: string;
+    /** Trigger phrases describing when the agent should use the skill. */
+    whenToUse?: string[];
 }

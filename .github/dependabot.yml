@@ -20,6 +20,9 @@ updates:
       - dependency-name: '*'
         update-types:
           - version-update:semver-major
+      # Pinned at 8.68.0: 8.70.0's no-meaningless-void-operator flags this
+      # codebase's void unusedParam; idiom (see PR #174 and #213).
+      - dependency-name: 'typescript-eslint'
     groups:
       npm-minor-and-patch:
         applies-to: version-updates

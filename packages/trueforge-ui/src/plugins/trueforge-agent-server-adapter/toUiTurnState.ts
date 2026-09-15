@@ -1,6 +1,5 @@
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type { SessionEventItem, TurnDoneMetrics, TurnState, TurnStreamingEvent } from '../../server/types.js';
-import { isSkillUsedEvent } from './skillUsedEvent.js';
 
 /** SDK token fields are optional; the UI contract requires numbers. Keep cost for session tiles. */
 export function toUiTurnDoneMetrics(metrics: TrueForgeApi.TurnMetrics): TurnDoneMetrics & { totalCostInUsd?: number } {
@@ -75,7 +74,7 @@ export function toUiEventItem(item: TrueForgeApi.SessionEventItem): SessionEvent
     item.event.type === 'tool.execution_started' ||
     item.event.type === 'aman.memory.recall' ||
     item.event.type === 'aman.profile.learned' ||
-    isSkillUsedEvent(item.event) ||
+    item.event.type === 'aman.skill.used' ||
     item.event.type === 'agent.context.compaction' ||
     item.event.type === 'document.ingestion'
   ) {

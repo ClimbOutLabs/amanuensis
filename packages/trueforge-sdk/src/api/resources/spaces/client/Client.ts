@@ -510,7 +510,7 @@ export class SpacesClient {
         space_id: string,
         request: TrueForge.DeleteSpacesRequest = {},
         requestOptions?: SpacesClient.RequestOptions,
-    ): core.HttpResponsePromise<void> {
+    ): core.HttpResponsePromise<TrueForge.DeleteSpaceResponse> {
         return core.HttpResponsePromise.fromPromise(this.__delete(space_id, request, requestOptions));
     }
 
@@ -518,7 +518,7 @@ export class SpacesClient {
         space_id: string,
         request: TrueForge.DeleteSpacesRequest = {},
         requestOptions?: SpacesClient.RequestOptions,
-    ): Promise<core.WithRawResponse<void>> {
+    ): Promise<core.WithRawResponse<TrueForge.DeleteSpaceResponse>> {
         const { expectedRevision } = request;
         const _queryParams: Record<string, unknown> = {
             expected_revision: expectedRevision,
@@ -549,7 +549,16 @@ export class SpacesClient {
             logging: this._options.logging,
         });
         if (_response.ok) {
-            return { data: undefined, rawResponse: _response.rawResponse };
+            return {
+                data: serializers.DeleteSpaceResponse.parseOrThrow(_response.body, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    skipValidation: true,
+                    breadcrumbsPrefix: ["response"],
+                }),
+                rawResponse: _response.rawResponse,
+            };
         }
 
         if (_response.error.reason === "status-code") {

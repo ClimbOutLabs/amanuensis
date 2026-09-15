@@ -460,6 +460,125 @@ await client.auth.me();
 </dl>
 </details>
 
+## BugReports
+<details><summary><code>client.bugReports.<a href="/src/api/resources/bugReports/client/Client.ts">create</a>({ ...params }) -> TrueForge.CreateAppBugReportResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Assembles a redacted diagnostic bundle without a session: build identity, non-secret config flags, and the optional description supplied in the request body, included verbatim. No session, trace, or chat data is collected, so there is nothing session-bound to redact — see the response `redaction` field. Usable wherever a session-based report is not available (e.g. outside a chat).
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.bugReports.create();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.CreateAppBugReportRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `BugReportsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.bugReports.<a href="/src/api/resources/bugReports/client/Client.ts">getHandoff</a>() -> TrueForge.GetBugReportHandoffResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Returns the host-configured issue-tracker URL bug reports hand off to (the bug_report.yml template), or null when the host disabled the handoff via BUG_REPORT_HANDOFF_URL.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.bugReports.getHandoff();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `BugReportsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Server
 <details><summary><code>client.server.<a href="/src/api/resources/server/client/Client.ts">getCapabilities</a>() -> TrueForge.GetCapabilitiesResponse</code></summary>
 <dl>
@@ -4786,7 +4905,7 @@ await client.spaces.update("space_id", {
 </dl>
 </details>
 
-<details><summary><code>client.spaces.<a href="/src/api/resources/spaces/client/Client.ts">delete</a>(space_id, { ...params }) -> void</code></summary>
+<details><summary><code>client.spaces.<a href="/src/api/resources/spaces/client/Client.ts">delete</a>(space_id, { ...params }) -> TrueForge.DeleteSpaceResponse</code></summary>
 <dl>
 <dd>
 

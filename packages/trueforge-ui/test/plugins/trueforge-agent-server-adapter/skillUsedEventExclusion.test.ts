@@ -6,8 +6,8 @@ import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
 /**
  * Covers the `aman.skill.used` exclusion in `toUiStreamingEvent` (chatServer.ts): the vendor
- * `TurnStreamingEvent` union predates this event, so it must be dropped from the live SSE stream
- * the UI consumes, the same way `aman.memory.recall` / `aman.profile.learned` /
+ * `TurnStreamingEvent` union has no ingestion case for this event, so it must be dropped from the
+ * live SSE stream the UI consumes, the same way `aman.memory.recall` / `aman.profile.learned` /
  * `agent.context.compaction` / `document.ingestion` are dropped just above it. Also asserts that
  * dropping it does not swallow neighboring events on the same stream.
  */
@@ -77,11 +77,10 @@ function skillUsed(id: string): FakeStreamItem {
     data: {
       type: 'aman.skill.used',
       id: `evt_${id}`,
-      threadId: 'main',
-      skillId: 'skill_1',
+      kind: 'skill_read',
       skillName: 'example-skill',
       createdAt: '2026-09-15T00:00:00.500Z',
-    } as unknown as TrueForgeApi.TurnStreamingEvent,
+    },
   };
 }
 

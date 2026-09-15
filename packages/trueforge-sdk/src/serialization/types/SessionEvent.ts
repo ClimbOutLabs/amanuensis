@@ -13,6 +13,7 @@ import { ProfileLearnedPersistedEvent } from "./ProfileLearnedPersistedEvent.js"
 import { SandboxCreatedEvent } from "./SandboxCreatedEvent.js";
 import { SessionEventFive } from "./SessionEventFive.js";
 import { SessionEventFour } from "./SessionEventFour.js";
+import { SkillUsedPersistedEvent } from "./SkillUsedPersistedEvent.js";
 import { ThreadCreatedEvent } from "./ThreadCreatedEvent.js";
 import { ThreadDoneEvent } from "./ThreadDoneEvent.js";
 import { ToolApprovalRequiredEvent } from "./ToolApprovalRequiredEvent.js";
@@ -42,6 +43,7 @@ export const SessionEvent: core.serialization.Schema<serializers.SessionEvent.Ra
         ContextCompactionEvent,
         MemoryRecallPersistedEvent,
         ProfileLearnedPersistedEvent,
+        SkillUsedPersistedEvent,
     ]);
 
 export declare namespace SessionEvent {
@@ -63,5 +65,6 @@ export declare namespace SessionEvent {
         | ToolResponseRequiredEvent.Raw
         | ContextCompactionEvent.Raw
         | MemoryRecallPersistedEvent.Raw
-        | ProfileLearnedPersistedEvent.Raw;
+        | ProfileLearnedPersistedEvent.Raw
+        | SkillUsedPersistedEvent.Raw;
 }

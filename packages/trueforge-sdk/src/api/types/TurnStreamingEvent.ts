@@ -6,6 +6,7 @@ export type TurnStreamingEvent =
     | TrueForge.ContextCompactionEvent
     | TrueForge.MemoryRecallPersistedEvent
     | TrueForge.ProfileLearnedPersistedEvent
+    | TrueForge.SkillUsedPersistedEvent
     | TrueForge.DocumentIngestionEvent
     | TrueForge.McpAuthRequiredEvent
     | TrueForge.McpInitializeEvent

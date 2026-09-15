@@ -50,16 +50,16 @@ describe('toUiTurnState', () => {
     // Regression: the server emits aman.skill.used when an agent reads or
     // executes inside a mounted skill. The vendor union has no shape for it,
     // so the adapter must drop it rather than fail response validation.
-    // The checked-in SDK union predates aman.skill.used, so this fixture cannot be constructed as
-    // a real TrueForgeApi.SessionEventItem; widen through `unknown`, same as the vendor-boundary
-    // fixtures in skillUsedEventExclusion.test.ts and modelProviderCatalog.test.ts.
-    const item = {
+    const item: TrueForgeApi.SessionEventItem = {
       turnId: 'turn-1',
       event: {
         type: 'aman.skill.used',
-        skill: 'test-skill',
+        id: 'evt_1',
+        kind: 'skill_read',
+        skillName: 'test-skill',
+        createdAt: '2026-09-15T00:00:00.000Z',
       },
-    } as unknown as TrueForgeApi.SessionEventItem;
+    };
     assert.equal(toUiEventItem(item), undefined);
   });
 });

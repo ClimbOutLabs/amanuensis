@@ -3,16 +3,19 @@
 import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
+import { SandboxConfigSkillPromptMode } from "./SandboxConfigSkillPromptMode.js";
 
 export const SandboxConfig: core.serialization.ObjectSchema<serializers.SandboxConfig.Raw, TrueForge.SandboxConfig> =
     core.serialization.object({
         enabled: core.serialization.boolean(),
         fileDownloads: core.serialization.property("file_downloads", core.serialization.boolean().optional()),
+        skillPromptMode: core.serialization.property("skill_prompt_mode", SandboxConfigSkillPromptMode.optional()),
     });
 
 export declare namespace SandboxConfig {
     export interface Raw {
         enabled: boolean;
         file_downloads?: boolean | null;
+        skill_prompt_mode?: SandboxConfigSkillPromptMode.Raw | null;
     }
 }

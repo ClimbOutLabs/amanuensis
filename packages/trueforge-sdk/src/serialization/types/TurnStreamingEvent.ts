@@ -12,6 +12,7 @@ import { ModelMessageDeltaEvent } from "./ModelMessageDeltaEvent.js";
 import { ModelMessageEvent } from "./ModelMessageEvent.js";
 import { ProfileLearnedPersistedEvent } from "./ProfileLearnedPersistedEvent.js";
 import { SandboxCreatedEvent } from "./SandboxCreatedEvent.js";
+import { SkillUsedPersistedEvent } from "./SkillUsedPersistedEvent.js";
 import { ThreadCreatedEvent } from "./ThreadCreatedEvent.js";
 import { ThreadDoneEvent } from "./ThreadDoneEvent.js";
 import { ToolApprovalRequiredEvent } from "./ToolApprovalRequiredEvent.js";
@@ -29,6 +30,7 @@ export const TurnStreamingEvent: core.serialization.Schema<
     ContextCompactionEvent,
     MemoryRecallPersistedEvent,
     ProfileLearnedPersistedEvent,
+    SkillUsedPersistedEvent,
     DocumentIngestionEvent,
     McpAuthRequiredEvent,
     McpInitializeEvent,
@@ -51,6 +53,7 @@ export declare namespace TurnStreamingEvent {
         | ContextCompactionEvent.Raw
         | MemoryRecallPersistedEvent.Raw
         | ProfileLearnedPersistedEvent.Raw
+        | SkillUsedPersistedEvent.Raw
         | DocumentIngestionEvent.Raw
         | McpAuthRequiredEvent.Raw
         | McpInitializeEvent.Raw

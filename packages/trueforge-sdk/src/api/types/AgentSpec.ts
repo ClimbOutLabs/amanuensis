@@ -16,6 +16,6 @@ export interface AgentSpec {
     messages?: TrueForge.InitialUserMessage[];
     model: TrueForge.Model;
     responseFormat?: TrueForge.ResponseFormat;
-    /** Skills used in this agent. */
+    /** Optional name-only skill references. Skills mount into the sandbox and are advertised in the <skills> prompt section only when `config.sandbox.enabled` is true — listing skills with the sandbox disabled is rejected (422), so a spec can never silently advertise skills the agent cannot reach. */
     skills?: TrueForge.Skill[];
 }
