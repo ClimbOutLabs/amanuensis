@@ -1,0 +1,62 @@
+---
+title: 'Setup Models'
+sidebarTitle: 'Models'
+description: 'Connect model providers from the shipped catalog or add a custom OpenAI-compatible endpoint.'
+---
+
+TrueForge works with the major model providers and any OpenAI-compatible endpoint. Configure credentials once under **Settings → Models**. Agents reference models by name — agent definitions never contain API keys.
+
+## Supported providers
+
+| Provider type   | Notes                                                                  |
+| --------------- | ---------------------------------------------------------------------- |
+| `openai`        | OpenAI                                                                 |
+| `anthropic`     | Anthropic                                                              |
+| `google-gemini` | Google Gemini                                                          |
+| `fireworks`     | Fireworks AI                                                           |
+| `together`      | Together AI                                                            |
+| `moonshot`      | Moonshot AI (Kimi)                                                     |
+| `zai`           | Z.ai (GLM)                                                             |
+| `alibaba`       | Alibaba (Qwen)                                                         |
+| `custom`        | Any OpenAI-compatible endpoint — self-hosted models, gateways, proxies |
+
+## Configuring a standard provider
+
+Open **Settings → Models**, pick a provider, and paste your API key. Models from that provider become available immediately in the agent model selector.
+
+
+The provider list comes from the shipped model catalog — see [Initial Setup](/harness/initial-setup#what-is-supported-out-of-the-box) for how catalogs work and how to change what the UI offers.
+
+## Adding a custom provider
+
+Use the `custom` provider type for vLLM, Ollama, a corporate gateway, or any other OpenAI-compatible API. Custom providers are not in the catalog — you add them yourself with a base URL, API key, and the model IDs you want exposed.
+
+
+## Assigning models to jobs
+
+This page is inventory: which providers are connected and which models exist. Which model does which
+job — main chat, sub-agents, compaction, and named personas — lives under **Settings → Model roles**.
+See [Model Roles & Personas](/model-roles).
+
+<Note>
+  **Planned:** automatic model selection for different turns or subagents. Today every model choice is one
+  you made explicitly, per role or per persona. In the future, TrueForge will be able to pick among a set
+  of models per turn or subagent based on task complexity, latency, and cost.
+</Note>
+
+## Stalled model streams
+
+The host uses the model SDK's progress deadlines: five minutes for the first
+content chunk, then sixty seconds between content chunks. Nonempty reasoning
+and tool-argument chunks count as progress; empty transport heartbeats do not.
+There is no new overall answer-duration ceiling, and thinking remains enabled
+where configured. Embedders can supply `VercelAILLMConfig.streamTimeout` with
+positive `firstChunkMs` and `chunkMs` values within the runtime timer range
+(at most 2,147,483,647 milliseconds); these are host settings, not model request
+parameters. The first-content deadline starts when the provider response stream
+opens; Aman's existing host turn execution deadline also covers the wait for HTTP
+headers. Standalone embedders must supply their own overall cancellation signal.
+
+A timeout fails the turn with its recorded cause. An unfinished tool proposal
+is never approved or executed, and is not automatically retried. Results from
+earlier completed tool calls remain in the audit history.

@@ -1,0 +1,51 @@
+---
+title: 'Deployment Security'
+sidebarTitle: 'Deployment Security'
+description: 'What the shipped defaults protect against, what they do not, and what to change before exposing an instance beyond your own machine.'
+---
+
+TrueForge ships defaults tuned for a single user running it locally. This page describes those defaults plainly so you can decide what to change before a shared or network-reachable deployment.
+
+## Everyone is admin without OIDC
+
+Standalone mode (`STANDALONE=true`, the local `npx` default) has no login screen and ignores OIDC even if the variables are set. Hosted mode (`STANDALONE=false`, Docker Compose or Kubernetes) also has no login screen unless you configure OIDC: with `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` all unset, every request is treated as one shared local admin identity. The server only logs a warning ("Auth is disabled; browser login is off") when it starts this way; it does not refuse to start.
+
+In practice this means anyone who can reach the app port has full admin access: they can read chat history, change settings, and use any configured model, MCP connector, or sandbox credential.
+
+## Enabling OIDC
+
+Set all three variables together, never just one or two:
+
+- `OIDC_ISSUER_URL`
+- `OIDC_CLIENT_ID`
+- `OIDC_CLIENT_SECRET`
+
+Once set, users sign in through your identity provider and are assigned `admin` or `user` roles from an ID token claim. See [Setup Login](/authentication/overview) for how to register an application with Okta, Microsoft Entra ID, or any standard OIDC provider, and for the remaining optional variables (`OIDC_USER_REFERENCE_CLAIM`, `OIDC_USER_ROLE_CLAIM`, `OIDC_ADMIN_ROLE_VALUE`, `OIDC_SCOPES`).
+
+## Do not expose the app port without OIDC
+
+Do not put the app port (`8790` in standalone mode, `8791` in the Compose topology) on a network interface reachable beyond `localhost`, or beyond hosts you trust on a private network, unless OIDC is configured. This applies to `docker-compose.yml`'s `8791:8790` mapping and to any port-forward, reverse proxy, or Tailscale/VPN exposure you add yourself. The default Compose file comments this on the port mapping as a reminder.
+
+## Change the Postgres password
+
+`packages/trueforge/.env.example` ships `POSTGRES_USER=trueforge` and `POSTGRES_PASSWORD=trueforge` for local development. `docker-compose.yml` binds the Postgres port (`5433`) and Redis port (`6380`) to `127.0.0.1` only, so they are not reachable from other machines by default. If you deploy on a shared host, change the Postgres password in your `.env` file before starting the stack, and keep the debug ports off any interface other than loopback unless you have a specific reason to open them.
+
+## Prompt Guard screens
+
+TrueForge can run recalled memories and live tool output past a classifier sidecar (`aman-content-screen`) that looks for prompt injection. Both screens are optional and off by default:
+
+- **Memory recall screen** (`MEMORY_SCREEN_ENABLED`, env default `false`): checks memories recalled from the memory bank before they reach the model. Turn it on per memory bank in **Settings → Memory**, using the "Screen recalled memories with Prompt Guard" switch under the active bank. The switch is disabled until a classifier URL (`MEMORY_SCREEN_URL`) is configured and reachable. Your own stated memories are never withheld by this screen; it applies to memories that came from tools, documents, or email.
+- **Tool output screen** (`TOOL_OUTPUT_SCREEN_ENABLED`, env default `false`): checks tool results from structurally open-world tools before they re-enter model context. This one is environment-only; there is no Settings switch. It uses the same classifier URL, bearer token, and threshold as the memory recall screen (`MEMORY_SCREEN_URL`, `MEMORY_SCREEN_AUTH_TOKEN`, `MEMORY_SCREEN_THRESHOLD`).
+
+Leaving both off does not remove the structural defenses described below, which are always on regardless of these settings.
+
+## Structural defenses that are always on
+
+Two defenses do not depend on the Prompt Guard screens and cannot be turned off:
+
+- **Sandbox network policy**: every sandbox (local or Daytona) is restricted to a fixed outbound domain allowlist covering PyPI and GitHub hosts only. Everything else is denied by default, which also denies access to private networks and cloud metadata endpoints (for example `169.254.169.254`) from inside a sandbox.
+- **HTML Spaces render without scripts**: a `format: 'html'` Space body renders in a sandboxed iframe with no `allow-scripts`, so nothing in the rendered HTML can execute. An allow-list sanitizer strips `<script>`, `<link>`, `<iframe>`, `<object>`, `<embed>`, `javascript:` URLs, and `@import` before the HTML reaches the iframe, as a second layer behind the sandbox attribute itself.
+
+## Supply chain: package release age
+
+`pnpm-workspace.yaml` sets `minimumReleaseAge: 0` in this repository, meaning pnpm will install a package version the moment it is published, with no waiting period during which a malicious release could be caught and pulled. This is set to 0 so contributors and CI are not blocked on a newly published dependency bump. An operator building their own image or maintaining a long-lived deployment may want to raise this value (for example to a few days) in their own fork or override, trading immediate access to new releases for a window in which supply-chain attacks tend to get caught and yanked.

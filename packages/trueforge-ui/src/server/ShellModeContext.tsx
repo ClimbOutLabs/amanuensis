@@ -1,0 +1,783 @@
+'use client';
+
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+
+import type { HistoryAgentIntent } from '../utils/historyAgentSearch.js';
+import { replaceSessionShareSearch } from '../utils/sessionShareUrl.js';
+import { DEFAULT_AGENT_SPEC_SKILLS } from './defaultAgentSpecSkills.js';
+import {
+  readDraftSpecPreferences,
+  selectDraftSpecPreferences,
+  withCapabilitiesSandbox,
+  writeDraftSpecPreferences,
+  type DraftPreferenceKind,
+} from './draftSpecPreferences.js';
+import { isSchedulesChromeEnabled, isSessionsChromeEnabled, isSettingsChromeEnabled } from './serverChrome.js';
+import {
+  useOptionalAgentSessionsServer,
+  useOptionalCatalogServer,
+  useOptionalRefreshServerCapabilities,
+  useOptionalScheduleServer,
+  useServerCapabilities,
+} from './ServerContext.js';
+import type { AgentLibraryEntry, AgentSpec } from './types.js';
+
+/** Host-facing shell configuration for agent / library / composer chrome. */
+export type AgentConfig =
+  | { mode: 'SingleAgent'; name: string }
+  | { mode: 'AgentLibrary' }
+  | { mode: 'AgentComposer'; defaultAgentSpec?: AgentSpec }
+  | { mode: 'AgentLibraryWithComposer'; defaultAgentSpec?: AgentSpec };
+
+export const DEFAULT_AGENT_CONFIG: AgentConfig = {
+  mode: 'AgentLibraryWithComposer',
+};
+
+/**
+ * Active chat binding. Mutability (`isMutable`) decides draft vs named runtime.
+ * `isCreateAgent` (mutable only) splits New Agent builder chrome from simple New Chat.
+ */
+export type ShellMode =
+  | { status: 'idle' }
+  | {
+      status: 'active';
+      isMutable: boolean;
+      /**
+       * Mutable only: true = Agent builder (config drawer + Save); false = simple chat.
+       * Always false when `isMutable` is false (Try / named).
+       */
+      isCreateAgent: boolean;
+      /** Identity for immutable bind + history filter. */
+      agentId?: string;
+      /** Display / welcome label (often same as agentId). */
+      agentName?: string;
+      /** Published-agent description, kept outside the executable agent spec. */
+      description?: string;
+      /** Seed for mutable (draft) runtime. */
+      agentSpec?: AgentSpec;
+      locked: boolean;
+    };
+
+/** Library / New Chat / New Agent create intent. */
+export type SelectLibraryAgentRequest = {
+  isMutable: boolean;
+  /**
+   * Mutable only. When omitted: true if Edit identity is present, else false (New Chat).
+   */
+  isCreateAgent?: boolean;
+  agentId?: string;
+  agentName?: string;
+  description?: string;
+  agentSpec?: AgentSpec;
+};
+
+export type SettingsSection =
+  'models' | 'model-roles' | 'connectors' | 'memory' | 'skills' | 'sandbox' | 'personalization';
+
+export type HistoryAgentFilter = {
+  agentId?: string;
+  agentName: string;
+  intent: HistoryAgentIntent;
+};
+
+type ShellModeContextValue = {
+  mode: ShellMode;
+  /** Host agentConfig mode (capabilities source). */
+  agentConfigMode: AgentConfig['mode'];
+  /** Agents chrome. */
+  isLibraryEnabled: boolean;
+  /** Mutable composer / Save Agent chrome (host capability). */
+  isComposerEnabled: boolean;
+  /** Sidebar / list New Chat control. */
+  isNewChatEnabled: boolean;
+  settingsOpen: boolean;
+  settingsSection: SettingsSection;
+  setSettingsOpen: (open: boolean, section?: SettingsSection) => void;
+  agentConfigOpen: boolean;
+  setAgentConfigOpen: (open: boolean) => void;
+  /** Agents main-pane overlay (sidebar layout). */
+  libraryOpen: boolean;
+  libraryAgentId: string | null;
+  setLibraryAgentId: (id: string | null) => void;
+  setLibraryOpen: (open: boolean) => void;
+  /** All-user sessions browser (includes drafts). */
+  sessionsOpen: boolean;
+  setSessionsOpen: (open: boolean) => void;
+  openLibraryAgent: (agentId: string) => void;
+  closeLibraryAgent: () => void;
+  schedulesOpen: boolean;
+  setSchedulesOpen: (open: boolean) => void;
+  /** True while the Spaces full-page view (list or a single space) is showing instead of chat. */
+  spacesOpen: boolean;
+  /** The space currently open, or null when showing the spaces list. */
+  selectedSpaceId: string | null;
+  /** Opens the spaces view. Pass a `spaceId` to open a space directly, or omit/null for the list. */
+  openSpaces: (spaceId?: string | null) => void;
+  /** Leaves the spaces view and returns to chat. */
+  closeSpaces: () => void;
+  /**
+   * Bind from Agents (Try = immutable, Edit = mutable + agentSpec).
+   * Prefer this over `selectAgent` / `openDraft` when both fields are available.
+   */
+  selectLibraryAgent: (req: SelectLibraryAgentRequest) => void;
+  /**
+   * Attach identity + agentSpec to the *current* mutable chat without remounting.
+   * Used after `saveAgent` so the same draft session continues as an editable agent.
+   */
+  bindMutableAgent: (req: { agentId: string; agentName: string; description?: string; agentSpec: AgentSpec }) => void;
+  /** @deprecated Prefer `selectLibraryAgent({ isMutable: false, agentName })`. */
+  selectAgent: (agentName: string) => void;
+  /** Open a simple New Chat (mutable, no agent-builder chrome). */
+  openDraft: () => void;
+  /** Open New Agent builder (mutable + Agent Config drawer). */
+  openAgentBuilder: () => void;
+  /** Remember plain-draft composer choices as the seed for future New Chat / New Agent. */
+  rememberDraftSpec: (agentSpec: AgentSpec, kind?: DraftPreferenceKind) => void;
+  /**
+   * Open a history session without remounting the runtime.
+   * Prefer explicit `isMutable`; otherwise agentName means immutable.
+   */
+  openHistorySession: (req: {
+    sessionId: string;
+    agentName?: string;
+    isMutable?: boolean;
+    isCreateAgent?: boolean;
+  }) => void;
+  /** Reset current chat; no-op when idle. */
+  clearChat: () => void;
+  /** Return library-only mode to its idle landing; no-op in other modes. */
+  openLibraryHome: () => void;
+  /** Changes only when the chat runtime must reset. */
+  runtimeKey: string;
+  /**
+   * History list filter forwarded as `listSessions({ agentId })`.
+   * `null` = All chats. Only meaningful when `isLibraryEnabled`.
+   */
+  historyAgentFilter: HistoryAgentFilter | null;
+  setHistoryAgentFilter: (filter: HistoryAgentFilter | null) => void;
+  /** Effective `listSessionsAgentId` for the runtime (SingleAgent locks to name). */
+  listSessionsAgentId: string | undefined;
+  /** Session selected from history. */
+  pendingSessionId: string | undefined;
+  /** Distinguishes repeated selections of the same session. */
+  pendingSessionEpoch: number;
+  /**
+   * Bumped when the Agents catalog may have changed (e.g. after saveAgent).
+   * Library chrome should re-fetch when this changes.
+   */
+  agentsListEpoch: number;
+  invalidateAgentsList: () => void;
+};
+
+const ShellModeContext = createContext<ShellModeContextValue | null>(null);
+
+const FALLBACK_MUTABLE_SPEC: AgentSpec = {
+  model: { name: 'openai-main/gpt-4.1' },
+  skills: [...DEFAULT_AGENT_SPEC_SKILLS],
+};
+
+function mutableSeedFromConfig(config: AgentConfig): AgentSpec {
+  if (config.mode === 'AgentComposer' || config.mode === 'AgentLibraryWithComposer') {
+    return config.defaultAgentSpec ?? FALLBACK_MUTABLE_SPEC;
+  }
+  return FALLBACK_MUTABLE_SPEC;
+}
+
+function initialMode(config: AgentConfig, mutableSeed: AgentSpec): ShellMode {
+  switch (config.mode) {
+    case 'SingleAgent':
+      return {
+        status: 'active',
+        isMutable: false,
+        isCreateAgent: false,
+        agentId: config.name,
+        agentName: config.name,
+        locked: true,
+      };
+    case 'AgentLibrary':
+      return { status: 'idle' };
+    case 'AgentComposer':
+    case 'AgentLibraryWithComposer':
+      return {
+        status: 'active',
+        isMutable: true,
+        isCreateAgent: false,
+        agentSpec: mutableSeed,
+        locked: false,
+      };
+  }
+}
+
+function resolveMutableIsCreateAgent(req: SelectLibraryAgentRequest): boolean {
+  if (req.isCreateAgent !== undefined) return req.isCreateAgent;
+  return req.agentId != null || req.agentName != null;
+}
+
+function libraryAgentId(agent: Pick<AgentLibraryEntry, 'agentId' | 'name'>): string {
+  return agent.agentId ?? agent.name;
+}
+
+export function ShellModeProvider({
+  agentConfig = DEFAULT_AGENT_CONFIG,
+  initialSettingsOpen = false,
+  children,
+}: {
+  agentConfig?: AgentConfig;
+  /** Open settings on first paint (e.g. host boot with no models). Does not re-open later. */
+  initialSettingsOpen?: boolean;
+  children: ReactNode;
+}) {
+  const capabilities = useServerCapabilities();
+  const catalog = useOptionalCatalogServer();
+  const refreshCapabilities = useOptionalRefreshServerCapabilities();
+  const sessionsServer = useOptionalAgentSessionsServer();
+  const scheduleServer = useOptionalScheduleServer();
+  const chatSeedRef = useRef(
+    readDraftSpecPreferences('chat') ?? selectDraftSpecPreferences(mutableSeedFromConfig(agentConfig), 'chat'),
+  );
+  const agentSeedRef = useRef(
+    readDraftSpecPreferences('agent') ?? selectDraftSpecPreferences(mutableSeedFromConfig(agentConfig), 'agent'),
+  );
+
+  const isLibraryEnabled = agentConfig.mode === 'AgentLibrary' || agentConfig.mode === 'AgentLibraryWithComposer';
+  const isComposerEnabled = agentConfig.mode === 'AgentComposer' || agentConfig.mode === 'AgentLibraryWithComposer';
+  const isNewChatEnabled = agentConfig.mode !== 'AgentLibrary';
+  const locked = agentConfig.mode === 'SingleAgent';
+
+  const [mode, setMode] = useState<ShellMode>(() => initialMode(agentConfig, chatSeedRef.current));
+  const [mutableEpoch, setMutableEpoch] = useState(0);
+  const [clearEpoch, setClearEpoch] = useState(0);
+  const [agentsListEpoch, setAgentsListEpoch] = useState(0);
+  const [settingsOpenState, setSettingsOpenState] = useState(initialSettingsOpen);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('models');
+  const [agentConfigOpenState, setAgentConfigOpenState] = useState(false);
+  const [libraryOpenState, setLibraryOpenState] = useState(false);
+  const [sessionsOpenState, setSessionsOpenState] = useState(false);
+  const [libraryAgentId, setLibraryAgentId] = useState<string | null>(null);
+  const [schedulesOpenState, setSchedulesOpenState] = useState(false);
+  const [historyAgentFilter, setHistoryAgentFilter] = useState<HistoryAgentFilter | null>(null);
+  const [pendingSessionId, setPendingSessionId] = useState<string | undefined>(undefined);
+  const [pendingSessionEpoch, setPendingSessionEpoch] = useState(0);
+  const [spacesOpen, setSpacesOpenState] = useState(false);
+  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
+  const settingsEnabled = isSettingsChromeEnabled({ catalog, capabilities });
+  const settingsOpen = settingsEnabled && settingsOpenState;
+  const sessionsEnabled = isSessionsChromeEnabled({ sessions: sessionsServer });
+  const schedulesEnabled = isSchedulesChromeEnabled({ schedules: scheduleServer });
+  const schedulesOpen = schedulesEnabled && schedulesOpenState;
+  const libraryOpen = isLibraryEnabled && libraryOpenState;
+  const sessionsOpen = sessionsEnabled && sessionsOpenState;
+
+  // The only place spacesOpen is cleared, so selectedSpaceId always clears with it: no path can
+  // leave a stale selection behind a closed spaces view.
+  const closeSpaces = useCallback(() => {
+    setSpacesOpenState(false);
+    setSelectedSpaceId(null);
+  }, []);
+
+  const setSessionsOpen = useCallback(
+    (open: boolean) => {
+      if (open) {
+        setSettingsOpenState(false);
+        setAgentConfigOpenState(false);
+        setLibraryOpenState(false);
+        setLibraryAgentId(null);
+        setSchedulesOpenState(false);
+        closeSpaces();
+      } else {
+        replaceSessionShareSearch({ view: null });
+      }
+      setSessionsOpenState(sessionsEnabled && open);
+    },
+    [sessionsEnabled, closeSpaces],
+  );
+  const setLibraryOpen = useCallback(
+    (open: boolean) => {
+      if (!isLibraryEnabled) return;
+      if (open) {
+        setSettingsOpenState(false);
+        setAgentConfigOpenState(false);
+        setSessionsOpen(false);
+        setSchedulesOpenState(false);
+        closeSpaces();
+      }
+      setLibraryAgentId(null);
+      setLibraryOpenState(open);
+    },
+    [isLibraryEnabled, setSessionsOpen, closeSpaces],
+  );
+  const openLibraryAgent = useCallback(
+    (agentId: string) => {
+      if (!isLibraryEnabled || !sessionsEnabled) return;
+      setSettingsOpenState(false);
+      setAgentConfigOpenState(false);
+      setSessionsOpen(false);
+      setSchedulesOpenState(false);
+      closeSpaces();
+      setLibraryOpenState(true);
+      setLibraryAgentId(agentId);
+    },
+    [isLibraryEnabled, sessionsEnabled, setSessionsOpen, closeSpaces],
+  );
+  const closeLibraryAgent = useCallback(() => {
+    setLibraryAgentId(null);
+  }, []);
+  const setSettingsOpen = useCallback(
+    (open: boolean, section?: SettingsSection) => {
+      if (section !== undefined) {
+        setSettingsSection(section);
+      }
+      if (open) {
+        setAgentConfigOpenState(false);
+        setLibraryOpenState(false);
+        setLibraryAgentId(null);
+        setSessionsOpen(false);
+        setSchedulesOpenState(false);
+        closeSpaces();
+      }
+      setSettingsOpenState(settingsEnabled && open);
+    },
+    [setSessionsOpen, settingsEnabled, closeSpaces],
+  );
+  const setAgentConfigOpen = useCallback(
+    (open: boolean) => {
+      if (open) {
+        setSettingsOpenState(false);
+        setLibraryOpenState(false);
+        setLibraryAgentId(null);
+        setSessionsOpen(false);
+        setSchedulesOpenState(false);
+        closeSpaces();
+      }
+      setAgentConfigOpenState(open);
+    },
+    [setSessionsOpen, closeSpaces],
+  );
+  const setSchedulesOpen = useCallback(
+    (open: boolean) => {
+      if (open) {
+        setSettingsOpenState(false);
+        setAgentConfigOpenState(false);
+        setLibraryOpenState(false);
+        setLibraryAgentId(null);
+        setSessionsOpen(false);
+        closeSpaces();
+      }
+      setSchedulesOpenState(schedulesEnabled && open);
+    },
+    [schedulesEnabled, setSessionsOpen, closeSpaces],
+  );
+
+  useEffect(() => {
+    if (catalog == null || capabilities?.settings?.enabled === false) {
+      setSettingsOpenState(false);
+    }
+  }, [capabilities?.settings?.enabled, catalog]);
+
+  useEffect(() => {
+    if (!sessionsEnabled) {
+      setSessionsOpenState(false);
+      setLibraryAgentId(null);
+    }
+  }, [sessionsEnabled]);
+
+  useEffect(() => {
+    if (!schedulesEnabled) {
+      setSchedulesOpenState(false);
+    }
+  }, [schedulesEnabled]);
+
+  const openSpaces = useCallback((spaceId?: string | null) => {
+    setSelectedSpaceId(spaceId ?? null);
+    setSpacesOpenState(true);
+    setSettingsOpenState(false);
+  }, []);
+
+  const invalidateAgentsList = useCallback(() => {
+    setAgentsListEpoch(n => n + 1);
+  }, []);
+
+  const lockedAgentName = agentConfig.mode === 'SingleAgent' ? agentConfig.name : '';
+  const effectiveMode: ShellMode = useMemo(() => {
+    if (!locked) return mode;
+    return {
+      status: 'active',
+      isMutable: false,
+      isCreateAgent: false,
+      agentId: lockedAgentName,
+      agentName: lockedAgentName,
+      locked: true,
+    };
+  }, [locked, lockedAgentName, mode]);
+  const agentConfigOpen =
+    effectiveMode.status === 'active' && effectiveMode.isMutable && effectiveMode.isCreateAgent && agentConfigOpenState;
+
+  useEffect(() => {
+    if (effectiveMode.status !== 'active' || !effectiveMode.isMutable || !effectiveMode.isCreateAgent) {
+      setAgentConfigOpenState(false);
+    }
+  }, [effectiveMode]);
+
+  const listSessionsAgentId = useMemo(() => {
+    if (locked) return lockedAgentName;
+    if (!isLibraryEnabled) return undefined;
+    return historyAgentFilter?.agentId;
+  }, [locked, lockedAgentName, isLibraryEnabled, historyAgentFilter]);
+
+  const bumpEpoch = useCallback((isMutable: boolean) => {
+    if (isMutable) setMutableEpoch(n => n + 1);
+    else setClearEpoch(n => n + 1);
+  }, []);
+
+  const selectLibraryAgent = useCallback(
+    (req: SelectLibraryAgentRequest) => {
+      if (req.isMutable) {
+        if (!isComposerEnabled) return;
+        setSettingsOpen(false);
+        setLibraryOpenState(false);
+        setLibraryAgentId(null);
+        setSessionsOpen(false);
+        setSchedulesOpen(false);
+        closeSpaces();
+        setPendingSessionId(undefined);
+        const isCreateAgent = resolveMutableIsCreateAgent(req);
+        const kind: DraftPreferenceKind = isCreateAgent ? 'agent' : 'chat';
+        setMode({
+          status: 'active',
+          isMutable: true,
+          isCreateAgent,
+          agentId: req.agentId,
+          agentName: req.agentName,
+          description: req.description,
+          agentSpec: req.agentSpec ?? (kind === 'agent' ? agentSeedRef.current : chatSeedRef.current),
+          locked: false,
+        });
+        setAgentConfigOpenState(isCreateAgent);
+        bumpEpoch(true);
+        return;
+      }
+      if (!isLibraryEnabled) return;
+      const agentName = req.agentName ?? req.agentId;
+      if (agentName == null) return;
+      setSettingsOpen(false);
+      setLibraryOpenState(false);
+      setLibraryAgentId(null);
+      setSessionsOpen(false);
+      setSchedulesOpen(false);
+      closeSpaces();
+      setPendingSessionId(undefined);
+      setAgentConfigOpenState(false);
+      setMode({
+        status: 'active',
+        isMutable: false,
+        isCreateAgent: false,
+        agentId: req.agentId ?? agentName,
+        agentName,
+        locked: false,
+      });
+      if (req.agentId != null) {
+        setHistoryAgentFilter({
+          agentId: req.agentId,
+          agentName,
+          intent: 'try-agent',
+        });
+      } else {
+        setHistoryAgentFilter(null);
+      }
+      bumpEpoch(false);
+    },
+    [isComposerEnabled, isLibraryEnabled, bumpEpoch, setSettingsOpen, setSessionsOpen, setSchedulesOpen, closeSpaces],
+  );
+
+  const bindMutableAgent = useCallback(
+    (req: { agentId: string; agentName: string; description?: string; agentSpec: AgentSpec }) => {
+      if (!isComposerEnabled) return;
+      setMode(prev => {
+        if (prev.status !== 'active' || !prev.isMutable) return prev;
+        return {
+          status: 'active',
+          isMutable: true,
+          isCreateAgent: true,
+          agentId: req.agentId,
+          agentName: req.agentName,
+          description: req.description,
+          agentSpec: req.agentSpec,
+          locked: false,
+        };
+      });
+    },
+    [isComposerEnabled],
+  );
+
+  const selectAgent = useCallback(
+    (name: string) => {
+      selectLibraryAgent({ isMutable: false, agentId: name, agentName: name });
+    },
+    [selectLibraryAgent],
+  );
+
+  const openDraft = useCallback(() => {
+    if (!isComposerEnabled) return;
+    refreshCapabilities?.();
+    setHistoryAgentFilter(null);
+    selectLibraryAgent({ isMutable: true, isCreateAgent: false, agentSpec: chatSeedRef.current });
+  }, [isComposerEnabled, refreshCapabilities, selectLibraryAgent]);
+
+  const isActiveAgentBuilder =
+    effectiveMode.status === 'active' && effectiveMode.isMutable && effectiveMode.isCreateAgent;
+  const openAgentBuilder = useCallback(() => {
+    if (!isComposerEnabled) return;
+    refreshCapabilities?.();
+    // Returning from an overlay must keep the live draft runtime and its unsaved instructions.
+    if (isActiveAgentBuilder) {
+      setSettingsOpen(false);
+      setLibraryOpenState(false);
+      setLibraryAgentId(null);
+      setSessionsOpen(false);
+      setSchedulesOpen(false);
+      setAgentConfigOpenState(true);
+      return;
+    }
+    selectLibraryAgent({ isMutable: true, isCreateAgent: true, agentSpec: agentSeedRef.current });
+  }, [
+    isActiveAgentBuilder,
+    isComposerEnabled,
+    refreshCapabilities,
+    selectLibraryAgent,
+    setSchedulesOpen,
+    setSessionsOpen,
+    setSettingsOpen,
+  ]);
+
+  const sandboxEnabled = capabilities?.sandbox.enabled;
+  const rememberDraftSpec = useCallback(
+    (agentSpec: AgentSpec, kind: DraftPreferenceKind = 'chat') => {
+      const selected = selectDraftSpecPreferences(agentSpec, kind);
+      const preferences = kind === 'agent' ? withCapabilitiesSandbox(selected, sandboxEnabled) : selected;
+      if (kind === 'chat') {
+        chatSeedRef.current = preferences;
+      } else {
+        // Keep the active builder intact in memory; storage remains limited to reusable preferences.
+        agentSeedRef.current = withCapabilitiesSandbox(agentSpec, sandboxEnabled);
+      }
+      writeDraftSpecPreferences(kind, preferences);
+    },
+    [sandboxEnabled],
+  );
+
+  const openHistorySession = useCallback(
+    ({
+      sessionId,
+      agentName,
+      isMutable: isMutableOpt,
+      isCreateAgent: isCreateAgentOpt,
+    }: {
+      sessionId: string;
+      agentName?: string;
+      isMutable?: boolean;
+      isCreateAgent?: boolean;
+    }) => {
+      const isMutable = isMutableOpt ?? agentName == null;
+      if (isMutable) {
+        if (!isComposerEnabled) return;
+      } else if (locked) {
+        if (agentName == null || lockedAgentName !== agentName) return;
+      } else if (!isLibraryEnabled) {
+        return;
+      }
+
+      setSettingsOpen(false);
+      setLibraryOpenState(false);
+      setLibraryAgentId(null);
+      setSessionsOpen(false);
+      setSchedulesOpen(false);
+      closeSpaces();
+      setPendingSessionId(sessionId);
+      setPendingSessionEpoch(n => n + 1);
+      if (isMutable) {
+        const isCreateAgent = isCreateAgentOpt === true;
+        setMode({
+          status: 'active',
+          isMutable: true,
+          isCreateAgent,
+          agentSpec: isCreateAgent ? agentSeedRef.current : chatSeedRef.current,
+          locked: false,
+        });
+        setAgentConfigOpenState(isCreateAgent);
+        return;
+      }
+      setAgentConfigOpenState(false);
+      setMode({
+        status: 'active',
+        isMutable: false,
+        isCreateAgent: false,
+        locked: false,
+        ...(agentName != null ? { agentId: agentName, agentName } : {}),
+      });
+    },
+    [
+      isLibraryEnabled,
+      isComposerEnabled,
+      locked,
+      lockedAgentName,
+      setSettingsOpen,
+      setSessionsOpen,
+      setSchedulesOpen,
+      closeSpaces,
+    ],
+  );
+
+  const clearChat = useCallback(() => {
+    if (effectiveMode.status === 'idle') return;
+    setPendingSessionId(undefined);
+    if (effectiveMode.isMutable) {
+      // Preserve Edit / builder vs chat intent; blank drafts fall back to host seed.
+      const kind: DraftPreferenceKind = effectiveMode.isCreateAgent ? 'agent' : 'chat';
+      setMode({
+        status: 'active',
+        isMutable: true,
+        isCreateAgent: effectiveMode.isCreateAgent,
+        agentId: effectiveMode.agentId,
+        agentName: effectiveMode.agentName,
+        agentSpec: effectiveMode.agentSpec ?? (kind === 'agent' ? agentSeedRef.current : chatSeedRef.current),
+        locked: false,
+      });
+      setAgentConfigOpenState(effectiveMode.isCreateAgent);
+      bumpEpoch(true);
+      return;
+    }
+    bumpEpoch(false);
+  }, [effectiveMode, bumpEpoch]);
+
+  const openLibraryHome = useCallback(() => {
+    // Only library-only mode has an idle landing; other modes root via openDraft / clearChat.
+    if (!isLibraryEnabled || isComposerEnabled) return;
+    setPendingSessionId(undefined);
+    setSettingsOpen(false);
+    setLibraryOpenState(false);
+    setLibraryAgentId(null);
+    setSchedulesOpen(false);
+    closeSpaces();
+    setMode({ status: 'idle' });
+    bumpEpoch(false);
+  }, [isLibraryEnabled, isComposerEnabled, setSettingsOpen, setSchedulesOpen, closeSpaces, bumpEpoch]);
+
+  // Only explicit resets remount the runtime; history and identity changes happen in place.
+  const runtimeKey = useMemo(() => {
+    if (effectiveMode.status === 'idle') return 'idle';
+    return `chat:${mutableEpoch}:${clearEpoch}`;
+  }, [effectiveMode.status, mutableEpoch, clearEpoch]);
+
+  const value = useMemo<ShellModeContextValue>(
+    () => ({
+      mode: effectiveMode,
+      agentConfigMode: agentConfig.mode,
+      isLibraryEnabled,
+      isComposerEnabled,
+      isNewChatEnabled,
+      settingsOpen,
+      settingsSection,
+      setSettingsOpen,
+      agentConfigOpen,
+      setAgentConfigOpen,
+      libraryOpen,
+      libraryAgentId,
+      setLibraryAgentId,
+      setLibraryOpen,
+      sessionsOpen,
+      setSessionsOpen,
+      openLibraryAgent,
+      closeLibraryAgent,
+      schedulesOpen,
+      setSchedulesOpen,
+      spacesOpen,
+      selectedSpaceId,
+      openSpaces,
+      closeSpaces,
+      selectLibraryAgent,
+      bindMutableAgent,
+      selectAgent,
+      openDraft,
+      openAgentBuilder,
+      rememberDraftSpec,
+      openHistorySession,
+      clearChat,
+      openLibraryHome,
+      runtimeKey,
+      historyAgentFilter,
+      setHistoryAgentFilter,
+      listSessionsAgentId,
+      pendingSessionId,
+      pendingSessionEpoch,
+      agentsListEpoch,
+      invalidateAgentsList,
+    }),
+    [
+      effectiveMode,
+      agentConfig.mode,
+      isLibraryEnabled,
+      isComposerEnabled,
+      isNewChatEnabled,
+      settingsOpen,
+      settingsSection,
+      setSettingsOpen,
+      agentConfigOpen,
+      setAgentConfigOpen,
+      libraryOpen,
+      libraryAgentId,
+      setLibraryOpen,
+      sessionsOpen,
+      setSessionsOpen,
+      openLibraryAgent,
+      closeLibraryAgent,
+      schedulesOpen,
+      setSchedulesOpen,
+      spacesOpen,
+      selectedSpaceId,
+      openSpaces,
+      closeSpaces,
+      selectLibraryAgent,
+      bindMutableAgent,
+      selectAgent,
+      openDraft,
+      openAgentBuilder,
+      rememberDraftSpec,
+      openHistorySession,
+      clearChat,
+      openLibraryHome,
+      runtimeKey,
+      historyAgentFilter,
+      listSessionsAgentId,
+      pendingSessionId,
+      pendingSessionEpoch,
+      agentsListEpoch,
+      invalidateAgentsList,
+    ],
+  );
+
+  return <ShellModeContext.Provider value={value}>{children}</ShellModeContext.Provider>;
+}
+
+export function useShellMode(): ShellModeContextValue {
+  const ctx = useContext(ShellModeContext);
+  if (ctx == null) {
+    throw new Error('useShellMode must be used within a ShellModeProvider.');
+  }
+  return ctx;
+}
+
+export function useOptionalShellMode(): ShellModeContextValue | null {
+  return useContext(ShellModeContext);
+}
+
+/** True when the shell is bound to a mutable (editable) agentSpec. */
+export function shellIsMutable(mode: ShellMode): boolean {
+  return mode.status === 'active' && mode.isMutable;
+}
+
+/** True when the shell is in New Agent / Edit builder chrome. */
+export function shellIsCreateAgent(mode: ShellMode): boolean {
+  return mode.status === 'active' && mode.isMutable && mode.isCreateAgent;
+}
+
+export { libraryAgentId };

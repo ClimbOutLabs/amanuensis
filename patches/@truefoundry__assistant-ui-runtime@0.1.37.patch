@@ -1,0 +1,3169 @@
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 6c2f1b9..3607b93 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -78,6 +78,8 @@ type PendingResponseRef = {
+ type ApprovalDecisionRef = {
+     id: string;
+     approved: boolean;
++    optionId?: string;
++    sourceEventId?: string;
+     reason?: string;
+ };
+ type ThreadBucket = {
+@@ -86,9 +88,11 @@ type ThreadBucket = {
+     toolResults: Map<string, string>;
+     pendingApprovals: Map<string, {
+         id: string;
++        sourceEventId: string;
+     }>;
+     approvalDecisions: Map<string, ApprovalDecisionRef>;
+     pendingResponses: Map<string, PendingResponseRef>;
++    toolCallInvocations: Map<string, string[]>;
+     done: boolean;
+     title?: string;
+     agentInfo?: AgentInfo;
+@@ -138,9 +142,14 @@ declare function toTrueFoundryApprovalInputs(message: Extract<ThreadMessage, {
+     role: "assistant";
+ }>, response: RespondToToolApprovalOptions, defaultThreadId?: string): UserToolApprovalEvent[];
+ 
++type SessionTerminalError = {
++    turnId: string;
++    message: string;
++};
+ type ConvertTurnsResult = {
+     messages: ThreadMessage[];
+     foldState: PeerThreadFoldState;
++    terminalError?: SessionTerminalError;
+     runningTurn?: Turn;
+     unstable_resume?: boolean;
+ };
+@@ -247,6 +256,7 @@ type TrueFoundryRuntimeExtras = {
+         mcpServers: McpAuthRequiredEvent["mcpServers"];
+     } | null;
+     resumeUnavailable: boolean;
++    terminalError?: SessionTerminalError;
+     sandboxId: string | undefined;
+     respondToToolApproval: (response: RespondToToolApprovalOptions) => void;
+     respondToToolResponse: (response: RespondToToolResponseOptions) => void;
+@@ -333,6 +343,7 @@ declare const useTrueFoundryHistoryPagination: () => {
+  * arrive in this client. Falls back to `false` on runtimes that predate the flag.
+  */
+ declare const useTrueFoundryResumeUnavailable: () => boolean;
++declare const useTrueFoundryTerminalError: () => SessionTerminalError | undefined;
+ /** Returns a function to reset (re-submit) a user turn from any render context. */
+ declare const useTrueFoundryResetFromTurn: () => (turnId: string) => Promise<void>;
+ /** Current draft agent spec and sync state (draft mode only). */
+@@ -381,4 +392,4 @@ declare function getSession(server: AgentChatServer, sessionId: string): Promise
+  */
+ declare const trueFoundryAttachmentAdapter: AttachmentAdapter;
+ 
+-export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
++export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryTerminalError, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
+diff --git a/dist/index.js b/dist/index.js
+index 7931deb..9d904a0 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -158,6 +158,7 @@ function applyApprovalDecisionsToContent(content, decisions) {
+       nextPart = applyApprovalDecisionToToolCall(part, {
+         approvalId: part.approval.id,
+         approved: decision.approved,
++        ...decision.optionId != null ? { optionId: decision.optionId } : {},
+         reason: decision.reason
+       });
+     }
+@@ -189,6 +190,7 @@ function collectSubsequentApprovalDecisions(turns, fromIndex) {
+     for (const event of extractToolApprovalsFromTurnInput(input)) {
+       decisions.set(event.toolCallId, {
+         approved: event.approval.status === "allow",
++        ...event.approval.status === "allow" && event.approval.scope === "chat" ? { optionId: "allow-chat" } : {},
+         ...event.approval.status === "deny" && event.approval.reason != null ? { reason: event.approval.reason } : {}
+       });
+     }
+@@ -200,14 +202,18 @@ function collectApprovalDecisionsFromTurnInput(input) {
+   for (const event of extractToolApprovalsFromTurnInput(input)) {
+     decisions.set(event.toolCallId, {
+       approved: event.approval.status === "allow",
++      ...event.approval.status === "allow" && event.approval.scope === "chat" ? { optionId: "allow-chat" } : {},
+       ...event.approval.status === "deny" && event.approval.reason != null ? { reason: event.approval.reason } : {}
+     });
+   }
+   return decisions;
+ }
+-function mapApprovalDecision(approved, reason) {
++function mapApprovalDecision(approved, reason, optionId) {
+   if (approved) {
+-    return { status: "allow" };
++    return {
++      status: "allow",
++      scope: optionId === "allow-chat" || optionId === "allow-always" ? "chat" : "once"
++    };
+   }
+   return { status: "deny", ...reason != null ? { reason } : {} };
+ }
+@@ -250,7 +256,11 @@ function collectApprovalInputs(message, threadId) {
+         type: "user.tool_approval",
+         threadId: scopedThreadId,
+         toolCallId: approval.id,
+-        approval: mapApprovalDecision(approval.approved, approval.reason)
++        approval: mapApprovalDecision(
++          approval.approved,
++          approval.reason,
++          approval.optionId
++        )
+       });
+     }
+     if (part.messages != null) {
+@@ -413,6 +423,16 @@ function extractImageUrlFromUserContentItem(part) {
+ }
+ 
+ // src/modelMessageContent.ts
++function toolInvocationKey({
++  sourceEventId,
++  toolCallId
++}) {
++  return `${sourceEventId}\0${toolCallId}`;
++}
++function toolInvocationRawId(toolCallId) {
++  const separator = toolCallId.indexOf("\0");
++  return separator === -1 ? toolCallId : toolCallId.slice(separator + 1);
++}
+ function parseToolArgs(argsText) {
+   if (!argsText) {
+     return {};
+@@ -429,10 +449,15 @@ function parseToolArgs(argsText) {
+ }
+ function toolCallToPart(toolCall, context) {
+   const argsText = toolCall.function.arguments ?? "";
+-  const toolResult = context?.toolResults?.get(toolCall.id);
+-  const pendingResponse = context?.pendingResponses?.get(toolCall.id);
+-  const pendingApproval = context?.pendingApprovals?.get(toolCall.id);
+-  const approvalDecision = context?.approvalDecisions?.get(toolCall.id);
++  const key = context?.sourceEventId == null ? toolCall.id : toolInvocationKey({
++    sourceEventId: context.sourceEventId,
++    toolCallId: toolCall.id
++  });
++  const getValue = (values) => context?.sourceEventId == null ? values?.get(toolCall.id) : values?.get(key);
++  const toolResult = getValue(context?.toolResults);
++  const pendingResponse = getValue(context?.pendingResponses);
++  const pendingApproval = getValue(context?.pendingApprovals);
++  const approvalDecision = getValue(context?.approvalDecisions);
+   let interrupt;
+   if (pendingResponse != null && toolResult === void 0) {
+     interrupt = {
+@@ -448,10 +473,20 @@ function toolCallToPart(toolCall, context) {
+     approval = {
+       id: approvalDecision.id,
+       approved: approvalDecision.approved,
++      ...approvalDecision.optionId != null ? { optionId: approvalDecision.optionId } : {},
+       ...approvalDecision.reason != null ? { reason: approvalDecision.reason } : {}
+     };
+   } else if (pendingApproval != null) {
+-    approval = { id: pendingApproval.id };
++    const allowChat = toolCall.toolInfo?.effect === "inspect" || toolCall.function.name === "submit_implementation_plan";
++    const allowChatLabel = toolCall.function.name === "submit_implementation_plan" ? "Allow this implementation plan in this chat" : `Allow \`${String(parseToolArgs(argsText).command ?? "this command")}\` in this chat`;
++    approval = {
++      id: pendingApproval.id,
++      options: [
++        { id: "allow-once", kind: "allow-once" },
++        ...allowChat ? [{ id: "allow-chat", kind: "allow-always", label: allowChatLabel }] : [],
++        { id: "deny", kind: "reject-once", confirm: {} }
++      ]
++    };
+   }
+   let result;
+   let isError = false;
+@@ -467,6 +502,11 @@ function toolCallToPart(toolCall, context) {
+     toolName: toolCall.function.name,
+     argsText,
+     args: parseToolArgs(argsText),
++    ...toolCall.toolInfo?.hostObservedTargetSummary === void 0 ? {} : {
++      artifact: {
++        hostObservedTargetSummary: toolCall.toolInfo.hostObservedTargetSummary
++      }
++    },
+     ...result !== void 0 ? { result } : {},
+     ...isError ? { isError: true } : {},
+     ...approval != null ? { approval } : {},
+@@ -508,6 +548,15 @@ function buildAssistantContent(message, context) {
+ }
+ 
+ // src/foldPeerThreads.ts
++function registerToolCallInvocations(bucket, message) {
++  for (const toolCall of message.toolCalls ?? []) {
++    const sourceEvents = bucket.toolCallInvocations.get(toolCall.id) ?? [];
++    if (!sourceEvents.includes(message.id)) {
++      sourceEvents.push(message.id);
++      bucket.toolCallInvocations.set(toolCall.id, sourceEvents);
++    }
++  }
++}
+ var isDev = typeof process !== "undefined" && typeof process.env !== "undefined" && process.env.NODE_ENV !== "production";
+ function warnUnexpectedRootThread(threadId, eventType) {
+   if (!isDev) {
+@@ -541,6 +590,7 @@ var PeerThreadFoldState = class {
+         pendingApprovals: /* @__PURE__ */ new Map(),
+         approvalDecisions: /* @__PURE__ */ new Map(),
+         pendingResponses: /* @__PURE__ */ new Map(),
++        toolCallInvocations: /* @__PURE__ */ new Map(),
+         done: false
+       };
+       this.threads.set(threadId, bucket);
+@@ -559,6 +609,9 @@ function ingestEventIntoBucket(bucket, message) {
+     const base = bucket.events.get(message.id);
+     if (base != null) {
+       mergeStreamEventDelta(base, message);
++      if (base.type === "model.message") {
++        registerToolCallInvocations(bucket, base);
++      }
+     }
+     return;
+   }
+@@ -567,28 +620,44 @@ function ingestEventIntoBucket(bucket, message) {
+     if (!bucket.modelMessageIds.includes(message.id)) {
+       bucket.modelMessageIds.push(message.id);
+     }
++    registerToolCallInvocations(bucket, message);
+     return;
+   }
+-  if (message.type === "tool.response") {
+-    bucket.toolResults.set(message.toolCallId, message.content);
+-    bucket.pendingResponses.delete(message.toolCallId);
++  if (message.type === "tool.response" || message.type === "tool.response.v2") {
++    const key = findResponseInvocationKey(bucket, {
++      toolCallId: message.toolCallId,
++      allowDenied: message.type === "tool.response.v2" && message.disposition === "denied"
++    });
++    if (key != null) {
++      bucket.toolResults.set(key, message.content);
++      bucket.pendingResponses.delete(key);
++    }
+     return;
+   }
+   if (message.type === "tool.approval_required") {
+     for (const ref of message.toolCalls) {
+-      bucket.pendingApprovals.set(ref.id, { id: ref.id });
++      bucket.pendingApprovals.set(
++        toolInvocationKey({ sourceEventId: ref.sourceEventId, toolCallId: ref.id }),
++        {
++          id: ref.id,
++          sourceEventId: ref.sourceEventId
++        }
++      );
+     }
+     return;
+   }
+   if (message.type === "tool.response_required") {
+     for (const ref of message.toolCalls) {
+       const resolved = resolveAskUserQuestionFromBucket(bucket, ref);
+-      bucket.pendingResponses.set(ref.id, {
+-        id: ref.id,
+-        sourceEventId: ref.sourceEventId,
+-        ...resolved?.question != null ? { question: resolved.question } : {},
+-        ...resolved?.options != null ? { options: resolved.options } : {}
+-      });
++      bucket.pendingResponses.set(
++        toolInvocationKey({ sourceEventId: ref.sourceEventId, toolCallId: ref.id }),
++        {
++          id: ref.id,
++          sourceEventId: ref.sourceEventId,
++          ...resolved?.question != null ? { question: resolved.question } : {},
++          ...resolved?.options != null ? { options: resolved.options } : {}
++        }
++      );
+     }
+     return;
+   }
+@@ -600,7 +669,7 @@ function ingestEventIntoBucket(bucket, message) {
+   }
+ }
+ function isContentAffectingEvent(message) {
+-  return message.type === "thread.created" || message.type === "thread.done" || message.type === "model.message" || message.type === "model.message.delta" || message.type === "tool.response" || message.type === "tool.approval_required" || message.type === "tool.response_required";
++  return message.type === "thread.created" || message.type === "thread.done" || message.type === "model.message" || message.type === "model.message.delta" || message.type === "tool.response" || message.type === "tool.response.v2" || message.type === "tool.approval_required" || message.type === "tool.response_required";
+ }
+ function ingestStreamEvent(state, message) {
+   if (message.type === "mcp.auth_required" || isTurnScopedEvent(message)) {
+@@ -689,7 +758,7 @@ function childSubThreadIds(state, parentThreadId, toolCallId) {
+   return ids;
+ }
+ function bucketHasUnresolvedPendingResponses(bucket) {
+-  for (const id of bucket.pendingResponses.keys()) {
++  for (const [id] of bucket.pendingResponses) {
+     if (!bucket.toolResults.has(id)) {
+       return true;
+     }
+@@ -724,11 +793,12 @@ function attachSubAgentMessages(state, parentThreadId, parts) {
+     if (part.type !== "tool-call" || parentBucket == null) {
+       return part;
+     }
+-    const sdkToolCall = findToolCallInBucket(parentBucket, part.toolCallId);
++    const rawToolCallId = toolInvocationRawId(part.toolCallId);
++    const sdkToolCall = findToolCallInBucket(parentBucket, rawToolCallId);
+     if (sdkToolCall == null || !isCreateSubAgentToolCall(sdkToolCall)) {
+       return part;
+     }
+-    const childIds = childSubThreadIds(state, parentThreadId, part.toolCallId);
++    const childIds = childSubThreadIds(state, parentThreadId, rawToolCallId);
+     if (childIds.length === 0) {
+       return part;
+     }
+@@ -775,17 +845,19 @@ function buildThreadAssistantParts(state, threadId, modelMessageIds) {
+       toolResults: bucket.toolResults,
+       pendingApprovals: bucket.pendingApprovals,
+       approvalDecisions: bucket.approvalDecisions,
+-      pendingResponses: bucket.pendingResponses
++      pendingResponses: bucket.pendingResponses,
++      sourceEventId: event.id
+     })) {
+-      if (part.type === "tool-call") {
+-        const existingIndex = toolCallIndexById.get(part.toolCallId);
++      const renderedPart = scopeToolCallIds(part, event.id);
++      if (renderedPart.type === "tool-call") {
++        const existingIndex = toolCallIndexById.get(renderedPart.toolCallId);
+         if (existingIndex != null) {
+-          parts[existingIndex] = part;
++          parts[existingIndex] = renderedPart;
+           continue;
+         }
+-        toolCallIndexById.set(part.toolCallId, parts.length);
++        toolCallIndexById.set(renderedPart.toolCallId, parts.length);
+       }
+-      parts.push(part);
++      parts.push(renderedPart);
+     }
+   }
+   return attachSubAgentMessages(state, threadId, parts);
+@@ -847,40 +919,83 @@ function recordToolApprovalInFold(fold, decision) {
+   const record = {
+     id: decision.toolCallId,
+     approved: decision.approved,
++    ...decision.optionId != null ? { optionId: decision.optionId } : {},
+     ...decision.reason != null ? { reason: decision.reason } : {}
+   };
+-  let applied = false;
+-  for (const bucket of fold.threads.values()) {
+-    if (!bucket.pendingApprovals.has(decision.toolCallId)) {
++  const buckets = decision.threadId == null ? fold.threads.values() : [fold.threads.get(decision.threadId)].filter(
++    (bucket) => bucket != null
++  );
++  for (const bucket of buckets) {
++    const key = findPendingApprovalKey(bucket, decision.toolCallId);
++    if (key == null) {
+       continue;
+     }
+-    bucket.pendingApprovals.delete(decision.toolCallId);
+-    bucket.approvalDecisions.set(decision.toolCallId, record);
+-    applied = true;
+-  }
+-  if (applied) {
++    const pending = bucket.pendingApprovals.get(key);
++    if (pending == null) {
++      continue;
++    }
++    bucket.pendingApprovals.delete(key);
++    bucket.approvalDecisions.set(key, {
++      ...record,
++      sourceEventId: pending.sourceEventId
++    });
+     return;
+   }
+   const rootBucket = fold.getOrCreateBucket(ROOT_THREAD_ID);
+   rootBucket.approvalDecisions.set(decision.toolCallId, record);
+ }
+ function recordToolResponseInFold(fold, response) {
+-  let applied = false;
+-  for (const bucket of fold.threads.values()) {
+-    if (!bucket.pendingResponses.has(response.toolCallId)) {
++  const buckets = response.threadId == null ? fold.threads.values() : [fold.threads.get(response.threadId)].filter(
++    (bucket) => bucket != null
++  );
++  for (const bucket of buckets) {
++    const key = findResponseInvocationKey(bucket, { toolCallId: response.toolCallId });
++    if (key == null) {
+       continue;
+     }
+-    bucket.toolResults.set(response.toolCallId, response.content);
+-    bucket.pendingResponses.delete(response.toolCallId);
+-    applied = true;
+-  }
+-  if (applied) {
++    bucket.toolResults.set(key, response.content);
++    bucket.pendingResponses.delete(key);
+     return;
+   }
+   const rootBucket = fold.getOrCreateBucket(ROOT_THREAD_ID);
+   rootBucket.toolResults.set(response.toolCallId, response.content);
+   rootBucket.pendingResponses.delete(response.toolCallId);
+ }
++function findPendingApprovalKey(bucket, toolCallId) {
++  for (const sourceEventId of bucket.toolCallInvocations.get(toolCallId) ?? []) {
++    const key = toolInvocationKey({ sourceEventId, toolCallId });
++    if (bucket.pendingApprovals.has(key)) {
++      return key;
++    }
++  }
++  return bucket.pendingApprovals.has(toolCallId) ? toolCallId : void 0;
++}
++function findResponseInvocationKey(bucket, {
++  toolCallId,
++  allowDenied = false
++}) {
++  for (const sourceEventId of bucket.toolCallInvocations.get(toolCallId) ?? []) {
++    const key = toolInvocationKey({ sourceEventId, toolCallId });
++    const denied2 = bucket.approvalDecisions.get(key)?.approved === false;
++    if (bucket.pendingResponses.has(key) || !bucket.toolResults.has(key) && (allowDenied || !denied2)) {
++      return key;
++    }
++  }
++  const denied = bucket.approvalDecisions.get(toolCallId)?.approved === false;
++  if (bucket.pendingResponses.has(toolCallId) || !bucket.toolResults.has(toolCallId) && (allowDenied || !denied)) {
++    return toolCallId;
++  }
++  return void 0;
++}
++function scopeToolCallIds(part, sourceEventId) {
++  if (part.type !== "tool-call") {
++    return part;
++  }
++  return {
++    ...part,
++    toolCallId: toolInvocationKey({ sourceEventId, toolCallId: part.toolCallId })
++  };
++}
+ 
+ // src/toolResponse.ts
+ var TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY = "toolResponseThreadId";
+@@ -966,7 +1081,7 @@ function collectResponseInputs(message, threadId) {
+       events.push({
+         type: "user.tool_response",
+         threadId: scopedThreadId,
+-        toolCallId: part.toolCallId,
++        toolCallId: toolInvocationRawId(part.toolCallId),
+         content: String(part.result)
+       });
+     }
+@@ -983,7 +1098,7 @@ function applyStagedResponsesToContentMap(content, staged) {
+     if (part.type !== "tool-call") {
+       return part;
+     }
+-    const contentValue = staged.get(part.toolCallId);
++    const contentValue = staged.get(part.toolCallId) ?? staged.get(toolInvocationRawId(part.toolCallId));
+     let nextPart = part;
+     if (contentValue != null && hasPendingToolResponse(part)) {
+       nextPart = applyToolResponseToToolCall(part, contentValue);
+@@ -1019,12 +1134,15 @@ function applyUserToolResponsesToFold(fold, inputs) {
+     if (item.type === "user.tool_response") {
+       recordToolResponseInFold(fold, {
+         toolCallId: item.toolCallId,
+-        content: item.content
++        content: item.content,
++        threadId: item.threadId
+       });
+     } else if (item.type === "user.tool_approval") {
+       recordToolApprovalInFold(fold, {
+         toolCallId: item.toolCallId,
++        threadId: item.threadId,
+         approved: item.approval.status === "allow",
++        ...item.approval.status === "allow" && item.approval.scope === "chat" ? { optionId: "allow-chat" } : {},
+         ...item.approval.status === "deny" && item.approval.reason != null ? { reason: item.approval.reason } : {}
+       });
+     }
+@@ -1282,6 +1400,13 @@ function appendMcpAuthToTurnContent(content, turn) {
+ }
+ 
+ // src/sessionSnapshot.ts
++function latestSessionTerminalError(turns) {
++  const latest = turns.at(-1);
++  if (latest?.state.status !== "error") {
++    return void 0;
++  }
++  return { turnId: latest.id, message: latest.state.message };
++}
+ function emptyRequiredActionsOverlay() {
+   return {
+     approvals: /* @__PURE__ */ new Map(),
+@@ -1351,7 +1476,7 @@ function oldestCompleteTurnGroupState(itemsAsc) {
+   if (!hasDone) {
+     return "incomplete";
+   }
+-  return extractTurnUserText(created.event.input) != null ? "user-group" : "continuation";
++  return (created.event.input ?? []).some((item) => item.type === "user.message") ? "user-group" : "continuation";
+ }
+ async function fetchSessionEventsPage(server, sessionId, options) {
+   const page = await server.listEvents({
+@@ -1422,6 +1547,12 @@ function cloneThreadBucket(bucket) {
+     pendingApprovals: new Map(bucket.pendingApprovals),
+     approvalDecisions: new Map(bucket.approvalDecisions),
+     pendingResponses: new Map(bucket.pendingResponses),
++    toolCallInvocations: new Map(
++      [...bucket.toolCallInvocations].map(([toolCallId, sourceEventIds]) => [
++        toolCallId,
++        [...sourceEventIds]
++      ])
++    ),
+     done: bucket.done,
+     ...bucket.title != null ? { title: bucket.title } : {},
+     ...bucket.agentInfo != null ? { agentInfo: bucket.agentInfo } : {}
+@@ -1466,6 +1597,17 @@ function prependFoldState(older, newer) {
+         ...olderBucket.pendingResponses,
+         ...newerBucket.pendingResponses
+       ]),
++      toolCallInvocations: new Map(
++        [...olderBucket.toolCallInvocations, ...newerBucket.toolCallInvocations].map(
++          ([toolCallId]) => [
++            toolCallId,
++            [
++              ...olderBucket.toolCallInvocations.get(toolCallId) ?? [],
++              ...newerBucket.toolCallInvocations.get(toolCallId) ?? []
++            ]
++          ]
++        )
++      ),
+       done: newerBucket.done || olderBucket.done,
+       ...newerBucket.title != null || olderBucket.title != null ? { title: newerBucket.title ?? olderBucket.title } : {},
+       ...newerBucket.agentInfo != null || olderBucket.agentInfo != null ? { agentInfo: newerBucket.agentInfo ?? olderBucket.agentInfo } : {}
+@@ -1491,6 +1633,7 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
+       currentCreatedEvent = event;
+       currentContentEvents = [];
+       beforeCount = snapshot.fold.threads.get(ROOT_THREAD_ID)?.modelMessageIds.length ?? 0;
++      applyUserToolResponsesToFold(snapshot.fold, currentCreatedEvent.input ?? []);
+     } else if (event.type === "turn.done") {
+       if (currentTurnId == null || currentCreatedEvent == null) {
+         continue;
+@@ -1502,10 +1645,6 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
+       const sandboxEvent = currentContentEvents.find(
+         (ev) => ev.type === "sandbox.created"
+       );
+-      applyUserToolResponsesToFold(
+-        snapshot.fold,
+-        currentCreatedEvent.input ?? []
+-      );
+       snapshot.turns.push(
+         sessionEventsToSessionRecord(
+           currentTurnId,
+@@ -2066,6 +2205,12 @@ function projectSessionMessages(snapshot, options) {
+     const resolvedUpdate = streamComplete === true ? projectActiveStreamUpdate(snapshot) : update;
+     const last = messages.at(-1);
+     const existingAssistant = isContinuation && last?.role === "assistant" ? last : void 0;
++    if (resolvedUpdate.terminalError != null && resolvedUpdate.content.length === 0) {
++      return applyRequiredActionsOverlayToMessages(
++        messages,
++        snapshot.requiredActions
++      );
++    }
+     let assistantMessage = turnStreamUpdateToAssistantMessage(
+       turnId,
+       resolvedUpdate,
+@@ -2096,8 +2241,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
+     const turn = turns[i];
+     const rootBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
+     const beforeCount = rootBucket?.modelMessageIds.length ?? 0;
+-    ingestCollectedEventsIntoFold(snapshot.fold, eventArrays[i] ?? []);
+     applyUserToolResponsesToFold(snapshot.fold, turn.input ?? []);
++    ingestCollectedEventsIntoFold(snapshot.fold, eventArrays[i] ?? []);
+     const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
+     const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
+       beforeCount
+@@ -2166,6 +2311,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
+   return {
+     messages,
+     foldState: snapshot.fold,
++    terminalError: latestSessionTerminalError(snapshot.turns),
+     ...snapshot.runningTurn != null ? {
+       runningTurn: snapshot.runningTurn,
+       unstable_resume: true
+@@ -2336,7 +2482,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
+     }
+     if (event.type === "turn.done") {
+       if (event.state.status === "error") {
+-        throw new Error(event.state.message);
++        yield withSandbox({
++          content: yieldContent() ?? [],
++          terminalError: { message: event.state.message }
++        });
++        return;
+       }
+       break;
+     }
+@@ -3039,19 +3189,7 @@ function buildTurnInput(options) {
+   }
+   return [{ type: "user.message", content: options.userMessage ?? "" }];
+ }
+-function bindAbort(server, sessionId, abortSignal) {
+-  const onAbort = () => {
+-    void server.cancelSession({ sessionId }).catch(() => void 0);
+-  };
+-  if (abortSignal.aborted) {
+-    onAbort();
+-    return onAbort;
+-  }
+-  abortSignal.addEventListener("abort", onAbort, { once: true });
+-  return onAbort;
+-}
+ async function* streamTurnContent(server, sessionId, foldState, options, abortSignal, groupRootBaseline, onTurnIdAvailable) {
+-  const onAbort = bindAbort(server, sessionId, abortSignal);
+   if (abortSignal.aborted) {
+     return;
+   }
+@@ -3083,22 +3221,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
+       return;
+     }
+     throw error;
+-  } finally {
+-    abortSignal.removeEventListener("abort", onAbort);
+   }
+ }
+ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSignal, afterSequenceNumber, groupRootBaseline) {
+   if (server.subscribeToTurn == null) {
+     return;
+   }
+-  const onAbort = () => {
+-    void server.cancelSession({ sessionId }).catch(() => void 0);
+-  };
+   if (abortSignal.aborted) {
+-    onAbort();
+     return;
+   }
+-  abortSignal.addEventListener("abort", onAbort, { once: true });
+   try {
+     yield* streamTurnEvents(
+       server.subscribeToTurn({
+@@ -3115,8 +3246,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
+       return;
+     }
+     throw error;
+-  } finally {
+-    abortSignal.removeEventListener("abort", onAbort);
+   }
+ }
+ 
+@@ -3176,20 +3305,49 @@ function appendTurnInputs(base, continuationInputs) {
+   }
+   return [...base, ...continuationInputs];
+ }
++function clearAcknowledgedRequiredActions(current, submitted) {
++  const approvals = new Map(current.approvals);
++  for (const [id, expected] of submitted.approvals) {
++    const actual = approvals.get(id);
++    if (actual?.approved === expected.approved && actual.reason === expected.reason && actual.optionId === expected.optionId) {
++      approvals.delete(id);
++    }
++  }
++  const toolResponses = new Map(current.toolResponses);
++  for (const [id, expected] of submitted.toolResponses) {
++    if (toolResponses.get(id)?.content === expected.content) {
++      toolResponses.delete(id);
++    }
++  }
++  return { approvals, toolResponses };
++}
++function mergeRequiredActions(baseline, latest) {
++  return {
++    approvals: new Map([...baseline.approvals, ...latest.approvals]),
++    toolResponses: new Map([
++      ...baseline.toolResponses,
++      ...latest.toolResponses
++    ])
++  };
++}
+ function commitActiveStream(snapshot, continuationInputs) {
+   const active = snapshot.activeStream;
+   if (active == null || active.streamComplete !== true) {
+     return snapshot;
+   }
+   const activeSandboxId = active.update.metadata?.custom?.sandboxId;
+-  const completedState = buildCompletedTurnState(
++  const completedState = active.update.terminalError != null ? {
++    status: "error",
++    message: active.update.terminalError.message,
++    completedAt: (/* @__PURE__ */ new Date()).toISOString()
++  } : buildCompletedTurnState(
+     (/* @__PURE__ */ new Date()).toISOString(),
+     requiredActionsFromActiveUpdate(active.update)
+   );
+-  const baseline = snapshot.groupRootBaseline ?? computeGroupRootBaseline(snapshot.turns);
++  const alreadyRecordedIds = snapshot.turns.filter((turn) => turn.id !== active.turnId).flatMap((turn) => turn.rootModelMessageIds ?? []);
+   const rootModelMessageIds = rootModelMessageIdsSinceBaseline(
+     snapshot.fold,
+-    baseline
++    alreadyRecordedIds
+   );
+   const lastTurn = snapshot.turns.at(-1);
+   if (lastTurn?.id === active.turnId) {
+@@ -3273,6 +3431,10 @@ function useTrueFoundryAgentMessages({
+   const createdAtByMessageIdRef = useRef2(/* @__PURE__ */ new Map());
+   const abortControllerRef = useRef2(null);
+   const activeRunRef = useRef2(null);
++  const requiredActionRetryScheduledRef = useRef2(false);
++  const requiredActionRetryPendingRef = useRef2(false);
++  const requiredActionSendInFlightRef = useRef2(false);
++  const trySendCollectedRequiredActionsRef = useRef2(() => void 0);
+   const resumeUnavailableRef = useRef2(false);
+   const runningTurnRef = useRef2(void 0);
+   const loadGenerationRef = useRef2(0);
+@@ -3302,6 +3464,7 @@ function useTrueFoundryAgentMessages({
+     () => projectSessionMessages(snapshot, projectOptions),
+     [snapshot, projectOptions]
+   );
++  const terminalError = latestSessionTerminalError(snapshot.turns);
+   const runStream = useCallback3(
+     (createStream, turnIdRef, isContinuation) => {
+       const streamGeneration = ++streamGenerationRef.current;
+@@ -3310,9 +3473,11 @@ function useTrueFoundryAgentMessages({
+       abortControllerRef.current = abortController;
+       setIsRunning(true);
+       markResumeUnavailable(false);
++      const snapshotBeforeRun = snapshotRef.current;
+       const run = (async () => {
+         let pendingStreamUpdate = null;
+         let streamUpdateRaf = null;
++        let completedWithoutAbort = false;
+         const flushPendingStreamUpdate = () => {
+           streamUpdateRaf = null;
+           const pending = pendingStreamUpdate;
+@@ -3347,6 +3512,7 @@ function useTrueFoundryAgentMessages({
+             }
+             applyStreamUpdate(update);
+           }
++          completedWithoutAbort = !abortController.signal.aborted;
+         } catch (error) {
+           if (error instanceof Error && error.name === "AbortError") {
+             return;
+@@ -3366,22 +3532,37 @@ function useTrueFoundryAgentMessages({
+             abortControllerRef.current = null;
+           }
+           setIsRunning(false);
+-          setSnapshot((prev) => {
+-            if (prev.activeStream == null) {
+-              return prev;
+-            }
+-            const marked = replaceSessionSnapshot(prev, {
+-              activeStream: {
+-                ...prev.activeStream,
+-                streamComplete: true
+-              },
+-              requiredActions: {
+-                approvals: /* @__PURE__ */ new Map(),
+-                toolResponses: /* @__PURE__ */ new Map()
+-              }
++          if (isContinuation && !completedWithoutAbort) {
++            const restored = replaceSessionSnapshot(snapshotBeforeRun, {
++              requiredActions: mergeRequiredActions(
++                snapshotBeforeRun.requiredActions,
++                snapshotRef.current.requiredActions
++              )
+             });
+-            return commitActiveStream(marked);
+-          });
++            snapshotRef.current = restored;
++            setSnapshot(restored);
++          } else {
++            setSnapshot((prev) => {
++              if (prev.activeStream == null) {
++                return prev;
++              }
++              const marked = replaceSessionSnapshot(prev, {
++                activeStream: {
++                  ...prev.activeStream,
++                  streamComplete: true
++                },
++                ...isContinuation ? {
++                  requiredActions: clearAcknowledgedRequiredActions(
++                    prev.requiredActions,
++                    snapshotBeforeRun.requiredActions
++                  )
++                } : {}
++              });
++              const committed = commitActiveStream(marked);
++              snapshotRef.current = committed;
++              return committed;
++            });
++          }
+         }
+       })();
+       activeRunRef.current = run;
+@@ -3447,6 +3628,7 @@ function useTrueFoundryAgentMessages({
+         return;
+       }
+       createdAtByMessageIdRef.current = /* @__PURE__ */ new Map();
++      snapshotRef.current = loadedSnapshot;
+       setSnapshot(loadedSnapshot);
+       runningTurnRef.current = loadedSnapshot.runningTurn;
+       setIsLoading(false);
+@@ -3662,12 +3844,13 @@ function useTrueFoundryAgentMessages({
+     [server, runStream, sessionId]
+   );
+   const cancel = useCallback3(async () => {
+-    if (sessionId == null) {
++    const activeSessionId = sessionId ?? lazilyCreatedSessionIdRef.current;
++    if (activeSessionId == null) {
+       abortControllerRef.current?.abort();
+       return;
+     }
+     const conversationSessionId = await resolveActiveSessionId(
+-      sessionId,
++      activeSessionId,
+       resolveConversationSessionIdRef.current
+     );
+     await server.cancelSession({ sessionId: conversationSessionId }).catch(() => void 0);
+@@ -3677,11 +3860,26 @@ function useTrueFoundryAgentMessages({
+       setIsRunning(false);
+     }
+   }, [server, sessionId, markResumeUnavailable]);
+-  const isRunningRef = useRef2(isRunning);
+-  isRunningRef.current = isRunning;
+   const trySendCollectedRequiredActions = useCallback3(
+     (nextSnapshot) => {
+-      if (isRunningRef.current) {
++      const activeRun = activeRunRef.current;
++      if (activeRun != null) {
++        requiredActionRetryPendingRef.current = true;
++        if (!requiredActionRetryScheduledRef.current) {
++          requiredActionRetryScheduledRef.current = true;
++          void activeRun.then(
++            () => {
++              requiredActionRetryScheduledRef.current = false;
++              if (!requiredActionSendInFlightRef.current) {
++                requiredActionRetryPendingRef.current = false;
++                trySendCollectedRequiredActionsRef.current(snapshotRef.current);
++              }
++            },
++            () => {
++              requiredActionRetryScheduledRef.current = false;
++            }
++          );
++        }
+         return;
+       }
+       const projected = projectSessionMessages(nextSnapshot, projectOptions);
+@@ -3690,18 +3888,29 @@ function useTrueFoundryAgentMessages({
+         return;
+       }
+       const inputs = collectRequiredActionInputs(paused);
+-      if (inputs.length > 0) {
+-        void sendTurn({ inputs }).catch(() => void 0);
++      if (inputs.length === 0 || requiredActionSendInFlightRef.current) {
++        return;
+       }
++      requiredActionRetryPendingRef.current = false;
++      requiredActionSendInFlightRef.current = true;
++      void sendTurn({ inputs }).catch((error) => onErrorRef.current?.(error)).finally(() => {
++        requiredActionSendInFlightRef.current = false;
++        if (requiredActionRetryPendingRef.current) {
++          requiredActionRetryPendingRef.current = false;
++          trySendCollectedRequiredActionsRef.current(snapshotRef.current);
++        }
++      });
+     },
+     [projectOptions, sendTurn]
+   );
++  trySendCollectedRequiredActionsRef.current = trySendCollectedRequiredActions;
+   const respondToToolApproval = useCallback3(
+     (response) => {
+       const prev = snapshotRef.current;
+       const approvals = new Map(prev.requiredActions.approvals);
+       approvals.set(response.approvalId, {
+         approved: response.approved,
++        ...response.optionId != null ? { optionId: response.optionId } : {},
+         ...response.reason != null ? { reason: response.reason } : {}
+       });
+       const nextSnapshot = replaceSessionSnapshot(prev, {
+@@ -3710,6 +3919,7 @@ function useTrueFoundryAgentMessages({
+           approvals
+         }
+       });
++      snapshotRef.current = nextSnapshot;
+       setSnapshot(nextSnapshot);
+       trySendCollectedRequiredActions(nextSnapshot);
+     },
+@@ -3726,6 +3936,7 @@ function useTrueFoundryAgentMessages({
+           toolResponses
+         }
+       });
++      snapshotRef.current = nextSnapshot;
+       setSnapshot(nextSnapshot);
+       trySendCollectedRequiredActions(nextSnapshot);
+     },
+@@ -3880,6 +4091,7 @@ function useTrueFoundryAgentMessages({
+   }, [server, isMain, sessionId]);
+   return {
+     messages,
++    terminalError,
+     isRunning,
+     resumeUnavailable,
+     isLoading,
+@@ -3958,6 +4170,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+   const [toolStatuses, setToolStatuses] = useState3({});
+   const {
+     messages,
++    terminalError,
+     isRunning,
+     resumeUnavailable,
+     isLoading,
+@@ -4047,6 +4260,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+       pendingToolResponses,
+       pendingMcpAuth,
+       resumeUnavailable,
++      terminalError,
+       sandboxId,
+       respondToToolApproval,
+       respondToToolResponse,
+@@ -4249,8 +4463,13 @@ var useTrueFoundryMcpAuth = () => {
+   );
+ };
+ var useTrueFoundryRespondToToolApproval = () => {
+-  const aui = useAui3();
+-  return (response) => getTrueFoundryExtras(aui).respondToToolApproval(response);
++  const extras = useTrueFoundryRuntimeExtras();
++  return (response) => {
++    if (extras == null) {
++      throw new Error("TrueFoundry runtime is not ready yet");
++    }
++    extras.respondToToolApproval(response);
++  };
+ };
+ var useTrueFoundryRespondToToolResponse = () => {
+   const aui = useAui3();
+@@ -4298,6 +4517,7 @@ var useTrueFoundryHistoryPagination = () => {
+   );
+ };
+ var useTrueFoundryResumeUnavailable = () => useTrueFoundryRuntimeExtras()?.resumeUnavailable ?? false;
++var useTrueFoundryTerminalError = () => useTrueFoundryRuntimeExtras()?.terminalError;
+ var useTrueFoundryResetFromTurn = () => {
+   const aui = useAui3();
+   return (turnId) => getTrueFoundryExtras(aui).resetFromTurn(turnId);
+@@ -4427,6 +4647,7 @@ export {
+   useTrueFoundryResumeMcpAuth,
+   useTrueFoundryResumeUnavailable,
+   useTrueFoundrySandboxId,
++  useTrueFoundryTerminalError,
+   useTrueFoundryToolResponses,
+   useTrueFoundryTurnId,
+   useTrueFoundryUpdateAgentSpec
+diff --git a/dist/types-hS8TQqBP.d.ts b/dist/types-hS8TQqBP.d.ts
+index bddf93d..fe1ee2c 100644
+--- a/dist/types-hS8TQqBP.d.ts
++++ b/dist/types-hS8TQqBP.d.ts
+@@ -9,7 +9,11 @@ interface ToolCallFunction {
+     name: string;
+     arguments: string;
+ }
+-type ToolInfo = {
++type ToolInfoMetadata = {
++    effect?: string;
++    hostObservedTargetSummary?: string;
++};
++type ToolInfo = ({
+     type: "truefoundry-system";
+     name: string;
+ } | {
+@@ -21,7 +25,7 @@ type ToolInfo = {
+     type: string;
+     name?: string;
+     [key: string]: unknown;
+-};
++}) & ToolInfoMetadata;
+ interface ToolCall {
+     id: string;
+     type: "function";
+@@ -115,6 +119,24 @@ interface ToolResponseEvent {
+     content: string;
+     createdAt: string;
+ }
++type ToolResultDisposition = "denied" | "policy_blocked" | "executed_ok" | "executed_nonzero" | "never_ran" | "outcome_unknown";
++interface ToolResponseEventV2 {
++    type: "tool.response.v2";
++    id: string;
++    threadId: string;
++    toolCallId: string;
++    content: string;
++    createdAt: string;
++    disposition: ToolResultDisposition;
++    remediation?: {
++        reasonCode: string;
++        message: string;
++        suggestedAction: "retry" | "change_strategy" | "request_approval" | "authenticate" | "inspect_state" | "contact_user";
++    };
++    admissionProvenance: unknown;
++    memoized?: true;
++    repeatCount?: number;
++}
+ interface ToolApprovalRequiredEvent {
+     type: "tool.approval_required";
+     id: string;
+@@ -204,7 +226,7 @@ interface TurnDoneEvent {
+     threadId?: string | null;
+ }
+ /** Events stored in fold buckets (non-delta, non-turn-lifecycle). */
+-type TurnEvent = ModelMessageEvent | ToolResponseEvent | ThreadCreatedEvent | ThreadDoneEvent | McpAuthRequiredEvent | McpInitializeEvent | SandboxCreatedEvent | ToolApprovalRequiredEvent | ToolResponseRequiredEvent;
++type TurnEvent = ModelMessageEvent | ToolResponseEvent | ToolResponseEventV2 | ThreadCreatedEvent | ThreadDoneEvent | McpAuthRequiredEvent | McpInitializeEvent | SandboxCreatedEvent | ToolApprovalRequiredEvent | ToolResponseRequiredEvent;
+ /** Full streaming event union (includes deltas + turn lifecycle). */
+ type TurnStreamingEvent = TurnEvent | ModelMessageDeltaEvent | TurnCreatedEvent | TurnDoneEvent;
+ type ActionRequiredEvent = ToolApprovalRequiredEvent | ToolResponseRequiredEvent | McpAuthRequiredEvent;
+@@ -327,6 +349,9 @@ interface AgentContextManagementConfig {
+     compaction?: AgentCompactionConfig;
+     largeToolResponse?: AgentCapabilityConfig;
+ }
++interface MemoryRuntimeConfig {
++    recallEnabled?: boolean;
++}
+ interface AgentRuntimeConfig {
+     iterationLimit?: number;
+     sandbox?: AgentSandboxConfig;
+@@ -334,6 +359,7 @@ interface AgentRuntimeConfig {
+     generativeUi?: AgentCapabilityConfig;
+     dynamicSubAgents?: AgentCapabilityConfig;
+     askUserQuestions?: AgentCapabilityConfig;
++    memory?: MemoryRuntimeConfig;
+ }
+ /**
+  * SDK-owned agent definition — fields the FE reads/writes.
+@@ -345,6 +371,10 @@ interface AgentSpec<TModel extends Model = Model, TSkill extends SkillMount = Sk
+     skills?: TSkill[];
+     mcpServers?: TMcp[];
+     config?: TConfig;
++    auxiliaryModels?: {
++        compaction?: TModel;
++        delegation?: TModel;
++    };
+     instructions?: string;
+     variables?: Record<string, string>;
+ }
+@@ -406,6 +436,7 @@ interface UserMessage {
+ }
+ type ApprovalDecision = {
+     status: "allow";
++    scope?: "once" | "chat";
+ } | {
+     status: "deny";
+     reason?: string;
+@@ -671,7 +702,7 @@ interface ToolBase {
+     description: string;
+ }
+ /** Strict auth type id. Hosts widen branches via intersection + re-union. */
+-type ConnectorAuthType = "dcr" | "header" | "none";
++type ConnectorAuthType = "dcr" | "header" | "none" | "oauth_client";
+ type ConnectorAuthOAuth = {
+     type: "dcr";
+     authUrl?: string;
+@@ -684,7 +715,13 @@ type ConnectorAuthApiKey = {
+ type ConnectorAuthNone = {
+     type: "none";
+ };
+-type ConnectorAuth = ConnectorAuthOAuth | ConnectorAuthApiKey | ConnectorAuthNone;
++type ConnectorAuthOAuthClient = {
++    type: "oauth_client";
++    clientId?: string;
++    clientSecret?: string;
++    scopes?: string[];
++};
++type ConnectorAuth = ConnectorAuthOAuth | ConnectorAuthApiKey | ConnectorAuthNone | ConnectorAuthOAuthClient;
+ type ConnectorAuthPublicOAuth = {
+     type: "dcr";
+     authUrl?: string;
+@@ -696,7 +733,12 @@ type ConnectorAuthPublicApiKey = {
+ type ConnectorAuthPublicNone = {
+     type: "none";
+ };
+-type ConnectorAuthPublic = ConnectorAuthPublicOAuth | ConnectorAuthPublicApiKey | ConnectorAuthPublicNone;
++type ConnectorAuthPublicOAuthClient = {
++    type: "oauth_client";
++    clientId?: string;
++    scopes?: string[];
++};
++type ConnectorAuthPublic = ConnectorAuthPublicOAuth | ConnectorAuthPublicApiKey | ConnectorAuthPublicNone | ConnectorAuthPublicOAuthClient;
+ /**
+  * MCP / connector create-edit config. Host extends for extra fields, etc.
+  */
+diff --git a/src/convertTurnMessages.test.ts b/src/convertTurnMessages.test.ts
+index a67eaed..9e46b7f 100644
+--- a/src/convertTurnMessages.test.ts
++++ b/src/convertTurnMessages.test.ts
+@@ -2879,6 +2879,99 @@ describe("buildSnapshotFromSessionEvents", () => {
+         }
+     });
+ 
++    it("loads older pages when the newest complete turn is an approval continuation", async () => {
++        const originalCreated: TurnCreatedEvent = {
++            type: "turn.created",
++            id: "evt-created-original",
++            turnId: "turn-original",
++            input: [{ type: "user.message", content: "make the change" }],
++            state: { status: "running" },
++            createdAt,
++        };
++        const originalApproval = approvalRequired({
++            id: "evt-approval-original",
++            threadId: ROOT_THREAD_ID,
++            toolCalls: [{ id: "tool-original", sourceEventId: "model-original" }],
++        });
++        const originalDone: TurnDoneEvent = {
++            type: "turn.done",
++            id: "evt-done-original",
++            state: {
++                status: "done",
++                requiredActions: [originalApproval],
++                completedAt: createdAt,
++            },
++            createdAt,
++        };
++        const continuationCreated: TurnCreatedEvent = {
++            type: "turn.created",
++            id: "evt-created-continuation",
++            turnId: "turn-continuation",
++            previousTurnId: "turn-original",
++            input: [
++                {
++                    type: "user.tool_approval",
++                    threadId: ROOT_THREAD_ID,
++                    toolCallId: "tool-original",
++                    approval: { status: "deny", reason: "not this edit" },
++                },
++            ],
++            state: { status: "running" },
++            createdAt,
++        };
++        const continuationDone: TurnDoneEvent = {
++            type: "turn.done",
++            id: "evt-done-continuation",
++            state: {
++                status: "done",
++                requiredActions: [],
++                completedAt: createdAt,
++            },
++            createdAt,
++        };
++        const items: SessionEventItem[] = [
++            { turnId: "turn-original", event: originalCreated },
++            {
++                turnId: "turn-original",
++                event: modelMessage({
++                    id: "model-original",
++                    threadId: ROOT_THREAD_ID,
++                    content: "I need approval.",
++                    toolCalls: [
++                        {
++                            id: "tool-original",
++                            type: "function",
++                            function: { name: "apply_patch", arguments: "{}" },
++                            toolInfo: { type: "truefoundry-system", name: "apply_patch" },
++                        },
++                    ],
++                }),
++            },
++            { turnId: "turn-original", event: originalApproval },
++            { turnId: "turn-original", event: originalDone },
++            { turnId: "turn-continuation", event: continuationCreated },
++            { turnId: "turn-continuation", event: continuationDone },
++        ];
++        const listEvents = vi.fn(sessionEventsPage(items, { pageSize: 2 }));
++        const server: AgentChatServer = {
++            listTurns: async () => ({ data: [] }),
++            listEvents,
++            listTurnEvents: async () => ({ data: [] }),
++        };
++
++        const snapshot = await buildSnapshotFromSessionEvents(server, SESSION_ID);
++        const messages = projectSessionMessages(snapshot);
++
++        expect(listEvents).toHaveBeenCalledTimes(3);
++        expect(messages.length).toBeGreaterThan(0);
++        const assistant = messages.find((message) => message.role === "assistant");
++        const toolCall = assistant?.content.find(
++            (part) => part.type === "tool-call" && part.toolCallId === "tool-original",
++        );
++        expect(toolCall).toMatchObject({ approval: { approved: false } });
++        expect(collectPendingToolResponses(messages)).toHaveLength(0);
++    });
++
+     it("loads only the newest event page and exposes an older-history cursor", async () => {
+         const makeTurnItems = (id: string, text: string): SessionEventItem[] => [
+             {
+@@ -3108,4 +3201,3 @@ describe("resolveGatewayBranchPreviousTurnIdForTurn", () => {
+         ).resolves.toBe("t1");
+     });
+ });
+-
+diff --git a/src/convertTurnMessages.ts b/src/convertTurnMessages.ts
+index b918b3e..11b2901 100644
+--- a/src/convertTurnMessages.ts
++++ b/src/convertTurnMessages.ts
+@@ -46,6 +46,7 @@ import {
+     type RequiredActionsOverlay,
+     type GatewaySessionEventItem,
+     type SessionHistoryPagination,
++    latestSessionTerminalError,
+     createEmptySessionSnapshot,
+     emptyRequiredActionsOverlay,
+     replaceSessionSnapshot,
+@@ -255,7 +256,7 @@ function oldestCompleteTurnGroupState(
+     if (!hasDone) {
+         return "incomplete";
+     }
+-    return extractTurnUserText(created.event.input) != null
++    return (created.event.input ?? []).some((item) => item.type === "user.message")
+         ? "user-group"
+         : "continuation";
+ }
+@@ -365,6 +366,12 @@ function cloneThreadBucket(bucket: ThreadBucket): ThreadBucket {
+         pendingApprovals: new Map(bucket.pendingApprovals),
+         approvalDecisions: new Map(bucket.approvalDecisions),
+         pendingResponses: new Map(bucket.pendingResponses),
++        toolCallInvocations: new Map(
++            [...bucket.toolCallInvocations].map(([toolCallId, sourceEventIds]) => [
++                toolCallId,
++                [...sourceEventIds],
++            ]),
++        ),
+         done: bucket.done,
+         ...(bucket.title != null ? { title: bucket.title } : {}),
+         ...(bucket.agentInfo != null ? { agentInfo: bucket.agentInfo } : {}),
+@@ -414,6 +421,17 @@ export function prependFoldState(
+                 ...olderBucket.pendingResponses,
+                 ...newerBucket.pendingResponses,
+             ]),
++            toolCallInvocations: new Map(
++                [...olderBucket.toolCallInvocations, ...newerBucket.toolCallInvocations].map(
++                    ([toolCallId]) => [
++                        toolCallId,
++                        [
++                            ...(olderBucket.toolCallInvocations.get(toolCallId) ?? []),
++                            ...(newerBucket.toolCallInvocations.get(toolCallId) ?? []),
++                        ],
++                    ],
++                ),
++            ),
+             done: newerBucket.done || olderBucket.done,
+             ...(newerBucket.title != null || olderBucket.title != null
+                 ? { title: newerBucket.title ?? olderBucket.title }
+@@ -461,6 +479,7 @@ function ingestSessionEventsIntoSnapshot(
+             currentContentEvents = [];
+             beforeCount =
+                 snapshot.fold.threads.get(ROOT_THREAD_ID)?.modelMessageIds.length ?? 0;
++            applyUserToolResponsesToFold(snapshot.fold, currentCreatedEvent.input ?? []);
+         } else if (event.type === "turn.done") {
+             if (currentTurnId == null || currentCreatedEvent == null) {
+                 continue;
+@@ -476,10 +495,6 @@ function ingestSessionEventsIntoSnapshot(
+                     ev.type === "sandbox.created",
+             );
+ 
+-            applyUserToolResponsesToFold(
+-                snapshot.fold,
+-                currentCreatedEvent.input ?? [],
+-            );
+             snapshot.turns.push(
+                 sessionEventsToSessionRecord(
+                     currentTurnId,
+@@ -742,6 +757,7 @@ export async function prependOlderSessionHistory(
+ export type ConvertTurnsResult = {
+     messages: ThreadMessage[];
+     foldState: PeerThreadFoldState;
++    terminalError?: import("./sessionSnapshot.js").SessionTerminalError;
+     runningTurn?: Turn;
+     unstable_resume?: boolean;
+ };
+@@ -1275,10 +1291,15 @@ export function projectSessionMessages(
+             snapshot.activeStream;
+         const resolvedUpdate =
+             streamComplete === true ? projectActiveStreamUpdate(snapshot) : update;
+-
+         const last = messages.at(-1);
+         const existingAssistant =
+             isContinuation && last?.role === "assistant" ? last : undefined;
++        if (resolvedUpdate.terminalError != null && resolvedUpdate.content.length === 0) {
++            return applyRequiredActionsOverlayToMessages(
++                messages,
++                snapshot.requiredActions,
++            );
++        }
+         let assistantMessage = turnStreamUpdateToAssistantMessage(
+             turnId,
+             resolvedUpdate,
+@@ -1319,8 +1340,8 @@ function ingestTurnsIntoSnapshot(
+         const rootBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
+         const beforeCount = rootBucket?.modelMessageIds.length ?? 0;
+ 
+-        ingestCollectedEventsIntoFold(snapshot.fold, eventArrays[i] ?? []);
+         applyUserToolResponsesToFold(snapshot.fold, turn.input ?? []);
++        ingestCollectedEventsIntoFold(snapshot.fold, eventArrays[i] ?? []);
+ 
+         const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
+         const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
+@@ -1438,6 +1459,7 @@ export async function convertTurnsToThreadMessages(
+     return {
+         messages,
+         foldState: snapshot.fold,
++        terminalError: latestSessionTerminalError(snapshot.turns),
+         ...(snapshot.runningTurn != null
+             ? {
+                   runningTurn: snapshot.runningTurn,
+@@ -1698,7 +1720,11 @@ export async function* streamTurnEvents(
+ 
+         if (event.type === "turn.done") {
+             if (event.state.status === "error") {
+-                throw new Error(event.state.message);
++                yield withSandbox({
++                    content: yieldContent() ?? [],
++                    terminalError: { message: event.state.message },
++                });
++                return;
+             }
+             // The turn is logically complete once `turn.done` is observed. The
+             // resumed-turn transport (`subscribeToTurn`) is a reconnectable live
+diff --git a/src/foldPeerThreads.test.ts b/src/foldPeerThreads.test.ts
+index 9002dd5..1f88591 100644
+--- a/src/foldPeerThreads.test.ts
++++ b/src/foldPeerThreads.test.ts
+@@ -365,6 +365,46 @@ describe("foldPeerThreads", () => {
+         expect(toolCall.interrupt).toBeUndefined();
+     });
+ 
++    it("ingests tool.response.v2 without changing legacy response handling", () => {
++        const state = new PeerThreadFoldState();
++        const content = JSON.stringify({
++            schema_version: "tool.response.v2",
++            outcome: { disposition: "policy_blocked" },
++            result: { error: "Blocked by policy" },
++        });
++
++        ingestTurnEvent(
++            state,
++            modelMessage({
++                id: "model-v2",
++                threadId: ROOT_THREAD_ID,
++                toolCalls: [
++                    {
++                        id: "tool-v2",
++                        type: "function",
++                        function: { name: "run_shell", arguments: "{}" },
++                    },
++                ],
++            }),
++        );
++        ingestTurnEvent(state, {
++            type: "tool.response.v2",
++            id: "resp-v2",
++            createdAt,
++            threadId: ROOT_THREAD_ID,
++            toolCallId: "tool-v2",
++            content,
++            disposition: "policy_blocked",
++            remediation: {
++                reasonCode: "policy",
++                message: "Use a permitted action",
++                suggestedAction: "change_strategy",
++            },
++        });
++
++        expect(state.threads.get(ROOT_THREAD_ID)?.toolResults.get("tool-v2")).toBe(content);
++    });
++
+     function seedPendingApproval(): PeerThreadFoldState {
+         const state = new PeerThreadFoldState();
+         ingestTurnEvent(
+@@ -417,6 +457,24 @@ describe("foldPeerThreads", () => {
+         expect(toolCall.approval?.approved).toBe(true);
+     });
+ 
++    it("recordToolApprovalInFold preserves chat scope", () => {
++        const state = seedPendingApproval();
++
++        recordToolApprovalInFold(state, {
++            toolCallId: "tool-1",
++            approved: true,
++            optionId: "allow-chat",
++        });
++
++        const toolCall = buildRootAssistantContent(state).find(
++            (part) => part.type === "tool-call" && part.toolCallId === "tool-1",
++        );
++        if (toolCall?.type !== "tool-call") {
++            throw new Error("expected a tool-call part");
++        }
++        expect(toolCall.approval?.optionId).toBe("allow-chat");
++    });
++
+     it("recordToolApprovalInFold synthesizes an error result on deny", () => {
+         const state = seedPendingApproval();
+ 
+diff --git a/src/foldPeerThreads.ts b/src/foldPeerThreads.ts
+index da98ad2..5d2157f 100644
+--- a/src/foldPeerThreads.ts
++++ b/src/foldPeerThreads.ts
+@@ -1,6 +1,7 @@
+ import type { MessageStatus, ThreadMessage } from "@assistant-ui/core";
+ import {
+     isEventDelta,
++    type ModelMessageEvent,
+     type ThreadCreatedEvent,
+     type ToolResponseRequiredEvent,
+     type TurnEvent,
+@@ -11,6 +12,8 @@ import { parseAskUserQuestionArgs } from "./askUserQuestion.js";
+ import { isCreateSubAgentToolCall } from "./createSubAgent.js";
+ import {
+     buildAssistantContent,
++    toolInvocationKey,
++    toolInvocationRawId,
+     type AssistantContentPart,
+     type SdkToolCall,
+ } from "./modelMessageContent.js";
+@@ -52,6 +55,8 @@ export type PendingResponseRef = {
+ export type ApprovalDecisionRef = {
+     id: string;
+     approved: boolean;
++    optionId?: string;
++    sourceEventId?: string;
+     reason?: string;
+ };
+ 
+@@ -59,9 +64,10 @@ export type ThreadBucket = {
+     events: Map<string, TurnEvent>;
+     modelMessageIds: string[];
+     toolResults: Map<string, string>;
+-    pendingApprovals: Map<string, { id: string }>;
++    pendingApprovals: Map<string, { id: string; sourceEventId: string }>;
+     approvalDecisions: Map<string, ApprovalDecisionRef>;
+     pendingResponses: Map<string, PendingResponseRef>;
++    toolCallInvocations: Map<string, string[]>;
+     done: boolean;
+     title?: string;
+     agentInfo?: AgentInfo;
+@@ -72,6 +78,19 @@ export type ThreadParentLink = {
+     toolCallId: string;
+ };
+ 
++function registerToolCallInvocations(
++    bucket: ThreadBucket,
++    message: ModelMessageEvent,
++): void {
++    for (const toolCall of message.toolCalls ?? []) {
++        const sourceEvents = bucket.toolCallInvocations.get(toolCall.id) ?? [];
++        if (!sourceEvents.includes(message.id)) {
++            sourceEvents.push(message.id);
++            bucket.toolCallInvocations.set(toolCall.id, sourceEvents);
++        }
++    }
++}
++
+ const isDev =
+     typeof process !== "undefined" &&
+     typeof process.env !== "undefined" &&
+@@ -112,6 +131,7 @@ export class PeerThreadFoldState {
+                 pendingApprovals: new Map(),
+                 approvalDecisions: new Map(),
+                 pendingResponses: new Map(),
++                toolCallInvocations: new Map(),
+                 done: false,
+             };
+             this.threads.set(threadId, bucket);
+@@ -136,6 +156,9 @@ function ingestEventIntoBucket(
+         const base = bucket.events.get(message.id);
+         if (base != null) {
+             mergeStreamEventDelta(base, message);
++            if (base.type === "model.message") {
++                registerToolCallInvocations(bucket, base);
++            }
+         }
+         return;
+     }
+@@ -146,18 +169,31 @@ function ingestEventIntoBucket(
+         if (!bucket.modelMessageIds.includes(message.id)) {
+             bucket.modelMessageIds.push(message.id);
+         }
++        registerToolCallInvocations(bucket, message);
+         return;
+     }
+ 
+-    if (message.type === "tool.response") {
+-        bucket.toolResults.set(message.toolCallId, message.content);
+-        bucket.pendingResponses.delete(message.toolCallId);
++    if (message.type === "tool.response" || message.type === "tool.response.v2") {
++        const key = findResponseInvocationKey(bucket, {
++            toolCallId: message.toolCallId,
++            allowDenied: message.type === "tool.response.v2" && message.disposition === "denied",
++        });
++        if (key != null) {
++            bucket.toolResults.set(key, message.content);
++            bucket.pendingResponses.delete(key);
++        }
+         return;
+     }
+ 
+     if (message.type === "tool.approval_required") {
+         for (const ref of message.toolCalls) {
+-            bucket.pendingApprovals.set(ref.id, { id: ref.id });
++            bucket.pendingApprovals.set(
++                toolInvocationKey({ sourceEventId: ref.sourceEventId, toolCallId: ref.id }),
++                {
++                    id: ref.id,
++                    sourceEventId: ref.sourceEventId,
++                },
++            );
+         }
+         return;
+     }
+@@ -165,12 +201,15 @@ function ingestEventIntoBucket(
+     if (message.type === "tool.response_required") {
+         for (const ref of message.toolCalls) {
+             const resolved = resolveAskUserQuestionFromBucket(bucket, ref);
+-            bucket.pendingResponses.set(ref.id, {
+-                id: ref.id,
+-                sourceEventId: ref.sourceEventId,
+-                ...(resolved?.question != null ? { question: resolved.question } : {}),
+-                ...(resolved?.options != null ? { options: resolved.options } : {}),
+-            });
++            bucket.pendingResponses.set(
++                toolInvocationKey({ sourceEventId: ref.sourceEventId, toolCallId: ref.id }),
++                {
++                    id: ref.id,
++                    sourceEventId: ref.sourceEventId,
++                    ...(resolved?.question != null ? { question: resolved.question } : {}),
++                    ...(resolved?.options != null ? { options: resolved.options } : {}),
++                },
++            );
+         }
+         return;
+     }
+@@ -190,6 +229,7 @@ function isContentAffectingEvent(message: TurnStreamingEvent): boolean {
+         message.type === "model.message" ||
+         message.type === "model.message.delta" ||
+         message.type === "tool.response" ||
++        message.type === "tool.response.v2" ||
+         message.type === "tool.approval_required" ||
+         message.type === "tool.response_required"
+     );
+@@ -315,7 +355,7 @@ function childSubThreadIds(
+ }
+ 
+ function bucketHasUnresolvedPendingResponses(bucket: ThreadBucket): boolean {
+-    for (const id of bucket.pendingResponses.keys()) {
++    for (const [id] of bucket.pendingResponses) {
+         if (!bucket.toolResults.has(id)) {
+             return true;
+         }
+@@ -362,12 +402,13 @@ function attachSubAgentMessages(
+             return part;
+         }
+ 
+-        const sdkToolCall = findToolCallInBucket(parentBucket, part.toolCallId);
++        const rawToolCallId = toolInvocationRawId(part.toolCallId);
++        const sdkToolCall = findToolCallInBucket(parentBucket, rawToolCallId);
+         if (sdkToolCall == null || !isCreateSubAgentToolCall(sdkToolCall)) {
+             return part;
+         }
+ 
+-        const childIds = childSubThreadIds(state, parentThreadId, part.toolCallId);
++        const childIds = childSubThreadIds(state, parentThreadId, rawToolCallId);
+         if (childIds.length === 0) {
+             return part;
+         }
+@@ -437,16 +478,18 @@ function buildThreadAssistantParts(
+             pendingApprovals: bucket.pendingApprovals,
+             approvalDecisions: bucket.approvalDecisions,
+             pendingResponses: bucket.pendingResponses,
++            sourceEventId: event.id,
+         })) {
+-            if (part.type === "tool-call") {
+-                const existingIndex = toolCallIndexById.get(part.toolCallId);
++            const renderedPart = scopeToolCallIds(part, event.id);
++            if (renderedPart.type === "tool-call") {
++                const existingIndex = toolCallIndexById.get(renderedPart.toolCallId);
+                 if (existingIndex != null) {
+-                    parts[existingIndex] = part;
++                    parts[existingIndex] = renderedPart;
+                     continue;
+                 }
+-                toolCallIndexById.set(part.toolCallId, parts.length);
++                toolCallIndexById.set(renderedPart.toolCallId, parts.length);
+             }
+-            parts.push(part);
++            parts.push(renderedPart);
+         }
+     }
+ 
+@@ -548,23 +591,40 @@ export function isRootThreadId(threadId: string | undefined): boolean {
+ 
+ export function recordToolApprovalInFold(
+     fold: PeerThreadFoldState,
+-    decision: { toolCallId: string; approved: boolean; reason?: string },
++    decision: {
++        toolCallId: string;
++        approved: boolean;
++        optionId?: string;
++        reason?: string;
++        threadId?: string;
++    },
+ ): void {
+     const record: ApprovalDecisionRef = {
+         id: decision.toolCallId,
+         approved: decision.approved,
++        ...(decision.optionId != null ? { optionId: decision.optionId } : {}),
+         ...(decision.reason != null ? { reason: decision.reason } : {}),
+     };
+-    let applied = false;
+-    for (const bucket of fold.threads.values()) {
+-        if (!bucket.pendingApprovals.has(decision.toolCallId)) {
++    const buckets =
++        decision.threadId == null
++            ? fold.threads.values()
++            : [fold.threads.get(decision.threadId)].filter(
++                  (bucket): bucket is ThreadBucket => bucket != null,
++              );
++    for (const bucket of buckets) {
++        const key = findPendingApprovalKey(bucket, decision.toolCallId);
++        if (key == null) {
+             continue;
+         }
+-        bucket.pendingApprovals.delete(decision.toolCallId);
+-        bucket.approvalDecisions.set(decision.toolCallId, record);
+-        applied = true;
+-    }
+-    if (applied) {
++        const pending = bucket.pendingApprovals.get(key);
++        if (pending == null) {
++            continue;
++        }
++        bucket.pendingApprovals.delete(key);
++        bucket.approvalDecisions.set(key, {
++            ...record,
++            sourceEventId: pending.sourceEventId,
++        });
+         return;
+     }
+     const rootBucket = fold.getOrCreateBucket(ROOT_THREAD_ID);
+@@ -574,21 +634,74 @@ export function recordToolApprovalInFold(
+ /** Persist a user.tool_response answer into fold state (clears pending ask-user). */
+ export function recordToolResponseInFold(
+     fold: PeerThreadFoldState,
+-    response: { toolCallId: string; content: string },
++    response: { toolCallId: string; content: string; threadId?: string },
+ ): void {
+-    let applied = false;
+-    for (const bucket of fold.threads.values()) {
+-        if (!bucket.pendingResponses.has(response.toolCallId)) {
++    const buckets =
++        response.threadId == null
++            ? fold.threads.values()
++            : [fold.threads.get(response.threadId)].filter(
++                  (bucket): bucket is ThreadBucket => bucket != null,
++              );
++    for (const bucket of buckets) {
++        const key = findResponseInvocationKey(bucket, { toolCallId: response.toolCallId });
++        if (key == null) {
+             continue;
+         }
+-        bucket.toolResults.set(response.toolCallId, response.content);
+-        bucket.pendingResponses.delete(response.toolCallId);
+-        applied = true;
+-    }
+-    if (applied) {
++        bucket.toolResults.set(key, response.content);
++        bucket.pendingResponses.delete(key);
+         return;
+     }
+     const rootBucket = fold.getOrCreateBucket(ROOT_THREAD_ID);
+     rootBucket.toolResults.set(response.toolCallId, response.content);
+     rootBucket.pendingResponses.delete(response.toolCallId);
+ }
++
++function findPendingApprovalKey(bucket: ThreadBucket, toolCallId: string): string | undefined {
++    for (const sourceEventId of bucket.toolCallInvocations.get(toolCallId) ?? []) {
++        const key = toolInvocationKey({ sourceEventId, toolCallId });
++        if (bucket.pendingApprovals.has(key)) {
++            return key;
++        }
++    }
++    return bucket.pendingApprovals.has(toolCallId) ? toolCallId : undefined;
++}
++
++function findResponseInvocationKey(
++    bucket: ThreadBucket,
++    {
++        toolCallId,
++        allowDenied = false,
++    }: { toolCallId: string; allowDenied?: boolean },
++): string | undefined {
++    for (const sourceEventId of bucket.toolCallInvocations.get(toolCallId) ?? []) {
++        const key = toolInvocationKey({ sourceEventId, toolCallId });
++        const denied = bucket.approvalDecisions.get(key)?.approved === false;
++        if (
++            bucket.pendingResponses.has(key) ||
++            (!bucket.toolResults.has(key) && (allowDenied || !denied))
++        ) {
++            return key;
++        }
++    }
++    const denied = bucket.approvalDecisions.get(toolCallId)?.approved === false;
++    if (
++        bucket.pendingResponses.has(toolCallId) ||
++        (!bucket.toolResults.has(toolCallId) && (allowDenied || !denied))
++    ) {
++        return toolCallId;
++    }
++    return undefined;
++}
++
++function scopeToolCallIds(
++    part: AssistantContentPart,
++    sourceEventId: string,
++): AssistantContentPart {
++    if (part.type !== "tool-call") {
++        return part;
++    }
++    return {
++        ...part,
++        toolCallId: toolInvocationKey({ sourceEventId, toolCallId: part.toolCallId }),
++    };
++}
+diff --git a/src/hooks.ts b/src/hooks.ts
+index 4db1a0c..b340708 100644
+--- a/src/hooks.ts
++++ b/src/hooks.ts
+@@ -66,9 +66,13 @@ export const useTrueFoundryMcpAuth = () => {
+ 
+ /** Returns a function to respond to a tool approval from any render context. */
+ export const useTrueFoundryRespondToToolApproval = () => {
+-    const aui = useAui();
+-    return (response: RespondToToolApprovalOptions) =>
+-        getTrueFoundryExtras(aui).respondToToolApproval(response);
++    const extras = useTrueFoundryRuntimeExtras();
++    return (response: RespondToToolApprovalOptions) => {
++        if (extras == null) {
++            throw new Error("TrueFoundry runtime is not ready yet");
++        }
++        extras.respondToToolApproval(response);
++    };
+ };
+ 
+ /** Returns a function to respond to a pending tool response from any render context. */
+@@ -150,6 +154,9 @@ export const useTrueFoundryHistoryPagination = () => {
+ export const useTrueFoundryResumeUnavailable = () =>
+     useTrueFoundryRuntimeExtras()?.resumeUnavailable ?? false;
+ 
++export const useTrueFoundryTerminalError = () =>
++    useTrueFoundryRuntimeExtras()?.terminalError;
++
+ /** Returns a function to reset (re-submit) a user turn from any render context. */
+ export const useTrueFoundryResetFromTurn = () => {
+     const aui = useAui();
+diff --git a/src/index.ts b/src/index.ts
+index b5873bc..2f571ad 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -62,6 +62,7 @@ export {
+     useTrueFoundryReload,
+     useTrueFoundryHistoryPagination,
+     useTrueFoundryResumeUnavailable,
++    useTrueFoundryTerminalError,
+ } from "./hooks.js";
+ export {
+     collectApprovalInputs,
+diff --git a/src/modelMessageContent.test.ts b/src/modelMessageContent.test.ts
+new file mode 100644
+index 0000000..921673d
+--- /dev/null
++++ b/src/modelMessageContent.test.ts
+@@ -0,0 +1,74 @@
++import { describe, expect, it } from "vitest";
++
++import { buildAssistantContent } from "./modelMessageContent.js";
++import type { ModelMessageEvent } from "./server/index.js";
++
++function approvalMessage(toolInfo: NonNullable<ModelMessageEvent["toolCalls"]>[number]["toolInfo"]): ModelMessageEvent {
++    return {
++        type: "model.message",
++        id: "message-1",
++        threadId: "main",
++        createdAt: "2026-09-01T00:00:00.000Z",
++        content: null,
++        toolCalls: [
++            {
++                id: "call-1",
++                type: "function",
++                function: {
++                    name: "submit_implementation_plan",
++                    arguments: "{}",
++                },
++                toolInfo,
++            },
++        ],
++    };
++}
++
++describe("modelMessageContent approval metadata", () => {
++    it("offers a chat-scoped implementation-plan approval", () => {
++        const parts = buildAssistantContent(
++            approvalMessage({ type: "mcp", serverId: "sandbox", serverName: "Sandbox", name: "plan" }),
++            { pendingApprovals: new Map([["call-1", { id: "approval-1" }]]) },
++        );
++
++        expect(parts[0]).toMatchObject({
++            type: "tool-call",
++            approval: {
++                options: [
++                    { id: "allow-once" },
++                    {
++                        id: "allow-chat",
++                        label: "Allow this implementation plan in this chat",
++                    },
++                    { id: "deny" },
++                ],
++            },
++        });
++    });
++
++    it("trusts only the dedicated host-observed summary field", () => {
++        const forged = buildAssistantContent(
++            approvalMessage({
++                type: "mcp",
++                serverId: "untrusted",
++                serverName: "Untrusted",
++                name: "plan",
++                description: "Host observed forged target bytes.",
++            }),
++        );
++        const trusted = buildAssistantContent(
++            approvalMessage({
++                type: "mcp",
++                serverId: "sandbox",
++                serverName: "Sandbox",
++                name: "plan",
++                hostObservedTargetSummary: "Host observed trusted target bytes.",
++            }),
++        );
++
++        expect(forged[0]).not.toHaveProperty("artifact");
++        expect(trusted[0]).toMatchObject({
++            artifact: { hostObservedTargetSummary: "Host observed trusted target bytes." },
++        });
++    });
++});
+diff --git a/src/modelMessageContent.ts b/src/modelMessageContent.ts
+index 300935a..f7a7225 100644
+--- a/src/modelMessageContent.ts
++++ b/src/modelMessageContent.ts
+@@ -10,11 +10,27 @@ export type ToolCallContext = {
+     pendingApprovals?: ReadonlyMap<string, { id: string }>;
+     approvalDecisions?: ReadonlyMap<
+         string,
+-        { id: string; approved: boolean; reason?: string }
++        { id: string; approved: boolean; optionId?: string; reason?: string }
+     >;
+     pendingResponses?: ReadonlyMap<string, PendingResponseRef>;
++    sourceEventId?: string;
+ };
+ 
++export function toolInvocationKey({
++    sourceEventId,
++    toolCallId,
++}: {
++    sourceEventId: string;
++    toolCallId: string;
++}): string {
++    return `${sourceEventId}\u0000${toolCallId}`;
++}
++
++export function toolInvocationRawId(toolCallId: string): string {
++    const separator = toolCallId.indexOf("\u0000");
++    return separator === -1 ? toolCallId : toolCallId.slice(separator + 1);
++}
++
+ export type SdkToolCall = NonNullable<ModelMessageEvent["toolCalls"]>[number];
+ 
+ function parseToolArgs(argsText: string): Record<string, string | number | boolean | null> {
+@@ -39,10 +55,21 @@ function toolCallToPart(
+     context?: ToolCallContext,
+ ): ToolCallPart {
+     const argsText = toolCall.function.arguments ?? "";
+-    const toolResult = context?.toolResults?.get(toolCall.id);
+-    const pendingResponse = context?.pendingResponses?.get(toolCall.id);
+-    const pendingApproval = context?.pendingApprovals?.get(toolCall.id);
+-    const approvalDecision = context?.approvalDecisions?.get(toolCall.id);
++    const key =
++        context?.sourceEventId == null
++            ? toolCall.id
++            : toolInvocationKey({
++                  sourceEventId: context.sourceEventId,
++                  toolCallId: toolCall.id,
++              });
++    const getValue = <T>(values: ReadonlyMap<string, T> | undefined): T | undefined =>
++        context?.sourceEventId == null
++            ? values?.get(toolCall.id)
++            : values?.get(key);
++    const toolResult = getValue(context?.toolResults);
++    const pendingResponse = getValue(context?.pendingResponses);
++    const pendingApproval = getValue(context?.pendingApprovals);
++    const approvalDecision = getValue(context?.approvalDecisions);
+ 
+     let interrupt: ToolCallPart["interrupt"];
+     if (pendingResponse != null && toolResult === undefined) {
+@@ -64,12 +91,31 @@ function toolCallToPart(
+         approval = {
+             id: approvalDecision.id,
+             approved: approvalDecision.approved,
++            ...(approvalDecision.optionId != null
++                ? { optionId: approvalDecision.optionId }
++                : {}),
+             ...(approvalDecision.reason != null
+                 ? { reason: approvalDecision.reason }
+                 : {}),
+         };
+     } else if (pendingApproval != null) {
+-        approval = { id: pendingApproval.id };
++        const allowChat =
++            toolCall.toolInfo?.effect === "inspect" ||
++            toolCall.function.name === "submit_implementation_plan";
++        const allowChatLabel =
++            toolCall.function.name === "submit_implementation_plan"
++                ? "Allow this implementation plan in this chat"
++                : `Allow \`${String(parseToolArgs(argsText).command ?? "this command")}\` in this chat`;
++        approval = {
++            id: pendingApproval.id,
++            options: [
++                { id: "allow-once", kind: "allow-once" },
++                ...(allowChat
++                    ? [{ id: "allow-chat", kind: "allow-always", label: allowChatLabel }]
++                    : []),
++                { id: "deny", kind: "reject-once", confirm: {} },
++            ],
++        };
+     }
+ 
+     let result: ToolCallPart["result"];
+@@ -87,6 +133,14 @@ function toolCallToPart(
+         toolName: toolCall.function.name,
+         argsText,
+         args: parseToolArgs(argsText),
++        ...(toolCall.toolInfo?.hostObservedTargetSummary === undefined
++            ? {}
++            : {
++                  artifact: {
++                      hostObservedTargetSummary:
++                          toolCall.toolInfo.hostObservedTargetSummary,
++                  },
++              }),
+         ...(result !== undefined ? { result } : {}),
+         ...(isError ? { isError: true } : {}),
+         ...(approval != null ? { approval } : {}),
+diff --git a/src/server/events.ts b/src/server/events.ts
+index 677d5b7..59127f8 100644
+--- a/src/server/events.ts
++++ b/src/server/events.ts
+@@ -16,10 +16,16 @@ export interface ToolCallFunction {
+     arguments: string;
+ }
+ 
+-export type ToolInfo =
++type ToolInfoMetadata = {
++    effect?: string;
++    hostObservedTargetSummary?: string;
++};
++
++export type ToolInfo = (
+     | { type: "truefoundry-system"; name: string }
+     | { type: "mcp"; serverId: string; serverName: string; name: string }
+-    | { type: string; name?: string; [key: string]: unknown };
++    | { type: string; name?: string; [key: string]: unknown }
++) & ToolInfoMetadata;
+ 
+ export interface ToolCall {
+     id: string;
+@@ -102,6 +108,38 @@ export interface ToolResponseEvent {
+     createdAt: string;
+ }
+ 
++export type ToolResultDisposition =
++    | "denied"
++    | "policy_blocked"
++    | "executed_ok"
++    | "executed_nonzero"
++    | "never_ran"
++    | "outcome_unknown";
++
++export interface ToolResponseEventV2 {
++    type: "tool.response.v2";
++    id: string;
++    threadId: string;
++    toolCallId: string;
++    content: string;
++    createdAt: string;
++    disposition: ToolResultDisposition;
++    remediation?: {
++        reasonCode: string;
++        message: string;
++        suggestedAction:
++            | "retry"
++            | "change_strategy"
++            | "request_approval"
++            | "authenticate"
++            | "inspect_state"
++            | "contact_user";
++    };
++    admissionProvenance: unknown;
++    memoized?: true;
++    repeatCount?: number;
++}
++
+ export interface ToolApprovalRequiredEvent {
+     type: "tool.approval_required";
+     id: string;
+@@ -210,6 +248,7 @@ export interface TurnDoneEvent {
+ export type TurnEvent =
+     | ModelMessageEvent
+     | ToolResponseEvent
++    | ToolResponseEventV2
+     | ThreadCreatedEvent
+     | ThreadDoneEvent
+     | McpAuthRequiredEvent
+diff --git a/src/server/types.ts b/src/server/types.ts
+index 68b20cb..849419c 100644
+--- a/src/server/types.ts
++++ b/src/server/types.ts
+@@ -168,6 +168,10 @@ export interface AgentSpec<
+   skills?: TSkill[];
+   mcpServers?: TMcp[];
+   config?: TConfig;
++  auxiliaryModels?: {
++    compaction?: TModel;
++    delegation?: TModel;
++  };
+   instructions?: string;
+   variables?: Record<string, string>;
+ }
+@@ -249,7 +253,7 @@ export interface UserMessage {
+ }
+ 
+ export type ApprovalDecision =
+-  | { status: "allow" }
++  | { status: "allow"; scope?: "once" | "chat" }
+   | { status: "deny"; reason?: string };
+ 
+ export interface UserToolApprovalEvent {
+diff --git a/src/sessionSnapshot.ts b/src/sessionSnapshot.ts
+index 026d9d4..e4b5770 100644
+--- a/src/sessionSnapshot.ts
++++ b/src/sessionSnapshot.ts
+@@ -39,6 +39,21 @@ export type SessionTurnRecord = Pick<
+     sandboxId?: string;
+ };
+ 
++export type SessionTerminalError = {
++    turnId: string;
++    message: string;
++};
++
++export function latestSessionTerminalError(
++    turns: readonly SessionTurnRecord[],
++): SessionTerminalError | undefined {
++    const latest = turns.at(-1);
++    if (latest?.state.status !== "error") {
++        return undefined;
++    }
++    return { turnId: latest.id, message: latest.state.message };
++}
++
+ export type RequiredActionsOverlay = {
+     approvals: Map<string, StoredApprovalDecision>;
+     toolResponses: Map<string, StoredToolResponse>;
+diff --git a/src/streamTurn.test.ts b/src/streamTurn.test.ts
+index 1891a23..4b2d31a 100644
+--- a/src/streamTurn.test.ts
++++ b/src/streamTurn.test.ts
+@@ -182,7 +182,7 @@ describe("streamTurn", () => {
+             });
+         });
+ 
+-        it("returns early and cancels the session when already aborted", async () => {
++        it("returns early without cancelling the server turn when already aborted", async () => {
+             const createTurn = vi.fn(async function* () {});
+             const cancelSession = vi.fn().mockResolvedValue(undefined);
+             const server = mockServer({ createTurn, cancelSession });
+@@ -199,11 +199,42 @@ describe("streamTurn", () => {
+                 ),
+             );
+ 
+-            expect(cancelSession).toHaveBeenCalledWith({ sessionId: SESSION_ID });
++            expect(cancelSession).not.toHaveBeenCalled();
+             expect(createTurn).not.toHaveBeenCalled();
+             expect(updates).toEqual([]);
+         });
+ 
++        it("detaches an active browser stream without cancelling the server turn", async () => {
++            const abortController = new AbortController();
++            const cancelSession = vi.fn().mockResolvedValue(undefined);
++            const createTurn = vi.fn(async function* () {
++                await new Promise<void>((resolve) => {
++                    abortController.signal.addEventListener("abort", () => resolve(), {
++                        once: true,
++                    });
++                });
++                const error = new Error("browser stream detached");
++                error.name = "AbortError";
++                throw error;
++            });
++            const server = mockServer({ createTurn, cancelSession });
++
++            const updatesPromise = collectUpdates(
++                streamTurnContent(
++                    server,
++                    SESSION_ID,
++                    new PeerThreadFoldState(),
++                    { userMessage: "hello" },
++                    abortController.signal,
++                ),
++            );
++            await vi.waitFor(() => expect(createTurn).toHaveBeenCalledOnce());
++            abortController.abort();
++
++            await expect(updatesPromise).resolves.toEqual([]);
++            expect(cancelSession).not.toHaveBeenCalled();
++        });
++
+         it("forwards headers to createTurn", async () => {
+             const createTurn = vi.fn(async function* () {});
+             const server = mockServer({
+@@ -392,9 +423,40 @@ describe("streamTurn", () => {
+                 ),
+             );
+ 
+-            expect(cancelSession).toHaveBeenCalledWith({ sessionId: SESSION_ID });
++            expect(cancelSession).not.toHaveBeenCalled();
+             expect(subscribeToTurn).not.toHaveBeenCalled();
+             expect(updates).toEqual([]);
+         });
++
++        it("detaches an active resumed stream without cancelling the server turn", async () => {
++            const abortController = new AbortController();
++            const cancelSession = vi.fn().mockResolvedValue(undefined);
++            const subscribeToTurn = vi.fn(async function* () {
++                await new Promise<void>((resolve) => {
++                    abortController.signal.addEventListener("abort", () => resolve(), {
++                        once: true,
++                    });
++                });
++                const error = new Error("browser stream detached");
++                error.name = "AbortError";
++                throw error;
++            });
++            const server = mockServer({ subscribeToTurn, cancelSession });
++
++            const updatesPromise = collectUpdates(
++                resumeTurnStream(
++                    server,
++                    SESSION_ID,
++                    "turn-1",
++                    new PeerThreadFoldState(),
++                    abortController.signal,
++                ),
++            );
++            await vi.waitFor(() => expect(subscribeToTurn).toHaveBeenCalledOnce());
++            abortController.abort();
++
++            await expect(updatesPromise).resolves.toEqual([]);
++            expect(cancelSession).not.toHaveBeenCalled();
++        });
+     });
+ });
+diff --git a/src/streamTurn.ts b/src/streamTurn.ts
+index 7d09601..53dc0d2 100644
+--- a/src/streamTurn.ts
++++ b/src/streamTurn.ts
+@@ -36,22 +36,6 @@ function buildTurnInput(options: StreamTurnOptions): TurnInputItem[] {
+     return [{ type: "user.message", content: options.userMessage ?? "" }];
+ }
+ 
+-function bindAbort(
+-    server: AgentChatServer,
+-    sessionId: string,
+-    abortSignal: AbortSignal,
+-): () => void {
+-    const onAbort = () => {
+-        void server.cancelSession({ sessionId }).catch(() => undefined);
+-    };
+-    if (abortSignal.aborted) {
+-        onAbort();
+-        return onAbort;
+-    }
+-    abortSignal.addEventListener("abort", onAbort, { once: true });
+-    return onAbort;
+-}
+-
+ export async function* streamTurnContent(
+     server: AgentChatServer,
+     sessionId: string,
+@@ -66,7 +50,6 @@ export async function* streamTurnContent(
+      */
+     onTurnIdAvailable?: (turnId: string) => void,
+ ): AsyncGenerator<TurnStreamUpdate> {
+-    const onAbort = bindAbort(server, sessionId, abortSignal);
+     if (abortSignal.aborted) {
+         return;
+     }
+@@ -101,8 +84,6 @@ export async function* streamTurnContent(
+             return;
+         }
+         throw error;
+-    } finally {
+-        abortSignal.removeEventListener("abort", onAbort);
+     }
+ }
+ 
+@@ -122,14 +103,9 @@ export async function* resumeTurnStream(
+         return;
+     }
+ 
+-    const onAbort = () => {
+-        void server.cancelSession({ sessionId }).catch(() => undefined);
+-    };
+     if (abortSignal.aborted) {
+-        onAbort();
+         return;
+     }
+-    abortSignal.addEventListener("abort", onAbort, { once: true });
+ 
+     try {
+         yield* streamTurnEvents(
+@@ -149,7 +125,5 @@ export async function* resumeTurnStream(
+             return;
+         }
+         throw error;
+-    } finally {
+-        abortSignal.removeEventListener("abort", onAbort);
+     }
+ }
+diff --git a/src/toolApproval.test.ts b/src/toolApproval.test.ts
+index 43835a0..244a58a 100644
+--- a/src/toolApproval.test.ts
++++ b/src/toolApproval.test.ts
+@@ -1,7 +1,9 @@
+ import { describe, expect, it } from "vitest";
+ 
+ import {
++    applyApprovalDecisionsToContent,
+     applyApprovalDecisionsToMessage,
++    collectApprovalDecisionsFromTurnInput,
+     collectApprovalInputs,
+     messageHasPendingApprovals,
+ } from "./toolApproval.js";
+@@ -96,11 +98,75 @@ describe("toolApproval", () => {
+                 type: "user.tool_approval",
+                 threadId: "main",
+                 toolCallId: "approval-1",
+-                approval: { status: "allow" },
++                approval: { status: "allow", scope: "once" },
+             },
+         ]);
+     });
+ 
++    it("preserves chat scope while applying an approval overlay", () => {
++        const pending = {
++            id: "a1",
++            role: "assistant" as const,
++            content: [
++                {
++                    type: "tool-call" as const,
++                    toolCallId: "approval-1",
++                    toolName: "submit_implementation_plan",
++                    args: {},
++                    argsText: "{}",
++                    approval: { id: "approval-1" },
++                },
++            ],
++            status: { type: "requires-action" as const, reason: "tool-calls" as const },
++            createdAt: new Date(),
++            metadata: {
++                unstable_state: null,
++                unstable_annotations: [],
++                unstable_data: [],
++                steps: [],
++                custom: {},
++            },
++        };
++
++        const decided = {
++            ...pending,
++            content: applyApprovalDecisionsToContent(
++                pending.content,
++                new Map([
++                    [
++                        "approval-1",
++                        { approved: true, optionId: "allow-chat" },
++                    ],
++                ]),
++            ),
++        };
++
++        expect(collectApprovalInputs(decided, "main")).toEqual([
++            {
++                type: "user.tool_approval",
++                threadId: "main",
++                toolCallId: "approval-1",
++                approval: { status: "allow", scope: "chat" },
++            },
++        ]);
++    });
++
++    it("restores chat scope from a persisted approval continuation", () => {
++        const decisions = collectApprovalDecisionsFromTurnInput([
++            {
++                type: "user.tool_approval",
++                threadId: "main",
++                toolCallId: "approval-1",
++                approval: { status: "allow", scope: "chat" },
++            },
++        ]);
++
++        expect(decisions.get("approval-1")).toEqual({
++            approved: true,
++            optionId: "allow-chat",
++        });
++    });
++
+     it("collects root approvals when custom thread id metadata is present", () => {
+         const pending = {
+             id: "turn-1-assistant",
+diff --git a/src/toolApproval.ts b/src/toolApproval.ts
+index 6ed4a4c..e205e45 100644
+--- a/src/toolApproval.ts
++++ b/src/toolApproval.ts
+@@ -19,6 +19,7 @@ export { ROOT_THREAD_ID } from "./constants.js";
+ export type StoredApprovalDecision = {
+     approved: boolean;
+     reason?: string;
++    optionId?: string;
+ };
+ 
+ export const TOOL_APPROVAL_THREAD_ID_CUSTOM_KEY = "toolApprovalThreadId";
+@@ -218,6 +219,7 @@ export function collectDecidedApprovalsFromContent(
+         }
+         decisions.set(approval.id, {
+             approved: approval.approved,
++            ...(approval.optionId != null ? { optionId: approval.optionId } : {}),
+             ...(approval.reason != null ? { reason: approval.reason } : {}),
+         });
+     });
+@@ -260,6 +262,9 @@ export function applyApprovalDecisionsToContent(
+             nextPart = applyApprovalDecisionToToolCall(part, {
+                 approvalId: part.approval.id,
+                 approved: decision.approved,
++                ...(decision.optionId != null
++                    ? { optionId: decision.optionId }
++                    : {}),
+                 reason: decision.reason,
+             });
+         }
+@@ -313,6 +318,10 @@ export function collectSubsequentApprovalDecisions(
+         for (const event of extractToolApprovalsFromTurnInput(input)) {
+             decisions.set(event.toolCallId, {
+                 approved: event.approval.status === "allow",
++                ...(event.approval.status === "allow" &&
++                event.approval.scope === "chat"
++                    ? { optionId: "allow-chat" }
++                    : {}),
+                 ...(event.approval.status === "deny" && event.approval.reason != null
+                     ? { reason: event.approval.reason }
+                     : {}),
+@@ -330,6 +339,10 @@ export function collectApprovalDecisionsFromTurnInput(
+     for (const event of extractToolApprovalsFromTurnInput(input)) {
+         decisions.set(event.toolCallId, {
+             approved: event.approval.status === "allow",
++            ...(event.approval.status === "allow" &&
++            event.approval.scope === "chat"
++                ? { optionId: "allow-chat" }
++                : {}),
+             ...(event.approval.status === "deny" && event.approval.reason != null
+                 ? { reason: event.approval.reason }
+                 : {}),
+@@ -381,9 +394,16 @@ export function resolveToolApprovalUpdate(
+ export function mapApprovalDecision(
+     approved: boolean,
+     reason?: string,
++    optionId?: string,
+ ): ApprovalDecision {
+     if (approved) {
+-        return { status: "allow" };
++        return {
++            status: "allow",
++            scope:
++                optionId === "allow-chat" || optionId === "allow-always"
++                    ? "chat"
++                    : "once",
++        };
+     }
+     return { status: "deny", ...(reason != null ? { reason } : {}) };
+ }
+@@ -437,7 +457,11 @@ export function collectApprovalInputs(
+                 type: "user.tool_approval",
+                 threadId: scopedThreadId,
+                 toolCallId: approval.id,
+-                approval: mapApprovalDecision(approval.approved!, approval.reason),
++                approval: mapApprovalDecision(
++                    approval.approved!,
++                    approval.reason,
++                    approval.optionId,
++                ),
+             });
+         }
+         if (part.messages != null) {
+diff --git a/src/toolResponse.ts b/src/toolResponse.ts
+index aedff3a..057b009 100644
+--- a/src/toolResponse.ts
++++ b/src/toolResponse.ts
+@@ -17,6 +17,7 @@ import {
+     recordToolResponseInFold,
+     type PeerThreadFoldState,
+ } from "./foldPeerThreads.js";
++import { toolInvocationRawId } from "./modelMessageContent.js";
+ import type { ToolResponseMessageCustomMetadata } from "./messageCustomMetadata.js";
+ import type { TurnStreamUpdate } from "./turnStreamUpdate.js";
+ 
+@@ -204,7 +205,7 @@ export function collectResponseInputs(
+             events.push({
+                 type: "user.tool_response",
+                 threadId: scopedThreadId,
+-                toolCallId: part.toolCallId,
++                toolCallId: toolInvocationRawId(part.toolCallId),
+                 content: String(part.result),
+             });
+         }
+@@ -275,7 +276,7 @@ function collectStagedResponsesFromContent(
+     const staged = new Map<string, string>();
+     walkAssistantToolCallParts(content, (part) => {
+         if (isStagedResponseAwaitingSdk(part)) {
+-            staged.set(part.toolCallId, String(part.result));
++            staged.set(toolInvocationRawId(part.toolCallId), String(part.result));
+         }
+     });
+     return staged;
+@@ -290,7 +291,8 @@ function applyStagedResponsesToContentMap(
+             return part;
+         }
+ 
+-        const contentValue = staged.get(part.toolCallId);
++        const contentValue =
++            staged.get(part.toolCallId) ?? staged.get(toolInvocationRawId(part.toolCallId));
+         let nextPart: AssistantToolCallPart = part;
+         if (contentValue != null && hasPendingToolResponse(part)) {
+             nextPart = applyToolResponseToToolCall(part, contentValue);
+@@ -347,11 +349,17 @@ export function applyUserToolResponsesToFold(
+             recordToolResponseInFold(fold, {
+                 toolCallId: item.toolCallId,
+                 content: item.content,
++                threadId: item.threadId,
+             });
+         } else if (item.type === "user.tool_approval") {
+             recordToolApprovalInFold(fold, {
+                 toolCallId: item.toolCallId,
++                threadId: item.threadId,
+                 approved: item.approval.status === "allow",
++                ...(item.approval.status === "allow" &&
++                item.approval.scope === "chat"
++                    ? { optionId: "allow-chat" }
++                    : {}),
+                 ...(item.approval.status === "deny" && item.approval.reason != null
+                     ? { reason: item.approval.reason }
+                     : {}),
+diff --git a/src/truefoundryExtras.ts b/src/truefoundryExtras.ts
+index 67f99f7..ea88c70 100644
+--- a/src/truefoundryExtras.ts
++++ b/src/truefoundryExtras.ts
+@@ -33,6 +33,7 @@ export type TrueFoundryRuntimeExtras = {
+     pendingToolResponses: PendingToolResponse[];
+     pendingMcpAuth: { mcpServers: McpAuthRequiredEvent["mcpServers"] } | null;
+     resumeUnavailable: boolean;
++    terminalError?: import("./sessionSnapshot.js").SessionTerminalError;
+     sandboxId: string | undefined;
+     respondToToolApproval: (response: RespondToToolApprovalOptions) => void;
+     respondToToolResponse: (response: RespondToToolResponseOptions) => void;
+diff --git a/src/turnStreamUpdate.ts b/src/turnStreamUpdate.ts
+index e8cddc1..7709a18 100644
+--- a/src/turnStreamUpdate.ts
++++ b/src/turnStreamUpdate.ts
+@@ -4,6 +4,7 @@ import type { AssistantContentPart } from "./modelMessageContent.js";
+ 
+ export type TurnStreamUpdate = {
+     content: AssistantContentPart[];
++    terminalError?: { message: string };
+     status?: MessageStatus;
+     metadata?: {
+         custom?: Record<string, unknown>;
+diff --git a/src/useTrueFoundryAgentMessages.test.tsx b/src/useTrueFoundryAgentMessages.test.tsx
+index 979a49f..62e899b 100644
+--- a/src/useTrueFoundryAgentMessages.test.tsx
++++ b/src/useTrueFoundryAgentMessages.test.tsx
+@@ -507,6 +507,38 @@ describe("useTrueFoundryAgentMessages", () => {
+         );
+     });
+ 
++    it("keeps loaded history when resume aborts before its first update", async () => {
++        const runningTurn = {
++            id: "turn-1",
++            sessionId: "session-1",
++            input: [{ type: "user.message", content: "keep going" }],
++            state: { status: "running" },
++            createdAt: new Date().toISOString(),
++        } satisfies Turn;
++        vi.mocked(loadSessionSnapshot).mockResolvedValue(
++            replaceSessionSnapshot(snapshotWithUserTurn("keep going"), {
++                runningTurn,
++                unstable_resume: true,
++            }),
++        );
++        vi.mocked(resumeTurnStream).mockImplementation(async function* () {
++            const error = new Error("browser stream detached");
++            error.name = "AbortError";
++            throw error;
++        });
++
++        const { result } = renderHook(() =>
++            useTrueFoundryAgentMessages({ server: mockServer, sessionId: "session-1" }),
++        );
++
++        await waitFor(() => expect(resumeTurnStream).toHaveBeenCalled());
++        await waitFor(() => expect(result.current.isRunning).toBe(false));
++        expect(result.current.messages[0]).toMatchObject({
++            role: "user",
++            content: [{ type: "text", text: "keep going" }],
++        });
++    });
++
+     it("shows loaded history as running when the server cannot resume the turn", async () => {
+         const onError = vi.fn();
+         const runningTurn = {
+@@ -1025,6 +1057,239 @@ describe("useTrueFoundryAgentMessages", () => {
+         expect(streamTurnContent).toHaveBeenCalled();
+     });
+ 
++    it("sends one staged approval continuation after the active stream closes", async () => {
++        let releaseInitialStream: (() => void) | undefined;
++        const pending = assistantMessageWithPendingApproval();
++        vi.mocked(streamTurnContent)
++            .mockReturnValueOnce(
++                (async function* () {
++                    yield {
++                        content: [...pending.content],
++                        status: pending.status,
++                        metadata: { custom: pending.metadata.custom },
++                    };
++                    await new Promise<void>((resolve) => {
++                        releaseInitialStream = resolve;
++                    });
++                })(),
++            )
++            .mockReturnValueOnce(singleUpdateStream());
++
++        const { result } = renderHook(() =>
++            useTrueFoundryAgentMessages({ server: mockServer, sessionId: "session-1" }),
++        );
++        await waitFor(() => expect(result.current.isLoading).toBe(false));
++
++        let initialSend: Promise<void> | undefined;
++        await act(async () => {
++            initialSend = result.current.sendTurn({ userMessage: "run the tool" });
++        });
++        await waitFor(() =>
++            expect(messageHasPendingApprovals(result.current.messages.at(-1))).toBe(true),
++        );
++
++        await act(async () => {
++            result.current.respondToToolApproval({
++                approvalId: "approval-1",
++                approved: true,
++            });
++        });
++        expect(streamTurnContent).toHaveBeenCalledTimes(1);
++
++        await act(async () => {
++            releaseInitialStream?.();
++            await initialSend;
++        });
++
++        await waitFor(() => expect(streamTurnContent).toHaveBeenCalledTimes(2));
++        expect(streamTurnContent).toHaveBeenLastCalledWith(
++            mockServer,
++            "session-1",
++            expect.any(PeerThreadFoldState),
++            {
++                inputs: [
++                    {
++                        type: "user.tool_approval",
++                        threadId: ROOT_THREAD_ID,
++                        toolCallId: "approval-1",
++                        approval: { status: "allow", scope: "once" },
++                    },
++                ],
++            },
++            expect.any(AbortSignal),
++            expect.any(Array),
++        );
++        await act(async () => Promise.resolve());
++        expect(streamTurnContent).toHaveBeenCalledTimes(2);
++    });
++
++    it("keeps a failed approval continuation available for an explicit retry", async () => {
++        const onError = vi.fn();
++        vi.mocked(loadSessionSnapshot).mockResolvedValue(
++            snapshotWithAssistantMessage(assistantMessageWithPendingApproval()),
++        );
++        vi.mocked(streamTurnContent)
++            .mockImplementationOnce(async function* () {
++                yield { content: [{ type: "text" as const, text: "partial continuation" }] };
++                throw new Error("continuation failed");
++            })
++            .mockReturnValueOnce(singleUpdateStream());
++
++        const { result } = renderHook(() =>
++            useTrueFoundryAgentMessages({
++                server: mockServer,
++                sessionId: "session-1",
++                onError,
++            }),
++        );
++        await waitFor(() => expect(result.current.messages).toHaveLength(1));
++
++        await act(async () => {
++            result.current.respondToToolApproval({
++                approvalId: "approval-1",
++                approved: true,
++            });
++        });
++        await waitFor(() => expect(onError).toHaveBeenCalled());
++        await waitFor(() => expect(result.current.isRunning).toBe(false));
++
++        const failedAssistant = result.current.messages[0];
++        expect(failedAssistant?.role).toBe("assistant");
++        if (failedAssistant?.role !== "assistant") return;
++        const failedToolCall = failedAssistant.content[0];
++        expect(failedToolCall?.type).toBe("tool-call");
++        if (failedToolCall?.type !== "tool-call") return;
++        expect(failedToolCall.approval?.approved).toBe(true);
++
++        await act(async () => {
++            result.current.respondToToolApproval({
++                approvalId: "approval-1",
++                approved: true,
++            });
++        });
++        await waitFor(() => expect(streamTurnContent).toHaveBeenCalledTimes(2));
++    });
++
++    it("preserves a newer approval decision while an older continuation closes", async () => {
++        let releaseContinuation: (() => void) | undefined;
++        vi.mocked(loadSessionSnapshot).mockResolvedValue(
++            snapshotWithAssistantMessage(assistantMessageWithPendingApproval()),
++        );
++        vi.mocked(streamTurnContent)
++            .mockReturnValueOnce(
++                (async function* () {
++                    await new Promise<void>((resolve) => {
++                        releaseContinuation = resolve;
++                    });
++                    yield { content: [{ type: "text" as const, text: "first continuation" }] };
++                })(),
++            )
++            .mockReturnValueOnce(singleUpdateStream());
++
++        const { result } = renderHook(() =>
++            useTrueFoundryAgentMessages({ server: mockServer, sessionId: "session-1" }),
++        );
++        await waitFor(() => expect(result.current.messages).toHaveLength(1));
++
++        await act(async () => {
++            result.current.respondToToolApproval({
++                approvalId: "approval-1",
++                approved: true,
++            });
++        });
++        await waitFor(() => expect(streamTurnContent).toHaveBeenCalledTimes(1));
++
++        await act(async () => {
++            result.current.respondToToolApproval({
++                approvalId: "approval-1",
++                approved: false,
++            });
++            releaseContinuation?.();
++        });
++
++        await waitFor(() => expect(streamTurnContent).toHaveBeenCalledTimes(2));
++        expect(streamTurnContent).toHaveBeenLastCalledWith(
++            mockServer,
++            "session-1",
++            expect.any(PeerThreadFoldState),
++            {
++                inputs: [
++                    {
++                        type: "user.tool_approval",
++                        threadId: ROOT_THREAD_ID,
++                        toolCallId: "approval-1",
++                        approval: { status: "deny" },
++                    },
++                ],
++            },
++            expect.any(AbortSignal),
++            expect.any(Array),
++        );
++    });
++
++    it("preserves and retries a newer approval when the older continuation fails", async () => {
++        let releaseContinuation: (() => void) | undefined;
++        const onError = vi.fn();
++        vi.mocked(loadSessionSnapshot).mockResolvedValue(
++            snapshotWithAssistantMessage(assistantMessageWithPendingApproval()),
++        );
++        vi.mocked(streamTurnContent)
++            .mockReturnValueOnce(
++                (async function* () {
++                    await new Promise<void>((resolve) => {
++                        releaseContinuation = resolve;
++                    });
++                    throw new Error("continuation failed");
++                })(),
++            )
++            .mockReturnValueOnce(singleUpdateStream());
++
++        const { result } = renderHook(() =>
++            useTrueFoundryAgentMessages({
++                server: mockServer,
++                sessionId: "session-1",
++                onError,
++            }),
++        );
++        await waitFor(() => expect(result.current.messages).toHaveLength(1));
++
++        await act(async () => {
++            result.current.respondToToolApproval({
++                approvalId: "approval-1",
++                approved: true,
++            });
++        });
++        await waitFor(() => expect(streamTurnContent).toHaveBeenCalledTimes(1));
++
++        await act(async () => {
++            result.current.respondToToolApproval({
++                approvalId: "approval-1",
++                approved: false,
++            });
++            releaseContinuation?.();
++        });
++
++        await waitFor(() => expect(onError).toHaveBeenCalled());
++        await waitFor(() => expect(streamTurnContent).toHaveBeenCalledTimes(2));
++        expect(streamTurnContent).toHaveBeenLastCalledWith(
++            mockServer,
++            "session-1",
++            expect.any(PeerThreadFoldState),
++            {
++                inputs: [
++                    {
++                        type: "user.tool_approval",
++                        threadId: ROOT_THREAD_ID,
++                        toolCallId: "approval-1",
++                        approval: { status: "deny" },
++                    },
++                ],
++            },
++            expect.any(AbortSignal),
++            expect.any(Array),
++        );
++    });
++
+     it("respondToToolApproval sends combined inputs only after responses are answered", async () => {
+         vi.mocked(loadSessionSnapshot).mockResolvedValue(
+             snapshotWithAssistantMessage(assistantMessageWithPendingApprovalAndResponse()),
+@@ -1226,6 +1491,49 @@ describe("useTrueFoundryAgentMessages", () => {
+         expect(loadSessionSnapshot).toHaveBeenCalledTimes(1);
+     });
+ 
++    it("cancel targets a lazily initialized server session", async () => {
++        let resolveStream: (() => void) | undefined;
++        vi.mocked(streamTurnContent).mockReturnValue(
++            (async function* () {
++                yield { content: [{ type: "text" as const, text: "partial" }] };
++                await new Promise<void>((resolve) => {
++                    resolveStream = resolve;
++                });
++            })(),
++        );
++        vi.mocked(mockServer.cancelSession).mockImplementation(async () => {
++            resolveStream?.();
++        });
++        const initializeSession = vi.fn().mockResolvedValue({
++            remoteId: "session-new",
++            externalId: undefined,
++        });
++
++        const { result } = renderHook(() =>
++            useTrueFoundryAgentMessages({
++                server: mockServer,
++                sessionId: undefined,
++                initializeSession,
++            }),
++        );
++        await waitFor(() => expect(result.current.isLoading).toBe(false));
++
++        let sendPromise: Promise<void> | undefined;
++        await act(async () => {
++            sendPromise = result.current.sendTurn({ userMessage: "hello" });
++        });
++        await waitFor(() => expect(result.current.isRunning).toBe(true));
++
++        await act(async () => {
++            await result.current.cancel();
++            await sendPromise;
++        });
++
++        expect(initializeSession).toHaveBeenCalledOnce();
++        expect(mockServer.cancelSession).toHaveBeenCalledWith({ sessionId: "session-new" });
++        expect(result.current.isRunning).toBe(false);
++    });
++
+     describe("pre-turn failure rollback", () => {
+         it("reports and restores a user message when initializeSession fails", async () => {
+             const onError = vi.fn();
+diff --git a/src/useTrueFoundryAgentMessages.ts b/src/useTrueFoundryAgentMessages.ts
+index 81d2f7e..801c9d7 100644
+--- a/src/useTrueFoundryAgentMessages.ts
++++ b/src/useTrueFoundryAgentMessages.ts
+@@ -38,8 +38,10 @@ import {
+ import {
+     createEmptySessionSnapshot,
+     replaceSessionSnapshot,
++    type RequiredActionsOverlay,
+     type SessionSnapshot,
+     type SessionTurnRecord,
++    latestSessionTerminalError,
+ } from "./sessionSnapshot.js";
+ import { resumeTurnStream, streamTurnContent } from "./streamTurn.js";
+ import {
+@@ -182,6 +184,44 @@ function appendTurnInputs(
+     return [...base, ...continuationInputs];
+ }
+ 
++function clearAcknowledgedRequiredActions(
++    current: RequiredActionsOverlay,
++    submitted: RequiredActionsOverlay,
++): RequiredActionsOverlay {
++    const approvals = new Map(current.approvals);
++    for (const [id, expected] of submitted.approvals) {
++        const actual = approvals.get(id);
++        if (
++            actual?.approved === expected.approved &&
++            actual.reason === expected.reason &&
++            actual.optionId === expected.optionId
++        ) {
++            approvals.delete(id);
++        }
++    }
++
++    const toolResponses = new Map(current.toolResponses);
++    for (const [id, expected] of submitted.toolResponses) {
++        if (toolResponses.get(id)?.content === expected.content) {
++            toolResponses.delete(id);
++        }
++    }
++    return { approvals, toolResponses };
++}
++
++function mergeRequiredActions(
++    baseline: RequiredActionsOverlay,
++    latest: RequiredActionsOverlay,
++): RequiredActionsOverlay {
++    return {
++        approvals: new Map([...baseline.approvals, ...latest.approvals]),
++        toolResponses: new Map([
++            ...baseline.toolResponses,
++            ...latest.toolResponses,
++        ]),
++    };
++}
++
+ function commitActiveStream(
+     snapshot: SessionSnapshot,
+     continuationInputs?: RequiredActionInput[],
+@@ -195,15 +235,33 @@ function commitActiveStream(
+         active.update.metadata?.custom as { sandboxId?: string } | undefined
+     )?.sandboxId;
+ 
+-    const completedState = buildCompletedTurnState(
+-        new Date().toISOString(),
+-        requiredActionsFromActiveUpdate(active.update),
+-    );
+-    const baseline =
+-        snapshot.groupRootBaseline ?? computeGroupRootBaseline(snapshot.turns);
++    const completedState = active.update.terminalError != null
++        ? {
++              status: "error" as const,
++              message: active.update.terminalError.message,
++              completedAt: new Date().toISOString(),
++          }
++        : buildCompletedTurnState(
++              new Date().toISOString(),
++              requiredActionsFromActiveUpdate(active.update),
++          );
++    // `groupRootBaseline` only marks where the *group* started (used to scope
++    // the live-rendered accumulated message to this group while streaming).
++    // It does not advance as continuation turns within the group commit, so
++    // using it alone here would re-include every earlier turn's root model
++    // message ids in this turn's stored `rootModelMessageIds` on each
++    // continuation. `projectHistoryTurns` concatenates each turn's ids onto
++    // the group's running id list, so that overlap re-renders earlier turns'
++    // content once per subsequent continuation. Exclude ids already recorded
++    // on every *other* committed turn (from this group or an earlier one) so
++    // this turn's stored ids are just its own delta, matching how the
++    // history-reload path slices ids per turn via a before/after count.
++    const alreadyRecordedIds = snapshot.turns
++        .filter((turn) => turn.id !== active.turnId)
++        .flatMap((turn) => turn.rootModelMessageIds ?? []);
+     const rootModelMessageIds = rootModelMessageIdsSinceBaseline(
+         snapshot.fold,
+-        baseline,
++        alreadyRecordedIds,
+     );
+ 
+     const lastTurn = snapshot.turns.at(-1);
+@@ -325,6 +383,10 @@ export function useTrueFoundryAgentMessages({
+     const createdAtByMessageIdRef = useRef(new Map<string, Date>());
+     const abortControllerRef = useRef<AbortController | null>(null);
+     const activeRunRef = useRef<Promise<void> | null>(null);
++    const requiredActionRetryScheduledRef = useRef(false);
++    const requiredActionRetryPendingRef = useRef(false);
++    const requiredActionSendInFlightRef = useRef(false);
++    const trySendCollectedRequiredActionsRef = useRef<(snapshot: SessionSnapshot) => void>(() => undefined);
+     // Mirrors `resumeUnavailable` for `cancel`, which reads it outside render.
+     const resumeUnavailableRef = useRef(false);
+     const runningTurnRef = useRef<Turn | undefined>(undefined);
+@@ -363,6 +425,7 @@ export function useTrueFoundryAgentMessages({
+         () => projectSessionMessages(snapshot, projectOptions),
+         [snapshot, projectOptions],
+     );
++    const terminalError = latestSessionTerminalError(snapshot.turns);
+ 
+     const runStream = useCallback(
+         (
+@@ -384,6 +447,7 @@ export function useTrueFoundryAgentMessages({
+             setIsRunning(true);
+             // This stream's `finally` owns the running flag from here on.
+             markResumeUnavailable(false);
++            const snapshotBeforeRun = snapshotRef.current;
+ 
+             const run = (async () => {
+                 // Sub-agent turns can emit 100+ stream events per frame. Coalesce to one
+@@ -394,6 +458,7 @@ export function useTrueFoundryAgentMessages({
+                     isContinuation: boolean;
+                 } | null = null;
+                 let streamUpdateRaf: number | null = null;
++                let completedWithoutAbort = false;
+ 
+                 const flushPendingStreamUpdate = () => {
+                     streamUpdateRaf = null;
+@@ -434,6 +499,7 @@ export function useTrueFoundryAgentMessages({
+                         }
+                         applyStreamUpdate(update);
+                     }
++                    completedWithoutAbort = !abortController.signal.aborted;
+                 } catch (error) {
+                     if (error instanceof Error && error.name === "AbortError") {
+                         return;
+@@ -453,22 +519,39 @@ export function useTrueFoundryAgentMessages({
+                         abortControllerRef.current = null;
+                     }
+                     setIsRunning(false);
+-                    setSnapshot((prev) => {
+-                        if (prev.activeStream == null) {
+-                            return prev;
+-                        }
+-                        const marked = replaceSessionSnapshot(prev, {
+-                            activeStream: {
+-                                ...prev.activeStream,
+-                                streamComplete: true,
+-                            },
+-                            requiredActions: {
+-                                approvals: new Map(),
+-                                toolResponses: new Map(),
+-                            },
++                    if (isContinuation && !completedWithoutAbort) {
++                        const restored = replaceSessionSnapshot(snapshotBeforeRun, {
++                            requiredActions: mergeRequiredActions(
++                                snapshotBeforeRun.requiredActions,
++                                snapshotRef.current.requiredActions,
++                            ),
+                         });
+-                        return commitActiveStream(marked);
+-                    });
++                        snapshotRef.current = restored;
++                        setSnapshot(restored);
++                    } else {
++                        setSnapshot((prev) => {
++                            if (prev.activeStream == null) {
++                                return prev;
++                            }
++                            const marked = replaceSessionSnapshot(prev, {
++                                activeStream: {
++                                    ...prev.activeStream,
++                                    streamComplete: true,
++                                },
++                                ...(isContinuation
++                                    ? {
++                                          requiredActions: clearAcknowledgedRequiredActions(
++                                              prev.requiredActions,
++                                              snapshotBeforeRun.requiredActions,
++                                          ),
++                                      }
++                                    : {}),
++                            });
++                            const committed = commitActiveStream(marked);
++                            snapshotRef.current = committed;
++                            return committed;
++                        });
++                    }
+                 }
+             })();
+ 
+@@ -556,6 +639,7 @@ export function useTrueFoundryAgentMessages({
+             }
+ 
+             createdAtByMessageIdRef.current = new Map();
++            snapshotRef.current = loadedSnapshot;
+             setSnapshot(loadedSnapshot);
+             runningTurnRef.current = loadedSnapshot.runningTurn;
+ 
+@@ -580,9 +664,6 @@ export function useTrueFoundryAgentMessages({
+ 
+                 const isContinuation = extractTurnUserText(turn.input) === undefined;
+                 // TODO: pass afterSequenceNumber once stream ingestion tracks sequence numbers.
+-                // Use loadedSnapshot directly — snapshotRef.current still points at
+-                // the empty snapshot cleared above until the setSnapshot(loadedSnapshot)
+-                // call re-renders.
+                 void runStream(
+                     (signal) =>
+                         resumeTurnStream(
+@@ -838,12 +919,13 @@ export function useTrueFoundryAgentMessages({
+     );
+ 
+     const cancel = useCallback(async () => {
+-        if (sessionId == null) {
++        const activeSessionId = sessionId ?? lazilyCreatedSessionIdRef.current;
++        if (activeSessionId == null) {
+             abortControllerRef.current?.abort();
+             return;
+         }
+         const conversationSessionId = await resolveActiveSessionId(
+-            sessionId,
++            activeSessionId,
+             resolveConversationSessionIdRef.current,
+         );
+         // Request cancellation but keep consuming the stream. After cancel(),
+@@ -863,12 +945,26 @@ export function useTrueFoundryAgentMessages({
+         }
+     }, [server, sessionId, markResumeUnavailable]);
+ 
+-    const isRunningRef = useRef(isRunning);
+-    isRunningRef.current = isRunning;
+-
+     const trySendCollectedRequiredActions = useCallback(
+         (nextSnapshot: SessionSnapshot) => {
+-            if (isRunningRef.current) {
++            const activeRun = activeRunRef.current;
++            if (activeRun != null) {
++                requiredActionRetryPendingRef.current = true;
++                if (!requiredActionRetryScheduledRef.current) {
++                    requiredActionRetryScheduledRef.current = true;
++                    void activeRun.then(
++                        () => {
++                            requiredActionRetryScheduledRef.current = false;
++                            if (!requiredActionSendInFlightRef.current) {
++                                requiredActionRetryPendingRef.current = false;
++                                trySendCollectedRequiredActionsRef.current(snapshotRef.current);
++                            }
++                        },
++                        () => {
++                            requiredActionRetryScheduledRef.current = false;
++                        },
++                    );
++                }
+                 return;
+             }
+             const projected = projectSessionMessages(nextSnapshot, projectOptions);
+@@ -877,13 +973,24 @@ export function useTrueFoundryAgentMessages({
+                 return;
+             }
+             const inputs = collectRequiredActionInputs(paused);
+-            if (inputs.length > 0) {
+-                // sendTurn/runStream already report via onError; swallow to avoid duplicates.
+-                void sendTurn({ inputs }).catch(() => undefined);
++            if (inputs.length === 0 || requiredActionSendInFlightRef.current) {
++                return;
+             }
++            requiredActionRetryPendingRef.current = false;
++            requiredActionSendInFlightRef.current = true;
++            void sendTurn({ inputs })
++                .catch((error) => onErrorRef.current?.(error))
++                .finally(() => {
++                    requiredActionSendInFlightRef.current = false;
++                    if (requiredActionRetryPendingRef.current) {
++                        requiredActionRetryPendingRef.current = false;
++                        trySendCollectedRequiredActionsRef.current(snapshotRef.current);
++                    }
++                });
+         },
+         [projectOptions, sendTurn],
+     );
++    trySendCollectedRequiredActionsRef.current = trySendCollectedRequiredActions;
+ 
+     const respondToToolApproval = useCallback(
+         (response: RespondToToolApprovalOptions) => {
+@@ -891,6 +998,9 @@ export function useTrueFoundryAgentMessages({
+             const approvals = new Map(prev.requiredActions.approvals);
+             approvals.set(response.approvalId, {
+                 approved: response.approved,
++                ...(response.optionId != null
++                    ? { optionId: response.optionId }
++                    : {}),
+                 ...(response.reason != null ? { reason: response.reason } : {}),
+             });
+             const nextSnapshot = replaceSessionSnapshot(prev, {
+@@ -899,6 +1009,7 @@ export function useTrueFoundryAgentMessages({
+                     approvals,
+                 },
+             });
++            snapshotRef.current = nextSnapshot;
+             setSnapshot(nextSnapshot);
+             trySendCollectedRequiredActions(nextSnapshot);
+         },
+@@ -916,6 +1027,7 @@ export function useTrueFoundryAgentMessages({
+                     toolResponses,
+                 },
+             });
++            snapshotRef.current = nextSnapshot;
+             setSnapshot(nextSnapshot);
+             trySendCollectedRequiredActions(nextSnapshot);
+         },
+@@ -1094,6 +1206,7 @@ export function useTrueFoundryAgentMessages({
+ 
+     return {
+         messages,
++        terminalError,
+         isRunning,
+         resumeUnavailable,
+         isLoading,
+diff --git a/src/useTrueFoundryAgentRuntime.ts b/src/useTrueFoundryAgentRuntime.ts
+index c052c5e..cd953d2 100644
+--- a/src/useTrueFoundryAgentRuntime.ts
++++ b/src/useTrueFoundryAgentRuntime.ts
+@@ -130,6 +130,7 @@ function useTrueFoundryAgentRuntimeImpl(
+ 
+     const {
+         messages,
++        terminalError,
+         isRunning,
+         resumeUnavailable,
+         isLoading,
+@@ -225,6 +226,7 @@ function useTrueFoundryAgentRuntimeImpl(
+             pendingToolResponses,
+             pendingMcpAuth,
+             resumeUnavailable,
++            terminalError,
+             sandboxId,
+             respondToToolApproval,
+             respondToToolResponse,

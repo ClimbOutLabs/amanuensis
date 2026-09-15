@@ -1,0 +1,343 @@
+// @vitest-environment jsdom
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useEffect } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { measureFrameContentHeight, SpacesView } from '@/containers/SpacesView.js';
+import { SPACE_PAGE_BASE_STYLE } from '@/containers/spacePageBase.js';
+import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
+import { SpaceProvider, type Space, type SpaceStore } from '@/server/SpaceContext.js';
+
+// jsdom does not implement HTMLDialogElement.showModal()/close(); CenteredModal (used for the
+// delete-space confirmation) calls both, so it needs the same minimal polyfill the CenteredModal
+// suite uses, toggling the `open` attribute the dialog UA stylesheet keys off.
+const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
+const showModal = vi.fn(function showModal(this: HTMLDialogElement) {
+  this.open = true;
+});
+const close = vi.fn(function close(this: HTMLDialogElement) {
+  this.open = false;
+  this.dispatchEvent(new Event('close'));
+});
+
+beforeEach(() => {
+  showModal.mockClear();
+  close.mockClear();
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: showModal });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: close });
+});
+
+afterEach(() => {
+  if (originalShowModal === undefined) {
+    Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+  } else {
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
+  }
+  if (originalClose === undefined) {
+    Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
+  } else {
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', originalClose);
+  }
+});
+
+const SPAIN_HOUSES: Space = {
+  id: 's-spain-houses',
+  name: 'Spain houses',
+  purpose: 'Track candidate houses in Spain: price, location, and viewing status.',
+  status: 'active',
+  body: [
+    '# Spain houses',
+    '',
+    'Shortlist of candidate houses.',
+    '',
+    '| Address | Price | Status |',
+    '| --- | --- | --- |',
+    '| Calle Mayor 1 | 250000 | Viewed |',
+    '| Calle Sol 2 |  | |',
+  ].join('\n'),
+  format: 'markdown',
+  revision: 2,
+  created_at: '2026-09-01T00:00:00.000Z',
+  updated_at: '2026-09-10T00:00:00.000Z',
+};
+
+const ARCHIVED_TRIP: Space = {
+  id: 's-trip',
+  name: 'Iceland trip',
+  purpose: 'Plan the Iceland trip itinerary.',
+  status: 'archived',
+  body: '## Day 1\nArrive in Reykjavik.',
+  format: 'markdown',
+  revision: 5,
+  created_at: '2026-08-01T00:00:00.000Z',
+  updated_at: '2026-08-20T00:00:00.000Z',
+};
+
+const DESIGNED_TRACKER: Space = {
+  id: 's-html-tracker',
+  name: 'Launch tracker',
+  purpose: 'Track the launch checklist.',
+  status: 'active',
+  body: '<style>body{background:#111}</style><h1>Launch tracker</h1><p>Ready to ship.</p>',
+  format: 'html',
+  revision: 1,
+  created_at: '2026-09-05T00:00:00.000Z',
+  updated_at: '2026-09-12T00:00:00.000Z',
+};
+
+/** Mutable so a `delete` call is reflected by the next `list()`, the way the real HTTP store is. */
+function mockStore(initialSpaces: Space[]): SpaceStore {
+  const spaces = [...initialSpaces];
+  return {
+    list: vi.fn(async () => spaces),
+    get: vi.fn(async ({ spaceId }) => {
+      const found = spaces.find(space => space.id === spaceId);
+      if (found === undefined) throw new Error(`Space not found: ${spaceId}`);
+      return found;
+    }),
+    delete: vi.fn(async ({ spaceId }) => {
+      const index = spaces.findIndex(space => space.id === spaceId);
+      if (index === -1) throw new Error(`Space not found: ${spaceId}`);
+      spaces.splice(index, 1);
+    }),
+  };
+}
+
+function Harness({ store, initialSpaceId }: { store: SpaceStore; initialSpaceId?: string }) {
+  return (
+    <ShellModeProvider>
+      <SpaceProvider store={store}>
+        <OpenOnMount spaceId={initialSpaceId} />
+        <SpacesView />
+      </SpaceProvider>
+    </ShellModeProvider>
+  );
+}
+
+function OpenOnMount({ spaceId }: { spaceId?: string }) {
+  const { openSpaces } = useShellMode();
+  // Opens the view on mount, mirroring what SpacesButton does on click.
+  useEffect(() => {
+    openSpaces(spaceId ?? null);
+  }, [openSpaces, spaceId]);
+  return null;
+}
+
+describe('SpacesView list page', () => {
+  it('renders each space with a status pill, updated time, and a one-line preview', async () => {
+    render(<Harness store={mockStore([SPAIN_HOUSES, ARCHIVED_TRIP])} />);
+
+    expect(await screen.findByRole('heading', { name: 'Spaces' })).toBeInTheDocument();
+    expect(screen.getByText('Spain houses')).toBeInTheDocument();
+    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByText('Archived')).toBeInTheDocument();
+    expect(screen.getByText(/Shortlist of candidate houses/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Updated/).length).toBeGreaterThan(0);
+  });
+
+  it('shows an empty state telling the user to ask the assistant for a space', async () => {
+    render(<Harness store={mockStore([])} />);
+
+    expect(await screen.findByText(/No spaces yet/)).toBeInTheDocument();
+    expect(screen.getByText(/Ask the assistant to build one/)).toBeInTheDocument();
+  });
+
+  it('opens a space page on click', async () => {
+    render(<Harness store={mockStore([SPAIN_HOUSES])} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Spain houses/ }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Spain houses' })).toBeInTheDocument());
+  });
+});
+
+describe('SpacesView space page', () => {
+  it('shows the name once as the title, not repeated as a body heading', async () => {
+    render(<Harness store={mockStore([SPAIN_HOUSES])} initialSpaceId={SPAIN_HOUSES.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Spain houses' })).toBeInTheDocument());
+    expect(screen.getAllByRole('heading', { name: 'Spain houses' })).toHaveLength(1);
+  });
+
+  it('keeps headings in the body that do not repeat the name', async () => {
+    render(<Harness store={mockStore([ARCHIVED_TRIP])} initialSpaceId={ARCHIVED_TRIP.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Iceland trip' })).toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Day 1' })).toBeInTheDocument();
+  });
+
+  it('shows the purpose as a subtitle, a status pill, and an updated time, without a revision number', async () => {
+    render(<Harness store={mockStore([SPAIN_HOUSES])} initialSpaceId={SPAIN_HOUSES.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Spain houses' })).toBeInTheDocument());
+    expect(screen.getByText(/Track candidate houses in Spain/)).toBeInTheDocument();
+    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByText(/Updated/)).toBeInTheDocument();
+    expect(screen.queryByText(/revision/i)).not.toBeInTheDocument();
+  });
+
+  it('renders a markdown table in the body as a table element', async () => {
+    render(<Harness store={mockStore([SPAIN_HOUSES])} initialSpaceId={SPAIN_HOUSES.id} />);
+
+    const table = await screen.findByRole('table');
+    expect(table).toBeInTheDocument();
+    expect(screen.getByText('Calle Mayor 1')).toBeInTheDocument();
+  });
+
+  it('renders a format "html" space body in a sandboxed iframe, not as markdown', async () => {
+    render(<Harness store={mockStore([DESIGNED_TRACKER])} initialSpaceId={DESIGNED_TRACKER.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Launch tracker' })).toBeInTheDocument());
+    const frame = document.querySelector('iframe');
+    expect(frame).not.toBeNull();
+    expect(frame?.getAttribute('sandbox')).toBe('allow-same-origin');
+    expect(frame?.getAttribute('referrerpolicy')).toBe('no-referrer');
+    expect(frame?.hasAttribute('srcdoc')).toBe(true);
+    // The page heading lives inside the iframe's srcdoc, not the light DOM as a markdown heading.
+    expect(screen.queryAllByRole('heading', { name: 'Launch tracker' })).toHaveLength(1);
+  });
+
+  it('gives the iframe no scrollbar of its own, so the outer page owns scrolling', async () => {
+    render(<Harness store={mockStore([DESIGNED_TRACKER])} initialSpaceId={DESIGNED_TRACKER.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Launch tracker' })).toBeInTheDocument());
+    const frame = document.querySelector('iframe');
+    expect(frame?.getAttribute('scrolling')).toBe('no');
+    expect(frame?.className).toContain('overflow-hidden');
+  });
+
+  it('injects base styles that let content size to auto height and wide tables scroll horizontally', async () => {
+    render(<Harness store={mockStore([DESIGNED_TRACKER])} initialSpaceId={DESIGNED_TRACKER.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Launch tracker' })).toBeInTheDocument());
+    const frame = document.querySelector('iframe');
+    const srcdoc = frame?.getAttribute('srcdoc') ?? '';
+    expect(srcdoc).toContain('height:auto');
+    expect(srcdoc).toContain('overflow:visible');
+    expect(srcdoc).toContain('table{display:block;overflow-x:auto;}');
+    expect(srcdoc).toContain('img,table{max-width:100%;}');
+  });
+
+  it('injects the designed base stylesheet ahead of the page’s own <style>', async () => {
+    render(<Harness store={mockStore([DESIGNED_TRACKER])} initialSpaceId={DESIGNED_TRACKER.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Launch tracker' })).toBeInTheDocument());
+    const frame = document.querySelector('iframe');
+    const srcdoc = frame?.getAttribute('srcdoc') ?? '';
+    expect(srcdoc).toContain(SPACE_PAGE_BASE_STYLE);
+
+    const baseIndex = srcdoc.indexOf(SPACE_PAGE_BASE_STYLE);
+    // DESIGNED_TRACKER's own body opens with `<style>body{background:#111}</style>`.
+    const pageStyleIndex = srcdoc.indexOf('body{background:#111}');
+    expect(baseIndex).toBeGreaterThanOrEqual(0);
+    expect(pageStyleIndex).toBeGreaterThan(baseIndex);
+  });
+
+  it('gives the base stylesheet its design-system classes: cards, tables, badges, page-header, grids', async () => {
+    render(<Harness store={mockStore([DESIGNED_TRACKER])} initialSpaceId={DESIGNED_TRACKER.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Launch tracker' })).toBeInTheDocument());
+    const frame = document.querySelector('iframe');
+    const srcdoc = frame?.getAttribute('srcdoc') ?? '';
+    for (const selector of [
+      '.page-header',
+      '.card,section',
+      '.grid-2',
+      '.grid-3',
+      'thead th',
+      'td.num,th.num',
+      '.badge',
+      '.badge-success',
+      '.badge-warning',
+      'details',
+    ]) {
+      expect(srcdoc).toContain(selector);
+    }
+  });
+
+  it('renders a format "markdown" space as markdown, not an iframe', async () => {
+    render(<Harness store={mockStore([SPAIN_HOUSES])} initialSpaceId={SPAIN_HOUSES.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Spain houses' })).toBeInTheDocument());
+    expect(document.querySelector('iframe')).toBeNull();
+  });
+});
+
+describe('measureFrameContentHeight', () => {
+  // jsdom never lays out an iframe's srcdoc, so scrollHeight stays 0 regardless of content and the
+  // sizing behaviour cannot be asserted through a rendered iframe. This exercises the pure
+  // computation the frame's load and ResizeObserver handlers both call into.
+  it('returns the larger of documentElement and body scrollHeight', () => {
+    expect(measureFrameContentHeight({ documentElement: { scrollHeight: 900 }, body: { scrollHeight: 640 } })).toBe(
+      900,
+    );
+    expect(measureFrameContentHeight({ documentElement: { scrollHeight: 300 }, body: { scrollHeight: 640 } })).toBe(
+      640,
+    );
+  });
+
+  it('returns 0 when the document or its elements are unavailable', () => {
+    expect(measureFrameContentHeight(null)).toBe(0);
+    expect(measureFrameContentHeight({ documentElement: null, body: null })).toBe(0);
+    expect(measureFrameContentHeight({})).toBe(0);
+  });
+});
+
+describe('SpacesView list page html preview', () => {
+  it('strips tags from an html body for the one-line preview', async () => {
+    render(<Harness store={mockStore([DESIGNED_TRACKER])} />);
+
+    expect(await screen.findByText('Launch tracker')).toBeInTheDocument();
+    expect(screen.getByText(/Ready to ship\./)).toBeInTheDocument();
+    expect(screen.queryByText(/<h1>/)).not.toBeInTheDocument();
+  });
+});
+
+describe('SpacesView delete', () => {
+  it('has no per-row delete control on the list page', async () => {
+    render(<Harness store={mockStore([SPAIN_HOUSES])} />);
+
+    expect(await screen.findByText('Spain houses')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /space actions/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /delete/i })).not.toBeInTheDocument();
+  });
+
+  it('deletes the space after confirmation naming it, then returns to the list', async () => {
+    const store = mockStore([SPAIN_HOUSES]);
+    render(<Harness store={store} initialSpaceId={SPAIN_HOUSES.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Spain houses' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Space actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /delete space/i }));
+
+    // The confirmation names the space being deleted.
+    await screen.findByRole('heading', { name: 'Delete “Spain houses”?' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete space' }));
+
+    await waitFor(() => expect(store.delete).toHaveBeenCalledWith({ spaceId: SPAIN_HOUSES.id, expectedRevision: 2 }));
+    // Deleting returns to the list page, and the list no longer shows the deleted space.
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { level: 1, name: 'Spain houses' })).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByText(/No spaces yet/)).toBeInTheDocument();
+  });
+
+  it('does not delete the space when the confirmation is cancelled', async () => {
+    const store = mockStore([SPAIN_HOUSES]);
+    render(<Harness store={store} initialSpaceId={SPAIN_HOUSES.id} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Spain houses' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Space actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /delete space/i }));
+    await screen.findByRole('heading', { name: 'Delete “Spain houses”?' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(store.delete).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { level: 1, name: 'Spain houses' })).toBeInTheDocument();
+  });
+});

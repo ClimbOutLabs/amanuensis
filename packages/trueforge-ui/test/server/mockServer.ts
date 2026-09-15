@@ -1,0 +1,96 @@
+import type {
+  AgentMetricsServer,
+  AgentSessionsServer,
+  AgentUIServer,
+  CatalogServer,
+  ScheduleServer,
+} from '@/server/types.js';
+
+async function unavailable(): Promise<never> {
+  throw new Error('Unexpected mock server call');
+}
+
+async function* emptyTurnStream() {}
+
+export function createMockCatalog(overrides: Partial<CatalogServer> = {}): CatalogServer {
+  return {
+    modelCatalog: {
+      getModelProviderCatalog: async () => [],
+      listModelProviders: async () => [],
+      createModelProvider: unavailable,
+      updateModelProvider: unavailable,
+    },
+    connectorCatalog: {
+      getConnectorCatalog: async () => [],
+      listConnectors: async () => [],
+      getConnector: unavailable,
+      getToolsByConnectorId: async () => [],
+      createConnector: unavailable,
+      updateConnector: unavailable,
+      authenticateConnector: unavailable,
+      disconnectConnector: unavailable,
+    },
+    ...overrides,
+  };
+}
+
+export function createMockAgentSessionsServer(overrides: Partial<AgentSessionsServer> = {}): AgentSessionsServer {
+  return {
+    getAgent: unavailable,
+    getCodeSnippets: async () => [],
+    listSessions: async () => ({ data: [] }),
+    listSessionEvents: async () => ({ data: [] }),
+    ...overrides,
+  };
+}
+
+export function createMockScheduleServer(overrides: Partial<ScheduleServer> = {}): ScheduleServer {
+  return {
+    listSchedules: async () => ({ data: [] }),
+    getSchedule: unavailable,
+    createSchedule: unavailable,
+    updateSchedule: unavailable,
+    deleteSchedule: unavailable,
+    listScheduleRuns: async () => [],
+    createScheduleRun: unavailable,
+    ...overrides,
+  };
+}
+
+export function createMockAgentMetricsServer(overrides: Partial<AgentMetricsServer> = {}): AgentMetricsServer {
+  return {
+    getCharts: async () => [],
+    getMeters: async () => [],
+    getChartData: unavailable,
+    ...overrides,
+  };
+}
+
+export function createMockAgentUIServer(overrides: Partial<AgentUIServer> = {}): AgentUIServer {
+  return {
+    createSession: unavailable,
+    listSessions: unavailable,
+    getSession: unavailable,
+    updateSession: unavailable,
+    createTurn: emptyTurnStream,
+    cancelSession: unavailable,
+    listTurns: unavailable,
+    getTurn: unavailable,
+    listEvents: unavailable,
+    getCapabilities: async () => ({
+      data: {
+        sandbox: { enabled: true },
+        skill: { enabled: true },
+        settings: { enabled: true },
+        memoryScreen: { enabled: false },
+        toolOutputScreen: { enabled: false },
+      },
+    }),
+    getModels: async () => [],
+    getSkills: async () => [],
+    getMcp: async () => [],
+    searchAgents: async () => [],
+    saveAgent: unavailable,
+    ...overrides,
+  };
+}

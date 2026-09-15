@@ -1,0 +1,140 @@
+# Shipped skill catalog: skill presets offered by
+# GET /api/v1/catalog/skills for the UI to copy into
+# PUT /api/v1/settings/skills bodies. Discovery-only — never executed against.
+#
+# Entries reference upstream skill repos directly (url + path + ref); installing
+# a preset sparse-clones that subdirectory into the sandbox. Only permissively
+# licensed skills (Apache-2.0 / MIT) are listed — licenses were verified against
+# each skill's upstream LICENSE and are noted in the comments below. The schema
+# stores only {type, name, url, path, ref, description}; license and the MCP a
+# skill pairs with live in the comments for provenance.
+#
+# NOTE: Anthropic's document skills (pdf, docx, pptx, xlsx) are intentionally
+# excluded — their LICENSE.txt is proprietary ("All rights reserved", usable
+# only within Anthropic's Services) and forbids extracting/retaining/redistributing
+# the materials, which a clone-into-sandbox preset would do.
+#
+# PINNING: every `ref` below is a full 40-char commit SHA off the named branch
+# (almost always `main`), not the branch itself. A mutable branch name would let
+# whoever controls the upstream repo change what gets spliced into the model's
+# system prompt between sessions with nobody seeing a diff — the sandbox-side
+# downloader (packages/trueforge-core/src/core/sandbox/scripts/git_downloader.py)
+# already supports fetching by full object id, so pinning costs nothing at fetch
+# time. Each entry's trailing comment (`# tracks: main @ <date>`) records which
+# branch/tip the pin follows so a future update knows what to re-resolve.
+#
+# To re-pin a skill (pick up upstream changes, deliberately, with a reviewable
+# diff): run `git ls-remote <url> refs/heads/<branch>`, replace the `ref` value
+# with the returned SHA, update the `# tracks:` comment's date, then regenerate
+# the shipped catalog with `pnpm --filter @truefoundry/trueforge build:gen`
+# (do not hand-edit src/catalog/skillCatalog.gen.ts).
+skills:
+  # 10x — durable project context and disciplined engineering execution. (z3z1ma/10x · MIT)
+  # Kept as an on-demand Git skill rather than base-prompt text: its full instructions are useful
+  # for substantial engineering work but unnecessarily expensive for ordinary assistant turns.
+  - type: git
+    name: ten-x
+    url: https://github.com/z3z1ma/10x
+    ref: 4616e5c07d6f9b82fb299ef18446280ab6f1e09d # tracks: main @ 2026-08-26
+    description: 10x engineering method. Use for substantial coding work that needs disciplined discovery, durable project context, bounded execution, verification evidence, and learning from failed attempts. Skip for trivial edits and ordinary conversation.
+
+  # ── Anthropic skills (github.com/anthropics/skills · per-skill LICENSE, all Apache-2.0) ──
+  - type: git
+    name: algorithmic-art
+    url: https://github.com/anthropics/skills
+    path: skills/algorithmic-art
+    ref: 3b3fad96af16a10759d930941b4520ba0c40edae # tracks: main @ 2026-08-26
+    description: Creating algorithmic art using p5.js with seeded randomness and interactive parameter exploration.
+
+  # Agent-builder skills — author skills, MCP servers, and web artifacts.
+  - type: git
+    name: skill-creator
+    url: https://github.com/anthropics/skills
+    path: skills/skill-creator
+    ref: 3b3fad96af16a10759d930941b4520ba0c40edae # tracks: main @ 2026-08-26
+    description: Scaffold, refine, and package new Agent Skills, including SKILL.md structure and evaluation.
+  - type: git
+    name: mcp-builder
+    url: https://github.com/anthropics/skills
+    path: skills/mcp-builder
+    ref: 3b3fad96af16a10759d930941b4520ba0c40edae # tracks: main @ 2026-08-26
+    description: Build Model Context Protocol (MCP) servers — tool definitions, transports, and packaging.
+  - type: git
+    name: web-artifacts-builder
+    url: https://github.com/anthropics/skills
+    path: skills/web-artifacts-builder
+    ref: 3b3fad96af16a10759d930941b4520ba0c40edae # tracks: main @ 2026-08-26
+    description: Build self-contained web artifacts (HTML/JS/CSS) that render as interactive standalone pages.
+
+  # ── MCP-paired workflow skills (each pairs with the noted MCP connector) ──
+
+  # tavily-research — pairs with the Tavily retrieval MCP. (tavily-ai/skills · MIT)
+  - type: git
+    name: tavily-research
+    url: https://github.com/tavily-ai/skills
+    path: skills/tavily-research
+    ref: ea5e8201b0d3ed9c10b70b71187589bd761fe2d2 # tracks: main @ 2026-08-26
+    description: Run structured web research with the Tavily MCP — search, extract, and synthesize sources.
+    requires:
+      - tvly
+
+  # supabase — pairs with the Supabase MCP. (supabase/agent-skills · MIT)
+  - type: git
+    name: supabase
+    url: https://github.com/supabase/agent-skills
+    path: skills/supabase
+    ref: 8331f910845103c08d51f6ca1d86ebb7d1f745e3 # tracks: main @ 2026-08-26
+    description: Query and manage a Supabase Postgres database via SQL through the Supabase MCP.
+
+  # wiki-architect / wiki-qa — pair with DeepWiki / GitHub for repo briefs. (microsoft/skills · MIT)
+  - type: git
+    name: wiki-architect
+    url: https://github.com/microsoft/skills
+    path: .github/plugins/deep-wiki/skills/wiki-architect
+    ref: 7066b58141d8cc66f39356b2ee5bb64d428dcf17 # tracks: main @ 2026-08-26
+    description: Plan and structure a repository wiki / brief from a codebase (DeepWiki).
+  - type: git
+    name: wiki-qa
+    url: https://github.com/microsoft/skills
+    path: .github/plugins/deep-wiki/skills/wiki-qa
+    ref: 7066b58141d8cc66f39356b2ee5bb64d428dcf17 # tracks: main @ 2026-08-26
+    description: Answer questions about a repository from its generated wiki (DeepWiki); companion to wiki-architect.
+
+  # openai/skills — per-skill licenses (verified). Apache-2.0 unless noted.
+  # NOTE: this repo is deprecated upstream — plan to re-vendor from openai/plugins
+  # later and update the url/path/ref.
+  # linear — pairs with the Linear MCP. (Apache-2.0)
+  - type: git
+    name: linear
+    url: https://github.com/openai/skills
+    path: skills/.curated/linear
+    ref: 49f948faa9258a0c61caceaf225e179651397431 # tracks: main @ 2026-08-26
+    description: Triage and manage Linear issues (create, update, search) via the Linear MCP.
+  # gh-fix-ci — pairs with the GitHub MCP. (Apache-2.0)
+  - type: git
+    name: gh-fix-ci
+    url: https://github.com/openai/skills
+    path: skills/.curated/gh-fix-ci
+    ref: 49f948faa9258a0c61caceaf225e179651397431 # tracks: main @ 2026-08-26
+    description: Diagnose and fix failing GitHub CI checks on a pull request via the GitHub MCP.
+  # notion-knowledge-capture — pairs with the Notion MCP. (MIT · Notion Labs, Inc.)
+  - type: git
+    name: notion-knowledge-capture
+    url: https://github.com/openai/skills
+    path: skills/.curated/notion-knowledge-capture
+    ref: 49f948faa9258a0c61caceaf225e179651397431 # tracks: main @ 2026-08-26
+    description: Capture and organize knowledge into Notion pages and databases via the Notion MCP.
+  # sentry — pairs with the Sentry MCP. (Apache-2.0)
+  - type: git
+    name: sentry
+    url: https://github.com/openai/skills
+    path: skills/.curated/sentry
+    ref: 49f948faa9258a0c61caceaf225e179651397431 # tracks: main @ 2026-08-26
+    description: Investigate and triage Sentry errors and issues via the Sentry MCP.
+  # jupyter-notebook — data analysis (pairs with data/DB MCPs such as Supabase). (Apache-2.0)
+  - type: git
+    name: jupyter-notebook
+    url: https://github.com/openai/skills
+    path: skills/.curated/jupyter-notebook
+    ref: 49f948faa9258a0c61caceaf225e179651397431 # tracks: main @ 2026-08-26
+    description: Perform data analysis in Jupyter notebooks — load data, compute, and visualize results.

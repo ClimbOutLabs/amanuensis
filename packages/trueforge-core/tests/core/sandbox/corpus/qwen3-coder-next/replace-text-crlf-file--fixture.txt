@@ -1,0 +1,10 @@
+import type { Result } from './types';
+
+function test() {
+  return 42;
+}
+
+export async function main() {
+  const result = test();
+  console.log(result);
+}

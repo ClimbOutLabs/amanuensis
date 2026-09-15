@@ -1,0 +1,1145 @@
+/**
+ * Tailwind authoring source for @truefoundry/trueforge-ui.
+ *
+ * The package build compiles this file through `build-styles.css` into the
+ * public `dist/styles.css` artifact. `ThemeProvider` injects that stylesheet
+ * at runtime — hosts do not need a CSS import. The `styles.css` export remains
+ * for SSR / explicit control.
+ *
+ * Tokens live on `.aui-theme-root` (light) and `.aui-theme-root.dark` so the
+ * host document is not rethemed. Override via host CSS on `.aui-theme-root` or
+ * `theme={{ tokens: { primaryButtonBg: "#e11d48" } }}`.
+ */
+@import './openui.css';
+
+/*
+ * GitHub Markdown styles (https://github.com/sindresorhus/github-markdown-css).
+ * Applied via `.markdown-body` on the Markdown atom. The bridge remaps light/dark
+ * CSS variables to the SDK ThemeProvider mode (class + data-theme).
+ */
+@import 'github-markdown-css/github-markdown.css';
+@import './github-markdown-bridge.css';
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Owned palette scoped to `.aui-theme-root` so host `:root` / `html.dark`
+ * are untouched. ThemeProvider toggles `.dark` on this root.
+ * ──────────────────────────────────────────────────────────────────── */
+@layer tfy-agent-ui-base {
+  .aui-theme-root {
+    box-sizing: border-box;
+    --color-white: #ffffff;
+    --color-black: #09090b;
+    --color-gray-100: #f4f4f5;
+    --color-gray-125: #f1f1f2;
+    --color-gray-150: #eeeef0;
+    --color-gray-200: #e4e4e7;
+    --color-gray-250: #e4e4e7;
+    --color-gray-275: #f4f4f5;
+    --color-gray-300: #d4d4d8;
+    --color-gray-400: #a1a1aa;
+    --color-gray-500: #71717a;
+    --color-gray-550: #62626a;
+    --color-gray-600: #52525b;
+    --color-gray-650: #494950;
+    --color-gray-700: #3f3f46;
+    --color-gray-750: #303036;
+    --color-gray-800: #27272a;
+    --color-gray-1000: #09090b;
+    --color-indigo-500: #6366f1;
+    --color-red-500: #ef4444;
+
+    --sidebar-bg: var(--color-white);
+    --topbar-bg: var(--color-white);
+    --primary-bg: var(--color-white);
+    --secondary-bg: var(--color-gray-100);
+    --border: var(--color-gray-250);
+    --input-box-bg: var(--color-white);
+    --input-border: var(--color-gray-250);
+    --text-primary: var(--color-gray-1000);
+    --text-secondary: var(--color-gray-550);
+    --sidebar-text: var(--text-primary);
+    --card-bg: var(--color-white);
+    --dropdown-selected-item-bg: var(--color-gray-125);
+    --dropdown-selected-item-text: var(--color-gray-1000);
+    --user-message-bg: var(--color-black);
+    --user-message-text: var(--color-white);
+    --assistant-message-bg: transparent;
+    --assistant-message-text: var(--text-primary);
+    --primary-button-bg: var(--color-black);
+    --primary-button-hover: #27272a;
+    --primary-button-text: var(--color-white);
+    --secondary-button-bg: var(--primary-bg);
+    --secondary-button-hover: var(--color-gray-200);
+    --secondary-button-text: var(--color-gray-1000);
+    --ghost-button-bg: transparent;
+    --ghost-button-hover: var(--color-gray-125);
+    --ghost-button-text: var(--color-gray-1000);
+    --success-bg: #16a34a;
+    --success-text: var(--color-white);
+    --failure-bg: var(--color-red-500);
+    --failure-text: var(--color-white);
+    --warning-bg: #d97706;
+    --warning-text: var(--color-white);
+    /* Figma Agents approval banner (light 6747:4232): blue-50 / blue-500 / blue-600 */
+    --approval-banner-bg: #eff6ff;
+    --approval-banner-border: #3b82f6;
+    --approval-banner-fg: #2563eb;
+    --approval-banner-accent: #3b82f6;
+    --focus-ring: var(--color-black);
+    --radius: 0.375rem;
+    --composer-radius: 1.5rem;
+    --overlay: rgb(9 9 11 / 0.5);
+    --shadow-color: var(--color-black);
+    --scrollbar-thumb: var(--color-gray-550);
+    --chat-font-size: 0.875rem;
+  }
+
+  .aui-theme-root *,
+  .aui-theme-root *::before,
+  .aui-theme-root *::after {
+    box-sizing: border-box;
+  }
+
+  .aui-theme-root.dark {
+    --color-gray-100: #101013;
+    --color-gray-125: #141417;
+    --color-gray-150: #18181b;
+    --color-gray-200: #1f1f22;
+    --color-gray-250: #27272a;
+    --color-gray-275: #343439;
+    --color-gray-300: #3f3f46;
+    --color-gray-400: #52525b;
+    --color-gray-500: #71717a;
+    --color-gray-550: #8c8c92;
+    --color-gray-600: #a1a1aa;
+    --color-gray-650: #b8b8be;
+    --color-gray-700: #d4d4d8;
+    --color-gray-750: #dfdfe2;
+    --color-gray-800: #ececee;
+    --color-gray-1000: #fdfdfd;
+
+    --sidebar-bg: var(--color-gray-200);
+    --topbar-bg: var(--color-gray-200);
+    --primary-bg: var(--color-gray-200);
+    --secondary-bg: var(--color-gray-250);
+    --border: var(--color-gray-275);
+    --input-box-bg: var(--color-gray-150);
+    --input-border: var(--color-gray-275);
+    --text-primary: var(--color-gray-1000);
+    --text-secondary: var(--color-gray-600);
+    --sidebar-text: var(--text-primary);
+    --card-bg: var(--color-gray-150);
+    --dropdown-selected-item-bg: var(--color-gray-275);
+    --dropdown-selected-item-text: var(--color-gray-1000);
+    --user-message-bg: var(--color-indigo-500);
+    --user-message-text: var(--color-white);
+    --assistant-message-bg: transparent;
+    --assistant-message-text: var(--text-primary);
+    --primary-button-bg: var(--color-indigo-500);
+    --primary-button-hover: #4f46e5;
+    --primary-button-text: var(--color-white);
+    --secondary-button-bg: var(--color-gray-250);
+    --secondary-button-hover: var(--color-gray-275);
+    --secondary-button-text: var(--color-gray-1000);
+    --ghost-button-bg: transparent;
+    --ghost-button-hover: var(--color-gray-275);
+    --ghost-button-text: var(--color-gray-1000);
+    --success-bg: #4ade80;
+    --success-text: #052e16;
+    --failure-bg: var(--color-red-500);
+    --failure-text: var(--color-white);
+    --warning-bg: #fbbf24;
+    --warning-text: #422006;
+    /* Figma Agents approval banner (dark 6748:1977): #202636 / blue-600 top / Base_gray/750 text */
+    --approval-banner-bg: #202636;
+    --approval-banner-border: #2563eb;
+    --approval-banner-fg: #dfdfe2;
+    --approval-banner-accent: #2563eb;
+    --focus-ring: var(--color-indigo-500);
+    --overlay: rgb(0 0 0 / 0.7);
+    --shadow-color: #000000;
+    --scrollbar-thumb: var(--color-gray-600);
+  }
+}
+
+/*
+ * Unlayered so it beats any @layer utilities rule (e.g. Tailwind's
+ * `.font-sans`) that might otherwise override the inherited font on
+ * descendant elements. `.aui-theme-root` covers all SDK chrome (including
+ * brand names and sidebars), while `.aui-root` covers standalone thread
+ * shells and consumer slot overrides. `.font-sans-flex` remains available
+ * for explicitly portaled surfaces. All three override `--font-sans`.
+ * Override `--font-agent-ui` in host CSS to brand the font. Default face is
+ * Google Sans (loaded once via `ensureStyles`).
+ */
+.aui-theme-root,
+.aui-root,
+.font-sans-flex {
+  --font-sans: var(
+    --font-agent-ui,
+    'Google Sans',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif
+  );
+  font-family: var(
+    --font-agent-ui,
+    'Google Sans',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif
+  );
+}
+
+/*
+ * Clone typography: conversation copy and composer text are regular weight;
+ * controls and headings keep their component-level medium/semibold utilities.
+ */
+.aui-theme-root:is([data-preset='claude'], [data-preset='chatgpt'], [data-preset='gemini'])
+  :is(
+    .aui-markdown,
+    [data-slot='aui_user-message-content'],
+    [data-slot='aui_composer-input'],
+    [data-slot='aui_user-edit-input']
+  ) {
+  font-weight: 400;
+}
+
+/* trueforge: circular composer send control (icon-only up-arrow). */
+.aui-theme-root[data-preset='trueforge'] [data-slot='aui_composer-send'] {
+  border-radius: 100%;
+}
+
+/*
+ * Token-driven default color for every SDK surface, not just thread shells.
+ * Without this, chrome outside `.aui-root` (sidebar, headers, footers, icon
+ * buttons) inherits the host page color and goes unreadable in dark mode.
+ */
+.aui-theme-root {
+  --thread-list-item-radius: 0.75rem;
+  color: var(--text-primary);
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Slim scrollbars — flush to the edge, transparent track. Thumb color via
+ * `--scrollbar-thumb` (theme.tokens.scrollbarThumb). Theme-root covers
+ * sidebar/chrome; aui-root covers standalone thread shells.
+ * ──────────────────────────────────────────────────────────────────── */
+.aui-root {
+  color: var(--text-primary);
+}
+
+/* Keep the send action in the narrow composer footer instead of allowing the
+ * selector row to push it beyond a 320px viewport. The breakpoint is below
+ * the supported 390px layout, so ordinary mobile and desktop stay unchanged. */
+@media (max-width: 359px) {
+  [data-slot='aui_composer-shell'] .aui-composer-footer {
+    align-items: flex-start;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-leading,
+  [data-slot='aui_composer-shell'] .aui-composer-actions {
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-model-button {
+    max-width: 7rem;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-reasoning-button {
+    max-width: 6rem;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-send-button,
+  [data-slot='aui_composer-shell'] .aui-composer-cancel-button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-send-button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  /* The running-state Cancel replaces Send and inherits the 32px `sm` height; pin it to the same
+   * 44px touch target explicitly rather than relying on min-height alone. */
+  [data-slot='aui_composer-shell'] .aui-composer-cancel-button {
+    height: 2.75rem;
+  }
+}
+
+/* Amanuensis host chrome: warm paper, charcoal copy, and a restrained brass accent. */
+.aman-runtime-rail {
+  display: flex;
+  min-width: 15rem;
+  width: 17.5rem;
+  flex-direction: column;
+  gap: 1rem;
+  border-left: 1px solid var(--border);
+  background: var(--sidebar-bg);
+  padding: 1.25rem 0.75rem 0.75rem;
+  color: var(--text-primary);
+}
+
+.aman-runtime-rail__avatar-card {
+  position: relative;
+  display: block;
+  width: 10rem;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border: 1px solid #d9c29a;
+  border-radius: 1.25rem;
+  background: linear-gradient(145deg, #fffdf8, #eee1cc);
+  box-shadow: 0 12px 30px rgb(63 48 30 / 0.1);
+}
+
+.aman-runtime-rail__avatar-glow {
+  position: absolute;
+  inset: 20% 14%;
+  border-radius: 999px;
+  background: #d9b576;
+  filter: blur(2.5rem);
+  opacity: 0.28;
+}
+
+.aman-runtime-rail__avatar,
+.aman-runtime-rail__avatar-fallback {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.aman-runtime-rail__avatar-fallback {
+  display: grid;
+  place-items: center;
+  border-radius: 2rem;
+  background: #2c2a26;
+  color: #f7f1e6;
+  font-size: 4rem;
+  font-weight: 700;
+}
+
+.aman-runtime-rail__status {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.aman-runtime-rail__status-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #4b8060;
+  box-shadow: 0 0 0 4px rgb(75 128 96 / 0.12);
+}
+
+.aman-runtime-rail__status[data-status='connecting'] .aman-runtime-rail__status-dot {
+  background: #b5894c;
+  box-shadow: 0 0 0 4px rgb(181 137 76 / 0.14);
+}
+
+.aman-runtime-rail__status[data-status='offline'] .aman-runtime-rail__status-dot {
+  background: #a95445;
+  box-shadow: 0 0 0 4px rgb(169 84 69 / 0.12);
+}
+
+.aman-runtime-rail__identity {
+  border-bottom: 1px solid var(--border);
+  padding: 0.25rem 0 1rem;
+}
+
+.aman-runtime-rail__identity h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.75rem;
+}
+
+.aman-runtime-rail__identity p:last-child {
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.aman-runtime-rail__details {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0;
+}
+
+.aman-runtime-rail__details > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.aman-runtime-rail__details dt {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.aman-runtime-rail__details dd {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
+.aman-runtime-rail__details dd a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Chat text with unified font sizing and line height. */
+.aman-chat-text {
+  font-size: var(--chat-font-size);
+  line-height: 1.5;
+}
+
+.aui-theme-root,
+.aui-root {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb, var(--text-secondary)) transparent;
+}
+
+.aui-theme-root ::-webkit-scrollbar,
+.aui-root ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+}
+
+.aui-theme-root ::-webkit-scrollbar-track,
+.aui-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.aui-theme-root ::-webkit-scrollbar-thumb,
+.aui-root ::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb, var(--text-secondary));
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.aui-theme-root ::-webkit-scrollbar-corner,
+.aui-root ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.aui-theme-root .aui-scrollbar-hidden,
+.aui-root .aui-scrollbar-hidden {
+  scrollbar-width: none;
+}
+
+.aui-theme-root .aui-scrollbar-hidden::-webkit-scrollbar,
+.aui-root .aui-scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Tailwind v4 `@theme inline` registrations.
+ * ──────────────────────────────────────────────────────────────────── */
+@theme inline {
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-sidebar-text: var(--sidebar-text);
+  --color-topbar-bg: var(--topbar-bg);
+  --color-primary-bg: var(--primary-bg);
+  --color-secondary-bg: var(--secondary-bg);
+  --color-border: var(--border);
+  --color-input-box-bg: var(--input-box-bg);
+  --color-input-border: var(--input-border);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-card-bg: var(--card-bg);
+  --color-dropdown-selected-item-bg: var(--dropdown-selected-item-bg);
+  --color-dropdown-selected-item-text: var(--dropdown-selected-item-text);
+  --color-user-message-bg: var(--user-message-bg);
+  --color-user-message-text: var(--user-message-text);
+  --color-assistant-message-bg: var(--assistant-message-bg);
+  --color-assistant-message-text: var(--assistant-message-text);
+  --color-primary-button-bg: var(--primary-button-bg);
+  --color-primary-button-hover: var(--primary-button-hover);
+  --color-primary-button-text: var(--primary-button-text);
+  --color-secondary-button-bg: var(--secondary-button-bg);
+  --color-secondary-button-hover: var(--secondary-button-hover);
+  --color-secondary-button-text: var(--secondary-button-text);
+  --color-ghost-button-bg: var(--ghost-button-bg);
+  --color-ghost-button-hover: var(--ghost-button-hover);
+  --color-ghost-button-text: var(--ghost-button-text);
+  --color-success-bg: var(--success-bg);
+  --color-success-text: var(--success-text);
+  --color-failure-bg: var(--failure-bg);
+  --color-failure-text: var(--failure-text);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-text: var(--warning-text);
+  --color-approval-banner-bg: var(--approval-banner-bg);
+  --color-approval-banner-border: var(--approval-banner-border);
+  --color-approval-banner-fg: var(--approval-banner-fg);
+  --color-approval-banner-accent: var(--approval-banner-accent);
+  --color-focus-ring: var(--focus-ring);
+  --color-white: var(--color-white);
+  --color-black: var(--color-black);
+  --color-gray-100: var(--color-gray-100);
+  --color-gray-125: var(--color-gray-125);
+  --color-gray-150: var(--color-gray-150);
+  --color-gray-200: var(--color-gray-200);
+  --color-gray-250: var(--color-gray-250);
+  --color-gray-275: var(--color-gray-275);
+  --color-gray-300: var(--color-gray-300);
+  --color-gray-400: var(--color-gray-400);
+  --color-gray-500: var(--color-gray-500);
+  --color-gray-550: var(--color-gray-550);
+  --color-gray-600: var(--color-gray-600);
+  --color-gray-650: var(--color-gray-650);
+  --color-gray-700: var(--color-gray-700);
+  --color-gray-750: var(--color-gray-750);
+  --color-gray-800: var(--color-gray-800);
+  --color-gray-1000: var(--color-gray-1000);
+  --color-indigo-500: var(--color-indigo-500);
+  --color-red-500: var(--color-red-500);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  /* Between text-sm (0.875rem) and text-lg (1.125rem); Tailwind has no default text-md. */
+  --text-md: 1rem;
+  --text-md--line-height: 1.5rem;
+}
+
+/* Monaco embeds: blend into surrounding cards (transparent editor chrome). */
+.aui-monaco .monaco-editor,
+.aui-monaco .monaco-editor-background,
+.aui-monaco .margin,
+.aui-monaco .monaco-editor .inputarea.ime-input {
+  background-color: transparent !important;
+}
+
+.aui-monaco .monaco-editor .overflow-guard {
+  border-radius: inherit;
+}
+
+/* ChatGPT dark: transparent composer border + inset white edge */
+.aui-theme-root[data-preset='chatgpt'][data-theme='dark'] [data-slot='aui_composer-shell'] {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+}
+
+.aui-bottom-sheet {
+  height: min(70dvh, 30rem);
+  max-height: 85dvh;
+}
+
+/* Dropdowns / popup cards: opacity + scale (not transform) so portal `style.transform` still positions. */
+@media (prefers-reduced-motion: no-preference) {
+  .aui-popup-enter {
+    animation: aui-popup-enter 140ms ease-out;
+  }
+}
+
+@keyframes aui-popup-enter {
+  from {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+
+/* Dialog slide: off-canvas when closed; @starting-style + allow-discrete for enter/exit.
+   Open state MUST be `none` (not translate(0)) so themePortalRoot fixed popovers/tooltips
+   keep the viewport as containing block and are not clipped by overflow-hidden. */
+@media (prefers-reduced-motion: no-preference) {
+  .aui-bottom-sheet,
+  .aui-side-drawer {
+    transition:
+      transform 200ms ease-out,
+      overlay 200ms ease-out allow-discrete,
+      display 200ms ease-out allow-discrete;
+    transform: translateY(100%);
+  }
+
+  .aui-bottom-sheet[open],
+  .aui-side-drawer[open] {
+    transform: none;
+  }
+
+  @starting-style {
+    .aui-bottom-sheet[open],
+    .aui-side-drawer[open] {
+      transform: translateY(100%);
+    }
+  }
+
+  @media (min-width: 768px) {
+    .aui-side-drawer:not([data-compact])[data-anchor='right'] {
+      transform: translateX(100%);
+    }
+
+    .aui-side-drawer:not([data-compact])[data-anchor='right'][open] {
+      transform: none;
+    }
+
+    .aui-side-drawer:not([data-compact])[data-anchor='left'] {
+      transform: translateX(-100%);
+    }
+
+    .aui-side-drawer:not([data-compact])[data-anchor='left'][open] {
+      transform: none;
+    }
+
+    @starting-style {
+      .aui-side-drawer:not([data-compact])[data-anchor='right'][open] {
+        transform: translateX(100%);
+      }
+
+      .aui-side-drawer:not([data-compact])[data-anchor='left'][open] {
+        transform: translateX(-100%);
+      }
+    }
+  }
+}
+
+/* Tool-approval focus flash (composer banner nav). */
+@keyframes aui-approval-flash {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  15%,
+  40%,
+  65% {
+    background-color: color-mix(in srgb, var(--approval-banner-accent) 18%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .aui-approval-flash {
+    animation: aui-approval-flash 2s ease-in-out;
+    border-radius: 0.375rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aui-approval-flash {
+    background-color: color-mix(in srgb, var(--approval-banner-accent) 18%, transparent);
+    border-radius: 0.375rem;
+  }
+}
+
+/* Left-to-right shimmer for assistant "Working..." indicator text. */
+@keyframes aui-text-shimmer {
+  from {
+    background-position: 100% center;
+  }
+  to {
+    background-position: -100% center;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .aui-message-indicator-shimmer {
+    background-image: linear-gradient(
+      90deg,
+      var(--text-secondary) 0%,
+      var(--text-secondary) 40%,
+      var(--text-primary) 50%,
+      var(--text-secondary) 60%,
+      var(--text-secondary) 100%
+    );
+    background-size: 200% auto;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: aui-text-shimmer 1.5s linear infinite;
+  }
+}
+
+/* Mascot Animator: base component + animation states (shipped in this stylesheet so the
+   library build bundles it; a separate MascotAnimator.css next to the component never reached
+   the browser). */
+.mascot-animator__container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.mascot-animator__image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  will-change: transform;
+}
+
+.mascot-animator__halo {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: currentColor;
+  filter: blur(6px);
+  opacity: 0.35;
+  transform: scale(1.04);
+  pointer-events: none;
+  will-change: opacity;
+  z-index: 0;
+}
+
+.mascot-animator__glyphs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  will-change: opacity;
+  z-index: 2;
+}
+
+/* Animation States */
+
+/* 1. Idle - slow breathing */
+.mascot-animator--idle .mascot-animator__image {
+  animation: mascot-breathing 4s ease-in-out infinite;
+}
+
+@keyframes mascot-breathing {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
+/* 2. Listening - lean toward composer with ear twitch */
+.mascot-animator--listening .mascot-animator__image {
+  animation: mascot-listening 1.2s ease-in-out infinite;
+}
+
+@keyframes mascot-listening {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(3deg);
+  }
+}
+
+.mascot-animator--listening .mascot-animator__glyphs {
+  animation: mascot-ear-twitch 3s steps(1, start) infinite;
+}
+
+@keyframes mascot-ear-twitch {
+  0%,
+  20% {
+    opacity: 0;
+  }
+  21%,
+  23% {
+    opacity: 1;
+  }
+  24%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 3. Thinking - head tilt with floating dots */
+.mascot-animator--thinking .mascot-animator__image {
+  animation: mascot-thinking 2.4s ease-in-out infinite;
+}
+
+.mascot-animator--thinking.mascot-animator--variant-1 .mascot-animator__image {
+  animation: mascot-thinking-variant-1 2.4s ease-in-out infinite;
+}
+
+@keyframes mascot-thinking {
+  0%,
+  50%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-4deg);
+  }
+  75% {
+    transform: rotate(4deg);
+  }
+}
+
+@keyframes mascot-thinking-variant-1 {
+  0%,
+  25%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotateY(15deg);
+  }
+}
+
+.mascot-animator--thinking .mascot-animator__glyphs {
+  animation: mascot-dots-float 2s ease-in-out infinite;
+}
+
+@keyframes mascot-dots-float {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-20px);
+  }
+}
+
+/* 4. Reading - page turn glyph and nod */
+.mascot-animator--reading .mascot-animator__image {
+  animation: mascot-nod 0.9s ease-in-out infinite;
+}
+
+@keyframes mascot-nod {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(3px);
+  }
+}
+
+.mascot-animator--reading .mascot-animator__glyphs {
+  animation: mascot-page-turn 1.6s ease-in-out infinite;
+}
+
+@keyframes mascot-page-turn {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateX(-10px) scaleX(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(0) scaleX(1);
+  }
+}
+
+/* 5. Searching - magnifier sweep with curious lean */
+.mascot-animator--searching .mascot-animator__image {
+  animation: mascot-curious-lean 1.6s ease-in-out infinite;
+}
+
+.mascot-animator--searching.mascot-animator--variant-1 .mascot-animator__image {
+  animation: mascot-curious-lean-variant-1 1.6s ease-in-out infinite;
+}
+
+@keyframes mascot-curious-lean {
+  0%,
+  100% {
+    transform: rotate(-2deg);
+  }
+  50% {
+    transform: rotate(2deg);
+  }
+}
+
+@keyframes mascot-curious-lean-variant-1 {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+}
+
+.mascot-animator--searching .mascot-animator__glyphs {
+  animation: mascot-magnifier-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes mascot-magnifier-sweep {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateX(-15px) scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(10px) scale(1);
+  }
+}
+
+/* 6. Working - busy bob with sparkle */
+.mascot-animator--working .mascot-animator__image {
+  animation: mascot-busy-bob 0.5s ease-in-out infinite;
+}
+
+.mascot-animator--working.mascot-animator--variant-1 .mascot-animator__image {
+  animation: mascot-busy-bob-variant-1 0.5s ease-in-out infinite;
+}
+
+@keyframes mascot-busy-bob {
+  0%,
+  100% {
+    transform: translateY(-2px);
+  }
+  50% {
+    transform: translateY(2px);
+  }
+}
+
+@keyframes mascot-busy-bob-variant-1 {
+  0%,
+  100% {
+    transform: rotate(1deg);
+  }
+  50% {
+    transform: rotate(-1deg);
+  }
+}
+
+.mascot-animator--working .mascot-animator__glyphs {
+  animation: mascot-sparkle 1s ease-in-out infinite;
+}
+
+@keyframes mascot-sparkle {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* 7. Waiting - patient blink */
+.mascot-animator--waiting .mascot-animator__image {
+  animation: mascot-idle 4s ease-in-out infinite;
+}
+
+@keyframes mascot-idle {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+}
+
+.mascot-animator--waiting .mascot-animator__glyphs {
+  animation: mascot-blink 4s steps(1, start) infinite;
+}
+
+@keyframes mascot-blink {
+  0%,
+  20% {
+    opacity: 0;
+  }
+  20%,
+  22% {
+    opacity: 1;
+  }
+  22%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 8. Celebrating - bounce with confetti */
+.mascot-animator--celebrating .mascot-animator__image {
+  animation: mascot-bounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 1;
+}
+
+@keyframes mascot-bounce {
+  0% {
+    transform: translateY(0) scaleY(1);
+  }
+  50% {
+    transform: translateY(-10px) scaleY(0.94);
+    transform-origin: center;
+  }
+  100% {
+    transform: translateY(0) scaleX(1.08);
+  }
+}
+
+.mascot-animator--celebrating .mascot-animator__glyphs {
+  animation: mascot-confetti 2s ease-out;
+}
+
+@keyframes mascot-confetti {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-30px) scale(0.5);
+  }
+}
+
+/* 9. Oops - shake with droop */
+.mascot-animator--oops .mascot-animator__image {
+  animation:
+    mascot-shake 0.4s ease-in-out infinite,
+    mascot-droop 1s ease-in-out 1;
+}
+
+@keyframes mascot-shake {
+  0%,
+  100% {
+    transform: translateX(-3px);
+  }
+  50% {
+    transform: translateX(3px);
+  }
+}
+
+@keyframes mascot-droop {
+  0% {
+    transform: rotate(0deg);
+  }
+  40% {
+    transform: rotate(-8deg);
+  }
+  100% {
+    transform: rotate(-8deg);
+  }
+}
+
+/* 10. Sleeping - deeper breath with Z glyph */
+.mascot-animator--sleeping .mascot-animator__image {
+  animation: mascot-sleep-breath 6s ease-in-out infinite;
+  opacity: 0.7;
+}
+
+@keyframes mascot-sleep-breath {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+.mascot-animator--sleeping .mascot-animator__halo {
+  animation: mascot-dim-halo 6s ease-in-out infinite;
+}
+
+@keyframes mascot-dim-halo {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+.mascot-animator--sleeping .mascot-animator__glyphs {
+  animation: mascot-z-drift 5s ease-in infinite;
+}
+
+@keyframes mascot-z-drift {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-30px);
+  }
+}
+
+/* Reduced motion - animations only use opacity and glyph changes */
+@media (prefers-reduced-motion: reduce) {
+  .mascot-animator--reduced-motion .mascot-animator__image,
+  .mascot-animator--reduced-motion .mascot-animator__glyphs,
+  .mascot-animator--reduced-motion .mascot-animator__halo {
+    animation: none !important;
+    transform: none !important;
+    opacity: 1;
+  }
+
+  .mascot-animator--reduced-motion.mascot-animator--waiting .mascot-animator__glyphs {
+    animation: mascot-blink-reduced 4s steps(1, start) infinite !important;
+  }
+
+  .mascot-animator--reduced-motion.mascot-animator--sleeping .mascot-animator__image {
+    opacity: 0.7;
+  }
+}
+
+@keyframes mascot-blink-reduced {
+  0%,
+  20% {
+    opacity: 0;
+  }
+  20%,
+  22% {
+    opacity: 1;
+  }
+  22%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Paused state - all animations stop when tab is hidden */
+.mascot-animator--paused {
+  animation-play-state: paused;
+}
+
+.mascot-animator--paused .mascot-animator__image,
+.mascot-animator--paused .mascot-animator__glyphs,
+.mascot-animator--paused .mascot-animator__halo {
+  animation-play-state: paused;
+}
+
+/* MascotAnimator overrides in runtime rail: the card is the exact box (sized to the image,
+   no inner padding), so the container and image fill it at 100% and the card's own
+   overflow: hidden clips the halo layer to that same box. */
+.aman-runtime-rail__avatar-card .mascot-animator__container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+.aman-runtime-rail__avatar-card .mascot-animator__image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.aman-runtime-rail__avatar-card .mascot-animator__halo {
+  opacity: 0.28;
+  background: #d9b576;
+}

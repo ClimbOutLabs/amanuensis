@@ -1,0 +1,7 @@
+function getSettings() {
+  const settings = {
+    debug: true,
+    timeout: 5000
+  };
+  return settings;
+}

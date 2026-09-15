@@ -1,0 +1,4 @@
+# The CRLF matcher-fuzzy corpus fixture below intentionally carries real CRLF line endings to
+# reproduce a Windows-style file; core.autocrlf=input would otherwise convert them to LF on
+# commit and silently defeat the test the fixture exists for.
+packages/trueforge-core/tests/core/sandbox/corpus/qwen3-coder-next/replace-text-crlf-file--fixture.txt -text

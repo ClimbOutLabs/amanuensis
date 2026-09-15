@@ -1,0 +1,7 @@
+# Fast checks only. Anything slow belongs in pre-push, or it gets bypassed.
+pnpm exec lint-staged
+
+# Runs on the index, so a newly staged key or database is caught before it
+# becomes a commit. Roughly a quarter of a second on this repo, which is cheap
+# enough that there is never a reason to skip it.
+node scripts/check-no-private-data.mjs

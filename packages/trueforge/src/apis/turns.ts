@@ -1,0 +1,1849 @@
+/**
+ * DB-backed turns API (mounted at /api/v1/sessions).
+ */
+import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
+import type { ISessionStore, Sessions, Turn, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
+import {
+  CancellationReason,
+  EventType,
+  PreviousTurnRunningError,
+  SessionStoreConflictError,
+  SessionStoreNotFoundError,
+  StaleApprovalContinuationError,
+  TurnAlreadyExistsError,
+  type SessionHandle,
+  type TurnHandle,
+  type TurnInputItem,
+  type TurnRecordWithoutSnapshot,
+} from '@truefoundry/trueforge-core/agent-session';
+import {
+  AgentHarnessError,
+  existingSandboxIdForProvider,
+  extractErrorLogFields,
+  isAgentInputUserMessage,
+  isFileContentPart,
+  McpConnectionError,
+  rawSandboxId,
+  redisKey,
+  SandboxError,
+  SandboxNotAvailableError,
+  VercelAILLM,
+  type BoundRepository,
+} from '@truefoundry/trueforge-core/core';
+import type { Context } from 'hono';
+import { HTTPException } from 'hono/http-exception';
+import { streamSSE } from 'hono/streaming';
+import { ulid } from 'ulid';
+import type { Logger } from 'winston';
+import type { Authorizer } from '../auth/authorizer';
+import type { ResolveRequestContext } from '../auth/identity';
+import configuration, { isTrueFoundryModeEnabled } from '../config';
+import type { AgentRecord, IAgentStore } from '../db/agentStore';
+import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
+import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
+import type { IModelProviderStore } from '../db/modelProviderStore';
+import type { IPersonalizationStore } from '../db/personalizationStore';
+import type { IPersonaStore } from '../db/personaStore';
+import type { IRepositoryStore } from '../db/repositoryStore';
+import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
+import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
+import type { ISkillStore } from '../db/skillStore';
+import type { ISpaceStore } from '../db/spaceStore';
+import type { ITurnArtifactStore } from '../db/turnArtifactStore';
+import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { buildPersonalizationContext, type PersonalizationContext } from '../personalization/profile';
+import type { PersonaContext } from '../personas/persona';
+import {
+  createAndExecuteTurnRoute,
+  downloadSandboxFileRoute,
+  getTurnRoute,
+  listTurnEventsRoute,
+  listTurnsRoute,
+  subscribeTurnRoute,
+} from '../routes/turnRoutes';
+import type { ActiveTurnRegistry } from '../runtime/activeTurns';
+import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
+import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
+import { HindsightClient } from '../runtime/memory/hindsightClient';
+import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
+import { submitRetain } from '../runtime/memory/memoryRetain';
+import { applyMemorySettings } from '../runtime/memory/memorySettings';
+import { mintPeeredTurnId } from '../runtime/peeringIds';
+import {
+  profileLearningPassConfig,
+  resolveTurnModelFqn,
+  submitProfileLearning,
+  type ProfileLearningDrainMember,
+} from '../runtime/profileLearning';
+import { synchronizeRepositoryCommandProposals } from '../runtime/repositoryCommandProposals';
+import { validateSandboxFilePath } from '../runtime/sandboxFilePath';
+import {
+  buildGatewayMetadata,
+  buildTurnSandbox,
+  gatewayMetadataHeaders,
+  getMcpConnection,
+  getModelDetails,
+  isGithubConnectorAttached,
+  isWebConnectorAttached,
+  RepositoryBindingResolutionError,
+  resolveBoundRepository,
+  resolveGithubGitCredentials,
+  resolveGitSkills,
+  resolveSandboxProvider,
+  withGatewayMetadataHeaders,
+} from '../runtime/sessionResources';
+import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
+import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
+import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
+import { checkSnapshotStatus } from '../sandbox/providerUtils';
+import type { MemoryProviderSettings } from '../schemas/mcpServer';
+import { canReadAgentBoundResource } from './agentAccess';
+
+export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnapshot<TCustom>): Turn {
+  return {
+    id: record.turn_id,
+    session_id: record.session_id,
+    previous_turn_id: record.previous_turn_id,
+    input: record.input,
+    state: record.state,
+    created_at: record.created_at.toISOString(),
+  };
+}
+
+/**
+ * Copies into a standalone ArrayBuffer for the response body: a pooled Buffer's
+ * backing store is shared and typed as ArrayBufferLike, which is not a body.
+ * Bounded by SANDBOX_FILE_MAX_BYTES_FOR_DOWNLOAD.
+ */
+function toArrayBuffer(content: Buffer): ArrayBuffer {
+  const buffer = new ArrayBuffer(content.byteLength);
+  new Uint8Array(buffer).set(content);
+  return buffer;
+}
+
+/**
+ * Builds the Content-Disposition telling the browser to save the file under its sandbox name.
+ *
+ * A sandbox file can be named in any script, but an HTTP header can only carry bytes, so a name
+ * like `中文.csv` cannot be written into the header as-is — doing so throws when the response is
+ * constructed. RFC 6266's `filename*` exists for this: percent-encode the UTF-8 name so the value
+ * stays plain ASCII, and the client decodes it back. Encoding also defuses quotes and newlines,
+ * which could otherwise close the value or inject another header.
+ */
+export function toContentDisposition(path: string): string {
+  // Trailing separators are dropped so a path ending in `/` still yields its last real segment.
+  const fileName = path.split('/').filter(Boolean).pop() ?? 'download';
+  // encodeURIComponent covers everything except these four, which RFC 5987 also disallows here.
+  const encoded = encodeURIComponent(fileName).replace(
+    /['()*]/g,
+    char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename*=UTF-8''${encoded}`;
+}
+
+/**
+ * Machine-readable `error.code` values for a create-turn conflict. A client that resumes a
+ * chat has to tell "your decision is stale, re-read the session" apart from "you contradicted
+ * a decision already on record", and an HTTP status alone cannot say which.
+ */
+export const TurnConflictCode = {
+  STALE_APPROVAL_CONTINUATION: 'stale_approval_continuation',
+  PREVIOUS_TURN_RUNNING: 'previous_turn_running',
+  TURN_ALREADY_EXISTS: 'turn_already_exists',
+  APPROVAL_CONFLICT: 'approval_conflict',
+} as const;
+
+export type TurnConflictCode = (typeof TurnConflictCode)[keyof typeof TurnConflictCode];
+
+/** The conflict code for a store rejection, or null when the store raised one we do not name. */
+export function turnConflictCodeFor(error: SessionStoreConflictError): TurnConflictCode | null {
+  if (error instanceof StaleApprovalContinuationError) {
+    return TurnConflictCode.STALE_APPROVAL_CONTINUATION;
+  }
+  if (error instanceof PreviousTurnRunningError) {
+    return TurnConflictCode.PREVIOUS_TURN_RUNNING;
+  }
+  if (error instanceof TurnAlreadyExistsError) {
+    return TurnConflictCode.TURN_ALREADY_EXISTS;
+  }
+  return null;
+}
+
+export interface TurnsRouterDeps {
+  sessions: Sessions<SessionCustom, TurnCustom>;
+  /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
+  sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
+  activeTurns: ActiveTurnRegistry;
+  resolveModelProviderStore: (c: Context, runAsAgent?: AgentRecord) => IModelProviderStore;
+  resolveMcpServerStore: (c: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore;
+  resolveSkillStore: (c: Context) => ISkillStore;
+  resolveAgentStore: (c: Context) => IAgentStore;
+  /** Fork-only: not agent-scoped upstream, so these stay directly injected rather than resolved per-request. */
+  tokenStore: IOAuthTokenStore;
+  personalizationStore: IPersonalizationStore;
+  personaStore: IPersonaStore;
+  spaceStore: ISpaceStore;
+  repositoryStore: IRepositoryStore;
+  turnArtifactStore: ITurnArtifactStore;
+  /** Resumable live turn-event transport: create-turn writes, subscribe polls. */
+  eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
+  resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore;
+  /** Composition seam for provider-backed integration tests and alternative hosts. */
+  sandboxProviderResolver?: typeof resolveSandboxProvider | undefined;
+  logger: Logger;
+  resolveRequestContext: ResolveRequestContext;
+  authorizer: Authorizer;
+}
+
+/** Names only, bounded: enough for the model to know the host's catalog exists without inflating the prompt. */
+const CONFIGURED_MODELS_PROMPT_LIMIT = 20;
+
+/**
+ * Deps needed to create a turn and drain events in-process (no HTTP). Carries already-resolved
+ * stores; callers must resolve them from the request context (e.g. schedule `resolveTurnDeps(c, agent)`)
+ * so TrueFoundry mode stays token-bound for models, MCP, and skills.
+ */
+export type BeginTurnExecutionDeps = Pick<TurnsRouterDeps, 'activeTurns' | 'eventSubscriptions' | 'logger'> & {
+  agentStore: IAgentStore;
+  modelProviderStore: IModelProviderStore;
+  mcpServerStore: IMcpServerWithAuthStore;
+  sandboxProviderStore: ISandboxProviderStore;
+  skillStore: ISkillStore;
+  /** Fork-only: required unconditionally by createTurnResolver's memory/repository wiring. */
+  tokenStore: IOAuthTokenStore;
+  repositoryStore: IRepositoryStore;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  spaceStore: ISpaceStore;
+  /** Same override point as the chat path's `TurnsRouterDeps.sandboxProviderResolver`; defaults to {@link resolveSandboxProvider}. */
+  sandboxProviderResolver?: typeof resolveSandboxProvider | undefined;
+  /** Optional: absent for callers (e.g. schedule run-now) that do not resolve a memory/persona context. */
+  personalizationContext?: PersonalizationContext | undefined;
+  personaContext?: PersonaContext | undefined;
+  boundRepository?: BoundRepository | undefined;
+  memoryClient?: HindsightClient | undefined;
+  memoryProviderServerName?: string | undefined;
+  memorySettings?: MemoryProviderSettings | undefined;
+  previousTurnId?: string | null;
+  sessionTitle?: string | undefined;
+};
+
+/**
+ * Builds the per-turn resolver. Agent / MCP / sandbox / LLM lookups are wired
+ * the same way: async factories over the corresponding stores.
+ */
+function createTurnResolver(deps: {
+  mcpServerStore: IMcpServerWithAuthStore;
+  tokenStore: IOAuthTokenStore;
+  skillStore: ISkillStore;
+  sandboxProviderStore: ISandboxProviderStore;
+  sandboxProviderResolver: typeof resolveSandboxProvider;
+  agentStore: IAgentStore;
+  modelProviderStore: IModelProviderStore;
+  logger: Logger;
+  signal: AbortSignal;
+  userRef: string;
+  session: SessionHandle<SessionCustom, TurnCustom>;
+  turnId: string;
+  personalizationContext?: PersonalizationContext | undefined;
+  personaContext?: PersonaContext | undefined;
+  boundRepository?: BoundRepository | undefined;
+  repositoryStore: IRepositoryStore;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  memoryClient?: HindsightClient | undefined;
+  memoryProviderServerName?: string | undefined;
+  memorySettings?: MemoryProviderSettings | undefined;
+  previousTurnId?: string | null;
+  sessionTitle?: string | undefined;
+  spaceStore: ISpaceStore;
+}): SpaceTurnResourceResolver {
+  const {
+    mcpServerStore,
+    tokenStore,
+    skillStore,
+    sandboxProviderStore,
+    sandboxProviderResolver,
+    agentStore,
+    modelProviderStore,
+    logger,
+    signal,
+    userRef,
+    session,
+    turnId,
+    personalizationContext,
+    personaContext,
+    boundRepository,
+    repositoryStore,
+    sessionStore,
+    memoryClient,
+    memoryProviderServerName,
+    memorySettings,
+    previousTurnId,
+    sessionTitle,
+    spaceStore,
+  } = deps;
+  const tenant_id = session.tenant_id;
+  const sessionId = session.session_id;
+  const metadataHeaders = isTrueFoundryModeEnabled()
+    ? gatewayMetadataHeaders(buildGatewayMetadata({ session, turnId }))
+    : {};
+  return new SpaceTurnResourceResolver(
+    {
+      llm: async name => {
+        const resolved = await getModelDetails({
+          tenant_id,
+          name,
+          store: modelProviderStore,
+        });
+        return {
+          modelClient: new VercelAILLM({
+            providerConfig: {
+              ...resolved.providerConfig,
+              headers: { ...resolved.providerConfig.headers, ...metadataHeaders },
+            },
+            logger,
+            signal,
+            streamTimeout: resolved.streamTimeout,
+          }),
+          defaultModelParams: resolved.defaultModelParams,
+          // The upstream identifier actually sent to the provider, not
+          // `name` (the configured catalog alias), so the model-identity
+          // prompt names what it really is.
+          modelId: resolved.providerConfig.model.id,
+          // Absent means false, see ModelPropertiesSchema.vision.
+          modelSupportsVision: resolved.modelProperties.vision ?? false,
+        };
+      },
+      mcp: async name => {
+        const connection = await getMcpConnection({
+          tenant_id,
+          name,
+          store: mcpServerStore,
+          tokenStore,
+          clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
+          userRef,
+        });
+        if (connection === undefined) {
+          throw new HTTPException(422, {
+            message: `Unknown MCP server "${name}" - not configured`,
+          });
+        }
+        return {
+          url: connection.url,
+          headers: withGatewayMetadataHeaders({
+            headers: connection.headers,
+            metadataHeaders,
+          }),
+        };
+      },
+      mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
+      mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      sandboxProvider: async ({ spec, existingSandboxId, tracing }) => {
+        const provider = await sandboxProviderResolver({
+          tenant_id,
+          store: sandboxProviderStore,
+          logger,
+          sessionId,
+        });
+        if (provider === undefined) {
+          throw new HTTPException(422, {
+            message: 'no sandbox provider configured, PUT /settings/sandbox-providers',
+          });
+        }
+        const carriedSandboxId = existingSandboxIdForProvider({
+          existingSandboxId,
+          currentProviderType: provider.type,
+        });
+        // A fresh Daytona sandbox is cloned from the release snapshot, so the build must be ready first.
+        // Restoring an existing sandbox goes through daytona.get and never touches the snapshot.
+        // Local fallback has no image build.
+        if (carriedSandboxId === undefined && provider.type !== 'local') {
+          const status = await checkSnapshotStatus({ store: sandboxProviderStore, tenant_id, logger });
+          if (status?.status !== 'ready') {
+            throw new HTTPException(422, {
+              message:
+                status?.status === 'failed'
+                  ? `sandbox image build failed (${status.status_reason ?? 'unknown error'})`
+                  : 'sandbox image is activating, retry shortly',
+            });
+          }
+        }
+        const gitSkills = await resolveGitSkills({
+          tenant_id,
+          skills: spec.skills ?? [],
+          store: skillStore,
+        });
+        const resolvedGitCredentialsContent = await resolveGithubGitCredentials({
+          tenant_id,
+          spec,
+          store: mcpServerStore,
+        });
+        return buildTurnSandbox({
+          provider,
+          logger,
+          gitSkills,
+          resolvedGitCredentialsContent,
+          githubConnectorAttached: isGithubConnectorAttached(spec),
+          webConnectorAttached: isWebConnectorAttached(spec),
+          fileDownloadEnabled: spec.config.sandbox.file_downloads,
+          existingSandboxId: carriedSandboxId,
+          boundRepository,
+          loadBoundRepository:
+            boundRepository === undefined
+              ? undefined
+              : async () => {
+                  const currentSession = await sessionStore.getSession({
+                    tenant_id,
+                    session_id: sessionId,
+                  });
+                  if (currentSession?.created_by_subject.subject_id !== userRef) {
+                    return undefined;
+                  }
+                  return resolveBoundRepository({
+                    tenant_id,
+                    created_by: userRef,
+                    repository_id: currentSession.repository_id,
+                    workspace_cwd: currentSession.workspace_cwd,
+                    store: repositoryStore,
+                  });
+                },
+          workspaceVerificationCoordinator: repositoryStore,
+          workspaceLeaseOwnerId: configuration.EXECUTOR_ID,
+          onRepositorySources:
+            boundRepository === undefined
+              ? undefined
+              : observation =>
+                  synchronizeRepositoryCommandProposals({
+                    tenant_id,
+                    created_by: userRef,
+                    repository_id: boundRepository.repository_id,
+                    sources: observation.sources,
+                    store: repositoryStore,
+                    signal: observation.signal,
+                  }),
+          tracing,
+        });
+      },
+      agent: async agentId => {
+        const record = await agentStore.getAgent({ tenant_id, id: agentId });
+        if (record === undefined) {
+          throw new HTTPException(422, { message: `Agent not found: ${agentId}` });
+        }
+        return record.manifest;
+      },
+      logger,
+      boundRepository,
+      compactionThresholdTokensDefault: configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS,
+      toolDispatchMaxConcurrency: configuration.TOOL_DISPATCH_MAX_CONCURRENCY,
+      toolCallTimeoutMs: configuration.TOOL_CALL_TIMEOUT_MS,
+      // Host-owned facts, capped and named-only, for the model-identity
+      // section: what the host actually has configured, not what the model
+      // is asked to believe about itself.
+      configuredModels: async () => {
+        const models = await modelProviderStore.listModels({ tenant_id });
+        return models.slice(0, CONFIGURED_MODELS_PROMPT_LIMIT).map(model => ({
+          modelId: model.model_id,
+          provider: model.provider.name,
+        }));
+      },
+      compactionContext: {
+        getTaskChecklist: () => sessionStore.getTaskChecklist({ tenant_id, session_id: sessionId }),
+        replaceTaskChecklist: input =>
+          sessionStore.replaceTaskChecklist({ tenant_id, session_id: sessionId, ...input }),
+      },
+    },
+    personalizationContext,
+    personaContext,
+    {
+      client: memoryClient,
+      config: applyMemorySettings(memorySettings, {
+        recallMaxTokens: configuration.MEMORY_RECALL_MAX_TOKENS,
+        recallEntityTokens: configuration.MEMORY_RECALL_ENTITY_TOKENS,
+        recallTimeoutMs: configuration.MEMORY_RECALL_TIMEOUT_MS,
+        recallQueryWindow: configuration.MEMORY_RECALL_QUERY_WINDOW,
+        recallMinScore: configuration.MEMORY_RECALL_MIN_SCORE,
+        recallMaxItems: configuration.MEMORY_RECALL_MAX_ITEMS,
+        recallMaxEntities: configuration.MEMORY_RECALL_MAX_ENTITIES,
+        retainTimeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
+        sweepMaxPerTurn: configuration.MEMORY_SWEEP_MAX_PER_TURN,
+        screen: {
+          enabled: configuration.MEMORY_SCREEN_ENABLED,
+          url: configuration.MEMORY_SCREEN_URL,
+          authToken: configuration.MEMORY_SCREEN_AUTH_TOKEN,
+          threshold: configuration.MEMORY_SCREEN_THRESHOLD,
+          timeoutMs: configuration.MEMORY_SCREEN_TIMEOUT_MS,
+          maxConcurrency: configuration.MEMORY_SCREEN_MAX_CONCURRENCY,
+        },
+        curated: {
+          enabled: configuration.MEMORY_CURATED_ENABLED,
+          maxModels: configuration.MEMORY_CURATED_MAX_MODELS,
+          maxTokens: configuration.MEMORY_CURATED_MAX_TOKENS,
+        },
+        reflect: {
+          enabled: configuration.MEMORY_REFLECT_ENABLED,
+          budget: configuration.MEMORY_REFLECT_BUDGET,
+          maxTokens: configuration.MEMORY_REFLECT_MAX_TOKENS,
+          timeoutMs: configuration.MEMORY_REFLECT_TIMEOUT_MS,
+        },
+      }),
+      sessionId,
+      previousTurnId: previousTurnId ?? null,
+      sessionTitle,
+      providerServerName: memoryProviderServerName,
+      // Will be derived from spec.config.memory.recall_enabled in resolveAgentDefinition
+      recallEnabled: undefined,
+    },
+    {
+      enabled: configuration.TOOL_OUTPUT_SCREEN_ENABLED,
+      url: configuration.MEMORY_SCREEN_URL,
+      authToken: configuration.MEMORY_SCREEN_AUTH_TOKEN,
+      threshold: configuration.MEMORY_SCREEN_THRESHOLD,
+      timeoutMs: configuration.TOOL_OUTPUT_SCREEN_TIMEOUT_MS,
+    },
+    {
+      store: spaceStore,
+      authority: { tenantId: tenant_id, userRef },
+    },
+  );
+}
+
+const MAX_SESSION_TITLE_LENGTH = 50;
+
+/**
+ * Derives a session title from the first user message of the first turn. Returns the
+ * trimmed text (capped at {@link MAX_SESSION_TITLE_LENGTH}) or `undefined` when no usable
+ * text is present (e.g. file-only or tool-approval input).
+ */
+export function deriveSessionTitle(input: TurnInputItem[] | undefined): string | undefined {
+  const firstUserMessage = input?.find(isAgentInputUserMessage);
+  if (!firstUserMessage) {
+    return undefined;
+  }
+
+  const text =
+    typeof firstUserMessage.content === 'string'
+      ? firstUserMessage.content
+      : firstUserMessage.content
+          .filter(part => !isFileContentPart(part))
+          .map(part => part.text)
+          .join(' ');
+
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed.slice(0, MAX_SESSION_TITLE_LENGTH);
+}
+
+/**
+ * Full (uncapped) text of every user message in a create-turn input, concatenated in order and
+ * joined with a blank line, or `''` when there is none. A turn's input can carry several user
+ * messages (e.g. queued follow-ups sent before the previous turn finished); retention must not
+ * silently drop any but the first.
+ */
+export function extractUserMessageText(input: TurnInputItem[] | undefined): string {
+  const userMessages = input?.filter(isAgentInputUserMessage) ?? [];
+  return userMessages
+    .map(message =>
+      typeof message.content === 'string'
+        ? message.content
+        : message.content
+            .filter(part => !isFileContentPart(part))
+            .map(part => part.text)
+            .join(' '),
+    )
+    .join('\n\n');
+}
+
+/**
+ * SSE payload for one turn event. The `id` field carries the per-stream
+ * sequence number; the event body itself is not numbered (yield order is
+ * persist order, so the transport boundary stamps).
+ */
+export function turnEventSsePayload(event: TurnStreamingEvent, sequenceNumber: number): { id: string; data: string } {
+  return {
+    id: String(sequenceNumber),
+    data: JSON.stringify(event),
+  };
+}
+
+/**
+ * turn.created arms the active-run TTL, turn.done shortens it to the
+ * post-completion drain window; mid-run events leave the TTL untouched.
+ */
+export function streamTTLSecondsFor(event: TurnStreamingEvent): number | undefined {
+  if (event.type === EventType.TURN_CREATED) {
+    return configuration.TURN_STREAM_TTL_SECONDS;
+  }
+  if (event.type === EventType.TURN_DONE) {
+    return configuration.TURN_STREAM_POST_COMPLETION_TTL_SECONDS;
+  }
+  return undefined;
+}
+
+/** Redis/in-memory key for one turn's resumable event stream. */
+export function turnStreamId(tenantId: string, sessionId: string, turnId: string): string {
+  return redisKey('agent', 'turn', tenantId, sessionId, turnId, 'stream');
+}
+
+/**
+ * Dual-write turn events to the resumable subscription registry, then optionally
+ * forward each sequenced event (SSE path). Shared by streaming and non-streaming
+ * create-turn; the HTTP response lifecycle does not own execution.
+ */
+/** Plain-text content of an assistant model message, `openai` chat-completion shaped. */
+function formatAssistantMessageText(
+  content: string | ({ type: 'text'; text: string } | { type: 'refusal'; refusal: string })[] | null | undefined,
+): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!content) {
+    return '';
+  }
+  return content.map(part => (part.type === 'text' ? part.text : part.refusal)).join('\n');
+}
+
+/**
+ * Re-reads the just-completed turn for its sandbox id, resolves the tenant's sandbox provider,
+ * and hands both to `submitArtifactPersistence`. Kept separate from that function (which only
+ * needs a provider and a sandbox id it already has) because resolving those two is itself
+ * fallible in ways that must never surface as a turn failure, the same fire-and-forget contract as
+ * `submitRetain`: this never throws.
+ */
+async function resolveAndSubmitArtifactPersistence(params: {
+  turnArtifactStore: ITurnArtifactStore;
+  sandboxProviderStore: ISandboxProviderStore;
+  sandboxProviderResolver: typeof resolveSandboxProvider;
+  sessions: Sessions<SessionCustom, TurnCustom>;
+  tenantId: string;
+  sessionId: string;
+  turnId: string;
+  assistantText: string;
+  logger: Logger;
+}): Promise<void> {
+  const {
+    turnArtifactStore,
+    sandboxProviderStore,
+    sandboxProviderResolver,
+    sessions,
+    tenantId,
+    sessionId,
+    turnId,
+    assistantText,
+    logger,
+  } = params;
+  try {
+    const session = await sessions.get({ tenant_id: tenantId, session_id: sessionId });
+    const turn = await session?.getTurn(turnId);
+    const sandboxId = turn?.record.snapshot.sandbox_info?.sandbox_id;
+    if (sandboxId === undefined) {
+      return;
+    }
+    const provider = await sandboxProviderResolver({
+      tenant_id: tenantId,
+      store: sandboxProviderStore,
+      logger,
+      sessionId,
+    });
+    if (provider === undefined) {
+      return;
+    }
+    await submitArtifactPersistence({
+      store: turnArtifactStore,
+      provider,
+      sandboxId,
+      tenantId,
+      sessionId,
+      turnId,
+      assistantText,
+      logger,
+    });
+  } catch (error) {
+    logger.error('Sandbox artifact persistence failed to start', {
+      ...extractErrorLogFields(error),
+      sessionId,
+      turnId,
+    });
+  }
+}
+
+export async function drainTurnEvents(input: {
+  trackedStream: AsyncIterable<TurnStreamingEvent>;
+  turnEventStream: EventSubscription<TurnStreamingEvent>;
+  sessionId: string;
+  turnId: string;
+  executionDeadline: TurnExecutionDeadline;
+  logger: Logger;
+  onEvent?: (event: TurnStreamingEvent, sequenceNumber: number) => Promise<void>;
+  /** Present only when a memory provider resolved for this turn; retain is fire-and-forget. */
+  memory?:
+    | {
+        client: HindsightClient;
+        userText: string;
+        sessionTitle: string | undefined;
+      }
+    | undefined;
+  /** Present only when profile learning is enabled; the pass is fire-and-forget. */
+  profileLearning?: ProfileLearningDrainMember | undefined;
+  /**
+   * Present on every turn (unconditionally, unlike memory/profile learning): a turn that never
+   * declared a sandbox_artifacts block is a no-op inside submitArtifactPersistence, so there is no
+   * cheaper precondition to gate this on at the call site.
+   */
+  artifacts?:
+    | {
+        turnArtifactStore: ITurnArtifactStore;
+        sandboxProviderStore: ISandboxProviderStore;
+        sandboxProviderResolver: typeof resolveSandboxProvider;
+        sessions: Sessions<SessionCustom, TurnCustom>;
+        tenantId: string;
+      }
+    | undefined;
+}): Promise<void> {
+  const {
+    trackedStream,
+    turnEventStream,
+    sessionId,
+    turnId,
+    executionDeadline,
+    logger,
+    onEvent,
+    memory,
+    artifacts,
+    profileLearning,
+  } = input;
+  // Provenance for the memory the retain below writes. All tool output is untrusted data (the
+  // host says so in the system prompt), and the retained assistant reply is produced after seeing
+  // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
+  // screen's stricter posture. This is the honest taint signal available at this chokepoint: the
+  // harness classifies no tool output as trusted, so "saw a tool result" is exactly "ingested
+  // untrusted content". A turn with no tool result is the user's own voice: `user_stated`.
+  let ingestedToolOutput = false;
+  try {
+    for await (const event of trackedStream) {
+      if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
+        ingestedToolOutput = true;
+      }
+      // Dual-write before any client sink so subscribers can resume after disconnect.
+      const sequenceNumber = await turnEventStream.put(event, {
+        streamTTLSeconds: streamTTLSecondsFor(event),
+      });
+      await onEvent?.(event, sequenceNumber);
+      if (event.type === EventType.TURN_DONE && event.state.status === 'done') {
+        if (memory !== undefined) {
+          void submitRetain({
+            client: memory.client,
+            sessionId,
+            turnId,
+            userText: memory.userText,
+            assistantText: formatAssistantMessageText(event.state.output?.content),
+            completedAt: event.state.completed_at,
+            sessionTitle: memory.sessionTitle,
+            origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
+            logger,
+          });
+        }
+        if (profileLearning !== undefined) {
+          // The assistant's reply is deliberately not passed here: it is not a source of facts
+          // about the user, so the learning pass only ever sees the user's own turn text.
+          void submitProfileLearning({
+            ...profileLearning,
+            sessionId,
+            turnId,
+            completedAt: event.state.completed_at,
+            // The pass writes its audit event after this drain has finished; the stream is how
+            // an open tab sees that event without reloading the turn.
+            turnEventStream,
+            logger,
+          });
+        }
+        if (artifacts !== undefined) {
+          void resolveAndSubmitArtifactPersistence({
+            ...artifacts,
+            sessionId,
+            turnId,
+            assistantText: formatAssistantMessageText(event.state.output?.content),
+            logger,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    if (error instanceof SessionStoreNotFoundError) {
+      logger.warn('Turn stream ended after session/turn was removed', {
+        sessionId,
+        turnId,
+        ...extractErrorLogFields(error),
+      });
+    } else {
+      logger.error('Unexpected error in turn event drain', {
+        sessionId,
+        turnId,
+        ...extractErrorLogFields(error),
+      });
+    }
+  } finally {
+    executionDeadline.dispose();
+  }
+}
+
+/** Inputs for {@link drainTurnEvents} produced by {@link beginTurnExecution}. */
+export interface TurnEventDrainInput {
+  trackedStream: AsyncIterable<TurnStreamingEvent>;
+  turnEventStream: EventSubscription<TurnStreamingEvent>;
+  sessionId: string;
+  turnId: string;
+  executionDeadline: TurnExecutionDeadline;
+  logger: Logger;
+  memory?:
+    | {
+        client: HindsightClient;
+        userText: string;
+        sessionTitle: string | undefined;
+      }
+    | undefined;
+}
+
+/**
+ * Shared create-turn engine: persist the turn, start execution, and return the
+ * drain inputs. Does not wait for events and does not write HTTP/SSE.
+ */
+export async function beginTurnExecution(params: {
+  session: SessionHandle<SessionCustom, TurnCustom>;
+  input: TurnInputItem[] | undefined;
+  previous_turn_id: string | undefined;
+  userRef: string;
+  deps: BeginTurnExecutionDeps;
+}): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
+  const { session, input, previous_turn_id: previousTurnId, userRef, deps } = params;
+  const sessionId = session.session_id;
+  const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
+
+  const abortController = new AbortController();
+  const executionDeadline = new TurnExecutionDeadline({
+    abortController,
+    default_timeout_ms: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS * 1000,
+    finalization_buffer_ms: 30_000,
+  });
+  const tenant_id = session.tenant_id;
+  const resolver = createTurnResolver({
+    mcpServerStore: deps.mcpServerStore,
+    tokenStore: deps.tokenStore,
+    skillStore: deps.skillStore,
+    sandboxProviderStore: deps.sandboxProviderStore,
+    sandboxProviderResolver: deps.sandboxProviderResolver ?? resolveSandboxProvider,
+    agentStore: deps.agentStore,
+    modelProviderStore: deps.modelProviderStore,
+    repositoryStore: deps.repositoryStore,
+    sessionStore: deps.sessionStore,
+    spaceStore: deps.spaceStore,
+    logger: deps.logger,
+    signal: abortController.signal,
+    userRef,
+    session,
+    turnId,
+    boundRepository: deps.boundRepository,
+    personalizationContext: deps.personalizationContext,
+    personaContext: deps.personaContext,
+    memoryClient: deps.memoryClient,
+    memoryProviderServerName: deps.memoryProviderServerName,
+    memorySettings: deps.memorySettings,
+    previousTurnId: deps.previousTurnId ?? null,
+    sessionTitle: deps.sessionTitle,
+  });
+
+  // First turn only: derive the title from the first user message. The store
+  // never overwrites an existing title.
+  const title = session.record.last_turn_id ? undefined : deriveSessionTitle(input);
+
+  const turn = await session.createTurn({
+    turn_id: turnId,
+    input,
+    previous_turn_id: previousTurnId,
+    signal: abortController.signal,
+    resolver,
+    update_session_title_if_not_exist: title,
+    on_command_execution_started: execution => {
+      executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
+    },
+    command_execution_owner_id: configuration.EXECUTOR_ID,
+  });
+
+  executionDeadline.arm();
+
+  const trackedStream = deps.activeTurns.track({
+    sessionId,
+    turnId: turn.id,
+    abortController,
+    stream: turn.stream(),
+  });
+
+  // Held for the whole turn; the stream's sequence counter dies with it.
+  const turnEventStream = deps.eventSubscriptions.get(turnStreamId(tenant_id, sessionId, turn.id));
+
+  return {
+    turn,
+    drainInput: {
+      trackedStream,
+      turnEventStream,
+      sessionId,
+      turnId: turn.id,
+      executionDeadline,
+      logger: deps.logger,
+      memory:
+        deps.memoryClient === undefined
+          ? undefined
+          : {
+              client: deps.memoryClient,
+              userText: extractUserMessageText(input ?? []),
+              sessionTitle: deps.sessionTitle,
+            },
+    },
+  };
+}
+
+/**
+ * Non-stream create-turn: begin execution and resolve once the first event is
+ * dual-written so immediate subscribe cannot 412. Same as `stream: false`.
+ */
+export async function startTurnInProcess(params: {
+  session: SessionHandle<SessionCustom, TurnCustom>;
+  input: TurnInputItem[] | undefined;
+  previous_turn_id: string | undefined;
+  userRef: string;
+  deps: BeginTurnExecutionDeps;
+}): Promise<TurnHandle<TurnCustom>> {
+  const { turn, drainInput } = await beginTurnExecution(params);
+
+  // Same unawaited drain scheduling as Hono streamSSE's run(cb).
+  const { promise: firstEventDualWritten, resolve: markFirstEventDualWritten } = Promise.withResolvers<undefined>();
+  void drainTurnEvents({
+    ...drainInput,
+    onEvent: () => {
+      markFirstEventDualWritten(undefined);
+      return Promise.resolve();
+    },
+  }).finally(() => {
+    markFirstEventDualWritten(undefined);
+  });
+  await firstEventDualWritten;
+  return turn;
+}
+
+/** Mapped client error from turn execution; undefined means rethrow. */
+export interface TurnExecutionError {
+  status: 400 | 404 | 422;
+  message: string;
+}
+
+/**
+ * Resolve turn-start failures to HTTP status + message.
+ * Returns undefined when the caller should rethrow (unexpected / 5xx).
+ */
+export function getTurnExecutionError(error: unknown): TurnExecutionError | undefined {
+  if (error instanceof HTTPException) {
+    if (error.status === 400 || error.status === 404 || error.status === 422) {
+      return { status: error.status, message: error.message };
+    }
+    return undefined;
+  }
+  if (error instanceof SessionStoreNotFoundError) {
+    return { status: 404, message: error.message };
+  }
+  if (error instanceof AgentHarnessError && !(error instanceof McpConnectionError)) {
+    switch (error.code) {
+      case 'invalid_file_input':
+        return { status: 400, message: error.message };
+      case 'invalid_send_input':
+      case 'agent_sandbox_required':
+      case 'tool_name_collision':
+        return { status: 422, message: error.message };
+      case 'capability_state_error':
+      case 'mcp_connection_failed':
+        return undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Resume cursor: `Last-Event-ID` header wins over the body value because the
+ * header is updated by the SDK on every reconnect to reflect the last delivered
+ * event, whereas the body is the original caller-supplied cursor and never
+ * changes between reconnect attempts.
+ */
+export function resolveAfterSequenceNumber(c: Context, bodyAfterSequenceNumber?: number): number | undefined {
+  const lastEventId = c.req.header('last-event-id');
+  if (lastEventId) {
+    const sequenceNumber = Number(lastEventId);
+    if (!Number.isInteger(sequenceNumber) || sequenceNumber < 0) {
+      throw new HTTPException(400, { message: 'Invalid Last-Event-Id header' });
+    }
+    return sequenceNumber;
+  }
+  return bodyAfterSequenceNumber;
+}
+
+/** True when the subject is the session creator (`created_by_subject.subject_id`). */
+function isSessionOwner({
+  subject_id,
+  created_by_subject,
+}: {
+  subject_id: string;
+  created_by_subject: { subject_id: string };
+}): boolean {
+  return created_by_subject.subject_id === subject_id;
+}
+
+const FORBIDDEN_SESSION_ACCESS = 'Only the session creator can access this session';
+const FORBIDDEN_CREATE_TURN = 'Only the session creator can create turns';
+
+/** DB-backed turns (mounted at /api/v1/sessions). */
+export function createTurnsRouter(deps: TurnsRouterDeps) {
+  const listTurnsHandler: RouteHandler<typeof listTurnsRoute> = async c => {
+    const { session_id: sessionId } = c.req.valid('param');
+    const query = c.req.valid('query');
+    const requestContext = deps.resolveRequestContext(c);
+    const session = await deps.sessions.get({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+    });
+    if (!session) {
+      return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
+    }
+    if (
+      !(await canReadAgentBoundResource({
+        store: deps.resolveAgentStore(c),
+        context: requestContext,
+        authorizer: deps.authorizer,
+        agent_id: session.record.agent.type === 'reference' ? session.record.agent.id : undefined,
+        created_by_subject_id: session.record.created_by_subject.subject_id,
+      }))
+    ) {
+      return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
+    }
+    try {
+      const { data, pagination } = await session.listTurns({
+        limit: query.limit,
+        page_token: query.page_token,
+      });
+      return c.json({ data: data.map(toWireTurn), pagination }, 200);
+    } catch (error) {
+      if (error instanceof SessionStoreConflictError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
+    }
+  };
+
+  const getTurnHandler: RouteHandler<typeof getTurnRoute> = async c => {
+    const { session_id: sessionId, turn_id: turnId } = c.req.valid('param');
+    const requestContext = deps.resolveRequestContext(c);
+    const session = await deps.sessions.get({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+    });
+    if (!session) {
+      return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
+    }
+    if (
+      !(await canReadAgentBoundResource({
+        store: deps.resolveAgentStore(c),
+        context: requestContext,
+        authorizer: deps.authorizer,
+        agent_id: session.record.agent.type === 'reference' ? session.record.agent.id : undefined,
+        created_by_subject_id: session.record.created_by_subject.subject_id,
+      }))
+    ) {
+      return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
+    }
+    const turn = await session.getTurn(turnId);
+    if (!turn) {
+      return c.json({ error: { message: `Turn not found: ${turnId}` } }, 404);
+    }
+    return c.json({ data: toWireTurn(turn.record) }, 200);
+  };
+
+  const downloadSandboxFileHandler: RouteHandler<typeof downloadSandboxFileRoute> = async c => {
+    const { session_id: sessionId, turn_id: turnId } = c.req.valid('param');
+    const { path } = c.req.valid('query');
+
+    let sandboxId: string | undefined;
+    try {
+      // Cheapest first: a malformed path costs no store read and no provider round-trip.
+      validateSandboxFilePath(path);
+
+      const requestContext = deps.resolveRequestContext(c);
+      const session = await deps.sessions.get({
+        tenant_id: requestContext.tenant_id,
+        session_id: sessionId,
+      });
+      if (!session) {
+        return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
+      }
+      if (
+        !isSessionOwner({
+          subject_id: requestContext.subject.id,
+          created_by_subject: session.record.created_by_subject,
+        })
+      ) {
+        return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
+      }
+
+      // Loading the turn through the session is also a session-binding check: a turn id from another
+      // session cannot be used to reach this session's sandbox.
+      const turn = await session.getTurn(turnId);
+      if (!turn) {
+        return c.json({ error: { message: `Turn not found: ${turnId}` } }, 404);
+      }
+
+      // Persisted copy first: the sandbox that produced this file is likely long gone by the time
+      // anyone clicks download (the provider auto-stops it minutes after the turn ends, then
+      // deletes it later). Only a turn still running, or one that predates this feature, has no
+      // row here, and those fall through to the live sandbox below, unchanged from before.
+      const persisted = await deps.turnArtifactStore.getArtifact({
+        tenant_id: requestContext.tenant_id,
+        session_id: sessionId,
+        turn_id: turnId,
+        path,
+      });
+      if (persisted?.status === 'stored' && persisted.digest !== null) {
+        const blob = await deps.turnArtifactStore.getBlob({
+          tenant_id: requestContext.tenant_id,
+          digest: persisted.digest,
+        });
+        if (blob !== undefined) {
+          return c.body(toArrayBuffer(blob), 200, {
+            'Content-Type': persisted.mime ?? 'application/octet-stream',
+            'Content-Length': String(blob.byteLength),
+            'Content-Disposition': toContentDisposition(path),
+            'Cache-Control': 'private, no-store',
+          });
+        }
+        // Index row says stored but the blob is gone (should not happen, logged, then treated
+        // like "no persisted copy" so the live-sandbox fallback below gets a chance).
+        deps.logger.error('turn_artifact row is stored but its blob is missing', {
+          sessionId,
+          turnId,
+          path,
+          digest: persisted.digest,
+        });
+      } else if (persisted?.status === 'skipped_size') {
+        return c.json(
+          { error: { message: `This file was not kept: ${persisted.skip_reason ?? 'it was too large to keep.'}` } },
+          413,
+        );
+      }
+
+      sandboxId = turn.record.snapshot.sandbox_info?.sandbox_id;
+      if (sandboxId === undefined) {
+        return c.json({ error: { message: `Turn has no sandbox: ${turnId}` } }, 412);
+      }
+
+      const provider = await (deps.sandboxProviderResolver ?? resolveSandboxProvider)({
+        tenant_id: requestContext.tenant_id,
+        store: deps.resolveSandboxProviderStore(c),
+        logger: deps.logger,
+        sessionId,
+      });
+      if (provider === undefined) {
+        return c.json({ error: { message: 'No sandbox provider configured' } }, 412);
+      }
+
+      try {
+        // TODO: stream the body instead of buffering the whole file in memory.
+        const content = await provider.downloadFile({ sandboxId: rawSandboxId(sandboxId), path });
+        return c.body(toArrayBuffer(content), 200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': String(content.byteLength),
+          'Content-Disposition': toContentDisposition(path),
+          'Cache-Control': 'private, no-store',
+        });
+      } catch (error) {
+        // No persisted copy and the live sandbox is gone: say what happened instead of the raw
+        // provider error, which reads as if the whole session vanished rather than this one file.
+        if (error instanceof SandboxNotAvailableError) {
+          const reason =
+            persisted?.status === 'skipped_missing'
+              ? (persisted.skip_reason ?? 'it was not found in the sandbox when this turn finished.')
+              : 'the sandbox was stopped after this turn finished, and no persisted copy was found for this file.';
+          return c.json({ error: { message: `This file was not kept: ${reason}` } }, 410);
+        }
+        throw error;
+      }
+    } catch (error) {
+      // Every guard and the provider itself raise SandboxError, whose statusCode is the contract.
+      if (error instanceof SandboxError) {
+        return c.json({ error: { message: error.message } }, error.statusCode);
+      }
+      deps.logger.error('Sandbox file download failed', {
+        ...extractErrorLogFields(error),
+        sessionId,
+        turnId,
+        sandboxId,
+        path,
+      });
+      return c.json({ error: { message: 'Failed to download file from sandbox' } }, 424);
+    }
+  };
+
+  const listTurnEventsHandler: RouteHandler<typeof listTurnEventsRoute> = async c => {
+    const { session_id: sessionId, turn_id: turnId } = c.req.valid('param');
+    const query = c.req.valid('query');
+    const requestContext = deps.resolveRequestContext(c);
+    const session = await deps.sessions.get({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+    });
+    if (!session) {
+      return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
+    }
+    if (
+      !(await canReadAgentBoundResource({
+        store: deps.resolveAgentStore(c),
+        context: requestContext,
+        authorizer: deps.authorizer,
+        agent_id: session.record.agent.type === 'reference' ? session.record.agent.id : undefined,
+        created_by_subject_id: session.record.created_by_subject.subject_id,
+      }))
+    ) {
+      return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
+    }
+    const turn = await session.getTurn(turnId);
+    if (!turn) {
+      return c.json({ error: { message: `Turn not found: ${turnId}` } }, 404);
+    }
+    try {
+      const { data, pagination } = await turn.listEvents({
+        limit: query.limit,
+        page_token: query.page_token,
+        order: query.order,
+      });
+      return c.json({ data, pagination }, 200);
+    } catch (error) {
+      if (error instanceof SessionStoreConflictError) {
+        return c.json({ error: { message: error.message } }, 400);
+      }
+      throw error;
+    }
+  };
+
+  const createAndExecuteTurnHandler: RouteHandler<typeof createAndExecuteTurnRoute> = async c => {
+    const { session_id: sessionId } = c.req.valid('param');
+    const body = c.req.valid('json');
+    const requestContext = deps.resolveRequestContext(c);
+
+    const session = await deps.sessions.get({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+    });
+    if (!session) {
+      return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
+    }
+    const userRef = requestContext.subject.id;
+    if (
+      !isSessionOwner({
+        subject_id: userRef,
+        created_by_subject: session.record.created_by_subject,
+      })
+    ) {
+      return c.json({ error: { message: FORBIDDEN_CREATE_TURN } }, 403);
+    }
+
+    let referencedAgent: AgentRecord | undefined;
+    const agentStore = deps.resolveAgentStore(c);
+    if (session.record.agent.type === 'reference') {
+      const agentId = session.record.agent.id;
+      const agent = await agentStore.getAgent({
+        tenant_id: requestContext.tenant_id,
+        id: agentId,
+      });
+      if (agent === undefined) {
+        return c.json({ error: { message: `Agent not found: ${agentId}` } }, 422);
+      }
+      const canUseAgent = await deps.authorizer.canAccessAgent({
+        context: requestContext,
+        action: 'use',
+        agent,
+      });
+      if (!canUseAgent) {
+        return c.json({ error: { message: `Agent not found: ${agentId}` } }, 404);
+      }
+      referencedAgent = agent;
+    }
+
+    const modelProviderStore = deps.resolveModelProviderStore(c, referencedAgent);
+    const mcpServerStore = deps.resolveMcpServerStore(c, referencedAgent);
+    const skillStore = deps.resolveSkillStore(c);
+    const sandboxProviderStore = deps.resolveSandboxProviderStore(c);
+
+    let boundRepository: BoundRepository | undefined;
+    try {
+      boundRepository = await resolveBoundRepository({
+        tenant_id: requestContext.tenant_id,
+        created_by: userRef,
+        repository_id: session.record.repository_id,
+        workspace_cwd: session.record.workspace_cwd,
+        store: deps.repositoryStore,
+      });
+    } catch (error) {
+      if (error instanceof RepositoryBindingResolutionError) {
+        return c.json({ error: { message: error.message } }, 422);
+      }
+      throw error;
+    }
+
+    const requestedParent = body.previous_turn_id;
+    const previousTurnId =
+      requestedParent === 'none' ? null : requestedParent === 'auto' ? session.record.last_turn_id : requestedParent;
+    const previousTurn = previousTurnId === null ? undefined : await session.getTurn(previousTurnId);
+    if (previousTurnId !== null && previousTurn === undefined) {
+      return c.json({ error: { message: `Turn not found: ${previousTurnId}` } }, 404);
+    }
+    const profile = await deps.personalizationStore.getProfile({
+      tenant_id: requestContext.tenant_id,
+      created_by: userRef,
+    });
+    const previousTurnCustom = previousTurn?.custom;
+    const latestManualActivation = await deps.personaStore.getLatestManualSessionPersona({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+    });
+    const hasPersonaSnapshot =
+      previousTurnCustom !== null && previousTurnCustom !== undefined && Object.hasOwn(previousTurnCustom, 'persona');
+    const legacyParentActivation =
+      !hasPersonaSnapshot && previousTurnId !== null
+        ? await deps.personaStore.getTurnPersonaActivation({
+            tenant_id: requestContext.tenant_id,
+            session_id: sessionId,
+            turn_id: previousTurnId,
+          })
+        : undefined;
+    const latestManualActivationAfterParent =
+      !hasPersonaSnapshot && previousTurnId !== null
+        ? await deps.personaStore.getLatestManualSessionPersonaAfterTurn({
+            tenant_id: requestContext.tenant_id,
+            session_id: sessionId,
+            turn_id: previousTurnId,
+          })
+        : undefined;
+
+    // Resolved before the turn exists so an unavailable persona model is a
+    // clean 422 rather than a turn that was created and then could not run.
+    const persona = await resolveTurnPersona({
+      personaStore: deps.personaStore,
+      modelProviderStore,
+      agentStore,
+      sessionAgent: session.record.agent,
+      logger: deps.logger,
+      defaultAssistantName: profile?.assistant_name,
+      tenant_id: requestContext.tenant_id,
+      created_by: userRef,
+      session_id: sessionId,
+      turnInput: body.input,
+      previousTurnCustom,
+      latestManualActivation,
+      legacyParentActivation,
+      latestManualActivationAfterParent,
+    });
+    const turnCustom: TurnCustom = {
+      persona:
+        persona === undefined || persona.kind === 'default'
+          ? null
+          : {
+              persona_id: persona.persona.id,
+              persona_name: persona.persona.display_name,
+              model_name: persona.persona.model_name,
+              source: persona.source,
+            },
+      manual_persona_activation_id: latestManualActivation?.id ?? null,
+    };
+
+    // Resolved before the turn exists, same as the model/sandbox lookups above: a missing or
+    // invalid memory provider must never fail the turn, so this degrades to `undefined` rather
+    // than throwing. Read once and shared between the resolver (recall) and the drain hook
+    // (retain) so a turn dials the provider through a single client instance.
+    const memoryProvider = await resolveMemoryProvider({
+      mcpServerStore,
+      tokenStore: deps.tokenStore,
+      tenantId: requestContext.tenant_id,
+      clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
+      userRef,
+      logger: deps.logger,
+    });
+    const memoryClient =
+      memoryProvider === undefined
+        ? undefined
+        : new HindsightClient({
+            apiBase: memoryProvider.apiBase,
+            bank: memoryProvider.bank,
+            headers: memoryProvider.headers,
+          });
+    const sessionTitleForMemory = session.record.title ?? deriveSessionTitle(body.input);
+
+    // Resolved before the turn exists, like the memory provider above: the pass itself runs
+    // fire-and-forget after TURN_DONE and every failure inside it silently no-ops. Read off the
+    // profile already loaded for the personalization context, so learning left off (the default)
+    // costs nothing here, not even the model-FQN lookup. The pass re-reads the switch itself, so
+    // a user who turns it off mid-turn is still obeyed.
+    //
+    // This is the one part of the pass that runs on the create-turn path, so it is the one
+    // part that could fail a turn. It must not: an agent-store read that throws drops learning
+    // for this turn and nothing more.
+    let profileLearning: ProfileLearningDrainMember | undefined;
+    if (profile?.learning_enabled === true) {
+      try {
+        profileLearning = {
+          config: profileLearningPassConfig(),
+          personalizationStore: deps.personalizationStore,
+          eventStore: deps.sessionStore,
+          modelProviderStore,
+          memoryClient,
+          tenantId: requestContext.tenant_id,
+          createdBy: userRef,
+          userText: extractUserMessageText(body.input),
+          turnModelFqn: await resolveTurnModelFqn({
+            tenantId: requestContext.tenant_id,
+            personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
+            sessionAgent: session.record.agent,
+            agentStore,
+          }),
+        };
+      } catch (error) {
+        deps.logger.debug('Profile learning disabled for this turn: the model FQN did not resolve', {
+          sessionId,
+          ...extractErrorLogFields(error),
+        });
+        profileLearning = undefined;
+      }
+    }
+
+    const abortController = new AbortController();
+    const executionDeadline = new TurnExecutionDeadline({
+      abortController,
+      default_timeout_ms: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS * 1000,
+      finalization_buffer_ms: 30_000,
+    });
+    const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
+    const resolver = createTurnResolver({
+      mcpServerStore,
+      tokenStore: deps.tokenStore,
+      skillStore,
+      sandboxProviderStore,
+      sandboxProviderResolver: deps.sandboxProviderResolver ?? resolveSandboxProvider,
+      agentStore,
+      modelProviderStore,
+      logger: deps.logger,
+      signal: abortController.signal,
+      userRef,
+      session,
+      turnId,
+      personalizationContext: profile
+        ? buildPersonalizationContext(profile, {
+            speaker: persona?.kind === 'persona' ? 'persona' : 'default_assistant',
+          })
+        : undefined,
+      personaContext: persona?.kind === 'persona' ? persona.context : undefined,
+      boundRepository,
+      repositoryStore: deps.repositoryStore,
+      sessionStore: deps.sessionStore,
+      memoryClient,
+      memoryProviderServerName: memoryProvider?.serverName,
+      memorySettings: memoryProvider?.settings,
+      previousTurnId,
+      sessionTitle: sessionTitleForMemory,
+      spaceStore: deps.spaceStore,
+    });
+
+    // First turn only: derive the title from the first user message. The store
+    // never overwrites an existing title.
+    const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
+
+    let turn;
+    try {
+      turn = await session.createTurn({
+        turn_id: turnId,
+        input: body.input,
+        previous_turn_id: body.previous_turn_id,
+        signal: abortController.signal,
+        resolver,
+        custom: turnCustom,
+        update_session_title_if_not_exist: title,
+        on_command_execution_started: execution => {
+          executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
+        },
+        command_execution_owner_id: configuration.EXECUTOR_ID,
+      });
+    } catch (error) {
+      if (error instanceof SessionStoreNotFoundError) {
+        return c.json({ error: { message: error.message } }, 404);
+      }
+      if (error instanceof SessionStoreConflictError) {
+        return c.json({ error: { message: error.message, type: 'conflict', code: turnConflictCodeFor(error) } }, 409);
+      }
+      if (error instanceof AgentHarnessError && !(error instanceof McpConnectionError)) {
+        switch (error.code) {
+          case 'invalid_file_input':
+            return c.json({ error: { message: error.message } }, 400);
+          case 'invalid_send_input': {
+            // A decision the session already recorded is a resubmission, not a bad request:
+            // the tool has run (or been denied) once and must not run again. Answer from
+            // stored state; only a genuinely unrecorded decision keeps the 422.
+            const resubmission = await session.classifyApprovalResubmission({
+              previous_turn_id: body.previous_turn_id,
+              decisions: (body.input ?? []).filter(item => item.type === EventType.USER_TOOL_APPROVAL),
+            });
+            if (resubmission.outcome === 'replay') {
+              return c.json({ data: toWireTurn(resubmission.turn) }, 200);
+            }
+            if (resubmission.outcome === 'conflict') {
+              return c.json(
+                {
+                  error: {
+                    message: `Tool call ${resubmission.tool_call_id} already has a different decision on record`,
+                    type: 'conflict',
+                    code: TurnConflictCode.APPROVAL_CONFLICT,
+                  },
+                },
+                409,
+              );
+            }
+            return c.json({ error: { message: error.message } }, 422);
+          }
+          case 'agent_sandbox_required':
+          case 'tool_name_collision':
+            return c.json({ error: { message: error.message } }, 422);
+          case 'capability_state_error':
+          case 'mcp_connection_failed':
+            throw error;
+        }
+      }
+      throw error;
+    }
+
+    /**
+     * A turn is durable and `running` after createTurn, but inference has not
+     * started yet on these paths. Always make it terminal before returning an
+     * error so the chat never retains a turn that no executor owns.
+     */
+    const abandonUnstartedTurn = async (context: string, cause?: unknown): Promise<void> => {
+      abortController.abort(CancellationReason.Abandoned);
+      await resolver.close().catch((closeError: unknown) => {
+        deps.logger.error(`Failed to close turn resources after ${context}`, {
+          sessionId,
+          turnId: turn.id,
+          ...extractErrorLogFields(closeError),
+        });
+      });
+
+      const freezeFailures: unknown[] = [];
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          // Freezing is idempotent: a response can be lost after the store
+          // committed, and retrying returns the existing terminal turn.
+          await session.freezeTurn({ turn_id: turn.id, reason: CancellationReason.Abandoned });
+          return;
+        } catch (freezeError) {
+          freezeFailures.push(freezeError);
+          deps.logger.error(`Failed to end the turn after ${context}`, {
+            sessionId,
+            turnId: turn.id,
+            attempt,
+            ...extractErrorLogFields(freezeError),
+          });
+        }
+      }
+      throw new AggregateError(
+        cause === undefined ? freezeFailures : [cause, ...freezeFailures],
+        `${context}; the durable running turn could not be ended`,
+        cause === undefined ? undefined : { cause },
+      );
+    };
+
+    // Chats without persona provenance still recheck the manual selection
+    // observed during resolution. Persona-backed turns perform this comparison
+    // atomically with their provenance insert below, so a UI choice cannot land
+    // between validation and the write that would otherwise supersede it.
+    if (persona === undefined) {
+      let manualSelectionStillCurrent: boolean;
+      try {
+        manualSelectionStillCurrent = await deps.personaStore.isManualSessionPersonaCurrent({
+          tenant_id: requestContext.tenant_id,
+          session_id: sessionId,
+          expected_activation_id: latestManualActivation?.id ?? null,
+        });
+      } catch (error) {
+        await abandonUnstartedTurn('persona admission validation failed', error);
+        throw error;
+      }
+      if (!manualSelectionStillCurrent) {
+        await abandonUnstartedTurn('persona selection changed during admission');
+        return c.json(
+          {
+            error: {
+              message:
+                'Persona selection changed while this turn was being admitted. The turn was not started; submit it again.',
+              type: 'conflict',
+            },
+          },
+          409,
+        );
+      }
+    }
+
+    if (persona?.kind === 'persona') {
+      let personaStillCurrent: boolean;
+      try {
+        personaStillCurrent = await isTurnPersonaResolutionCurrent({
+          resolution: persona,
+          personaStore: deps.personaStore,
+          tenant_id: requestContext.tenant_id,
+          created_by: userRef,
+        });
+      } catch (error) {
+        await abandonUnstartedTurn('persona revision validation failed', error);
+        throw error;
+      }
+      if (!personaStillCurrent) {
+        await abandonUnstartedTurn('persona changed during admission');
+        return c.json(
+          {
+            error: {
+              message:
+                'The selected persona changed while this turn was being admitted. The turn was not started; submit it again.',
+              type: 'conflict',
+            },
+          },
+          409,
+        );
+      }
+    }
+
+    // Written after the turn commits, so the log never claims a persona
+    // answered a turn that was never created. For semantic and sticky choices,
+    // the expected manual activation is compared and the provenance is written
+    // under one session lock. A deterministic direct invocation keeps its
+    // documented precedence over a concurrent UI choice.
+    if (persona !== undefined) {
+      let activationRecorded: boolean;
+      try {
+        const activation = {
+          tenant_id: requestContext.tenant_id,
+          id: ulid().toLowerCase(),
+          session_id: sessionId,
+          turn_id: turn.id,
+          persona_id: persona.kind === 'persona' ? persona.persona.id : null,
+          persona_name: persona.kind === 'persona' ? persona.persona.display_name : null,
+          model_name: persona.kind === 'persona' ? persona.persona.model_name : null,
+          source: persona.source,
+        };
+        if (persona.selection === 'direct') {
+          await deps.personaStore.recordPersonaActivation(activation);
+          activationRecorded = true;
+        } else {
+          activationRecorded =
+            (await deps.personaStore.recordPersonaActivationIfManualCurrent({
+              ...activation,
+              expected_activation_id: latestManualActivation?.id ?? null,
+            })) !== undefined;
+        }
+      } catch (error) {
+        // The turn is durable and `running` by now, and nothing has begun
+        // draining it: the generator that would write its terminal state has
+        // not been started and never will be on this path. Reporting the
+        // failure without ending it would leave the chat holding a turn no
+        // runner owns. So the request still fails, but it fails with the turn
+        // in a terminal state and the session able to take its next one.
+        deps.logger.error('Persona provenance write failed; ending the turn it belongs to', {
+          sessionId,
+          turnId: turn.id,
+          personaId: persona.kind === 'persona' ? persona.persona.id : null,
+          ...extractErrorLogFields(error),
+        });
+        await abandonUnstartedTurn('persona provenance write failed', error);
+        throw error;
+      }
+      if (!activationRecorded) {
+        await abandonUnstartedTurn('persona selection changed during admission');
+        return c.json(
+          {
+            error: {
+              message:
+                'Persona selection changed while this turn was being admitted. The turn was not started; submit it again.',
+              type: 'conflict',
+            },
+          },
+          409,
+        );
+      }
+    }
+
+    executionDeadline.arm();
+
+    const trackedStream = deps.activeTurns.track({
+      sessionId,
+      turnId: turn.id,
+      abortController,
+      stream: turn.stream(),
+    });
+
+    // Held for the whole turn; the stream's sequence counter dies with it.
+    const turnEventStream = deps.eventSubscriptions.get(turnStreamId(requestContext.tenant_id, sessionId, turn.id));
+    const drainInput = {
+      trackedStream,
+      turnEventStream,
+      sessionId,
+      turnId: turn.id,
+      executionDeadline,
+      logger: deps.logger,
+      memory:
+        memoryClient === undefined
+          ? undefined
+          : {
+              client: memoryClient,
+              userText: extractUserMessageText(body.input),
+              sessionTitle: sessionTitleForMemory,
+            },
+      profileLearning,
+      artifacts: {
+        turnArtifactStore: deps.turnArtifactStore,
+        sandboxProviderStore,
+        sandboxProviderResolver: deps.sandboxProviderResolver ?? resolveSandboxProvider,
+        sessions: deps.sessions,
+        tenantId: requestContext.tenant_id,
+      },
+    };
+
+    // Non-stream: same unawaited drain scheduling as Hono streamSSE's run(cb).
+    // Wait until the first dual-write (turn.created) so immediate subscribeToTurn
+    // cannot 412 before the resumable stream exists.
+    if (!body.stream) {
+      const { promise: firstEventDualWritten, resolve: markFirstEventDualWritten } = Promise.withResolvers<undefined>();
+      void drainTurnEvents({
+        ...drainInput,
+        onEvent: () => {
+          markFirstEventDualWritten(undefined);
+          return Promise.resolve();
+        },
+      }).finally(() => {
+        markFirstEventDualWritten(undefined);
+      });
+      await firstEventDualWritten;
+      return c.json({ data: toWireTurn(turn.record) }, 200);
+    }
+
+    let shouldWriteToSSEStream = true;
+    return streamSSE(c, async stream => {
+      stream.onAbort(() => {
+        shouldWriteToSSEStream = false;
+      });
+      await drainTurnEvents({
+        ...drainInput,
+        onEvent: async (event, sequenceNumber) => {
+          if (!stream.closed && !stream.aborted && shouldWriteToSSEStream) {
+            try {
+              await stream.writeSSE(turnEventSsePayload(event, sequenceNumber));
+            } catch (error) {
+              deps.logger.error('SSE stream write error', extractErrorLogFields(error));
+              shouldWriteToSSEStream = false;
+            }
+          }
+        },
+      });
+      await stream.close();
+    });
+  };
+
+  const subscribeTurnHandler: RouteHandler<typeof subscribeTurnRoute> = async c => {
+    const { session_id: sessionId, turn_id: turnId } = c.req.valid('param');
+    const query = c.req.valid('query');
+    const afterSequenceNumber = resolveAfterSequenceNumber(c, query.after_sequence_number);
+    const requestContext = deps.resolveRequestContext(c);
+
+    const session = await deps.sessions.get({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+    });
+    if (!session) {
+      return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
+    }
+    if (
+      !(await canReadAgentBoundResource({
+        store: deps.resolveAgentStore(c),
+        context: requestContext,
+        authorizer: deps.authorizer,
+        agent_id: session.record.agent.type === 'reference' ? session.record.agent.id : undefined,
+        created_by_subject_id: session.record.created_by_subject.subject_id,
+      }))
+    ) {
+      return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
+    }
+    const turn = await session.getTurn(turnId);
+    if (!turn) {
+      return c.json({ error: { message: `Turn not found: ${turnId}` } }, 404);
+    }
+
+    const turnEventStream = deps.eventSubscriptions.get(turnStreamId(requestContext.tenant_id, sessionId, turnId));
+
+    // Admission check before SSE headers are sent, so it can still map to HTTP 412.
+    try {
+      await turnEventStream.assertSubscribable();
+    } catch (error) {
+      if (error instanceof StreamGoneError) {
+        throw new HTTPException(412, { message: error.message, cause: error });
+      }
+      throw error;
+    }
+
+    // One lifecycle controller: server-side timeout, client disconnect, and
+    // normal teardown all abort it, which ends poll even while it is parked
+    // waiting for events.
+    const subscribeAbort = new AbortController();
+    const timeoutMs = configuration.TURN_SUBSCRIBE_TIMEOUT_MS;
+    const timeoutHandler = setTimeout(() => {
+      deps.logger.info('Subscribe turn stream server-side timeout reached, closing stream', {
+        sessionId,
+        turnId,
+        afterSequenceNumber,
+        timeoutMs,
+      });
+      subscribeAbort.abort(new Error('subscribe-timeout'));
+    }, timeoutMs);
+
+    return streamSSE(c, async stream => {
+      stream.onAbort(() => {
+        subscribeAbort.abort(new Error('client-disconnected'));
+      });
+
+      const generator = turnEventStream.poll(afterSequenceNumber, { signal: subscribeAbort.signal });
+      try {
+        for await (const { sequence_number: sequenceNumber, ...event } of generator) {
+          await stream.writeSSE(turnEventSsePayload(event, sequenceNumber));
+          if (event.type === EventType.TURN_DONE) {
+            break;
+          }
+        }
+      } catch (error) {
+        if (!subscribeAbort.signal.aborted) {
+          deps.logger.error('Unexpected error in turn subscribe SSE loop', extractErrorLogFields(error));
+        }
+      } finally {
+        clearTimeout(timeoutHandler);
+        // Poll loops forever by design; aborting releases a parked generator
+        // immediately so the return() below settles right away.
+        subscribeAbort.abort();
+        await generator.return(undefined);
+        await stream.close();
+      }
+    });
+  };
+
+  const router = new OpenAPIHono();
+  router.openapi(createAndExecuteTurnRoute, createAndExecuteTurnHandler);
+  router.openapi(listTurnsRoute, listTurnsHandler);
+  router.openapi(getTurnRoute, getTurnHandler);
+  router.openapi(downloadSandboxFileRoute, downloadSandboxFileHandler);
+  router.openapi(listTurnEventsRoute, listTurnEventsHandler);
+  router.openapi(subscribeTurnRoute, subscribeTurnHandler);
+  return router;
+}

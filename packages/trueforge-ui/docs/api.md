@@ -1,0 +1,114 @@
+# Public API
+
+Curated exports from `@truefoundry/trueforge-ui`. Design-system primitives
+(`CenteredModal`, `Switch`, …) are owned in this package. Low-level controls
+like `Button` / `IconButton` are styled via theme tokens / CSS (not
+`SlotsProvider` slots); their **prop types** (`ButtonProps`, `IconButtonProps`,
+…) are exported for hosts that build around those contracts. Component
+**values** appear below only when they are part of the public surface.
+
+## Quick start
+
+| Export                           | Notes                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------ |
+| `TrueForgeUI`                    | Slots + runtime + built-in layout                                                    |
+| `TrueForgeUIProps`, `ChatLayout` | Props / layout union                                                                 |
+| `TrueForgeServerConfig`          | `server` prop: `type: "truefoundry"` \| `type: "trueforge"` \| ready `AgentUIServer` |
+
+### Built-in servers
+
+| `server` config                                                      | What the SDK does                                                                       |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `{ type: 'truefoundry', apiKey, controlPlaneURL, gatewayPlaneURL? }` | Calls runtime `createTrueFoundryAgentUIServer`                                          |
+| `{ type: 'trueforge', baseUrl?, token?, fetch?, catalog? }`          | Dynamic-imports `plugins/trueforge-agent-server-adapter` → full Harness `AgentUIServer` |
+| Ready `AgentUIServer`                                                | Passthrough (host-composed or `createTrueFoundryServer`)                                |
+
+TrueForge hosts need `@truefoundry/trueforge-sdk`. Cookie apps pass `fetch`; embeds usually pass `token`.
+
+```tsx
+// Harness / TrueForge
+<TrueForgeUI
+  server={{ type: 'trueforge', baseUrl: '/', token: process.env.TRUEFORGE_TOKEN }}
+  layout="sidebar"
+/>
+
+// Or same-origin cookies:
+<TrueForgeUI server={{ type: 'trueforge', fetch: authAwareFetch }} layout="sidebar" />
+```
+
+Factory without `<TrueForgeUI />`:
+
+```ts
+import { createTrueForgeAgentUIServer } from '@truefoundry/trueforge-ui/plugins/trueforge-agent-server-adapter';
+
+const server = createTrueForgeAgentUIServer({ baseUrl: '/', token });
+```
+
+The Harness factory includes the optional `AgentMetricsServer` port used by the
+agent-detail Metrics tab. Custom servers can provide `metrics` with
+`getCharts`, `getMeters`, and `getChartData`; access it with
+`useAgentMetricsServer` / `useOptionalAgentMetricsServer`. The default visual
+surface is split across the `AgentMetrics`, `AgentMetricsView`,
+`AgentMetricsTimeRangeFilter`, `AgentMetricCard`, and `AgentMetricChart` slots.
+
+The built-in TrueForge config enables permissions automatically through the
+Harness endpoint and accepts an explicit `PermissionsServer` override.
+TrueFoundry and custom servers remain permissive unless they provide the optional
+port. `useResourcePermissions` reads `USE`, `MANAGE`, and `DELETE` grants, while
+`PermissionGuard` keeps denied actions visible and explained.
+
+## Compose
+
+| Export                                                        | Notes                           |
+| ------------------------------------------------------------- | ------------------------------- |
+| `TrueFoundryChatProvider`                                     | Named-agent runtime + toasts    |
+| `TrueFoundryChatProviderProps`                                | `client` XOR `apiKey`+`baseUrl` |
+| `Thread`                                                      | Full thread + composer          |
+| `ThreadContainer`, `ComposerContainer`, `ThreadListContainer` | Building blocks                 |
+| `ToasterProvider`, `useToaster`, `useToasterOptional`         | Success and error toasts        |
+| Other `*Container` exports                                    | Advanced message / tool wiring  |
+
+## Slots / theme
+
+| Export                                                               | Notes                       |
+| -------------------------------------------------------------------- | --------------------------- |
+| `SlotsProvider`, `useSlot`, `defaultSlots`                           | Override registry           |
+| `SlotOverrides`, `AtomSlots`, `ThemeMode`                            | Types                       |
+| `useTheme`, `useThemeMode`                                           | Theme mode                  |
+| Feature atoms (`WelcomeScreen`, `ComposerShell`, bubbles, toasts, …) | Defaults + override targets |
+
+## Chrome / runtime
+
+| Export                                                                                | Notes                                         |
+| ------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `useAui`, `useAuiState`, `AssistantState`                                             | Also `@truefoundry/trueforge-ui/assistant-ui` |
+| `AgentSessionClient`                                                                  | Gateway client                                |
+| `useTrueFoundryAgentRuntime`, `trueFoundryAttachmentAdapter`, other `useTrueFoundry*` | Runtime hooks                                 |
+
+### Spaces
+
+`SpacesButton` sits in the sidebar next to Chat History. Clicking it calls
+`useShellMode().openSpaces()`, which swaps the shell's main content area to a
+full-page Spaces view the same way `setSettingsOpen(true)` swaps it to
+Settings, there is no modal. The view has two pages: a list (each space as a
+row with its name, purpose, a status pill, the updated time, and a one-line
+preview of the body) and, once a space is opened, that space's own page (the
+name as the title, the purpose as a subtitle, a status pill, a quiet updated
+time, and the body through the `Markdown` atom with a leading heading that
+repeats the name stripped out). `SpaceProvider`, `useOptionalSpaces`, and the
+`Space` / `SpaceStore` types are unchanged; only the button's target changed
+from a `CenteredModal` to shell navigation (`ShellModeContext`'s `spacesOpen`
+/ `selectedSpaceId` / `openSpaces` / `closeSpaces`).
+
+## Types for overrides
+
+| Export                                         | Notes                                                            |
+| ---------------------------------------------- | ---------------------------------------------------------------- |
+| `ButtonProps`, `ButtonSize`, `IconButtonProps` | Prop contracts for in-package primitives (tokens/CSS, not slots) |
+| Atom `*Props` types                            | Per-atom override shapes                                         |
+
+## Styles
+
+| Export path                            | Notes                                                 |
+| -------------------------------------- | ----------------------------------------------------- |
+| `@truefoundry/trueforge-ui/styles.css` | Tokens + utilities + OpenUI (optional; auto-injected) |
