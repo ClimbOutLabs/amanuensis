@@ -9,6 +9,7 @@ import { assertCreateTurnThreadDelta } from '@truefoundry/trueforge-core/agent-s
 import type {
   FreezeAndGetTurnInput,
   NewThreadInit,
+  ThreadTaskStateInit,
   ThreadToolCallMemoInit,
   TurnRecordWithoutSnapshot,
   UpdateTurnStateInput,
@@ -50,6 +51,7 @@ export interface NewThreadRegistration {
   parent: AgentParent | null;
   agent_info: AgentInfo | null;
   tool_call_memo: NewThreadInit['tool_call_memo'];
+  task_state: NewThreadInit['task_state'];
 }
 
 async function closeRunningCommandExecutions(
@@ -145,6 +147,7 @@ export interface CreateTurnInput {
     capability_state: CapabilityState | null;
   }[];
   tool_call_memos: ThreadToolCallMemoInit[];
+  task_states: ThreadTaskStateInit[];
   last_activity_timestamp_ms: number;
   update_session_title_if_not_exist: string | null;
   mcp_servers: Record<string, MCPServerInitInfo> | null;
@@ -372,6 +375,10 @@ async function assembleTurnRecord(
       agent_info: meta.agent_info,
       completion: meta.checkpoint.completion,
       tool_call_memo: meta.checkpoint.tool_call_memo,
+      // Host-owned task state persists in the thread checkpoint alongside the
+      // memo, so approval/tool-response continuations rebuild with the
+      // scratchpad intact.
+      task_state: meta.checkpoint.task_state,
       capability_state,
     };
     threads[threadId] = snap;
@@ -599,6 +606,7 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
         }
       }
       const memoByThread = new Map(input.tool_call_memos.map(memo => [memo.thread_id, memo.tool_call_memo]));
+      const taskStateByThread = new Map(input.task_states.map(entry => [entry.thread_id, entry.task_state]));
 
       // Step 5: insert turn_thread rows for carried-forward and new threads.
       const turnThreadRows: {
@@ -622,13 +630,16 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
       for (const parent of retainedPrevThreadRows) {
         const usage = appendUsageByThread.get(parent.thread_id) ?? parent.current_context_usage;
         const tool_call_memo = memoByThread.get(parent.thread_id);
+        const task_state = taskStateByThread.get(parent.thread_id);
         turnThreadRows.push({
           session_id: input.session_id,
           turn_id: input.turn.turn_id,
           thread_id: parent.thread_id,
-          checkpoint: jsonbBind(
-            tool_call_memo === undefined ? parent.checkpoint : { ...parent.checkpoint, tool_call_memo },
-          ),
+          checkpoint: jsonbBind({
+            ...parent.checkpoint,
+            ...(tool_call_memo === undefined ? {} : { tool_call_memo }),
+            ...(task_state === undefined ? {} : { task_state }),
+          }),
           agent_info: parent.agent_info !== null ? jsonbBind(parent.agent_info) : null,
           current_context_usage: jsonbBind(usage),
           updated_at: now,
@@ -687,6 +698,7 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
           parent: nt.parent,
           completion: null,
           tool_call_memo: nt.tool_call_memo,
+          task_state: nt.task_state,
         };
         turnThreadRows.push({
           session_id: input.session_id,

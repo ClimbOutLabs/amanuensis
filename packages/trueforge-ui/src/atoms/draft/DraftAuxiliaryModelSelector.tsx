@@ -5,8 +5,7 @@ import {
   useTrueFoundryUpdateAgentSpec,
   type AgentSpecUpdate,
 } from '@truefoundry/assistant-ui-runtime';
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { Icon } from '../../icons/Icon.js';
 import type { Model, ModelSelection } from '../../server/types.js';
@@ -17,6 +16,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import { BottomSheet } from '../primitives/BottomSheet.js';
 import { useDraftCatalog } from './DraftCatalogProvider.js';
 import { displayModelLabel, DraftModelCatalogPanel, ProviderMark } from './DraftModelCatalogPanel.js';
+import { DraftModelMenuPortal, useFloatingMenuPosition } from './DraftModelMenuPortal.js';
 
 /**
  * Model roles for the host's own bounded operations. A role exists only where
@@ -36,32 +36,12 @@ export type DraftAuxiliaryModelSelectorProps = {
   disabled?: boolean;
 };
 
-// Keep portaled chrome under ThemeProvider so preset/custom CSS vars still apply.
-function themePortalRoot(from: HTMLElement | null): HTMLElement {
-  return from?.closest('.aui-theme-root') ?? document.body;
-}
-
-type MenuPosition = {
-  left: number;
-  width: number;
-  maxHeight: number;
-  placement: 'below' | 'above';
-  top?: number;
-  bottom?: number;
-};
-
-const MENU_GAP = 6;
-const MENU_MAX_VH_RATIO = 0.6;
-const MENU_MIN_HEIGHT = 160;
-const MENU_MIN_WIDTH = 260;
-
 export function DraftAuxiliaryModelSelector({ role, roleLabel, disabled }: DraftAuxiliaryModelSelectorProps) {
   const { models, loading, ensureLoaded } = useDraftCatalog();
   const { agentSpec } = useTrueFoundryAgentSpec();
   const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [menuPos, setMenuPos] = useState<MenuPosition | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -76,39 +56,7 @@ export function DraftAuxiliaryModelSelector({ role, roleLabel, disabled }: Draft
 
   // Desktop only: float the menu in a portal so it escapes the settings pane's
   // own scroll container, and flip above the trigger when there is no room below.
-  useLayoutEffect(() => {
-    if (!open || useSheet) {
-      setMenuPos(null);
-      return;
-    }
-    const update = () => {
-      const rect = buttonRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const viewportHeight = window.innerHeight;
-      const desiredMaxHeight = viewportHeight * MENU_MAX_VH_RATIO;
-      const spaceBelow = viewportHeight - rect.bottom - MENU_GAP;
-      const spaceAbove = rect.top - MENU_GAP;
-      const placement: 'below' | 'above' =
-        spaceBelow >= Math.min(desiredMaxHeight, MENU_MIN_HEIGHT) || spaceBelow >= spaceAbove ? 'below' : 'above';
-      const available = placement === 'below' ? spaceBelow : spaceAbove;
-      const maxHeight = Math.max(Math.min(desiredMaxHeight, available), MENU_MIN_HEIGHT);
-      setMenuPos({
-        left: rect.left,
-        width: Math.max(rect.width, MENU_MIN_WIDTH),
-        maxHeight,
-        placement,
-        top: placement === 'below' ? rect.bottom + MENU_GAP : undefined,
-        bottom: placement === 'above' ? viewportHeight - rect.top + MENU_GAP : undefined,
-      });
-    };
-    update();
-    window.addEventListener('resize', update);
-    window.addEventListener('scroll', update, true);
-    return () => {
-      window.removeEventListener('resize', update);
-      window.removeEventListener('scroll', update, true);
-    };
-  }, [open, useSheet]);
+  const menuPos = useFloatingMenuPosition({ open: open && !useSheet, anchorRef: buttonRef });
 
   useEffect(() => {
     if (!open) return;
@@ -253,24 +201,11 @@ export function DraftAuxiliaryModelSelector({ role, roleLabel, disabled }: Draft
         </BottomSheet>
       ) : null}
 
-      {!useSheet && open && menuPos
-        ? createPortal(
-            <div
-              ref={menuRef}
-              style={{
-                left: menuPos.left,
-                width: menuPos.width,
-                maxHeight: menuPos.maxHeight,
-                top: menuPos.top,
-                bottom: menuPos.bottom,
-              }}
-              className="bg-card-bg text-text-primary fixed z-50 flex flex-col overflow-hidden rounded-lg border border-border shadow-lg"
-            >
-              {content}
-            </div>,
-            themePortalRoot(containerRef.current),
-          )
-        : null}
+      {!useSheet && open && menuPos ? (
+        <DraftModelMenuPortal anchorRef={buttonRef} menuPos={menuPos} menuRef={menuRef}>
+          {content}
+        </DraftModelMenuPortal>
+      ) : null}
     </div>
   );
 }

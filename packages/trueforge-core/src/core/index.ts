@@ -217,6 +217,8 @@ export { InternalEventType } from './runtime/AgentThread.types';
 export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread.types';
 export { AgentThreadMetricsSchema } from './runtime/metrics';
 export type { AgentThreadMetrics } from './runtime/metrics';
+export { TaskFindingSchema, TaskPhaseSchema, TaskStateSchema } from './runtime/taskState';
+export type { TaskFinding, TaskPhase, TaskState, TaskStateSnapshot } from './runtime/taskState';
 
 // Tracing
 export type {

@@ -168,6 +168,7 @@ const defaultRootThread: NewThreadInit = {
   parent: null,
   agent_info: null,
   tool_call_memo: undefined,
+  task_state: undefined,
 };
 
 export interface MakeCreateTurnInputOptions<TTurnCustom extends object = Record<string, never>> {
@@ -180,6 +181,7 @@ export interface MakeCreateTurnInputOptions<TTurnCustom extends object = Record<
   new_context_appends?: TurnContextAppend[];
   capability_states?: CreateTurnInput<TTurnCustom>['capability_states'];
   tool_call_memos?: CreateTurnInput<TTurnCustom>['tool_call_memos'];
+  task_states?: CreateTurnInput<TTurnCustom>['task_states'];
   approval_grants?: string[];
   require_previous_turn_is_tip?: boolean;
   update_session_title_if_not_exist?: string;
@@ -217,6 +219,7 @@ export function makeCreateTurnInput<TTurnCustom extends object = Record<string, 
     new_context_appends: input.new_context_appends ?? [],
     capability_states: capabilityStates,
     tool_call_memos: input.tool_call_memos ?? [],
+    task_states: input.task_states ?? [],
     update_session_title_if_not_exist: input.update_session_title_if_not_exist ?? null,
   };
 }
@@ -274,6 +277,7 @@ export function makeRunningTurnRecord<TCustom extends object = Record<string, ne
           completion: null,
           capability_state: null,
           tool_call_memo: undefined,
+          task_state: undefined,
         },
       },
       mcp_servers: null,

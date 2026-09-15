@@ -51,11 +51,20 @@ export default function AgentOverview({ detail }: AgentOverviewProps) {
   const temperature = readRecordValue(modelParams, 'temperature');
   const config = isRecord(spec.config) ? spec.config : null;
   const sandbox = isRecord(config?.sandbox) ? config.sandbox : null;
+  const taskState =
+    config !== null && isRecord(config.taskState)
+      ? config.taskState
+      : config !== null && isRecord(config.task_state)
+        ? config.task_state
+        : null;
   const instructions = spec.instructions?.trim() ? spec.instructions : null;
   const description = detail.description?.trim() ? detail.description : null;
+  const budgetedToolsValue = readRecordValue(taskState, 'budgetedTools', 'budgeted_tools');
   const execution = [
     ['Sandbox', typeof sandbox?.enabled === 'boolean' ? (sandbox.enabled ? 'Enabled' : 'Disabled') : undefined],
     ['Iteration limit', readRecordValue(config, 'iterationLimit', 'iteration_limit')],
+    ['Research tool-call budget', readRecordValue(taskState, 'toolCallBudget', 'tool_call_budget')],
+    ['Budgeted tools', Array.isArray(budgetedToolsValue) ? budgetedToolsValue.join(', ') : budgetedToolsValue],
     ['Response format', readRecordValue(config, 'responseFormat', 'response_format')],
   ].filter((entry): entry is [string, string | number] => {
     return typeof entry[1] === 'string' || typeof entry[1] === 'number';

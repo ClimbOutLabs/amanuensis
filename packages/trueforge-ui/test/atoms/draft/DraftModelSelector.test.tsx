@@ -196,4 +196,39 @@ describe('DraftModelSelector', () => {
     await waitFor(() => expect(screen.getByText('No models')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /Please configure Models/i })).not.toBeInTheDocument();
   });
+
+  it('renders the open menu through a portal, so an overflow-hidden ancestor (e.g. the Model roles card) cannot clip it', async () => {
+    const server = createMockAgentUIServer({ getModels: async () => models });
+    const { container } = render(
+      <div style={{ overflow: 'hidden' }}>
+        <ServerProvider server={server}>
+          <ShellModeProvider>
+            <DraftCatalogProvider>
+              <DraftModelSelector />
+            </DraftCatalogProvider>
+          </ShellModeProvider>
+        </ServerProvider>
+      </div>,
+    );
+
+    const trigger = await screen.findByTitle('Select model');
+    fireEvent.click(trigger);
+
+    const listbox = await screen.findByRole('listbox', { name: 'Select model' });
+    expect(container.contains(listbox)).toBe(false);
+    expect(document.body.contains(listbox)).toBe(true);
+  });
+
+  it('caps the menu height and scrolls the option list instead of growing off screen', async () => {
+    renderSelector();
+
+    const trigger = await screen.findByTitle('Select model');
+    fireEvent.click(trigger);
+
+    const listbox = await screen.findByRole('listbox', { name: 'Select model' });
+    // The listbox itself scrolls; the portal wrapper around it caps how tall it can get.
+    expect(listbox).toHaveClass('overflow-y-auto');
+    const menu = listbox.closest('[style*="max-height"]');
+    expect(menu).not.toBeNull();
+  });
 });

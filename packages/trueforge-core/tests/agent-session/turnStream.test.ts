@@ -594,6 +594,7 @@ describe('TurnHandle.stream()', () => {
           completion: null,
           capability_state: null,
           tool_call_memo: undefined,
+          task_state: undefined,
         },
       ],
     });
@@ -1066,6 +1067,7 @@ describe('TurnHandle.stream()', () => {
         context: [{ role: 'user', content: 'late processor context' }],
         output: [],
         tool_call_memo: undefined,
+        task_state: undefined,
       },
     });
     await lateResult.promise;

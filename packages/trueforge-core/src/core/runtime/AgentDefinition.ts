@@ -71,6 +71,24 @@ export interface AgentDefinition {
   /** Same wire shape as AgentSpec.response_format (Zod ResponseFormat). */
   responseFormat?: ResponseFormat | undefined;
   iterationLimit?: number | undefined;
+  /**
+   * Host-owned per-request tool-call budget. When set, the turn gets the
+   * task-state scratchpad (fresh `<task_state>` block before every model call,
+   * immune to context compaction) plus the `record_finding` tool, and the
+   * host withholds the configured budgeted research tools once `toolCallBudget`
+   * calls have executed, forcing the final-answer pass. Control, approval,
+   * host, and unrelated tools stay available throughout. Undefined (default)
+   * disables the whole feature: no block, no tool, no budget. Requires
+   * `budgetedTools` when set.
+   */
+  toolCallBudget?: number | undefined;
+  /**
+   * Canonical original tool names charged against `toolCallBudget` and
+   * withheld once it is spent. Supports `*` wildcards (e.g. `tavily*`).
+   * `record_finding` is always exempt and can never be listed. Required when
+   * `toolCallBudget` is set; ignored otherwise.
+   */
+  budgetedTools?: readonly string[] | undefined;
 
   toolSets?: readonly IToolSet[] | undefined;
 }

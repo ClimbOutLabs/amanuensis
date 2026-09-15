@@ -79,6 +79,7 @@ export async function addThreadsInTransaction(db: DbOrTrx, input: AddThreadsInpu
       parent: thread.parent ?? null,
       completion: thread.completion ?? null,
       tool_call_memo: thread.tool_call_memo,
+      task_state: thread.task_state,
     };
     turnThreadPlans.push({
       thread_id: thread.thread_id,
@@ -236,11 +237,15 @@ async function getNextPos(db: DbOrTrx, keys: TurnKeys, thread_id: string): Promi
 function checkpointPatchExpr(
   completion: SubAgentCompletionMarker | null,
   tool_call_memo: AppendToThreadContextInput['tool_call_memo'],
+  task_state: AppendToThreadContextInput['task_state'],
 ): RawBuilder<string> {
   let checkpoint: RawBuilder<string> =
     completion === null ? sql`checkpoint` : jsonbSet(sql.ref('checkpoint'), '$.completion', completion);
   if (tool_call_memo !== undefined) {
     checkpoint = jsonbSet(checkpoint, '$.tool_call_memo', tool_call_memo);
+  }
+  if (task_state !== undefined) {
+    checkpoint = jsonbSet(checkpoint, '$.task_state', task_state);
   }
   return checkpoint;
 }
@@ -262,6 +267,7 @@ async function fencedTurnThreadContextUpdate(
     current_context_usage: CurrentContextUsage | null;
     completion: SubAgentCompletionMarker | null;
     tool_call_memo: AppendToThreadContextInput['tool_call_memo'];
+    task_state: AppendToThreadContextInput['task_state'];
     /** When replace_array, usage is set unconditionally (overwrite contract). */
     usage_unconditional: CurrentContextUsage | null;
   },
@@ -327,7 +333,7 @@ async function fencedTurnThreadContextUpdate(
     const updateResult = await trx
       .updateTable('turn_thread')
       .set({
-        checkpoint: checkpointPatchExpr(args.completion, args.tool_call_memo),
+        checkpoint: checkpointPatchExpr(args.completion, args.tool_call_memo, args.task_state),
         current_context_usage: usageExpr,
         updated_at: now,
       })
@@ -358,6 +364,7 @@ export async function appendToThreadContext(db: Kysely<Database>, input: AppendT
     current_context_usage: input.current_context_usage,
     completion: input.completion,
     tool_call_memo: input.tool_call_memo,
+    task_state: input.task_state,
     usage_unconditional: null,
   });
 }
@@ -378,6 +385,8 @@ export async function overwriteThreadContext(db: Kysely<Database>, input: Overwr
     current_context_usage: null,
     completion: null,
     tool_call_memo: undefined,
+    // Overwrite replaces context only; task state is untouched.
+    task_state: undefined,
     usage_unconditional: input.event.current_context_usage,
   });
 }

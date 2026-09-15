@@ -213,6 +213,45 @@ const MemoryConfigSchema = z
   })
   .openapi('MemoryConfig');
 
+const TaskStateConfigSchema = z
+  .object({
+    tool_call_budget: z
+      .number()
+      .int()
+      .positive()
+      .max(1024)
+      .optional()
+      .describe(
+        'Host-owned research tool-call budget per turn (1–1024). When set, the agent banks findings with the ' +
+          '`record_finding` tool into a structured scratchpad that is re-injected before every model call and ' +
+          'survives context compaction; once the budget is spent the host withholds the budgeted research tools ' +
+          'and the agent must write its final answer from the banked findings. Unset (default) disables the ' +
+          'feature entirely. Requires `budgeted_tools` when set.',
+      ),
+    budgeted_tools: z
+      .array(z.string().trim().min(1).max(128))
+      .max(64)
+      .optional()
+      .describe(
+        'Tool names charged against `tool_call_budget` and withheld once it is spent. ' +
+          "Matched against each tool's canonical original name; `*` is a wildcard " +
+          '(e.g. `tavily*` budgets every Tavily tool). The host-owned `record_finding` ' +
+          'tool is always exempt and can never be budgeted. Only these tools are ' +
+          'withheld in the final-answer phase — control, approval, and unrelated ' +
+          'tools stay available. Required when `tool_call_budget` is set.',
+      ),
+  })
+  .superRefine((value, ctx) => {
+    if (value.tool_call_budget !== undefined && (value.budgeted_tools ?? []).length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message: '`budgeted_tools` must list at least one tool when `tool_call_budget` is set.',
+        path: ['budgeted_tools'],
+      });
+    }
+  })
+  .openapi('TaskStateConfig');
+
 export const RuntimeConfigSchema = z
   .object({
     iteration_limit: z
@@ -231,6 +270,7 @@ export const RuntimeConfigSchema = z
       large_tool_response: { enabled: true },
     })),
     memory: MemoryConfigSchema.default(() => ({ recall_enabled: true })),
+    task_state: TaskStateConfigSchema.default(() => ({})),
     generative_ui: GenerativeUIConfigSchema.default(() => ({ enabled: true })),
     ask_user_questions: AskUserQuestionsConfigSchema.default(() => ({ enabled: true })),
   })

@@ -15,6 +15,7 @@ import type {
   SubAgentCompletionMarker,
 } from '../../core/runtime/AgentThread.types';
 import type { CurrentContextUsage } from '../../core/runtime/contextUsage';
+import type { TaskStateSnapshot } from '../../core/runtime/taskState';
 import type { SandboxInfo } from '../../core/sandbox/Sandbox';
 import type { SessionFolderRecord } from '../models/SessionFolderRecord';
 import type { SessionRecord } from '../models/SessionRecord';
@@ -197,6 +198,9 @@ export type NewThreadInit = Omit<
 /** Complete canonical tool-call memo for one resulting thread. */
 export type ThreadToolCallMemoInit = Pick<AgentThreadSnapshot, 'thread_id' | 'tool_call_memo'>;
 
+/** Complete host-owned task-state scratchpad for one resulting thread. */
+export type ThreadTaskStateInit = Pick<AgentThreadSnapshot, 'thread_id' | 'task_state'>;
+
 /** Full post-send capability map for one thread. */
 export type ThreadCapabilityStateInit = Pick<AgentThreadSnapshot, 'thread_id' | 'capability_state'>;
 
@@ -238,6 +242,8 @@ export interface CreateTurnInput<TTurnCustom extends object = Record<string, nev
   capability_states: ThreadCapabilityStateInit[];
   /** Complete canonical tool-call memos for all resulting threads. */
   tool_call_memos: ThreadToolCallMemoInit[];
+  /** Complete host-owned task-state scratchpads for all resulting threads. */
+  task_states: ThreadTaskStateInit[];
   /** Set only if session.title is NULL (first write wins). */
   update_session_title_if_not_exist: string | null;
 }
@@ -359,6 +365,8 @@ export interface AppendToThreadContextInput {
   current_context_usage: CurrentContextUsage | null;
   completion: SubAgentCompletionMarker | null;
   tool_call_memo: ToolCallMemoSnapshot | undefined;
+  /** Host-owned task-state snapshot; undefined leaves the persisted state untouched. */
+  task_state: TaskStateSnapshot | undefined;
 }
 
 export interface OverwriteThreadContextInput {

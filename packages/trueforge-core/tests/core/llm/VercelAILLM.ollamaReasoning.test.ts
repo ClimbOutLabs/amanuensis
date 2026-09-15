@@ -83,6 +83,7 @@ async function runThread(userText: string): Promise<AgentThreadEvent[]> {
     threadId: 'main',
     title: 'Ollama empty-answer turn',
     toolCallMemo: undefined,
+    taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),

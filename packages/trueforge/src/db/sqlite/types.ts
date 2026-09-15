@@ -25,6 +25,7 @@ import type {
   MCPServerInitInfo,
   SandboxInfo,
   SubAgentCompletionMarker,
+  TaskStateSnapshot,
   ToolCallMemoSnapshot,
 } from '@truefoundry/trueforge-core/core';
 import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
@@ -49,6 +50,8 @@ export interface TurnThreadCheckpoint {
   completion: SubAgentCompletionMarker | null;
   /** Undefined for rows written before cross-continuation memo persistence. */
   tool_call_memo: ToolCallMemoSnapshot | undefined;
+  /** Undefined for rows written before task-state persistence, or when the feature is off. */
+  task_state: TaskStateSnapshot | undefined;
 }
 
 /** Turn-level checkpoint — threads live in `turn_thread`; only owned top-level keys remain. */

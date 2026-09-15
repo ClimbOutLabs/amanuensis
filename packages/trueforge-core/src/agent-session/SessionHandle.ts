@@ -48,6 +48,7 @@ import { CancellationReason } from './schemas/turn';
 import type {
   ISessionStore,
   NewThreadInit,
+  ThreadTaskStateInit,
   ThreadToolCallMemoInit,
   TurnContextAppend,
   TurnRecordWithoutSnapshot,
@@ -460,6 +461,10 @@ export class SessionHandle<
           thread_id,
           tool_call_memo: thread.toSnapshot().tool_call_memo,
         })),
+        task_states: [...agentThreads].map(([thread_id, thread]): ThreadTaskStateInit => ({
+          thread_id,
+          task_state: thread.toSnapshot().task_state,
+        })),
         update_session_title_if_not_exist: input.update_session_title_if_not_exist ?? null,
       });
       turnCommitted = true;
@@ -771,6 +776,7 @@ export class SessionHandle<
       capabilities,
       capabilityState: input.previousThreadSnapshot?.capability_state ?? undefined,
       toolCallMemo: input.previousThreadSnapshot?.tool_call_memo,
+      taskState: input.previousThreadSnapshot?.task_state,
       chatApprovalGrants: input.chatApprovalGrants,
       loadImplementationPlanGrants: input.loadImplementationPlanGrants,
       isRequestContinuation: input.isRequestContinuation,
@@ -853,6 +859,7 @@ export class SessionHandle<
         agentInfo: params.request,
         capabilities,
         toolCallMemo: undefined,
+        taskState: undefined,
         chatApprovalGrants: input.chatApprovalGrants,
         loadImplementationPlanGrants: input.loadImplementationPlanGrants,
         isRequestContinuation: false,

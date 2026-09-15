@@ -29,10 +29,19 @@ function runningTurnInput(input: { sessionId: string; turnId: string }): CreateT
     approval_grants: [],
     require_previous_turn_is_tip: false,
     retained_previous_thread_ids: [],
-    new_threads: [{ thread_id: MAIN_THREAD_ID, parent: null, agent_info: null, tool_call_memo: undefined }],
+    new_threads: [
+      {
+        thread_id: MAIN_THREAD_ID,
+        parent: null,
+        agent_info: null,
+        tool_call_memo: undefined,
+        task_state: undefined,
+      },
+    ],
     new_context_appends: [],
     capability_states: [{ thread_id: MAIN_THREAD_ID, capability_state: null }],
     tool_call_memos: [],
+    task_states: [],
     sandbox_info: null,
     update_session_title_if_not_exist: null,
   };

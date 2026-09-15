@@ -1,19 +1,19 @@
 'use client';
 
-import type { AgentRuntimeConfig } from '../../server/types.js';
+import type { TrueForgeAgentRuntimeConfig } from '../../server/types.js';
 import { cn } from '../lib/cn.js';
 import { auiInputClass } from '../lib/inputClasses.js';
 import { Switch } from '../primitives/Switch.js';
 import { Tooltip } from '../primitives/Tooltip.js';
 
 export type AgentRuntimeConfigFieldsProps = {
-  value: AgentRuntimeConfig;
+  value: TrueForgeAgentRuntimeConfig;
   sandboxAvailable: boolean;
   hasSkills: boolean;
   disabled?: boolean;
   showCapabilities?: boolean;
   layout?: 'compact' | 'detailed';
-  onChange: (value: AgentRuntimeConfig) => void;
+  onChange: (value: TrueForgeAgentRuntimeConfig) => void;
 };
 
 function parseIterationLimit(raw: string): number | null {
@@ -28,6 +28,61 @@ function parsePositiveInteger(raw: string): number | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+/**
+ * Parse the research tool-call budget field.
+ * Returns `undefined` when the field is cleared (feature off),
+ * `null` when the input is invalid (keep the previous value),
+ * otherwise the clamped budget.
+ */
+function parseToolCallBudget(raw: string): number | null | undefined {
+  if (raw.trim() === '') return undefined;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || !Number.isFinite(parsed)) return null;
+  return Math.max(1, Math.min(1024, parsed));
+}
+
+function applyToolCallBudget(
+  value: TrueForgeAgentRuntimeConfig,
+  toolCallBudget: number | undefined,
+): TrueForgeAgentRuntimeConfig {
+  const budgetedTools = value.taskState?.budgetedTools;
+  if (toolCallBudget === undefined && (budgetedTools ?? []).length === 0) {
+    const { taskState: _dropped, ...rest } = value;
+    void _dropped;
+    return rest;
+  }
+  return {
+    ...value,
+    taskState: {
+      ...(toolCallBudget === undefined ? {} : { toolCallBudget }),
+      ...(budgetedTools === undefined ? {} : { budgetedTools }),
+    },
+  };
+}
+
+function parseBudgetedTools(raw: string): string[] {
+  return raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0);
+}
+
+function applyBudgetedTools(value: TrueForgeAgentRuntimeConfig, budgetedTools: string[]): TrueForgeAgentRuntimeConfig {
+  const toolCallBudget = value.taskState?.toolCallBudget;
+  if (budgetedTools.length === 0 && toolCallBudget === undefined) {
+    const { taskState: _dropped, ...rest } = value;
+    void _dropped;
+    return rest;
+  }
+  return {
+    ...value,
+    taskState: {
+      ...(toolCallBudget === undefined ? {} : { toolCallBudget }),
+      ...(budgetedTools.length === 0 ? {} : { budgetedTools }),
+    },
+  };
+}
+
 const NO_SANDBOX_PROVIDER_HINT = 'No sandbox provider yet, add one in Settings → Sandbox';
 
 type RuntimeSwitchField = {
@@ -36,7 +91,7 @@ type RuntimeSwitchField = {
   checked: boolean;
   disabled?: boolean;
   disabledTooltip?: string;
-  update: (enabled: boolean) => AgentRuntimeConfig;
+  update: (enabled: boolean) => TrueForgeAgentRuntimeConfig;
 };
 
 export function AgentRuntimeConfigFields({
@@ -195,6 +250,46 @@ export function AgentRuntimeConfigFields({
             }}
           />
         </label>
+        <label className="flex items-center justify-between gap-4 border-b border-border py-3">
+          <span>
+            <span className="text-text-primary block text-sm font-medium">Research tool-call budget</span>
+            <span className="text-text-secondary mt-0.5 block text-xs">
+              Host-owned research budget per turn. The agent banks findings into a structured scratchpad that survives
+              context compaction; once the budget is spent, research tools are withheld and the agent must write its
+              final answer from the banked findings. Empty disables it.
+            </span>
+          </span>
+          <input
+            type="number"
+            min={1}
+            max={1024}
+            disabled={disabled}
+            value={value.taskState?.toolCallBudget ?? ''}
+            placeholder="Off"
+            className={auiInputClass('h-8 w-24 disabled:opacity-60')}
+            onChange={event => {
+              const toolCallBudget = parseToolCallBudget(event.target.value);
+              if (toolCallBudget !== null) onChange(applyToolCallBudget(value, toolCallBudget));
+            }}
+          />
+        </label>
+        <label className="flex items-center justify-between gap-4 border-b border-border py-3">
+          <span>
+            <span className="text-text-primary block text-sm font-medium">Budgeted tools</span>
+            <span className="text-text-secondary mt-0.5 block text-xs">
+              Comma-separated tool names charged against the budget and withheld once it is spent. `*` is a wildcard
+              (e.g. `tavily*`). Required when the budget is set. `record_finding` is always exempt.
+            </span>
+          </span>
+          <input
+            type="text"
+            disabled={disabled}
+            value={(value.taskState?.budgetedTools ?? []).join(', ')}
+            placeholder="tavily*"
+            className={auiInputClass('h-8 w-48 disabled:opacity-60')}
+            onChange={event => onChange(applyBudgetedTools(value, parseBudgetedTools(event.target.value)))}
+          />
+        </label>
         <div className="divide-y divide-border">
           <section className="py-3">
             {switchField({ field: sandboxField, className: 'items-center justify-between gap-4' })}
@@ -261,6 +356,33 @@ export function AgentRuntimeConfigFields({
             const iterationLimit = parseIterationLimit(event.target.value);
             if (iterationLimit !== null) onChange({ ...value, iterationLimit });
           }}
+        />
+      </label>
+      <label className="mb-2 block text-xs">
+        <span className="text-text-secondary mb-1 block">Research tool-call budget (empty = off)</span>
+        <input
+          type="number"
+          min={1}
+          max={1024}
+          disabled={disabled}
+          value={value.taskState?.toolCallBudget ?? ''}
+          placeholder="Off"
+          className={auiInputClass('h-8 disabled:opacity-60')}
+          onChange={event => {
+            const toolCallBudget = parseToolCallBudget(event.target.value);
+            if (toolCallBudget !== null) onChange(applyToolCallBudget(value, toolCallBudget));
+          }}
+        />
+      </label>
+      <label className="mb-2 block text-xs">
+        <span className="text-text-secondary mb-1 block">Budgeted tools (comma-separated, `*` = wildcard)</span>
+        <input
+          type="text"
+          disabled={disabled}
+          value={(value.taskState?.budgetedTools ?? []).join(', ')}
+          placeholder="tavily*"
+          className={auiInputClass('h-8 disabled:opacity-60')}
+          onChange={event => onChange(applyBudgetedTools(value, parseBudgetedTools(event.target.value)))}
         />
       </label>
       {[...runtimeFields, ...(showCapabilities ? capabilityFields : [])].map(field => switchField({ field }))}

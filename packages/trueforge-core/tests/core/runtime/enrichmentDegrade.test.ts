@@ -103,6 +103,7 @@ describe('AgentThread enrichment degrade on an unreachable MCP server', () => {
       threadId: 'main',
       title: 'Main',
       toolCallMemo: undefined,
+      taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),

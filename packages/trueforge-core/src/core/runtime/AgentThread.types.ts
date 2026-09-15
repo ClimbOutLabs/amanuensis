@@ -41,6 +41,7 @@ import type { AgentTracing } from '../tracing/AgentTracing';
 import type { AbnormalHandoffCause } from './AbnormalHandoff';
 import type { AgentDefinition } from './AgentDefinition';
 import type { CurrentContextUsage } from './contextUsage';
+import type { TaskStateSnapshot } from './taskState';
 
 export type { AgentInfo, AgentParent };
 
@@ -134,6 +135,14 @@ export interface AgentThreadAppendContext {
   completion?: SubAgentCompletionMarker | undefined;
   tool_call_memo: ToolCallMemoSnapshot | undefined;
   /**
+   * Host-owned task-state snapshot for this append. Set when the agent opted
+   * into a tool-call budget; undefined means "leave the persisted task state
+   * untouched" (the feature is off, or this append carries no task-state
+   * change). Lets approval/tool-response continuations rebuild the thread
+   * with the scratchpad intact.
+   */
+  task_state: TaskStateSnapshot | undefined;
+  /**
    * Set when this append is the host-enforced grounding nudge (a freshness
    * question, see `isFreshnessQuestion`, answered with no retrieval tool
    * called this turn) rather than ordinary model output. Lets a trace or bug
@@ -202,6 +211,12 @@ export interface AgentThreadSnapshot {
   capability_state: CapabilityState | null;
   /** Canonical cross-continuation tool-call memo; undefined for legacy snapshots. */
   tool_call_memo: ToolCallMemoSnapshot | undefined;
+  /**
+   * Host-owned task-state scratchpad (findings + tool-call budget usage).
+   * Lives outside the transcript so context compaction can never erase it.
+   * Undefined for legacy snapshots; hydrates to an empty state.
+   */
+  task_state: TaskStateSnapshot | undefined;
 }
 
 export interface AgentThreadConstructorInput {
@@ -222,6 +237,12 @@ export interface AgentThreadConstructorInput {
   capabilityState?: CapabilityState | undefined;
   /** Previous turn's canonical tool-call memo for continuation hydration. */
   toolCallMemo: ToolCallMemoSnapshot | undefined;
+  /**
+   * Previous request's task-state scratchpad for continuation hydration.
+   * Only consumed when `isRequestContinuation` is true; a genuinely new user
+   * message always starts from an empty state.
+   */
+  taskState: TaskStateSnapshot | undefined;
   /**
    * True when this instance continues the same in-flight user request (an
    * approval or tool-response resubmission built a fresh instance from the

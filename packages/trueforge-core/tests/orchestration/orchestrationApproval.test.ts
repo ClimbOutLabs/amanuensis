@@ -319,6 +319,7 @@ function makeApprovalHarness(finalReply: string): {
     ],
     capabilityState: undefined,
     toolCallMemo: undefined,
+    taskState: undefined,
     isRequestContinuation: undefined,
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),

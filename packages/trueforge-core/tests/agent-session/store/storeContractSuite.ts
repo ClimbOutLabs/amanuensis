@@ -33,6 +33,7 @@ import {
 import { AbnormalHandoffSchema } from '../../../src/core/runtime/AbnormalHandoff';
 import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../../src/core/runtime/contextUsage';
+import type { TaskStateSnapshot } from '../../../src/core/runtime/taskState';
 import {
   makeAgentSpec,
   makeCreateTurnInput as makeBaseCreateTurnInput,
@@ -223,6 +224,7 @@ export function runStoreContractSuite<
               completion: null,
               capability_state: null,
               tool_call_memo: undefined,
+              task_state: undefined,
             },
           ],
         }),
@@ -235,6 +237,7 @@ export function runStoreContractSuite<
           current_context_usage: null,
           completion: null,
           tool_call_memo: undefined,
+          task_state: undefined,
         }),
       () =>
         store.overwriteThreadContext({
@@ -942,6 +945,7 @@ export function runStoreContractSuite<
           current_context_usage: null,
           completion: null,
           tool_call_memo: undefined,
+          task_state: undefined,
         }),
       ]);
 
@@ -1521,6 +1525,7 @@ export function runStoreContractSuite<
             completion: null,
             capability_state: null,
             tool_call_memo: undefined,
+            task_state: undefined,
           },
         ],
       });
@@ -1968,6 +1973,7 @@ export function runStoreContractSuite<
               parent: null,
               agent_info: null,
               tool_call_memo: firstMemo,
+              task_state: undefined,
             },
           ],
         }),
@@ -1997,6 +2003,61 @@ export function runStoreContractSuite<
 
       const second = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'memo-turn-2' }));
       expect(second.snapshot.threads[MAIN_THREAD_ID]?.tool_call_memo).toEqual(secondMemo);
+    });
+
+    it('round-trips host-owned task states for new and carried-forward threads', async () => {
+      const store = createStore();
+      await seedSession(store);
+      const firstTaskState: TaskStateSnapshot = {
+        findings: [
+          {
+            label: 'Spain/Madrid',
+            headline: 'Average room rent is around 650 euros per month.',
+            why_it_matters: 'Answers the rent beat of the brief.',
+            url: 'https://example.com/madrid-rent',
+          },
+        ],
+        tool_calls_used: 2,
+        phase: 'research',
+      };
+      await store.createTurn(
+        makeCreateTurnInput({
+          sessionId,
+          turnId: 'task-state-turn-1',
+          new_threads: [
+            {
+              thread_id: MAIN_THREAD_ID,
+              parent: null,
+              agent_info: null,
+              tool_call_memo: undefined,
+              task_state: firstTaskState,
+            },
+          ],
+          task_states: [{ thread_id: MAIN_THREAD_ID, task_state: firstTaskState }],
+        }),
+      );
+
+      const first = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'task-state-turn-1' }));
+      expect(first.snapshot.threads[MAIN_THREAD_ID]?.task_state).toEqual(firstTaskState);
+
+      await finishTurn(store, 'task-state-turn-1');
+      const secondTaskState: TaskStateSnapshot = {
+        ...firstTaskState,
+        tool_calls_used: 5,
+        phase: 'final_answer',
+      };
+      await store.createTurn(
+        makeCreateTurnInput({
+          sessionId,
+          turnId: 'task-state-turn-2',
+          previousTurnId: 'task-state-turn-1',
+          firstTurnId: 'task-state-turn-1',
+          task_states: [{ thread_id: MAIN_THREAD_ID, task_state: secondTaskState }],
+        }),
+      );
+
+      const second = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'task-state-turn-2' }));
+      expect(second.snapshot.threads[MAIN_THREAD_ID]?.task_state).toEqual(secondTaskState);
     });
 
     it('merges concurrent chat approval grants instead of replacing existing grants', async () => {
@@ -2225,6 +2286,7 @@ export function runStoreContractSuite<
               parent: null,
               agent_info: null,
               tool_call_memo: undefined,
+              task_state: undefined,
             },
           ],
           capability_states: [{ thread_id: MAIN_THREAD_ID, capability_state: { 'tfy.plan': { step: 1 } } }],
@@ -2393,18 +2455,21 @@ export function runStoreContractSuite<
               parent: null,
               agent_info: null,
               tool_call_memo: undefined,
+              task_state: undefined,
             },
             {
               thread_id: 'child-a',
               parent: { thread_id: MAIN_THREAD_ID, tool_call_id: 'tc-a' },
               agent_info: { type: 'dynamic', name: 'child-a', input: 'task-a' },
               tool_call_memo: undefined,
+              task_state: undefined,
             },
             {
               thread_id: 'child-b',
               parent: { thread_id: MAIN_THREAD_ID, tool_call_id: 'tc-b' },
               agent_info: { type: 'dynamic', name: 'child-b', input: 'task-b' },
               tool_call_memo: undefined,
+              task_state: undefined,
             },
           ],
           capability_states: [
@@ -2574,6 +2639,7 @@ export function runStoreContractSuite<
             current_context_usage: null,
             completion: null,
             tool_call_memo: undefined,
+            task_state: undefined,
           }),
         () =>
           store.overwriteThreadContext({
@@ -2602,6 +2668,7 @@ export function runStoreContractSuite<
                 completion: null,
                 capability_state: null,
                 tool_call_memo: undefined,
+                task_state: undefined,
               },
             ],
           }),
@@ -3048,6 +3115,7 @@ export function runStoreContractSuite<
             completion: null,
             capability_state: null,
             tool_call_memo: undefined,
+            task_state: undefined,
           },
         ],
       });
@@ -3059,6 +3127,7 @@ export function runStoreContractSuite<
         current_context_usage: null,
         completion: null,
         tool_call_memo: undefined,
+        task_state: undefined,
       });
       let turn = await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' });
       expect(turn?.snapshot.threads['child']?.context).toHaveLength(1);
@@ -3117,6 +3186,7 @@ export function runStoreContractSuite<
         current_context_usage: null,
         completion: null,
         tool_call_memo: undefined,
+        task_state: undefined,
       });
 
       const loaded = await store.getTurn({
@@ -3187,6 +3257,7 @@ export function runStoreContractSuite<
               parent: null,
               agent_info: null,
               tool_call_memo: undefined,
+              task_state: undefined,
             },
           ],
           capability_states: [{ thread_id: MAIN_THREAD_ID, capability_state: { plan: { step: 1 } } }],

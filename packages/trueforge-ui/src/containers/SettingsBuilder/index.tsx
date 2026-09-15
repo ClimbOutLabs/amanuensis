@@ -7,7 +7,6 @@ import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
 import { cn } from '@/atoms/lib/cn.js';
 import { useCompactLayout } from '@/atoms/lib/CompactLayoutContext.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
-import { useOptionalPersonas } from '@/components/PersonaContext.js';
 import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
 import { Icon } from '@/icons/Icon.js';
 import { useOptionalCatalogServer, useOptionalRefreshServerCapabilities } from '@/server/ServerContext.js';
@@ -15,12 +14,13 @@ import { useShellMode, type SettingsSection } from '@/server/ShellModeContext.js
 
 // Section modules (and their list/catalog APIs) load only when that tab mounts.
 const ModelSettings = lazy(() => import('./ModelSettings.js'));
+// Personas live under Model roles (their model bindings sit alongside every other
+// model role — see docs/model-roles.mdx), not as a section of their own here.
 const ModelRoleSettings = lazy(() => import('./ModelRoleSettings.js'));
 const ConnectorSettings = lazy(() => import('./ConnectorSettings.js'));
 const MemorySettings = lazy(() => import('./MemorySettings.js'));
 const SkillSettings = lazy(() => import('./SkillSettings.js'));
 const SandboxSettings = lazy(() => import('./SandboxSettings.js'));
-const PersonaSettings = lazy(() => import('./PersonaSettings.js'));
 const PersonalizationSettings = lazy(() =>
   import('@/components/PersonalizationPanel.js').then(module => ({ default: module.PersonalizationPanel })),
 );
@@ -44,7 +44,6 @@ const TruefoundrySettingsBuilder = () => {
   const hasSkills = catalog?.skillCatalog != null;
   const hasSandbox = catalog?.sandboxCatalog != null;
   const hasPersonalization = useOptionalPersonalization() != null;
-  const hasPersonas = useOptionalPersonas() != null;
 
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
@@ -69,10 +68,7 @@ const TruefoundrySettingsBuilder = () => {
     if (!hasPersonalization && section === 'personalization') {
       setSettingsOpen(settingsOpen, 'models');
     }
-    if (!hasPersonas && section === 'personas') {
-      setSettingsOpen(settingsOpen, 'models');
-    }
-  }, [hasSkills, hasSandbox, hasPersonalization, hasPersonas, section, settingsOpen, setSettingsOpen]);
+  }, [hasSkills, hasSandbox, hasPersonalization, section, settingsOpen, setSettingsOpen]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -114,13 +110,8 @@ const TruefoundrySettingsBuilder = () => {
     if (hasPersonalization) {
       baseSections.push({ id: 'personalization', label: 'Personalization', icon: 'robot' });
     }
-    // Gated on the persona API: PersonaSettings throws without a PersonaProvider,
-    // and the section would be an empty shell without one.
-    if (hasPersonas) {
-      baseSections.push({ id: 'personas', label: 'Personas', icon: 'robot' });
-    }
     return baseSections;
-  }, [hasSkills, hasSandbox, hasPersonalization, hasPersonas]);
+  }, [hasSkills, hasSandbox, hasPersonalization]);
 
   if (!settingsOpen || !catalog) return null;
 
@@ -182,7 +173,6 @@ const TruefoundrySettingsBuilder = () => {
               {section === 'skills' && hasSkills ? <SkillSettings /> : null}
               {section === 'sandbox' && hasSandbox ? <SandboxSettings /> : null}
               {section === 'personalization' && hasPersonalization ? <PersonalizationSettings /> : null}
-              {section === 'personas' && hasPersonas ? <PersonaSettings /> : null}
             </Suspense>
           </div>
         </section>

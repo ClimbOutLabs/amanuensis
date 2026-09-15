@@ -154,6 +154,7 @@ function newThreadSnapshot(thread: NewThreadInit): AgentThreadSnapshot {
     current_context_usage: getEmptyCurrentContextUsage(),
     completion: null,
     tool_call_memo: thread.tool_call_memo === undefined ? undefined : deepCopy(thread.tool_call_memo),
+    task_state: thread.task_state === undefined ? undefined : deepCopy(thread.task_state),
   };
 }
 
@@ -178,6 +179,7 @@ function buildSnapshotFromDelta(input: {
   new_context_appends: TurnContextAppend[];
   capability_states: CreateTurnInput['capability_states'];
   tool_call_memos: CreateTurnInput['tool_call_memos'];
+  task_states: CreateTurnInput['task_states'];
 }): TurnSnapshot {
   const previousThreads = input.previousSnapshot?.threads ?? {};
 
@@ -216,6 +218,13 @@ function buildSnapshotFromDelta(input: {
       throw new SessionStoreInvariantError(`tool_call_memos references unknown thread ${memo.thread_id}`);
     }
     thread.tool_call_memo = memo.tool_call_memo === undefined ? undefined : deepCopy(memo.tool_call_memo);
+  }
+  for (const taskState of input.task_states) {
+    const thread = threads[taskState.thread_id];
+    if (thread === undefined) {
+      throw new SessionStoreInvariantError(`task_states references unknown thread ${taskState.thread_id}`);
+    }
+    thread.task_state = taskState.task_state === undefined ? undefined : deepCopy(taskState.task_state);
   }
 
   return {
@@ -754,6 +763,7 @@ export class InMemorySessionStore<
       new_context_appends: input.new_context_appends,
       capability_states: input.capability_states,
       tool_call_memos: input.tool_call_memos,
+      task_states: input.task_states,
     });
 
     const turnRecord: TurnRecord<TTurnCustom> = {
@@ -1073,6 +1083,9 @@ export class InMemorySessionStore<
     }
     if (input.tool_call_memo !== undefined) {
       thread.tool_call_memo = deepCopy(input.tool_call_memo);
+    }
+    if (input.task_state !== undefined) {
+      thread.task_state = deepCopy(input.task_state);
     }
     turn.updated_at = new Date();
     return;

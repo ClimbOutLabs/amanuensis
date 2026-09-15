@@ -122,6 +122,7 @@ describe('provider stream progress deadlines', () => {
       threadId: 'main',
       title: 'Synthetic stalled tool stream',
       toolCallMemo: undefined,
+      taskState: undefined,
       isRequestContinuation: undefined,
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),

@@ -262,6 +262,8 @@ export class OpenToolCallCloser implements PreSendContextProcessor {
       output: canonicalResults.map(result => result.event),
       current_context_usage: currentContextUsage,
       tool_call_memo: undefined,
+      // Closes open tool calls only; never touches task state.
+      task_state: undefined,
     };
   }
 }

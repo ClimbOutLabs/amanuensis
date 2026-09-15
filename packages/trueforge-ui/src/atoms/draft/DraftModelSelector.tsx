@@ -13,12 +13,17 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 import { BottomSheet } from '../primitives/BottomSheet.js';
 import { useDraftCatalog } from './DraftCatalogProvider.js';
 import { displayModelLabel, DraftModelCatalogPanel, ProviderMark } from './DraftModelCatalogPanel.js';
+import { DraftModelMenuPortal, useFloatingMenuPosition } from './DraftModelMenuPortal.js';
 import { modelPatchWithReasoningEffort } from './reasoningEffort.js';
 
 export type DraftModelSelectorProps = {
   disabled?: boolean;
   isRunning?: boolean;
 };
+
+// Matches the panel's previous fixed width so the composer's compact trigger
+// still opens a comfortably wide menu.
+const MENU_WIDTH = 288; // 18rem
 
 export function DraftModelSelector({ disabled, isRunning }: DraftModelSelectorProps) {
   const { models, loading, ensureLoaded } = useDraftCatalog();
@@ -29,11 +34,25 @@ export function DraftModelSelector({ disabled, isRunning }: DraftModelSelectorPr
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const isMobile = useIsMobile();
   const compactLayout = useCompactLayout();
+  const useSheet = isMobile || compactLayout;
   const showConfigureSettingsCta = !loading && models.length === 0 && catalog != null;
   const seededDefaultModelRef = useRef<string | null>(null);
+
+  // Desktop only: float the menu in a portal so it escapes whatever container the
+  // trigger sits in (a settings card clips an absolutely-positioned menu; a portal
+  // does not), right-aligned to match the trigger's usual bottom-right placement.
+  const menuPos = useFloatingMenuPosition({
+    open: open && !useSheet,
+    anchorRef: buttonRef,
+    align: 'end',
+    width: MENU_WIDTH,
+    minWidth: MENU_WIDTH,
+  });
 
   useEffect(() => {
     ensureLoaded();
@@ -73,9 +92,11 @@ export function DraftModelSelector({ disabled, isRunning }: DraftModelSelectorPr
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target;
+      if (!(target instanceof Node)) return;
+      if (containerRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -113,6 +134,7 @@ export function DraftModelSelector({ disabled, isRunning }: DraftModelSelectorPr
   return (
     <div ref={containerRef} className="aui-composer-model-selector relative min-w-0">
       <button
+        ref={buttonRef}
         type="button"
         disabled={disabled || isRunning}
         aria-haspopup="listbox"
@@ -134,16 +156,16 @@ export function DraftModelSelector({ disabled, isRunning }: DraftModelSelectorPr
         <Icon name="chevron-down" className="size-3.5 shrink-0 opacity-60" />
       </button>
 
-      {open ? (
-        isMobile || compactLayout ? (
-          <BottomSheet open onOpenChange={setOpen} aria-label="Select model">
-            {content}
-          </BottomSheet>
-        ) : (
-          <div className="aui-popup-enter bg-card-bg text-text-primary absolute right-0 bottom-full z-50 mb-2 flex max-h-[22rem] w-[18rem] flex-col overflow-hidden rounded-lg border border-border shadow-lg">
-            {content}
-          </div>
-        )
+      {useSheet && open ? (
+        <BottomSheet open onOpenChange={setOpen} aria-label="Select model">
+          {content}
+        </BottomSheet>
+      ) : null}
+
+      {!useSheet && open && menuPos ? (
+        <DraftModelMenuPortal anchorRef={buttonRef} menuPos={menuPos} menuRef={menuRef}>
+          {content}
+        </DraftModelMenuPortal>
       ) : null}
     </div>
   );

@@ -203,24 +203,20 @@ describe('TruefoundrySettingsBuilder', () => {
     expect(screen.queryByText('Model role settings content')).not.toBeInTheDocument();
   });
 
-  it('shows personas as a native Settings section when the host provides a persona API', async () => {
+  it('has no Personas section of its own: personas live under Model roles, not in the nav', async () => {
     const { unmount } = render(<TestShell server={createServer()} />);
     await openSettings();
 
-    // No persona API wired: the section stays out of the nav entirely, since
-    // PersonaSettings requires a PersonaProvider.
     expect(screen.queryByRole('button', { name: 'Personas' })).not.toBeInTheDocument();
     unmount();
 
+    // Even with a persona API wired up, Settings still has no standalone Personas
+    // tab or content here — PersonaSettings is only ever reached via Model roles.
     render(<TestShell server={createServer()} personas />);
     await openSettings();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Personas' }));
-
-    await waitFor(() => {
-      expect(screen.getByText('Persona settings content')).toBeInTheDocument();
-    });
-    expect(screen.getByRole('button', { name: 'Personas' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('button', { name: 'Personas' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Persona settings content')).not.toBeInTheDocument();
   });
 
   it('shows personalization as a native Settings section when the host provides it', async () => {

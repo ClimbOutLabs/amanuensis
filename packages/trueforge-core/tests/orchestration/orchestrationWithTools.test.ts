@@ -162,6 +162,7 @@ describe('orchestration: dynamic sub-agent', () => {
       capabilities: [dynamicSubAgents({ sandboxAvailable: false, tracing: NOOP_AGENT_TRACING })],
       capabilityState: undefined,
       toolCallMemo: undefined,
+      taskState: undefined,
       isRequestContinuation: undefined,
       // Default
       tracing: NOOP_AGENT_TRACING,
@@ -206,6 +207,7 @@ describe('orchestration: dynamic sub-agent', () => {
         capabilities: undefined,
         capabilityState: undefined,
         toolCallMemo: undefined,
+        taskState: undefined,
         isRequestContinuation: undefined,
         tracing: NOOP_AGENT_TRACING,
         logger: makeSilentLogger(),

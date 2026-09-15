@@ -49,3 +49,29 @@ describe('AgentSpec RuntimeConfig defaults', () => {
     expect(spec.config.generative_ui.enabled).toBe(false);
   });
 });
+
+describe('AgentSpec task_state config', () => {
+  it('accepts a budget with budgeted tools', () => {
+    const spec = AgentSpecSchema.parse({
+      model: { name: 'provider/model' },
+      config: { task_state: { tool_call_budget: 10, budgeted_tools: ['tavily_*'] } },
+    });
+    expect(spec.config.task_state.tool_call_budget).toBe(10);
+    expect(spec.config.task_state.budgeted_tools).toEqual(['tavily_*']);
+  });
+
+  it('rejects a budget without budgeted tools', () => {
+    expect(() =>
+      AgentSpecSchema.parse({
+        model: { name: 'provider/model' },
+        config: { task_state: { tool_call_budget: 10 } },
+      }),
+    ).toThrow('`budgeted_tools` must list at least one tool when `tool_call_budget` is set.');
+  });
+
+  it('leaves task_state disabled by default', () => {
+    const spec = AgentSpecSchema.parse({ model: { name: 'provider/model' } });
+    expect(spec.config.task_state.tool_call_budget).toBeUndefined();
+    expect(spec.config.task_state.budgeted_tools).toBeUndefined();
+  });
+});

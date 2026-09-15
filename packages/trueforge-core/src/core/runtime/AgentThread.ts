@@ -163,6 +163,20 @@ import { DeferredTool } from './DeferredTool';
 import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThreadMetrics } from './metrics';
 import { getClosableOpenToolCalls, OpenToolCallCloser } from './OpenToolCallCloser';
 import {
+  admitToolCallsForBudget,
+  cloneTaskState,
+  createTaskState,
+  matchesBudgetedTool,
+  noteExecutedToolCalls,
+  recordTaskFinding,
+  renderTaskStateBlock,
+  syncTaskPhase,
+  taskStateFromSnapshot,
+  toTaskStateSnapshot,
+  type TaskState,
+} from './taskState';
+import { TaskStateToolSet } from './TaskStateToolSet';
+import {
   buildIngestedDocumentTextPart,
   buildIngestionCancelledNote,
   buildIngestionUnavailableNote,
@@ -1067,6 +1081,24 @@ export class AgentThread {
   // resolved. Keep orchestration limits across those continuations; reset only
   // when a genuinely new user message starts a new request.
   private toolCallMemo = createToolCallMemoState();
+  /**
+   * Host-owned task-state scratchpad for this user request: structured
+   * findings plus tool-call budget usage and phase. Lives outside
+   * `this.context` so context compaction can never erase it; re-injected
+   * fresh as a `<task_state>` block before every model call. Only meaningful
+   * when the agent definition sets `toolCallBudget` — otherwise it stays
+   * empty and no block is injected. Advanced only after the tool-results
+   * context append is yielded (durable-state ordering); the
+   * TaskStateToolSet stages findings separately and never holds this
+   * reference, so reassignment here is safe.
+   */
+  private taskState: TaskState = createTaskState();
+  /**
+   * The staged-finding delegate, set when the agent opts into a tool-call
+   * budget. Owned here so stepToolResponse can drain staged findings after
+   * the tool-results append is yielded.
+   */
+  private taskStateToolSet: TaskStateToolSet | undefined;
   /** Mirrored capability KV — source for toSnapshot().capability_state. */
   private capabilityState: CapabilityState = {};
   private readonly capabilityStateKeys: ReadonlySet<string>;
@@ -1088,6 +1120,19 @@ export class AgentThread {
     this.toolDispatchMaxConcurrency = input.toolDispatchMaxConcurrency;
     this.toolCallTimeoutMs = input.toolCallTimeoutMs;
     this.toolCallMemo = createToolCallMemoState(input.toolCallMemo);
+    this.toolCallMemo.clarificationAnswered = requestHasAnsweredClarification(this.context);
+    // A fresh AgentThread is built per turn AND per approval/tool-response
+    // continuation of the same turn (rebuilt from the preceding snapshot), so
+    // the scratchpad must hydrate from the snapshot on continuations — but a
+    // genuinely new user message always starts empty, never inheriting the
+    // previous request's findings or budget usage.
+    this.taskState = input.isRequestContinuation ? taskStateFromSnapshot(input.taskState) : createTaskState();
+    // Host-owned phase sync at construction: a continuation hydrating a
+    // legacy (phase-less) snapshot, or a zero budget, must enter the
+    // final-answer phase before the first model call. Idempotent.
+    if (input.definition.toolCallBudget !== undefined) {
+      syncTaskPhase(this.taskState, input.definition.toolCallBudget);
+    }
     this.toolCallMemo.clarificationAnswered = requestHasAnsweredClarification(this.context);
     this.callSignatureCountsThisTurn = input.isRequestContinuation
       ? new Map(this.toolCallMemo.callSignatures)
@@ -1435,8 +1480,17 @@ export class AgentThread {
     completion?: SubAgentCompletionMarker | undefined;
     toolCallMemo?: ToolCallMemoState | undefined;
     groundingNudge?: boolean | undefined;
+    /**
+     * Explicit next task state to persist with this append. When omitted, the
+     * live state is snapshotted — but only when the agent opted into a
+     * tool-call budget; otherwise the event carries undefined and the store
+     * leaves the persisted task state untouched. Callers that computed a
+     * next state (tool-response step) pass it here and advance the live
+     * state only after this append is yielded.
+     */
+    taskState?: TaskState | undefined;
   }): Generator<AgentThreadAppendContext, void, unknown> {
-    const { context, output, currentContextUsage, usage, completion, toolCallMemo, groundingNudge } = opts;
+    const { context, output, currentContextUsage, usage, completion, toolCallMemo, groundingNudge, taskState } = opts;
 
     const newCurrentContextUsage =
       currentContextUsage ??
@@ -1450,6 +1504,8 @@ export class AgentThread {
       current_context_usage: newCurrentContextUsage,
       ...(completion && { completion }),
       tool_call_memo: toolCallMemo === undefined ? undefined : toToolCallMemoSnapshot(toolCallMemo),
+      task_state:
+        this.definition.toolCallBudget === undefined ? undefined : toTaskStateSnapshot(taskState ?? this.taskState),
       ...(groundingNudge && { grounding_nudge: true }),
     };
 
@@ -1583,6 +1639,7 @@ export class AgentThread {
       completion: this.preComputedCompletion ?? null,
       capability_state,
       tool_call_memo: toToolCallMemoSnapshot(this.toolCallMemo),
+      task_state: toTaskStateSnapshot(this.taskState),
     };
   }
 
@@ -1627,6 +1684,20 @@ export class AgentThread {
 
     for (const processor of this.preEphemeralLLMContextProcessors) {
       messages = processor.processPreLLMEphemeral(messages) ?? messages;
+    }
+
+    // Host-owned task state: re-injected fresh on EVERY model call, after
+    // transcript assembly and ephemeral processing. This message is never
+    // persisted into `this.context`, so context compaction — which only ever
+    // rewrites transcript messages — cannot erase the findings the model has
+    // banked. Appended last so the provider-prefix cache over the instruction
+    // and transcript is disturbed as little as possible.
+    const taskStateBlock = renderTaskStateBlock({
+      state: this.taskState,
+      budget: this.definition.toolCallBudget,
+    });
+    if (taskStateBlock !== null) {
+      messages.push({ role: 'system', content: taskStateBlock });
     }
 
     // modelParams may include provider extensions (e.g. reasoning_effort) beyond the SDK's
@@ -1836,6 +1907,19 @@ export class AgentThread {
     authRequirementInfo: MCPAuthRequired[];
   }> {
     const tfyManagedServers: IToolSet[] = [...this.systemToolSets];
+    // Host-owned task-state scratchpad: only for agents that opt into a
+    // tool-call budget. The tool stages findings; AgentThread folds them into
+    // the next task state only after the tool-results append is yielded
+    // (durable-state ordering). The banked-count closure always reads the
+    // current live state, so later state advances never stale it.
+    if (this.definition.toolCallBudget !== undefined) {
+      const taskStateToolSet = new TaskStateToolSet({
+        tracing: this.tracing,
+        bankedCount: () => this.taskState.findings.length,
+      });
+      this.taskStateToolSet = taskStateToolSet;
+      tfyManagedServers.push(taskStateToolSet);
+    }
     if (this.sandbox) {
       tfyManagedServers.push(this.sandbox);
     }
@@ -2375,6 +2459,49 @@ export class AgentThread {
     return { outcome: 'continue', modelMessageEventId, retryModelMessageEventId: undefined };
   }
 
+  /**
+   * Host-owned pre-dispatch admission for the tool-call budget. When the
+   * model's batch emits more budgeted calls than remain, the excess is
+   * marked `pre_dispatch_failure` so each resolves as a never_ran tool
+   * result carrying a budget-exhausted message — deterministic, per-batch,
+   * before any provider is reached. Only configured budgeted research tools
+   * are subject to admission; control, approval, host, and unrelated tools
+   * are always admitted. `record_finding` is always admitted (budget-exempt
+   * bookkeeping). Returns the input array unchanged when the feature is off
+   * or nothing is over budget.
+   */
+  private applyToolCallBudgetAdmission(calls: InternalEnrichedToolCall[]): InternalEnrichedToolCall[] {
+    const budget = this.definition.toolCallBudget;
+    if (budget === undefined) {
+      return calls;
+    }
+    const admittedIds = admitToolCallsForBudget({
+      state: this.taskState,
+      budget,
+      budgetedTools: this.definition.budgetedTools ?? [],
+      calls: calls.map(call => ({ id: call.id, originalToolName: call.tool_info.original_tool_name })),
+    });
+    if (admittedIds.size === calls.length) {
+      return calls;
+    }
+    return calls.map(call =>
+      admittedIds.has(call.id)
+        ? call
+        : {
+            ...call,
+            tool_info: {
+              ...call.tool_info,
+              pre_dispatch_failure: {
+                kind: 'pre_dispatch_failed' as const,
+                message:
+                  `Research tool-call budget exhausted (${String(this.taskState.tool_calls_used)} of ${String(budget)} used). ` +
+                  'This call was not executed. Bank remaining findings with record_finding and write the final answer.',
+              },
+            },
+          },
+    );
+  }
+
   private async *stepToolResponse(
     toolMapping: Map<string, MappedMCPTool>,
     unavailableToolsSeen: Set<string>,
@@ -2466,9 +2593,12 @@ export class AgentThread {
     // and turn every durably started side effect into one never_ran result.
     // This is also the final admission seam for host grants that may be added
     // by integration tranches: any such grant must be refreshed here, before
-    // executeToolCalls can reach a provider.
+    // executeToolCalls can reach a provider. The tool-call budget admission
+    // runs first, so an over-budget batch is capped deterministically before
+    // any provider is reached.
+    const budgetAdmittedCalls = this.applyToolCallBudgetAdmission(executionCalls);
     const callsForDispatch = signal?.aborted
-      ? executionCalls.map(call =>
+      ? budgetAdmittedCalls.map(call =>
           preparedSideEffectCalls.callIds.has(call.id)
             ? {
                 ...call,
@@ -2482,11 +2612,46 @@ export class AgentThread {
               }
             : call,
         )
-      : executionCalls;
+      : budgetAdmittedCalls;
     const assistantForDispatch: InternalEnrichedAssistantMessage = {
       ...assistantForExecution,
       tool_calls: callsForDispatch,
     };
+
+    // Host-owned budget reservation: admitted budgeted calls are charged
+    // against the budget BEFORE any provider is reached, and the reservation
+    // is persisted via a context append before dispatch. A crash between
+    // admission and dispatch therefore fails closed (the slots stay spent)
+    // instead of silently granting extra calls on recovery. Calls that end
+    // up not reaching a provider (memoized, never_ran, denied,
+    // policy_blocked) are refunded after results return. Non-budgeted tools
+    // and `record_finding` are never reserved. The append carries no context
+    // messages — the stores patch the task-state checkpoint on empty appends.
+    // Live state advances only after the append is yielded (durable-state
+    // ordering: yield event, then mutate).
+    const taskBudget = this.definition.toolCallBudget;
+    const budgetedTools = this.definition.budgetedTools ?? [];
+    let reservedBudgetCalls = 0;
+    if (taskBudget !== undefined) {
+      reservedBudgetCalls = callsForDispatch.filter(
+        call =>
+          call.tool_info.pre_dispatch_failure === undefined &&
+          matchesBudgetedTool(call.tool_info.original_tool_name, budgetedTools),
+      ).length;
+      if (reservedBudgetCalls > 0) {
+        const reservedState = cloneTaskState(this.taskState);
+        reservedState.tool_calls_used += reservedBudgetCalls;
+        syncTaskPhase(reservedState, taskBudget);
+        yield* this.appendToContext({
+          context: [],
+          output: [],
+          currentContextUsage: undefined,
+          usage: undefined,
+          taskState: reservedState,
+        });
+        this.taskState = reservedState;
+      }
+    }
 
     const unavailableToolNames = openCalls.map(call => call.function.name).filter(name => !toolMapping.has(name));
     const repeatedUnavailableToolNames = [
@@ -2531,6 +2696,48 @@ export class AgentThread {
     }
     this.metrics.total_tool_calls += toolCallResults.length;
     this.metrics.total_sub_agents += createThreadEvents.length;
+    // Host-owned research-budget accounting. The next task state is built as a
+    // clone — the pre-dispatch reservation refunded, staged findings folded
+    // in, dispatched calls charged, phase re-synced — and persisted via the
+    // tool-results append below; the live state advances only after that
+    // append is yielded (durable-state ordering: yield event, then mutate).
+    // Only calls that actually dispatched consume budget: memoized replays
+    // cost nothing and teach nothing new, and never-ran/denied/policy-blocked
+    // calls never reached a provider. Only configured budgeted tools are
+    // charged — control, approval, host, and unrelated tools are free — and
+    // `record_finding` itself is exempt (see noteExecutedToolCalls): it is
+    // local bookkeeping, and charging it would punish the model for using
+    // the scratchpad.
+    let nextTaskState: TaskState | undefined;
+    if (taskBudget !== undefined) {
+      nextTaskState = cloneTaskState(this.taskState);
+      // Refund the pre-dispatch reservation; the charge below counts only
+      // what actually reached a provider.
+      nextTaskState.tool_calls_used -= reservedBudgetCalls;
+      const stagedFindings = this.taskStateToolSet?.drainPendingFindings() ?? [];
+      for (const finding of stagedFindings) {
+        recordTaskFinding(nextTaskState, finding);
+      }
+      const executedOriginalNames: string[] = [];
+      for (const result of toolCallResults) {
+        if (result.memoized) {
+          continue;
+        }
+        if (
+          result.disposition === 'never_ran' ||
+          result.disposition === 'denied' ||
+          result.disposition === 'policy_blocked'
+        ) {
+          continue;
+        }
+        const call = openCalls.find(candidate => candidate.id === result.message.tool_call_id);
+        if (call !== undefined) {
+          executedOriginalNames.push(call.tool_info.original_tool_name);
+        }
+      }
+      noteExecutedToolCalls(nextTaskState, executedOriginalNames, budgetedTools);
+      syncTaskPhase(nextTaskState, taskBudget);
+    }
 
     if (initializationInfo.length > 0) {
       yield buildMCPInitializeEvent(initializationInfo, this.threadId);
@@ -2838,6 +3045,7 @@ export class AgentThread {
       currentContextUsage: undefined,
       usage: undefined,
       toolCallMemo: nextToolCallMemo,
+      taskState: nextTaskState,
     });
     for (const [index, result] of toolCallResults.entries()) {
       const candidate = result.verificationReceiptCandidate;
@@ -2853,6 +3061,12 @@ export class AgentThread {
     // The memo is durable only after the context-append event above has been
     // accepted by the consumer, just like the context itself.
     this.toolCallMemo = nextToolCallMemo;
+    // Same for task state: the next state (staged findings folded in, budget
+    // charged, phase re-synced) was persisted by the append above; only now
+    // does the live state advance to it.
+    if (nextTaskState !== undefined) {
+      this.taskState = nextTaskState;
+    }
     if (nextToolCallMemo.consecutiveEmptyInspectionBatches >= EMPTY_INSPECTION_STOP_AT) {
       return yield* this.recoverFromLoopOrExit({
         recoveryNote:
@@ -3115,13 +3329,37 @@ export class AgentThread {
             }
             this.metrics.iterations++;
 
-            const requestTools = this.toolCallMemo.clarificationAnswered
+            // Host-owned tool-call budget: once the turn's research budget is
+            // spent, the host moves the task into the final-answer phase and
+            // withholds the configured budgeted research tools from the model
+            // request — the model cannot decide to keep researching.
+            // `record_finding` stays available so the model can bank its last
+            // facts before answering, and control, approval, host, and
+            // unrelated tools stay available throughout. Phase transitions
+            // happen only in the constructor (hydration), at pre-dispatch
+            // reservation, and after tool-result charging, so reading the
+            // phase here is exact. This is the structural answer to
+            // non-convergent research loops: stopping is host-owned, not
+            // model-owned.
+            const taskBudget = this.definition.toolCallBudget;
+            const finalAnswerPhase = taskBudget !== undefined && this.taskState.phase === 'final_answer';
+            const budgetedTools = this.definition.budgetedTools ?? [];
+            const requestTools = finalAnswerPhase
               ? tools.filter(
                   tool =>
                     tool.type !== 'function' ||
-                    toolMapping.get(tool.function.name)?.originalToolName !== ASK_USER_QUESTION_TOOL_NAME,
+                    !matchesBudgetedTool(
+                      toolMapping.get(tool.function.name)?.originalToolName ?? tool.function.name,
+                      budgetedTools,
+                    ),
                 )
-              : tools;
+              : this.toolCallMemo.clarificationAnswered
+                ? tools.filter(
+                    tool =>
+                      tool.type !== 'function' ||
+                      toolMapping.get(tool.function.name)?.originalToolName !== ASK_USER_QUESTION_TOOL_NAME,
+                  )
+                : tools;
             const llmResult = yield* this.stepLLMCall(requestTools, toolMapping, signal, {
               emptyTerminalFallback: undefined,
               retryModelMessageEventId: pendingRetryModelMessageEventId,

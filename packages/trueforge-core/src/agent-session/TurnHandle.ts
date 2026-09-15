@@ -627,6 +627,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
           current_context_usage: event.current_context_usage ?? null,
           completion: event.completion ?? null,
           tool_call_memo: event.tool_call_memo,
+          task_state: event.task_state,
         });
         if (event.output.length > 0) {
           await this.store.appendToEvents({
@@ -666,6 +667,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
               completion: null,
               capability_state: null,
               tool_call_memo: undefined,
+              task_state: undefined,
             },
           ],
           events: [event],

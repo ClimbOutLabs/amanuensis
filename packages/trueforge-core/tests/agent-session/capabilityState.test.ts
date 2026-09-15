@@ -279,6 +279,7 @@ describe('capability_state (tfy.plan fixture)', () => {
         modelClient: makeMockILLM({ create: jest.fn().mockImplementation(() => emptyLlmStream()) }),
       },
       toolCallMemo: undefined,
+      taskState: undefined,
       isRequestContinuation: undefined,
       threadId: MAIN_THREAD_ID,
       title: 'main',

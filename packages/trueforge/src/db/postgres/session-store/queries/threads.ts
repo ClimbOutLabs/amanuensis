@@ -84,6 +84,7 @@ export async function addThreadsInTransaction(db: DbOrTrx, input: AddThreadsInpu
       parent: thread.parent ?? null,
       completion: thread.completion ?? null,
       tool_call_memo: thread.tool_call_memo,
+      task_state: thread.task_state,
     };
     turnThreadPlans.push({
       thread_id: thread.thread_id,
@@ -205,6 +206,7 @@ export async function removeThreads(db: Kysely<Database>, input: RemoveThreadsIn
 function checkpointPatchExpr(
   completion: SubAgentCompletionMarker | null,
   tool_call_memo: AppendToThreadContextInput['tool_call_memo'],
+  task_state: AppendToThreadContextInput['task_state'],
 ): RawBuilder<TurnThreadCheckpoint> {
   let checkpoint: RawBuilder<TurnThreadCheckpoint> =
     completion === null
@@ -212,6 +214,9 @@ function checkpointPatchExpr(
       : jsonbSet<TurnThreadCheckpoint>(sql`checkpoint`, sql`'{completion}'`, json(completion));
   if (tool_call_memo !== undefined) {
     checkpoint = jsonbSet<TurnThreadCheckpoint>(checkpoint, sql`'{tool_call_memo}'`, json(tool_call_memo));
+  }
+  if (task_state !== undefined) {
+    checkpoint = jsonbSet<TurnThreadCheckpoint>(checkpoint, sql`'{task_state}'`, json(task_state));
   }
   return checkpoint;
 }
@@ -234,6 +239,7 @@ async function fencedTurnThreadContextUpdate(
     current_context_usage: CurrentContextUsage | null;
     completion: SubAgentCompletionMarker | null;
     tool_call_memo: AppendToThreadContextInput['tool_call_memo'];
+    task_state: AppendToThreadContextInput['task_state'];
     /** When replace_array, usage is set unconditionally (overwrite contract). */
     usage_unconditional: CurrentContextUsage | null;
   },
@@ -248,7 +254,7 @@ async function fencedTurnThreadContextUpdate(
       .set({
         context_ids: replace_array ? sql<number[]>`'{}'::bigint[]` : sql<number[]>`context_ids`,
         current_context_usage: args.usage_unconditional ?? usageSetExpr(args.current_context_usage),
-        checkpoint: checkpointPatchExpr(args.completion, args.tool_call_memo),
+        checkpoint: checkpointPatchExpr(args.completion, args.tool_call_memo, args.task_state),
         updated_at: sql`now()`,
       })
       .where('session_id', '=', keys.session_id)
@@ -299,7 +305,7 @@ async function fencedTurnThreadContextUpdate(
     .set({
       context_ids: arrayExpr,
       current_context_usage: args.usage_unconditional ?? usageSetExpr(args.current_context_usage),
-      checkpoint: checkpointPatchExpr(args.completion, args.tool_call_memo),
+      checkpoint: checkpointPatchExpr(args.completion, args.tool_call_memo, args.task_state),
       updated_at: sql`now()`,
     })
     .where('session_id', '=', keys.session_id)
@@ -330,6 +336,7 @@ export async function appendToThreadContext(db: Kysely<Database>, input: AppendT
     current_context_usage: input.current_context_usage,
     completion: input.completion,
     tool_call_memo: input.tool_call_memo,
+    task_state: input.task_state,
     usage_unconditional: null,
   });
 }
@@ -350,6 +357,8 @@ export async function overwriteThreadContext(db: Kysely<Database>, input: Overwr
     current_context_usage: null,
     completion: null,
     tool_call_memo: undefined,
+    // Overwrite replaces context only; task state is untouched.
+    task_state: undefined,
     usage_unconditional: input.event.current_context_usage,
   });
 }

@@ -373,6 +373,9 @@ export class TurnResourceResolver<
         // Sub-agents should return free-form summaries to the parent, not the user-facing structured response.
         responseFormat: agentInfo ? undefined : spec.response_format,
         iterationLimit: spec.config.iteration_limit,
+        // Opt-in only: undefined leaves task state fully inert.
+        toolCallBudget: spec.config.task_state.tool_call_budget,
+        budgetedTools: spec.config.task_state.budgeted_tools,
         toolSets,
       },
       compactionModel,
