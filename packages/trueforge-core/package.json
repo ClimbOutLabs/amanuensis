@@ -107,23 +107,23 @@
     "@ai-sdk/openai-compatible": "^3.0.39",
     "@ai-sdk/provider": "^4.0.8",
     "@ai-sdk/provider-utils": "^5.0.32",
-    "@daytona/sdk": "^0.204.1",
+    "@daytona/sdk": "^0.211.2",
     "@hono/zod-openapi": "^1.6.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@nats-io/nats-core": "3.0.2",
+    "@nats-io/nats-core": "3.4.0",
     "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/core": "^2.10.0",
+    "@opentelemetry/core": "^2.11.0",
     "ai": "^7.0.82",
     "bash-parser": "^0.5.0",
     "dedent": "^1.7.2",
     "diff": "^9.0.0",
     "diff-match-patch": "^1.0.5",
-    "docx": "9.5.1",
+    "docx": "9.7.1",
     "openai": "^7.5.0",
     "ulid": "^3.0.2",
     "winston": "^3.19.0",
     "ws": "^8.21.3",
-    "zod": "^4.4.3"
+    "zod": "^4.6.2"
   },
   "peerDependencies": {
     "redis": "^5.10.0"
