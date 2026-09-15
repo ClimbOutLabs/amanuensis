@@ -39,13 +39,15 @@ Capabilities are configurable. A fresh checkout does not include a model, MCP cr
 - Docker with Compose for the hosted topology or smoke test
 - A Bash-compatible shell; on Windows, use WSL or Git Bash because root development scripts use POSIX environment-variable assignments
 
-From an existing private-repository checkout:
+From a fresh checkout of this repository:
 
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
 cp packages/trueforge/.env.example packages/trueforge/.env
 ```
+
+New to this project? [`docs/quickstart.mdx`](docs/quickstart.mdx) walks through installing with Docker Compose (no Node.js or pnpm needed), connecting a first model — a hosted API key or a fully local Ollama model — and confirming a chat works, in more detail than the summary below.
 
 ## Quick start
 
@@ -55,7 +57,7 @@ For local development with one server process and SQLite:
 pnpm standalone:dev
 ```
 
-Open `http://localhost:3000`. In a source development checkout, Vite serves the UI on port 3000 and proxies API requests to the server on port 8790; the development server does not serve an unbuilt UI from port 8790. Configure a model under **Settings → Models** before starting a chat. Connectors, skills, a sandbox, and memory are optional and configured separately.
+Open `http://localhost:3000`. In a source development checkout, Vite serves the UI on port 3000 and proxies API requests to the server on port 8790; the development server does not serve an unbuilt UI from port 8790. Configure a model under **Settings → Models** before starting a chat — see [`docs/quickstart.mdx`](docs/quickstart.mdx#connect-a-model) for how to connect a hosted API key or a local Ollama model. Connectors, skills, a sandbox, and memory are optional and configured separately.
 
 Standalone mode stores SQLite data in the operating system's application-data directory by default. Set `SQLITE_PATH` to use another location; see [`packages/trueforge/.env.example`](packages/trueforge/.env.example) for configuration and defaults.
 

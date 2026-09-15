@@ -36,6 +36,7 @@ Resolution vocabulary:
 | --------------------------------------------- | ----------------------------------------------------------- |
 | .github/workflows/ci.yml                      | Runs on the aman-wsl self-hosted runner, not hosted runners |
 | .github/workflows/pr-agent.yml (ours only)    | Local PR review via a self-hosted PR-Agent                        |
+| docker-compose.yml                            | `server` service adds `extra_hosts: host.docker.internal:host-gateway` so a host-run custom model provider (e.g. Ollama) is reachable from the container on Linux Docker Engine, not just Docker Desktop |
 | scripts/generate-sdk.sh                       | Hardened backup/restore + version pinning around Fern       |
 | scripts/check-no-private-data.mjs (ours only) | Private-data scan                                           |
 
@@ -70,9 +71,10 @@ Memory-provider exclusion on the new upstream "available servers" surface: `pack
 
 ## Product docs (resolution: ours)
 
-| Path      | Why                                                                                |
-| --------- | ---------------------------------------------------------------------------------- |
-| README.md | Aman product README and architecture; upstream's README describes TrueForge itself |
+| Path                | Why                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| README.md           | Aman product README and architecture; upstream's README describes TrueForge itself         |
+| docs/quickstart.mdx | Rewritten for a from-scratch Amanuensis install (this repo's clone URL, no published `npx` package, prerequisites, model connection including Ollama, troubleshooting); upstream's version documents installing upstream TrueForge itself, including its own published `npx`/Helm/Railway artifacts |
 
 Compaction triggers (#400): resolved to upstream's `trigger: { type: 'input_tokens', value }` shape.
 `builtinsFromSpec.ts` already reads `config.context_management.compaction.trigger?.value`; the fork's

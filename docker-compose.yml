@@ -70,6 +70,12 @@ services:
       # A single-process deployment can set STANDALONE=true and drop redis.
       STANDALONE: 'false'
       REDIS_URL: redis://redis:6379
+    # Lets a custom model provider inside the container reach a model server
+    # running on the host (e.g. Ollama at http://host.docker.internal:11434/v1).
+    # host-gateway is the Docker Engine special value for the host's own IP;
+    # it resolves the same way on Linux, macOS, and Windows hosts.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     # Secrets and Postgres credentials (POSTGRES_USER, …).
     # `environment` above overrides any colliding keys from this file.
     env_file:

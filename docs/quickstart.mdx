@@ -1,52 +1,138 @@
 ---
 title: 'Quickstart'
 sidebarTitle: 'Quickstart'
-description: 'Run TrueForge, connect a model and tools, and build your first reusable agent — step by step.'
+description: 'Install Amanuensis from a fresh clone, connect a model, and build your first reusable agent — step by step.'
 ---
 
-## Run TrueForge
+## What this is
 
-TrueForge runs in [two modes](/introduction#two-ways-to-run-it): **local mode** — a single process on your machine, like a personal productivity tool — and **hosted mode** — a shared deployment for your team, with Postgres for storage and Redis for cross-replica peering. The agent features are identical in both.
+Amanuensis (Aman) is a private, local-first AI workbench: a browser chat interface backed by your own choice of model, with optional tools (MCP connectors), reusable skills, sandboxed code execution, and memory. Nothing about a chat leaves your machine except the calls you explicitly configure — to a model provider, a connector, or a memory bank you point it at. This page gets a fresh checkout running end to end: install the prerequisites, start the app, connect one model, and send a first message.
+
+The app runs in two modes: **standalone** — one process on your own machine, SQLite storage, no login screen, meant for personal use — and **hosted** — Postgres and Redis, meant for a small team, gated by login once you configure it. This guide uses **Docker Compose**, which runs the hosted topology locally with one command and is the recommended path for a first install. See [Deployment Security](/deployment-security) before anyone besides you can reach the app.
+
+## Prerequisites
+
+| Requirement | Version | Get it |
+| --- | --- | --- |
+| Docker Desktop (macOS/Windows) or Docker Engine + Compose plugin (Linux) | Compose v2 (`docker compose`, not the old `docker-compose`) | [docs.docker.com/get-started/get-docker](https://docs.docker.com/get-started/get-docker/) |
+| Git | any recent version | [git-scm.com/downloads](https://git-scm.com/downloads) |
+| A Bash-compatible shell | — | macOS/Linux: built in. Windows: [WSL](https://learn.microsoft.com/windows/wsl/install) (recommended) or Git Bash, which ships with [Git for Windows](https://git-scm.com/downloads/win) |
+
+Docker Compose is the only thing this path needs to build and run the app — Node.js and pnpm are not required unless you go on to develop the code itself (see the [Contributing guide](https://github.com/ClimbOutLabs/amanuensis/blob/main/CONTRIBUTING.md) for that path: Node.js 22.14+ and pnpm via Corepack).
+
+On Windows, run every command below from a WSL or Git Bash shell, not PowerShell or cmd — the setup scripts use POSIX-style environment variable assignments that neither of those understand. Confirm Docker is reachable from that shell with `docker ps` before continuing; with Docker Desktop, enable WSL integration for your distro under **Settings → Resources → WSL Integration**.
+
+## Install and run
+
+From a terminal, in the folder where you want the code:
+
+```bash
+git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
+cp packages/trueforge/.env.example packages/trueforge/.env
+docker compose up --build
+```
+
+The first build takes a few minutes (it compiles the app from source). When it finishes you will see `Agent server listening on http://0.0.0.0:8790` in the `server` log line. Open [http://localhost:8791](http://localhost:8791) — that is the app.
+
+The defaults in `packages/trueforge/.env` work as-is for a local install; nothing else needs editing to reach this point. The values that matter if you look inside:
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `trueforge` / `trueforge` / `trueforge` | Credentials for the Postgres container this stack starts for you. Change the password before running on any shared machine. |
+| `TRUEFORGE_API_KEY` | `placeholder-value-please-generate-your-own` | Shared secret the internal schedule controller uses to call the server. Fine as-is for a local, single-machine install; generate your own (`openssl rand -hex 32`) before a shared deployment. |
+| <Tooltip tip="Public origin at which users and external services reach the app. Used to build MCP OAuth and OIDC login callbacks." cta="See the FAQ" href="/quickstart#faq">`PUBLIC_BASE_URL`</Tooltip> | `http://localhost:8791` | Only needs changing if you put the app behind a different host or port. |
+| Host ports | `8791`, `5433`, `6380` | App, Postgres, and Redis, all bound to `127.0.0.1` only by this Compose file — not reachable from other machines by default. |
+
+<Warning>
+  This stack has no login by default (`REQUIRE_AUTH=false` in `docker-compose.yml`): anyone who can reach port `8791` has
+  full admin access. That is safe as shipped, because the port is bound to `127.0.0.1`. Do not change that port mapping,
+  put the app behind a reverse proxy, or open it on your network, without first configuring OIDC — see
+  [Deployment Security](/deployment-security).
+</Warning>
+
+## Connect a model
+
+The app does not ship with a model configured — a fresh checkout has no default. Open **Settings → Models**. You have two options; either is enough to finish this guide.
 
 <Tabs>
-  <Tab title="npx (Local)">
-    Requires [Node.js](https://nodejs.org) 22.14 or newer on macOS, Linux, or Windows. One command, no other infrastructure — the UI and backend run locally, and data is stored in a local SQLite file:
-
-    ```bash
-    npx @truefoundry/trueforge@latest
-    ```
-
-    Then open [http://localhost:8790](http://localhost:8790). The defaults work out of the box — see the [FAQ](#faq) to change the port or data location.
-
-    The first screen works with just a model. While a model or a memory bank is still unset, a short checklist under the greeting says what to set and links to Settings; it disappears once setup is complete. The rail on the right shows the model and the memory bank in use.
-
-    <Warning>
-      Local (standalone) mode is meant for personal use on your own machine. It is not a production or internet-facing
-      setup — there is no login by default, and data lives in a local SQLite file. Please keep it on localhost. We
-      cannot take responsibility for data loss or unauthorized access if local mode is used beyond that. For a shared
-      deployment, use hosted mode below.
-    </Warning>
-
+  <Tab title="A hosted API key">
+    Fastest to try. Open **Settings → Models**, pick a provider from the catalog (OpenAI, Anthropic, Google Gemini, and others), click **Configure**, paste an API key from that provider's own dashboard, and click **Create**. The provider's models become available immediately in the model selector. See [Setup Models](/models) for the full provider list.
   </Tab>
-  <Tab title="Docker Compose (Hosted)">
-    Runs the full hosted topology on your machine: the server (UI + API), Postgres, and Redis.
+  <Tab title="A local model with Ollama">
+    Runs entirely on your machine — no API key, no data leaves it. Requires [Ollama](https://ollama.com/download) installed on the **host**, not inside a container.
 
     ```bash
-    git clone https://github.com/truefoundry/trueforge && cd trueforge
-    cp packages/trueforge/.env.example packages/trueforge/.env
-    docker compose up --build
+    ollama pull qwen2.5:0.5b
     ```
 
-    Then open [http://localhost:8791](http://localhost:8791).
+    (Any Ollama model works; this one is small and fast to try with. Larger models such as `llama3.1:8b` give better answers.)
 
-    | Configuration                                         | Default                 | Description                                              |
-    | ----------------------------------------------------- | ----------------------- | -------------------------------------------------------- |
-    | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | from `.env`             | Postgres credentials, read from `packages/trueforge/.env`.  |
-    | <Tooltip tip="Public origin at which users and external services reach TrueForge (e.g. https://trueforge.myorg.com). The server uses it to build MCP OAuth and OIDC login callbacks." cta="See the FAQ" href="/quickstart#faq">`PUBLIC_BASE_URL`</Tooltip> | `http://localhost:8791` | Public origin, used for MCP OAuth callbacks.             |
-    | Host ports                                            | `8791`, `5433`, `6380`  | App, Postgres, and Redis.                                |
+    Ollama listens on `127.0.0.1` only by default, which the app's container cannot reach. Confirm what your install does:
 
-    Before exposing this beyond your own machine, read [Deployment Security](/deployment-security) — the app port has no login unless you configure OIDC.
+    ```bash
+    curl -s http://localhost:11434 && echo " (already open)" || echo "not reachable — see below"
+    ```
 
+    If Ollama runs as a systemd service (the default on Linux and WSL), open it to the Docker network:
+
+    ```bash
+    sudo mkdir -p /etc/systemd/system/ollama.service.d
+    printf '[Service]\nEnvironment="OLLAMA_HOST=0.0.0.0:11434"\n' | sudo tee /etc/systemd/system/ollama.service.d/override.conf
+    sudo systemctl daemon-reload && sudo systemctl restart ollama
+    ```
+
+    On macOS or Windows with the Ollama desktop app, set the same variable (`OLLAMA_HOST=0.0.0.0:11434`) under the app's Settings and restart it.
+
+    In **Settings → Models**, click **Add Custom Provider** and fill in:
+
+    - **Name** — anything, e.g. `ollama-local`.
+    - **Base URL** — `http://host.docker.internal:11434/v1`. (This resolves from inside the app's container to your host machine; do not use `localhost` here, that means the container itself.)
+    - **API key** — leave blank.
+    - Under **Models**, **Model ID** — `qwen2.5:0.5b` (or whatever you pulled), matching the name exactly. **Model name** here is actually a machine slug, not a display label: lowercase letters, digits, and hyphens only, starting with a letter — `qwen2-5-0-5b` works.
+    - Under **Advanced**, set **Context length** and **Max output tokens** — check the model's page on [ollama.com/library](https://ollama.com/library) for its real limits; `32000` and `4096` are safe placeholders for small models.
+
+    Click **Add provider**.
+  </Tab>
+</Tabs>
+
+## Confirm it works
+
+Start a **New Chat**, pick your model from the selector in the message box, and send a message. A reply streaming back confirms the app, the database, and the model connection are all working. The right-hand rail shows which model and memory bank (if any) are active for the session.
+
+## Optional add-ons
+
+None of these are required to chat with a model. Each is one sentence plus where to read more:
+
+- **Sandbox** — lets an agent run code and use skills that need a filesystem, via [Daytona](https://www.daytona.io). See [Sandbox](/sandbox).
+- **Memory (Hindsight)** — a self-hosted, long-term memory bank the app recalls from and writes to automatically. See the [Memory runbook](/../ops/memory/RUNBOOK.md) and the README's [Memory](https://github.com/ClimbOutLabs/amanuensis#memory) section.
+- **Prompt Guard** — an optional classifier sidecar that screens recalled memories and tool output for prompt injection before they reach the model. See [Deployment Security → Prompt Guard screens](/deployment-security#prompt-guard-screens).
+- **OIDC login** — required before this app is reachable by anyone but you; without it every request is one shared admin identity. See [Setup Login](/authentication/overview).
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="`docker compose up --build` fails immediately, or `docker ps` errors">
+    Docker itself isn't running or isn't reachable from your shell. Open Docker Desktop and wait for it to report "running", or on Linux confirm the daemon is up with `sudo systemctl status docker`. On Windows/WSL, check **Docker Desktop → Settings → Resources → WSL Integration** has your distro enabled.
+  </Accordion>
+  <Accordion title="A custom provider connects but chat says it can't reach the model">
+    Almost always the Base URL. From inside the app's container, `localhost` means the container itself, not your machine — use `http://host.docker.internal:11434/v1` for Ollama, not `http://localhost:11434/v1`. If that still fails, confirm Ollama is listening on all interfaces, not just `127.0.0.1` (see the Ollama tab above) — `curl http://localhost:11434` from the host should succeed either way, but only a `0.0.0.0`-bound instance is reachable from the container.
+  </Accordion>
+  <Accordion title="Installing Ollama on a fresh Ubuntu/WSL machine fails with a zstd error">
+    The official install script needs `zstd`, which is not on a minimal Ubuntu image by default: `sudo apt-get update && sudo apt-get install -y zstd`, then re-run the Ollama install script.
+  </Accordion>
+  <Accordion title="Add Custom Provider rejects the Model name field">
+    That field is a machine identifier, not a display label, despite the name: 2-64 lowercase letters, digits, and hyphens, starting with a letter and ending alphanumeric. Spaces, capitals, and periods are rejected.
+  </Accordion>
+  <Accordion title="Port 8791 (or 5433, 6380) is already in use">
+    Something else on your machine is bound to that port — stop it, or edit the host-side port numbers in `docker-compose.yml` (the number left of the colon in each `ports:` entry) and open the app at the new port instead.
+  </Accordion>
+</AccordionGroup>
+
+## Other ways to run it
+
+<Tabs>
+  <Tab title="Source checkout (development)">
+    For working on the code itself rather than just running it, see [Contributing](https://github.com/ClimbOutLabs/amanuensis/blob/main/CONTRIBUTING.md) and the root README's [Quick start](https://github.com/ClimbOutLabs/amanuensis#quick-start): Node.js 22.14+, pnpm via Corepack, then `pnpm standalone:dev` for a single-process SQLite server with hot reload on [http://localhost:3000](http://localhost:3000).
   </Tab>
   <Tab title="Kubernetes (Hosted)">
     The Helm chart deploys the server in hosted mode with bundled Postgres and Redis (or point it at your own).
@@ -76,7 +162,7 @@ TrueForge runs in [two modes](/introduction#two-ways-to-run-it): **local mode** 
     ```
 
     Find the version you want to install in the [published Helm charts](https://tfy.jfrog.io/ui/packages/oci:%2F%2Ftrueforge).
-    See the [chart README](https://github.com/truefoundry/trueforge/blob/main/charts/trueforge/README.md#api-key) for full `apiKey` details.
+    See the [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#api-key) for full `apiKey` details.
 
     To expose TrueForge through an Istio gateway, save this `VirtualService` in
     `values.yaml` under `extraObjects`. Replace the host and gateway with your
@@ -116,11 +202,11 @@ TrueForge runs in [two modes](/introduction#two-ways-to-run-it): **local mode** 
     | `postgresql.enabled`   | `true`  | Bundle Postgres; set `false` + `externalPostgres.*` to bring your own.   |
     | `redis.enabled`        | `true`  | Bundle Redis; set `false` + `externalRedis.url` (string or `valueFrom`). |
     | `server.publicBaseUrl` | `""`    | Public origin; required for OIDC and MCP OAuth callbacks.                |
-    | `configs.oidc.enabled` | `false` | Enable IdP login via `configs.oidc.*`. Default off = shared local admin — see [chart README](https://github.com/truefoundry/trueforge/blob/main/charts/trueforge/README.md#dev-defaults-read-before-exposing). |
+    | `configs.oidc.enabled` | `false` | Enable IdP login via `configs.oidc.*`. Default off = shared local admin — see [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#dev-defaults-read-before-exposing). |
 
   </Tab>
   <Tab title="Railway (Hosted)">
-    Hosted topology on [Railway](https://railway.com) is defined with [Infrastructure as Code](https://docs.railway.com/infrastructure-as-code) in [`.railway/railway.ts`](https://github.com/truefoundry/trueforge/blob/main/.railway/railway.ts): one project with the server (UI + API), Postgres, and Redis. The app sets `RAILWAY_DOCKERFILE_PATH=Dockerfile.dev` so Railway builds the from-source image ([`Dockerfile.dev`](https://github.com/truefoundry/trueforge/blob/main/Dockerfile.dev)), and wires `DATABASE_URL`, `REDIS_URL`, and `PUBLIC_BASE_URL` in that file.
+    Hosted topology on [Railway](https://railway.com) is defined with [Infrastructure as Code](https://docs.railway.com/infrastructure-as-code) in [`.railway/railway.ts`](https://github.com/ClimbOutLabs/amanuensis/blob/main/.railway/railway.ts): one project with the server (UI + API), Postgres, and Redis. The app sets `RAILWAY_DOCKERFILE_PATH=Dockerfile.dev` so Railway builds the from-source image ([`Dockerfile.dev`](https://github.com/ClimbOutLabs/amanuensis/blob/main/Dockerfile.dev)), and wires `DATABASE_URL`, `REDIS_URL`, and `PUBLIC_BASE_URL` in that file.
 
     From a clone of this repo:
 
@@ -146,18 +232,18 @@ TrueForge runs in [two modes](/introduction#two-ways-to-run-it): **local mode** 
 </Tabs>
 
 <Note>
-  Local mode (`npx`) uses SQLite and needs no other services. Docker Compose, Kubernetes, and Railway run hosted mode:
-  Postgres replaces SQLite as durable storage, and Redis peers the replicas so streams and cancellations follow the client
-  across them.
+  Standalone (`pnpm standalone:dev`) uses SQLite and needs no other services. Docker Compose, Kubernetes, and Railway all
+  run hosted mode: Postgres replaces SQLite as durable storage, and Redis peers the replicas so streams and cancellations
+  follow the client across them.
 </Note>
 
 ## Build your first agent
 
-With TrueForge open in your browser, this walkthrough takes you from an empty workspace to a saved, reusable agent. The example builds a **web research briefer** — an agent that searches the web, fans out to parallel subagents, and turns its findings into an interactive one-page brief.
+With the app open in your browser and a model connected (above), this walkthrough takes you from an empty workspace to a saved, reusable agent. The example builds a **web research briefer** — an agent that searches the web, fans out to parallel subagents, and turns its findings into an interactive one-page brief. This part needs a hosted model that can call tools well; the Ollama tiny model above is fine for confirming the install works, but swap in a stronger model here if you have one connected.
 
 <Steps>
-  <Step title="Add a model provider">
-    Open **Settings → Models**, find a provider in the catalog, and click **Configure**. Paste your API key in **Configure Provider Details** and click **Create** — the provider's models become available immediately.
+  <Step title="Confirm a model is connected">
+    You connected one in [Connect a model](#connect-a-model) above — check **Settings → Models** for it now if you skipped ahead. For this walkthrough's parallel research and tool use, a hosted model generally does better than a small local one.
 
       </Step>
 
@@ -225,36 +311,22 @@ With TrueForge open in your browser, this walkthrough takes you from an empty wo
 
 <AccordionGroup>
   <Accordion title="How do I run the server on a different port?">
-    Pass `--port`, or set the `PORT` environment variable:
+    In the Docker Compose path, edit the host-side port in `docker-compose.yml` (the number left of the colon in the `server` service's `ports:` entry, `8791` by default) and rebuild. In a source checkout (`pnpm standalone:dev`), pass `--port` or set `PORT`:
 
     ```bash
-    npx @truefoundry/trueforge --port 3000
+    pnpm standalone:dev --port 3000
     # or
-    PORT=3000 npx @truefoundry/trueforge
+    PORT=3000 pnpm standalone:dev
     ```
-
-    In hosted mode, change the host port mappings in `docker-compose.yml` instead.
 
   </Accordion>
-  <Accordion title="Where does local mode store its data?">
-    In a SQLite file in your OS's application data directory. To put it somewhere else, set the `SQLITE_PATH` environment variable:
-
-    ```bash
-    SQLITE_PATH=~/trueforge/db.sqlite npx @truefoundry/trueforge
-    ```
-
+  <Accordion title="Where does standalone mode store its data?">
+    In a SQLite file in your OS's application data directory. To put it somewhere else, set the `SQLITE_PATH` environment variable before starting the server — see `packages/trueforge/.env.example` for the exact default path per OS.
   </Accordion>
   <Accordion title="What is PUBLIC_BASE_URL and when do I need to set it?">
-    The public origin the server hands to MCP servers for OAuth callbacks. It defaults to `http://localhost:<port>`, which is correct as long as you access TrueForge from the same machine.
+    The public origin the server hands to MCP servers for OAuth callbacks. It defaults to `http://localhost:<port>`, which is correct as long as you access the app from the same machine.
 
-    Set it when the server is reachable at a different address — behind a domain, reverse proxy, or on another host:
-
-    ```bash
-    PUBLIC_BASE_URL=https://trueforge.myorg.com npx @truefoundry/trueforge
-    ```
-
-    In hosted mode, set it in `packages/trueforge/.env` (Docker Compose), via `server.publicBaseUrl` (Helm), or as
-    `PUBLIC_BASE_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}` on Railway.
+    Set it in `packages/trueforge/.env` (Docker Compose) when the server is reachable at a different address instead — behind a domain, reverse proxy, or on another host. In Helm, use `server.publicBaseUrl`; on Railway, `PUBLIC_BASE_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}`.
 
   </Accordion>
 </AccordionGroup>
