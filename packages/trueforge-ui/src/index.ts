@@ -540,6 +540,7 @@ export { AgentMetricsTimeRangeFilter } from './atoms/agent-details/AgentMetricsT
 export { AgentMetricStatistics, AgentMetricsView } from './atoms/agent-details/AgentMetricsView.js';
 export { AgentOverviewCard } from './atoms/agent-details/AgentOverviewCard.js';
 export type {
+  ActivityFeedProps,
   AgentCodeBlockProps,
   AgentCodeSnippetsProps,
   AgentDetailsHeaderProps,

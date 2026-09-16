@@ -74,6 +74,13 @@ export type AgentSessionEventTimelineProps = {
   onSelectTurn?: (index: number) => void;
 };
 
+export type ActivityFeedProps = {
+  segments: SessionEventTimelineSegment[];
+  /** Session-start wall-clock ms; segment offsets are relative to it. */
+  originMs: number;
+  defaultExpanded?: boolean;
+};
+
 export type AgentSessionEventTimelineChartProps = {
   turns: SessionTurnView[];
   segments: SessionEventTimelineSegment[];

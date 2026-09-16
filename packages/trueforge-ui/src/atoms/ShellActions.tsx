@@ -16,12 +16,16 @@ export function ShellActions({ className, labeled = false }: { className?: strin
   const capabilities = useServerCapabilities();
   const { mode, setTheme } = useTheme();
   const ActionSlot = useSlot('ShellActionsActionSlot');
+  const SessionsBrowserButton = useSlot('SessionsBrowserButton');
   const isDark = mode === 'dark';
   const themeLabel = isDark ? 'Light' : 'Dark';
   const settingsChromeEnabled = isSettingsChromeEnabled({ catalog, capabilities });
 
   const hoverClass = 'hover:bg-secondary-button-hover hover:text-ghost-button-text';
 
+  // Footer order (top to bottom): Dark/Light, Settings, Sessions, Bugs, host slot (e.g. Logout).
+  // Sessions renders only in the labeled rail: the unlabeled header row never had it, and the
+  // rail button styling does not fit an icon row.
   return (
     <div
       className={cn(
@@ -30,21 +34,6 @@ export function ShellActions({ className, labeled = false }: { className?: strin
         className,
       )}
     >
-      <a
-        href="https://trueforge.dev"
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="Documentation"
-        title="Documentation"
-        className={auiButtonClass({
-          variant: 'ghost',
-          size: labeled ? undefined : 'icon',
-          className: cn(hoverClass, labeled && sidebarRailButtonClassName),
-        })}
-      >
-        <Icon name="book-open" size={labeled ? 14 : undefined} />
-        {labeled ? <span className="text-center">Docs</span> : null}
-      </a>
       <button
         type="button"
         aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
@@ -59,7 +48,6 @@ export function ShellActions({ className, labeled = false }: { className?: strin
         <Icon name={isDark ? 'sun' : 'moon'} size={labeled ? 14 : undefined} />
         {labeled ? <span className="text-center">{themeLabel}</span> : null}
       </button>
-      <BugReportButton />
       {shell != null && settingsChromeEnabled ? (
         <button
           type="button"
@@ -83,6 +71,8 @@ export function ShellActions({ className, labeled = false }: { className?: strin
           {labeled ? <span className="text-center">Settings</span> : null}
         </button>
       ) : null}
+      {labeled ? <SessionsBrowserButton compact /> : null}
+      <BugReportButton />
       <ActionSlot />
     </div>
   );

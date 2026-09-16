@@ -33,9 +33,11 @@ export function UserAvatar({ labeled = false, className }: UserAvatarProps) {
         className,
       )}
     >
-      <Avatar size="sm">
-        <AvatarFallback>{getUserInitials(displayName)}</AvatarFallback>
-      </Avatar>
+      <span className="flex items-center justify-center">
+        <Avatar size="sm">
+          <AvatarFallback>{getUserInitials(displayName)}</AvatarFallback>
+        </Avatar>
+      </span>
       <span className="w-full truncate text-center text-[0.625rem] leading-tight">{displayName}</span>
     </div>
   );

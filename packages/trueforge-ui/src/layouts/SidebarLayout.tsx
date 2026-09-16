@@ -50,10 +50,14 @@ function isRecentHistoryVisible({ overlayOpen, mode }: { overlayOpen: boolean; m
 }
 
 /**
- * Nav buttons only (New Chat through Spaces). Returned as plain siblings — not wrapped
+ * Nav buttons only (New Chat through Build Agent). Returned as plain siblings — not wrapped
  * in their own `<nav>` — so the caller can lay them out as siblings of the footer actions
  * in one scrolling flex column instead of two separately-boxed groups that can paint over
  * each other on a short viewport.
+ *
+ * Order is the everyday-user order: New Chat, Hide/Show recent chats, Spaces, Schedules,
+ * Agents, Build Agent. Sessions lives with the footer actions in `ShellActions`, after
+ * Settings.
  */
 function SidebarNavItems({
   showHistoryToggle = false,
@@ -67,7 +71,6 @@ function SidebarNavItems({
   const aui = useAui();
   const shell = useOptionalShellMode();
   const AgentsLibraryButton = useSlot('AgentsLibraryButton');
-  const SessionsBrowserButton = useSlot('SessionsBrowserButton');
   const SchedulesButton = useSlot('SchedulesButton');
   const SpacesButton = useSlot('SpacesButton');
   const showNewActions = shell?.isNewChatEnabled !== false;
@@ -138,6 +141,9 @@ function SidebarNavItems({
           <span className="text-center">{historyToggleLabel}</span>
         </button>
       ) : null}
+      <SpacesButton compact />
+      <SchedulesButton compact />
+      <AgentsLibraryButton compact />
       {showNewActions && shell?.isComposerEnabled ? (
         <button
           type="button"
@@ -154,10 +160,6 @@ function SidebarNavItems({
           <span className="text-center whitespace-nowrap">Build Agent</span>
         </button>
       ) : null}
-      <AgentsLibraryButton compact />
-      <SessionsBrowserButton compact />
-      <SchedulesButton compact />
-      <SpacesButton compact />
     </>
   );
 }

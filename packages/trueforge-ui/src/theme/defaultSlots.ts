@@ -23,6 +23,7 @@ import { AgentSessionsFilters } from '../atoms/agent-details/AgentSessionsFilter
 import { AgentSessionTurnHeader } from '../atoms/agent-details/AgentSessionTurnHeader.js';
 import { SessionsPage } from '../atoms/agent-details/SessionsPage.js';
 import type {
+  ActivityFeedProps,
   AgentCodeSnippetsProps,
   AgentMetricChartProps,
   AgentOverviewProps,
@@ -129,6 +130,10 @@ const AgentSessionEventTimelineChart: ComponentType<AgentSessionEventTimelineCha
   const mod = await import('../atoms/agent-details/AgentSessionEventTimelineChart.js');
   return { default: mod.AgentSessionEventTimelineChart };
 });
+const ActivityFeed: ComponentType<ActivityFeedProps> = lazy(async () => {
+  const mod = await import('../atoms/agent-details/ActivityFeed.js');
+  return { default: mod.ActivityFeed };
+});
 const AgentMetricChart: ComponentType<AgentMetricChartProps> = lazy(async () => {
   const mod = await import('../atoms/agent-details/AgentMetricChart.js');
   return { default: mod.AgentMetricChart };
@@ -233,6 +238,7 @@ export const defaultSlots = {
   SessionsPage,
   AgentSessionEventTimeline,
   AgentSessionEventTimelineChart,
+  ActivityFeed,
   AgentSessionListRow,
   AgentSessionMetricsStrip,
   AgentSessionTimelineContainer,

@@ -57,7 +57,7 @@ function sessionBundleSummary(bundle: BugReportBundle): { turns: number; events:
 }
 
 /**
- * "Report a bug" icon button, pinned next to the theme toggle in `ShellActions`. Opens a
+ * "Report a bug" icon button in `ShellActions`, after Sessions. Opens a
  * compact modal to fetch a redacted diagnostic bundle — for the current session when a chat is
  * open, or an app-level bundle otherwise (build version and config flags only, no session
  * data) — then download it, copy it to the clipboard, or hand it off to the issue tracker.

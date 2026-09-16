@@ -561,8 +561,33 @@ describe('SidebarLayout', () => {
     expect(screen.queryByText('Acme')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start new chat' })).toBeInTheDocument();
     expect(screen.getByText('New Chat')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', 'https://trueforge.dev');
+    expect(screen.queryByRole('link', { name: 'Documentation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^(Collapse|Expand) sidebar$/ })).not.toBeInTheDocument();
+  });
+
+  it('orders the sidebar rail: New Chat first, then theme toggle before Settings', () => {
+    render(
+      <SlotsProvider theme={{ brand: { mode: 'icon-title', name: 'Acme', icon: '/acme.svg' } }}>
+        <RuntimeHarness messages={[]}>
+          <div className="h-96">
+            <SidebarLayout />
+          </div>
+        </RuntimeHarness>
+      </SlotsProvider>,
+    );
+
+    const nav = screen.getByRole('navigation', { name: 'Sidebar' });
+    const labels = Array.from(nav.querySelectorAll('button')).map(
+      button => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '',
+    );
+    const newChatIndex = labels.indexOf('Start new chat');
+    const themeIndex = labels.findIndex(label => label === 'Switch to dark theme' || label === 'Switch to light theme');
+    expect(newChatIndex).toBeGreaterThanOrEqual(0);
+    expect(themeIndex).toBeGreaterThan(newChatIndex);
+    const settingsIndex = labels.indexOf('Settings');
+    if (settingsIndex >= 0) {
+      expect(settingsIndex).toBeGreaterThan(themeIndex);
+    }
   });
 
   it('keeps recent history visible when a named chat loads in the same page', async () => {

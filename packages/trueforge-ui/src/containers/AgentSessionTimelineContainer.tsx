@@ -4,6 +4,7 @@ import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
 import { convertTurnsToThreadMessages } from '@truefoundry/assistant-ui-runtime';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 
+import { cn } from '../atoms/lib/cn.js';
 import { useServer } from '../server/ServerContext.js';
 import type { AgentChatServer, SessionEventItem } from '../server/types.js';
 import type { SlotOverrides } from '../theme/SlotsProvider.js';
@@ -11,7 +12,7 @@ import { useSlot } from '../theme/SlotsProvider.js';
 import { buildSessionMetrics } from '../utils/buildSessionMetrics.js';
 import { buildSessionTimelineSegments } from '../utils/buildSessionTimelineSegments.js';
 import { createCachedListEventsBridge } from '../utils/cachedListEventsBridge.js';
-import { getTurnInputSummary } from '../utils/sessionTimelineEvents.js';
+import { getTurnInputSummary, parseTimestamp } from '../utils/sessionTimelineEvents.js';
 import { buildSessionTurnViews, type SessionTurnView } from '../utils/sessionTurnViews.js';
 import { AssistantMessageContainer } from './AssistantMessageContainer.js';
 import { ReadOnlySessionTurnRuntime } from './ReadOnlySessionTurnRuntime.js';
@@ -116,6 +117,7 @@ export function AgentSessionTimelineContainer({ sessionId, events, listMetrics }
   const server = useServer();
   const AgentSessionTurnHeader = useSlot('AgentSessionTurnHeader');
   const AgentSessionEventTimeline = useSlot('AgentSessionEventTimeline');
+  const ActivityFeed = useSlot('ActivityFeed');
   const AgentSessionMetricsStrip = useSlot('AgentSessionMetricsStrip');
   const MessageListSkeleton = useSlot('MessageListSkeleton');
   const ThreadViewportShell = useSlot('ThreadViewportShell');
@@ -127,6 +129,9 @@ export function AgentSessionTimelineContainer({ sessionId, events, listMetrics }
   const turnViews = useMemo(() => buildSessionTurnViews(events), [events]);
   const projectionEvents = useMemo(() => buildProjectionEvents(events, turnViews), [events, turnViews]);
   const timelineSegments = useMemo(() => buildSessionTimelineSegments(turnViews), [turnViews]);
+  const originMs = useMemo(() => parseTimestamp(turnViews[0]?.created.createdAt) ?? 0, [turnViews]);
+  const [eventView, setEventView] = useState<'activity' | 'timeline'>('activity');
+  const eventViews: Array<'activity' | 'timeline'> = ['activity', 'timeline'];
   const sessionMetrics = useMemo(
     () => buildSessionMetrics({ turns: turnViews, segments: timelineSegments, listMetrics }),
     [listMetrics, timelineSegments, turnViews],
@@ -190,9 +195,47 @@ export function AgentSessionTimelineContainer({ sessionId, events, listMetrics }
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="shrink-0 border-b border-border">
         <AgentSessionMetricsStrip metrics={sessionMetrics} />
-        <Suspense fallback={null}>
-          <AgentSessionEventTimeline turns={turnViews} segments={timelineSegments} onSelectTurn={handleSelectTurn} />
-        </Suspense>
+        {timelineSegments.length > 0 && (
+          <>
+            <div
+              role="tablist"
+              aria-label="Session events view"
+              className="flex items-center gap-1 border-b border-border px-3 py-1.5"
+            >
+              {eventViews.map(view => {
+                const isSelected = eventView === view;
+                return (
+                  <button
+                    key={view}
+                    type="button"
+                    role="tab"
+                    aria-selected={isSelected}
+                    onClick={() => setEventView(view)}
+                    className={cn(
+                      'rounded-full border px-2.5 py-0.5 text-xs font-medium',
+                      isSelected
+                        ? 'border-border text-text-primary'
+                        : 'border-transparent text-text-secondary hover:text-text-primary',
+                    )}
+                  >
+                    {view === 'activity' ? 'Activity' : 'Timeline'}
+                  </button>
+                );
+              })}
+            </div>
+            <Suspense fallback={null}>
+              {eventView === 'activity' ? (
+                <ActivityFeed segments={timelineSegments} originMs={originMs} />
+              ) : (
+                <AgentSessionEventTimeline
+                  turns={turnViews}
+                  segments={timelineSegments}
+                  onSelectTurn={handleSelectTurn}
+                />
+              )}
+            </Suspense>
+          </>
+        )}
       </div>
       <ThreadViewportShell className="flex-1 pb-4">
         <div className="flex flex-col gap-4">

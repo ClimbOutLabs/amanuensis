@@ -23,6 +23,10 @@ updates:
       # Pinned at 8.68.0: 8.70.0's no-meaningless-void-operator flags this
       # codebase's void unusedParam; idiom (see PR #174 and #213).
       - dependency-name: 'typescript-eslint'
+      # 0.56 breaks the frontend build through vite-plugin-monaco-editor-esm's
+      # worker paths; hold both packages until the build is fixed.
+      - dependency-name: monaco-editor
+      - dependency-name: vite-plugin-monaco-editor-esm
     groups:
       npm-minor-and-patch:
         applies-to: version-updates

@@ -174,6 +174,11 @@ describe('AgentSessionTimelineContainer', () => {
       </SlotsProvider>,
     );
 
+    const activityTab = await screen.findByRole('tab', { name: 'Activity' });
+    expect(activityTab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByText('timeline turns=1')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Timeline' }));
     expect(await screen.findByText('timeline turns=1')).toBeInTheDocument();
     expect(await screen.findByText('Turn 1')).toBeInTheDocument();
     expect(screen.getByText('Turns')).toBeInTheDocument();
