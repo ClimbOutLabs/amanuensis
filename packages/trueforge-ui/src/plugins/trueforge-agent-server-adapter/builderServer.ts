@@ -1,0 +1,170 @@
+/**
+ * AgentBuilderServer callbacks for createTrueFoundryServer.
+ * Composer pickers + agent library backed by the Harness agents registry.
+ */
+import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
+import type { AgentBuilderServer, AgentLibraryEntry, ModelSelection, SearchAgentsParams } from '../../server/types.js';
+import { AGENTS_PAGE_DEFAULT, clampAgentsPageSize, drainAgentsList, listAgentsPage } from './agentsList.js';
+import { toUiConnectorFromReadEntry, toUiTool } from './catalogs/connectorCatalog.js';
+import { toHarnessAgentSpec, toUiAgentSpec } from './chatServer.js';
+import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
+import { listConfiguredMcpServers, listSkills } from './lists.js';
+import type { HarnessAgentSpec } from './types.js';
+
+export type CreateHarnessBuilderServerOptions = CreateTrueForgeClientOptions & {
+  client?: TrueForge;
+};
+
+/** Well-known catalog entries key logos by `type` (same as configured provider resource name). */
+export function modelProviderLogosByName(
+  catalog: readonly TrueForgeApi.CatalogModelProvider[],
+): ReadonlyMap<string, string> {
+  const logos = new Map<string, string>();
+  for (const entry of catalog) {
+    if (entry.type === 'custom' || entry.logo === undefined) {
+      continue;
+    }
+    logos.set(entry.type, entry.logo);
+  }
+  return logos;
+}
+
+/** Map harness model rows onto the UI picker shape (nested provider + properties + optional logo). */
+export function toModelSelection({
+  model,
+  logo,
+}: {
+  model: TrueForgeApi.AvailableModel;
+  logo?: string;
+}): ModelSelection {
+  const { contextLength, maxOutputTokens, reasoningEfforts } = model.properties;
+  return {
+    id: model.modelId,
+    name: model.name,
+    provider: {
+      name: model.provider.name,
+      ...(logo === undefined ? {} : { logo }),
+    },
+    properties: {
+      ...(contextLength === undefined ? {} : { contextLength }),
+      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+      ...(reasoningEfforts === undefined ? {} : { reasoningEfforts: [...reasoningEfforts] }),
+    },
+  };
+}
+
+function toLibraryEntry(agent: TrueForgeApi.Agent): AgentLibraryEntry {
+  return {
+    name: agent.name,
+    agentId: agent.id,
+    description: agent.description,
+    agentSpec: toUiAgentSpec(agent.manifest),
+    createdBySubject: agent.createdBySubject,
+  };
+}
+
+export function createHarnessBuilderServer(
+  options: CreateHarnessBuilderServerOptions = {},
+): AgentBuilderServer<HarnessAgentSpec> {
+  const client = options.client ?? createTrueForgeClient(options);
+
+  return {
+    getCapabilities: () => client.server.getCapabilities(),
+    getModels: async () => {
+      // Catalog logos are optional UI enrichment — a catalog failure must not blank the picker.
+      const [modelsBody, catalogEntries] = await Promise.all([
+        client.models.list(),
+        client.catalogs.modelProviders.list().then(
+          body => body.data,
+          () => [],
+        ),
+      ]);
+      const logosByName = modelProviderLogosByName(catalogEntries);
+      return modelsBody.data.map(model => {
+        const logo = logosByName.get(model.provider.name);
+        return toModelSelection(logo === undefined ? { model } : { model, logo });
+      });
+    },
+    // Skills require a configured sandbox provider; keep the picker empty when skill capability is off.
+    // Catalog AvailableSkill.name is store identity (FQN in TFY). Picker `id` copies that
+    // attach key; `name` is displayName so the draft can show a label without losing the wire key.
+    // Draft mounts `{ id, name }`; toHarnessSkill admits AgentSpec.skills[].name = id ?? name.
+    getSkills: async () => {
+      const skills = await listSkills(client);
+      return skills.map(skill => {
+        const { display_name, repository_name, version: versionRaw } = skill.metadata ?? {};
+        const version = Number(versionRaw);
+        const hasVersion = Number.isInteger(version) && version > 0;
+        return {
+          id: skill.name,
+          name: display_name ?? skill.name,
+          description: skill.description,
+          ...(repository_name === undefined ? {} : { skillRepoName: repository_name }),
+          ...(hasVersion
+            ? {
+                version,
+                loadVersions: async () => (await client.skills.listVersions({ name: skill.name })).data,
+              }
+            : {}),
+        };
+      });
+    },
+    getMcp: async () => (await listConfiguredMcpServers(client)).map(toUiConnectorFromReadEntry),
+    getMcpConnector: async ({ connectorId }: { connectorId: string }) => {
+      const body = await client.mcpServers.get(connectorId);
+      return toUiConnectorFromReadEntry(body.data);
+    },
+    getMcpTools: async ({ connectorId }: { connectorId: string }) => {
+      const body = await client.mcpServers.listTools(connectorId);
+      return body.data.flatMap(tool =>
+        typeof tool.name === 'string' && tool.name.trim() !== '' ? [toUiTool(tool)] : [],
+      );
+    },
+
+    async searchAgents(req?: SearchAgentsParams) {
+      const limit = clampAgentsPageSize(req?.limit ?? AGENTS_PAGE_DEFAULT);
+      const offset = req?.offset ?? 0;
+      const query = req?.query?.trim();
+      const rows = await listAgentsPage({
+        client,
+        limit,
+        offset,
+        ...(query === undefined || query === '' ? {} : { agentName: query }),
+      });
+      return rows.map(toLibraryEntry);
+    },
+
+    async saveAgent({ agentName, description: descriptionRaw, agentSpec, intent }) {
+      const manifest = toHarnessAgentSpec(agentSpec);
+      const description = descriptionRaw?.trim();
+      if (intent === 'update') {
+        const agents = await drainAgentsList(client);
+        const existing = agents.find(agent => agent.name === agentName);
+        if (!existing) {
+          return {};
+        }
+        // Omit empty description on update so a reloaded draft (no description in session
+        // manifest) preserves the stored value instead of failing min(1).
+        await client.agents.update(existing.id, {
+          ...(description ? { description } : {}),
+          manifest,
+        });
+        return { agentId: existing.id };
+      }
+      // Create requires description; fall back to name for clone of pre-description agents.
+      const created = await client.agents.create({
+        name: agentName,
+        description: description || agentName,
+        manifest,
+      });
+      return { agentId: created.data.id };
+    },
+
+    async deleteAgent({ agentName }) {
+      const agents = await drainAgentsList(client);
+      const existing = agents.find(agent => agent.name === agentName);
+      if (!existing) return;
+      await client.agents.delete(existing.id);
+    },
+  };
+}

@@ -1,0 +1,419 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+
+import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
+import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
+import type { AgentSpec } from '@/server/types.js';
+
+import { RuntimeHarness } from '../containers/RuntimeHarness.js';
+
+let agentSpec: AgentSpec | null | undefined;
+const updateAgentSpec = vi.fn();
+const fetchMock = vi.fn();
+
+vi.mock('@truefoundry/assistant-ui-runtime', () => ({
+  useTrueFoundryAgentSpec: () => ({ agentSpec }),
+  useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
+}));
+
+// Walks up from wherever the runner started, so the stylesheet is found whether vitest
+// runs in the package or at the monorepo root. import.meta.url is not a file URL here.
+const findStylesheet = (): string => {
+  let dir = process.cwd();
+  for (;;) {
+    for (const relative of ['src/styles.css', 'packages/trueforge-ui/src/styles.css']) {
+      const candidate = resolve(dir, relative);
+      if (existsSync(candidate)) return candidate;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) throw new Error('could not locate trueforge-ui src/styles.css');
+    dir = parent;
+  }
+};
+
+describe('AmanRuntimeRail', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    agentSpec = undefined;
+    updateAgentSpec.mockClear();
+    fetchMock.mockReset();
+    // The probe stays in flight unless a test overrides the mock, so sync tests
+    // never see a post-assertion status flip.
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('shows the assistant identity and runtime summary', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail avatarSrc="/aman-avatar.png" modelName="local-model" />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Amanuensis' })).toBeInTheDocument();
+    expect(screen.getByText('local-model')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Amanuensis avatar' })).toHaveAttribute('src', '/aman-avatar.png');
+  });
+
+  it('collapses and expands the rail from its toggle, and remembers the choice', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail modelName="local-model" />
+      </RuntimeHarness>,
+    );
+
+    const collapse = screen.getByRole('button', { name: 'Collapse rail' });
+    expect(collapse).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).not.toHaveClass(
+      'aman-runtime-rail--collapsed',
+    );
+
+    fireEvent.click(collapse);
+
+    const expand = screen.getByRole('button', { name: 'Expand rail' });
+    expect(expand).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).toHaveClass(
+      'aman-runtime-rail--collapsed',
+    );
+    expect(screen.queryByText('local-model')).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('aui-runtime-rail-collapsed')).toBe('true');
+
+    fireEvent.click(expand);
+
+    expect(screen.getByRole('button', { name: 'Collapse rail' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('local-model')).toBeInTheDocument();
+    expect(window.localStorage.getItem('aui-runtime-rail-collapsed')).toBe('false');
+  });
+
+  it('starts collapsed when the stored preference says so', () => {
+    window.localStorage.setItem('aui-runtime-rail-collapsed', 'true');
+
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail modelName="local-model" />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Expand rail' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('complementary', { name: 'Amanuensis runtime status' })).toHaveClass(
+      'aman-runtime-rail--collapsed',
+    );
+  });
+
+  it('renders expanded when reading the stored preference throws', () => {
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('storage blocked');
+    });
+
+    try {
+      render(
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail modelName="local-model" />
+        </RuntimeHarness>,
+      );
+
+      expect(screen.getByRole('button', { name: 'Collapse rail' })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByText('local-model')).toBeInTheDocument();
+    } finally {
+      getItem.mockRestore();
+    }
+  });
+
+  it('still collapses when writing the preference throws', () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('storage blocked');
+    });
+
+    try {
+      render(
+        <RuntimeHarness messages={[]}>
+          <AmanRuntimeRail modelName="local-model" />
+        </RuntimeHarness>,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse rail' }));
+
+      expect(screen.getByRole('button', { name: 'Expand rail' })).toHaveAttribute('aria-expanded', 'false');
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  it('feathers the avatar edges without a container, motion, or a literal colour', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail avatarSrc="/aman-avatar.png" />
+      </RuntimeHarness>,
+    );
+    const avatar = screen.getByRole('img', { name: 'Amanuensis avatar' });
+    expect(avatar).toHaveClass('aman-runtime-rail__avatar');
+
+    const stylesheet = readFileSync(findStylesheet(), 'utf8');
+    const selector = '.aman-runtime-rail__avatar {';
+    // Pinning the count keeps the slice below honest: a second block for the same selector
+    // would let this read an earlier rule and pass on stale declarations.
+    expect(stylesheet.split(selector)).toHaveLength(2);
+    const rule = stylesheet.slice(stylesheet.indexOf(selector));
+    const avatarRule = rule.slice(0, rule.indexOf('}') + 1);
+
+    // The prefixed pair is asserted separately because WebKit ships only those, and an
+    // unprefixed-only rule would leave Safari with the hard rectangle this change removes.
+    expect(avatarRule).toMatch(/^\s{2}mask-image:/m);
+    expect(avatarRule).toMatch(/^\s{2}mask-composite:/m);
+    expect(avatarRule).toContain('-webkit-mask-image:');
+    expect(avatarRule).toContain('-webkit-mask-composite:');
+    // The rail background must show through the feather, so the rule names no colour of
+    // its own beyond the mask alpha ramp, and stays static.
+    expect(avatarRule).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(avatarRule).not.toMatch(/animation|transition|transform/);
+  });
+
+  it('calls the build line a release, with a shortened reference', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail version="0.4.2" buildRef="4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90" />
+      </RuntimeHarness>,
+    );
+
+    const value = screen.getByText('Release 0.4.2 · 4f2a91c');
+    expect(value).toBeInTheDocument();
+    expect(value).toHaveAttribute('title', 'Release 0.4.2 · 4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90');
+    expect(screen.queryByText(/Session/)).not.toBeInTheDocument();
+  });
+
+  it('leaves a tag-shaped build reference whole in the release line', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail version="0.4.2" buildRef="v0.4.2-rc1" />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByText('Release 0.4.2 · v0.4.2-rc1')).toBeInTheDocument();
+  });
+
+  it('shows the version alone in the release line when the build carries no reference', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail version="0.4.2" />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByText('Release 0.4.2')).toBeInTheDocument();
+  });
+
+  it('leaves out the release line when the server reports no version', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail buildRef="4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90" />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.queryByText(/^Release /)).not.toBeInTheDocument();
+  });
+
+  it('shows the memory bank in use', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail memoryBank={{ name: 'amantest', connected: true }} />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByText('Memory')).toBeInTheDocument();
+    expect(screen.getByText('amantest · on')).toBeInTheDocument();
+  });
+
+  it('shows the memory recall switch checked by default', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail memoryBank={{ name: 'amantest', connected: true }} />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByRole('checkbox', { name: 'Toggle memory recall' })).toBeChecked();
+  });
+
+  it('calls updateAgentSpec with memory.recallEnabled false when the switch is clicked', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail memoryBank={{ name: 'amantest', connected: true }} />
+      </RuntimeHarness>,
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Toggle memory recall' }));
+
+    expect(updateAgentSpec).toHaveBeenCalledWith({
+      config: {
+        memory: {
+          recallEnabled: false,
+        },
+      },
+    });
+  });
+
+  it('says a bank that still needs sign-in is not on, and links to settings', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail memoryBank={{ name: 'amantest', connected: false }} settingsHref="/settings" />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByText(/amantest · needs sign-in/)).toBeInTheDocument();
+    expect(screen.queryByText('amantest · on')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'sign in' })).toHaveAttribute('href', '/settings');
+  });
+
+  it('says memory is off and links to settings when no bank is configured', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail memoryBank={null} settingsHref="/settings" />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByText('Memory')).toBeInTheDocument();
+    expect(screen.getByText(/^Off/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'set up' })).toHaveAttribute('href', '/settings');
+  });
+
+  it('leaves the memory row out when the host could not find out', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.queryByText('Memory')).not.toBeInTheDocument();
+  });
+
+  it('renders an accessible fallback when no avatar is configured', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail status="offline" />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByRole('img', { name: 'Amanuensis avatar' })).toHaveTextContent('A');
+    expect(screen.getByText('Offline')).toBeInTheDocument();
+  });
+
+  it('shows the personalized name without exposing editing controls in the runtime rail', async () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <PersonalizationProvider
+          api={{
+            getProfile: async () => ({
+              assistant_name: 'Mira',
+              assistant_identity: null,
+              voice_guidance: null,
+              user_profile: null,
+              pinned_preferences: [],
+              learned_profile: null,
+            }),
+            updateProfile: async profile => profile,
+            deleteProfile: async () => {},
+          }}
+        >
+          <AmanRuntimeRail />
+        </PersonalizationProvider>
+      </RuntimeHarness>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Mira' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Personalize assistant' })).not.toBeInTheDocument();
+  });
+
+  it('groups the rail into labeled signed-in, answering, model, and memory sections', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail
+          modelName="local-model"
+          version="0.4.2"
+          memoryBank={{ name: 'amantest', connected: true }}
+          userName="Alex"
+          personaName="Mannie"
+        />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Signed in' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Answering' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Model' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Memory' })).toBeInTheDocument();
+
+    // The props actually drive the conditional sections.
+    expect(screen.getByText('Alex')).toBeInTheDocument();
+    expect(screen.getByText('Mannie')).toBeInTheDocument();
+
+    // Old labels must not reappear.
+    expect(screen.queryByRole('heading', { name: 'Status' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Session' })).not.toBeInTheDocument();
+  });
+
+  it('shows the probe latency next to a ready status', async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail />
+      </RuntimeHarness>,
+    );
+
+    expect(await screen.findByText('Ready')).toBeInTheDocument();
+    expect(await screen.findByText(/\d+ ms/)).toBeInTheDocument();
+  });
+
+  it('lets an explicit status prop override the live probe', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail status="degraded" />
+      </RuntimeHarness>,
+    );
+
+    // The probe would report ready, but the host's status wins and no probing happens.
+    expect(screen.getByText('Degraded')).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+ ms/)).not.toBeInTheDocument();
+  });
+
+  it('shows a retry control when the live probe fails, and re-probes on retry', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network down'));
+    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail />
+      </RuntimeHarness>,
+    );
+
+    const retry = await screen.findByRole('button', { name: /retry/i });
+    expect(await screen.findByText('Offline')).toBeInTheDocument();
+
+    fireEvent.click(retry);
+
+    // The retry succeeds after a failure, so the rail reports degraded rather than ready.
+    expect(await screen.findByText('Degraded')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('renders the avatar as a plain, static image with no animator wrapper classes', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail avatarSrc="/aman-avatar.png" />
+      </RuntimeHarness>,
+    );
+
+    const avatar = screen.getByRole('img', { name: 'Amanuensis avatar' });
+    expect(avatar.tagName).toBe('IMG');
+    expect(avatar.className).not.toMatch(/mascot-animator/);
+    expect(avatar.parentElement?.querySelector('.mascot-animator__container')).toBeNull();
+    expect(avatar.parentElement?.querySelector('.mascot-animator__halo')).toBeNull();
+  });
+});

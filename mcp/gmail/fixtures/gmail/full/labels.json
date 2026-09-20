@@ -1,0 +1,37 @@
+[
+  {
+    "id": "INBOX",
+    "name": "INBOX",
+    "type": "system",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow"
+  },
+  {
+    "id": "SENT",
+    "name": "SENT",
+    "type": "system",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow"
+  },
+  {
+    "id": "UNREAD",
+    "name": "UNREAD",
+    "type": "system",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow"
+  },
+  {
+    "id": "TRASH",
+    "name": "TRASH",
+    "type": "system",
+    "messageListVisibility": "hide",
+    "labelListVisibility": "labelHide"
+  },
+  {
+    "id": "Label_20",
+    "name": "Drafts To Send",
+    "type": "user",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow"
+  }
+]

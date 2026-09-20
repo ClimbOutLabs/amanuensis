@@ -1,0 +1,17 @@
+{
+  "tool": "replace_text",
+  "args": {
+    "intent": "Fix a typo",
+    "cwd": "/repo/src",
+    "path": "util.ts",
+    "old_text": "fucntion",
+    "new_text": "function"
+  },
+  "cwd": "/repo/src",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": true,
+    "normalizedPath": "src/util.ts",
+    "notes": []
+  }
+}

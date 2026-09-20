@@ -1,0 +1,77 @@
+import { AgentSpecSchema, DEFAULT_AGENT_CONFIG_ITERATION_LIMIT } from '../../src/agent-session/schemas/agentSpec';
+
+describe('AgentSpec RuntimeConfig defaults', () => {
+  it('materializes config when omitted', () => {
+    const spec = AgentSpecSchema.parse({ model: { name: 'provider/model' } });
+    expect(spec.config.iteration_limit).toBe(DEFAULT_AGENT_CONFIG_ITERATION_LIMIT);
+    expect(spec.config.sandbox).toEqual({ enabled: false, file_downloads: true, skill_prompt_mode: 'advertise' });
+    expect(spec.config.generative_ui).toEqual({ enabled: true });
+    expect(spec.config.ask_user_questions).toEqual({ enabled: true });
+    expect(spec.config.dynamic_sub_agents).toEqual({ enabled: true });
+    expect(spec.config.context_management.compaction).toEqual({ enabled: true });
+    expect(spec.config.context_management.large_tool_response.enabled).toBe(true);
+  });
+
+  it('accepts an explicit input-token compaction trigger', () => {
+    const spec = AgentSpecSchema.parse({
+      model: { name: 'provider/model' },
+      config: {
+        context_management: {
+          compaction: {
+            enabled: true,
+            trigger: { type: 'input_tokens', value: 80_000 },
+          },
+        },
+      },
+    });
+
+    expect(spec.config.context_management.compaction).toEqual({
+      enabled: true,
+      trigger: { type: 'input_tokens', value: 80_000 },
+    });
+  });
+
+  it('fills generative_ui when other config fields are present', () => {
+    const spec = AgentSpecSchema.parse({
+      model: { name: 'provider/model' },
+      config: { sandbox: { enabled: true } },
+    });
+    expect(spec.config.sandbox.enabled).toBe(true);
+    expect(spec.config.sandbox.file_downloads).toBe(true);
+    expect(spec.config.generative_ui.enabled).toBe(true);
+  });
+
+  it('allows opting out of generative_ui', () => {
+    const spec = AgentSpecSchema.parse({
+      model: { name: 'provider/model' },
+      config: { generative_ui: { enabled: false } },
+    });
+    expect(spec.config.generative_ui.enabled).toBe(false);
+  });
+});
+
+describe('AgentSpec task_state config', () => {
+  it('accepts a budget with budgeted tools', () => {
+    const spec = AgentSpecSchema.parse({
+      model: { name: 'provider/model' },
+      config: { task_state: { tool_call_budget: 10, budgeted_tools: ['tavily_*'] } },
+    });
+    expect(spec.config.task_state.tool_call_budget).toBe(10);
+    expect(spec.config.task_state.budgeted_tools).toEqual(['tavily_*']);
+  });
+
+  it('rejects a budget without budgeted tools', () => {
+    expect(() =>
+      AgentSpecSchema.parse({
+        model: { name: 'provider/model' },
+        config: { task_state: { tool_call_budget: 10 } },
+      }),
+    ).toThrow('`budgeted_tools` must list at least one tool when `tool_call_budget` is set.');
+  });
+
+  it('leaves task_state disabled by default', () => {
+    const spec = AgentSpecSchema.parse({ model: { name: 'provider/model' } });
+    expect(spec.config.task_state.tool_call_budget).toBeUndefined();
+    expect(spec.config.task_state.budgeted_tools).toBeUndefined();
+  });
+});

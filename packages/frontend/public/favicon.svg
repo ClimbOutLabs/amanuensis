@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <style>
+    /* A raster icon cannot adapt, but an SVG favicon can: modern browsers
+       apply the viewer's scheme here, so the ink flips with the tab strip. */
+    .ink { fill: #2f2b24 }
+    .accent { fill: #b5894c }
+    @media (prefers-color-scheme: dark) {
+      .ink { fill: #f4eddd }
+      .accent { fill: #c69c5d }
+    }
+  </style>
+  <path class="ink" d="M62 10 74 15 112 106 87 112 59 40 28 106 11 112Z"/>
+  <path class="ink" d="M35 74Q62 68 97 62L98 74Q63 79 36 86Z"/>
+  <path class="accent" d="M97 62C107 60 113 56 119 50 114 60 107 69 98 74Z"/>
+</svg>

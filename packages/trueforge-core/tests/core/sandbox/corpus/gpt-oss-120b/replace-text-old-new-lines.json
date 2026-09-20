@@ -1,0 +1,17 @@
+{
+  "tool": "replace_text",
+  "args": {
+    "path": "src/config.ts",
+    "old_text_lines": ["  const settings = {", "    debug: true,", "    timeout: 5000", "  };"],
+    "new_text_lines": ["  const settings = {", "    debug: false,", "    timeout: 10000", "  };"],
+    "replace_all": false
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": true,
+    "normalizedPath": "src/config.ts",
+    "matchStatus": "exact_match",
+    "notes": ["joined old_text_lines into old_text", "joined new_text_lines into new_text"]
+  }
+}

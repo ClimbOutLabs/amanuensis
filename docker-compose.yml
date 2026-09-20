@@ -1,0 +1,225 @@
+# Full-stack smoke test. Reads packages/trueforge/.env for secrets and
+# credentials; in-network DB/Redis targets are opinionated here so they do not
+# inherit host-dev localhost values. Postgres/Redis stay off the host network.
+name: trueforge
+
+services:
+  postgres:
+    image: postgres:17
+    env_file:
+      - path: packages/trueforge/.env
+        required: true
+    # Host 5433 avoids conflict with docker-compose.dev.yml on 5432. Bound to
+    # loopback only: this is a debug port for the host machine, not for the network.
+    ports:
+      - '127.0.0.1:5433:5432'
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    # -h forces a TCP probe. initdb's bootstrap server answers only on the
+    # Unix socket, so without -h the check passes before the real server is
+    # up and the app's first connection is refused.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Shared by all server replicas: carries executor peering (cross-replica
+  # turn cancel via request-reply).
+  redis:
+    image: redis:7-alpine
+    # Host 6380 avoids conflict with docker-compose.dev.yml on 6379. Bound to
+    # loopback only: this is a debug port for the host machine, not for the network.
+    ports:
+      - '127.0.0.1:6380:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # Holds the network namespace that `server` and, with the login profile,
+  # `dex` share, and publishes their ports. Sharing one namespace is what lets
+  # the OIDC issuer https://localhost:5556/dex be the same URL for the browser
+  # on the host and for the server verifying tokens. The namespace lives in
+  # this idle container so either of the two can restart without stranding
+  # the other in a dead namespace.
+  loopback:
+    image: alpine:3.21
+    init: true
+    command: ['sleep', 'infinity']
+    ports:
+      # Host 8791 avoids conflict with host `pnpm dev` on 8790. Published on
+      # loopback only: the app binds 0.0.0.0 inside the container, and without
+      # OIDC every request has the admin role (see docs/deployment-security.mdx).
+      # To expose it beyond localhost, configure OIDC and publish explicitly.
+      - '127.0.0.1:8791:8790'
+      # Dex (login profile). Nothing listens here unless that profile runs.
+      - '127.0.0.1:5556:5556'
+    # Lets a custom model provider in the server reach a model server running
+    # on the host (e.g. Ollama at http://host.docker.internal:11434/v1).
+    # host-gateway is the Docker Engine special value for the host's own IP;
+    # it resolves the same way on Linux, macOS, and Windows hosts. It lives
+    # here because Docker rejects extra_hosts on a container that joins
+    # another's namespace, and the joined containers read this hosts file.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    restart: unless-stopped
+
+  # Serves both the API and the UI on one port.
+  server:
+    build:
+      context: .
+      # From-source image; root Dockerfile is the npm-install prod recipe.
+      dockerfile: Dockerfile.dev
+    image: truefoundry-server:latest
+    # Ports are published by `loopback` above. Compose DNS therefore has no
+    # `server` entry; other services reach this one as `loopback`.
+    network_mode: 'service:loopback'
+    environment:
+      # Wins over env_file / image defaults so a host .env cannot flip this.
+      NODE_ENV: production
+      # The app sees HOST=0.0.0.0 inside the container, so the REQUIRE_AUTH
+      # startup guard needs this explicit opt-out. The loopback-only port
+      # mapping above is what keeps this stack's exposure local; production
+      # deployments MUST configure OIDC instead of copying this.
+      REQUIRE_AUTH: 'false'
+      # Inside the container; host mapping above is 8791.
+      PORT: 8790
+      # Host-facing origin for MCP OAuth callbacks (mapped port, not container PORT).
+      PUBLIC_BASE_URL: http://localhost:8791
+      # Compose network hosts — do not use packages/trueforge/.env localhost values.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      # Compose runs one replica but keeps peering on so the peered cancel path
+      # stays exercised. STANDALONE=false ⇒ Postgres + Redis.
+      # A single-process deployment can set STANDALONE=true and drop redis.
+      STANDALONE: 'false'
+      REDIS_URL: redis://redis:6379
+      # Markdown memory backend (default): local files under
+      # MEMORY_MARKDOWN_DIR. Mounted on the persistent memory-data volume so
+      # memories survive container recreates.
+      MEMORY_MARKDOWN_DIR: /data/memory
+    # Secrets and Postgres credentials (POSTGRES_USER, …).
+    # `environment` above overrides any colliding keys from this file.
+    env_file:
+      - path: packages/trueforge/.env
+        required: true
+    # The login profile's self-signed Dex certificate lives here. Empty, and
+    # unused, unless NODE_EXTRA_CA_CERTS in .env points into it.
+    volumes:
+      - dex-tls:/etc/dex-tls:ro
+      # Persistent Markdown memory ; without this, memories vanish
+      # on container recreate.
+      - memory-data:/data/memory
+    depends_on:
+      loopback:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # OIDC discovery runs at startup, so with the login profile Dex must be
+      # up first. Optional: without the profile the entry is skipped.
+      dex:
+        condition: service_healthy
+        required: false
+    # Probes GET /healthz; node is already in the image.
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:8790/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    # Above the app's default GRACEFUL_TIMEOUT_SECONDS (30) so SIGKILL does not
+    # cut off turn drain.
+    stop_grace_period: 35s
+    restart: unless-stopped
+
+  # Schedule controller: runs the periodic control loops (schedule dispatch) as a separate service.
+  controller:
+    # Runs the image the `server` service builds. Building it here too makes Compose build
+    # the same tag twice in parallel, and the second export fails with "already exists".
+    image: truefoundry-server:latest
+    pull_policy: never
+    command: ['node', 'dist/controller-main.js']
+    environment:
+      NODE_ENV: production
+      STANDALONE: 'false'
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      # The controller is its own container, so localhost would be itself; the
+      # server answers in the network namespace published by `loopback`.
+      SERVER_URL: http://loopback:8790
+    env_file:
+      - path: packages/trueforge/.env
+        required: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      server:
+        condition: service_healthy
+    # Above GRACEFUL_TIMEOUT_SECONDS (30) so SIGKILL does not cut off loop drain.
+    stop_grace_period: 35s
+    restart: unless-stopped
+
+  # Login profile. Start with `docker compose --profile login up --build` after
+  # setting the OIDC_*, DEX_* and NODE_EXTRA_CA_CERTS values in
+  # packages/trueforge/.env (docs/quickstart.mdx walks through it). The app
+  # then shows a real sign-in screen backed by one local account, with no
+  # external identity provider.
+
+  # One-shot: mints a self-signed certificate for https://localhost:5556 the
+  # first time the profile runs. OIDC issuers must be HTTPS; the server trusts
+  # this certificate through NODE_EXTRA_CA_CERTS, and the browser asks once.
+  dex-tls:
+    image: alpine/openssl:3.5.1
+    profiles: ['login']
+    entrypoint: ['sh', '-c']
+    command:
+      - |
+        test -f /tls/dex.crt && exit 0
+        openssl req -x509 -newkey rsa:2048 -nodes -days 825           -keyout /tls/dex.key -out /tls/dex.crt           -subj '/CN=localhost'           -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+        # Dex runs unprivileged; the key protects a loopback-only login.
+        chmod 644 /tls/dex.key /tls/dex.crt
+    volumes:
+      - dex-tls:/tls
+
+  dex:
+    image: ghcr.io/dexidp/dex:v2.41.1
+    profiles: ['login']
+    # Same network namespace as the server (see `loopback`), so the issuer
+    # https://localhost:5556/dex is one URL for the browser and the server.
+    network_mode: 'service:loopback'
+    command: ['dex', 'serve', '/etc/dex/config.yaml']
+    volumes:
+      - ./ops/compose/dex/config.yaml:/etc/dex/config.yaml:ro
+      - dex-tls:/etc/dex/tls:ro
+    env_file:
+      - path: packages/trueforge/.env
+        required: true
+    depends_on:
+      loopback:
+        condition: service_started
+      dex-tls:
+        condition: service_completed_successfully
+    # Dex's plain-HTTP telemetry listener serves /healthz; see config.yaml.
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:5558/healthz']
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  dex-tls:
+  # Persistent Markdown memory files .
+  memory-data:

@@ -1,0 +1,78 @@
+node_modules/
+dist/
+*.tgz
+!vendor/*.tgz
+.DS_Store
+*.log
+coverage/
+.turbo/
+*.tsbuildinfo
+.pnpm-store/
+.eslintcache
+.prettiercache
+packages/trueforge-core/src/core/sandbox/sandboxScripts.gen.ts
+packages/trueforge/src/catalog/modelCatalog.gen.ts
+packages/trueforge/src/catalog/mcpCatalog.gen.ts
+packages/trueforge/src/catalog/skillCatalog.gen.ts
+packages/trueforge/src/catalog/sandboxCatalog.gen.ts
+packages/trueforge/src/sandbox/local/sandboxScripts.gen.ts
+data/
+# Helm subchart deps are fetched via `helm dependency build` (pinned by the
+# committed Chart.lock); the downloaded .tgz/dirs are not committed.
+charts/*/charts/
+
+# Secrets / local env (keep committed examples and the unit-test env fixture)
+.env
+.env.*
+!.env.example
+!.env.test
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+credentials.json
+service-account*.json
+.aws/
+
+# OpenSSH keypairs written next to the repo during sandbox work. The public
+# half is ignored too: it is harmless, but its presence advertises the private
+# half and invites someone to force-add the pair.
+id_rsa
+id_ecdsa
+id_ed25519
+*.pub
+
+# Databases and dumps. These carry chat history and, for a sandbox provider
+# row, a plaintext API key, so they are user data rather than build output.
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.mdb
+
+# Git bundles: a whole repository in one file, easy to produce while debugging
+# and easy to commit by accident.
+*.bundle
+
+# Agent scratch files. Assistants working in this tree write probe scripts,
+# screenshots, database copies and key material beside the source. None of it
+# belongs in history.
+.codex-*
+.claude-scratch/
+
+# Test output directories (e.g., package smoke test temporaries)
+.package-smoke-*/
+
+# Local Cursor scratch (committed rules under .cursor/rules/ stay tracked)
+.cursor/notes/
+.cursor/plans/
+
+.vscode
+
+.certs/
+# Stray PR description scratch files pasted into the tree root by mistake.
+pr-body*
+pr_body*
+.pr-body*

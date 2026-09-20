@@ -1,0 +1,18 @@
+{
+  "tool": "replace_text",
+  "args": {
+    "intent": "Replace a passage that itself contains numbered, colon-delimited lines whose numbers are not strictly consecutive — must not be misread as a line-number gutter and stripped, which could redirect the edit to an unrelated unnumbered passage",
+    "path": "src/outline.ts",
+    "old_text": "1: Introduction\n2: Overview\n5: Conclusion",
+    "new_text": "1: Intro\n2: Summary\n5: Closing",
+    "replace_all": false
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": true,
+    "normalizedPath": "src/outline.ts",
+    "matchStatus": "exact_match",
+    "notes": []
+  }
+}

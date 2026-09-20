@@ -1,0 +1,30 @@
+import type { Theme } from "./index.js";
+
+export const solarizedDarkTheme: Theme = {
+  name: "solarized-dark",
+  nerd: false,
+  fg: "#839496",
+  bg: "#002b36",
+  dim: "#586e75",
+  accent: "#268bd2",
+  error: "#dc322f",
+  warning: "#b58900",
+  success: "#859900",
+  selectedFg: "#002b36",
+  selectedBg: "#268bd2",
+  sidebarBg: "#073642",
+  modalBg: "#073642",
+  statusBarBg: "#073642",
+  statusBarFg: "#93a1a1",
+  helpBarFg: "#586e75",
+  border: "#586e75",
+  glyphs: {
+    mail: "@",
+    attachment: "*",
+    star: "-",
+    starOn: "+",
+    unread: "*",
+    chevronRight: ">",
+    chevronDown: "v",
+  },
+};

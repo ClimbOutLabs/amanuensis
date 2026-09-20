@@ -1,0 +1,4 @@
+# Last matching pattern wins. Enable "Require review from Code Owners" on the
+# default branch for these rules to gate merges.
+
+* @ClimbOutLabs

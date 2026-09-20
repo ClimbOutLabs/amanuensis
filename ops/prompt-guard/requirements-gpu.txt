@@ -1,0 +1,17 @@
+# GPU backend dependencies.
+#
+# Dockerfile.gpu installs nothing from this file at build time. The base
+# image (vllm/vllm-openai:v0.27.1) already ships a working torch+CUDA build
+# for this host's architecture (aarch64) plus transformers and safetensors
+# (see ADR.md, "GPU backend on official weights", for why that image is the
+# base instead of a plain CUDA devel image). This file exists to document
+# and pin the versions actually in use, verified on an aarch64 host with an
+# NVIDIA GPU:
+#
+# torch==2.13.0+cu130
+# transformers==5.15.0
+# safetensors==0.8.0
+#
+# If a future base image drops or downgrades one of these, add it here with
+# `--require-hashes` pins the way requirements.txt does for the ONNX backend,
+# and install it explicitly in Dockerfile.gpu.

@@ -1,0 +1,31 @@
+{
+  "id": "w_thr_001",
+  "historyId": "1001",
+  "snippet": "Q3 planning thread",
+  "messages": [
+    {
+      "id": "w_msg_001",
+      "threadId": "w_thr_001",
+      "labelIds": [
+        "INBOX"
+      ],
+      "snippet": "Q3 planning thread",
+      "payload": {
+        "mimeType": "text/plain",
+        "headers": [
+          {
+            "name": "Subject",
+            "value": "Q3 planning"
+          },
+          {
+            "name": "From",
+            "value": "colleague@fixture.test"
+          }
+        ],
+        "body": {
+          "data": "UGxhbm5pbmcgbm90ZXMgZ28gaGVyZS4="
+        }
+      }
+    }
+  ]
+}

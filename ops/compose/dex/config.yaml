@@ -1,0 +1,40 @@
+# Dex identity provider for the Compose `login` profile: one local account,
+# no external IdP. The Dex image renders this file with gomplate before
+# start, so `getenv` reads the values from packages/trueforge/.env.
+#
+# Dex shares the server container's network namespace (see
+# docker-compose.yml), so the issuer below is the same URL for the browser
+# on the host and for the server verifying tokens, which OIDC requires.
+issuer: https://localhost:5556/dex
+
+storage:
+  type: memory
+
+web:
+  https: 0.0.0.0:5556
+  tlsCert: /etc/dex/tls/dex.crt
+  tlsKey: /etc/dex/tls/dex.key
+
+# Plain HTTP, never published: the container healthcheck reads /healthz here.
+telemetry:
+  http: 127.0.0.1:5558
+
+oauth2:
+  responseTypes: ['code']
+  skipApprovalScreen: true
+
+enablePasswordDB: true
+
+staticPasswords:
+  - email: {{ getenv "DEX_USER_EMAIL" | required "DEX_USER_EMAIL must be set in packages/trueforge/.env" }}
+    # A bcrypt hash; the `$` signs inside it stay out of this file on purpose.
+    hashFromEnv: DEX_USER_PASSWORD_HASH
+    username: {{ getenv "DEX_USER_NAME" "Admin" | quote }}
+    userID: local-admin
+
+staticClients:
+  - id: amanuensis
+    name: Amanuensis
+    secretEnv: OIDC_CLIENT_SECRET
+    redirectURIs:
+      - http://localhost:8791/api/v1/auth/callback

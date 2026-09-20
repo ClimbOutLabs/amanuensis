@@ -1,0 +1,57 @@
+import type { SessionAgent, SessionMetadata, SessionMetrics, SessionSource } from '../schemas/session';
+import type { CreatedBySubject } from '../schemas/subject';
+import type { TaskChecklist } from '../schemas/taskChecklist';
+
+/**
+ * Session persistence record. Agent binding is a single discriminated `agent`
+ * (`reference` | `inline`). Reference rows carry create-time `name` snapshot
+ * (nullable for legacy/orphan). Named agents are not hydrated to inline on read.
+ */
+export interface SessionRecord<TCustom extends object = Record<string, never>> {
+  tenant_id: string;
+  session_id: string;
+  /** Caller identity that created the session (immutable after create). */
+  created_by_subject: CreatedBySubject;
+  agent: SessionAgent;
+  /**
+   * Public session title (nullable). Written via updateSession patch or createTurn's
+   * update_session_title_if_not_exist (first write wins; caller derives).
+   */
+  title: string | null;
+  /** Optional owner-scoped folder. Folder changes are not session activity. */
+  folder_id: string | null;
+  /** Optional host-owned repository registry binding. */
+  repository_id: string | null;
+  /** Absolute checkout path inside the session sandbox when repository-bound. */
+  workspace_cwd: string | null;
+  /**
+   * Optional caller-supplied key, unique within a tenant when set.
+   * Null means the session has no external id.
+   */
+  external_id: string | null;
+  /**
+   * How the session was created. Null for interactive sessions.
+   */
+  source: SessionSource | null;
+  /**
+   * Session tip — used for `previous_turn_id: 'auto'` resolution and turn
+   * listing anchors. Advanced only by `createTurn` (atomic link).
+   */
+  last_turn_id: string | null;
+  /** Instant the session was created (store domain). Wire/API serialize as ISO-8601. */
+  created_at: Date;
+  /** Instant the session was last updated (store domain). Wire/API serialize as ISO-8601. */
+  updated_at: Date;
+  /**
+   * Liveness clock (ms since epoch). The store bumps it on createSession,
+   * updateSession, and createTurn — never on reads.
+   */
+  last_activity_timestamp_ms: number;
+  /** Server-derived exact-tool grants created by "Allow for this chat". */
+  approval_grants: string[];
+  /** Host-owned ordered task state, persisted outside the model context. */
+  task_checklist: TaskChecklist;
+  metrics: SessionMetrics;
+  metadata: SessionMetadata;
+  custom: TCustom | null;
+}

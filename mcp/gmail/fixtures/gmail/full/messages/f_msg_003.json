@@ -1,0 +1,33 @@
+{
+  "id": "f_msg_003",
+  "threadId": "f_thr_008",
+  "labelIds": [
+    "INBOX"
+  ],
+  "snippet": "Message with an attachment",
+  "payload": {
+    "mimeType": "multipart/mixed",
+    "headers": [
+      {
+        "name": "Subject",
+        "value": "Attachment demo"
+      }
+    ],
+    "parts": [
+      {
+        "mimeType": "text/plain",
+        "body": {
+          "data": "U2VlIGF0dGFjaGVkLg=="
+        }
+      },
+      {
+        "mimeType": "application/octet-stream",
+        "filename": "demo.bin",
+        "body": {
+          "attachmentId": "att_001",
+          "size": 49
+        }
+      }
+    ]
+  }
+}
