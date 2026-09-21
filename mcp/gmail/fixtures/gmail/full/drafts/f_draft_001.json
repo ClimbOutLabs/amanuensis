@@ -1,0 +1,27 @@
+{
+  "id": "f_draft_001",
+  "message": {
+    "id": "f_msg_001",
+    "threadId": "f_thr_006",
+    "labelIds": [
+      "DRAFT"
+    ],
+    "snippet": "Hi team, agenda to follow",
+    "payload": {
+      "mimeType": "text/plain",
+      "headers": [
+        {
+          "name": "Subject",
+          "value": "Tomorrow's sync"
+        },
+        {
+          "name": "To",
+          "value": "team@fixture.test"
+        }
+      ],
+      "body": {
+        "data": "SGkgdGVhbSwgYWdlbmRhIHRvIGZvbGxvdyB0b21vcnJvdy4="
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "tool": "apply_patch",
+  "args": {
+    "intent": "Add a return statement, no envelope markers",
+    "cwd": "/repo",
+    "patch": "*** Update File: src/util.ts\n@@\n-export function add(a, b) {\n-}\n+export function add(a, b) {\n+  return a + b;\n+}\n"
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": true,
+    "notes": ["converted OpenAI apply_patch envelope to a Git-format unified diff"]
+  }
+}

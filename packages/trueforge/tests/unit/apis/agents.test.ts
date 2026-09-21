@@ -1,0 +1,351 @@
+import { createAgentsRouter } from '../../../src/apis/agents';
+import { TrueForgeAuthorizer, type AgentListAccess, type Authorizer } from '../../../src/auth/authorizer';
+import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import configuration from '../../../src/config';
+import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
+import { createSqliteDb } from '../../../src/db/sqlite/client';
+import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
+import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
+import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
+import { ListAgentsResponseSchema } from '../../../src/schemas/agent';
+
+const modelProvider = {
+  type: 'anthropic' as const,
+  base_url: 'https://api.anthropic.com/v1',
+  auth: { api_key: 'sk-ant-secret' },
+  models: [
+    {
+      model_id: 'claude-sonnet-4-6',
+      name: 'claude-sonnet-4-6',
+      properties: { context_length: 200000, max_output_tokens: 32768 },
+    },
+  ],
+};
+
+const manifest = {
+  model: { name: 'anthropic/claude-sonnet-4-6' },
+  instructions: 'Be helpful.',
+  config: {
+    context_management: {
+      compaction: {
+        enabled: true,
+        trigger: { type: 'input_tokens', value: 80_000 },
+      },
+    },
+  },
+};
+
+const writeBody = {
+  name: 'research',
+  description: 'Research helper.',
+  manifest,
+};
+
+const updateBody = {
+  description: 'Updated research agent.',
+  manifest: {
+    model: { name: 'anthropic/claude-sonnet-4-6' },
+    instructions: 'Updated instructions.',
+  },
+};
+
+type WireAgent = {
+  id: string;
+  name: string;
+  description: string;
+  manifest: {
+    model: { name: string };
+    instructions?: string;
+    config?: {
+      context_management?: {
+        compaction?: { enabled: boolean; trigger?: { type: 'input_tokens'; value: number } };
+      };
+    };
+  };
+};
+
+function jsonInit(method: string, body: unknown): RequestInit {
+  return {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  };
+}
+
+const deniedListAgentAccess = jest.fn(
+  (_input: Parameters<Authorizer['listAgentAccess']>[0]): Promise<AgentListAccess> =>
+    Promise.resolve({ kind: 'agent_external_ids', agent_external_ids: [] }),
+);
+const deniedCanAccessAgent = jest.fn((_input: Parameters<Authorizer['canAccessAgent']>[0]) => Promise.resolve(false));
+const denyAllAuthorizer: Authorizer = {
+  listAgentAccess: deniedListAgentAccess,
+  canAccessAgent: deniedCanAccessAgent,
+  getPermissions: async ({ resourceIds }) => Object.fromEntries(resourceIds.map(id => [id, []])),
+};
+
+describe('agents router', () => {
+  let router: ReturnType<typeof createAgentsRouter>;
+  let deniedRouter: ReturnType<typeof createAgentsRouter>;
+
+  beforeAll(async () => {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const modelProviderStore = new SqliteModelProviderStore(db);
+    await modelProviderStore.upsertProvider({ tenant_id: 'default', name: 'anthropic', manifest: modelProvider });
+    const agentStore = new SqliteAgentStore(db);
+    router = createAgentsRouter({
+      resolveAgentStore: () => agentStore,
+      resolveModelProviderStore: () => modelProviderStore,
+      resolveMcpServerStore: () => new SqliteMcpServerStore(db),
+      resolveSkillStore: () => new SqliteSkillStore(db),
+      resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
+      withTransaction: callback => db.transaction().execute(callback),
+      resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+      authorizer: new TrueForgeAuthorizer(),
+    });
+    deniedRouter = createAgentsRouter({
+      resolveAgentStore: () => agentStore,
+      resolveModelProviderStore: () => modelProviderStore,
+      resolveMcpServerStore: () => new SqliteMcpServerStore(db),
+      resolveSkillStore: () => new SqliteSkillStore(db),
+      resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
+      withTransaction: callback => db.transaction().execute(callback),
+      resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+      authorizer: denyAllAuthorizer,
+    });
+  });
+
+  it('POST returns a wrapped Agent; PUT by immutable id keeps the same id', async () => {
+    const created = await router.request('/', jsonInit('POST', { ...writeBody, description: '  Research helper.  ' }));
+    expect(created.status).toBe(201);
+    const createdJson = (await created.json()) as { data: WireAgent };
+    expect(createdJson.data.id.length).toBeGreaterThan(0);
+    expect(createdJson.data).toMatchObject({
+      name: 'research',
+      description: 'Research helper.',
+      manifest: {
+        model: { name: 'anthropic/claude-sonnet-4-6' },
+        instructions: 'Be helpful.',
+        config: {
+          context_management: {
+            compaction: {
+              enabled: true,
+              trigger: { type: 'input_tokens', value: 80_000 },
+            },
+          },
+        },
+      },
+    });
+    expect(createdJson.data).not.toHaveProperty('metadata');
+
+    const updated = await router.request(`/${createdJson.data.id}`, jsonInit('PUT', updateBody));
+    expect(updated.status).toBe(200);
+    const updatedJson = (await updated.json()) as { data: WireAgent };
+    expect(updatedJson.data.id).toBe(createdJson.data.id);
+    expect(updatedJson.data.name).toBe('research');
+    expect(updatedJson.data.description).toBe('Updated research agent.');
+    expect(updatedJson.data.manifest.instructions).toBe('Updated instructions.');
+    expect(updatedJson.data).not.toHaveProperty('metadata');
+  });
+
+  it('PUT with only manifest keeps the stored description', async () => {
+    const created = await router.request(
+      '/',
+      jsonInit('POST', { ...writeBody, name: 'keep-desc', description: 'Keep me.' }),
+    );
+    expect(created.status).toBe(201);
+    const createdJson = (await created.json()) as { data: WireAgent };
+
+    const updated = await router.request(`/${createdJson.data.id}`, jsonInit('PUT', { manifest: updateBody.manifest }));
+    expect(updated.status).toBe(200);
+    const updatedJson = (await updated.json()) as { data: WireAgent };
+    expect(updatedJson.data.description).toBe('Keep me.');
+    expect(updatedJson.data.manifest.instructions).toBe('Updated instructions.');
+  });
+
+  it('PUT rejects metadata in the request body', async () => {
+    const created = await router.request('/', jsonInit('POST', { ...writeBody, name: 'no-meta' }));
+    expect(created.status).toBe(201);
+    const createdJson = (await created.json()) as { data: WireAgent };
+
+    const put = await router.request(`/${createdJson.data.id}`, jsonInit('PUT', { ...updateBody, metadata: {} }));
+    expect(put.status).toBe(400);
+  });
+
+  it('GET and PUT return 404 for unknown ids', async () => {
+    const get = await router.request('/missing-agent-id');
+    expect(get.status).toBe(404);
+
+    const put = await router.request('/missing-agent-id', jsonInit('PUT', updateBody));
+    expect(put.status).toBe(404);
+
+    const snippets = await router.request('/missing-agent-id/code-snippets');
+    expect(snippets.status).toBe(404);
+  });
+
+  it('GET code-snippets returns snippets for an existing agent', async () => {
+    const created = await router.request('/', jsonInit('POST', { ...writeBody, name: 'snippet-bot' }));
+    expect(created.status).toBe(201);
+    const createdJson = (await created.json()) as { data: WireAgent };
+
+    const response = await router.request(`/${createdJson.data.id}/code-snippets`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        base_url: string;
+        snippets: Array<{ sample_code: { stream: string; non_stream: string } }>;
+      };
+    };
+    expect(body.data.base_url).toBe(
+      configuration.PUBLIC_BASE_URL
+        ? new URL(new URL(configuration.PUBLIC_BASE_URL).pathname, 'http://localhost').href
+        : 'http://localhost',
+    );
+    expect(body.data.snippets.length).toBeGreaterThan(0);
+    expect(body.data.snippets[0]?.sample_code.stream).not.toContain('USER_API_KEY');
+    expect(body.data.snippets[0]?.sample_code.non_stream).not.toContain('USER_API_KEY');
+
+    const overridden = await router.request(
+      `/${createdJson.data.id}/code-snippets?base_url=${encodeURIComponent('https://sample.com/trueforge')}`,
+    );
+    expect(overridden.status).toBe(200);
+    const overriddenBody = (await overridden.json()) as { data: { base_url: string } };
+    expect(overriddenBody.data.base_url).toBe('https://sample.com/trueforge');
+  });
+
+  it('DELETE removes an agent by id and returns 404 when already gone', async () => {
+    const created = await router.request('/', jsonInit('POST', { ...writeBody, name: 'deletable' }));
+    expect(created.status).toBe(201);
+    const { data } = (await created.json()) as { data: { id: string } };
+
+    const deleted = await router.request(`/${data.id}`, { method: 'DELETE' });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({});
+
+    expect((await router.request(`/${data.id}`)).status).toBe(404);
+    const deletedAgain = await router.request(`/${data.id}`, { method: 'DELETE' });
+    expect(deletedAgain.status).toBe(404);
+  });
+
+  it('POST rejects invalid bodies, unknown models, and duplicate names', async () => {
+    const badName = await router.request('/', jsonInit('POST', { ...writeBody, name: 'Not A Name' }));
+    expect(badName.status).toBe(400);
+
+    const dotted = await router.request('/', jsonInit('POST', { ...writeBody, name: 'my.agent' }));
+    expect(dotted.status).toBe(400);
+
+    const underscored = await router.request('/', jsonInit('POST', { ...writeBody, name: 'my_agent' }));
+    expect(underscored.status).toBe(400);
+
+    const reservedTfg = await router.request('/', jsonInit('POST', { ...writeBody, name: 'tfg' }));
+    expect(reservedTfg.status).toBe(400);
+
+    const reservedTrueforge = await router.request('/', jsonInit('POST', { ...writeBody, name: 'trueforge' }));
+    expect(reservedTrueforge.status).toBe(400);
+
+    const unknownModel = await router.request(
+      '/',
+      jsonInit('POST', {
+        name: 'other',
+        description: 'Other agent.',
+        manifest: { ...manifest, model: { name: 'missing/model' } },
+      }),
+    );
+    expect(unknownModel.status).toBe(422);
+
+    const blankDescription = await router.request(
+      '/',
+      jsonInit('POST', { ...writeBody, name: 'blank-desc', description: '   ' }),
+    );
+    expect(blankDescription.status).toBe(400);
+
+    const missingDescription = await router.request('/', jsonInit('POST', { name: 'no-desc', manifest }));
+    expect(missingDescription.status).toBe(400);
+
+    const first = await router.request('/', jsonInit('POST', { ...writeBody, name: 'alpha' }));
+    expect(first.status).toBe(201);
+
+    const clash = await router.request('/', jsonInit('POST', { ...writeBody, name: 'alpha' }));
+    expect(clash.status).toBe(409);
+  });
+
+  it('lists, gets, updates, and deletes as not found when the authorizer denies the agent', async () => {
+    deniedListAgentAccess.mockClear();
+    deniedCanAccessAgent.mockClear();
+    const created = await router.request('/', jsonInit('POST', { ...writeBody, name: 'denied-agent' }));
+    expect(created.status).toBe(201);
+    const { data } = (await created.json()) as { data: { id: string } };
+
+    const listed = await deniedRouter.request('/');
+    expect(listed.status).toBe(200);
+    expect(ListAgentsResponseSchema.parse(await listed.json())).toEqual({
+      data: [],
+      pagination: { limit: 50 },
+    });
+
+    expect((await deniedRouter.request(`/${data.id}`)).status).toBe(404);
+    expect((await deniedRouter.request(`/${data.id}/code-snippets`)).status).toBe(404);
+    expect((await deniedRouter.request(`/${data.id}`, jsonInit('PUT', updateBody))).status).toBe(404);
+    expect((await deniedRouter.request(`/${data.id}`, { method: 'DELETE' })).status).toBe(404);
+    expect((await router.request(`/${data.id}`)).status).toBe(200);
+    expect(deniedListAgentAccess.mock.calls.map(([input]) => input.action)).toEqual(['read']);
+    expect(deniedCanAccessAgent.mock.calls.map(([input]) => input.action)).toEqual([
+      'read',
+      'read',
+      'manage',
+      'delete',
+    ]);
+  });
+
+  it('lists agents with pagination envelope and rejects an invalid page_token', async () => {
+    const charlie = await router.request('/', jsonInit('POST', { ...writeBody, name: 'aaa-list-charlie' }));
+    const alpha = await router.request('/', jsonInit('POST', { ...writeBody, name: 'aaa-list-alpha' }));
+    const bravo = await router.request('/', jsonInit('POST', { ...writeBody, name: 'aaa-list-bravo' }));
+    expect(charlie.status).toBe(201);
+    expect(alpha.status).toBe(201);
+    expect(bravo.status).toBe(201);
+
+    const first = await router.request('/?limit=2');
+    expect(first.status).toBe(200);
+    const firstBody = ListAgentsResponseSchema.parse(await first.json());
+    expect(firstBody.data.map(agent => agent.name)).toEqual(['aaa-list-alpha', 'aaa-list-bravo']);
+    expect(firstBody.pagination.limit).toBe(2);
+    expect(firstBody.pagination.next_page_token).toEqual(expect.any(String));
+
+    const second = await router.request(
+      `/?limit=2&page_token=${encodeURIComponent(firstBody.pagination.next_page_token ?? '')}`,
+    );
+    expect(second.status).toBe(200);
+    const secondBody = ListAgentsResponseSchema.parse(await second.json());
+    expect(secondBody.data[0]?.name).toBe('aaa-list-charlie');
+    expect(secondBody.pagination.previous_page_token).toEqual(expect.any(String));
+
+    const badToken = await router.request('/?page_token=not-a-token');
+    expect(badToken.status).toBe(400);
+  });
+
+  it('lists agents filtered by agent_name substring case-insensitively', async () => {
+    const alpha = await router.request('/', jsonInit('POST', { ...writeBody, name: 'zzz-filter-alpha-bot' }));
+    const bravo = await router.request('/', jsonInit('POST', { ...writeBody, name: 'zzz-filter-bravo-bot' }));
+    const other = await router.request('/', jsonInit('POST', { ...writeBody, name: 'zzz-filter-unrelated' }));
+    expect(alpha.status).toBe(201);
+    expect(bravo.status).toBe(201);
+    expect(other.status).toBe(201);
+
+    const matched = await router.request('/?agent_name=FILTER-ALPHA');
+    expect(matched.status).toBe(200);
+    const matchedBody = ListAgentsResponseSchema.parse(await matched.json());
+    expect(matchedBody.data.map(agent => agent.name)).toEqual(['zzz-filter-alpha-bot']);
+
+    const both = await router.request('/?agent_name=zzz-filter');
+    expect(both.status).toBe(200);
+    const bothBody = ListAgentsResponseSchema.parse(await both.json());
+    expect(bothBody.data.map(agent => agent.name)).toEqual([
+      'zzz-filter-alpha-bot',
+      'zzz-filter-bravo-bot',
+      'zzz-filter-unrelated',
+    ]);
+  });
+});

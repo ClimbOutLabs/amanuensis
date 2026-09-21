@@ -1,0 +1,30 @@
+import type { Theme } from "./index.js";
+
+export const defaultTheme: Theme = {
+  name: "default",
+  nerd: false,
+  fg: "white",
+  bg: "black",
+  dim: "gray",
+  accent: "cyan",
+  error: "red",
+  warning: "yellow",
+  success: "green",
+  selectedFg: "black",
+  selectedBg: "cyan",
+  sidebarBg: "black",
+  modalBg: "black",
+  statusBarBg: "blue",
+  statusBarFg: "white",
+  helpBarFg: "gray",
+  border: "gray",
+  glyphs: {
+    mail: "@",
+    attachment: "*",
+    star: "-",
+    starOn: "+",
+    unread: "*",
+    chevronRight: ">",
+    chevronDown: "v",
+  },
+};

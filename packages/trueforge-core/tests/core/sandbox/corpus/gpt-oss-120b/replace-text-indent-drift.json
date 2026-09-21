@@ -1,0 +1,15 @@
+{
+  "tool": "replace_text",
+  "args": {
+    "path": "src/config.ts",
+    "old_text": "  const settings = {\n    debug:  true,\n    timeout: 5000\n  };",
+    "new_text": "  const settings = {\n    debug: false,\n    timeout: 10000\n  };",
+    "replace_all": false
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": false,
+    "matchStatus": "no_match"
+  }
+}

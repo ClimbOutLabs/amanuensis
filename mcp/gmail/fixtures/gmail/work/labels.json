@@ -1,0 +1,48 @@
+[
+  {
+    "id": "INBOX",
+    "name": "INBOX",
+    "type": "system",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow",
+    "messagesUnread": 3,
+    "messagesTotal": 13
+  },
+  {
+    "id": "SENT",
+    "name": "SENT",
+    "type": "system",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow"
+  },
+  {
+    "id": "UNREAD",
+    "name": "UNREAD",
+    "type": "system",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow",
+    "messagesUnread": 5,
+    "messagesTotal": 9
+  },
+  {
+    "id": "TRASH",
+    "name": "TRASH",
+    "type": "system",
+    "messageListVisibility": "hide",
+    "labelListVisibility": "labelHide"
+  },
+  {
+    "id": "Label_1",
+    "name": "Project Acme",
+    "type": "user",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow"
+  },
+  {
+    "id": "Label_2",
+    "name": "Receipts",
+    "type": "user",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow"
+  }
+]

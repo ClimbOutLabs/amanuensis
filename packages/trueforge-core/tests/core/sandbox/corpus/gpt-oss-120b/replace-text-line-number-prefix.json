@@ -1,0 +1,17 @@
+{
+  "tool": "replace_text",
+  "args": {
+    "path": "src/example.ts",
+    "old_text": "212 | const value = 42;",
+    "new_text": "const value = 100;",
+    "replace_all": false
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": true,
+    "normalizedPath": "src/example.ts",
+    "matchStatus": "exact_match",
+    "notes": []
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "tool": "apply_patch",
+  "args": {
+    "intent": "A well-formed git diff, unchanged by normalisation",
+    "cwd": "/repo",
+    "patch": "diff --git a/src/util.ts b/src/util.ts\n--- a/src/util.ts\n+++ b/src/util.ts\n@@ -1 +1 @@\n-const x = 1;\n+const y = 1;\n"
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": true,
+    "notes": []
+  }
+}

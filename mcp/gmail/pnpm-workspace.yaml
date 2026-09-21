@@ -1,0 +1,13 @@
+# Standalone (Docker) install of @amanuensis/gmail-mcp.
+# Mirrors the root workspace override so the image resolves exactly one
+# google-auth-library 10.x: googleapis-common@8.0.3 pins it to exactly
+# 10.5.0 while mcp/gmail needs ^10.9.0; one 10.x keeps OAuth2Client types
+# unified so the Docker build typechecks like the pnpm workspace.
+overrides:
+  google-auth-library: "^10.9.0"
+
+# esbuild's postinstall only fetches its platform binary for tsx/vite/vitest
+# (all devDependencies); the Docker build is plain `tsc`, so never run it.
+# Declaring this keeps `pnpm install --frozen-lockfile` non-interactive.
+allowBuilds:
+  esbuild: false

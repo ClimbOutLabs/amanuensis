@@ -1,0 +1,16 @@
+{
+  "tool": "write_file",
+  "args": {
+    "intent": "Create a file whose name a model typed with a Unicode hyphen",
+    "cwd": "/repo",
+    "path": "src/my‐module.ts",
+    "content": "export const value = 1;\n"
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": true,
+    "normalizedPath": "src/my‐module.ts",
+    "notes": []
+  }
+}

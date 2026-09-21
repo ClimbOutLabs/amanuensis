@@ -1,0 +1,4 @@
+# Direct runtime dependencies. requirements.txt is the generated, hash-locked closure.
+numpy==2.2.2
+onnxruntime==1.20.1
+transformers==4.48.3

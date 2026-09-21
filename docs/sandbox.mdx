@@ -1,0 +1,134 @@
+---
+title: 'Setup Sandbox'
+sidebarTitle: 'Sandbox'
+description: 'Connect an isolated execution environment for code, files, and shell commands — provisioned only when the agent needs one.'
+---
+
+The sandbox gives your agent a secure, isolated environment to run code, manipulate files, and execute shell commands — separate from the TrueForge server and your infrastructure.
+
+Skills and [Code Mode](/key-features/code-mode) require a sandbox. Configure a provider once under **Settings → Sandbox providers**, then enable the sandbox on each agent that needs it.
+
+## TrueForge's approach
+
+There are two common patterns for combining agents with sandboxes:
+
+| Pattern | Where the agent runs | Trade-off |
+| --- | --- | --- |
+| **Agent in sandbox** | Inside the sandbox image | Sandbox is provisioned even for the simplest request; secrets must live in the sandbox; updates mean rebuilding images |
+| **Sandbox as tool** | Outside, on the server | Sandbox is provisioned on demand when needed; secrets stay in the harness; sandbox is only for exec/files |
+
+TrueForge uses **sandbox as tool**: the agent loop and credentials stay in the harness; the sandbox only runs code, file, and shell operations.
+
+That means:
+
+- Model and MCP credentials never enter the sandbox.
+- Conversation state survives a sandbox crash.
+- A sandbox is created only when the agent actually needs one — simple Q&A and MCP calls incur no sandbox cost.
+
+## Configuring a provider
+
+**Daytona is the only sandbox provider supported today.** Support for additional providers is planned.
+
+Open **Settings → Sandbox providers**, pick the [Daytona](https://www.daytona.io) preset from the catalog, and paste your API key.
+
+<Note>
+  The Daytona API key needs permission to create **snapshots**, not only sandboxes. The first time you configure the
+  provider, TrueForge builds a release snapshot in your Daytona account, and every sandbox it starts afterwards is
+  cloned from that snapshot. Create the key with **Sandboxes** access and **Snapshots** write (create) permission.
+
+  If the key is missing snapshot permission, configuring the provider fails 
+  even though the key is otherwise valid. If you hit that, check the key's permissions before regenerating it.
+</Note>
+
+
+The provider presets come from the shipped sandbox catalog — see [Initial Setup](/harness/initial-setup#what-is-supported-out-of-the-box) for how catalogs work and how to change what the UI offers.
+
+## Enabling the sandbox on an agent
+
+The sandbox is **off by default** per agent. Turn it on in the agent builder when you need code execution, skills, or Code Mode. You can also set `config.sandbox.enabled` in the [agent spec](/create-agent/overview#config) when creating agents via the SDK.
+
+Optional controls:
+
+- **File downloads** — let users download files the agent produces (on by default in the chat UI).
+
+### Downloads outlive the sandbox
+
+A sandbox is stopped a few minutes after its turn finishes and deleted later, but a file the agent
+declared in its `sandbox_artifacts` block is copied to host storage as soon as that turn
+completes, so the download still works after the sandbox itself is gone. A file over
+`SANDBOX_FILE_MAX_BYTES_FOR_DOWNLOAD` is not copied; downloading it later reports that it was not
+kept, with the size involved. A turn still in progress has no persisted copy yet, so its download
+route falls back to the live sandbox until the turn finishes.
+
+## PDF and image text extraction
+
+The Aman sandbox runtime includes local PDF and OCR tools. As soon as the supported PDF and image
+attachments in an upload are staged, their text is extracted in a single batched call and placed
+directly in the message the model receives, using embedded PDF text when available and
+English-language OCR for image-only PDF pages and for uploaded images, so any model, including a
+text-only one, sees the content without deciding to call a tool for it. Batching the call keeps
+the page, character, and byte caps shared across the whole upload and keeps only one OCR pipeline
+running in the sandbox at a time. Extraction runs inside the sandbox and does not send document
+contents to an external OCR service. Very long documents are truncated in the message with a
+note; the `extract_document_text` tool re-extracts a file on demand for page- and
+line-addressable provenance, or for the remainder of a truncated document. Attachments of an
+unsupported type get no extraction note; the upload announcement already lists them and the
+model can read them with its own file tools.
+
+Existing sandbox-provider configurations remain pinned to the runtime image they originally
+registered. After updating Aman, open **Settings → Sandbox providers** and choose **Upgrade
+runtime** once to register the current image for newly created sandboxes. Running sandboxes and
+older snapshots are not replaced.
+
+## Repository-bound coding sessions
+
+A session can be bound to one registered repository and an absolute checkout path. On every turn and thread rebuild, the harness verifies that checkout and gives the agent its repository ID, current branch, HEAD commit, working directory, and the IDs of confirmed build, test, and verification commands.
+
+Confirmed commands are host-owned. The agent invokes a command by ID, while the harness supplies the exact command, working directory, purpose, and timeout. A missing command or invalid checkout fails clearly instead of falling back to a guessed command or directory.
+
+To reduce first-run setup friction, the harness can propose commands from two bounded repository files after a checkout is bound:
+
+- `package.json` scripts named `build`, `test`, or `verify`
+- explicit `Build:`, `Test:`, or `Verify:` command declarations in `AGENTS.md`
+
+Proposals are never executable. Review and confirm a proposal before it enters the command registry. The registry remains the source of truth even if the source file later changes.
+
+A successful `verify` command can authorize a separately approved commit in the next continuation turn. That authorization is single-use and is bound to the tenant, session owner, session, repository revision, provider sandbox, absolute checkout, and the exact Git state captured after verification. Any intervening workspace mutation invalidates it.
+
+Verification authorization is process-local in this release. It survives normal turn reconstruction in one running server, but a server restart or replica hop loses it and the commit fails closed by asking for verification again. The runtime exposes an asynchronous receipt-store boundary so deployments can replace that owner with durable, cross-replica storage without changing sandbox admission.
+
+The repository endpoints live under `/api/v1/repositories`; session binding lives under `/api/v1/sessions/{session_id}/repository`.
+
+## Structured file edits
+
+`apply_patch`, `replace_text`, and `write_file` are the sandbox's structured file-edit tools.
+`apply_patch` accepts a Git-format unified diff, or OpenAI's `apply_patch` envelope format
+(`*** Begin Patch` / `*** Update File:` / `*** End Patch`), converted to a git diff before
+validation; a body that omits the envelope but still opens with a file operation header is
+accepted the same way.
+
+Every multi-line text field these three tools take (`write_file`'s `content`, `apply_patch`'s
+`patch`, `replace_text`'s `old_text` and `new_text`) also accepts a sibling `<field>_lines`
+array: one array element per line, blank lines as empty strings, joined with `"\n"` before
+anything downstream sees it. Exactly one of each pair is required. Some models reliably produce
+one array element per line but unreliably produce embedded newlines inside a single JSON string
+value, so the array form is the reliable way for those models to send multi-line content; the
+plain string form keeps working unchanged for models that handle it correctly.
+
+Every call to these three tools passes through one argument-normalisation layer before
+validation: a leading byte-order mark or a surrounding markdown code fence is stripped, CRLF
+line endings are normalized to LF, an absolute path inside the bound repository is rewritten as
+cwd-relative, and Unicode hyphen or no-break-space characters inside a path are normalized to
+their ASCII form. A rejection that survives normalisation states what was received and what was
+expected, so a retrying model has something concrete to correct.
+
+## Lifecycle
+
+- Provisioned on demand when the agent needs code, files, skills, or Code Mode.
+- Reused across turns in the same session (files persist).
+- Stopped after idle time, then archived and eventually deleted per the provider settings.
+
+## Credential safety
+
+- Model and MCP credentials stay in the harness.
+- MCP calls from [Code Mode](/key-features/code-mode) scripts are bridged back to the harness — the sandbox never holds those tokens.

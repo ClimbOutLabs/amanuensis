@@ -1,0 +1,30 @@
+import type { Theme } from "./index.js";
+
+export const draculaTheme: Theme = {
+  name: "dracula",
+  nerd: false,
+  fg: "#f8f8f2",
+  bg: "#282a36",
+  dim: "#6272a4",
+  accent: "#bd93f9",
+  error: "#ff5555",
+  warning: "#ffb86c",
+  success: "#50fa7b",
+  selectedFg: "#282a36",
+  selectedBg: "#bd93f9",
+  sidebarBg: "#282a36",
+  modalBg: "#44475a",
+  statusBarBg: "#44475a",
+  statusBarFg: "#f8f8f2",
+  helpBarFg: "#6272a4",
+  border: "#6272a4",
+  glyphs: {
+    mail: "@",
+    attachment: "*",
+    star: "-",
+    starOn: "+",
+    unread: "*",
+    chevronRight: ">",
+    chevronDown: "v",
+  },
+};

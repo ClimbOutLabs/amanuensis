@@ -1,0 +1,6 @@
+function setup() {
+  const settings = {
+    debug: true,
+    timeout: 5000
+  };
+}

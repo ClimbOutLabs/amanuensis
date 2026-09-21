@@ -1,0 +1,224 @@
+/**
+ * Tests for the MEMORY_SUMMARIZE retain path.
+ *
+ * The config module is mocked with MEMORY_SUMMARIZE=true; the summarizeTurnContent
+ * module is mocked to control the LLM outcome without network access.
+ */
+import winston from 'winston';
+
+jest.mock('../../../../src/config', () => {
+  const actual = jest.requireActual<typeof import('../../../../src/config')>('../../../../src/config');
+  return {
+    __esModule: true,
+    ...actual,
+    default: { ...actual.default, MEMORY_SUMMARIZE: true },
+  };
+});
+
+jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
+  const actual = jest.requireActual<typeof import('../../../../src/runtime/memory/memorySummarize')>(
+    '../../../../src/runtime/memory/memorySummarize',
+  );
+  return { ...actual, summarizeTurnContent: jest.fn() };
+});
+
+import { type IModelProviderStore } from '../../../../src/db/modelProviderStore';
+import { HindsightClient, type RetainOutcome } from '../../../../src/runtime/memory/hindsightClient';
+import { submitRetain, submitRetainWithVerification } from '../../../../src/runtime/memory/memoryRetain';
+import { summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
+
+const mockSummarize = jest.mocked(summarizeTurnContent);
+
+function makeLogger() {
+  return winston.createLogger({ silent: true });
+}
+
+/** Minimal fake; the mocked summarizeTurnContent never dereferences the store. */
+function fakeModelProviderStore(): IModelProviderStore {
+  return {
+    listProviders: jest.fn(),
+    getProvider: jest.fn(),
+    getProviderForUpdate: jest.fn(),
+    createProvider: jest.fn(),
+    upsertProvider: jest.fn(),
+    listModels: jest.fn(),
+    deleteProvider: jest.fn(),
+  };
+}
+
+function retainingClient(): {
+  client: HindsightClient;
+  retain: jest.SpyInstance<Promise<RetainOutcome>, Parameters<HindsightClient['retain']>>;
+} {
+  const client = new HindsightClient({
+    apiBase: 'https://hindsight.test.example',
+    bank: 'aman',
+    headers: {},
+    fetchImpl: () => Promise.reject(new Error('retain tests must not reach the network')),
+  });
+  return { client, retain: jest.spyOn(client, 'retain') };
+}
+
+function summarizeContext() {
+  return {
+    tenantId: 'tenant-1',
+    modelProviderStore: fakeModelProviderStore(),
+    summarizationModelFqn: 'openai/gpt-4o',
+  };
+}
+
+describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
+  beforeEach(() => {
+    mockSummarize.mockReset();
+  });
+
+  it('retains the summary instead of the verbatim transcript on success', async () => {
+    const { client, retain } = retainingClient();
+    retain.mockResolvedValue({ ok: true });
+    mockSummarize.mockResolvedValue({
+      status: 'summarized',
+      summary: '- User has a synthetic test robot named Bleep-Bloop.',
+    });
+
+    await submitRetain({
+      client,
+      sessionId: 's1',
+      turnId: 't1',
+      userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
+      assistantText: 'Got it — Bleep-Bloop.',
+      completedAt: '2026-09-19T12:00:00.000Z',
+      logger: makeLogger(),
+      summarize: summarizeContext(),
+    });
+
+    expect(mockSummarize).toHaveBeenCalledTimes(1);
+    expect(mockSummarize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
+        assistantText: 'Got it — Bleep-Bloop.',
+        tenantId: 'tenant-1',
+        summarizationModelFqn: 'openai/gpt-4o',
+      }),
+    );
+    const call = retain.mock.calls[0]?.[0];
+    expect(call?.items[0]?.content).toBe('Turn summary: - User has a synthetic test robot named Bleep-Bloop.');
+  });
+
+  it('falls back to verbatim when summarization is skipped', async () => {
+    const { client, retain } = retainingClient();
+    retain.mockResolvedValue({ ok: true });
+    mockSummarize.mockResolvedValue({ status: 'skipped', reason: 'empty-exchange' });
+
+    await submitRetain({
+      client,
+      sessionId: 's1',
+      turnId: 't1',
+      userText: 'hi',
+      assistantText: 'hello',
+      completedAt: '2026-09-19T12:00:00.000Z',
+      logger: makeLogger(),
+      summarize: summarizeContext(),
+    });
+
+    const call = retain.mock.calls[0]?.[0];
+    expect(call?.items[0]?.content).toBe('User: hi\n\nAssistant: hello');
+  });
+
+  it('falls back to verbatim when summarization fails', async () => {
+    const { client, retain } = retainingClient();
+    retain.mockResolvedValue({ ok: true });
+    mockSummarize.mockResolvedValue({ status: 'failed', reason: 'provider down' });
+
+    await submitRetain({
+      client,
+      sessionId: 's1',
+      turnId: 't1',
+      userText: 'hi',
+      assistantText: 'hello',
+      completedAt: '2026-09-19T12:00:00.000Z',
+      logger: makeLogger(),
+      summarize: summarizeContext(),
+    });
+
+    const call = retain.mock.calls[0]?.[0];
+    expect(call?.items[0]?.content).toBe('User: hi\n\nAssistant: hello');
+  });
+
+  it('falls back to verbatim when summarization throws', async () => {
+    const { client, retain } = retainingClient();
+    retain.mockResolvedValue({ ok: true });
+    mockSummarize.mockRejectedValue(new Error('should be caught inside'));
+
+    await submitRetain({
+      client,
+      sessionId: 's1',
+      turnId: 't1',
+      userText: 'hi',
+      assistantText: 'hello',
+      completedAt: '2026-09-19T12:00:00.000Z',
+      logger: makeLogger(),
+      summarize: summarizeContext(),
+    });
+
+    // The retain itself never throws; the memory is preserved verbatim.
+    const call = retain.mock.calls[0]?.[0];
+    expect(call?.items[0]?.content).toBe('User: hi\n\nAssistant: hello');
+  });
+
+  it('does not summarize when no summarize context is provided (verbatim default)', async () => {
+    const { client, retain } = retainingClient();
+    retain.mockResolvedValue({ ok: true });
+
+    await submitRetain({
+      client,
+      sessionId: 's1',
+      turnId: 't1',
+      userText: 'hi',
+      assistantText: 'hello',
+      completedAt: '2026-09-19T12:00:00.000Z',
+      logger: makeLogger(),
+    });
+
+    expect(mockSummarize).not.toHaveBeenCalled();
+    const call = retain.mock.calls[0]?.[0];
+    expect(call?.items[0]?.content).toBe('User: hi\n\nAssistant: hello');
+  });
+});
+
+describe('submitRetainWithVerification with MEMORY_SUMMARIZE=true', () => {
+  beforeEach(() => {
+    mockSummarize.mockReset();
+  });
+
+  it('invokes the summarizer exactly once across submission and verification resubmission', async () => {
+    const { client, retain } = retainingClient();
+    retain.mockResolvedValue({ ok: true });
+    // The verification pass sees a vanished operation and resubmits once.
+    const getOperation = jest.spyOn(client, 'getOperation').mockResolvedValue({ ok: true, status: 'unknown' });
+    mockSummarize.mockResolvedValue({
+      status: 'summarized',
+      summary: '- User has a synthetic test robot named Bleep-Bloop.',
+    });
+
+    await submitRetainWithVerification({
+      client,
+      sessionId: 's1',
+      turnId: 't1',
+      userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
+      assistantText: 'Got it.',
+      completedAt: '2026-09-19T12:00:00.000Z',
+      logger: makeLogger(),
+      summarize: summarizeContext(),
+    });
+
+    // Submission plus the verification resubmission...
+    expect(retain).toHaveBeenCalledTimes(2);
+    // ...but the summary was computed once and reused, never recomputed.
+    expect(mockSummarize).toHaveBeenCalledTimes(1);
+    // Both submissions carried the same precomputed summary.
+    for (const call of retain.mock.calls) {
+      expect(call[0]?.items[0]?.content).toBe('Turn summary: - User has a synthetic test robot named Bleep-Bloop.');
+    }
+    getOperation.mockRestore();
+  });
+});

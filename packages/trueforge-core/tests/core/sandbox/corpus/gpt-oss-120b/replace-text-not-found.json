@@ -1,0 +1,15 @@
+{
+  "tool": "replace_text",
+  "args": {
+    "path": "src/missing.ts",
+    "old_text": "const notFound = 'this text does not exist';",
+    "new_text": "const found = 'replacement text';",
+    "replace_all": false
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": false,
+    "notes": []
+  }
+}

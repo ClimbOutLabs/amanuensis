@@ -1,0 +1,41 @@
+[
+  {
+    "id": "INBOX",
+    "name": "INBOX",
+    "type": "system",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow",
+    "messagesUnread": 1,
+    "messagesTotal": 11
+  },
+  {
+    "id": "SENT",
+    "name": "SENT",
+    "type": "system",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow"
+  },
+  {
+    "id": "UNREAD",
+    "name": "UNREAD",
+    "type": "system",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow",
+    "messagesUnread": 2,
+    "messagesTotal": 6
+  },
+  {
+    "id": "TRASH",
+    "name": "TRASH",
+    "type": "system",
+    "messageListVisibility": "hide",
+    "labelListVisibility": "labelHide"
+  },
+  {
+    "id": "Label_10",
+    "name": "Newsletters",
+    "type": "user",
+    "messageListVisibility": "show",
+    "labelListVisibility": "labelShow"
+  }
+]

@@ -1,0 +1,46 @@
+---
+title: "Layouts"
+description: "The four built-in layouts, and how to supply your own."
+hidden: true
+---
+
+The sidebar view is the default option. You can pass predefined values - sidebar, drawer, dock, or widget to change the layout.
+
+<Tabs>
+  <Tab title="sidebar(default)">
+    Full-page chat with a persistent chat history on the left. The default choice for a dedicated chat surface.
+
+    ```tsx
+    <TrueForgeUI server={server} layout="sidebar" />
+    ```
+
+    
+    The rail carries a Hide/Show recent chats button next to the theme and settings controls. It hides or restores the recent-chats panel without affecting the chat itself, and the choice is remembered per browser. The button only appears when the panel could otherwise be showing.
+  </Tab>
+  <Tab title="drawer">
+    Chat history list collapses into an overlay drawer. Click on the history icon to view the past conversations. Suited to narrower viewports.
+
+    ```tsx
+    <TrueForgeUI server={server} layout="drawer" />
+    ```
+
+      </Tab>
+  <Tab title="dock">
+    A panel pinned to the right edge, filling the available width up to a 400px cap.
+
+    ```tsx
+    <TrueForgeUI server={server} layout="dock" />
+    ```
+
+      </Tab>
+  <Tab title="widget">
+    Floating launcher that expands into a compact chat panel.
+
+    ```tsx
+    <TrueForgeUI server={server} layout="widget" />
+    ```
+
+      </Tab>
+</Tabs>
+
+Built-in layouts are code-split, so using one does not pull the other three into your bundle. A placeholder renders for the moment it takes to load.

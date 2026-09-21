@@ -1,0 +1,15 @@
+{
+  "tool": "write_file",
+  "args": {
+    "intent": "Attempt to write outside the bound repository",
+    "cwd": "/repo",
+    "path": "/etc/passwd",
+    "content": "nope\n"
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": false,
+    "notes": []
+  }
+}

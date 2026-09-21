@@ -1,0 +1,167 @@
+/**
+ * Host-facing server contract — re-exported from `@truefoundry/assistant-ui-runtime/server`
+ * so hosts never import the runtime package directly.
+ *
+ * Canonical definitions live in the runtime; this module is aliases + pass-through,
+ * plus host-widened types (e.g. `TrueForgeAgentRuntimeConfig`) the generated SDK
+ * does not declare yet.
+ * Use the `/server` entry (not package root) so port types are not shadowed by
+ * converter helpers that share names (e.g. `UserMessageContent`).
+ */
+
+import type { AgentRuntimeConfig } from '@truefoundry/assistant-ui-runtime/server';
+
+export type {
+  AgentBuilderCapabilitiesResponse,
+  AgentBuilderServer,
+  AgentCapabilityConfig,
+  AgentChatServer,
+  AgentCompactionConfig,
+  AgentDetail,
+  AgentInputTokensCompactionTrigger,
+  AgentLibraryEntry,
+  AgentMetricChartData,
+  AgentMetricChartDataRequest,
+  AgentMetricChartDefinition,
+  AgentMetricChartType,
+  AgentMetricGraph,
+  AgentMetricGraphLine,
+  AgentMetricMeter,
+  AgentMetricPoint,
+  AgentMetricRangeRequest,
+  AgentMetricsServer,
+  AgentRuntimeConfig,
+  AgentSessionsServer,
+  AgentSkill,
+  AgentSpec,
+  AgentUIServer,
+  ApprovalDecision,
+  AuthenticateConnectorRequest,
+  CatalogServer,
+  CodeSnippet,
+  CodeSnippetSampleCode,
+  ConnectorAuth,
+  ConnectorAuthApiKey,
+  ConnectorAuthenticationResult,
+  ConnectorAuthNone,
+  ConnectorAuthOAuth,
+  ConnectorAuthPublic,
+  ConnectorAuthPublicApiKey,
+  ConnectorAuthPublicNone,
+  ConnectorAuthPublicOAuth,
+  ConnectorAuthType,
+  ConnectorBase,
+  ConnectorCatalogEntry,
+  ConnectorCatalogServer,
+  ConnectorConfigBase,
+  ConnectorState,
+  CreateConnectorRequest,
+  CreatedBySubject,
+  CreateModelProviderRequest,
+  CreateSandboxProviderRequest,
+  CreateScheduleRequest,
+  CreateScheduleRunRequest,
+  CreateSessionRequest,
+  CreateSkillRequest,
+  CreateSkillRequestBase,
+  DefinedSkill,
+  GithubSkill,
+  ImportGithubSkillRequest,
+  ListPermissionsRequest,
+  ListPermissionsResponse,
+  ListResult,
+  ListSchedulesParams,
+  ListSessionEventsParams,
+  ListSessionsOrder,
+  ListSessionsParams,
+  McpServerMount,
+  McpToolSelection,
+  Model,
+  ModelCatalogServer,
+  ModelEntry,
+  ModelParams,
+  ModelProperties,
+  ModelProviderBase,
+  ModelProviderCatalogEntry,
+  ModelProviderConfigBase,
+  ModelSelection,
+  ModelSelectorEntry,
+  PageParams,
+  PermissionResourceType,
+  PermissionsServer,
+  PreviousTurnIdInput,
+  ProviderEntry,
+  ProviderType,
+  RegistrySkill,
+  ResourcePermission,
+  SandboxCatalogServer,
+  SandboxProviderBase,
+  SandboxProviderCatalogEntry,
+  SandboxProviderConfig,
+  SandboxProviderListEntry,
+  SandboxSnapshotSyncStatus,
+  SaveAgentRequest,
+  SaveAgentResult,
+  Schedule,
+  ScheduleRun,
+  ScheduleRunStatus,
+  ScheduleServer,
+  ScheduleStatus,
+  SearchAgentsParams,
+  SelectRegistrySkillRequest,
+  Session,
+  SessionEventItem,
+  SessionListEntry,
+  SessionListMetrics,
+  SkillBase,
+  SkillCatalogEntry,
+  SkillCatalogServer,
+  SkillConfigBase,
+  SkillMount,
+  ToolBase,
+  Turn,
+  TurnDoneMetrics,
+  TurnInputItem,
+  TurnState,
+  TurnStreamData,
+  TurnStreamingEvent,
+  UpdateConnectorRequest,
+  UpdateModelProviderRequest,
+  UpdateSandboxProviderRequest,
+  UpdateScheduleRequest,
+  UpdateSessionRequest,
+  UserMessage,
+  UserMessageContent,
+  UserToolApprovalEvent,
+  UserToolResponseEvent,
+} from '@truefoundry/assistant-ui-runtime/server';
+
+/**
+ * Host-owned task-state knobs (camelCase in the UI; the wire is snake_case).
+ *
+ * The generated SDK does not declare these until `pnpm sdk:generate` runs
+ * against a backend whose AgentSpec schema includes `task_state`, so the UI
+ * widens the SDK's `AgentRuntimeConfig` instead of editing generated types.
+ */
+export interface TaskStateRuntimeConfig {
+  /**
+   * Host-owned research tool-call budget per turn. When set, the agent banks
+   * findings into a structured scratchpad that is re-injected before every
+   * model call and survives context compaction; once the budget is spent the
+   * host withholds the budgeted research tools and the agent writes its final
+   * answer from the banked findings. Unset disables the feature entirely.
+   * Requires `budgetedTools`.
+   */
+  toolCallBudget?: number;
+  /**
+   * Tool names charged against `toolCallBudget` and withheld once it is
+   * spent. `*` is a wildcard (e.g. `tavily*`). `record_finding` is always
+   * exempt. Required when `toolCallBudget` is set.
+   */
+  budgetedTools?: string[];
+}
+
+/** SDK runtime config plus TrueForge task-state knobs. */
+export type TrueForgeAgentRuntimeConfig = AgentRuntimeConfig & {
+  taskState?: TaskStateRuntimeConfig;
+};
