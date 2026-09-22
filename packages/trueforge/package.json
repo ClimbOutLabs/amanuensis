@@ -62,8 +62,8 @@
     "typecheck": "pnpm run build:gen && tsc --noEmit && tsc --noEmit -p tests/db/tsconfig.json && tsc --noEmit -p tests/unit/tsconfig.json"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "0.0.76",
-    "@daytona/sdk": "^0.211.2",
+    "@anthropic-ai/sandbox-runtime": "0.0.77",
+    "@daytona/sdk": "^0.214.0",
     "@hono/node-server": "^2.1.1",
     "@hono/swagger-ui": "^0.6.1",
     "@hono/zod-openapi": "^1.6.1",
@@ -74,9 +74,9 @@
     "better-sqlite3": "^13.0.3",
     "cron-parser": "^5.10.1",
     "env-paths": "^4.0.0",
-    "hono": "^4.13.5",
+    "hono": "^4.13.8",
     "jose": "^6.2.10",
-    "kysely": "^0.29.5",
+    "kysely": "^0.29.6",
     "openid-client": "^6.8.7",
     "onnxruntime-node": "1.30.0",
     "pg": "^8.23.0",
