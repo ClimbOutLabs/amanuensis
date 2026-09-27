@@ -107,6 +107,12 @@ export class SqliteNotificationStore implements INotificationStore<Transaction<D
     if (input.created_by_subject_id !== undefined) {
       query = query.where(sql`json_extract(created_by_subject, '$.subject_id')`, '=', input.created_by_subject_id);
     }
+    if (input.schedule_run_id !== undefined) {
+      query =
+        input.schedule_run_id === null
+          ? query.where('schedule_run_id', 'is', null)
+          : query.where('schedule_run_id', '=', input.schedule_run_id);
+    }
     // Unread first, then newest first. `read_at` sorts nulls first in ascending
     // order in SQLite; the explicit expression keeps the intent readable.
     const rows = await query
