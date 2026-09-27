@@ -41,7 +41,7 @@ export const MCP_OAUTH_HTTP_TIMEOUT_MS = 15_000;
  * Used by discoverOAuthServerInfo / registerClient / refreshAuthorization / exchangeAuthorization
  * (startAuthorization is local PKCE + URL construction and never calls this).
  */
-const mcpOAuthFetch: FetchLike = (url, init) => {
+export const mcpOAuthFetch: FetchLike = (url, init) => {
   const timeoutSignal = AbortSignal.timeout(MCP_OAUTH_HTTP_TIMEOUT_MS);
   const signal = init?.signal != null ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal;
   return fetch(url, { ...init, signal });
@@ -367,6 +367,20 @@ export async function buildMcpAuthorizationUrl(params: {
   return started.authorizationUrl;
 }
 
+/**
+ * True when the manifest's requested scopes no longer match the scopes the stored
+ * token was granted. The manifest is the user's current intent - they can narrow
+ * scopes after connecting - and a token granted under a different scope set must
+ * not keep being used (a refresh would preserve the old grant). Returns false
+ * when comparison is impossible: no requested scopes (e.g. DCR, where the AS
+ * default applies), an empty request, or a token that carries no recorded grant.
+ */
+function grantedScopesMismatch(requested: string[] | undefined, granted: string | null): boolean {
+  if (!requested || requested.length === 0 || granted === null) return false;
+  const grantedSet = new Set(granted.split(/\s+/).filter(scope => scope.length > 0));
+  return requested.length !== grantedSet.size || requested.some(scope => !grantedSet.has(scope));
+}
+
 export async function resolveMcpAuth(params: {
   tokenStore: IOAuthTokenStore;
   mcpServerStore: IOAuthClientStore;
@@ -384,7 +398,15 @@ export async function resolveMcpAuth(params: {
 }): Promise<ResolveMcpAuthResult> {
   const nowMs = Date.now();
   const tokenKey = { id: params.serverId, userRef: params.userRef };
-  const token = await params.tokenStore.getToken(tokenKey);
+  let token = await params.tokenStore.getToken(tokenKey);
+  if (token && grantedScopesMismatch(params.oauthScopes, token.scope)) {
+    // The manifest's requested scopes changed after authorization (narrowed or
+    // widened): the stored grant no longer matches the user's current intent, so
+    // drop it and run the authorization flow again for the new scope set. A
+    // refresh would preserve the old grant, so it must not be attempted here.
+    await params.tokenStore.deleteToken(tokenKey);
+    token = undefined;
+  }
   if (token && isOAuthAccessTokenUsable(token.expiresAt, nowMs)) {
     return { headers: { Authorization: `Bearer ${token.accessToken}` } };
   }
@@ -429,6 +451,56 @@ export async function resolveMcpAuth(params: {
     ...(params.oauthScopes !== undefined ? { scopes: params.oauthScopes } : {}),
   });
   return { authUrl };
+}
+
+/**
+ * Best-effort revocation of the stored OAuth grant at the authorization server.
+ * Called on disconnect, before the local token is deleted. Currently revokes at
+ * Google only: it is the one authorization server in this flow whose revocation
+ * endpoint is well-known (the persisted client record carries no generic
+ * revocation_endpoint). Revoking the refresh token invalidates the whole grant,
+ * so a leaked token cannot be reused after disconnect. Any failure is swallowed:
+ * deleting the local token is the hard guarantee that the integration stops
+ * working; revocation additionally invalidates the grant server-side.
+ */
+export async function revokeMcpAuthorization(params: {
+  tokenStore: IOAuthTokenStore;
+  mcpServerStore: IOAuthClientStore;
+  serverId: string;
+  userRef: string;
+  mcpServerUrl: string;
+  mcpServerName: string;
+  clientName: string;
+  authType: 'dcr' | 'oauth_client';
+  oauthClientId?: string;
+  oauthClientSecret?: string;
+}): Promise<void> {
+  const tokenKey = { id: params.serverId, userRef: params.userRef };
+  const token = await params.tokenStore.getToken(tokenKey);
+  if (!token) return;
+  try {
+    const client = await ensureMcpClientRegistered({
+      mcpServerStore: params.mcpServerStore,
+      serverId: params.serverId,
+      mcpServerUrl: params.mcpServerUrl,
+      mcpServerName: params.mcpServerName,
+      clientName: params.clientName,
+      authType: params.authType,
+      oauthClientId: params.oauthClientId,
+      oauthClientSecret: params.oauthClientSecret,
+    });
+    if (mcpAuthorizationServerOrigin(client.server).toLowerCase() !== 'https://accounts.google.com') {
+      return;
+    }
+    const revokeTarget = token.refreshToken ?? token.accessToken;
+    await mcpOAuthFetch('https://oauth2.googleapis.com/revoke', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: `token=${encodeURIComponent(revokeTarget)}`,
+    });
+  } catch {
+    // Best effort only; the caller deletes the local token regardless.
+  }
 }
 
 /**
