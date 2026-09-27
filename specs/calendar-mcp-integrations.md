@@ -1,7 +1,7 @@
 # Spec: Calendar MCP Integrations (Google, Outlook, iCal)
 
 ## Problem
-Aman currently has Gmail MCP for email. But for a personal AI assistant to be useful with appointments, schedules, and smart departure times, it needs calendar access. Sidd uses Google Calendar. Outlook and iCal cover everyone else.
+Aman currently has Gmail MCP for email. But for a personal AI assistant to be useful with appointments, schedules, and smart departure times, it needs calendar access. Google Calendar is the most widely used. Outlook and iCal cover other users.
 
 ## Solution
 Build MCP servers for Google Calendar, Outlook Calendar, and iCal (ICS) following the same pattern as the existing Gmail MCP.
@@ -11,7 +11,7 @@ Build MCP servers for Google Calendar, Outlook Calendar, and iCal (ICS) followin
 ### 1. Google Calendar (priority)
 - OAuth2 flow (same pattern as Gmail MCP)
 - Read events, create events, update/delete
-- Sidd's primary calendar
+- The user's primary calendar
 
 ### 2. Outlook Calendar
 - Microsoft Graph API
@@ -36,7 +36,7 @@ Build MCP servers for Google Calendar, Outlook Calendar, and iCal (ICS) followin
 - Proactive reminders before appointments
 
 ## Testing
-- Synthetic calendar events (not Sidd's real calendar)
+- Synthetic calendar events (not real user calendar data)
 - Verify: read, create, update, delete for each provider
 - Verify: permission scopes are enforced
 - Verify: disabling an integration revokes access cleanly
