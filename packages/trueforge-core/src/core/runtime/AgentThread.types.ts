@@ -278,6 +278,12 @@ export interface AgentThreadConstructorInput {
    * core default (see DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS).
    */
   modelFirstResponseTimeoutMs?: number | undefined;
+  /**
+   * Bound in milliseconds on the pre-LLM context processor phase producing
+   * progress before the turn fails visibly instead of hanging. Undefined falls
+   * back to the core default (DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS).
+   */
+  preLLMProcessorsTimeoutMs?: number | undefined;
   tracing: AgentTracing;
   logger: Logger;
 }
