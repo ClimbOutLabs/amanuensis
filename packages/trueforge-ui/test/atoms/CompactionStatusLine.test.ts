@@ -1,7 +1,25 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
-import { formatRelativeTime, formatTokenCount } from '@/atoms/CompactionStatusLine.js';
+import { CompactionStatusLine, formatRelativeTime, formatTokenCount } from '@/atoms/CompactionStatusLine.js';
+import { useCompactionStatus } from '@/hooks/useCompactionStatus.js';
+
+vi.mock('@/hooks/useCompactionStatus.js', () => ({
+  useCompactionStatus: vi.fn(),
+}));
+
+const mockedStatus = vi.mocked(useCompactionStatus);
+
+function stubStatus(overrides: Partial<ReturnType<typeof useCompactionStatus>>): void {
+  mockedStatus.mockReturnValue({
+    contextLimit: null,
+    liveTokens: null,
+    lastCompaction: null,
+    loading: false,
+    ...overrides,
+  });
+}
 
 describe('formatTokenCount', () => {
   it('formats sub-thousand counts as-is', () => {
@@ -42,5 +60,25 @@ describe('formatRelativeTime', () => {
 
   it('returns empty for unparseable input', () => {
     expect(formatRelativeTime('not-a-date', now)).toBe('');
+  });
+});
+
+describe('CompactionStatusLine token labels', () => {
+  it('labels live tokens as in-context when no limit is known', () => {
+    stubStatus({ liveTokens: 77200 });
+    render(<CompactionStatusLine />);
+    expect(screen.getByText('77.2k tokens in context')).toBeDefined();
+  });
+
+  it('shows used-over-limit when the context limit is known', () => {
+    stubStatus({ liveTokens: 77200, contextLimit: 256000 });
+    render(<CompactionStatusLine />);
+    expect(screen.getByText('77.2k / 256k tokens')).toBeDefined();
+  });
+
+  it('names the limit when only the limit is known', () => {
+    stubStatus({ contextLimit: 256000 });
+    render(<CompactionStatusLine />);
+    expect(screen.getByText('256k token limit')).toBeDefined();
   });
 });
