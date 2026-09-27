@@ -182,7 +182,7 @@ function ComposerWithOptionalDraft({
 }
 
 export function ComposerContainer({
-  placeholder = 'Ask anything... (Shift+Enter for new line)',
+  placeholder = 'Ask anything...',
 }: ComposerContainerProps) {
   const pauseView = useComposerPauseView();
   const canManageSession = useActiveSessionCanManage();

@@ -14,7 +14,7 @@ export function AssistantMessageBubble({ children, error, actionBar, className }
     <div
       data-slot="aui_assistant-message-root"
       className={cn(
-        'aman-chat-text group/assistant relative min-w-0 max-w-full bg-assistant-message-bg text-assistant-message-text',
+        'aman-chat-text group/assistant relative min-w-0 max-w-full border-l-[0.1875rem] border-primary-button-bg bg-assistant-message-bg pl-3 text-assistant-message-text',
         className,
       )}
     >
