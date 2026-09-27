@@ -24,6 +24,7 @@ import { createPermissionsRouter } from './apis/permissions';
 import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
+import { createPrivacyRouter } from './apis/privacy';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
 import { createSessionFolderAssignmentsRouter, createSessionFoldersRouter } from './apis/sessionFolders';
@@ -410,6 +411,21 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,
+      }),
+      adminAuthMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/privacy',
+    withAdminAuth(
+      createPrivacyRouter({
+        sessionStore: deps.sessionStore,
+        personaStore: deps.personaStore,
+        scheduleStore: deps.scheduleStore,
+        globalSettingsStore: deps.globalSettingsStore,
+        resolveRequestContext,
+        logger: deps.logger,
+        memoryMarkdownDir: configuration.MEMORY_MARKDOWN_DIR,
       }),
       adminAuthMiddleware,
     ),

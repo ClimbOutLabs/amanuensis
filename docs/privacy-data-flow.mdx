@@ -1,0 +1,94 @@
+---
+title: Privacy and data flow
+description: Every network connection Amanuensis can make, what offline mode blocks, and what the one-click export contains.
+---
+
+Amanuensis is local-first: your chats, memory, personas, and schedules live in your own database and files. This page lists every connection the system can make to the outside world, what leaves the box on each one, and how to turn each one off. The same list is available machine-readable at `GET /api/v1/privacy/data-flow` and rendered in the app under Settings, then Privacy.
+
+## Connections
+
+### Model API
+
+Your configured model provider. This is a cloud API such as OpenAI or Anthropic, or a self-hosted endpoint such as Ollama or vLLM on your own network.
+
+What is sent: prompts, conversation history, tool definitions, and tool results for each turn. The model only sees what the current turn sends it.
+
+To disable: point the model provider at a local endpoint, or turn on offline mode to block all non-local calls from the server.
+
+### Embedding model download
+
+`huggingface.co`, the model hub.
+
+What is sent: nothing is uploaded. Only the requested model id is sent, to download the file. This is a one-time download of the local embedding model used for memory retrieval.
+
+To disable: pre-seed the embedding model directory before first run, or turn on offline mode. Without the model, memory retrieval falls back to keyword search.
+
+### OAuth token endpoints
+
+Each OAuth MCP server's identity-provider token URL.
+
+What is sent: authorization codes and refresh tokens during the OAuth exchange, to obtain access tokens so MCP tools can call third-party APIs on your behalf.
+
+To disable: remove OAuth MCP servers under Connectors, or turn on offline mode.
+
+### Remote MCP servers
+
+Each configured remote MCP server URL.
+
+What is sent: tool names, tool arguments, and tool results.
+
+To disable: remove the remote MCP server under Connectors, or turn on offline mode.
+
+### Remote sandbox provider
+
+The configured remote sandbox provider API (Daytona or TrueForge cloud).
+
+What is sent: code to execute, plus files and results the code produces.
+
+To disable: use the local sandbox provider instead, or turn on offline mode.
+
+### Git skill remotes
+
+The git remote URL of each installed git skill.
+
+What is sent: nothing is uploaded. Repositories are cloned or pulled to install and update skills.
+
+To disable: remove git skills. Note the boundary below: git skill downloads run `git` inside the sandbox, outside the server fetch boundary, so offline mode does not block them. The sandbox egress allowlist still applies.
+
+## Offline mode
+
+Offline mode is the software equivalent of pulling the network cable. When it is on, the server process refuses every `fetch` call to a non-local destination. Local destinations keep working: loopback addresses, RFC 1918 private ranges, link-local addresses, `.local` and `.localhost` names, and the Docker host aliases, so a self-hosted model endpoint on your LAN is unaffected. The check is hostname-based: a public DNS name that happens to resolve to a private IP is still treated as remote.
+
+The flag is kept in memory so the hot path needs no database read per request, and mirrored to the `privacy_offline_mode` global setting so it survives restarts. Toggling it in Settings, then Privacy applies immediately. Server boot re-reads the persisted setting.
+
+### Enforcement boundary
+
+Offline mode guards the server process's `fetch`. It does not cover traffic that never passes through `fetch`:
+
+- Git skill installs and updates run `git` inside the sandbox, not in the server process.
+- Code running inside sandboxes is governed by the sandbox egress allowlist, a separate control.
+
+If you need zero network activity of any kind, remove git skills and use the local sandbox provider in addition to turning on offline mode.
+
+### Blocked-call error
+
+A blocked call fails with an `OfflineBlockedError`. The message names the blocked destination and points at Settings, then Privacy to turn offline mode off. API responses carry the code `OFFLINE_MODE_BLOCKED`.
+
+## One-click export
+
+Settings, then Privacy, then "Download all my data" downloads a zip archive of everything the system stores for you. The endpoints are `GET /api/v1/privacy/export`, admin-gated like the rest of the settings surface.
+
+The archive contains:
+
+- `chats.json`: your sessions with their turns, including the full message content of each turn.
+- `personas.json`: your personas.
+- `schedules.json`: your schedules.
+- `settings.json`: the exported global settings (memory screening, memory summarization, tool-output screening, and the offline-mode flag).
+- `manifest.json`: export timestamp, format version, and item counts.
+- `memory/<tenant>/MEMORY.md` and `memory/<tenant>/memory/*.md`: your memory files, verbatim.
+
+Scoping: chats, personas, and schedules are filtered to your user; memory files are limited to your tenant namespace, never another tenant's. Provider credentials and MCP credential stores are not part of the export: secrets are never written into it. JSON content is scrubbed for credential-shaped values (secret-looking keys and token patterns are replaced with `[redacted]`); memory Markdown files ship verbatim because they are your own authored data.
+
+## Telemetry
+
+There is none. The system collects no usage analytics and phones nothing home. OpenTelemetry references in the codebase are used for in-process context propagation between components, not for reporting data anywhere.

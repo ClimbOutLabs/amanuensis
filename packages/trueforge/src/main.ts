@@ -59,6 +59,7 @@ import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 
 import { createServerApp } from './app';
+import { hydrateOfflineModeFromStore, installOfflineFetchGuard } from './privacy/offlineGuard';
 import { TENANT_ID } from './tenancy';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
@@ -661,6 +662,17 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     authenticator,
     authorizer,
   });
+
+  // Offline mode enforcement: wrap process-wide fetch before serving traffic,
+  // then hydrate the persisted toggle so a restart keeps the last state.
+  installOfflineFetchGuard();
+  try {
+    await hydrateOfflineModeFromStore({ globalSettingsStore });
+  } catch (error) {
+    logger.warn('Could not read the persisted offline-mode setting; starting with it off', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   return { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnDrains };
 }
