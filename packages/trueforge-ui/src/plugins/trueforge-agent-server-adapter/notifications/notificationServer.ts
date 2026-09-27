@@ -4,6 +4,8 @@
  *
  * Uses direct fetch rather than the generated SDK client because the SDK
  * has not yet been regenerated with the notification endpoints.
+ * TODO: migrate to the generated SDK client once it declares them, and drop
+ * the hand-rolled request/parsing helpers below.
  */
 import type {
   ListNotificationsParams,
