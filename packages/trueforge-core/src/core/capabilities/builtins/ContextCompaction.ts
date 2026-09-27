@@ -45,9 +45,9 @@ const HOST_TOUCHED_PATHS_HEADING = '### host_owned_touched_paths';
 const MAX_CONVERSATION_SUMMARY_CHARS = 12_000;
 /** Bound for the raw rejected-output preview in the validation-failure warn log (spec 002 REQ-1). */
 export const MAX_REJECTED_OUTPUT_PREVIEW_CHARS = 2_000;
-/** Consecutive validation skips before the circuit breaker backs off (spec 002 REQ-3). */
+/** Unused: retained for API compatibility. The truncation fallback supersedes the skip circuit breaker. */
 export const MAX_CONSECUTIVE_COMPACTION_SKIPS = 3;
-/** Context growth required before retrying after the breaker trips (spec 002 REQ-3). */
+/** Unused: retained for API compatibility. The truncation fallback supersedes the skip circuit breaker. */
 export const COMPACTION_BACKOFF_TOKEN_DELTA = 10_000;
 export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
 
@@ -804,10 +804,6 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
   private readonly logger: Logger | undefined;
   private touchedPaths: string[] = [];
   private touchedPathsOverflowed = false;
-  /** Consecutive validation-failure skips; drives the circuit breaker (spec 002 REQ-3). In-memory only: a restart is a natural reset. */
-  private consecutiveSkips = 0;
-  /** When set, no summarization call until contextTokens reaches this; cleared on success. */
-  private backoffUntilTokens: number | undefined = undefined;
 
   constructor(input: {
     modelClient: ILLM;
@@ -896,7 +892,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     tokensBefore: number;
     tokensAfter: number;
     summaryChars: number;
-    outcome: 'applied' | 'skipped_invalid' | 'skipped_blocked';
+    outcome: 'applied' | 'skipped_invalid' | 'skipped_blocked' | 'truncated_fallback';
     reason?: ContextCompactionEvent['reason'];
   }): AgentContextProcessorCompactionEvent {
     return {
@@ -958,18 +954,6 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
       return;
     }
     if (!overThreshold) {
-      return;
-    }
-
-    // Circuit breaker (spec 002 REQ-3): after repeated validation failures, stop burning
-    // a summarization call every turn until the context has grown past the backoff mark.
-    // A host-forced compaction bypasses the backoff, consistent with it bypassing the
-    // threshold (REQ-5). No event is emitted here; the trip was already logged at error.
-    if (
-      this.backoffUntilTokens !== undefined &&
-      contextTokens < this.backoffUntilTokens &&
-      execution.forceCompaction !== true
-    ) {
       return;
     }
 
@@ -1097,43 +1081,52 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     }
 
     if (validationReason !== undefined) {
-      // The summary is unusable even after salvage. Skip this compaction attempt
-      // rather than failing the turn. The request still completed and consumed
-      // billable tokens, so fold its usage into thread metrics through the same
-      // path as any other model call rather than dropping it.
+      // The summary is unusable even after salvage. Fall back to deterministic
+      // old-turn truncation instead of skipping: skipping leaves the context
+      // over threshold, so the next turn retries (and bills) another doomed
+      // summarization while the prompt grows unbounded. Truncation drops the
+      // oldest turns while preserving system messages and the recent tail,
+      // guaranteeing the context shrinks without ever replacing it with nothing.
       // REQ-1 (security-hardened): log a content-free structural diagnostic, never
       // raw model output. Follows the oversizedResultFingerprint precedent.
       const fingerprint = compactionValidationFingerprint(modelOutput, requiredSections);
       this.logger?.warn(
-        `Skipping compaction: model produced an invalid summary (reason: ${validationReason}, mode: ${mode}, fingerprint: ${fingerprint})`,
+        `Compaction summary invalid (reason: ${validationReason}, mode: ${mode}, fingerprint: ${fingerprint}); falling back to truncation`,
       );
-      // REQ-3: circuit breaker — stop retrying every turn after repeated failures.
-      this.consecutiveSkips += 1;
-      if (this.consecutiveSkips >= MAX_CONSECUTIVE_COMPACTION_SKIPS) {
-        this.backoffUntilTokens = contextTokens + COMPACTION_BACKOFF_TOKEN_DELTA;
-        this.logger?.error(
-          `Compaction circuit breaker tripped after ${String(this.consecutiveSkips)} consecutive skips ` +
-            `(last reason: ${validationReason}, mode: ${mode}); backing off until context reaches ${String(this.backoffUntilTokens)} tokens`,
-        );
-      }
+      const tailSet = new Set(recentTail);
+      const systemMessages = execution.context.filter(
+        message => isLLMContextMessage(message) && message.role === 'system' && !tailSet.has(message),
+      );
+      const truncationNotice = internalSystemMessage(
+        'Earlier conversation turns were dropped because automatic summarization failed. ' +
+          'Continue with the remaining context.',
+      );
+      const truncatedContext: ContextMessage[] = [...systemMessages, truncationNotice, ...recentTail];
+      const tokensAfterTruncation = estimateTokensForContextMessages(truncatedContext).prompt_tokens;
+
       yield { type: InternalEventType.MODEL_USAGE, usage: response.usage };
+      yield {
+        type: EventType.AGENT_CONTEXT_OVERWRITE,
+        id: newEventId(),
+        created_at: new Date().toISOString(),
+        reason: 'compaction_truncation_fallback',
+        context: truncatedContext,
+        current_context_usage: {
+          prompt_tokens: tokensAfterTruncation,
+          completion_tokens: 0,
+        },
+        usage: response.usage,
+      };
       yield this.compactionEvent({
         mode,
         tokensBefore: contextTokens,
-        tokensAfter: contextTokens,
+        tokensAfter: tokensAfterTruncation,
         summaryChars: 0,
-        outcome: 'skipped_invalid',
+        outcome: 'truncated_fallback',
         reason: validationReason,
       });
       return;
     }
-
-    // A successful compaction resets the breaker (REQ-3).
-    if (this.consecutiveSkips > 0 || this.backoffUntilTokens !== undefined) {
-      this.logger?.warn('Compaction circuit breaker reset after successful compaction');
-    }
-    this.consecutiveSkips = 0;
-    this.backoffUntilTokens = undefined;
 
     // Host framing: the summary is presented as a host note (the same internalSystemMessage
     // mechanism the nudges use), preceded by a sentence saying plainly that it is a host-written
