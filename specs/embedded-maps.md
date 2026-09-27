@@ -1,7 +1,7 @@
 # Spec: Embedded Maps with Location Pins
 
 ## Problem
-When Sidd asks Aman something location-related ("where's the nearest...", "show me Madrid on a map", "how do I get to..."), Aman responds with text only. A personal AI assistant should render a visual map with a pin.
+Location-related queries return text-only responses. Users cannot see spatial context (distance, direction, surroundings) without doing the mental mapping themselves.
 
 ## Solution
 Add map rendering to Aman's generative UI. When the agent detects a location query, it geocodes the location and renders an interactive map with a pin.
@@ -34,15 +34,15 @@ Add map rendering to Aman's generative UI. When the agent detects a location que
 - Single pin per query (v1)
 - No routing/directions (future)
 - No multiple pins (future)
-- Mobile-responsive (Sidd uses mobile browser)
+- Mobile-responsive
 
 ## Privacy
 - No location data sent to third parties beyond the tile/geocode request
 - Document this in the privacy dashboard (ties into feature #5: private by architecture)
 
 ## Testing
-- Synthetic locations (not Sidd's real location)
-- Verify: "show me Madrid on a map" renders correctly
+- Synthetic locations (not real user location data)
+- Verify: "show me Paris on a map" renders correctly
 - Verify: geocoding failure degrades gracefully to text
 
 ## Out of Scope
@@ -54,7 +54,7 @@ Add map rendering to Aman's generative UI. When the agent detects a location que
 
 ## Phase 2: Smart Departure Times
 
-**Scenario:** Sidd has a calendar appointment with a location. Aman tells him when to leave.
+**Scenario:** A user has a calendar appointment with a location. The assistant tells them when to leave.
 
 **How it works:**
 1. Calendar MCP provides upcoming events with locations
@@ -69,3 +69,4 @@ Add map rendering to Aman's generative UI. When the agent detects a location que
 - Proactive notification system (ties into feature #2: scheduled tasks)
 
 **Privacy:** Location never leaves the device except for tile/geocode/routing requests to OSM services. No Google Maps API.
+
