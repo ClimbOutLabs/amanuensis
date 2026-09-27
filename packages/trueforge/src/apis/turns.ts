@@ -102,6 +102,8 @@ import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSetti
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
+import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
+import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
@@ -264,6 +266,9 @@ function createTurnResolver(deps: {
   turnId: string;
   personalizationContext?: PersonalizationContext | undefined;
   personaContext?: PersonaContext | undefined;
+  personaKnowledgeBlock?: string | undefined;
+  personaKnowledgeHits?: readonly PersonaKnowledgeHit[] | undefined;
+  switchNotice?: PersonaSwitchNotice | undefined;
   boundRepository?: BoundRepository | undefined;
   repositoryStore: IRepositoryStore;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
@@ -300,6 +305,9 @@ function createTurnResolver(deps: {
     turnId,
     personalizationContext,
     personaContext,
+    personaKnowledgeBlock,
+    personaKnowledgeHits,
+    switchNotice,
     boundRepository,
     repositoryStore,
     sessionStore,
@@ -543,6 +551,9 @@ function createTurnResolver(deps: {
       threshold: configuration.MEMORY_SCREEN_THRESHOLD,
       timeoutMs: configuration.TOOL_OUTPUT_SCREEN_TIMEOUT_MS,
     },
+    personaKnowledgeBlock,
+    personaKnowledgeHits,
+    switchNotice,
     {
       store: spaceStore,
       authority: { tenantId: tenant_id, userRef },
@@ -1489,13 +1500,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     const persona = await resolveTurnPersona({
       personaStore: deps.personaStore,
       modelProviderStore,
-      agentStore,
-      sessionAgent: session.record.agent,
-      logger: deps.logger,
       defaultAssistantName: profile?.assistant_name,
       tenant_id: requestContext.tenant_id,
       created_by: userRef,
-      session_id: sessionId,
       turnInput: body.input,
       previousTurnCustom,
       latestManualActivation,
