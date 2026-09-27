@@ -7,6 +7,7 @@ import { isSettingsChromeEnabled } from '../server/serverChrome.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { useTheme } from '../theme/ThemeProvider.js';
 import { BugReportButton } from './BugReportButton.js';
+import { HandsFreeToggle } from './HandsFreeToggle.js';
 import { auiButtonClass, sidebarRailButtonClassName } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 
@@ -23,7 +24,8 @@ export function ShellActions({ className, labeled = false }: { className?: strin
 
   const hoverClass = 'hover:bg-secondary-button-hover hover:text-ghost-button-text';
 
-  // Footer order (top to bottom): Dark/Light, Settings, Sessions, Bugs, host slot (e.g. Logout).
+  // Footer order (top to bottom): Dark/Light, Hands-free, Settings, Sessions,
+  // Bugs, host slot (e.g. Logout).
   // Sessions renders only in the labeled rail: the unlabeled header row never had it, and the
   // rail button styling does not fit an icon row.
   return (
@@ -48,6 +50,7 @@ export function ShellActions({ className, labeled = false }: { className?: strin
         <Icon name={isDark ? 'sun' : 'moon'} size={labeled ? 14 : undefined} />
         {labeled ? <span className="text-center">{themeLabel}</span> : null}
       </button>
+      <HandsFreeToggle labeled={labeled} />
       {shell != null && settingsChromeEnabled ? (
         <button
           type="button"

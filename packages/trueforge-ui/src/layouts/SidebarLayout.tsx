@@ -14,6 +14,7 @@ import {
 
 import { useAui } from '../assistant-ui.js';
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
+import { CopyTranscriptButton } from '../atoms/CopyTranscriptButton.js';
 import { auiButtonClass, sidebarRailButtonClassName } from '../atoms/lib/buttonClasses.js';
 import { cn } from '../atoms/lib/cn.js';
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
@@ -335,6 +336,7 @@ export function SidebarLayout({ className }: { className?: string }) {
             !overlayOpen ? (
               <>
                 <ClearChatButton />
+                <CopyTranscriptButton />
                 <AgentDetailsToggleButton />
                 <SaveAgentButton />
               </>

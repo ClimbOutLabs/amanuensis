@@ -4,6 +4,7 @@ import { lazy, Suspense, useEffect, type ReactNode } from 'react';
 
 import { useAui } from '../assistant-ui.js';
 import { AgentDetailsToggleButton } from '../atoms/AgentDetailsToggleButton.js';
+import { CopyTranscriptButton } from '../atoms/CopyTranscriptButton.js';
 import { NamedAgentHeaderLabel } from '../atoms/NamedAgentHeaderLabel.js';
 import { PageHeader } from '../atoms/PageHeader.js';
 import { ShellActions } from '../atoms/ShellActions.js';
@@ -156,6 +157,7 @@ export function StackChatPanel({ className, threadHeaderEnd }: StackChatPanelPro
             end={
               <>
                 <ClearChatButton />
+                <CopyTranscriptButton />
                 <AgentDetailsToggleButton />
                 <SaveAgentButton />
                 {threadHeaderEnd}

@@ -43,6 +43,7 @@ import { ClearChatButton } from '../atoms/ClearChatButton.js';
 import { CodeEditor } from '../atoms/CodeEditor.js';
 import { ComposerLeftSection, ComposerRightSection, ComposerSendButton } from '../atoms/ComposerSections.js';
 import { ComposerShell } from '../atoms/ComposerShell.js';
+import { CopyTranscriptButton } from '../atoms/CopyTranscriptButton.js';
 import { AgentConfigEditors } from '../atoms/draft/AgentConfigEditors.js';
 import { AgentConfigPanel, AgentConfigSection } from '../atoms/draft/AgentConfigPanel.js';
 import { AgentCustomParametersEditor } from '../atoms/draft/AgentCustomParametersEditor.js';
@@ -63,6 +64,7 @@ import { DraftComposerActionsMenu } from '../atoms/draft/DraftComposerActionsMen
 import { DraftComposerLeftSection, DraftComposerRightSection } from '../atoms/draft/DraftComposerSections.js';
 import { CatalogRow, ConnectorConnectButton, DraftCompositeSelector } from '../atoms/draft/DraftCompositeSelector.js';
 import { DraftModelSelector } from '../atoms/draft/DraftModelSelector.js';
+import { HandsFreeToggle } from '../atoms/HandsFreeToggle.js';
 import { HistoryLoader } from '../atoms/HistoryLoader.js';
 import { HtmlArtifactPreview } from '../atoms/HtmlArtifactPreview.js';
 import { Markdown } from '../atoms/Markdown.js';
@@ -104,6 +106,7 @@ import { UserAvatar } from '../atoms/UserAvatar.js';
 import { UserMessageActionBar } from '../atoms/UserMessageActionBar.js';
 import { UserMessageBubble } from '../atoms/UserMessageBubble.js';
 import { UserMessageEdit } from '../atoms/UserMessageEdit.js';
+import { VoiceInputButton } from '../atoms/VoiceInputButton.js';
 import { WelcomeScreen } from '../atoms/WelcomeScreen.js';
 import { AgentMetricsContainer } from '../containers/AgentMetricsContainer.js';
 import { AgentSessionTimelineContainer } from '../containers/AgentSessionTimelineContainer.js';
@@ -253,6 +256,9 @@ export const defaultSlots = {
   SaveAgentForm,
   SelectAgentEmptyState,
   ClearChatButton,
+  CopyTranscriptButton,
+  VoiceInputButton,
+  HandsFreeToggle,
   ThreadListRowSkeleton,
   ThreadListEmptyState,
   ThreadListShell,

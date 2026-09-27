@@ -21,6 +21,7 @@ const ConnectorSettings = lazy(() => import('./ConnectorSettings.js'));
 const MemorySettings = lazy(() => import('./MemorySettings.js'));
 const SkillSettings = lazy(() => import('./SkillSettings.js'));
 const SandboxSettings = lazy(() => import('./SandboxSettings.js'));
+const VoiceSettings = lazy(() => import('./VoiceSettings.js'));
 const PersonalizationSettings = lazy(() =>
   import('@/components/PersonalizationPanel.js').then(module => ({ default: module.PersonalizationPanel })),
 );
@@ -86,13 +87,13 @@ const TruefoundrySettingsBuilder = () => {
     Array<{
       id: SettingsSection;
       label: string;
-      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot';
+      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'mic';
     }>
   >(() => {
     const baseSections: Array<{
       id: SettingsSection;
       label: string;
-      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot';
+      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'mic';
     }> = [
       { id: 'models', label: 'Models', icon: 'cpu' },
       { id: 'model-roles', label: 'Model roles', icon: 'brain' },
@@ -100,6 +101,8 @@ const TruefoundrySettingsBuilder = () => {
       // Not gated on a capability: memory is configured by pointing at a bank, so the section has
       // to be reachable while none is configured. It reads as off until one is.
       { id: 'memory', label: 'Memory', icon: 'box-archive' },
+      // Voice is browser-local (Web Speech API); always reachable, like memory.
+      { id: 'voice', label: 'Voice', icon: 'mic' },
     ];
     if (hasSkills) {
       baseSections.push({ id: 'skills', label: 'Skills', icon: 'lightbulb' });
@@ -170,6 +173,7 @@ const TruefoundrySettingsBuilder = () => {
               {section === 'model-roles' ? <ModelRoleSettings /> : null}
               {section === 'connectors' ? <ConnectorSettings /> : null}
               {section === 'memory' ? <MemorySettings /> : null}
+              {section === 'voice' ? <VoiceSettings /> : null}
               {section === 'skills' && hasSkills ? <SkillSettings /> : null}
               {section === 'sandbox' && hasSandbox ? <SandboxSettings /> : null}
               {section === 'personalization' && hasPersonalization ? <PersonalizationSettings /> : null}

@@ -6,6 +6,7 @@ import {
   ComposerDraftScopeProvider,
   DEFAULT_AGENT_SPEC_SKILLS,
   getErrorMessage,
+  HandsFreeProvider,
   ImplementationPlanGrantProvider,
   MemoryRecallProvider,
   PersonalizationProvider,
@@ -13,6 +14,8 @@ import {
   ThemeProvider,
   TrueForgeUI,
   useTheme,
+  VoiceSettingsProvider,
+  VoiceSpeechProvider,
   type AmanAvatarActivity,
   type AmanAvatarMotionSources,
   type MemoryBankStatus,
@@ -412,16 +415,22 @@ export function App() {
                     }}
                   >
                     <ComposerDraftScopeProvider scope={draftScope}>
-                      <AmanShell
-                        defaultAgentSpec={boot.defaultAgentSpec}
-                        openSettings={boot.openSettings}
-                        displayName={session.displayName}
-                        overrides={overrides}
-                        modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
-                        memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
-                        version={boot.build?.version}
-                        buildRef={boot.build?.ref}
-                      />
+                      <HandsFreeProvider>
+                        <VoiceSettingsProvider>
+                          <VoiceSpeechProvider>
+                            <AmanShell
+                              defaultAgentSpec={boot.defaultAgentSpec}
+                              openSettings={boot.openSettings}
+                              displayName={session.displayName}
+                              overrides={overrides}
+                              modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
+                              memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
+                              version={boot.build?.version}
+                              buildRef={boot.build?.ref}
+                            />
+                          </VoiceSpeechProvider>
+                        </VoiceSettingsProvider>
+                      </HandsFreeProvider>
                     </ComposerDraftScopeProvider>
                   </AmanSetupProvider>
                 </PersonaProvider>

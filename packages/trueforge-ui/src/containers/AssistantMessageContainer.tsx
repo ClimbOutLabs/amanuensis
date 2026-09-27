@@ -9,6 +9,7 @@ import {
   type MessageStatus,
 } from '@assistant-ui/react';
 import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
+import { useMemo } from 'react';
 
 import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js';
 import { AgentInternalsDisclosure } from '../atoms/agent-chat/AgentInternalsDisclosure.js';
@@ -17,6 +18,8 @@ import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceConte
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit } from '../utils/computeAgentStepsSplit.js';
 import { parseToolResultDisposition } from '../utils/toolCallParsing.js';
+import { messageTextOf } from '../voice/messageText.js';
+import { useVoiceSpeech } from '../voice/VoiceSpeechContext.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
 import { useDocumentIngestionStatusLine } from './DocumentIngestionStatusProvider.js';
@@ -122,6 +125,8 @@ export function AssistantMessageContainer() {
   const createdAt = useAuiState(s => s.message.createdAt);
   const messageStatus = useAuiState(s => s.message.status?.type);
   const isMessageRunning = messageStatus === 'running';
+  const messageId = useAuiState(s => s.message.id);
+  const isSpeaking = useVoiceSpeech().isSpeaking(messageId);
   const sessionId = useAuiState(s => s.threadListItem.remoteId ?? undefined);
   const { visibility: agentDetailsVisibility } = useAgentDetailsVisibility(sessionId);
   const { copy, isCopied } = useActionBarCopy({
@@ -139,6 +144,9 @@ export function AssistantMessageContainer() {
   const ingestionStatusLine = useDocumentIngestionStatusLine(turnId);
 
   const parts = useAuiState(s => s.message.parts);
+  // Plain text for the read-aloud button and transcript copy; reasoning and
+  // tool internals stay out of spoken and copied output.
+  const speakText = useMemo(() => messageTextOf(parts), [parts]);
 
   const { cutIndex, hasFinal, toolCount, thinkingCount } = computeAgentStepsSplit(parts, isMessageRunning);
   const phase = stepPhase(parts, messageStatus);
@@ -196,8 +204,17 @@ export function AssistantMessageContainer() {
     <MessagePrimitive.Root data-role="assistant">
       <AssistantMessageBubble
         error={error !== undefined ? <MessageErrorBanner message={String(error)} /> : undefined}
+        className={isSpeaking ? 'ring-2 ring-inset ring-primary-button-bg/60' : undefined}
         actionBar={
-          !isThreadRunning ? <MessageActionBar isCopied={isCopied} onCopy={copy} createdAt={createdAt} /> : undefined
+          !isThreadRunning ? (
+            <MessageActionBar
+              isCopied={isCopied}
+              onCopy={copy}
+              createdAt={createdAt}
+              messageId={messageId}
+              speakText={speakText}
+            />
+          ) : undefined
         }
       >
         {showInternals && (

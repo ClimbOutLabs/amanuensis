@@ -5,6 +5,7 @@ import { useTrueFoundryAgentSpec, useTrueFoundryCancel } from '@truefoundry/assi
 import { useRef } from 'react';
 
 import { DraftCatalogProvider } from '../atoms/draft/DraftCatalogProvider.js';
+import { VoiceInputButton } from '../atoms/VoiceInputButton.js';
 import { useComposerBusyState } from '../hooks/useComposerBusyState.js';
 import { useComposerDraft } from '../hooks/useComposerDraft.js';
 import { useComposerPauseView } from '../hooks/useComposerPauseView.js';
@@ -138,6 +139,7 @@ function ComposerBody({
                 : undefined
             }
             onAttach={canManageSession ? () => fileInputRef.current?.click() : undefined}
+            voiceButton={<VoiceInputButton />}
           />
         </ComposerPrimitive.Root>
       </ComposerPrimitive.AttachmentDropzone>

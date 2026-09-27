@@ -18,6 +18,8 @@ export type ComposerShellProps = {
   onSubmit: () => void;
   onCancel?: () => void;
   onAttach?: () => void;
+  /** Optional voice input control (e.g. the push-to-talk mic button). */
+  voiceButton?: ReactNode;
   className?: string;
 };
 
@@ -33,6 +35,7 @@ export function ComposerShell({
   onSubmit,
   onCancel,
   onAttach,
+  voiceButton,
   className,
 }: ComposerShellProps) {
   const ComposerLeftSection = useSlot('ComposerLeftSection');
@@ -69,6 +72,7 @@ export function ComposerShell({
             </span>
           )}
           <ComposerRightSection disabled={disabled} isRunning={isRunning} />
+          {voiceButton}
           <ComposerSendButton
             disabled={disabled}
             canSubmit={canSubmit}

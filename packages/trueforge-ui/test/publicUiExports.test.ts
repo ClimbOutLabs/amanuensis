@@ -277,6 +277,16 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'useTrueFoundryToolResponses',
   'useTrueFoundryTurnId',
   'useTrueFoundryUpdateAgentSpec',
+  'CopyTranscriptButton',
+  'HandsFreeToggle',
+  'VoiceInputButton',
+  'HandsFreeProvider',
+  'useHandsFree',
+  'VoiceSettingsProvider',
+  'useVoiceSettings',
+  'VoiceSpeechProvider',
+  'useVoiceSpeech',
+  'DEFAULT_VOICE_SETTINGS',
 ];
 
 describe('public runtime exports', () => {
