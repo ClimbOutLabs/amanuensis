@@ -1,7 +1,7 @@
 # Spec: Persona Knowledge Library
 
 ## Problem
-Personas have personalities but no expertise. A Spain-move persona should know the NLV requirements PDF, the tax-talk notes, and the budget sheet. Today it gives generic advice because it has no access to the user's documents.
+Personas have personalities but no expertise. A relocation-advisor persona should know the visa requirements PDF, the tax notes, and the budget sheet. Today it gives generic advice because it has no access to the user's documents.
 
 ## Solution
 A Knowledge section per persona (Settings → Personas → pick a persona). The user uploads PDFs, docs, notes, and links. When a question touches the persona's library, the turn retrieves the relevant chunks and the persona answers from them, with source attribution.
@@ -30,7 +30,7 @@ A Knowledge section per persona (Settings → Personas → pick a persona). The 
 - Persona isolation is enforced at the storage layer
 
 ## Testing
-- Synthetic documents only, never Sidd's real files
+- Synthetic documents only, never the user's real files
 - Verify: upload a synthetic PDF, ask a question it answers, confirm the answer cites the document
 - Verify: persona A cannot retrieve persona B's documents (adversarial test)
 - Verify: deleting a document removes it from retrieval
