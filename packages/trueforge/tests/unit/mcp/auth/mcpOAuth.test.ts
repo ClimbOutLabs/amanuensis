@@ -11,6 +11,7 @@ import {
   ensureMcpClientRegistered,
   isMcpAuthRequired,
   resolveMcpAuth,
+  revokeMcpAuthorization,
 } from '../../../../src/mcp/auth/mcpDcr';
 import { DEFAULT_MCP_ACCESS_TOKEN_TTL_SECONDS, mcpOAuthCallbackUrl } from '../../../../src/mcp/auth/mcpOAuthHelpers';
 import type { OAuthClientRecord } from '../../../../src/mcp/auth/types';
@@ -757,6 +758,246 @@ describe('resolveMcpAuth', () => {
     expect(isMcpAuthRequired(result)).toBe(true);
     if (!isMcpAuthRequired(result)) throw new Error('unreachable');
     expect(result.authUrl.searchParams.get('state')).toBeTruthy();
+  });
+
+  it('reuses the token when granted scopes match the manifest scopes', async () => {
+    const stores = newStores();
+    await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: sampleClient });
+    await stores.tokenStore.saveToken({
+      id: SERVER_ID,
+      userRef: USER_REF,
+      token: {
+        accessToken: 'sa1',
+        refreshToken: null,
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly',
+      },
+    });
+    stubOauthFetch({});
+
+    const result = await resolveMcpAuth({
+      ...resolveParams(stores, SERVER_URL, 'oauth_client', 'cid', 'csec'),
+      oauthScopes: [
+        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/calendar.events',
+      ],
+    });
+
+    expect(isMcpAuthRequired(result)).toBe(false);
+    if (isMcpAuthRequired(result)) throw new Error('unreachable');
+    expect(result.headers).toEqual({ Authorization: 'Bearer sa1' });
+  });
+
+  it('forces re-authorization when the manifest scopes were narrowed', async () => {
+    const stores = newStores();
+    await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: sampleClient });
+    await stores.tokenStore.saveToken({
+      id: SERVER_ID,
+      userRef: USER_REF,
+      token: {
+        accessToken: 'sa1',
+        refreshToken: 'sr1',
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events',
+      },
+    });
+    stubOauthFetch({});
+
+    const result = await resolveMcpAuth({
+      ...resolveParams(stores, SERVER_URL, 'oauth_client', 'cid', 'csec'),
+      oauthScopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+    });
+
+    // The broader grant is dropped, not refreshed: a refresh would preserve it.
+    expect(isMcpAuthRequired(result)).toBe(true);
+    if (!isMcpAuthRequired(result)) throw new Error('unreachable');
+    expect(result.authUrl.searchParams.get('scope')).toBe('https://www.googleapis.com/auth/calendar.readonly');
+    expect(await stores.tokenStore.getToken({ id: SERVER_ID, userRef: USER_REF })).toBeUndefined();
+  });
+
+  it('forces re-authorization when the manifest scopes were widened', async () => {
+    const stores = newStores();
+    await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: sampleClient });
+    await stores.tokenStore.saveToken({
+      id: SERVER_ID,
+      userRef: USER_REF,
+      token: {
+        accessToken: 'sa1',
+        refreshToken: null,
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        scope: 'https://www.googleapis.com/auth/calendar.readonly',
+      },
+    });
+    stubOauthFetch({});
+
+    const result = await resolveMcpAuth({
+      ...resolveParams(stores, SERVER_URL, 'oauth_client', 'cid', 'csec'),
+      oauthScopes: [
+        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/calendar.events',
+      ],
+    });
+
+    expect(isMcpAuthRequired(result)).toBe(true);
+    expect(await stores.tokenStore.getToken({ id: SERVER_ID, userRef: USER_REF })).toBeUndefined();
+  });
+
+  it('skips scope comparison when the token records no granted scopes', async () => {
+    const stores = newStores();
+    await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: sampleClient });
+    await stores.tokenStore.saveToken({
+      id: SERVER_ID,
+      userRef: USER_REF,
+      token: {
+        accessToken: 'sa1',
+        refreshToken: null,
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        scope: null,
+      },
+    });
+    stubOauthFetch({});
+
+    const result = await resolveMcpAuth({
+      ...resolveParams(stores, SERVER_URL, 'oauth_client', 'cid', 'csec'),
+      oauthScopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+    });
+
+    expect(isMcpAuthRequired(result)).toBe(false);
+    if (isMcpAuthRequired(result)) throw new Error('unreachable');
+    expect(result.headers).toEqual({ Authorization: 'Bearer sa1' });
+  });
+});
+
+describe('revokeMcpAuthorization', () => {
+  const googleClient: OAuthClientRecord = {
+    server: {
+      authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+      tokenEndpoint: 'https://oauth2.googleapis.com/token',
+      codeChallengeMethodsSupported: ['S256'],
+    },
+    client: { clientId: 'gci1', clientSecret: 'gcs1' },
+  };
+
+  const revokeParams = (stores: Stores) => ({
+    tokenStore: stores.tokenStore,
+    mcpServerStore: stores.mcpServerStore,
+    serverId: SERVER_ID,
+    userRef: USER_REF,
+    mcpServerUrl: SERVER_URL,
+    mcpServerName: SERVER_NAME,
+    clientName: CLIENT_NAME,
+    authType: 'oauth_client' as const,
+    oauthClientId: 'cid',
+    oauthClientSecret: 'csec',
+  });
+
+  /** Records outgoing fetch calls, delegating to the stubbed OAuth fetch underneath. */
+  function recordFetchCalls(): Array<{ url: string; body: string }> {
+    const calls: Array<{ url: string; body: string }> = [];
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ url: String(input), body: String(init?.body ?? '') });
+      return inner(input, init);
+    }) as typeof fetch;
+    return calls;
+  }
+
+  it('revokes the refresh token at the Google revocation endpoint', async () => {
+    const stores = newStores();
+    await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: googleClient });
+    await stores.tokenStore.saveToken({
+      id: SERVER_ID,
+      userRef: USER_REF,
+      token: {
+        accessToken: 'ga1',
+        refreshToken: 'gr1',
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        scope: null,
+      },
+    });
+    stubOauthFetch({});
+    const calls = recordFetchCalls();
+
+    await revokeMcpAuthorization(revokeParams(stores));
+
+    const revoke = calls.find(call => call.url === 'https://oauth2.googleapis.com/revoke');
+    expect(revoke).toBeDefined();
+    // The refresh token (whole grant) is revoked, not just the access token.
+    expect(revoke?.body).toBe('token=gr1');
+  });
+
+  it('falls back to the access token when there is no refresh token', async () => {
+    const stores = newStores();
+    await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: googleClient });
+    await stores.tokenStore.saveToken({
+      id: SERVER_ID,
+      userRef: USER_REF,
+      token: {
+        accessToken: 'ga1',
+        refreshToken: null,
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        scope: null,
+      },
+    });
+    stubOauthFetch({});
+    const calls = recordFetchCalls();
+
+    await revokeMcpAuthorization(revokeParams(stores));
+
+    const revoke = calls.find(call => call.url === 'https://oauth2.googleapis.com/revoke');
+    expect(revoke?.body).toBe('token=ga1');
+  });
+
+  it('does nothing when no token is stored', async () => {
+    const stores = newStores();
+    stubOauthFetch({});
+    const calls = recordFetchCalls();
+
+    await expect(revokeMcpAuthorization(revokeParams(stores))).resolves.toBeUndefined();
+    expect(calls).toEqual([]);
+  });
+
+  it('skips revocation for non-Google authorization servers', async () => {
+    const stores = newStores();
+    await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: sampleClient });
+    await stores.tokenStore.saveToken({
+      id: SERVER_ID,
+      userRef: USER_REF,
+      token: {
+        accessToken: 'sa1',
+        refreshToken: 'sr1',
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        scope: null,
+      },
+    });
+    stubOauthFetch({});
+    const calls = recordFetchCalls();
+
+    await expect(revokeMcpAuthorization(revokeParams(stores))).resolves.toBeUndefined();
+    expect(calls).toEqual([]);
+  });
+
+  it('resolves when the revocation call fails', async () => {
+    const stores = newStores();
+    await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: googleClient });
+    await stores.tokenStore.saveToken({
+      id: SERVER_ID,
+      userRef: USER_REF,
+      token: {
+        accessToken: 'ga1',
+        refreshToken: 'gr1',
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        scope: null,
+      },
+    });
+    stubOauthFetch({});
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async input => {
+      if (String(input) === 'https://oauth2.googleapis.com/revoke') throw new Error('network down');
+      return inner(input);
+    }) as typeof fetch;
+
+    await expect(revokeMcpAuthorization(revokeParams(stores))).resolves.toBeUndefined();
   });
 });
 
