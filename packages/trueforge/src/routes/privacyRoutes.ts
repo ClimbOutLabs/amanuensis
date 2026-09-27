@@ -19,7 +19,7 @@ export const getPrivacyExportRoute = createRoute({
   tags: [OpenApiTag.CAPABILITIES],
   summary: 'Export all of the caller data as a zip archive',
   description:
-    'One-click full export: chats, memory files, settings, personas, and schedules for the caller, as a zip download. Credential-shaped values are redacted.',
+    'One-click full export: chats, memory files, settings, personas, and schedules for the caller, as a zip download. Credential-shaped values in chats, personas, schedules, and settings are redacted; memory files ship verbatim.',
   'x-fern-sdk-group-name': ['privacy'],
   'x-fern-sdk-method-name': 'export_data',
   responses: {

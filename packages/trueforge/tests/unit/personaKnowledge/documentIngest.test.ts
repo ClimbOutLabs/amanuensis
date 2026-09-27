@@ -7,6 +7,7 @@ import {
   fetchUrlSnapshot,
   pinnedDispatcher,
 } from '../../../src/personaKnowledge/documentIngest';
+import { OfflineBlockedError, setOfflineModeEnabled } from '../../../src/privacy/offlineGuard';
 
 const textBytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -462,5 +463,31 @@ describe('fetchUrlSnapshot SSRF guards', () => {
       await dispatcher.close().catch(() => undefined);
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+describe('fetchUrlSnapshot offline mode', () => {
+  afterEach(() => {
+    setOfflineModeEnabled(false);
+  });
+
+  it('refuses the fetch while offline mode is on, without touching the network', async () => {
+    setOfflineModeEnabled(true);
+    // example.com is public and would pass the SSRF guards: only the
+    // offline gate may reject this.
+    await expect(fetchUrlSnapshot('https://example.com/doc.pdf')).rejects.toThrow(OfflineBlockedError);
+  });
+
+  it('passes the offline gate once offline mode is off again', async () => {
+    setOfflineModeEnabled(true);
+    setOfflineModeEnabled(false);
+    // Stubbed resolver: execution must reach DNS (and fail there), which
+    // proves the offline gate let the public URL through.
+    const resolveAddresses = async (): Promise<string[]> => {
+      throw new Error('dns disabled in test');
+    };
+    await expect(fetchUrlSnapshot('https://example.com/doc.pdf', { resolveAddresses })).rejects.toThrow(
+      /Couldn’t look up/,
+    );
   });
 });

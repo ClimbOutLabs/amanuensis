@@ -4,6 +4,8 @@ import { extractRawText } from 'mammoth';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
 
+import { assertOnlineAllowed } from '../privacy/offlineGuard';
+
 /**
  * Document ingestion: turns uploads and URL snapshots into plain text for
  * chunking. Every parser is bounded (byte caps, page caps) and every failure
@@ -540,6 +542,10 @@ export async function fetchUrlSnapshot(
   rawUrl: string,
   options?: FetchSnapshotOptions,
 ): Promise<UrlSnapshot> {
+  // Offline mode gates the server's fetch, but this module calls undici
+  // directly, so the destination is checked here explicitly. Without this,
+  // ingesting a document URL would reach the internet with offline mode on.
+  assertOnlineAllowed(rawUrl);
   const fetchImpl = options?.fetchImpl ?? undiciFetch;
   const timeoutMs = options?.timeoutMs ?? URL_FETCH_TIMEOUT_MS;
   const maxBytes = options?.maxBytes ?? MAX_URL_BYTES;

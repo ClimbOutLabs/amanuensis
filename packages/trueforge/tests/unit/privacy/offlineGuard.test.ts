@@ -28,6 +28,12 @@ describe('isLocalHostname', () => {
     ip(169, 254, 10, 20),
     '::1',
     '[::1]',
+    'fe80::1',
+    '[fe80::abcd]',
+    'fd00::1',
+    'fc00::dead:beef',
+    '::ffff:127.0.0.1',
+    `::ffff:${ip(10, 0, 0, 5)}`,
     'printer.local',
     'model.localhost',
     'host.docker.internal',
@@ -45,6 +51,10 @@ describe('isLocalHostname', () => {
     '999.1.1.1',
     'localhost.example.com',
     'huggingface.co',
+    '::ffff:8.8.8.8',
+    '2001:db8::1',
+    '::',
+    'fec0::1',
   ])('treats %s as remote', hostname => {
     expect(isLocalHostname(hostname)).toBe(false);
   });

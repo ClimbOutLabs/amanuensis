@@ -17,11 +17,14 @@ import type { Context } from 'hono';
 import type { Logger } from 'winston';
 
 import type { ResolveRequestContext } from '../auth/identity';
+import type { Authorizer } from '../auth/authorizer';
+import type { IAgentStore } from '../db/agentStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IPersonaStore, Persona } from '../db/personaStore';
 import type { IScheduleStore, ScheduleRecord } from '../db/scheduleStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { getDataFlowManifest } from '../privacy/dataFlow';
+import { resolveManagedAgentIds } from './agentAccess';
 import { scrubSecrets } from '../privacy/exportScrub';
 import { namespaceDirFor, sanitizeNamespace } from '../runtime/memory/markdownMemoryFiles';
 import {
@@ -46,6 +49,9 @@ export interface PrivacyRouterDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   resolveRequestContext: ResolveRequestContext;
+  /** Resolves the agent store for the caller, for managed-agent scoping. */
+  resolveAgentStore: (c: Context) => IAgentStore<TTransaction>;
+  authorizer: Authorizer;
   logger: Logger;
   /** Resolved `MEMORY_MARKDOWN_DIR`: where namespace memory files live on disk. */
   memoryMarkdownDir: string;
@@ -177,6 +183,20 @@ export function createPrivacyRouter<TTransaction>(deps: PrivacyRouterDeps<TTrans
     const tenantId = requestContext.tenant_id;
     const subjectId = requestContext.subject.id;
 
+    // Same scoping as the sessions/schedules list APIs: the caller's own
+    // rows plus rows created by agents the caller manages. Without this,
+    // agent-created chats visible in history would silently drop out of
+    // the "download all my data" export.
+    const managedAgentIds = await resolveManagedAgentIds({
+      store: deps.resolveAgentStore(c),
+      context: requestContext,
+      authorizer: deps.authorizer,
+    });
+    const createdByOrAgentIds = {
+      created_by_subject_id: subjectId,
+      agent_ids: managedAgentIds,
+    };
+
     const chats: ExportChat[] = [];
     const sessions = await listAllPages({
       list: pageToken =>
@@ -188,7 +208,7 @@ export function createPrivacyRouter<TTransaction>(deps: PrivacyRouterDeps<TTrans
           start_timestamp: undefined,
           end_timestamp: undefined,
           agent_id: undefined,
-          created_by_or_agent_ids: { created_by_subject_id: subjectId, agent_ids: [] },
+          created_by_or_agent_ids: createdByOrAgentIds,
           metadata: undefined,
           source_type: undefined,
           source_id: undefined,
@@ -214,7 +234,7 @@ export function createPrivacyRouter<TTransaction>(deps: PrivacyRouterDeps<TTrans
           limit: EXPORT_PAGE_LIMIT,
           page_token: pageToken,
           agent_names: undefined,
-          created_by_or_agent_ids: { created_by_subject_id: subjectId, agent_ids: [] },
+          created_by_or_agent_ids: createdByOrAgentIds,
         }),
     });
 

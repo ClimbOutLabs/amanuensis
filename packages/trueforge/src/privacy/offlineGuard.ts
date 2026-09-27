@@ -47,6 +47,30 @@ function ipv4Octets(hostname: string): [number, number, number, number] | undefi
 }
 
 /**
+ * Whether an IPv6 literal (brackets stripped, lowercased) points at this
+ * machine or the local network: loopback, link-local, unique-local, or an
+ * IPv4-mapped address whose embedded IPv4 address is local. Global unicast
+ * and anything unparseable are remote.
+ */
+function isLocalIpv6(host: string): boolean {
+  if (host === '::1') {
+    return true;
+  }
+  // IPv4-mapped IPv6, e.g. ::ffff:127.0.0.1: judge the embedded IPv4 address.
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(host);
+  if (mapped?.[1] !== undefined) {
+    return isLocalHostname(mapped[1]);
+  }
+  const first = Number.parseInt(host.split(':')[0] ?? '', 16);
+  if (!Number.isInteger(first) || first < 0 || first > 0xffff) {
+    return false;
+  }
+  if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+  if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7 unique-local
+  return false;
+}
+
+/**
  * Whether a hostname points at this machine or the local network.
  * Hostname-based only: a public DNS name that happens to resolve to a
  * private IP is still treated as remote. Documented in privacy-data-flow.mdx.
@@ -61,6 +85,9 @@ export function isLocalHostname(hostname: string): boolean {
   }
   if (host === 'host.docker.internal' || host === 'host.containers.internal') {
     return true;
+  }
+  if (host.includes(':')) {
+    return isLocalIpv6(host);
   }
   if (isIpv4(host)) {
     const octets = ipv4Octets(host);

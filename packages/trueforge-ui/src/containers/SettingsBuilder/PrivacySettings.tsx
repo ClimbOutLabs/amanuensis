@@ -125,9 +125,9 @@ function OfflineModeCard() {
           </h4>
           <p className="mt-0.5 text-sm text-text-secondary">
             Stops the server from reaching the internet. Your assistant keeps working with local
-            models and memory. Any server network call that is not to this machine or your local
-            network is refused with a clear error, including model APIs, OAuth, remote tools, and
-            downloads. Downloads that run inside sandboxes, such as git skill updates, are outside
+            models and memory. Any fetch call the server makes that is not to this machine or your
+            local network is refused with a clear error, including model APIs, OAuth, remote tools,
+            and downloads. Downloads that run inside sandboxes, such as git skill updates, are outside
             this boundary: remove those skills to stop their network access.
           </p>
         </div>

@@ -424,6 +424,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         scheduleStore: deps.scheduleStore,
         globalSettingsStore: deps.globalSettingsStore,
         resolveRequestContext,
+        resolveAgentStore: deps.resolveAgentStore,
+        authorizer: deps.authorizer,
         logger: deps.logger,
         memoryMarkdownDir: configuration.MEMORY_MARKDOWN_DIR,
       }),
