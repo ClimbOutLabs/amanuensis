@@ -17,8 +17,6 @@ export type {
 } from './runtime/AbnormalHandoff';
 export type { AgentDefinition, ConfiguredModelSummary, ModelParams } from './runtime/AgentDefinition';
 export { AgentThread } from './runtime/AgentThread';
-export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCall } from './runtime/HostToolCallPolicy';
-export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';
 export type {
   AgentInfo,
   AgentParent,
@@ -203,7 +201,6 @@ export type {
   MCPAuthRequiredEvent,
   MCPServerAuthInfo,
   MCPServerInitInfo,
-  ModelMessageEvent,
   ThreadDoneEvent,
   ThreadOverwriteContextEvent,
   ToolAdmissionProvenance,
@@ -215,10 +212,6 @@ export type {
 } from './events/schema';
 export { CompletionUsageSchema } from './llm/LLMTypes';
 export type { CompletionUsage } from './llm/LLMTypes';
-export type {
-  ChatCompletionContentPartRefusal,
-  ChatCompletionContentPartText,
-} from './llm/openaiSchemas';
 export type { ToolCallMemoSnapshot } from './mcp/executeToolCalls';
 export { InternalEventType } from './runtime/AgentThread.types';
 export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread.types';
@@ -256,6 +249,25 @@ export type { CodeModeClientInstall, CodeModeTransport } from './sandbox/codeMod
 export { CodeModeErrorSourceSchema, CodeModeReplySchema, CodeModeRequestSchema } from './sandbox/codeMode/types';
 export type { CodeModeErrorSource, CodeModeReply, CodeModeRequest } from './sandbox/codeMode/types';
 export { SANDBOX_ALLOWED_EGRESS_DOMAINS, sandboxEgressDomainAllowList } from './sandbox/egressPolicy';
+// run_code isolation-driver stack (Docker v1; Firecracker parked until /dev/kvm is confirmed)
+export { DockerDriver } from './sandbox/driver/DockerDriver';
+export type { DockerDriverOptions } from './sandbox/driver/DockerDriver';
+export { classifyExecCommand, interpreterInvocationRefusal } from './sandbox/driver/ExecGuard';
+export type { ExecGuardHost, ExecGuardVerdict } from './sandbox/driver/ExecGuard';
+export type {
+  DriverReadiness,
+  DriverRunParams,
+  DriverRunResult,
+  DriverTermination,
+  IsolationDriver,
+  RunCodeLanguage,
+} from './sandbox/driver/IsolationDriver';
+export { OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX, runCodeProgramPath } from './sandbox/driver/IsolationDriver';
+export { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './sandbox/driver/errors';
+export { RUN_CODE_ERROR_CODES, RunCodeInputSchema, RunCodeResultSchema } from './sandbox/driver/RunCodeSchemas';
+export type { RunCodeErrorCode, RunCodeInput, RunCodeResult } from './sandbox/driver/RunCodeSchemas';
+export { RunCodeService, validateRunCodeStartupConfig } from './sandbox/driver/RunCodeService';
+export type { HarvestedFile, RunCodeCallOptions, RunCodeServiceOptions, TurnAttachment } from './sandbox/driver/RunCodeService';
 export { DaytonaSandboxProvider } from './sandbox/provider/DaytonaProvider';
 export type { DaytonaSandboxProviderOptions } from './sandbox/provider/DaytonaProvider';
 export { absolutizeRelativeExecEnv } from './sandbox/provider/execEnv';

@@ -44,6 +44,7 @@ import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { WithTransaction } from '../db/transaction';
+import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import {
   createScheduleRoute,
@@ -95,6 +96,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   repositoryStore: IRepositoryStore<TTransaction>;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   spaceStore: ISpaceStore<TTransaction>;
+  /** persists run_code's harvested result files as turn artifacts at harvest time. */
+  turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Same override point as `TurnsRouterDeps.sandboxProviderResolver`; defaults to {@link resolveSandboxProvider}. */
   sandboxProviderResolver?: typeof resolveSandboxProvider | undefined;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
@@ -145,6 +148,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       repositoryStore: deps.repositoryStore,
       sessionStore: deps.sessionStore,
       spaceStore: deps.spaceStore,
+      turnArtifactStore: deps.turnArtifactStore,
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,

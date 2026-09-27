@@ -16,6 +16,7 @@ import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgent
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
+import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
@@ -84,6 +85,7 @@ function stubTurnExecutionDeps(
     repositoryStore: {} as never,
     sessionStore: {} as never,
     spaceStore: {} as never,
+    turnArtifactStore: new FakeTurnArtifactStore(),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
   };
 }

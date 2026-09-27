@@ -101,7 +101,6 @@ import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { TurnDrainRegistry } from './runtime/turnDrains';
 import { printStandaloneStartupBanner } from './startupBanner';
-import { ensureWritableDataDir } from './utils/dataDir';
 import {
   parsePerServerMcpHeaders,
   X_TFG_MCP_HEADERS,
@@ -662,7 +661,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     authorizer,
   });
 
-  return { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnDrains };
+  return { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnArtifactStore, turnDrains };
 }
 
 try {
@@ -671,21 +670,6 @@ try {
     standalone: configuration.STANDALONE,
     version: PACKAGE_VERSION,
   });
-
-  // Fail fast on unwritable data directories: the persona knowledge library and
-  // (with the markdown backend) the memory store write here at query time, and
-  // a bare EACCES mid-request is a silent production outage. This throws a
-  // configuration-shaped error naming the env var instead.
-  await ensureWritableDataDir({
-    dir: configuration.PERSONA_KNOWLEDGE_DIR,
-    envVar: 'PERSONA_KNOWLEDGE_DIR',
-  });
-  if (configuration.MEMORY_BACKEND === 'markdown') {
-    await ensureWritableDataDir({
-      dir: configuration.MEMORY_MARKDOWN_DIR,
-      envVar: 'MEMORY_MARKDOWN_DIR',
-    });
-  }
 
   if (configuration.STANDALONE) {
     printStandaloneStartupBanner({ version: PACKAGE_VERSION, color: shouldColorize() });
@@ -713,13 +697,42 @@ try {
     logger.info('TrueForge starting', { mode: 'distributed' });
   }
 
-  const { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnDrains } =
+  const { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnArtifactStore, turnDrains } =
     configuration.STANDALONE
       ? await createServerRuntime(
           await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
           logger,
         )
       : await createServerRuntime(await createDistributedPersistence({ configuration, logger }), logger);
+
+  // Turn artifact retention: persisted run_code/sandbox result files are
+  // downloads, not a permanent archive. One startup-anchored sweep a day
+  // deletes index rows older than TURN_ARTIFACT_RETENTION_DAYS plus blobs no
+  // surviving row references. Best effort: failures are logged, never fatal.
+  let artifactRetentionInFlight = false;
+  const sweepExpiredTurnArtifacts = async (): Promise<void> => {
+    if (artifactRetentionInFlight) {
+      return;
+    }
+    artifactRetentionInFlight = true;
+    try {
+      const deleted = await turnArtifactStore.deleteArtifactsOlderThan({
+        older_than: new Date(Date.now() - configuration.TURN_ARTIFACT_RETENTION_DAYS * 86_400_000).toISOString(),
+      });
+      if (deleted > 0) {
+        logger.info('Deleted expired turn artifact rows', { count: deleted });
+      }
+    } catch (error) {
+      logger.warn('Turn artifact retention sweep failed', extractErrorLogFields(error));
+    } finally {
+      artifactRetentionInFlight = false;
+    }
+  };
+  void sweepExpiredTurnArtifacts();
+  const artifactRetentionTimer = setInterval(() => {
+    void sweepExpiredTurnArtifacts();
+  }, 86_400_000);
+  artifactRetentionTimer.unref();
 
   if (
     mountFrontend(app, {
@@ -914,6 +927,7 @@ try {
       }
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       clearInterval(commandExecutionRecoveryTimer);
+      clearInterval(artifactRetentionTimer);
       // Stop serving peer requests (waits for in-flight replies), then close
       // the clients this process owns: the subscriber duplicate and the primary.
       await requestReplyExecutor?.drain();
