@@ -24,5 +24,10 @@ export function buildBriefingPrompt(template: BriefingTemplate): string {
   switch (template) {
     case 'morning-briefing':
       return MORNING_BRIEFING_PROMPT;
+    default:
+      // Fail loudly: a template without a prompt would resolve to `undefined`,
+      // which `resolveScheduleRunPrompt` treats as "no turn", silently dropping
+      // the briefing. New templates must add their prompt here.
+      throw new Error(`Unknown briefing template: ${String(template)}`);
   }
 }
