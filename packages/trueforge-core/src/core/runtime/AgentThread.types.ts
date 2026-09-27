@@ -278,6 +278,12 @@ export interface AgentThreadConstructorInput {
    * core default (see DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS).
    */
   modelFirstResponseTimeoutMs?: number | undefined;
+  /**
+   * Bound in milliseconds on the sandbox repository refresh before a model call.
+   * On timeout the turn continues with the pre-refresh state. Undefined falls
+   * back to the core default (DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS).
+   */
+  sandboxRefreshTimeoutMs?: number | undefined;
   tracing: AgentTracing;
   logger: Logger;
 }
