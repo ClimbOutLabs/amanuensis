@@ -3,11 +3,13 @@
  */
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type {
+  BriefingTemplate,
   CreateScheduleRequest,
   CreateScheduleRunRequest,
   ListResult,
   ListSchedulesParams,
   Schedule,
+  ScheduleKind,
   ScheduleRun,
   ScheduleServer,
   ScheduleStatus,
@@ -93,13 +95,26 @@ function toWireManifest(input: {
   cron: string;
   timezone?: string;
   status?: ScheduleStatus;
+  kind?: ScheduleKind;
+  template?: BriefingTemplate;
+  notifyOnCompletion?: boolean;
+  notifyOnFailure?: boolean;
 }): TrueForgeApi.ScheduleManifest {
-  return {
+  const manifest: TrueForgeApi.ScheduleManifest = {
     task: input.task,
     cron: input.cron,
     timezone: input.timezone ?? 'UTC',
     status: input.status ?? 'active',
   };
+  // The new manifest fields are not yet declared on the generated SDK type
+  // (the SDK has not been regenerated with them), so they are attached through
+  // `unknown` and serialized as-is. Mirrors the read side in `toUiSchedule`.
+  const extra: Record<string, unknown> = {};
+  if (input.kind !== undefined) extra['kind'] = input.kind;
+  if (input.template !== undefined) extra['template'] = input.template;
+  if (input.notifyOnCompletion !== undefined) extra['notify_on_completion'] = input.notifyOnCompletion;
+  if (input.notifyOnFailure !== undefined) extra['notify_on_failure'] = input.notifyOnFailure;
+  return { ...manifest, ...extra } as TrueForgeApi.ScheduleManifest;
 }
 
 function toIsoInstant(value: Date | string): string {
