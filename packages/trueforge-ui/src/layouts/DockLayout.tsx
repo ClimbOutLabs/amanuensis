@@ -11,7 +11,9 @@ export function DockLayout({ className }: { className?: string }) {
       <div
         data-aui-compact-layout
         className={cn(
-          'ml-auto flex h-full w-full max-w-[min(400px,100%)] min-h-0 min-w-0 flex-col border-l border-border bg-primary-bg shadow-[-4px_0_24px_color-mix(in_oklab,var(--shadow-color)_6%,transparent)]',
+          // No hairline border: the panel floats above the chat surface, separated
+          // by a soft directional shadow instead of a hard divider line.
+          'ml-auto flex h-full w-full max-w-[min(400px,100%)] min-h-0 min-w-0 flex-col bg-primary-bg shadow-[-12px_0_32px_-12px_color-mix(in_oklab,var(--shadow-color)_12%,transparent)]',
           className,
         )}
       >
