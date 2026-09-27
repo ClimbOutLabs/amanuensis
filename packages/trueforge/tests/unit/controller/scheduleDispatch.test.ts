@@ -80,6 +80,7 @@ async function tickDispatch() {
   const logger = fakeLogger();
   const loop = scheduleDispatchLoop({
     scheduleStore: store as never,
+    notificationStore: {} as never,
     logger: logger as never,
     withTransaction: async callback => callback({} as never),
   });
