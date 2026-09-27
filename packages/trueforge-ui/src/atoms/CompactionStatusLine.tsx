@@ -1,7 +1,7 @@
 'use client';
 
 import { useCompactionStatus } from '../hooks/useCompactionStatus.js';
-import { cn } from '../lib/cn.js';
+import { cn } from './lib/cn.js';
 
 /** Formats a token count compactly: 12500 -> "12.5k", 800 -> "800". */
 export function formatTokenCount(tokens: number): string {
