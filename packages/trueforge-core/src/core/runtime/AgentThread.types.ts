@@ -272,6 +272,12 @@ export interface AgentThreadConstructorInput {
    * executeToolCalls. Undefined falls back to the core default.
    */
   runCodeToolCallTimeoutMs?: number | undefined;
+  /**
+   * Bound in milliseconds on waiting for a model call's first output before
+   * the turn fails visibly instead of hanging. Undefined falls back to the
+   * core default (see DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS).
+   */
+  modelFirstResponseTimeoutMs?: number | undefined;
   tracing: AgentTracing;
   logger: Logger;
 }

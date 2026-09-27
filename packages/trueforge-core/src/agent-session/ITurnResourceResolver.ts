@@ -6,6 +6,8 @@ import type { AgentDefinition, ModelParams } from '../core/runtime/AgentDefiniti
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
+import type { ModelMessageEvent } from '../core/events/schema';
+import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { TurnRecord } from './models/TurnRecord';
 import type { AgentSpec } from './schemas/agentSpec';
 
@@ -58,6 +60,19 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
    * DEFAULT_RUN_CODE_TOOL_CALL_TIMEOUT_MS).
    */
   readonly runCodeToolCallTimeoutMs?: number | undefined;
+  /**
+   * Host instance-wide bound in milliseconds on waiting for a model call's
+   * first output before the turn fails visibly instead of hanging. Undefined
+   * falls back to the core default (see DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS).
+   */
+  readonly modelFirstResponseTimeoutMs?: number | undefined;
+  /**
+   * Per-run host policy over tool calls, consulted synchronously during
+   * assistant-message enrichment before any provider dispatch. A block resolves
+   * the call as `policy_blocked` with the host message as the tool error.
+   * Undefined disables the hook.
+   */
+  readonly toolCallPolicy?: HostToolCallPolicy | undefined;
   /** Host-resolved T2 repository binding, available even when the sandbox capability is disabled. */
   readonly boundRepository?: BoundRepository | undefined;
   /**
@@ -119,4 +134,36 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
    * knowing what was resolved.
    */
   close(): Promise<void>;
+  /**
+   * Optional host sanitizer for assistant text entering the durable thread
+   * context. TurnHandle applies it to every assistant message in
+   * AGENT_CONTEXT_APPEND before the store persists the context — so machine
+   * markers the model echoed (e.g. knowledge-citation `⟦src:N⟧`) never become
+   * live markers in the next turn's transcript, where they could
+   * false-attribute a passage the new answer never used. Streamed deltas and
+   * the turn's live in-memory context are untouched; only the durable copy
+   * is sanitized. Undefined means no sanitization. A throwing hook keeps the
+   * original text: sanitization can never fail the turn.
+   */
+  readonly sanitizeAssistantTextForContext?: ((text: string) => string) | undefined;
+  /**
+   * Optional host post-pass over the root thread's final assistant message.
+   * Applied exactly once per turn, after execution completes and before the
+   * terminal state is persisted and TURN_DONE is published. Return undefined
+   * to keep the original message. The harness treats a throwing hook as a
+   * no-op (logged) so host post-processing can never fail the turn. When the
+   * hook changes the message, TurnHandle re-publishes the repaired
+   * model.message event (same id) on the stream before TURN_DONE so
+   * delta-folding live clients converge on the repaired content.
+   *
+   * Streamed deltas are deliberately not post-processed: stripping markers
+   * mid-stream would need stateful cross-delta reassembly (a marker can
+   * split across token-boundary deltas) for a transient artifact, and the
+   * footer cannot be computed until the answer is complete anyway. Deltas
+   * are non-durable transport; the repaired terminal event is what live
+   * clients settle on.
+   */
+  readonly finalizeAssistantOutput?:
+    | ((output: ModelMessageEvent) => ModelMessageEvent | undefined)
+    | undefined;
 }

@@ -207,6 +207,59 @@ const INSPECTION_WARNING_LIMIT = 8;
 const INSPECTION_STOP_LIMIT = 30;
 const ASYNC_ITERATOR_ABORTED = Symbol('async-iterator-aborted');
 
+/**
+ * Default bound on waiting for a model call's first output before failing the turn visibly.
+ * Ten minutes: generous for slow prefill on large-but-legal contexts, tight enough that a
+ * provider that accepted the request and went silent never leaves a turn hanging for hours.
+ */
+export const DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS = 600_000;
+
+const MODEL_FIRST_RESPONSE_TIMEOUT = Symbol('model-first-response-timeout');
+
+/** Human duration for the watchdog timeout in the user-facing error, e.g. "10 minutes", "90 seconds". */
+function describeTimeout(timeoutMs: number): string {
+  if (timeoutMs < 60_000) {
+    const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+    return `${String(seconds)} second${seconds === 1 ? '' : 's'}`;
+  }
+  const minutes = Math.max(1, Math.round(timeoutMs / 60_000));
+  return `${String(minutes)} minute${minutes === 1 ? '' : 's'}`;
+}
+
+/**
+ * Waits for the first model chunk with a bounded watchdog. A provider that accepts the request
+ * but never produces a first chunk (and never errors) would otherwise leave the turn active
+ * indefinitely — observed as a ~4-hour stall with zero model steps. On timeout the stream is
+ * asked to close and the caller fails the turn visibly. The timer is cleared the moment the
+ * wait settles for any reason (chunk, abort, or error), so it can never fire late.
+ */
+function nextModelChunkWithFirstResponseTimeout<T, TReturn>(input: {
+  iterator: AsyncIterator<T, TReturn, unknown>;
+  signal: AbortSignal | undefined;
+  requestClose: () => void;
+  timeoutMs: number;
+}): Promise<IteratorResult<T, TReturn> | typeof ASYNC_ITERATOR_ABORTED | typeof MODEL_FIRST_RESPONSE_TIMEOUT> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      // The model went silent: ask the stream to close, but never await cleanup — a hung
+      // provider must not strand the turn a second time.
+      input.requestClose();
+      resolve(MODEL_FIRST_RESPONSE_TIMEOUT);
+    }, input.timeoutMs);
+    nextAbortableIteratorResult(input).then(
+      result => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        // nextAbortableIteratorResult already normalises non-Error rejections; forward as-is.
+        reject(error instanceof Error ? error : new Error(describeUnknownError(error), { cause: error }));
+      },
+    );
+  });
+}
+
 function mechanicalHandoffEvidence(): AbnormalHandoffEvidence {
   return {
     repository: null,
@@ -1128,6 +1181,7 @@ export class AgentThread {
   private readonly toolDispatchMaxConcurrency?: number | undefined;
   private readonly toolCallTimeoutMs?: number | undefined;
   private readonly runCodeToolCallTimeoutMs?: number | undefined;
+  private readonly modelFirstResponseTimeoutMs: number;
   private implementationPlanGrants: ReadonlySet<string> = new Set();
   // One user request may span several execute() calls while approvals are
   // resolved. Keep orchestration limits across those continuations; reset only
@@ -1172,6 +1226,7 @@ export class AgentThread {
     this.toolDispatchMaxConcurrency = input.toolDispatchMaxConcurrency;
     this.toolCallTimeoutMs = input.toolCallTimeoutMs;
     this.runCodeToolCallTimeoutMs = input.runCodeToolCallTimeoutMs;
+    this.modelFirstResponseTimeoutMs = input.modelFirstResponseTimeoutMs ?? DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
     this.toolCallMemo = createToolCallMemoState(input.toolCallMemo);
     this.toolCallMemo.clarificationAnswered = requestHasAnsweredClarification(this.context);
     // A fresh AgentThread is built per turn AND per approval/tool-response
@@ -2245,11 +2300,25 @@ export class AgentThread {
       let firstDeltaTimestamped = false;
       modelMessageUsage = undefined;
       try {
-        let attemptResult = await nextAbortableIteratorResult({
+        // The first chunk waits behind the watchdog: a provider that accepts the request but
+        // never produces output (and never errors) must fail the turn visibly, not hang it.
+        let attemptResult = await nextModelChunkWithFirstResponseTimeout({
           iterator: llmStream,
           signal,
           requestClose: requestLLMStreamClose,
+          timeoutMs: this.modelFirstResponseTimeoutMs,
         });
+        if (attemptResult === MODEL_FIRST_RESPONSE_TIMEOUT) {
+          yield this.generateErrorEvent(
+            `The model produced no output within ${describeTimeout(this.modelFirstResponseTimeoutMs)}, so the ` +
+              `turn was stopped instead of hanging. This usually means the request was too large for the ` +
+              `model to start on, for example after pasting a very large document. Try a smaller message or ` +
+              `a different model, then send again.`,
+            undefined,
+            'model_response_timeout',
+          );
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+        }
         if (attemptResult === ASYNC_ITERATOR_ABORTED) {
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
