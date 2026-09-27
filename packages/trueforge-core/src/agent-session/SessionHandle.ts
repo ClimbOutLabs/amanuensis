@@ -784,8 +784,7 @@ export class SessionHandle<
       logger: input.resolver.logger,
       toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
       toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
-      modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
-      toolCallPolicy: input.resolver.toolCallPolicy,
+      runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
     });
   }
 
@@ -869,8 +868,7 @@ export class SessionHandle<
         logger: input.resolver.logger,
         toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
         toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
-        modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
-        toolCallPolicy: input.resolver.toolCallPolicy,
+        runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
       });
     };
   }

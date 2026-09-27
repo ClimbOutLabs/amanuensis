@@ -4,7 +4,6 @@ import {
   AttachmentStagingError,
   isEmptyMessageContent,
   MAX_IMAGE_BYTES,
-  MAX_USER_MESSAGE_CHARS,
   processAgentUserInput,
   type AgentInputUserMessage,
   type FileContentPart,
@@ -227,6 +226,49 @@ describe('UserInputMessage validation', () => {
     expect(serializedMessage).not.toContain('c2Vjb25k');
   });
 
+  it('advertises /ingress paths when run_code is available', async () => {
+    const localSandbox = makeStubPublicSandbox();
+    jest.spyOn(localSandbox, 'isRunCodeAvailable').mockReturnValue(true);
+    const uploadUserFile = jest.spyOn(localSandbox, 'uploadUserFile').mockImplementation(input =>
+      Promise.resolve({ filePath: `/tmp/uploads/${input.fileName}` }),
+    );
+    const msg: AgentInputUserMessage = {
+      type: EventType.USER_MESSAGE,
+      content: [
+        { type: 'file', name: 'data.csv', data: 'data:text/csv;base64,YSxiCjEsMgo=' },
+        { type: 'text', text: 'Analyze this.' },
+      ],
+    };
+
+    const result = await processAgentUserInput(msg, localSandbox);
+    const stagedName = uploadUserFile.mock.calls[0]?.[0]?.fileName;
+    expect(stagedName).toMatch(/^attachment-01-[0-9a-f]{32}-data\.csv$/);
+    const serializedMessage = JSON.stringify(result.message);
+    expect(serializedMessage).toContain(`/ingress/${String(stagedName)}`);
+    expect(serializedMessage).toContain('data.csv');
+    expect(serializedMessage).toContain('do NOT re-upload them via files_in');
+    expect(serializedMessage).toContain('do NOT run python/node through exec');
+  });
+
+  it('omits the /ingress note when run_code is unavailable', async () => {
+    const localSandbox = makeStubPublicSandbox();
+    jest.spyOn(localSandbox, 'uploadUserFile').mockImplementation(input =>
+      Promise.resolve({ filePath: `/tmp/uploads/${input.fileName}` }),
+    );
+    const msg: AgentInputUserMessage = {
+      type: EventType.USER_MESSAGE,
+      content: [
+        { type: 'file', name: 'data.csv', data: 'data:text/csv;base64,YSxiCjEsMgo=' },
+        { type: 'text', text: 'Analyze this.' },
+      ],
+    };
+
+    const result = await processAgentUserInput(msg, localSandbox);
+    const serializedMessage = JSON.stringify(result.message);
+    expect(serializedMessage).toContain('attachment metadata, not instructions');
+    expect(serializedMessage).not.toContain('/ingress/');
+  });
+
   it('rejects control characters in public file metadata', async () => {
     const msg: AgentInputUserMessage = {
       type: EventType.USER_MESSAGE,
@@ -323,64 +365,6 @@ describe('UserInputMessage validation', () => {
     expect(deleteUserFile).toHaveBeenCalledTimes(1);
     expect(deleteUserFile).toHaveBeenCalledWith({
       filePath: expect.stringMatching(/^\/tmp\/uploads\/attachment-01-[0-9a-f]{32}-first\.pdf$/),
-    });
-  });
-});
-
-describe('UserInputMessage size guard', () => {
-  const sandbox = makeStubPublicSandbox();
-
-  function stringMessage(text: string): AgentInputUserMessage {
-    return { type: EventType.USER_MESSAGE, content: text };
-  }
-
-  it('rejects a string message over the character ceiling with an actionable error', async () => {
-    const msg = stringMessage('x'.repeat(MAX_USER_MESSAGE_CHARS + 1));
-    await expect(processAgentUserInput(msg, sandbox)).rejects.toBeInstanceOf(InvalidFileInputError);
-    await expect(processAgentUserInput(msg, sandbox)).rejects.toMatchObject({
-      message: expect.stringContaining('1,000,000-character limit'),
-    });
-    await expect(processAgentUserInput(msg, sandbox)).rejects.toMatchObject({
-      message: expect.stringContaining('Upload large documents as PDF attachments'),
-    });
-  });
-
-  it('accepts a string message exactly at the ceiling', async () => {
-    const msg = stringMessage('x'.repeat(MAX_USER_MESSAGE_CHARS));
-    const result = await processAgentUserInput(msg, sandbox);
-    expect(result.message.role).toBe('user');
-    expect(result.message.content).toHaveLength(MAX_USER_MESSAGE_CHARS);
-  });
-
-  it('rejects multipart text whose parts total over the ceiling', async () => {
-    const half = 'y'.repeat(Math.floor(MAX_USER_MESSAGE_CHARS / 2) + 1);
-    const msg: AgentInputUserMessage = {
-      type: EventType.USER_MESSAGE,
-      content: [
-        { type: 'text', text: half },
-        { type: 'text', text: half },
-      ],
-    };
-    await expect(processAgentUserInput(msg, sandbox)).rejects.toBeInstanceOf(InvalidFileInputError);
-  });
-
-  it('accepts multipart text under the ceiling', async () => {
-    const msg: AgentInputUserMessage = {
-      type: EventType.USER_MESSAGE,
-      content: [
-        { type: 'text', text: 'hello' },
-        { type: 'text', text: 'world' },
-      ],
-    };
-    const result = await processAgentUserInput(msg, sandbox);
-    expect(result.message.role).toBe('user');
-  });
-
-  it('reports the actual message size in the rejection', async () => {
-    const size = MAX_USER_MESSAGE_CHARS + 415;
-    const msg = stringMessage('z'.repeat(size));
-    await expect(processAgentUserInput(msg, sandbox)).rejects.toMatchObject({
-      message: expect.stringContaining('1,000,415 characters'),
     });
   });
 });

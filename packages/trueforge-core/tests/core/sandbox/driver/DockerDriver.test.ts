@@ -1,0 +1,666 @@
+/**
+ * Unit tests for the Docker isolation driver. No daemon: every docker/cosign
+ * interaction is scripted through a fake DockerCommandRunner.
+ */
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import {
+  DockerDriver,
+  type DockerCommandResult,
+  type DockerCommandRunner,
+  type DockerDriverOptions,
+} from '../../../../src/core/sandbox/driver/DockerDriver';
+import type { DriverRunParams } from '../../../../src/core/sandbox/driver/IsolationDriver';
+
+const DIGEST = 'sha256:' + 'a'.repeat(64);
+const IMAGE = `ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0@${DIGEST}`;
+const KEY_PATH = '/etc/amanuensis/cosign.pub';
+
+interface RecordedCall {
+  binary: string;
+  args: string[];
+}
+
+const okResult: DockerCommandResult = { stdout: '', stderr: '', exitCode: 0, timedOut: false };
+
+/** Scripted fake: handlers decide each docker/cosign call's outcome. */
+class FakeRunner implements DockerCommandRunner {
+  calls: RecordedCall[] = [];
+  killed: string[] = [];
+  progressLines: string[] = [];
+  runHandler: (binary: string, args: string[]) => DockerCommandResult | Promise<DockerCommandResult> =
+    () => okResult;
+  attachHandler: (input: {
+    containerId: string;
+    signal: AbortSignal | undefined;
+    onStdout: (chunk: Buffer) => void;
+    onStderr: (chunk: Buffer) => void;
+  }) => Promise<number | undefined> = () => Promise.resolve(0);
+  pullHandler: (input: {
+    image: string;
+    signal: AbortSignal | undefined;
+    onProgress: (line: string) => void;
+  }) => Promise<void> = () => Promise.resolve(undefined);
+
+  async run(binary: string, args: string[]): Promise<DockerCommandResult> {
+    this.calls.push({ binary, args });
+    if (args[0] === 'kill' && typeof args[1] === 'string') {
+      this.killed.push(args[1]);
+    }
+    return this.runHandler(binary, args);
+  }
+
+  async pull(input: {
+    image: string;
+    signal: AbortSignal | undefined;
+    onProgress: (line: string) => void;
+  }): Promise<void> {
+    return this.pullHandler(input);
+  }
+
+  async startAttach(input: {
+    containerId: string;
+    signal: AbortSignal | undefined;
+    onStdout: (chunk: Buffer) => void;
+    onStderr: (chunk: Buffer) => void;
+  }): Promise<number | undefined> {
+    return this.attachHandler(input);
+  }
+
+  callsFor(firstArg: string): RecordedCall[] {
+    return this.calls.filter((call) => call.args[0] === firstArg);
+  }
+}
+
+function driverOptions(): DockerDriverOptions {
+  return {
+    image: IMAGE,
+    cosignPublicKeyPath: KEY_PATH,
+    dockerBinary: undefined,
+    cosignBinary: undefined,
+    commandTimeoutMs: undefined,
+    createTimeoutMs: undefined,
+  };
+}
+
+function runParams(overrides: { signal?: AbortSignal | undefined } = {}): DriverRunParams {
+  return {
+    language: 'python',
+    code: 'print("hi")',
+    filesIn: [],
+    ingressDir: '/data/runs/r1/ingress',
+    scratchDir: '/data/runs/r1/scratch',
+    egressDir: '/data/runs/r1/egress',
+    timeoutMs: 60000,
+    memoryMb: 2048,
+    diskMb: 1024,
+    runId: 'run-123',
+    env: { PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8', HOME: '/scratch' },
+    signal: overrides.signal,
+    harvestGraceMs: 2000,
+  };
+}
+
+/** ensureReady happy path: info, inspect (pinned digest), cosign, create probe, ownership probe. */
+function scriptReadyPath(runner: FakeRunner, digest = DIGEST): void {
+  runner.runHandler = async (binary, args) => {
+    if (binary === 'docker' && args[0] === 'info') {
+      return okResult;
+    }
+    if (binary === 'docker' && args[0] === 'image') {
+      return {
+        ...okResult,
+        stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${digest}`] }]),
+      };
+    }
+    if (binary === 'cosign') {
+      return okResult;
+    }
+    if (binary === 'docker' && args[0] === 'create') {
+      return { ...okResult, stdout: 'probe-container-id\n' };
+    }
+    if (binary === 'docker' && args[0] === 'run') {
+      // Simulate the daemon's bind-mount write as the sandbox uid: the probe
+      // container touches /probe/write-test, which must appear on the host.
+      const volume = args.find((arg) => arg.endsWith(':/probe:rw'));
+      const hostDir = volume?.split(':')[0];
+      if (hostDir !== undefined) {
+        await writeFile(join(hostDir, 'write-test'), 'probe');
+      }
+      return { ...okResult, stdout: 'PROBE_OK\n' };
+    }
+    if (binary === 'docker' && args[0] === 'rm') {
+      return okResult;
+    }
+    throw new Error(`unexpected call: ${binary} ${args.join(' ')}`);
+  };
+}
+
+describe('DockerDriver.create', () => {
+  test('emits the exact hardened flag set from the plan', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-1\n' };
+      }
+      return okResult;
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const result = await driver.run(runParams());
+    expect(result.terminatedBy).toBe('completed');
+
+    const creates = runner.callsFor('create');
+    expect(creates).toHaveLength(1);
+    expect(creates[0]?.args).toEqual([
+      'create',
+      '--network', 'none',
+      '--init',
+      '--read-only',
+      '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m',
+      '--user', '65532:65532',
+      '--cap-drop=ALL',
+      '--security-opt', 'no-new-privileges:true',
+      '--pids-limit', '256',
+      '--memory', '2048m',
+      '--memory-swap', '2048m',
+      '--oom-kill-disable', 'false',
+      '--cpus', '2',
+      '--shm-size', '64m',
+      '--log-driver', 'local',
+      '--log-opt', 'max-size=1m',
+      '--log-opt', 'max-file=2',
+      '--label', 'tf.sandbox.run=run-123',
+      '-v', '/data/runs/r1/ingress:/ingress:ro',
+      '-v', '/data/runs/r1/scratch:/scratch:rw',
+      '-v', '/data/runs/r1/egress:/egress:rw',
+      '--workdir', '/scratch',
+      '-e', 'PATH=/usr/local/bin:/usr/bin:/bin',
+      '-e', 'LANG=C.UTF-8',
+      '-e', 'HOME=/scratch',
+      IMAGE,
+      'python3', '/ingress/__runcode_main.py',
+    ]);
+  });
+
+  test('node runs the staged .mjs program', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-1\n' };
+      }
+      return okResult;
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const params = runParams();
+    await driver.run({ ...params, language: 'node' });
+    const creates = runner.callsFor('create');
+    expect(creates[0]?.args.slice(-2)).toEqual(['node', '/ingress/__runcode_main.mjs']);
+  });
+
+  test('create failure maps to internal with host paths scrubbed', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, exitCode: 1, stderr: 'mount /data/runs/r1/scratch failed: permission denied' };
+      }
+      return okResult;
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const result = await driver.run(runParams());
+    expect(result.terminatedBy).toBe('internal');
+    expect(result.internalError).toContain('<scratch>');
+    expect(result.internalError).not.toContain('/data/runs/r1/scratch');
+  });
+
+  test('abort during the run kills the container and reports killed', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-9\n' };
+      }
+      return okResult;
+    };
+    // The fake attach only resolves once the driver kills the container.
+    let resolveAttach: ((code: number) => void) | undefined;
+    runner.attachHandler = () =>
+      new Promise<number>((resolve) => {
+        resolveAttach = resolve;
+      });
+    const originalRun: DockerCommandRunner['run'] = runner.run.bind(runner);
+    runner.run = async (binary: string, args: string[]) => {
+      const result = await originalRun(binary, args, { timeoutMs: 5000, signal: undefined });
+      if (args[0] === 'kill') {
+        resolveAttach?.(137);
+      }
+      return result;
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const controller = new AbortController();
+    const runPromise = driver.run(runParams({ signal: controller.signal }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+    const result = await runPromise;
+    expect(result.terminatedBy).toBe('killed');
+    expect(runner.killed).toContain('cid-9');
+  });
+
+  test('output past the 4 MiB transport bound kills the run with the marker', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-7\n' };
+      }
+      return okResult;
+    };
+    runner.attachHandler = (input) => {
+      input.onStdout(Buffer.alloc(5 * 1024 * 1024, 'x'));
+      return Promise.resolve(0);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const result = await driver.run(runParams());
+    expect(result.terminatedBy).toBe('killed');
+    expect(result.internalError?.startsWith('output_exceeded:')).toBe(true);
+    expect(runner.killed).toContain('cid-7');
+    expect(result.stdout.length).toBeLessThanOrEqual(4 * 1024 * 1024);
+  });
+
+  test('a non-zero program exit is completed with the verbatim code', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-2\n' };
+      }
+      return okResult;
+    };
+    runner.attachHandler = (input) => {
+      input.onStderr(Buffer.from('traceback\n'));
+      return Promise.resolve(3);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const result = await driver.run(runParams());
+    expect(result.terminatedBy).toBe('completed');
+    expect(result.exitCode).toBe(3);
+    expect(result.stderr).toBe('traceback\n');
+  });
+
+  test('exit 137 with OOMKilled set maps to oom', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-oom\n' };
+      }
+      if (args[0] === 'inspect') {
+        return { ...okResult, stdout: 'true\n' };
+      }
+      return okResult;
+    };
+    runner.attachHandler = () => Promise.resolve(137);
+    const driver = new DockerDriver(driverOptions(), runner);
+    const result = await driver.run(runParams());
+    expect(result.terminatedBy).toBe('oom');
+    expect(result.exitCode).toBe(137);
+    // Post-mortem inspect happens before the explicit remove (no --rm).
+    const inspects = runner.callsFor('inspect');
+    expect(inspects).toHaveLength(1);
+    expect(inspects[0]?.args).toContain('cid-oom');
+    const rms = runner.callsFor('rm');
+    expect(rms.map((call) => call.args[2])).toContain('cid-oom');
+  });
+
+  test('exit 137 without OOMKilled stays a completed program exit', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-137\n' };
+      }
+      if (args[0] === 'inspect') {
+        return { ...okResult, stdout: 'false\n' };
+      }
+      return okResult;
+    };
+    runner.attachHandler = () => Promise.resolve(137);
+    const driver = new DockerDriver(driverOptions(), runner);
+    const result = await driver.run(runParams());
+    expect(result.terminatedBy).toBe('completed');
+    expect(result.exitCode).toBe(137);
+  });
+
+  test('a failed OOM inspect never breaks the run', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-oom2\n' };
+      }
+      if (args[0] === 'inspect') {
+        return { ...okResult, exitCode: 1, stderr: 'no such container' };
+      }
+      return okResult;
+    };
+    runner.attachHandler = () => Promise.resolve(137);
+    const driver = new DockerDriver(driverOptions(), runner);
+    const result = await driver.run(runParams());
+    expect(result.terminatedBy).toBe('completed');
+    expect(result.exitCode).toBe(137);
+  });
+});
+
+describe('DockerDriver.ensureReady', () => {
+  test('happy path returns ready and removes the probe container', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const driver = new DockerDriver(driverOptions(), runner);
+    await expect(driver.ensureReady()).resolves.toEqual({ ready: true });
+    const rms = runner.callsFor('rm');
+    expect(rms).toHaveLength(1);
+    expect(rms[0]?.args).toContain('probe-container-id');
+  });
+
+  test('bind-mount ownership probe failure is daemon_unavailable', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const readyPath = runner.runHandler;
+    runner.runHandler = async (binary, args) => {
+      if (binary === 'docker' && args[0] === 'run') {
+        return { ...okResult, exitCode: 1, stderr: 'touch: /probe/write-test: Permission denied' };
+      }
+      return readyPath(binary, args);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('daemon_unavailable');
+      expect(readiness.error).toMatch(/ownership probe failed/);
+      expect(readiness.error).toMatch(/virtiofs/);
+    }
+  });
+
+  test('docker info failure is daemon_unavailable', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'info') {
+        return { ...okResult, exitCode: 1, stderr: 'Cannot connect to the Docker daemon' };
+      }
+      throw new Error(`unexpected call: ${args.join(' ')}`);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness).toEqual({
+      ready: false,
+      error_code: 'daemon_unavailable',
+      error:
+        'Docker daemon not reachable (`docker info` failed). Is dockerd running, and is the service user in the docker group?',
+    });
+  });
+
+  test('missing image is image_missing (E2: the explicit provisioning path, never an implicit pull)', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'info') {
+        return okResult;
+      }
+      if (args[0] === 'image') {
+        return { ...okResult, exitCode: 1, stderr: 'No such image' };
+      }
+      throw new Error(`unexpected call: ${args.join(' ')}`);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_missing');
+    }
+    expect(runner.callsFor('pull')).toHaveLength(0);
+  });
+
+  test('image without RepoDigest is refused', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'info') {
+        return okResult;
+      }
+      if (args[0] === 'image') {
+        return { ...okResult, stdout: JSON.stringify([{ RepoDigests: [] }]) };
+      }
+      throw new Error(`unexpected call: ${args.join(' ')}`);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_unavailable');
+      expect(readiness.error).toContain('no RepoDigest');
+    }
+  });
+
+  test('digest mismatch is refused', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner, 'sha256:' + 'b'.repeat(64));
+    const driver = new DockerDriver(driverOptions(), runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_unavailable');
+      expect(readiness.error).toContain('mismatch');
+    }
+  });
+
+  test('unpinned image reference is refused before touching the daemon', async () => {
+    const runner = new FakeRunner();
+    const driver = new DockerDriver({ ...driverOptions(), image: 'ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0' }, runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_unavailable');
+      expect(readiness.error).toContain('not pinned');
+    }
+    expect(runner.calls).toHaveLength(0);
+  });
+
+  test('cosign failure is image_unavailable', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (binary, args) => {
+      if (binary === 'docker' && args[0] === 'info') {
+        return okResult;
+      }
+      if (binary === 'docker' && args[0] === 'image') {
+        return {
+          ...okResult,
+          stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${DIGEST}`] }]),
+        };
+      }
+      if (binary === 'cosign') {
+        return { ...okResult, exitCode: 1, stderr: 'no matching signatures' };
+      }
+      throw new Error(`unexpected call: ${binary} ${args.join(' ')}`);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_unavailable');
+      expect(readiness.error).toContain('cosign');
+    }
+    // The create probe never runs when verification fails.
+    expect(runner.callsFor('create')).toHaveLength(0);
+  });
+
+  test('S4: the cosign key path is redacted from the model-visible error', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (binary, args) => {
+      if (binary === 'docker' && args[0] === 'info') {
+        return okResult;
+      }
+      if (binary === 'docker' && args[0] === 'image') {
+        return {
+          ...okResult,
+          stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${DIGEST}`] }]),
+        };
+      }
+      if (binary === 'cosign') {
+        // cosign echoes the missing/unreadable key path in stderr.
+        return { ...okResult, exitCode: 1, stderr: `error: could not read ${KEY_PATH}: no such file` };
+      }
+      throw new Error(`unexpected call: ${binary} ${args.join(' ')}`);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).not.toContain(KEY_PATH);
+      expect(readiness.error).toContain('<cosign public key>');
+    }
+  });
+
+  test('wedged daemon (create probe timeout) is daemon_unavailable', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (binary, args) => {
+      if (binary === 'docker' && args[0] === 'info') {
+        return okResult;
+      }
+      if (binary === 'docker' && args[0] === 'image') {
+        return {
+          ...okResult,
+          stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${DIGEST}`] }]),
+        };
+      }
+      if (binary === 'cosign') {
+        return okResult;
+      }
+      if (binary === 'docker' && args[0] === 'create') {
+        return { ...okResult, timedOut: true };
+      }
+      throw new Error(`unexpected call: ${binary} ${args.join(' ')}`);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('daemon_unavailable');
+      expect(readiness.error).toContain('wedged');
+    }
+  });
+});
+
+describe('DockerDriver.provision', () => {
+  test('forwards honest progress and verifies the pulled image', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const seen: string[] = [];
+    runner.pullHandler = (input) => {
+      input.onProgress('pulling layer 1/3');
+      input.onProgress('pull complete');
+      return Promise.resolve();
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    await driver.provision({ signal: undefined, onProgress: (message: string) => seen.push(message), timeoutSeconds: 600 });
+    expect(seen).toEqual(['pulling layer 1/3', 'pull complete']);
+  });
+
+  test('concurrent provisions coalesce on one pull', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    let pulls = 0;
+    runner.pullHandler = async () => {
+      pulls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const noop = (): void => undefined;
+    await Promise.all([
+      driver.provision({ signal: undefined, onProgress: noop, timeoutSeconds: 600 }),
+      driver.provision({ signal: undefined, onProgress: noop, timeoutSeconds: 600 }),
+    ]);
+    expect(pulls).toBe(1);
+  });
+
+  test('a pull that never finishes hits the timeout bound', async () => {
+    const runner = new FakeRunner();
+    runner.pullHandler = (input) =>
+      new Promise<void>((_resolve, reject) => {
+        input.signal?.addEventListener('abort', () => {
+          reject(new Error('aborted'));
+        }, { once: true });
+      });
+    const driver = new DockerDriver(driverOptions(), runner);
+    const noop = (): void => undefined;
+    await expect(
+      driver.provision({ signal: undefined, onProgress: noop, timeoutSeconds: 0 }),
+    ).rejects.toThrow('did not complete within 0s');
+  });
+});
+
+describe('DockerDriver.reapStale', () => {
+  test('removes only labeled containers older than 30 minutes', async () => {
+    const runner = new FakeRunner();
+    const now = Date.now();
+    const oldCreated = new Date(now - 31 * 60 * 1000).toISOString();
+    const freshCreated = new Date(now - 5 * 60 * 1000).toISOString();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'ps') {
+        expect(args).toContain('label=tf.sandbox.run');
+        return { ...okResult, stdout: 'old-id\nfresh-id\n' };
+      }
+      if (args[0] === 'inspect') {
+        return { ...okResult, stdout: `old-id ${oldCreated}\nfresh-id ${freshCreated}\n` };
+      }
+      if (args[0] === 'rm') {
+        return okResult;
+      }
+      throw new Error(`unexpected call: ${args.join(' ')}`);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    await driver.reapStale();
+    const rms = runner.callsFor('rm');
+    expect(rms).toHaveLength(1);
+    expect(rms[0]?.args).toEqual(['rm', '-f', 'old-id']);
+  });
+
+  test('does nothing when the daemon is down', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = () => ({ ...okResult, exitCode: 1, stderr: 'daemon down' });
+    const driver = new DockerDriver(driverOptions(), runner);
+    await expect(driver.reapStale()).resolves.toBeUndefined();
+  });
+});
+
+describe('DockerDriver.dispose', () => {
+  test('kills in-flight containers when the drain expires', async () => {
+    jest.useFakeTimers();
+    try {
+      const runner = new FakeRunner();
+      runner.runHandler = (_binary, args) => {
+        if (args[0] === 'create') {
+          return { ...okResult, stdout: 'cid-5\n' };
+        }
+        return okResult;
+      };
+      // Attach hangs until the driver kills the container (dispose path).
+      let resolveAttach: ((code: number) => void) | undefined;
+      runner.attachHandler = () =>
+        new Promise<number>((resolve) => {
+          resolveAttach = resolve;
+        });
+      const originalRun: DockerCommandRunner['run'] = runner.run.bind(runner);
+      runner.run = async (binary: string, args: string[]) => {
+        const result = await originalRun(binary, args, { timeoutMs: 5000, signal: undefined });
+        if (args[0] === 'kill') {
+          resolveAttach?.(137);
+        }
+        return result;
+      };
+      const driver = new DockerDriver(driverOptions(), runner);
+      const runPromise = driver.run(runParams());
+      await jest.advanceTimersByTimeAsync(10); // let create resolve
+      const disposePromise = driver.dispose();
+      await jest.advanceTimersByTimeAsync(30000); // expire the 30s drain
+      await disposePromise;
+      expect(runner.killed).toContain('cid-5');
+      const result = await runPromise;
+      expect(result.terminatedBy).toBe('completed');
+      expect(result.exitCode).toBe(137);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});

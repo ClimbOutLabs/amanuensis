@@ -134,6 +134,50 @@ export const MemoryEmbeddingsCapabilitySchema = z
 
 export type MemoryEmbeddingsCapability = z.infer<typeof MemoryEmbeddingsCapabilitySchema>;
 
+/**
+ * The run_code isolation driver's effective, non-secret config. Read-only:
+ * selection happens once at server start; changing it requires a config change
+ * and restart. The image digest pin and the cosign key presence (never its path)
+ * are reported so Settings can show what the sandbox runs. Safe on the
+ * read-mostly capabilities route: nothing here is a credential.
+ */
+export const SandboxIsolationCapabilitySchema = z
+  .object({
+    isolation_driver: z
+      .enum(['docker', 'firecracker'])
+      .describe('Process-isolation backend behind the run_code tool (`SANDBOX_ISOLATION_DRIVER`).'),
+    image: z
+      .string()
+      .describe('Expected sandbox image as <tag>@sha256:<digest> (`SANDBOX_IMAGE`). Never a bare tag.'),
+    default_timeout_seconds: z
+      .number()
+      .int()
+      .describe('Default per-run timeout for run_code, seconds (`SANDBOX_DEFAULT_TIMEOUT_SECONDS`).'),
+    max_timeout_seconds: z
+      .number()
+      .int()
+      .describe('Max per-run timeout for run_code, seconds (`SANDBOX_MAX_TIMEOUT_SECONDS`).'),
+    memory_mb: z.number().int().describe('Container memory limit for run_code, MiB (`SANDBOX_MEMORY_MB`).'),
+    disk_mb: z.number().int().describe('Scratch+egress disk quota for run_code, MiB (`SANDBOX_DISK_MB`).'),
+    stdout_stderr_cap_kb: z
+      .number()
+      .int()
+      .describe('Per-stream stdout/stderr cap for run_code, KiB (`SANDBOX_STDOUT_STDERR_CAP_KB`).'),
+    image_pull_timeout_seconds: z
+      .number()
+      .int()
+      .describe('Bound for the first-run image pull, seconds (`SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS`).'),
+    network_egress: z
+      .boolean()
+      .describe('Reserved for a future version; always false in v1 (`SANDBOX_NETWORK_EGRESS`).'),
+    cosign_key_configured: z
+      .boolean()
+      .describe('Whether a cosign public key is configured for image signature verification (path never exposed).'),
+  })
+  .openapi('SandboxIsolationCapability');
+
+export type SandboxIsolationCapability = z.infer<typeof SandboxIsolationCapabilitySchema>;
+
 export const BuildIdentitySchema = z
   .object({
     version: z.string().describe('Package version of the running server.'),
@@ -158,6 +202,7 @@ const CapabilitiesDataSchema = z
     tool_output_screen: ToolOutputScreenCapabilitySchema.optional(),
     memory_defaults: MemoryDefaultsCapabilitySchema,
     memory_embeddings: MemoryEmbeddingsCapabilitySchema,
+    sandbox_isolation: SandboxIsolationCapabilitySchema,
     build: BuildIdentitySchema,
   })
   .openapi('CapabilitiesData');

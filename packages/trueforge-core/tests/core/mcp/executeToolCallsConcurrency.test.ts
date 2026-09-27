@@ -227,6 +227,39 @@ describe('parallel tool-call dispatch', () => {
     expect(replay.toolCallResults[0]).toMatchObject({ failure: true, repeatedSideEffect: true });
   });
 
+  it('E4: a hung sandbox/run_code call uses the scoped run_code deadline, not the global one', async () => {
+    const { toolSet, callTool } = trackingToolSet('sandbox');
+    callTool.mockImplementation(() => new Promise<ReturnType<typeof toolResultResponse>>(() => {}));
+    const specs: CallSpec[] = [{ id: 'run-hung', name: 'run_code', args: { code: 'x' }, effect: 'execute' }];
+    const message = assistantMessage(specs);
+    // Tool identity is what scopes the deadline: toolSet.name 'sandbox',
+    // originalToolName 'run_code'.
+    const mapping = new Map([['run_code', { toolSet, originalToolName: 'run_code' }]]);
+    const memoState = createToolCallMemoState();
+    const prepared = prepareSideEffectToolCalls({
+      assistantMessage: message,
+      toolMapping: mapping,
+      approvalDecisions: new Map(),
+      memoState,
+    });
+    expect(prepared.callIds).toContain('run-hung');
+
+    const result = await executeToolCalls({
+      assistantMessage: message,
+      toolMapping: mapping,
+      threadId: 'main',
+      approvalDecisions: new Map(),
+      memoState,
+      preparedSideEffectCalls: prepared,
+      toolCallTimeoutMs: 10_000,
+      runCodeToolCallTimeoutMs: 50,
+    });
+
+    // Timed out at the 50 ms run_code deadline, not the 10 s global one.
+    expect(result.toolCallResults[0]).toMatchObject({ disposition: 'outcome_unknown' });
+    expect(callTool).toHaveBeenCalledTimes(1);
+  });
+
   it('records abort-queued calls as never_ran and aborted mid-dispatch calls as outcome_unknown', async () => {
     const started: string[] = [];
     const { toolSet, callTool } = trackingToolSet('inspector');

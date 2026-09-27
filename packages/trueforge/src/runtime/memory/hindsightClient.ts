@@ -15,7 +15,13 @@ import type { RemoteMcpHeaders } from '@truefoundry/trueforge-core/core';
 import configuration from '../../config';
 import type { MemoryProviderFailureCode } from '../../schemas/memoryProvider';
 import { readBodyWithinCap } from './boundedBodyReader';
-import type { MemoryClient } from './memoryClient';
+import type {
+  DeleteMemoryVaultEntryOutcome,
+  ListMemoryVaultEntriesOutcome,
+  MemoryClient,
+  MemoryVaultFailure,
+  UpdateMemoryVaultEntryOutcome,
+} from './memoryClient';
 
 /** Upper bound on the upstream error text carried into a reason line, a log field, or the UI. */
 const ERROR_DETAIL_MAX_CHARS = 200;
@@ -637,6 +643,31 @@ export class HindsightClient implements MemoryClient {
       ? items.map(sanitizeMentalModel).filter((model): model is MentalModel => model !== null)
       : [];
     return { ok: true, models };
+  }
+
+  /**
+   * The memory vault is a markdown-backend surface: the experimental Hindsight
+   * backend has no per-entry edit or delete, so every vault call fails closed.
+   */
+  private vaultUnsupported(): Promise<MemoryVaultFailure> {
+    const failure: MemoryVaultFailure = {
+      ok: false,
+      code: 'request_failed',
+      reason: 'The memory vault needs the markdown memory backend.',
+    };
+    return Promise.resolve(failure);
+  }
+
+  async listEntries(): Promise<ListMemoryVaultEntriesOutcome> {
+    return this.vaultUnsupported();
+  }
+
+  async updateEntry(): Promise<UpdateMemoryVaultEntryOutcome> {
+    return this.vaultUnsupported();
+  }
+
+  async deleteEntry(): Promise<DeleteMemoryVaultEntryOutcome> {
+    return this.vaultUnsupported();
   }
 
   async reflect(params: {

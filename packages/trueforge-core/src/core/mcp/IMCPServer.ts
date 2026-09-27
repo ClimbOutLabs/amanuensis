@@ -21,6 +21,12 @@ export interface ToolInvocationContext {
   dispatch_id?: string | undefined;
   /** Host-observed structured-edit target state captured before approval. */
   structured_edit_precondition?: StructuredEditPrecondition | undefined;
+  /**
+   * the turn's abort signal. Tools with bounded multi-phase work (e.g.
+   * run_code's explicit image-provisioning step) observe it so a cancelled
+   * turn stops the underlying operation instead of running detached.
+   */
+  signal?: AbortSignal | undefined;
 }
 
 export type ToolSchema = ListToolsResult['tools'][number];

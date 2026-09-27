@@ -79,10 +79,12 @@ flowchart TB
 
 ## Quick start
 
+> **Install from a release, not from main.** The commands below pin the latest stable release. For the newest stable release, see [Releases](https://github.com/ClimbOutLabs/amanuensis/releases). The `main` branch is active development and may be unstable.
+
 The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no Docker, no login screen. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these from [WSL](https://learn.microsoft.com/windows/wsl/install) or [Git Bash](https://git-scm.com/downloads/win):
 
 ```bash
-git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
+git clone --branch v0.1.0 https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
 corepack enable
 pnpm install --frozen-lockfile
 cp packages/trueforge/.env.example packages/trueforge/.env
@@ -102,7 +104,7 @@ When you're ready to run Aman as a shared service instead of a personal install.
 The app is single-user and, as shipped, this stack has no login screen: every port is bound to `127.0.0.1`, and whoever reaches port `8791` is the admin. The stack's `login` profile adds a real sign-in screen with an account you define, and needs no external identity provider; turn it on before anyone but you can reach the app (see [Deployment Security](docs/deployment-security.mdx)).
 
 ```bash
-git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
+git clone --branch v0.1.0 https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
 cp packages/trueforge/.env.example packages/trueforge/.env
 docker compose up --build
 ```
@@ -169,7 +171,7 @@ Aman remembers things between conversations so you don't have to repeat yourself
 
 **After each chat, Aman writes a short summary.** Instead of keeping every turn word for word, Aman distills each conversation down to the important details — decisions, facts about you, things to follow up on — and saves that. This keeps the memory folder small and useful. If you'd rather keep the full transcript of every turn instead, flip the **Turn summaries** switch off in **Settings → Memory**; new turns are then saved verbatim. Either way, if summarizing ever fails, Aman keeps the full transcript as a fallback, so nothing is lost.
 
-**Aman finds memories by meaning, not just words.** When you ask something, Aman searches your memories for meaning — so "where did we stay in Madrid" finds the hotel note even though it says "Petit Palace" and never mentions Madrid. To do that, the first time Aman runs it downloads a small helper model once (about 120 MB), automatically in the background: the download starts when the server starts, so it's usually finished before you need it. There is nothing to install and nothing to click. After that one download, memory search works fully offline, and everything stays on this server. If the download can't finish, Aman just keeps finding memories with keywords, and keeps retrying in the background.
+**Aman finds memories by meaning, not just words.** When you ask something, Aman searches your memories for meaning — so "where did we stay in Paris" finds the hotel note even though it says "Hotel Lumiere" and never mentions Paris. To do that, the first time Aman runs it downloads a small helper model once (about 120 MB), automatically in the background: the download starts when the server starts, so it's usually finished before you need it. There is nothing to install and nothing to click. After that one download, memory search works fully offline, and everything stays on this server. If the download can't finish, Aman just keeps finding memories with keywords, and keeps retrying in the background.
 
 **Keep the memory folder safe.** The downloaded helper model lives inside the memory folder too, so they travel together. If you run Aman with Docker, make sure the memory folder is stored on a persistent volume: without one, your memories — and the downloaded model — disappear whenever the container is recreated.
 

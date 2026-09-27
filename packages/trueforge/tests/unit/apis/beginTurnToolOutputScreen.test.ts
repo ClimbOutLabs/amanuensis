@@ -8,6 +8,7 @@ import { createLogger } from 'winston';
 
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { beginTurnExecution } from '../../../src/apis/turns';
+import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import type {
@@ -176,6 +177,7 @@ describe('beginTurnExecution tool-output screen wiring', () => {
         skillStore: new SqliteSkillStore(db),
         repositoryStore: new SqliteRepositoryStore(db),
         spaceStore: new SqliteSpaceStore(db),
+        turnArtifactStore: new FakeTurnArtifactStore(),
         eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
         logger,
       },

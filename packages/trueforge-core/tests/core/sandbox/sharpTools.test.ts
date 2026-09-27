@@ -589,9 +589,14 @@ describe('T8 sharp sandbox tools', () => {
     expect(uploadFile).not.toHaveBeenCalled();
   });
 
-  it.each(['cat source.txt > new.txt', 'cat <<EOF\nnew\nEOF', "python3 -c \"open('new.txt', 'w').write('new')\""])(
-    'names write_file when blocking an unstructured edit write: %s',
-    async command => {
+  it.each([
+    ['cat source.txt > new.txt', 'write_file'],
+    ['cat <<EOF\nnew\nEOF', 'write_file'],
+    // The interpreter guard fires before the unstructured-edit screening and redirects to run_code.
+    ["python3 -c \"open('new.txt', 'w').write('new')\"", 'use the run_code tool instead'],
+  ])(
+    'names the blocking tool for an unstructured edit write: %s',
+    async (command, expected) => {
       const exec = makeExec(() => readyExec());
       const sandbox = makeSandbox(makeProvider({ exec }));
       const call = {
@@ -602,18 +607,19 @@ describe('T8 sharp sandbox tools', () => {
       await expect(sandbox.toolCallInfo(call)).resolves.toEqual(
         expect.objectContaining({ is_approval_required: false }),
       );
-      expect(resultText(await sandbox.callTool(call))).toContain('write_file');
+      expect(resultText(await sandbox.callTool(call))).toContain(expected);
       expect(exec).not.toHaveBeenCalled();
     },
   );
 
   it.each([
-    'cat source.txt > new.txt',
-    'cat <<EOF\nnew\nEOF',
-    'cat source.txt | tee new.txt',
-    "python3 -c \"open('new.txt', 'w').write('new')\"",
-    'python3 -c "print(1)"',
-  ])('rejects an unstructured inspect-purpose operation without dispatch: %s', async command => {
+    ['cat source.txt > new.txt', 'write_file'],
+    ['cat <<EOF\nnew\nEOF', 'write_file'],
+    ['cat source.txt | tee new.txt', 'write_file'],
+    // The interpreter guard fires before the unstructured-operation screening and redirects to run_code.
+    ["python3 -c \"open('new.txt', 'w').write('new')\"", 'use the run_code tool instead'],
+    ['python3 -c "print(1)"', 'use the run_code tool instead'],
+  ])('rejects an unstructured inspect-purpose operation without dispatch: %s', async (command, expected) => {
     const exec = makeExec(() => readyExec());
     const sandbox = makeSandbox(makeProvider({ exec }));
     const call = {
@@ -622,7 +628,7 @@ describe('T8 sharp sandbox tools', () => {
     };
 
     await expect(sandbox.toolCallInfo(call)).resolves.toEqual(expect.objectContaining({ is_approval_required: false }));
-    expect(resultText(await sandbox.callTool(call))).toContain('write_file');
+    expect(resultText(await sandbox.callTool(call))).toContain(expected);
     expect(exec).not.toHaveBeenCalled();
   });
 

@@ -1,6 +1,8 @@
 import type { AgentSpec, SessionHandle } from '@truefoundry/trueforge-core/agent-session';
 import {
+  DockerDriver,
   McpConnectionError,
+  RunCodeService,
   Sandbox,
   SkillMounter,
   type AgentTracing,
@@ -24,6 +26,7 @@ import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { ISkillStore } from '../db/skillStore';
+import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
@@ -33,6 +36,7 @@ import { resolveConfiguredMcpRequestHeaders, type McpServerManifest } from '../s
 import type { ModelProperties, ModelProviderStreamTimeout } from '../schemas/modelProvider';
 import { parseGitSkill } from '../schemas/skill';
 import { isSecretReference, resolveSecretReference } from '../utils/secretReferences';
+import { buildRunCodeHarvestSink } from './artifacts/persistRunCodeHarvests';
 
 export interface McpConnection {
   url: string;
@@ -553,6 +557,61 @@ export async function resolveSandboxProvider({
 /**
  * Builds a Sandbox for one turn from a resolved provider and skill mounts.
  */
+/** Process-wide cap on concurrent run_code container executions. */
+const RUN_CODE_MAX_CONCURRENT_RUNS = 4;
+
+let sharedRunCodeService: RunCodeService | undefined;
+
+/**
+ * Process-shared run_code backend. One instance per process: the concurrency
+ * semaphore and the stale-container reaper are process-wide resources, and the
+ * Docker driver is stateless across turns (per-run containers). Built lazily on
+ * the first turn that needs it; the isolation config is validated fail-closed
+ * at startup, so construction here only fails on unexpected driver errors.
+ * Keeps the first caller's logger for the service lifetime.
+ */
+function getSharedRunCodeService(logger: Logger): RunCodeService {
+  if (sharedRunCodeService === undefined) {
+    if (configuration.SANDBOX_ISOLATION_DRIVER !== 'docker') {
+      throw new Error(
+        `run_code isolation driver "${configuration.SANDBOX_ISOLATION_DRIVER}" is not implemented in this build — refusing to dispatch.`,
+      );
+    }
+    const driver = new DockerDriver(
+      {
+        image: configuration.SANDBOX_IMAGE,
+        cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
+        dockerBinary: undefined,
+        cosignBinary: undefined,
+        commandTimeoutMs: undefined,
+        createTimeoutMs: undefined,
+      },
+      undefined,
+    );
+    sharedRunCodeService = new RunCodeService({
+      driver,
+      dataDir: configuration.SANDBOX_RUNS_DIR,
+      defaultTimeoutSeconds: configuration.SANDBOX_DEFAULT_TIMEOUT_SECONDS,
+      maxTimeoutSeconds: configuration.SANDBOX_MAX_TIMEOUT_SECONDS,
+      memoryMb: configuration.SANDBOX_MEMORY_MB,
+      diskMb: configuration.SANDBOX_DISK_MB,
+      outputCapKb: configuration.SANDBOX_STDOUT_STDERR_CAP_KB,
+      maxConcurrentRuns: RUN_CODE_MAX_CONCURRENT_RUNS,
+      imagePullTimeoutSeconds: configuration.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS,
+      // Docker ignores the FC pull-before-kill grace.
+      harvestGraceMs: 0,
+      logger: logger.child({ module: 'run-code' }),
+      now: undefined,
+      sleepMs: undefined,
+    });
+    // the singleton owns the stale-container reaper; starting it here (it
+    // is idempotent) covers every construction path, including the lazy
+    // per-turn path that never went through server startup.
+    sharedRunCodeService.startReaper();
+  }
+  return sharedRunCodeService;
+}
+
 export function buildTurnSandbox(input: {
   provider: SandboxProvider;
   logger: Logger;
@@ -574,6 +633,20 @@ export function buildTurnSandbox(input: {
   workspaceVerificationCoordinator?: WorkspaceVerificationCoordinator | undefined;
   workspaceLeaseOwnerId?: string | undefined;
   tracing: AgentTracing;
+  /**
+   * when present, run_code's harvested result files are persisted as turn
+   * artifacts at harvest time (before run-root cleanup) so the user can
+   * download them after the turn. Absent (e.g. unit tests, non-turn
+   * sandboxes), harvest bytes are still discarded at cleanup as before.
+   */
+  runCodeHarvestPersistence?:
+    | {
+        tenantId: string;
+        sessionId: string;
+        turnId: string;
+        store: ITurnArtifactStore;
+      }
+    | undefined;
 }): Sandbox {
   // Empty mounter still uploads requested-skills file so existing skills are cleaned up.
   const skillMounter = new SkillMounter(
@@ -597,6 +670,18 @@ export function buildTurnSandbox(input: {
     mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
     ocrLanguages: configuration.DOCUMENT_OCR_LANGUAGES,
     skillMounter,
+    runCodeService: getSharedRunCodeService(input.logger),
+    // persist harvested bytes per turn before the run root is cleaned up.
+    onRunCodeHarvestedFiles:
+      input.runCodeHarvestPersistence === undefined
+        ? undefined
+        : buildRunCodeHarvestSink({
+            store: input.runCodeHarvestPersistence.store,
+            tenantId: input.runCodeHarvestPersistence.tenantId,
+            sessionId: input.runCodeHarvestPersistence.sessionId,
+            turnId: input.runCodeHarvestPersistence.turnId,
+            logger: input.logger,
+          }),
     tracing: input.tracing,
     logger: input.logger,
   });

@@ -17,6 +17,7 @@ import { ComposerAttachmentsContainer } from './AttachmentsContainer.js';
 import { CustomActionContainer } from './CustomActionContainer.js';
 import { McpAuthContainer } from './McpAuthContainer.js';
 import { useToasterOptional } from './ToasterContainer.js';
+import { CompactionStatusLine } from '../atoms/CompactionStatusLine.js';
 
 export type ComposerContainerProps = {
   placeholder?: string;
@@ -141,6 +142,7 @@ function ComposerBody({
           />
         </ComposerPrimitive.Root>
       </ComposerPrimitive.AttachmentDropzone>
+      <CompactionStatusLine />
     </>
   );
 }
@@ -182,7 +184,7 @@ function ComposerWithOptionalDraft({
 }
 
 export function ComposerContainer({
-  placeholder = 'Ask anything... (Shift+Enter for new line)',
+  placeholder = 'Ask anything...',
 }: ComposerContainerProps) {
   const pauseView = useComposerPauseView();
   const canManageSession = useActiveSessionCanManage();

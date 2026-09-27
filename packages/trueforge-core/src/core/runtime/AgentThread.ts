@@ -67,7 +67,7 @@ import {
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
-import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
+import { ModelStreamFault } from '../llm/VercelAILLM';
 import {
   allowsChatApproval,
   approvalGrantKey,
@@ -114,11 +114,6 @@ import type {
   AgentThreadRuntimeSendInput,
   AgentThreadSnapshot,
 } from './AgentThread.types';
-import {
-  applyHostToolCallPolicy,
-  type HostToolCallPolicy,
-  type HostToolCallPolicyLogger,
-} from './HostToolCallPolicy';
 import {
   InternalEventType,
   type AgentThreadAppendContext,
@@ -168,7 +163,7 @@ import {
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
 } from './contextUtils';
-import { CALL_TOOL_NAME, DeferredTool } from './DeferredTool';
+import { DeferredTool } from './DeferredTool';
 import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThreadMetrics } from './metrics';
 import {
   getClosableOpenToolCallOutcomes,
@@ -213,30 +208,146 @@ const INSPECTION_STOP_LIMIT = 30;
 const ASYNC_ITERATOR_ABORTED = Symbol('async-iterator-aborted');
 
 /**
- * Last-resort ceiling on the assembled model request's text. Input-time guards bound each user
- * message; this is the backstop for the whole assembly. 4M characters (~1M tokens) sits well
- * above any legitimate request and far below a provider-hanging one.
+ * Default bound on waiting for a model call's first output before failing the turn visibly.
+ * Ten minutes: generous for slow prefill on large-but-legal contexts, tight enough that a
+ * provider that accepted the request and went silent never leaves a turn hanging for hours.
  */
-const MAX_MODEL_REQUEST_CHARS = 4_000_000;
+export const DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS = 600_000;
 
-/** Text length of one request message; non-text parts (images, audio) are not model text load. */
-function chatMessageTextLength(message: ChatCompletionMessageParam): number {
-  const content = message.content;
-  if (typeof content === 'string') {
-    return content.length;
+/**
+ * Default bound on the pre-LLM context processor phase producing progress before
+ * failing the turn visibly. Five minutes: generous for compaction on large contexts,
+ * tight enough that a processor that accepted the hook and went silent never leaves
+ * a turn hanging for hours.
+ */
+export const DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS = 300_000;
+
+/**
+ * Default bound on the sandbox repository refresh before a model call. Thirty
+ * seconds: the refresh is an optimization for prompt accuracy, not critical path;
+ * a hung refresh must not hang the turn.
+ */
+export const DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS = 30_000;
+
+const MODEL_FIRST_RESPONSE_TIMEOUT = Symbol('model-first-response-timeout');
+
+/** Human duration for the watchdog timeout in the user-facing error, e.g. "10 minutes", "90 seconds". */
+function describeTimeout(timeoutMs: number): string {
+  if (timeoutMs < 60_000) {
+    const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+    return `${String(seconds)} second${seconds === 1 ? '' : 's'}`;
   }
-  if (!Array.isArray(content)) {
-    return 0;
+  const minutes = Math.max(1, Math.round(timeoutMs / 60_000));
+  return `${String(minutes)} minute${minutes === 1 ? '' : 's'}`;
+}
+
+const OPERATION_TIMEOUT = Symbol('operation-timeout');
+
+/**
+ * Awaits an operation with a bounded timeout. If the operation settles first, its
+ * outcome (value or rejection) is used. If the timeout fires first, returns
+ * OPERATION_TIMEOUT; the operation's late settlement is ignored. Late rejections
+ * are swallowed to avoid unhandled-rejection noise — the caller has already chosen
+ * to proceed without the result.
+ */
+function awaitWithTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T | typeof OPERATION_TIMEOUT> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(OPERATION_TIMEOUT), timeoutMs);
+    operation.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      error => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
+ * Thrown when an async producer stalls without yielding for longer than its
+ * no-progress bound. Carries no producer internals; the message is user-facing.
+ */
+export class NoProgressTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NoProgressTimeoutError';
   }
-  let total = 0;
-  for (const part of content) {
-    if (part.type === 'text') {
-      total += part.text.length;
-    } else if (part.type === 'refusal') {
-      total += part.refusal.length;
+}
+
+/**
+ * Drains an async iterable with a no-progress watchdog. Each yielded item resets the
+ * timer; if no item arrives within timeoutMs, the iterator is asked to close
+ * (best-effort, never awaited — a hung producer must not strand the consumer a
+ * second time) and the drain rejects with NoProgressTimeoutError.
+ */
+async function* drainWithNoProgressTimeout<T>(
+  iterable: AsyncIterable<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): AsyncGenerator<T, void, unknown> {
+  const iterator = iterable[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let result: IteratorResult<T, unknown>;
+      try {
+        result = await Promise.race([
+          iterator.next(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new NoProgressTimeoutError(timeoutMessage)), timeoutMs);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+        }
+      }
+      if (result.done) {
+        return;
+      }
+      yield result.value;
     }
+  } finally {
+    // Best-effort close; never await a hung iterator during cleanup.
+    void Promise.resolve(iterator.return?.()).catch(() => undefined);
   }
-  return total;
+}
+
+/**
+ * Waits for the first model chunk with a bounded watchdog. A provider that accepts the request
+ * but never produces a first chunk (and never errors) would otherwise leave the turn active
+ * indefinitely — observed as a ~4-hour stall with zero model steps. On timeout the stream is
+ * asked to close and the caller fails the turn visibly. The timer is cleared the moment the
+ * wait settles for any reason (chunk, abort, or error), so it can never fire late.
+ */
+function nextModelChunkWithFirstResponseTimeout<T, TReturn>(input: {
+  iterator: AsyncIterator<T, TReturn, unknown>;
+  signal: AbortSignal | undefined;
+  requestClose: () => void;
+  timeoutMs: number;
+}): Promise<IteratorResult<T, TReturn> | typeof ASYNC_ITERATOR_ABORTED | typeof MODEL_FIRST_RESPONSE_TIMEOUT> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      // The model went silent: ask the stream to close, but never await cleanup — a hung
+      // provider must not strand the turn a second time.
+      input.requestClose();
+      resolve(MODEL_FIRST_RESPONSE_TIMEOUT);
+    }, input.timeoutMs);
+    nextAbortableIteratorResult(input).then(
+      result => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        // nextAbortableIteratorResult already normalises non-Error rejections; forward as-is.
+        reject(error instanceof Error ? error : new Error(describeUnknownError(error), { cause: error }));
+      },
+    );
+  });
 }
 
 function mechanicalHandoffEvidence(): AbnormalHandoffEvidence {
@@ -333,59 +444,6 @@ function nextAbortableIteratorResult<T, TReturn>(input: {
           resolve(ASYNC_ITERATOR_ABORTED);
           return;
         }
-        reject(error instanceof Error ? error : new Error(describeUnknownError(error), { cause: error }));
-      },
-    );
-  });
-}
-
-/**
- * Default bound on waiting for a model call's first output before failing the turn visibly.
- * Ten minutes: generous for slow prefill on large-but-legal contexts, tight enough that a
- * provider that accepted the request and went silent never leaves a turn hanging for hours.
- */
-export const DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS = 600_000;
-
-const MODEL_FIRST_RESPONSE_TIMEOUT = Symbol('model-first-response-timeout');
-
-/** Human duration for the watchdog timeout in the user-facing error, e.g. "10 minutes", "90 seconds". */
-function describeTimeout(timeoutMs: number): string {
-  if (timeoutMs < 60_000) {
-    const seconds = Math.max(1, Math.round(timeoutMs / 1000));
-    return `${String(seconds)} second${seconds === 1 ? '' : 's'}`;
-  }
-  const minutes = Math.max(1, Math.round(timeoutMs / 60_000));
-  return `${String(minutes)} minute${minutes === 1 ? '' : 's'}`;
-}
-
-/**
- * Waits for the first model chunk with a bounded watchdog. A provider that accepts the request
- * but never produces a first chunk (and never errors) would otherwise leave the turn active
- * indefinitely — observed as a ~4-hour stall with zero model steps. On timeout the stream is
- * asked to close and the caller fails the turn visibly. The timer is cleared the moment the
- * wait settles for any reason (chunk, abort, or error), so it can never fire late.
- */
-function nextModelChunkWithFirstResponseTimeout<T, TReturn>(input: {
-  iterator: AsyncIterator<T, TReturn, unknown>;
-  signal: AbortSignal | undefined;
-  requestClose: () => void;
-  timeoutMs: number;
-}): Promise<IteratorResult<T, TReturn> | typeof ASYNC_ITERATOR_ABORTED | typeof MODEL_FIRST_RESPONSE_TIMEOUT> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      // The model went silent: ask the stream to close, but never await cleanup — a hung
-      // provider must not strand the turn a second time.
-      input.requestClose();
-      resolve(MODEL_FIRST_RESPONSE_TIMEOUT);
-    }, input.timeoutMs);
-    nextAbortableIteratorResult(input).then(
-      result => {
-        clearTimeout(timer);
-        resolve(result);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        // nextAbortableIteratorResult already normalises non-Error rejections; forward as-is.
         reject(error instanceof Error ? error : new Error(describeUnknownError(error), { cause: error }));
       },
     );
@@ -1036,14 +1094,10 @@ async function enrichAssistantMessage({
   assistantMessage,
   toolMapping,
   resolveUnderlyingTool,
-  toolCallPolicy,
-  logger,
 }: {
   assistantMessage: RawAssistantMessage;
   toolMapping: Map<string, MappedMCPTool>;
   resolveUnderlyingTool: boolean;
-  toolCallPolicy: HostToolCallPolicy | undefined;
-  logger: HostToolCallPolicyLogger | undefined;
 }): Promise<InternalEnrichedAssistantMessage> {
   // Omit tool_calls when empty; OpenAI rejects `tool_calls: []` on replay.
   if (!assistantMessage.tool_calls?.length) {
@@ -1062,7 +1116,7 @@ async function enrichAssistantMessage({
       enrichedToolCalls.push({ ...toolCall, tool_info: makeUnknownToolInfo(toolCall.function.name) });
       continue;
     }
-    const resolvedInfo = await resolveToolCallInfo({
+    const tool_info = await resolveToolCallInfo({
       toolInfo,
       params: {
         name: toolInfo.originalToolName,
@@ -1070,35 +1124,6 @@ async function enrichAssistantMessage({
       },
       resolveUnderlyingTool,
     });
-    // The host policy runs after resolution so it sees the effective call:
-    // the underlying tool name (e.g. `web_search` reached through the
-    // `call_tool` dispatcher) and the underlying tool's args, unwrapped from
-    // the dispatcher's `input` envelope. The policy can only add a block,
-    // never clear a preparation failure. Skipped entirely when no policy is
-    // configured — the args re-parse below exists only for the policy.
-    let tool_info: InternalToolCallInfo = resolvedInfo;
-    if (toolCallPolicy !== undefined) {
-      const underlyingToolName =
-        resolvedInfo.type === 'mcp' ? resolvedInfo.original_tool_name : undefined;
-      const parsedArgs = tryParseToolArgs(toolCall.function.arguments);
-      const dispatchedArgs =
-        toolInfo.originalToolName === CALL_TOOL_NAME &&
-        underlyingToolName !== undefined &&
-        underlyingToolName !== CALL_TOOL_NAME &&
-        isJsonObject(parsedArgs['input'])
-          ? parsedArgs['input']
-          : parsedArgs;
-      tool_info = applyHostToolCallPolicy({
-        call: {
-          functionName: toolCall.function.name,
-          underlyingToolName,
-          args: dispatchedArgs,
-        },
-        toolInfo: resolvedInfo,
-        policy: toolCallPolicy,
-        logger,
-      });
-    }
     enrichedToolCalls.push({ ...toolCall, tool_info });
   }
   return { ...assistantMessage, tool_calls: enrichedToolCalls };
@@ -1245,8 +1270,10 @@ export class AgentThread {
   private readonly loadImplementationPlanGrants?: (() => Promise<ReadonlySet<string>>) | undefined;
   private readonly toolDispatchMaxConcurrency?: number | undefined;
   private readonly toolCallTimeoutMs?: number | undefined;
+  private readonly runCodeToolCallTimeoutMs?: number | undefined;
   private readonly modelFirstResponseTimeoutMs: number;
-  private readonly toolCallPolicy: HostToolCallPolicy | undefined;
+  private readonly preLLMProcessorsTimeoutMs: number;
+  private readonly sandboxRefreshTimeoutMs: number;
   private implementationPlanGrants: ReadonlySet<string> = new Set();
   // One user request may span several execute() calls while approvals are
   // resolved. Keep orchestration limits across those continuations; reset only
@@ -1290,8 +1317,10 @@ export class AgentThread {
     this.loadImplementationPlanGrants = input.loadImplementationPlanGrants;
     this.toolDispatchMaxConcurrency = input.toolDispatchMaxConcurrency;
     this.toolCallTimeoutMs = input.toolCallTimeoutMs;
+    this.runCodeToolCallTimeoutMs = input.runCodeToolCallTimeoutMs;
     this.modelFirstResponseTimeoutMs = input.modelFirstResponseTimeoutMs ?? DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
-    this.toolCallPolicy = input.toolCallPolicy;
+    this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
+    this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
     this.toolCallMemo = createToolCallMemoState(input.toolCallMemo);
     this.toolCallMemo.clarificationAnswered = requestHasAnsweredClarification(this.context);
     // A fresh AgentThread is built per turn AND per approval/tool-response
@@ -1820,6 +1849,41 @@ export class AgentThread {
     return { ...this.metrics };
   }
 
+/**
+ * Cheap text-length estimate over the raw context, without the full message
+ * conversion that transformToLLMRequest performs. Used as a pre-flight guard so a
+ * giant context compacts first (or fails fast) instead of blocking the event loop
+ * inside the synchronous request assembly.
+ */
+function estimateRawContextTextLength(context: readonly ContextMessage[]): number {
+  let total = 0;
+  for (const message of context) {
+    if (!isLLMContextMessage(message)) {
+      continue;
+    }
+    const content: unknown = message.content;
+    if (typeof content === 'string') {
+      total += content.length;
+    } else if (Array.isArray(content)) {
+      for (const part of content) {
+        if (
+          typeof part === 'object' &&
+          part !== null &&
+          (part as { type?: unknown }).type === 'text' &&
+          typeof (part as { text?: unknown }).text === 'string'
+        ) {
+          total += (part as { text: string }).text.length;
+        }
+      }
+    }
+    // Early exit: precision past the ceiling buys nothing.
+    if (total > MAX_MODEL_REQUEST_CHARS) {
+      return total;
+    }
+  }
+  return total;
+}
+
   private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
     // A long-running thread can cross UTC midnight between LLM steps. Within a
     // day the rebuilt string is byte-identical, so prefix caching is untouched;
@@ -1883,18 +1947,6 @@ export class AgentThread {
     // modelParams may include provider extensions (e.g. reasoning_effort) beyond the SDK's
     // ChatCompletionCreateParamsStreaming field set; assign after constructing the typed body.
     // Model identity is owned by modelClient — do not set `model` on the request.
-    // Last-resort ceiling on the assembled request, measured before the request is created.
-    // Input-time guards bound each user message; this guards the whole assembly (system
-    // prompt, tools, history, context processors) against a pathological request hanging
-    // provider prefill. Generous on purpose: legitimate requests stay far below it.
-    const requestChars = messages.reduce((sum, message) => sum + chatMessageTextLength(message), 0);
-    if (requestChars > MAX_MODEL_REQUEST_CHARS) {
-      throw new Error(
-        `Model request is ${requestChars.toLocaleString('en-US')} characters, above the ` +
-          `${MAX_MODEL_REQUEST_CHARS.toLocaleString('en-US')}-character safety ceiling; refusing to send a ` +
-          `request that would hang or fail in provider prefill. Start a new chat or reduce the context and try again.`,
-      );
-    }
     const requestBody: LLMCreateParamsStreaming = {
       messages,
       stream: true,
@@ -2304,6 +2356,34 @@ export class AgentThread {
     }
   }
 
+  /**
+   * Runs the pre-LLM context processors behind a no-progress watchdog. Each yielded
+   * processor event resets the timer; a processor that stalls without yielding (and
+   * without erroring) rejects with NoProgressTimeoutError instead of hanging the turn.
+   * Callers convert that into a visible turn failure.
+   */
+  private async *executePreLLMProcessorsWithTimeout(
+    signal: AbortSignal | undefined,
+    options?: { forceCompaction?: boolean },
+  ): AsyncGenerator<
+    | ThreadOverwriteContextEvent
+    | ContextCompactionEvent
+    | AgentThreadAppendContext
+    | { type: typeof InternalEventType.PASSTHROUGH; event: RegisteredPassthroughEvent }
+    | InternalCapabilityStateEvent,
+    void,
+    unknown
+  > {
+    const timeoutMessage =
+      `Pre-LLM context processors produced no output within ` +
+      `${describeTimeout(this.preLLMProcessorsTimeoutMs)}`;
+    yield* drainWithNoProgressTimeout(
+      this.executeContextProcessors('preLLM', signal, options),
+      this.preLLMProcessorsTimeoutMs,
+      timeoutMessage,
+    );
+  }
+
   private async *stepLLMCall(
     tools: ChatCompletionTool[],
     toolMapping: Map<string, MappedMCPTool>,
@@ -2324,21 +2404,53 @@ export class AgentThread {
     const emptyAnswerNudgeAlreadySentThisTurn = hasSentEmptyAnswerNudgeThisTurn(this.context);
 
     const repositoryBeforeRefresh = this.sandbox?.getBoundRepositoryContext();
-    for await (const event of this.executeContextProcessors('preLLM', signal)) {
-      yield event;
+    // The pre-LLM processors run behind a no-progress watchdog: a processor that
+    // stalls without yielding (and without erroring) must fail the turn visibly,
+    // not hang it.
+    try {
+      for await (const event of this.executePreLLMProcessorsWithTimeout(signal)) {
+        yield event;
+      }
+    } catch (error) {
+      if (!(error instanceof NoProgressTimeoutError)) {
+        throw error;
+      }
+      yield this.generateErrorEvent(
+        `${error.message}, so the turn was stopped instead of hanging. ` +
+          `A context processor stalled without producing output; try again, and if the ` +
+          `problem persists, start a new chat.`,
+        undefined,
+        'fatal_error',
+      );
+      return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
     if (signal?.aborted) {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
     const repositoryRefresh = this.sandbox?.refreshBoundRepositoryState({ signal });
+    let refreshTimedOut = false;
     if (repositoryRefresh !== undefined) {
-      await awaitWithAbort({ operation: repositoryRefresh, signal });
+      // The sandbox refresh is an optimization for prompt accuracy, not critical
+      // path: bound it, and on timeout continue with the pre-refresh state instead
+      // of hanging the turn.
+      const refreshOutcome = await awaitWithTimeout(
+        awaitWithAbort({ operation: repositoryRefresh, signal }),
+        this.sandboxRefreshTimeoutMs,
+      );
+      if (refreshOutcome === OPERATION_TIMEOUT) {
+        refreshTimedOut = true;
+        this.logger.warn('Sandbox repository refresh timed out; continuing with cached repository state', {
+          timeoutMs: this.sandboxRefreshTimeoutMs,
+        });
+      }
     }
     if (signal?.aborted) {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
-    const repositoryAfterRefresh = this.sandbox?.getBoundRepositoryContext();
+    const repositoryAfterRefresh = refreshTimedOut
+      ? repositoryBeforeRefresh
+      : this.sandbox?.getBoundRepositoryContext();
     if (
       repositoryBeforeRefresh?.branch !== repositoryAfterRefresh?.branch ||
       repositoryBeforeRefresh?.head_sha !== repositoryAfterRefresh?.head_sha
@@ -2347,6 +2459,28 @@ export class AgentThread {
       // when that state changed, keeping ordinary prompt construction deterministic.
       this.instruction = this.buildInstruction(this.definition.instruction);
     }
+    // Pre-flight guard: transformToLLMRequest is synchronous and assembles the whole
+    // request before its safety ceiling is checked. If the raw context is already past
+    // the ceiling, force one compaction pass; if it is still past the ceiling after
+    // that, fail fast instead of blocking the event loop on a doomed assembly.
+    if (estimateRawContextTextLength(this.context) > MAX_MODEL_REQUEST_CHARS) {
+      for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
+        yield event;
+      }
+      if (signal?.aborted) {
+        return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+      }
+      const postCompactionLength = estimateRawContextTextLength(this.context);
+      if (postCompactionLength > MAX_MODEL_REQUEST_CHARS) {
+        throw new Error(
+          `Context is ${postCompactionLength.toLocaleString('en-US')} characters, above the ` +
+            `${MAX_MODEL_REQUEST_CHARS.toLocaleString('en-US')}-character safety ceiling even after ` +
+            `compaction; refusing to assemble a request that would hang or fail in provider prefill. ` +
+            `Start a new chat or reduce the context and try again.`,
+        );
+      }
+    }
+
     let requestBody = this.transformToLLMRequest(tools);
     if (signal?.aborted) {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
@@ -2443,22 +2577,33 @@ export class AgentThread {
           throw error;
         }
         if (attempt >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
-          // A repetitive-output stop already tells the user what to do next
-          // (ask in smaller parts); do not replace it with the generic
-          // stream-broke message, which would mislead about the cause.
-          const message =
-            error instanceof ModelOutputRepetitionError
-              ? error.message
-              : "The model's output stream broke twice in a row, usually because the context is too long for it; start a new chat or use a different model";
-          yield this.generateErrorEvent(message, undefined, 'model_stream_fault');
+          yield this.generateErrorEvent(
+            "The model's output stream broke twice in a row, usually because the context is too long for it; start a new chat or use a different model",
+            undefined,
+            'model_stream_fault',
+          );
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
         this.logger.warn('Model stream fault; compacting context and retrying the call once', {
           ...extractErrorLogFields(error),
           attempt,
         });
-        for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
-          yield event;
+        try {
+          for await (const event of this.executePreLLMProcessorsWithTimeout(signal, { forceCompaction: true })) {
+            yield event;
+          }
+        } catch (error) {
+          if (!(error instanceof NoProgressTimeoutError)) {
+            throw error;
+          }
+          yield this.generateErrorEvent(
+            `${error.message}, so the turn was stopped instead of hanging. ` +
+              `A context processor stalled without producing output; try again, and if the ` +
+              `problem persists, start a new chat.`,
+            undefined,
+            'fatal_error',
+          );
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
         if (signal?.aborted) {
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
@@ -2486,8 +2631,6 @@ export class AgentThread {
       // During context persistence, we have the complete message and hence the tool arguments are available.
       // Hence, we resolve the underlying tool to get the tool information.
       resolveUnderlyingTool: true,
-      toolCallPolicy: this.toolCallPolicy,
-      logger: this.logger,
     });
     const finishReason = result.value.finish_reason;
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the
@@ -2891,6 +3034,7 @@ export class AgentThread {
       signal,
       toolDispatchMaxConcurrency: this.toolDispatchMaxConcurrency,
       toolCallTimeoutMs: this.toolCallTimeoutMs,
+      runCodeToolCallTimeoutMs: this.runCodeToolCallTimeoutMs,
       logger: this.logger,
     });
     const resultsById = new Map(executedToolCallResults.map(result => [result.message.tool_call_id, result]));

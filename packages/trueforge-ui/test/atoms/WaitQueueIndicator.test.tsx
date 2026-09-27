@@ -1,13 +1,9 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { WaitQueueIndicator } from '@/atoms/WaitQueueIndicator.js';
 import type { WaitQueueSnapshot } from '@/utils/waitQueueJourney.js';
-
-vi.mock('thinking-orbs', () => ({
-  ThinkingOrb: ({ state }: { state: string }) => <div data-testid="thinking-orb" data-state={state} />,
-}));
 
 function snapshot(overrides: Partial<WaitQueueSnapshot> = {}): WaitQueueSnapshot {
   return {
@@ -24,15 +20,15 @@ function snapshot(overrides: Partial<WaitQueueSnapshot> = {}): WaitQueueSnapshot
 }
 
 describe('WaitQueueIndicator', () => {
-  it('renders the station track, the orb-as-guest, and the live microcopy', () => {
+  it('renders the station track, the state sprite, and the live microcopy', () => {
     render(<WaitQueueIndicator snapshot={snapshot()} elapsedMs={0} reducedMotion={false} />);
 
     const status = screen.getByRole('status');
     expect(status).toHaveTextContent('Searching the web…');
     expect(status).toHaveTextContent('Read schema.sql');
 
-    // The orb follows the active station: doing -> solving.
-    expect(screen.getByTestId('thinking-orb')).toHaveAttribute('data-state', 'solving');
+    // The sprite mirrors the active station: doing -> doing sprite.
+    expect(document.querySelector('.aui-state-sprite--doing')).not.toBeNull();
 
     const track = document.querySelector('.aui-wait-queue__track');
     expect(track?.getAttribute('aria-hidden')).toBe('true');
@@ -83,6 +79,6 @@ describe('WaitQueueIndicator', () => {
     );
 
     expect(document.querySelector('.aui-wait-queue__station--arriving')).not.toBeNull();
-    expect(screen.getByTestId('thinking-orb')).toHaveAttribute('data-state', 'composing');
+    expect(document.querySelector('.aui-state-sprite--writing')).not.toBeNull();
   });
 });

@@ -166,7 +166,7 @@ export function StackChatPanel({ className, threadHeaderEnd }: StackChatPanelPro
         </>
       )}
       {/* Stable mount: only ShellActions needs to survive Settings / list / thread; host end chrome stays in the thread header. */}
-      <footer className="flex shrink-0 items-center justify-between border-t border-border px-2 py-1.5">
+      <footer className="flex shrink-0 items-center justify-between border-t border-border px-2 py-2">
         <div className="flex min-w-0 items-center gap-1">
           {libraryOpen || schedulesOpen ? (
             <button

@@ -1,6 +1,5 @@
 'use client';
 
-import { useThreadIsRunning } from '@assistant-ui/core/react';
 import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
@@ -67,16 +66,6 @@ function mountMatchesConnector({ mount, connector }: { mount: object; connector:
   return id === connector.id || name === connector.name;
 }
 
-function isConnectorEnabled({
-  spec,
-  connector,
-}: {
-  spec: AgentSpec | null | undefined;
-  connector: ConnectorBase;
-}): boolean {
-  return spec?.mcpServers?.some(mount => mountMatchesConnector({ mount, connector })) ?? false;
-}
-
 function withConnectorEnabled({
   spec,
   connector,
@@ -102,7 +91,6 @@ const ConnectorSettings = () => {
   const { agentSpec } = useTrueFoundryAgentSpec();
   const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
   const { mode, pendingSessionId } = useShellMode();
-  const isThreadRunning = useThreadIsRunning();
   const toaster = useToasterOptional();
 
   const [query, setQuery] = useState('');
@@ -421,13 +409,6 @@ const ConnectorSettings = () => {
   const canUpdateChat = shellIsMutable(mode) && agentSpec != null && updateAgentSpec != null;
   const isPlainDraft = mode.status === 'active' && mode.isMutable && mode.agentId == null && pendingSessionId == null;
 
-  const handleChatEnabledChange = (connector: ConnectorBase, enabled: boolean) => {
-    if (!canUpdateChat || agentSpec == null || updateAgentSpec == null) return;
-    const nextSpec = withConnectorEnabled({ spec: agentSpec, connector, enabled });
-    if (nextSpec === agentSpec) return;
-    updateAgentSpec({ mcpServers: nextSpec.mcpServers });
-  };
-
   const handleConnectionTest = (connector: ConnectorBase) => {
     if (connectionTester === undefined || checkInFlightIds.has(connector.id)) {
       return;
@@ -474,7 +455,6 @@ const ConnectorSettings = () => {
 
   const renderConnector = (connector: ConnectorBase, isConnected: boolean) => {
     const logoSrc = connectorIconMap[connector.name];
-    const enabledForChat = isConnectorEnabled({ spec: agentSpec, connector });
     const connectorCheckStatus = checkStatusById.get(connector.id) ?? null;
     // Nothing has dialed this connector's endpoint yet: `authenticated` only means "has valid
     // credentials" (or "no credentials needed"), which the server computes without ever reaching
@@ -485,15 +465,6 @@ const ConnectorSettings = () => {
     const canVerifyReachability = connectionTester !== undefined;
     const isVerifiedConnected = canVerifyReachability ? connectorCheckStatus?.ok === true : connector.authenticated;
     const isVerifiedFailed = canVerifyReachability && connectorCheckStatus?.ok === false;
-    const needsAuthentication = connector.requiresAuth && !connector.authenticated;
-    const chatToggleDisabled = !canUpdateChat || needsAuthentication || isThreadRunning;
-    const chatToggleTitle = needsAuthentication
-      ? 'Connect this connector to use it in this chat.'
-      : !canUpdateChat
-        ? 'Open an editable chat to add or remove connectors.'
-        : isThreadRunning
-          ? 'Wait for the current turn to finish before changing connectors in this chat.'
-          : undefined;
     const content = (
       <>
         <span
@@ -563,44 +534,6 @@ const ConnectorSettings = () => {
                 Test connection
               </Button>
             ) : null}
-            <div
-              className="flex items-center gap-2"
-              title={chatToggleTitle}
-              onClick={event => {
-                event.stopPropagation();
-              }}
-            >
-              {enabledForChat ? (
-                <>
-                  <span className="text-xs font-medium text-text-secondary">In chat</span>
-                  <Button
-                    variant="ghost"
-                    size="small"
-                    type="button"
-                    disabled={chatToggleDisabled}
-                    aria-label={`Remove ${connector.name} from this chat`}
-                    onClick={() => {
-                      handleChatEnabledChange(connector, false);
-                    }}
-                  >
-                    Remove
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  variant="secondary"
-                  size="small"
-                  type="button"
-                  disabled={chatToggleDisabled}
-                  aria-label={`Add ${connector.name} to this chat`}
-                  onClick={() => {
-                    handleChatEnabledChange(connector, true);
-                  }}
-                >
-                  Add to chat
-                </Button>
-              )}
-            </div>
             {connectorCheckStatus ? (
               <p
                 className={cn(
