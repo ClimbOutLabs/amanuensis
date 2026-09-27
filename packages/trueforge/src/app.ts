@@ -19,6 +19,7 @@ import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
+import { createMemoryVaultRouter } from './apis/memoryVault';
 import { createModelsRouter } from './apis/models';
 import { createPermissionsRouter } from './apis/permissions';
 import { createPersonalizationRouter } from './apis/personalization';
@@ -393,6 +394,16 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         withTransaction: deps.withTransaction,
         resolveRequestContext,
         authorizer: deps.authorizer,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/memory/vault',
+    withAuth(
+      createMemoryVaultRouter({
+        resolveRequestContext,
+        logger: deps.logger,
       }),
       authMiddleware,
     ),

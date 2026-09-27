@@ -46,4 +46,57 @@ export interface MemoryClient {
     maxTokens: number;
     timeoutMs: number;
   }): Promise<ReflectOutcome>;
+
+  /**
+   * Memory vault: the effective entries of one vault namespace, newest first.
+   * `namespace` is the wire namespace: empty or `default` for the shared vault,
+   * `persona:<name>` for a persona vault, else a topic vault. Implementations
+   * resolve it tenant-scoped, so one tenant's vault never addresses another's.
+   * Vault edits and deletes are applied; deleted entries are omitted.
+   */
+  listEntries(params: { namespace: string; timeoutMs: number }): Promise<ListMemoryVaultEntriesOutcome>;
+
+  /**
+   * Memory vault: replace one entry's text. The store stays append-only: the old
+   * entry is kept and a supersede marker records the new text. Unknown or deleted
+   * ids fail with code `not_found`.
+   */
+  updateEntry(params: { entryId: string; text: string; timeoutMs: number }): Promise<UpdateMemoryVaultEntryOutcome>;
+
+  /**
+   * Memory vault: hide one entry. The store stays append-only: the old entry is
+   * kept and a delete marker drops it from listings and recall. Idempotent:
+   * deleting an already-deleted id succeeds.
+   */
+  deleteEntry(params: { entryId: string; timeoutMs: number }): Promise<DeleteMemoryVaultEntryOutcome>;
 }
+
+/** One memory fact as the vault presents it. */
+export interface MemoryVaultEntry {
+  /** Stable id `md:{namespace}:{file}#{index}`; URL-encode for path params. */
+  id: string;
+  /** Replacement text after a vault edit, else the original retained text. */
+  text: string;
+  /** ISO-8601 instant: the edit time after a vault edit, else the retain time. */
+  timestamp: string;
+  /** Owning persona for `persona:<name>` vaults, else null. */
+  persona: string | null;
+}
+
+export type MemoryVaultFailureCode = 'request_failed' | 'not_found' | 'timeout';
+
+export interface MemoryVaultFailure {
+  ok: false;
+  code: MemoryVaultFailureCode;
+  reason: string;
+}
+
+export type ListMemoryVaultEntriesOutcome =
+  | { ok: true; entries: MemoryVaultEntry[] }
+  | MemoryVaultFailure;
+
+export type UpdateMemoryVaultEntryOutcome =
+  | { ok: true; entry: MemoryVaultEntry }
+  | MemoryVaultFailure;
+
+export type DeleteMemoryVaultEntryOutcome = { ok: true } | MemoryVaultFailure;
