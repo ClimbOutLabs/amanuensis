@@ -3,7 +3,7 @@
   "version": "0.2.0-rc.4",
   "description": "TrueForge Agent Harness library.",
   "author": "TrueFoundry",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/truefoundry/trueforge.git",

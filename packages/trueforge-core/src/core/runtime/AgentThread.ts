@@ -150,6 +150,7 @@ import {
   identicalCallNudgeMessage,
   INTERNAL_SYSTEM_PROMPT,
   internalSystemMessage,
+  internalSystemTag,
   isApprovalDecisionMessage,
   isClientSideToolResponseMessage,
   isFreshnessQuestion,
@@ -1132,6 +1133,47 @@ function tryParseToolArgs(args: string | undefined): Record<string, unknown> {
 // # This can raise exception.
 // update_redis(x)
 
+/**
+ * Breakfix (Sep 27 2026): when the resolved model cannot read images, any
+ * `image_url` parts in the assembled request would make the provider reject
+ * the entire request (400). Those parts reach here two ways: definition
+ * messages authored with images, or chat history from an earlier turn that
+ * ran under a vision-capable model. New uploads are already gated by
+ * processAgentUserInput; this covers everything else. Each removed image is
+ * replaced with a text note so the model sees what happened instead of a
+ * silent gap.
+ */
+export function replaceImagePartsForNonVisionModel(
+  messages: ChatCompletionMessageParam[],
+): ChatCompletionMessageParam[] {
+  return messages.map(msg => {
+    if (msg.role !== 'user' || typeof msg.content === 'string') {
+      return msg;
+    }
+    let replaced = false;
+    const content = msg.content.filter(part => {
+      if (part.type === 'image_url') {
+        replaced = true;
+        return false;
+      }
+      return true;
+    });
+    if (!replaced) {
+      return msg;
+    }
+    return {
+      ...msg,
+      content: [
+        ...content,
+        {
+          type: 'text',
+          text: internalSystemTag('Image omitted: this model cannot process images.'),
+        },
+      ],
+    };
+  });
+}
+
 export class AgentThread {
   readonly threadId: string;
   readonly parent?: AgentParent | undefined;
@@ -1829,6 +1871,13 @@ export class AgentThread {
     });
     if (taskStateBlock !== null) {
       messages.push({ role: 'system', content: taskStateBlock });
+    }
+
+    // Breakfix (Sep 27 2026): never send image_url parts to a model that cannot
+    // read images; the provider rejects the whole request. Covers history from
+    // vision-capable turns and image-bearing definition messages.
+    if (!this.definition.modelSupportsVision) {
+      messages = replaceImagePartsForNonVisionModel(messages);
     }
 
     // modelParams may include provider extensions (e.g. reasoning_effort) beyond the SDK's

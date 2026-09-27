@@ -7,7 +7,7 @@
  * package root. Keep this exact, fail-closed transform beside the generator
  * instead of editing generated output by hand.
  */
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -60,44 +60,4 @@ const cleanReference = reference
 if (reference !== cleanReference) {
   await writeFile(referencePath, cleanReference, 'utf8');
   console.log('Removed generator-owned trailing whitespace from the SDK reference.');
-}
-
-// Fern emits a placeholder test (`expect(true).toBe(true)`) that asserts
-// nothing. The SDK ships real generated tests; delete the stub so the suite
-// contains no decorative tests. Fail closed: if Fern changes the stub,
-// update this step instead of silently keeping a new placeholder.
-const customTestPath = resolve(repositoryRoot, 'packages/trueforge-sdk/tests/custom.test.ts');
-const fernStub = [
-  '/**',
-  ' * This is a custom test file, if you wish to add more tests',
-  ' * to your SDK.',
-  ' * Be sure to mark this file in `.fernignore`.',
-  ' *',
-  ' * If you include example requests/responses in your fern definition,',
-  ' * you will have tests automatically generated for you.',
-  ' */',
-  'describe("test", () => {',
-  '    it("default", () => {',
-  '        expect(true).toBe(true);',
-  '    });',
-  '});',
-  '',
-].join('\n');
-
-let customTest = null;
-try {
-  customTest = normalizeNewlines(await readFile(customTestPath, 'utf8'));
-} catch {
-  // Absent: nothing to remove.
-}
-if (customTest === null) {
-  console.log('Fern placeholder test already absent.');
-} else if (customTest === fernStub) {
-  await rm(customTestPath);
-  console.log('Removed Fern placeholder test (expect(true).toBe(true)).');
-} else {
-  throw new Error(
-    `Refusing to remove unexpected custom test at ${customTestPath}. ` +
-      'Update this generator-owned compatibility step for the new Fern output first.',
-  );
 }

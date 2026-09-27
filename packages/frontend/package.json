@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "description": "TrueForge agent chat frontend. Private app — not published to npm.",
   "author": "TrueFoundry",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "engines": {

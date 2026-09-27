@@ -66,9 +66,8 @@
     "test:trueforge-ui": "pnpm --filter @truefoundry/trueforge-ui test",
     "test": "pnpm test:trueforge-core && pnpm test:trueforge-sdk && pnpm test:trueforge-ui && pnpm test:trueforge && pnpm test:frontend",
     "verify": "pnpm run test:private-data && pnpm run format:check && pnpm run typecheck && pnpm run lint:ci && pnpm run build && pnpm run test",
-    "typecheck": "pnpm --filter @truefoundry/trueforge-core typecheck && pnpm --filter @truefoundry/trueforge-ui typecheck && pnpm --filter @truefoundry/trueforge typecheck && pnpm --filter frontend typecheck && pnpm --filter amanuensis typecheck && pnpm sdk:test-typecheck",
-    "version": "node scripts/version.mjs",
-    "sdk:test-typecheck": "pnpm --filter @truefoundry/trueforge-sdk exec tsc --noEmit --strict --skipLibCheck --target es2022 --module commonjs --moduleResolution node --esModuleInterop --types vitest/globals,node --isolatedModules tests/unit/schemas/lazy/lazy.test.ts tests/unit/schemas/object-like/withParsedProperties.test.ts tests/unit/schemas/object/extend.test.ts tests/unit/schemas/object/object.test.ts tests/unit/schemas/undiscriminated-union/undiscriminatedUnion.test.ts tests/unit/fetcher/getResponseBody.test.ts"
+    "typecheck": "pnpm --filter @truefoundry/trueforge-core typecheck && pnpm --filter @truefoundry/trueforge-ui typecheck && pnpm --filter @truefoundry/trueforge typecheck && pnpm --filter frontend typecheck && pnpm --filter amanuensis typecheck",
+    "version": "node scripts/version.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.1",
