@@ -214,6 +214,14 @@ const ASYNC_ITERATOR_ABORTED = Symbol('async-iterator-aborted');
  */
 export const DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS = 600_000;
 
+/**
+ * Default bound on the pre-LLM context processor phase producing progress before
+ * failing the turn visibly. Five minutes: generous for compaction on large contexts,
+ * tight enough that a processor that accepted the hook and went silent never leaves
+ * a turn hanging for hours.
+ */
+export const DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS = 300_000;
+
 const MODEL_FIRST_RESPONSE_TIMEOUT = Symbol('model-first-response-timeout');
 
 /** Human duration for the watchdog timeout in the user-facing error, e.g. "10 minutes", "90 seconds". */
@@ -224,6 +232,56 @@ function describeTimeout(timeoutMs: number): string {
   }
   const minutes = Math.max(1, Math.round(timeoutMs / 60_000));
   return `${String(minutes)} minute${minutes === 1 ? '' : 's'}`;
+}
+
+/**
+ * Thrown when an async producer stalls without yielding for longer than its
+ * no-progress bound. Carries no producer internals; the message is user-facing.
+ */
+export class NoProgressTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NoProgressTimeoutError';
+  }
+}
+
+/**
+ * Drains an async iterable with a no-progress watchdog. Each yielded item resets the
+ * timer; if no item arrives within timeoutMs, the iterator is asked to close
+ * (best-effort, never awaited — a hung producer must not strand the consumer a
+ * second time) and the drain rejects with NoProgressTimeoutError.
+ */
+async function* drainWithNoProgressTimeout<T>(
+  iterable: AsyncIterable<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): AsyncGenerator<T, void, unknown> {
+  const iterator = iterable[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let result: IteratorResult<T, unknown>;
+      try {
+        result = await Promise.race([
+          iterator.next(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new NoProgressTimeoutError(timeoutMessage)), timeoutMs);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+        }
+      }
+      if (result.done) {
+        return;
+      }
+      yield result.value;
+    }
+  } finally {
+    // Best-effort close; never await a hung iterator during cleanup.
+    void Promise.resolve(iterator.return?.()).catch(() => undefined);
+  }
 }
 
 /**
@@ -1182,6 +1240,7 @@ export class AgentThread {
   private readonly toolCallTimeoutMs?: number | undefined;
   private readonly runCodeToolCallTimeoutMs?: number | undefined;
   private readonly modelFirstResponseTimeoutMs: number;
+  private readonly preLLMProcessorsTimeoutMs: number;
   private implementationPlanGrants: ReadonlySet<string> = new Set();
   // One user request may span several execute() calls while approvals are
   // resolved. Keep orchestration limits across those continuations; reset only
@@ -1227,6 +1286,7 @@ export class AgentThread {
     this.toolCallTimeoutMs = input.toolCallTimeoutMs;
     this.runCodeToolCallTimeoutMs = input.runCodeToolCallTimeoutMs;
     this.modelFirstResponseTimeoutMs = input.modelFirstResponseTimeoutMs ?? DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
+    this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
     this.toolCallMemo = createToolCallMemoState(input.toolCallMemo);
     this.toolCallMemo.clarificationAnswered = requestHasAnsweredClarification(this.context);
     // A fresh AgentThread is built per turn AND per approval/tool-response
@@ -2227,6 +2287,34 @@ export class AgentThread {
     }
   }
 
+  /**
+   * Runs the pre-LLM context processors behind a no-progress watchdog. Each yielded
+   * processor event resets the timer; a processor that stalls without yielding (and
+   * without erroring) rejects with NoProgressTimeoutError instead of hanging the turn.
+   * Callers convert that into a visible turn failure.
+   */
+  private async *executePreLLMProcessorsWithTimeout(
+    signal: AbortSignal | undefined,
+    options?: { forceCompaction?: boolean },
+  ): AsyncGenerator<
+    | ThreadOverwriteContextEvent
+    | ContextCompactionEvent
+    | AgentThreadAppendContext
+    | { type: typeof InternalEventType.PASSTHROUGH; event: RegisteredPassthroughEvent }
+    | InternalCapabilityStateEvent,
+    void,
+    unknown
+  > {
+    const timeoutMessage =
+      `Pre-LLM context processors produced no output within ` +
+      `${describeTimeout(this.preLLMProcessorsTimeoutMs)}`;
+    yield* drainWithNoProgressTimeout(
+      this.executeContextProcessors('preLLM', signal, options),
+      this.preLLMProcessorsTimeoutMs,
+      timeoutMessage,
+    );
+  }
+
   private async *stepLLMCall(
     tools: ChatCompletionTool[],
     toolMapping: Map<string, MappedMCPTool>,
@@ -2247,8 +2335,25 @@ export class AgentThread {
     const emptyAnswerNudgeAlreadySentThisTurn = hasSentEmptyAnswerNudgeThisTurn(this.context);
 
     const repositoryBeforeRefresh = this.sandbox?.getBoundRepositoryContext();
-    for await (const event of this.executeContextProcessors('preLLM', signal)) {
-      yield event;
+    // The pre-LLM processors run behind a no-progress watchdog: a processor that
+    // stalls without yielding (and without erroring) must fail the turn visibly,
+    // not hang it.
+    try {
+      for await (const event of this.executePreLLMProcessorsWithTimeout(signal)) {
+        yield event;
+      }
+    } catch (error) {
+      if (!(error instanceof NoProgressTimeoutError)) {
+        throw error;
+      }
+      yield this.generateErrorEvent(
+        `${error.message}, so the turn was stopped instead of hanging. ` +
+          `A context processor stalled without producing output; try again, and if the ` +
+          `problem persists, start a new chat.`,
+        undefined,
+        'fatal_error',
+      );
+      return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
     if (signal?.aborted) {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
@@ -2377,8 +2482,22 @@ export class AgentThread {
           ...extractErrorLogFields(error),
           attempt,
         });
-        for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
-          yield event;
+        try {
+          for await (const event of this.executePreLLMProcessorsWithTimeout(signal, { forceCompaction: true })) {
+            yield event;
+          }
+        } catch (error) {
+          if (!(error instanceof NoProgressTimeoutError)) {
+            throw error;
+          }
+          yield this.generateErrorEvent(
+            `${error.message}, so the turn was stopped instead of hanging. ` +
+              `A context processor stalled without producing output; try again, and if the ` +
+              `problem persists, start a new chat.`,
+            undefined,
+            'fatal_error',
+          );
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
         if (signal?.aborted) {
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
