@@ -256,6 +256,17 @@ describe('resolveScheduleRunPrompt', () => {
     const prompt = resolveScheduleRunPrompt(manifest);
     expect(prompt).toContain('briefing');
   });
+
+  it('appends the schedule task as extra focus for briefing kind', () => {
+    const manifest = ScheduleManifestSchema.parse({
+      task: 'Focus on the deploy',
+      cron: '0 9 * * *',
+      timezone: 'UTC',
+      kind: 'briefing',
+    });
+    const prompt = resolveScheduleRunPrompt(manifest);
+    expect(prompt).toContain('Focus on the deploy');
+  });
 });
 
 describe('writeReminderNotification', () => {
@@ -282,7 +293,7 @@ describe('writeReminderNotification', () => {
     });
     const notificationStore = {
       createNotification,
-      listNotifications: jest.fn(),
+      listNotifications: jest.fn().mockResolvedValue({ data: [], pagination: {} }),
       getNotification: jest.fn(),
       markNotificationRead: jest.fn(),
       deleteNotification: jest.fn(),
@@ -298,5 +309,34 @@ describe('writeReminderNotification', () => {
         body: 'Stand up in 10 minutes',
       }),
     );
+  });
+
+  it('does not write a duplicate when the run already has a notification', async () => {
+    const dispatchItem = item();
+    dispatchItem.schedule.manifest = ScheduleManifestSchema.parse({
+      task: 'Stand up in 10 minutes',
+      cron: '0 9 * * *',
+      timezone: 'UTC',
+      kind: 'reminder',
+    });
+    const createNotification = jest.fn();
+    const notificationStore = {
+      createNotification,
+      listNotifications: jest.fn().mockResolvedValue({
+        data: [{ id: 'notif-1', schedule_run_id: 'run-1' }],
+        pagination: {},
+      }),
+      getNotification: jest.fn(),
+      markNotificationRead: jest.fn(),
+      deleteNotification: jest.fn(),
+    };
+    await writeReminderNotification({
+      notificationStore,
+      item: dispatchItem,
+    });
+    expect(notificationStore.listNotifications).toHaveBeenCalledWith(
+      expect.objectContaining({ tenant_id: 'default', schedule_run_id: 'run-1' }),
+    );
+    expect(createNotification).not.toHaveBeenCalled();
   });
 });
