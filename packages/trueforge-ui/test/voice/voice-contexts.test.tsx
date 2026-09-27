@@ -27,9 +27,8 @@ describe('VoiceSettingsProvider', () => {
 
     expect(result.current.settings.rate).toBe(1.5);
     expect(result.current.settings.autoRead).toBe(true);
-    const stored = JSON.parse(localStorage.getItem(VOICE_SETTINGS_KEY) ?? '{}') as Record<string, unknown>;
-    expect(stored.rate).toBe(1.5);
-    expect(stored.autoRead).toBe(true);
+    const stored: unknown = JSON.parse(localStorage.getItem(VOICE_SETTINGS_KEY) ?? '{}');
+    expect(stored).toMatchObject({ rate: 1.5, autoRead: true });
   });
 
   it('restores stored settings across mounts', () => {
