@@ -222,6 +222,13 @@ export const DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS = 600_000;
  */
 export const DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS = 300_000;
 
+/**
+ * Default bound on the sandbox repository refresh before a model call. Thirty
+ * seconds: the refresh is an optimization for prompt accuracy, not critical path;
+ * a hung refresh must not hang the turn.
+ */
+export const DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS = 30_000;
+
 const MODEL_FIRST_RESPONSE_TIMEOUT = Symbol('model-first-response-timeout');
 
 /** Human duration for the watchdog timeout in the user-facing error, e.g. "10 minutes", "90 seconds". */
@@ -232,6 +239,31 @@ function describeTimeout(timeoutMs: number): string {
   }
   const minutes = Math.max(1, Math.round(timeoutMs / 60_000));
   return `${String(minutes)} minute${minutes === 1 ? '' : 's'}`;
+}
+
+const OPERATION_TIMEOUT = Symbol('operation-timeout');
+
+/**
+ * Awaits an operation with a bounded timeout. If the operation settles first, its
+ * outcome (value or rejection) is used. If the timeout fires first, returns
+ * OPERATION_TIMEOUT; the operation's late settlement is ignored. Late rejections
+ * are swallowed to avoid unhandled-rejection noise — the caller has already chosen
+ * to proceed without the result.
+ */
+function awaitWithTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T | typeof OPERATION_TIMEOUT> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(OPERATION_TIMEOUT), timeoutMs);
+    operation.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      error => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 /**
@@ -1241,6 +1273,7 @@ export class AgentThread {
   private readonly runCodeToolCallTimeoutMs?: number | undefined;
   private readonly modelFirstResponseTimeoutMs: number;
   private readonly preLLMProcessorsTimeoutMs: number;
+  private readonly sandboxRefreshTimeoutMs: number;
   private implementationPlanGrants: ReadonlySet<string> = new Set();
   // One user request may span several execute() calls while approvals are
   // resolved. Keep orchestration limits across those continuations; reset only
@@ -1287,6 +1320,7 @@ export class AgentThread {
     this.runCodeToolCallTimeoutMs = input.runCodeToolCallTimeoutMs;
     this.modelFirstResponseTimeoutMs = input.modelFirstResponseTimeoutMs ?? DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
     this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
+    this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
     this.toolCallMemo = createToolCallMemoState(input.toolCallMemo);
     this.toolCallMemo.clarificationAnswered = requestHasAnsweredClarification(this.context);
     // A fresh AgentThread is built per turn AND per approval/tool-response
@@ -2359,14 +2393,29 @@ export class AgentThread {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
     const repositoryRefresh = this.sandbox?.refreshBoundRepositoryState({ signal });
+    let refreshTimedOut = false;
     if (repositoryRefresh !== undefined) {
-      await awaitWithAbort({ operation: repositoryRefresh, signal });
+      // The sandbox refresh is an optimization for prompt accuracy, not critical
+      // path: bound it, and on timeout continue with the pre-refresh state instead
+      // of hanging the turn.
+      const refreshOutcome = await awaitWithTimeout(
+        awaitWithAbort({ operation: repositoryRefresh, signal }),
+        this.sandboxRefreshTimeoutMs,
+      );
+      if (refreshOutcome === OPERATION_TIMEOUT) {
+        refreshTimedOut = true;
+        this.logger.warn('Sandbox repository refresh timed out; continuing with cached repository state', {
+          timeoutMs: this.sandboxRefreshTimeoutMs,
+        });
+      }
     }
     if (signal?.aborted) {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
     }
 
-    const repositoryAfterRefresh = this.sandbox?.getBoundRepositoryContext();
+    const repositoryAfterRefresh = refreshTimedOut
+      ? repositoryBeforeRefresh
+      : this.sandbox?.getBoundRepositoryContext();
     if (
       repositoryBeforeRefresh?.branch !== repositoryAfterRefresh?.branch ||
       repositoryBeforeRefresh?.head_sha !== repositoryAfterRefresh?.head_sha

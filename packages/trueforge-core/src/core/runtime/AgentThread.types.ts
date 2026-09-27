@@ -284,6 +284,12 @@ export interface AgentThreadConstructorInput {
    * back to the core default (DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS).
    */
   preLLMProcessorsTimeoutMs?: number | undefined;
+  /**
+   * Bound in milliseconds on the sandbox repository refresh before a model call.
+   * On timeout the turn continues with the pre-refresh state. Undefined falls
+   * back to the core default (DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS).
+   */
+  sandboxRefreshTimeoutMs?: number | undefined;
   tracing: AgentTracing;
   logger: Logger;
 }
