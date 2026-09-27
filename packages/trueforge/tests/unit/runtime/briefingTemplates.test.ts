@@ -13,4 +13,8 @@ describe('buildBriefingPrompt', () => {
     const prompt = buildBriefingPrompt('morning-briefing');
     expect(prompt.toLowerCase()).toContain('tool');
   });
+
+  it('throws for an unknown template instead of resolving to no prompt', () => {
+    expect(() => buildBriefingPrompt('evening-briefing' as never)).toThrow('Unknown briefing template');
+  });
 });
