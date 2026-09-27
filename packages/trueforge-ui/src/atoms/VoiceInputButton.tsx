@@ -1,7 +1,7 @@
 'use client';
 
 import { useAui, useAuiState } from '@assistant-ui/react';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 
 import { Icon } from '../icons/Icon.js';
 import { useHandsFree } from '../voice/HandsFreeContext.js';
@@ -26,6 +26,7 @@ export function VoiceInputButton() {
   const composerText = useAuiState(s => s.composer.text);
   const composerTextRef = useRef(composerText);
   composerTextRef.current = composerText;
+  const [micBlocked, setMicBlocked] = useState(false);
 
   const recognition = useSpeechRecognition({
     onFinalTranscript: transcript => {
@@ -33,6 +34,10 @@ export function VoiceInputButton() {
       if (text.length === 0) return;
       const current = composerTextRef.current;
       aui.composer().setText(current.length > 0 ? `${current} ${text}` : text);
+    },
+    onError: error => {
+      // Mic permission denied: say so instead of silently dropping back to idle.
+      if (error === 'not-allowed' || error === 'service-not-allowed') setMicBlocked(true);
     },
   });
 
@@ -57,11 +62,18 @@ export function VoiceInputButton() {
 
   return (
     <IconButton
-      aria-label={listening ? 'Stop dictation' : 'Dictate with your voice'}
-      tooltip={listening ? 'Stop dictation' : 'Dictate with your voice'}
+      aria-label={micBlocked ? 'Microphone blocked' : listening ? 'Stop dictation' : 'Dictate with your voice'}
+      tooltip={
+        micBlocked
+          ? 'Microphone is blocked. Allow microphone access in your browser, then try again.'
+          : listening
+            ? 'Stop dictation'
+            : 'Dictate with your voice'
+      }
       aria-pressed={listening}
       variant="ghost"
       onClick={() => {
+        setMicBlocked(false);
         // Any mic click exits hands-free; the loop's own recognition stops with it.
         if (handsFree.active) handsFree.setActive(false);
         if (listening || processing) {
@@ -74,7 +86,7 @@ export function VoiceInputButton() {
       }}
       className={cn(listening && 'animate-pulse bg-failure-bg/15 text-failure-bg')}
     >
-      {processing ? <Spinner size={16} /> : <Icon name="mic" size="1rem" />}
+      {processing ? <Spinner size={16} /> : <Icon name={micBlocked ? 'mic-off' : 'mic'} size="1rem" />}
     </IconButton>
   );
 }
