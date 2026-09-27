@@ -1755,6 +1755,41 @@ export class AgentThread {
     return { ...this.metrics };
   }
 
+/**
+ * Cheap text-length estimate over the raw context, without the full message
+ * conversion that transformToLLMRequest performs. Used as a pre-flight guard so a
+ * giant context compacts first (or fails fast) instead of blocking the event loop
+ * inside the synchronous request assembly.
+ */
+function estimateRawContextTextLength(context: readonly ContextMessage[]): number {
+  let total = 0;
+  for (const message of context) {
+    if (!isLLMContextMessage(message)) {
+      continue;
+    }
+    const content: unknown = message.content;
+    if (typeof content === 'string') {
+      total += content.length;
+    } else if (Array.isArray(content)) {
+      for (const part of content) {
+        if (
+          typeof part === 'object' &&
+          part !== null &&
+          (part as { type?: unknown }).type === 'text' &&
+          typeof (part as { text?: unknown }).text === 'string'
+        ) {
+          total += (part as { text: string }).text.length;
+        }
+      }
+    }
+    // Early exit: precision past the ceiling buys nothing.
+    if (total > MAX_MODEL_REQUEST_CHARS) {
+      return total;
+    }
+  }
+  return total;
+}
+
   private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
     // A long-running thread can cross UTC midnight between LLM steps. Within a
     // day the rebuilt string is byte-identical, so prefix caching is untouched;
@@ -2270,6 +2305,28 @@ export class AgentThread {
       // when that state changed, keeping ordinary prompt construction deterministic.
       this.instruction = this.buildInstruction(this.definition.instruction);
     }
+    // Pre-flight guard: transformToLLMRequest is synchronous and assembles the whole
+    // request before its safety ceiling is checked. If the raw context is already past
+    // the ceiling, force one compaction pass; if it is still past the ceiling after
+    // that, fail fast instead of blocking the event loop on a doomed assembly.
+    if (estimateRawContextTextLength(this.context) > MAX_MODEL_REQUEST_CHARS) {
+      for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
+        yield event;
+      }
+      if (signal?.aborted) {
+        return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+      }
+      const postCompactionLength = estimateRawContextTextLength(this.context);
+      if (postCompactionLength > MAX_MODEL_REQUEST_CHARS) {
+        throw new Error(
+          `Context is ${postCompactionLength.toLocaleString('en-US')} characters, above the ` +
+            `${MAX_MODEL_REQUEST_CHARS.toLocaleString('en-US')}-character safety ceiling even after ` +
+            `compaction; refusing to assemble a request that would hang or fail in provider prefill. ` +
+            `Start a new chat or reduce the context and try again.`,
+        );
+      }
+    }
+
     let requestBody = this.transformToLLMRequest(tools);
     if (signal?.aborted) {
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
