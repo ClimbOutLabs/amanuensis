@@ -58,7 +58,7 @@ const VALID_PRESETS: ReadonlyArray<ThemePreset> = [
   'midnight',
   'forest',
   'sunset',
-  'nvidia',
+  'volt',
 ];
 
 function getSystemTheme(): 'light' | 'dark' {
