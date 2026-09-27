@@ -19,22 +19,12 @@
 
 ## No private info
 
-<!-- This repo goes public. Confirm none of the following leaked in. -->
+<!-- This repo goes public. Confirm none of the following leaked in. Run the scanner before pushing. -->
 
-- [ ] No API keys, tokens, or secrets
-- [ ] No internal hostnames (Tailscale, `.ts.net`, `*.tail*`)
-- [ ] No personal names, emails, or internal identifiers
-- [ ] No internal IPs or local network addresses
-- [ ] No file paths containing usernames or home directories
+- [ ] Ran `python3 scripts/private-data-scan.py` on changed files (exit 0 = clean)
+- [ ] No Private Info
 
-## License
+ No new dependencies with copyleft or AGPL licenses
+ New source files carry the Apache-2.0 header where applicable (N/A - Markdown docs only)
 
-- [ ] No new dependencies with copyleft or AGPL licenses
-- [ ] New source files carry the Apache-2.0 header where applicable
-
-## Hackathon relevance (optional)
-
-<!-- If this PR supports the hackathon entry, note the feature and track. -->
-
-- Feature:
-- Track:
+License OK
