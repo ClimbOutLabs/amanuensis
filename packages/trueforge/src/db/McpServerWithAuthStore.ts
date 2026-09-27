@@ -1,5 +1,5 @@
 import type { RemoteMcpHeaders } from '@truefoundry/trueforge-core/core';
-import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
+import { isMcpAuthRequired, resolveMcpAuth, revokeMcpAuthorization } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
 import { resolveConfiguredMcpRequestHeaders, resolveMcpAuthStatus, type McpAuthStatus } from '../schemas/mcpServer';
 import {
@@ -167,7 +167,23 @@ export class McpServerWithAuthStore<TTransaction = never> implements IMcpServerW
     if (record === undefined) {
       throw new McpServerNotFoundError(input.name);
     }
-    if (record.manifest.auth?.type === 'dcr' || record.manifest.auth?.type === 'oauth_client') {
+    const auth = record.manifest.auth;
+    if (auth?.type === 'dcr' || auth?.type === 'oauth_client') {
+      // Revoke the grant at the authorization server first (best effort), then
+      // delete the local token: after this call the integration cannot be used.
+      await revokeMcpAuthorization({
+        tokenStore: this.#tokenStore,
+        mcpServerStore: this.#store,
+        serverId: record.id,
+        userRef: input.userRef,
+        mcpServerUrl: record.manifest.url,
+        mcpServerName: record.name,
+        clientName: this.#clientName,
+        authType: auth.type,
+        ...(auth.type === 'oauth_client'
+          ? { oauthClientId: auth.client_id, oauthClientSecret: auth.client_secret }
+          : {}),
+      });
       await this.#tokenStore.deleteToken({ id: record.id, userRef: input.userRef });
     }
   }
