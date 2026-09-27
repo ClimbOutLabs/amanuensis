@@ -1,6 +1,6 @@
 # Shipped MCP catalog: server presets offered by
 # GET /api/v1/catalog/mcp-servers for the UI to copy into
-# PUT /api/v1/settings/mcp-servers bodies. Discovery-only — never executed against.
+# PUT /api/v1/settings/mcp-servers bodies. Discovery-only - never executed against.
 mcp_servers:
   - type: remote
     name: linear
@@ -46,7 +46,7 @@ mcp_servers:
     auth:
       type: header
       headers:
-        Authorization: Bearer YOUR_GITHUB_PAT
+        Authorization: Bearer ${env:EXAMPLE_BEARER_TOKEN}
   - type: remote
     name: tavily
     logo: https://assets.production.truefoundry.com/tavily.svg
@@ -55,7 +55,7 @@ mcp_servers:
     auth:
       type: header
       headers:
-        Authorization: Bearer YOUR_TAVILY_API_KEY
+        Authorization: Bearer ${env:EXAMPLE_BEARER_TOKEN}
   - type: remote
     name: bright-data
     logo: https://assets.production.truefoundry.com/bright-data.png
@@ -64,7 +64,7 @@ mcp_servers:
     auth:
       type: header
       headers:
-        Authorization: Bearer YOUR_BRIGHT_DATA_API_TOKEN
+        Authorization: Bearer ${env:EXAMPLE_BEARER_TOKEN}
   - type: remote
     name: supabase
     logo: https://assets.production.truefoundry.com/supabase.svg
@@ -113,4 +113,38 @@ mcp_servers:
     auth:
       type: header
       headers:
-        Authorization: Bearer YOUR_HINDSIGHT_API_KEY
+        Authorization: Bearer ${env:EXAMPLE_BEARER_TOKEN}
+  # Self-hosted Google integrations. The URLs here are placeholders: run the calendar/tasks MCP
+  # servers (mcp/calendar, mcp/tasks) on your own host and register them with Add MCP Server
+  # using your own URL. TrueForge runs the Google OAuth flow in the browser and forwards the
+  # Google access token to the MCP server as a bearer token; the server validates the token,
+  # enforces the scopes below per tool, and calls the Google API. The client ID and secret are
+  # secret references, resolved at use time and never stored in the clear.
+  - type: remote
+    name: google-calendar
+    url: https://your-calendar-mcp-host:8080/mcp
+    description: >-
+      Read and manage Google Calendar events through your self-hosted calendar MCP server.
+      TrueForge completes Google OAuth in the browser and sends the Google access token to the
+      server, which validates it and calls the Google Calendar API on your behalf.
+    auth:
+      type: oauth_client
+      client_id: ${env:GOOGLE_CALENDAR_CLIENT_ID}
+      client_secret: ${env:GOOGLE_CALENDAR_CLIENT_SECRET}
+      scopes:
+        - https://www.googleapis.com/auth/calendar.readonly
+        - https://www.googleapis.com/auth/calendar.events
+  - type: remote
+    name: google-tasks
+    url: https://your-tasks-mcp-host:8080/mcp
+    description: >-
+      Read and manage Google Tasks through your self-hosted tasks MCP server. TrueForge
+      completes Google OAuth in the browser and sends the Google access token to the server,
+      which validates it and calls the Google Tasks API on your behalf.
+    auth:
+      type: oauth_client
+      client_id: ${env:GOOGLE_TASKS_CLIENT_ID}
+      client_secret: ${env:GOOGLE_TASKS_CLIENT_SECRET}
+      scopes:
+        - https://www.googleapis.com/auth/tasks.readonly
+        - https://www.googleapis.com/auth/tasks

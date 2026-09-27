@@ -61,7 +61,13 @@ export class McpServerWithAuthStore<TTransaction = never> implements IMcpServerW
     const auth = record.manifest.auth;
     if (auth?.type === 'dcr' || auth?.type === 'oauth_client') {
       const oauthParams =
-        auth.type === 'oauth_client' ? { oauthClientId: auth.client_id, oauthClientSecret: auth.client_secret } : {};
+        auth.type === 'oauth_client'
+          ? {
+              oauthClientId: auth.client_id,
+              oauthClientSecret: auth.client_secret,
+              ...(auth.scopes !== undefined ? { oauthScopes: auth.scopes } : {}),
+            }
+          : {};
       return async () => {
         const result = await resolveMcpAuth({
           tokenStore: this.#tokenStore,
@@ -132,7 +138,13 @@ export class McpServerWithAuthStore<TTransaction = never> implements IMcpServerW
     // `oauth_client` (fork-only; see DIVERGENCE.md) reuses the same discovery/token flow as `dcr`
     // but never registers a client: it is built from the manifest's own client_id/client_secret.
     const oauthParams =
-      auth.type === 'oauth_client' ? { oauthClientId: auth.client_id, oauthClientSecret: auth.client_secret } : {};
+      auth.type === 'oauth_client'
+        ? {
+            oauthClientId: auth.client_id,
+            oauthClientSecret: auth.client_secret,
+            ...(auth.scopes !== undefined ? { oauthScopes: auth.scopes } : {}),
+          }
+        : {};
     const result = await resolveMcpAuth({
       tokenStore: this.#tokenStore,
       mcpServerStore: this.#store,

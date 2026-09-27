@@ -9,6 +9,7 @@ import {
   toHarnessManifest,
   toUiAuthPublic,
   toUiCatalogEntry,
+  toUiSecretDisplay,
   toUiConnector,
   toUiConnectorFromReadEntry,
   toUiTool,
@@ -48,6 +49,47 @@ describe('connectorCatalog mappers', () => {
     });
   });
 
+  it('maps oauth_client auth with safe secret display', () => {
+    const secretRef = '${env:GOOGLE_CLIENT_SECRET}';
+    assert.deepEqual(
+      toUiAuthPublic({
+        type: 'oauth_client',
+        clientId: 'test-client-id',
+        clientSecret: secretRef,
+        scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+      }),
+      {
+        type: 'oauth_client',
+        clientId: 'test-client-id',
+        scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+        clientSecretDisplay: '${env:GOOGLE_CLIENT_SECRET}',
+      },
+    );
+  });
+
+  it('masks non-reference client secrets in oauth_client public auth', () => {
+    const secretValue = 'actual-secret-value';
+    const result = toUiAuthPublic({
+      type: 'oauth_client',
+      clientId: 'test-client-id',
+      clientSecret: secretValue,
+      scopes: [],
+    });
+    assert.equal(result.type, 'oauth_client');
+    if (result.type === 'oauth_client') {
+      assert.equal(result.clientSecretDisplay, '••••••••');
+      assert.ok(!('clientSecret' in result));
+    }
+  });
+
+  it('toUiSecretDisplay passes references through and masks everything else', () => {
+    assert.equal(toUiSecretDisplay('${env:FOO}'), '${env:FOO}');
+    assert.equal(toUiSecretDisplay('${file:/path/to/secret}'), '${file:/path/to/secret}');
+    assert.equal(toUiSecretDisplay('plain-secret'), '••••••••');
+    assert.equal(toUiSecretDisplay(''), '••••••••');
+    assert.equal(toUiSecretDisplay('${env:FOO} extra'), '••••••••');
+  });
+
   it('maps UI write auth onto harness dcr/header/omit', () => {
     assert.equal(toHarnessAuth({ type: 'none' }), undefined);
     assert.deepEqual(toHarnessAuth({ type: 'dcr' }), { type: 'dcr' });
@@ -62,11 +104,13 @@ describe('connectorCatalog mappers', () => {
   });
 
   it('leaves an already-schemed Authorization value untouched', () => {
-    assert.deepEqual(toHarnessAuth({ type: 'header', apiKey: 'Bearer x' }), {
+    const bearerKey = 'Bearer x';
+    const basicKey = 'Basic abc';
+    assert.deepEqual(toHarnessAuth({ type: 'header', apiKey: bearerKey }), {
       type: 'header',
       headers: { Authorization: 'Bearer x' },
     });
-    assert.deepEqual(toHarnessAuth({ type: 'header', apiKey: 'Basic abc' }), {
+    assert.deepEqual(toHarnessAuth({ type: 'header', apiKey: basicKey }), {
       type: 'header',
       headers: { Authorization: 'Basic abc' },
     });

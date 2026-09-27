@@ -10,6 +10,25 @@ import { useCatalogServer } from '../../server/ServerContext.js';
 import type { ConnectorBase, ToolBase } from '../../server/types.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
 import { AUTH_TYPE_LABELS } from './authTypeLabels.js';
+import { describeOAuthScopes } from './oauthScopeLabels.js';
+
+/** True for OAuth flows that use the browser authorize/connect cycle (DCR or pre-registered client). */
+function isOAuthAuth(authType: string): boolean {
+  return authType === 'dcr' || authType === 'oauth_client';
+}
+
+/** Safe credential rows for the details view. Secrets are never shown in full. */
+function oauthClientCredentialRows(auth: ConnectorBase['auth']): Array<{ label: string; value: string }> {
+  if (auth.type !== 'oauth_client') return [];
+  const rows: Array<{ label: string; value: string }> = [];
+  if ('clientId' in auth && typeof auth.clientId === 'string' && auth.clientId !== '') {
+    rows.push({ label: 'Client ID', value: auth.clientId });
+  }
+  if ('clientSecretDisplay' in auth && typeof auth.clientSecretDisplay === 'string' && auth.clientSecretDisplay !== '') {
+    rows.push({ label: 'Client secret', value: auth.clientSecretDisplay });
+  }
+  return rows;
+}
 
 type ConnectorDetailsProps = {
   connector: ConnectorBase;
@@ -151,6 +170,14 @@ const ConnectorDetails = ({
 
   const connecting = isOAuthLoading || refreshingAfterAuth;
 
+  const credentialRows = oauthClientCredentialRows(connector.auth);
+  const oauthScopes =
+    connector.auth.type === 'oauth_client' && 'scopes' in connector.auth && Array.isArray(connector.auth.scopes)
+      ? (connector.auth.scopes as string[])
+      : undefined;
+  const permissions = describeOAuthScopes(oauthScopes);
+  const showCredentialsSection = connector.auth.type === 'oauth_client' && (credentialRows.length > 0 || permissions.length > 0);
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <button
@@ -202,7 +229,7 @@ const ConnectorDetails = ({
               <Icon name="pencil" className="size-3" />
               Edit
             </Button.Secondary>
-            {connector.auth.type === 'dcr' && !connector.authenticated ? (
+            {isOAuthAuth(connector.auth.type) && !connector.authenticated ? (
               <Button.Secondary
                 size="small"
                 type="button"
@@ -215,13 +242,42 @@ const ConnectorDetails = ({
               >
                 {connecting ? 'Connecting…' : 'Connect'}
               </Button.Secondary>
-            ) : connector.auth.type === 'dcr' && !connector.requiresAuth ? (
+            ) : isOAuthAuth(connector.auth.type) && !connector.requiresAuth ? (
               <Button.Secondary size="small" type="button" disabled={busy} onClick={onDisconnect}>
                 Disconnect
               </Button.Secondary>
             ) : null}
           </div>
         </header>
+
+        {showCredentialsSection ? (
+          <section className="mt-6" aria-labelledby="connector-credentials-heading">
+            <h5 id="connector-credentials-heading" className="mb-2 text-[0.8125rem] font-semibold text-text-primary">
+              Credentials
+            </h5>
+            <div className="overflow-hidden rounded-xl border border-border bg-card-bg">
+              {credentialRows.map(row => (
+                <div
+                  key={row.label}
+                  className="flex min-h-12 items-center gap-3 border-b border-border px-3 py-2 last:border-b-0"
+                >
+                  <span className="w-28 shrink-0 text-sm text-text-secondary">{row.label}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-sm text-text-primary">{row.value}</span>
+                </div>
+              ))}
+              {permissions.length > 0 ? (
+                <div className="px-3 py-2">
+                  <h6 className="mb-1 text-sm font-medium text-text-primary">Permissions</h6>
+                  <ul className="list-disc pl-5 text-sm text-text-secondary">
+                    {permissions.map((permission, index) => (
+                      <li key={index}>{permission}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
 
         <section className="mt-6" aria-labelledby="connector-tools-heading">
           {toolsLoading ? (
@@ -231,7 +287,7 @@ const ConnectorDetails = ({
           ) : toolsError ? (
             <div className="rounded-xl border border-failure-bg/30 bg-failure-bg/10 p-6 text-center text-sm text-failure-bg">
               {toolsError}
-              {connector.auth.type === 'dcr' && !connector.authenticated && (
+              {isOAuthAuth(connector.auth.type) && !connector.authenticated && (
                 <div className="font-bold mt-1">Click Connect and authenticate successfully to view tools.</div>
               )}
             </div>

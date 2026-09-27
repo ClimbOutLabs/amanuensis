@@ -1,7 +1,7 @@
 ---
 title: 'Setup MCP Servers'
 sidebarTitle: 'MCP Servers'
-description: 'Connect remote MCP servers from the shipped catalog or your own URL — with header auth or OAuth.'
+description: 'Connect remote MCP servers from the shipped catalog or your own URL - with header auth or OAuth.'
 ---
 
 MCP servers are how your agent reaches real systems: SaaS apps, internal APIs, data platforms, ticketing tools, and infrastructure controls.
@@ -16,26 +16,27 @@ Open **Settings → Connectors**, pick a server from the catalog, complete auth 
 You can also use **Add MCP Server** to register any remote URL that is not in the catalog.
 
 
-The catalog entries under **Settings → Connectors** (Linear, Notion, GitHub, and others) come from the shipped MCP catalog — see [Initial Setup](/harness/initial-setup#what-is-supported-out-of-the-box) for how catalogs work and how to change what the UI offers.
+The catalog entries under **Settings → Connectors** (Linear, Notion, GitHub, and others) come from the shipped MCP catalog - see [Initial Setup](/harness/initial-setup#what-is-supported-out-of-the-box) for how catalogs work and how to change what the UI offers.
 
 ## Authentication options
 
-- **No auth** — public or network-trusted servers.
-- **Header auth** — static HTTP headers (API keys, bearer tokens) sent on every request.
-- **OAuth (Dynamic Client Registration)** — TrueForge registers as an OAuth client, runs the authorization-code flow, and stores and refreshes tokens. Users never paste tokens into the agent.
+- **No auth** - public or network-trusted servers.
+- **Header auth** - static HTTP headers (API keys, bearer tokens) sent on every request.
+- **OAuth (Dynamic Client Registration)** - TrueForge registers as an OAuth client, runs the authorization-code flow, and stores and refreshes tokens. Users never paste tokens into the agent.
+- **OAuth (pre-registered client)**: for providers like Google where you create the OAuth client yourself (e.g. in Google Cloud Console). Store the client ID and secret as `${env:NAME}` or `${file:PATH}` references; TrueForge resolves them at use time, runs the authorization-code flow with the scopes from the catalog entry, and stores and refreshes tokens. The connector details show the requested permissions in plain language, and secrets are never displayed in full.
 
 <Info>
-  For OAuth to work, the MCP server must redirect the user back to your TrueForge instance — so the server needs to
+  For OAuth to work, the MCP server must redirect the user back to your TrueForge instance - so the server needs to
   know its own public address. That is the `PUBLIC_BASE_URL` environment variable. It defaults to
   `http://localhost:<port>`, which is fine on your own machine; set it whenever TrueForge is reached at a different
-  address (a domain, reverse proxy, or another host). Where to set it depends on how you run TrueForge — as an env var
+  address (a domain, reverse proxy, or another host). Where to set it depends on how you run TrueForge - as an env var
   for `npx`, in `packages/trueforge/.env` for Docker Compose, or `server.publicBaseUrl` for Helm. See the
   [Quickstart FAQ](/quickstart#faq).
 </Info>
 
 ## In-chat authentication
 
-If a server uses OAuth and the user has not yet authorized it, the turn pauses and the chat UI shows a **Connect** button. The user completes OAuth in a popup and continues the conversation — the agent does not fail.
+If a server uses OAuth and the user has not yet authorized it, the turn pauses and the chat UI shows a **Connect** button. The user completes OAuth in a popup and continues the conversation - the agent does not fail.
 
 
 ## Next steps

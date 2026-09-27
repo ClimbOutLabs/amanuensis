@@ -29,7 +29,20 @@ import { getErrorMessage } from '../../../utils/getErrorMessage.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
 
 export type UiConnectorAuth = ConnectorAuth;
-export type UiConnectorAuthPublic = ConnectorAuthPublic;
+/**
+ * Public auth, widened for `oauth_client`: the client secret is never sent in the clear.
+ * `clientSecretDisplay` carries either a `${env:NAME}` / `${file:PATH}` reference (shown as-is)
+ * or a masked value. It is display-only; the write path uses `clientSecret`.
+ */
+export type UiOAuthClientAuthPublic = {
+  type: 'oauth_client';
+  clientId?: string;
+  scopes?: string[];
+  clientSecretDisplay?: string;
+};
+export type UiConnectorAuthPublic =
+  | Exclude<ConnectorAuthPublic, { type: 'oauth_client' }>
+  | UiOAuthClientAuthPublic;
 /**
  * `ConnectorBase` is the runtime's generic connector row type; it doesn't know about the
  * memory-provider flag. Widen locally rather than editing `@truefoundry/assistant-ui-runtime`.
@@ -126,8 +139,23 @@ async function requestMemoryProviderCheck({
 const DELETE_CONNECTOR_TIMEOUT_SECONDS = 15;
 
 const DEFAULT_API_KEY_HEADER = 'Authorization';
-/** An existing auth scheme prefix, e.g. `Bearer `/`Basic ` — a scheme token followed by whitespace. */
+/** An existing auth scheme prefix, e.g. `Bearer `/`Basic ` - a scheme token followed by whitespace. */
 const AUTH_SCHEME_PREFIX_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*\s/;
+
+/** Matches a `${env:NAME}` / `${file:PATH}` secret reference exactly. References are pointers, not secrets. */
+const SECRET_REFERENCE_PATTERN = /^\$\{(?:env|file):[^}]+\}$/;
+
+/**
+ * Safe secret display for the UI. A secret reference is shown as-is (it names where the secret
+ * lives, it is not the secret). Any other value is masked to a fixed string so a full secret
+ * can never reach the UI, even if a backend ever sent one by mistake.
+ */
+export function toUiSecretDisplay(value: string): string {
+  if (SECRET_REFERENCE_PATTERN.test(value)) {
+    return value;
+  }
+  return '••••••••';
+}
 
 export function toUiAuthPublic(
   auth: TrueForgeApi.McpServerManifestAuth | TrueForgeApi.McpServerAuthPublic | undefined,
@@ -141,10 +169,15 @@ export function toUiAuthPublic(
   if (auth.type === 'oauth_client') {
     const clientId = 'clientId' in auth && typeof auth.clientId === 'string' ? auth.clientId : undefined;
     const scopes = 'scopes' in auth && Array.isArray(auth.scopes) ? auth.scopes : undefined;
+    const clientSecret =
+      'clientSecret' in auth && typeof auth.clientSecret === 'string' ? auth.clientSecret : undefined;
     return {
       type: 'oauth_client',
       ...(clientId ? { clientId } : {}),
       ...(scopes ? { scopes } : {}),
+      ...(clientSecret !== undefined && clientSecret !== ''
+        ? { clientSecretDisplay: toUiSecretDisplay(clientSecret) }
+        : {}),
     };
   }
   if (auth.type === 'header') {
@@ -401,7 +434,7 @@ export function createConnectorCatalog(
     },
     disconnectConnector: async req => {
       const existing = await getConfigured(req.id);
-      if (existing.manifest.auth?.type !== 'dcr') {
+      if (existing.manifest.auth?.type !== 'dcr' && existing.manifest.auth?.type !== 'oauth_client') {
         throw new Error(`Disconnect is only supported for OAuth MCP servers`);
       }
       const body = await client.mcpServers.deleteAuthorization(req.id);
@@ -410,7 +443,7 @@ export function createConnectorCatalog(
     deleteConnector: async req => {
       // The delete route itself is a local DB transaction (no live dial to the connector's own
       // endpoint), but a bounded timeout still caps how long a slow/unreachable Harness server can
-      // hold the Settings UI in its "deleting…" state — the SDK's 60s default reads as a freeze.
+      // hold the Settings UI in its "deleting…" state - the SDK's 60s default reads as a freeze.
       // maxRetries: 0 makes that bound real: the SDK's default retries a 408/429/5xx response up
       // to twice more, with delays of up to 60s between attempts, which would blow well past the
       // timeout below if left at its default even though each individual attempt still honors it.

@@ -265,7 +265,17 @@ const ConnectorSettings = () => {
           }
         : entry.auth.type === 'dcr'
           ? { type: 'dcr' }
-          : { type: 'none' });
+          : entry.auth.type === 'oauth_client'
+            ? {
+                type: 'oauth_client',
+                clientId: 'clientId' in entry.auth && typeof entry.auth.clientId === 'string' ? entry.auth.clientId : '',
+                clientSecret:
+                  'clientSecretDisplay' in entry.auth && typeof entry.auth.clientSecretDisplay === 'string'
+                    ? entry.auth.clientSecretDisplay
+                    : '',
+                ...('scopes' in entry.auth && Array.isArray(entry.auth.scopes) ? { scopes: entry.auth.scopes } : {}),
+              }
+            : { type: 'none' });
     await connectorCatalog.createConnector({
       name: entry.name,
       description: entry.description ?? entry.url,
@@ -379,7 +389,7 @@ const ConnectorSettings = () => {
       await connectorCatalog.deleteConnector?.({ id: connector.id });
       setSelectedConnector(current => (current?.id === connector.id ? null : current));
       // A stale test result for a now-deleted row would otherwise carry over verbatim if a
-      // connector with the same id is ever added again — and bumping the generation here also
+      // connector with the same id is ever added again - and bumping the generation here also
       // discards a test for this id that was still in flight when the delete landed, so its
       // result can never write itself back in afterward.
       invalidateConnectionCheck(connector.id);
@@ -434,7 +444,7 @@ const ConnectorSettings = () => {
     }
     // Captured now, checked when the response lands: if invalidateConnectionCheck bumped this
     // id's generation in between (a delete, disconnect, reconnect, or key replace), the
-    // generation this request started with is no longer current and its result is dropped —
+    // generation this request started with is no longer current and its result is dropped -
     // never written into the map, no matter how long after the fact it arrives.
     const generation = (checkGenerationById.current.get(connector.id) ?? 0) + 1;
     checkGenerationById.current.set(connector.id, generation);
@@ -478,7 +488,7 @@ const ConnectorSettings = () => {
     const connectorCheckStatus = checkStatusById.get(connector.id) ?? null;
     // Nothing has dialed this connector's endpoint yet: `authenticated` only means "has valid
     // credentials" (or "no credentials needed"), which the server computes without ever reaching
-    // the endpoint — so it is not by itself evidence of reachability. Where a connection
+    // the endpoint - so it is not by itself evidence of reachability. Where a connection
     // test is available, the badge shows what the last test actually found instead. Where the host
     // offers no test at all, there is no way to verify reachability, so fall back to the
     // credential-based signal rather than showing "unverified" forever with no way to clear it.
@@ -767,7 +777,7 @@ const ConnectorSettings = () => {
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-text-secondary">
             <li>
               Find a connector in <span className="font-medium text-text-primary">Available</span> below and choose
-              Connect — most need an API key or token from that service.
+              Connect - most need an API key or token from that service.
             </li>
             <li>Add it to the current chat from the connector row so Aman can use its tools.</li>
             <li>

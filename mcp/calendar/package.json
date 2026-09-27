@@ -1,0 +1,35 @@
+{
+  "name": "@amanuensis/calendar-mcp",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Google Calendar MCP server: list, create, and delete events with minimal OAuth scopes.",
+  "type": "module",
+  "bin": {
+    "calendar-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "npm run clean && tsc",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "dev": "node --import tsx --env-file-if-exists=.env src/index.ts",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "google-auth-library": "10.5.0",
+    "googleapis": "173.0.0",
+    "zod": "^3.22.4",
+    "zod-to-json-schema": "^3.22.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "tsx": "^4.23.1",
+    "typescript": "^5.3.3",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "license": "Apache-2.0"
+}

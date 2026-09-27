@@ -23,6 +23,7 @@ import {
   mcpOAuthCallbackUrl,
   oauthTokensToOAuthToken,
 } from './mcpOAuthHelpers';
+import { isSecretReference, resolveSecretReference } from '../../utils/secretReferences';
 import type {
   IOAuthClientStore,
   IOAuthTokenStore,
@@ -225,6 +226,8 @@ export async function createMcpOAuthClient(params: {
 /**
  * Builds a client record from pre-registered OAuth credentials in the manifest.
  * Discovers the authorization server metadata but does not register a new client.
+ * `clientId` / `clientSecret` may be `${env:NAME}` / `${file:PATH}` references;
+ * they are resolved here, at use time, and the resolved values are never persisted.
  */
 async function createMcpOAuthClientFromManifest(params: {
   clientId: string;
@@ -239,17 +242,36 @@ async function createMcpOAuthClientFromManifest(params: {
   return {
     server: metadata,
     client: {
-      clientId: params.clientId,
-      clientSecret: params.clientSecret,
+      clientId: await resolveOAuthClientCredential(params.clientId, 'client_id', params.mcpServerName),
+      clientSecret: await resolveOAuthClientCredential(params.clientSecret, 'client_secret', params.mcpServerName),
     },
   };
+}
+
+/**
+ * Resolves one OAuth client credential. Plain values pass through untouched;
+ * `${env:NAME}` / `${file:PATH}` references are resolved at use time and never cached.
+ * Failures name the reference, never the value.
+ */
+async function resolveOAuthClientCredential(value: string, label: string, mcpServerName: string): Promise<string> {
+  if (!isSecretReference(value)) {
+    return value;
+  }
+  try {
+    return await resolveSecretReference(value);
+  } catch (error) {
+    throw new McpConnectionError(
+      `Failed to resolve OAuth ${label} for MCP server '${mcpServerName}': ${(error as Error).message}`,
+      500,
+    );
+  }
 }
 
 /**
  * Returns the stored OAuth client for `serverId`, or discovers + creates one via DCR or oauth_client.
  * For DCR: discovers + registers and persists a new client.
  * For oauth_client: discovers metadata and builds client from manifest credentials without persisting the client.
- * Used from `resolveMcpAuth` only — callers that already hold the client should pass it through.
+ * Used from `resolveMcpAuth` only - callers that already hold the client should pass it through.
  */
 export async function ensureMcpClientRegistered(params: {
   mcpServerStore: IOAuthClientStore;
@@ -289,6 +311,21 @@ export async function ensureMcpClientRegistered(params: {
   return client;
 }
 
+/**
+ * RFC 8707 `resource` parameter for an authorization request. Google's OAuth
+ * endpoints reject the `resource` parameter, so it is omitted when the
+ * authorization server is Google; sent otherwise.
+ */
+function resourceForAuthorizationServer(
+  authorizationServerOrigin: string,
+  mcpServerUrl: string,
+): URL | undefined {
+  if (/^https:\/\/accounts\.google\.com$/i.test(authorizationServerOrigin)) {
+    return undefined;
+  }
+  return resourceUrlFromServerUrl(mcpServerUrl);
+}
+
 /** Builds the AS authorize URL and saves the pending PKCE row. Caller must already have `client`. */
 export async function buildMcpAuthorizationUrl(params: {
   tokenStore: IOAuthTokenStore;
@@ -298,16 +335,20 @@ export async function buildMcpAuthorizationUrl(params: {
   mcpServerUrl: string;
   mcpServerName: string;
   returnTo?: string;
+  /** OAuth scopes to request, from the manifest. When absent, the AS default applies. */
+  scopes?: string[];
 }): Promise<URL> {
   const state = randomBytes(32).toString('base64url');
   const redirectUri = mcpOAuthCallbackUrl();
+  const authorizationServerOrigin = mcpAuthorizationServerOrigin(params.client.server);
   let started: Awaited<ReturnType<typeof startAuthorization>>;
   try {
-    started = await startAuthorization(mcpAuthorizationServerOrigin(params.client.server), {
+    started = await startAuthorization(authorizationServerOrigin, {
       metadata: mcpAuthorizationServerMetadata(params.client.server),
       clientInformation: mcpClientInformation(params.client.client),
       redirectUrl: redirectUri,
-      resource: resourceUrlFromServerUrl(params.mcpServerUrl),
+      resource: resourceForAuthorizationServer(authorizationServerOrigin, params.mcpServerUrl),
+      ...(params.scopes !== undefined && params.scopes.length > 0 ? { scope: params.scopes.join(' ') } : {}),
       state,
     });
   } catch (error: unknown) {
@@ -337,6 +378,8 @@ export async function resolveMcpAuth(params: {
   authType: 'dcr' | 'oauth_client';
   oauthClientId?: string;
   oauthClientSecret?: string;
+  /** OAuth scopes to request, from the manifest. When absent, the AS default applies. */
+  oauthScopes?: string[];
   returnTo?: string;
 }): Promise<ResolveMcpAuthResult> {
   const nowMs = Date.now();
@@ -357,11 +400,12 @@ export async function resolveMcpAuth(params: {
   });
   if (token?.refreshToken) {
     try {
-      const refreshed = await refreshAuthorization(mcpAuthorizationServerOrigin(client.server), {
+      const authorizationServerOrigin = mcpAuthorizationServerOrigin(client.server);
+      const refreshed = await refreshAuthorization(authorizationServerOrigin, {
         metadata: mcpAuthorizationServerMetadata(client.server),
         clientInformation: mcpClientInformation(client.client),
         refreshToken: token.refreshToken,
-        resource: resourceUrlFromServerUrl(params.mcpServerUrl),
+        resource: resourceForAuthorizationServer(authorizationServerOrigin, params.mcpServerUrl),
         fetchFn: mcpOAuthFetch,
       });
       const saved = oauthTokensToOAuthToken(refreshed, nowMs, token.refreshToken);
@@ -382,6 +426,7 @@ export async function resolveMcpAuth(params: {
     mcpServerUrl: params.mcpServerUrl,
     mcpServerName: params.mcpServerName,
     ...(params.returnTo !== undefined ? { returnTo: params.returnTo } : {}),
+    ...(params.oauthScopes !== undefined ? { scopes: params.oauthScopes } : {}),
   });
   return { authUrl };
 }
@@ -413,13 +458,14 @@ export async function completeMcpAuthorization<TTransaction>(params: {
   }
   let tokens: OAuthTokens;
   try {
-    tokens = await exchangeAuthorization(mcpAuthorizationServerOrigin(client.server), {
+    const authorizationServerOrigin = mcpAuthorizationServerOrigin(client.server);
+    tokens = await exchangeAuthorization(authorizationServerOrigin, {
       metadata: mcpAuthorizationServerMetadata(client.server),
       clientInformation: mcpClientInformation(client.client),
       authorizationCode: params.code,
       codeVerifier: pending.codeVerifier,
       redirectUri: mcpOAuthCallbackUrl(),
-      resource: resourceUrlFromServerUrl(pending.mcpServerUrl),
+      resource: resourceForAuthorizationServer(authorizationServerOrigin, pending.mcpServerUrl),
       fetchFn: mcpOAuthFetch,
     });
   } catch (error: unknown) {

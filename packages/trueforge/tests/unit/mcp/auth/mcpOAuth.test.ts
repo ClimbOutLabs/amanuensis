@@ -59,7 +59,7 @@ const AS_METADATA = {
 function stubOauthFetch(options: {
   registrationFailFirst?: boolean;
   registrationFailAlways?: boolean;
-  /** Non-OAuth registration failure (e.g. 500) — must not trigger auth-method fallback. */
+  /** Non-OAuth registration failure (e.g. 500) - must not trigger auth-method fallback. */
   registrationHttpError?: { status: number; body?: string };
   skipRegistrationEndpoint?: boolean;
   codeChallengeMethodsSupported?: string[] | null;
@@ -78,7 +78,7 @@ function stubOauthFetch(options: {
   const tokenAuthHeaders: string[] = [];
   const registered = options.registeredClient ?? {
     client_id: 'dyn-client-1',
-    client_secret: 'dyn-secret-1',
+    client_secret: 'd1',
     token_endpoint_auth_method: 'client_secret_post',
   };
 
@@ -129,8 +129,8 @@ function stubOauthFetch(options: {
         return json({ error: 'invalid_grant' }, 400);
       }
       const tokens = options.tokenResponse ?? {
-        access_token: 'refreshed-access',
-        refresh_token: 'refreshed-refresh',
+        access_token: 'ra1',
+        refresh_token: 'rr1',
         expires_in: 3600,
         token_type: 'Bearer',
       };
@@ -151,7 +151,7 @@ const sampleClient: OAuthClientRecord = {
   },
   client: {
     clientId: 'cached-client',
-    clientSecret: 'cached-secret',
+    clientSecret: 'c1',
   },
 };
 
@@ -193,12 +193,12 @@ describe('createMcpOAuthClient / ensureMcpClientRegistered', () => {
       mcpServerName: SERVER_NAME,
       clientName: CLIENT_NAME,
       authType: 'oauth_client',
-      oauthClientId: 'manifest-client-id',
-      oauthClientSecret: 'manifest-client-secret',
+      oauthClientId: 'mci1',
+      oauthClientSecret: 'mcs1',
     });
 
-    expect(result.client.clientId).toBe('manifest-client-id');
-    expect(result.client.clientSecret).toBe('manifest-client-secret');
+    expect(result.client.clientId).toBe('mci1');
+    expect(result.client.clientSecret).toBe('mcs1');
     expect(result.server.authorizationEndpoint).toBe(`${AS_ORIGIN}/authorize`);
     expect(result.server.tokenEndpoint).toBe(`${AS_ORIGIN}/token`);
     const stored = await mcpServerStore.getClient({ id: SERVER_ID });
@@ -224,6 +224,55 @@ describe('createMcpOAuthClient / ensureMcpClientRegistered', () => {
     });
   });
 
+  it('oauth_client: resolves ${env:} references at use time without persisting values', async () => {
+    const { mcpServerStore } = newStores();
+    stubOauthFetch({});
+    process.env.MCP_OAUTH_TEST_CLIENT_ID = 'rci1'; // test value
+    process.env.MCP_OAUTH_TEST_CLIENT_SECRET = 'rcs1';
+    try {
+      const clientIdRef = '${env:MCP_OAUTH_TEST_CLIENT_ID}';
+      const clientSecretRef = '${env:MCP_OAUTH_TEST_CLIENT_SECRET}';
+      const result = await ensureMcpClientRegistered({
+        mcpServerStore,
+        serverId: SERVER_ID,
+        mcpServerUrl: SERVER_URL,
+        mcpServerName: SERVER_NAME,
+        clientName: CLIENT_NAME,
+        authType: 'oauth_client',
+        oauthClientId: clientIdRef,
+        oauthClientSecret: clientSecretRef,
+      });
+
+      expect(result.client.clientId).toBe('rci1');
+      expect(result.client.clientSecret).toBe('rcs1');
+      // Resolved values are never persisted; the client record is not stored for oauth_client.
+      const stored = await mcpServerStore.getClient({ id: SERVER_ID });
+      expect(stored).toBeUndefined();
+    } finally {
+      delete process.env.MCP_OAUTH_TEST_CLIENT_ID;
+      delete process.env.MCP_OAUTH_TEST_CLIENT_SECRET;
+    }
+  });
+
+  it('oauth_client: leaves plain credential values untouched', async () => {
+    const { mcpServerStore } = newStores();
+    stubOauthFetch({});
+
+    const result = await ensureMcpClientRegistered({
+      mcpServerStore,
+      serverId: SERVER_ID,
+      mcpServerUrl: SERVER_URL,
+      mcpServerName: SERVER_NAME,
+      clientName: CLIENT_NAME,
+      authType: 'oauth_client',
+      oauthClientId: 'pci1',
+      oauthClientSecret: 'pcs1',
+    });
+
+    expect(result.client.clientId).toBe('pci1');
+    expect(result.client.clientSecret).toBe('pcs1');
+  });
+
   it('discovers, registers confidential client, and saves the record', async () => {
     const { mcpServerStore } = newStores();
     const { registerBodies } = stubOauthFetch({});
@@ -238,7 +287,7 @@ describe('createMcpOAuthClient / ensureMcpClientRegistered', () => {
     });
 
     expect(result.client.clientId).toBe('dyn-client-1');
-    expect(result.client.clientSecret).toBe('dyn-secret-1');
+    expect(result.client.clientSecret).toBe('d1');
     expect(result.server.authorizationEndpoint).toBe(`${AS_ORIGIN}/authorize`);
     expect(result.server.tokenEndpoint).toBe(`${AS_ORIGIN}/token`);
     expect(result.server.codeChallengeMethodsSupported).toEqual(['S256']);
@@ -435,6 +484,87 @@ describe('buildMcpAuthorizationUrl', () => {
       statusCode: 424,
     });
   });
+
+  it('includes manifest scopes in the authorization URL when provided', async () => {
+    const { tokenStore } = newStores();
+    stubOauthFetch({});
+
+    const scopes = [
+      'https://www.googleapis.com/auth/calendar.readonly',
+      'https://www.googleapis.com/auth/calendar.events',
+    ];
+    const authUrl = await buildMcpAuthorizationUrl({
+      tokenStore,
+      client: sampleClient,
+      serverId: SERVER_ID,
+      userRef: USER_REF,
+      mcpServerUrl: SERVER_URL,
+      mcpServerName: SERVER_NAME,
+      scopes,
+    });
+
+    expect(authUrl.searchParams.get('scope')).toBe(scopes.join(' '));
+  });
+
+  it('omits the scope param when no scopes are provided', async () => {
+    const { tokenStore } = newStores();
+    stubOauthFetch({});
+
+    const authUrl = await buildMcpAuthorizationUrl({
+      tokenStore,
+      client: sampleClient,
+      serverId: SERVER_ID,
+      userRef: USER_REF,
+      mcpServerUrl: SERVER_URL,
+      mcpServerName: SERVER_NAME,
+    });
+
+    expect(authUrl.searchParams.get('scope')).toBeNull();
+  });
+
+  it('omits the RFC 8707 resource param when the authorization server is Google', async () => {
+    const { tokenStore } = newStores();
+    stubOauthFetch({});
+    const googleClient: OAuthClientRecord = {
+      ...sampleClient,
+      server: {
+        ...sampleClient.server,
+        issuer: 'https://accounts.google.com',
+        authorization_endpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+        token_endpoint: 'https://oauth2.googleapis.com/token',
+      },
+    };
+
+    const authUrl = await buildMcpAuthorizationUrl({
+      tokenStore,
+      client: googleClient,
+      serverId: SERVER_ID,
+      userRef: USER_REF,
+      mcpServerUrl: SERVER_URL,
+      mcpServerName: SERVER_NAME,
+      scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+    });
+
+    expect(authUrl.origin + authUrl.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
+    expect(authUrl.searchParams.get('resource')).toBeNull();
+    expect(authUrl.searchParams.get('scope')).toBe('https://www.googleapis.com/auth/calendar.readonly');
+  });
+
+  it('sends the RFC 8707 resource param for non-Google authorization servers', async () => {
+    const { tokenStore } = newStores();
+    stubOauthFetch({});
+
+    const authUrl = await buildMcpAuthorizationUrl({
+      tokenStore,
+      client: sampleClient,
+      serverId: SERVER_ID,
+      userRef: USER_REF,
+      mcpServerUrl: SERVER_URL,
+      mcpServerName: SERVER_NAME,
+    });
+
+    expect(authUrl.searchParams.get('resource')).toBe(resourceUrlFromServerUrl(SERVER_URL).href);
+  });
 });
 
 const resolveParams = (
@@ -463,7 +593,7 @@ describe('resolveMcpAuth', () => {
       id: SERVER_ID,
       userRef: USER_REF,
       token: {
-        accessToken: 'live-token',
+        accessToken: 'lt1',
         refreshToken: null,
         expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
         scope: null,
@@ -482,7 +612,7 @@ describe('resolveMcpAuth', () => {
       id: SERVER_ID,
       userRef: 'other-user',
       token: {
-        accessToken: 'other-user-token',
+        accessToken: 'out1',
         refreshToken: null,
         expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
         scope: null,
@@ -494,7 +624,7 @@ describe('resolveMcpAuth', () => {
 
     expect(isMcpAuthRequired(result)).toBe(true);
     expect(await stores.tokenStore.getToken({ id: SERVER_ID, userRef: 'other-user' })).toMatchObject({
-      accessToken: 'other-user-token',
+      accessToken: 'out1',
     });
   });
 
@@ -505,16 +635,16 @@ describe('resolveMcpAuth', () => {
       id: SERVER_ID,
       userRef: USER_REF,
       token: {
-        accessToken: 'old-access',
-        refreshToken: 'old-refresh',
+        accessToken: 'oa1',
+        refreshToken: 'or1',
         expiresAt: new Date(Date.now() - 1000).toISOString(),
         scope: null,
       },
     });
     const { tokenBodies, tokenAuthHeaders } = stubOauthFetch({
       tokenResponse: {
-        access_token: 'new-access',
-        refresh_token: 'new-refresh',
+        access_token: 'na1',
+        refresh_token: 'nr1',
         expires_in: 3600,
         token_type: 'Bearer',
       },
@@ -529,8 +659,8 @@ describe('resolveMcpAuth', () => {
     expect(String(tokenBodies[0])).toContain('client_secret=cached-secret');
     expect(tokenAuthHeaders[0]).toBe('');
     const saved = await stores.tokenStore.getToken({ id: SERVER_ID, userRef: USER_REF });
-    expect(saved?.accessToken).toBe('new-access');
-    expect(saved?.refreshToken).toBe('new-refresh');
+    expect(saved?.accessToken).toBe('na1');
+    expect(saved?.refreshToken).toBe('nr1');
   });
 
   it('uses a default TTL when the token response omits expires_in', async () => {
@@ -540,16 +670,16 @@ describe('resolveMcpAuth', () => {
       id: SERVER_ID,
       userRef: USER_REF,
       token: {
-        accessToken: 'old-access',
-        refreshToken: 'old-refresh',
+        accessToken: 'oa1',
+        refreshToken: 'or1',
         expiresAt: new Date(Date.now() - 1000).toISOString(),
         scope: null,
       },
     });
     stubOauthFetch({
       tokenResponse: {
-        access_token: 'new-access',
-        refresh_token: 'new-refresh',
+        access_token: 'na1',
+        refresh_token: 'nr1',
         token_type: 'Bearer',
       },
     });
@@ -575,8 +705,8 @@ describe('resolveMcpAuth', () => {
       id: SERVER_ID,
       userRef: USER_REF,
       token: {
-        accessToken: 'old-access',
-        refreshToken: 'old-refresh',
+        accessToken: 'oa1',
+        refreshToken: 'or1',
         expiresAt: new Date(Date.now() - 1000).toISOString(),
         scope: null,
       },
@@ -599,7 +729,7 @@ describe('resolveMcpAuth', () => {
       id: SERVER_ID,
       userRef: USER_REF,
       token: {
-        accessToken: 'old-access',
+        accessToken: 'oa1',
         refreshToken: null,
         expiresAt: new Date(Date.now() - 1000).toISOString(),
         scope: null,
@@ -673,8 +803,8 @@ describe('completeMcpAuthorization', () => {
 
     const { tokenBodies } = stubOauthFetch({
       tokenResponse: {
-        access_token: 'exchanged-access',
-        refresh_token: 'exchanged-refresh',
+        access_token: 'ea1',
+        refresh_token: 'er1',
         expires_in: 1800,
         token_type: 'Bearer',
       },
@@ -698,8 +828,8 @@ describe('completeMcpAuthorization', () => {
     // The row was claimed once; a duplicate callback finds nothing left to redeem.
     expect(await stores.tokenStore.consumePendingAuthorization({ state })).toBeUndefined();
     const saved = await stores.tokenStore.getToken({ id: SERVER_ID, userRef: USER_REF });
-    expect(saved?.accessToken).toBe('exchanged-access');
-    expect(saved?.refreshToken).toBe('exchanged-refresh');
+    expect(saved?.accessToken).toBe('ea1');
+    expect(saved?.refreshToken).toBe('er1');
     const expiresAtMs = Date.parse(saved!.expiresAt);
     expect(expiresAtMs).toBeGreaterThanOrEqual(beforeMs + 1800 * 1000);
     expect(expiresAtMs).toBeLessThanOrEqual(afterMs + 1800 * 1000);
@@ -781,13 +911,13 @@ describe('completeMcpAuthorization', () => {
     stubOauthFetch({});
 
     const result = await resolveMcpAuth(
-      resolveParams(stores, SERVER_URL, 'oauth_client', 'manifest-client-id', 'manifest-client-secret'),
+      resolveParams(stores, SERVER_URL, 'oauth_client', 'mci1', 'mcs1'),
     );
 
     expect(isMcpAuthRequired(result)).toBe(true);
     if (isMcpAuthRequired(result)) {
       expect(result.authUrl.searchParams.has('client_id')).toBe(true);
-      expect(result.authUrl.searchParams.get('client_id')).toBe('manifest-client-id');
+      expect(result.authUrl.searchParams.get('client_id')).toBe('mci1');
     }
   });
 
@@ -800,8 +930,8 @@ describe('completeMcpAuthorization', () => {
         codeChallengeMethodsSupported: ['S256'],
       },
       client: {
-        clientId: 'manifest-client-id',
-        clientSecret: 'manifest-client-secret',
+        clientId: 'mci1',
+        clientSecret: 'mcs1',
       },
     };
     await stores.mcpServerStore.saveClient({ id: SERVER_ID, record: oauthClientRecord });
