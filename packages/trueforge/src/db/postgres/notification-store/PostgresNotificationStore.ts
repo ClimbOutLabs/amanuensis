@@ -92,6 +92,12 @@ export class PostgresNotificationStore implements INotificationStore<Transaction
     if (input.created_by_subject_id !== undefined) {
       query = query.where(sql`created_by_subject->>'subject_id'`, '=', input.created_by_subject_id);
     }
+    if (input.schedule_run_id !== undefined) {
+      query =
+        input.schedule_run_id === null
+          ? query.where('schedule_run_id', 'is', null)
+          : query.where('schedule_run_id', '=', input.schedule_run_id);
+    }
     // Unread first, then newest first.
     const rows = await query
       .orderBy(sql`(read_at IS NULL)`, 'desc')
