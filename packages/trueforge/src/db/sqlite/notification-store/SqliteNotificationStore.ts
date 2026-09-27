@@ -98,7 +98,7 @@ export class SqliteNotificationStore implements INotificationStore<Transaction<D
     input: ListNotificationsInput,
     transaction?: Transaction<Database>,
   ): Promise<{ data: NotificationRecord[]; pagination: TokenPagination }> {
-    const offset = decodeOffsetPageToken(input.page_token);
+    const offset = decodeOffsetPageToken(input.page_token ?? undefined);
     const db = transaction ?? this.#db;
     let query = db
       .selectFrom('notification')

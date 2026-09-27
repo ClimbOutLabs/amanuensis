@@ -1,4 +1,4 @@
-import type { CreatedBySubject, TokenPagination } from '@truefoundry/trueforge-core/agent-session';
+import type { TokenPagination } from '@truefoundry/trueforge-core/agent-session';
 import {
   decodeOffsetPageToken,
   paginateOffsetRows,
@@ -15,10 +15,26 @@ import {
   type MarkNotificationReadInput,
   type NotificationRecord,
 } from '../../notificationStore';
-import { now } from '../sqlExpressions';
-import type { Database, NotificationTable } from '../types';
+import { now, json } from '../sqlExpressions';
+import type { Database } from '../types';
+import type { CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 
-function toNotificationRecord(row: NotificationTable): NotificationRecord {
+/** Row shape returned from notification table selects. */
+interface NotificationRow {
+  id: string;
+  tenant_id: string;
+  kind: string;
+  title: string;
+  body: string;
+  schedule_id: string | null;
+  schedule_run_id: string | null;
+  created_by_subject: CreatedBySubject;
+  read_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+function toNotificationRecord(row: NotificationRow): NotificationRecord {
   return {
     id: row.id,
     tenant_id: row.tenant_id,
@@ -56,7 +72,7 @@ export class PostgresNotificationStore implements INotificationStore<Transaction
         body: input.body,
         schedule_id: input.schedule_id ?? null,
         schedule_run_id: input.schedule_run_id ?? null,
-        created_by_subject: input.created_by_subject,
+        created_by_subject: json(input.created_by_subject),
         read_at: null,
         created_at: now(),
         updated_at: now(),
@@ -70,7 +86,7 @@ export class PostgresNotificationStore implements INotificationStore<Transaction
     input: ListNotificationsInput,
     transaction?: Transaction<Database>,
   ): Promise<{ data: NotificationRecord[]; pagination: TokenPagination }> {
-    const offset = decodeOffsetPageToken(input.page_token);
+    const offset = decodeOffsetPageToken(input.page_token ?? undefined);
     const db = transaction ?? this.#db;
     let query = db.selectFrom('notification').selectAll().where('tenant_id', '=', input.tenant_id);
     if (input.created_by_subject_id !== undefined) {
