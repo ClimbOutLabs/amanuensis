@@ -14,7 +14,7 @@ const PRESET_META: Record<ThemePreset, { label: string; description: string }> =
   midnight: { label: 'Midnight', description: 'Deep blue-grays, navy accents' },
   forest: { label: 'Forest', description: 'Calm greens, natural tones' },
   sunset: { label: 'Sunset', description: 'Warm oranges, terracotta' },
-  nvidia: { label: 'NVIDIA', description: 'Signature green on near-black' },
+  volt: { label: 'Volt', description: 'Electric green on near-black' },
 };
 
 const PRESET_ORDER: ThemePreset[] = [
@@ -25,7 +25,7 @@ const PRESET_ORDER: ThemePreset[] = [
   'midnight',
   'forest',
   'sunset',
-  'nvidia',
+  'volt',
 ];
 
 /** Small color swatches previewing a preset's key surfaces. */

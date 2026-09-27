@@ -51,6 +51,7 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  Palette,
   Paperclip,
   Pause,
   Pencil,
@@ -122,6 +123,7 @@ export function resolveIconName(icon: string | readonly string[]): string {
 }
 
 const defaults: Record<string, IconEntry> = {
+  palette: Palette,
   paperclip: Paperclip,
   'arrow-up': ArrowUp,
   'arrow-down': ArrowDown,

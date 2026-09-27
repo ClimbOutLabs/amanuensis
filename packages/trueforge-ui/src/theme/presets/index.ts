@@ -674,10 +674,10 @@ const sunset: PresetTokens = {
 };
 
 /**
- * NVIDIA-adjacent: signature green #76B900 on near-black, for the hackathon.
+ * Electric green #76B900 on near-black.
  * Dark greens and black backgrounds with electric green accents.
  */
-const nvidia: PresetTokens = {
+const volt: PresetTokens = {
   light: {
     sidebarBg: '#eef2e8',
     sidebarText: '#0f1a0a',
@@ -776,7 +776,7 @@ export const PRESETS: Record<ThemePreset, PresetTokens> = {
   midnight,
   forest,
   sunset,
-  nvidia,
+  volt,
 };
 
 export function resolvePresetTokens(preset: ThemePreset | undefined, mode: 'light' | 'dark'): SemanticTokens {
