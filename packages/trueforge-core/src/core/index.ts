@@ -201,6 +201,7 @@ export type {
   MCPAuthRequiredEvent,
   MCPServerAuthInfo,
   MCPServerInitInfo,
+  ModelMessageEvent,
   ThreadDoneEvent,
   ThreadOverwriteContextEvent,
   ToolAdmissionProvenance,
@@ -212,6 +213,10 @@ export type {
 } from './events/schema';
 export { CompletionUsageSchema } from './llm/LLMTypes';
 export type { CompletionUsage } from './llm/LLMTypes';
+export type {
+  ChatCompletionContentPartRefusal,
+  ChatCompletionContentPartText,
+} from './llm/openaiSchemas';
 export type { ToolCallMemoSnapshot } from './mcp/executeToolCalls';
 export { InternalEventType } from './runtime/AgentThread.types';
 export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread.types';
@@ -343,3 +348,7 @@ export {
   renderSkillPromptBody,
 } from './sandbox/skills';
 export type { GitSkill, ISkillMounter, Skill, SkillMounterOptions, SkillPromptMode } from './sandbox/skills';
+
+// Host tool-call policy: lets the host review model-authored tool calls before dispatch
+export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCall } from './runtime/HostToolCallPolicy';
+export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';
