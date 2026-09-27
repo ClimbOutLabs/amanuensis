@@ -27,4 +27,13 @@ describe('StateSprite', () => {
     const { container } = render(<StateSprite state="writing" className="extra" />);
     expect(container.querySelector('.aui-state-sprite')).toHaveClass('extra');
   });
+
+  it('swaps the state modifier class on state change', () => {
+    const { container, rerender } = render(<StateSprite state="listening" />);
+    const sprite = container.querySelector('.aui-state-sprite');
+    expect(sprite).toHaveClass('aui-state-sprite--listening');
+    rerender(<StateSprite state="doing" />);
+    expect(sprite).toHaveClass('aui-state-sprite--doing');
+    expect(sprite).not.toHaveClass('aui-state-sprite--listening');
+  });
 });
