@@ -27,6 +27,18 @@ export interface SessionTipInfo {
   pendingApprovals: PendingApprovalInfo[];
 }
 
+/** Summary of the most recent context compaction on a session. */
+export interface LastCompactionStatus {
+  /** ISO 8601 timestamp of the compaction event. */
+  createdAt: string;
+  /** Estimated context tokens before the compaction attempt. */
+  tokensBefore: number;
+  /** Estimated context tokens after the compaction attempt. */
+  tokensAfter: number;
+  /** Whether the compaction applied, or was skipped as invalid or blocked. */
+  outcome: 'applied' | 'skipped_invalid' | 'skipped_blocked';
+}
+
 /** Host-facing methods beyond the vendor `AgentChatServer` contract. */
 export interface HarnessChatServerExtensions {
   /**
@@ -43,6 +55,35 @@ export interface HarnessChatServerExtensions {
     sessionId: string;
     reason: string;
   }): Promise<{ dismissed: number; alreadyResolved: boolean }>;
+  /**
+   * Read the most recent context compaction event for a session.
+   * Returns `null` when no compaction has run yet.
+   */
+  getLastCompactionStatus(request: {
+    sessionId: string;
+  }): Promise<LastCompactionStatus | null>;
+  /**
+   * Read the input token count from the session's most recent turn.
+   * This is the actual number the model saw for its last request.
+   * Returns `null` when the session has no turns yet or tokens are unknown.
+   */
+  getLastTurnInputTokens(request: {
+    sessionId: string;
+  }): Promise<number | null>;
+}
+
+/** Type guard for servers that provide the harness chat extensions. */
+export function hasSessionResync(server: object): server is HarnessChatServerExtensions {
+  const peek: unknown = Reflect.get(server, 'peekSessionTip');
+  const dismiss: unknown = Reflect.get(server, 'dismissPendingApprovals');
+  const compaction: unknown = Reflect.get(server, 'getLastCompactionStatus');
+  const tokens: unknown = Reflect.get(server, 'getLastTurnInputTokens');
+  return (
+    typeof peek === 'function' &&
+    typeof dismiss === 'function' &&
+    typeof compaction === 'function' &&
+    typeof tokens === 'function'
+  );
 }
 
 /**
@@ -138,7 +179,53 @@ export function createSessionResyncExtensions(
     return { dismissed: input.length, alreadyResolved: false };
   }
 
-  return { peekSessionTip, dismissPendingApprovals };
+  async function getLastCompactionStatus({
+    sessionId,
+  }: {
+    sessionId: string;
+  }): Promise<LastCompactionStatus | null> {
+    const page = await client.sessions.listEvents(sessionId, { limit: 100 });
+    for (const item of page.data) {
+      const event = item.event;
+      if (event.type !== 'agent.context.compaction') continue;
+      return {
+        createdAt: event.createdAt,
+        tokensBefore: event.tokensBefore,
+        tokensAfter: event.tokensAfter,
+        outcome: event.outcome,
+      };
+    }
+    return null;
+  }
+
+  /** Extract a numeric metric from turn state, accepting camelCase or snake_case keys. */
+  function readTurnMetricNumber(metrics: unknown, camel: string, snake: string): number | undefined {
+    if (typeof metrics !== 'object' || metrics === null) return undefined;
+    const camelValue: unknown = Reflect.get(metrics, camel);
+    if (typeof camelValue === 'number' && Number.isFinite(camelValue)) return camelValue;
+    const snakeValue: unknown = Reflect.get(metrics, snake);
+    if (typeof snakeValue === 'number' && Number.isFinite(snakeValue)) return snakeValue;
+    return undefined;
+  }
+
+  async function getLastTurnInputTokens({
+    sessionId,
+  }: {
+    sessionId: string;
+  }): Promise<number | null> {
+    const page = await client.sessions.listTurns(sessionId, { limit: 1 });
+    const tip = page.data[0];
+    if (tip == null) return null;
+    const state: unknown = tip.state;
+    if (typeof state !== 'object' || state === null) return null;
+    const status: unknown = Reflect.get(state, 'status');
+    if (status !== 'done' && status !== 'cancelled' && status !== 'error') return null;
+    const metrics: unknown = Reflect.get(state, 'metrics');
+    const inputTokens = readTurnMetricNumber(metrics, 'totalInputTokens', 'total_input_tokens');
+    return inputTokens ?? null;
+  }
+
+  return { peekSessionTip, dismissPendingApprovals, getLastCompactionStatus, getLastTurnInputTokens };
 }
 
 type BlockedSendListener = () => void;
