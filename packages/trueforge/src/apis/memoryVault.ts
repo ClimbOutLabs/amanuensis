@@ -17,6 +17,7 @@ import { getEmbeddingSubsystem } from '../runtime/memory/embeddingRetrieval';
 import { MarkdownMemoryClient } from '../runtime/memory/markdownMemoryClient';
 import {
   sanitizeNamespace,
+  stripRetainHeading,
   vaultFilesystemNamespace,
 } from '../runtime/memory/markdownMemoryFiles';
 import {
@@ -179,7 +180,9 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
           timestamp = parsed.toISOString();
         }
       }
-      return { content: entry.text, timestamp, document_id: randomUUID() };
+      // Exported text carries retain's `## <timestamp>` heading; retain adds its
+      // own, so strip the stale one first instead of stacking a phantom entry.
+      return { content: stripRetainHeading(entry.text), timestamp, document_id: randomUUID() };
     });
     const outcome = await importClient.retain({
       items,

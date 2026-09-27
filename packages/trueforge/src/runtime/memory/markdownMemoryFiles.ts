@@ -57,6 +57,22 @@ export function formatRetainEntry(item: RetainItem): string {
   return context !== undefined && context.length > 0 ? `${body}\n\n> ${context}` : body;
 }
 
+/**
+ * Strips the machine-written `## <ISO timestamp>` heading `formatRetainEntry`
+ * prepends. Vault export text carries that heading; re-importing it verbatim
+ * would stack a second heading and split the fact into a phantom heading-only
+ * entry plus the real one. Only timestamp-shaped headings are stripped, never
+ * user-written `## ` headings.
+ */
+export function stripRetainHeading(text: string): string {
+  const match = /^## \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\n\n([\s\S]*)$/.exec(text);
+  if (match === null) {
+    return text;
+  }
+  const rest = (match[1] ?? '').trim();
+  return rest.length > 0 ? rest : text;
+}
+
 export interface ScannedMemoryEntry {
   /** Stable id: `md:{namespace}:{file}#{index}`; append-only logs never shift indices. */
   id: string;

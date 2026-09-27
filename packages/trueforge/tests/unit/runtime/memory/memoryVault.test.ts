@@ -3,8 +3,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import {
+  formatRetainEntry,
   personaForVaultNamespace,
   readVaultTombstones,
+  splitEntries,
+  stripRetainHeading,
   vaultFilesystemNamespace,
 } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import type { MemoryVaultEntry } from '../../../../src/runtime/memory/memoryClient';
@@ -278,6 +281,33 @@ describe('memory vault', () => {
       } finally {
         await cleanup(dir);
       }
+    });
+  });
+
+  describe('stripRetainHeading', () => {
+    it('strips the machine-written retain heading so export text re-imports cleanly', () => {
+      const timestamp = '2026-09-27T10:00:00.000Z';
+      const exported = formatRetainEntry({ content: 'A fresh retained fact', timestamp, document_id: 'doc-9' });
+      expect(exported.startsWith('## ')).toBe(true);
+      expect(stripRetainHeading(exported)).toBe('A fresh retained fact');
+    });
+
+    it('round-trips exported text through retain as one entry, not a phantom heading entry', () => {
+      const timestamp = '2026-09-27T10:00:00.000Z';
+      const exported = formatRetainEntry({ content: 'A fresh retained fact', timestamp, document_id: 'doc-9' });
+      const reimported = formatRetainEntry({
+        content: stripRetainHeading(exported),
+        timestamp,
+        document_id: 'doc-10',
+      });
+      expect(reimported).toBe(exported);
+      expect(splitEntries(reimported)).toEqual([exported]);
+    });
+
+    it('leaves user-written markdown headings alone', () => {
+      expect(stripRetainHeading('## My own heading\n\nSome notes')).toBe('## My own heading\n\nSome notes');
+      expect(stripRetainHeading('Plain text without a heading')).toBe('Plain text without a heading');
+      expect(stripRetainHeading('## 2026-09-27T10:00:00.000Z')).toBe('## 2026-09-27T10:00:00.000Z');
     });
   });
 });
