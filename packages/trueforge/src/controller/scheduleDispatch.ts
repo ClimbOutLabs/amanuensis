@@ -106,7 +106,8 @@ export class ScheduleNotFoundError extends Error {
  * Resolve the first user message for a schedule run from its manifest.
  *
  * - `session` the schedule task, as before
- * - `briefing` the briefing template prompt
+ * - `briefing` the briefing template prompt, with the schedule task appended
+ *   as extra focus (the form presents it as "optional extra focus")
  * - `reminder` undefined: reminders never start an agent turn; the caller
  *   writes the notification directly instead
  */
@@ -114,8 +115,11 @@ export function resolveScheduleRunPrompt(manifest: ScheduleManifest): string | u
   switch (manifest.kind) {
     case 'reminder':
       return undefined;
-    case 'briefing':
-      return buildBriefingPrompt(manifest.template ?? 'morning-briefing');
+    case 'briefing': {
+      const base = buildBriefingPrompt(manifest.template ?? 'morning-briefing');
+      const focus = manifest.task.trim();
+      return focus === '' ? base : `${base}\n\nExtra focus for this briefing:\n${manifest.task}`;
+    }
     case 'session':
       return manifest.task;
   }
@@ -124,6 +128,10 @@ export function resolveScheduleRunPrompt(manifest: ScheduleManifest): string | u
 /**
  * Write the reminder notification for a `reminder` schedule run. No agent turn
  * is started and no session is created; the schedule task is the body.
+ *
+ * Idempotent per schedule run: dispatch may re-fire a run whose handoff
+ * already succeeded (process crash between the execute call and the run-status
+ * commit), so an existing notification for this run suppresses a duplicate.
  */
 export async function writeReminderNotification<TTransaction>(params: {
   notificationStore: INotificationStore<TTransaction>;
@@ -131,6 +139,14 @@ export async function writeReminderNotification<TTransaction>(params: {
 }): Promise<void> {
   const { notificationStore, item } = params;
   const { run, schedule } = item;
+  const existing = await notificationStore.listNotifications({
+    tenant_id: schedule.tenant_id,
+    limit: 1,
+    schedule_run_id: run.id,
+  });
+  if (existing.data.length > 0) {
+    return;
+  }
   await notificationStore.createNotification({
     tenant_id: schedule.tenant_id,
     kind: 'reminder',
@@ -150,7 +166,8 @@ function scheduleTurnFailureDetail(error: unknown): string {
 /**
  * Write the `schedule_failed` notification for a run that failed before its
  * turn started (or whose turn never produced output). Honours
- * `notify_on_failure`; callers must not await it on the request path.
+ * `notify_on_failure`. Callers await it so the failure notice is durably
+ * written before the run is marked failed.
  */
 export async function writeScheduleFailureNotification<TTransaction>(params: {
   notificationStore: INotificationStore<TTransaction>;
@@ -196,7 +213,9 @@ export const SCHEDULE_NOTIFICATION_WATCH_TIMEOUT_MS = 30 * 60 * 1000;
  *
  * - `briefing` always notifies on completion: the briefing output IS the delivery
  * - `session` notifies on completion only when `notify_on_completion` is set
- * - any kind notifies on turn error/cancellation only when `notify_on_failure` is set
+ * - `briefing` always notifies on turn error/cancellation: a failed briefing
+ *   with no notice is a silent nothing, and the notification IS the delivery
+ * - other kinds notify on turn error/cancellation only when `notify_on_failure` is set
  */
 export function watchScheduleTurnForNotificationCompletion<TTransaction>(params: {
   tenant_id: string;
@@ -233,7 +252,7 @@ export function watchScheduleTurnForNotificationCompletion<TTransaction>(params:
               created_by_subject: schedule.created_by_subject,
             });
           }
-        } else if (manifest.notify_on_failure) {
+        } else if (manifest.kind === 'briefing' || manifest.notify_on_failure) {
           const detail =
             event.state.status === 'error' ? event.state.message : `Turn ended with status "${event.state.status}".`;
           await notificationStore.createNotification({
