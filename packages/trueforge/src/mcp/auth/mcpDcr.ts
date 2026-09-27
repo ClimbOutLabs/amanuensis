@@ -377,8 +377,11 @@ export async function buildMcpAuthorizationUrl(params: {
  */
 function grantedScopesMismatch(requested: string[] | undefined, granted: string | null): boolean {
   if (!requested || requested.length === 0 || granted === null) return false;
+  const requestedSet = new Set(requested);
   const grantedSet = new Set(granted.split(/\s+/).filter(scope => scope.length > 0));
-  return requested.length !== grantedSet.size || requested.some(scope => !grantedSet.has(scope));
+  return (
+    requestedSet.size !== grantedSet.size || [...requestedSet].some(scope => !grantedSet.has(scope))
+  );
 }
 
 export async function resolveMcpAuth(params: {
