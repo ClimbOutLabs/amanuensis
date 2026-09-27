@@ -11,11 +11,6 @@ export interface MemoryVaultEntry {
   persona: string | null;
 }
 
-/** Per-persona sharing config: which vault namespaces each persona may read. */
-export interface MemoryVaultSharing {
-  shares: Record<string, string[]>;
-}
-
 export interface MemoryVaultCatalog {
   listEntries(namespace?: string): Promise<MemoryVaultEntry[]>;
   updateEntry(options: { entryId: string; text: string }): Promise<MemoryVaultEntry>;
@@ -24,8 +19,6 @@ export interface MemoryVaultCatalog {
   importEntries(
     options: { namespace?: string; entries: Array<{ text: string; timestamp?: string }> },
   ): Promise<{ namespace: string; imported: number }>;
-  getSharing(): Promise<MemoryVaultSharing>;
-  updateSharing(sharing: MemoryVaultSharing): Promise<MemoryVaultSharing>;
 }
 
 const MemoryVaultEntrySchema = z.object({
@@ -33,10 +26,6 @@ const MemoryVaultEntrySchema = z.object({
   text: z.string(),
   timestamp: z.string(),
   persona: z.string().nullable(),
-});
-
-const MemoryVaultSharingSchema = z.object({
-  shares: z.record(z.string(), z.array(z.string())),
 });
 
 const ErrorSchema = z.object({ error: z.object({ message: z.string() }) });
@@ -51,14 +40,6 @@ function parseEntry(body: unknown): MemoryVaultEntry {
 
 function parseEntries(body: unknown): MemoryVaultEntry[] {
   const parsed = z.object({ data: z.array(MemoryVaultEntrySchema) }).safeParse(body);
-  if (!parsed.success) {
-    throw new Error('The server returned an unexpected memory vault payload');
-  }
-  return parsed.data.data;
-}
-
-function parseSharing(body: unknown): MemoryVaultSharing {
-  const parsed = z.object({ data: MemoryVaultSharingSchema }).safeParse(body);
   if (!parsed.success) {
     throw new Error('The server returned an unexpected memory vault payload');
   }
@@ -148,8 +129,6 @@ export function createMemoryVaultCatalog(options: CreateTrueForgeClientOptions =
       }
       return parsed.data.data;
     },
-    getSharing: () => request('GET', '/api/v1/memory/vault/sharing', undefined, parseSharing),
-    updateSharing: sharing => request('PUT', '/api/v1/memory/vault/sharing', sharing, parseSharing),
   };
 }
 

@@ -2,10 +2,10 @@
  * Memory vault API (mounted at /api/v1/memory/vault).
  *
  * Productizes the markdown memory backend: list, edit, and delete individual
- * memory facts across tenant-scoped vault namespaces, export/import vaults as
- * JSON, and store the per-persona sharing config. The daily logs stay
- * append-only; edits and deletes are recorded as markers, never rewrites.
- * Only the markdown backend serves the vault; anything else answers 501.
+ * memory facts in the tenant's vault namespace, and export/import vaults as
+ * JSON. The daily logs stay append-only; edits and deletes are recorded as
+ * markers, never rewrites. Only the markdown backend serves the vault;
+ * anything else answers 501.
  */
 import { randomUUID } from 'node:crypto';
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
@@ -16,19 +16,14 @@ import type { ResolveRequestContext } from '../auth/identity';
 import { getEmbeddingSubsystem } from '../runtime/memory/embeddingRetrieval';
 import { MarkdownMemoryClient } from '../runtime/memory/markdownMemoryClient';
 import {
-  readVaultSharing,
   sanitizeNamespace,
   vaultFilesystemNamespace,
-  writeVaultSharing,
-  type VaultSharing,
 } from '../runtime/memory/markdownMemoryFiles';
 import {
   deleteMemoryVaultEntryRoute,
   exportMemoryVaultRoute,
-  getMemoryVaultSharingRoute,
   importMemoryVaultRoute,
   listMemoryVaultEntriesRoute,
-  putMemoryVaultSharingRoute,
   updateMemoryVaultEntryRoute,
 } from '../routes/memoryVaultRoutes';
 
@@ -39,9 +34,6 @@ export interface MemoryVaultRouterDeps {
 
 /** Upper bound for one vault request's storage work. */
 const VAULT_TIMEOUT_MS = 10_000;
-
-const MAX_SHARING_PERSONAS = 100;
-const MAX_SHARING_NAMESPACES = 100;
 
 function vaultClient(deps: MemoryVaultRouterDeps, tenantId: string): MarkdownMemoryClient | undefined {
   if (configuration.MEMORY_BACKEND !== 'markdown') {
@@ -77,40 +69,6 @@ function markdownBackendRequired(c: Context) {
 function vaultNamespaceLabel(namespace: string | undefined): string {
   const wire = (namespace ?? '').trim();
   return wire === '' ? 'default' : wire;
-}
-
-/**
- * Validates and normalizes a sharing payload. Returns the error message, or the
- * normalized shares when valid.
- */
-function normalizeSharing(shares: Record<string, string[]>): { shares: Record<string, string[]> } | { error: string } {
-  const entries = Object.entries(shares);
-  if (entries.length > MAX_SHARING_PERSONAS) {
-    return { error: `At most ${String(MAX_SHARING_PERSONAS)} personas can share vaults.` };
-  }
-  const normalized: Record<string, string[]> = {};
-  for (const [persona, namespaces] of entries) {
-    const name = persona.trim();
-    if (name === '' || name.length > 64) {
-      return { error: 'Persona names must be 1 to 64 characters.' };
-    }
-    if (!Array.isArray(namespaces) || namespaces.length > MAX_SHARING_NAMESPACES) {
-      return { error: `Persona "${name}" can read at most ${String(MAX_SHARING_NAMESPACES)} namespaces.` };
-    }
-    const seen = new Set<string>();
-    for (const namespace of namespaces) {
-      if (typeof namespace !== 'string') {
-        return { error: `Persona "${name}" has an invalid namespace.` };
-      }
-      const trimmed = namespace.trim();
-      if (trimmed === '' || trimmed.length > 128) {
-        return { error: `Persona "${name}" has a namespace that must be 1 to 128 characters.` };
-      }
-      seen.add(trimmed);
-    }
-    normalized[name] = [...seen];
-  }
-  return { shares: normalized };
 }
 
 export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
@@ -195,9 +153,22 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     const tenantNamespace = sanitizeNamespace(requestContext.tenant_id);
     const filesystemNamespace = vaultFilesystemNamespace(tenantNamespace, body.namespace);
     // Bound to the target vault namespace so the import lands in its daily logs.
+    // Shared-vault imports get the embedding subsystem so imported facts become
+    // meaning-searchable right away, the same as vault edits; other namespaces
+    // have no embedding subsystem and converge on the next warm.
     const importClient = new MarkdownMemoryClient({
       baseDir: configuration.MEMORY_MARKDOWN_DIR,
       namespace: filesystemNamespace,
+      embeddings:
+        configuration.MEMORY_EMBEDDINGS_ENABLED && filesystemNamespace === tenantNamespace
+          ? getEmbeddingSubsystem({
+              baseDir: configuration.MEMORY_MARKDOWN_DIR,
+              namespace: tenantNamespace,
+              modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+              batchSize: configuration.MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE,
+              log: (message: string) => deps.logger.info(message),
+            })
+          : undefined,
     });
     const now = new Date().toISOString();
     const items = body.entries.map(entry => {
@@ -221,44 +192,11 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     return c.json({ data: { namespace: vaultNamespaceLabel(body.namespace), imported: items.length } }, 201);
   };
 
-  const getSharingHandler: RouteHandler<typeof getMemoryVaultSharingRoute> = async c => {
-    const requestContext = deps.resolveRequestContext(c);
-    if (configuration.MEMORY_BACKEND !== 'markdown') {
-      return markdownBackendRequired(c);
-    }
-    const sharing = await readVaultSharing({
-      baseDir: configuration.MEMORY_MARKDOWN_DIR,
-      tenantNamespace: sanitizeNamespace(requestContext.tenant_id),
-    });
-    return c.json({ data: { shares: sharing.shares } }, 200);
-  };
-
-  const putSharingHandler: RouteHandler<typeof putMemoryVaultSharingRoute> = async c => {
-    const body = c.req.valid('json');
-    const requestContext = deps.resolveRequestContext(c);
-    if (configuration.MEMORY_BACKEND !== 'markdown') {
-      return markdownBackendRequired(c);
-    }
-    const normalized = normalizeSharing(body.shares);
-    if ('error' in normalized) {
-      return c.json({ error: { message: normalized.error } }, 400);
-    }
-    const sharing: VaultSharing = { version: 1, shares: normalized.shares };
-    await writeVaultSharing({
-      baseDir: configuration.MEMORY_MARKDOWN_DIR,
-      tenantNamespace: sanitizeNamespace(requestContext.tenant_id),
-      sharing,
-    });
-    return c.json({ data: { shares: sharing.shares } }, 200);
-  };
-
   const router = new OpenAPIHono();
-  // Static paths first: `/{entry_id}` would also match `/export`, `/import`, `/sharing`.
+  // Static paths first: `/{entry_id}` would also match `/export` and `/import`.
   router.openapi(listMemoryVaultEntriesRoute, listHandler);
   router.openapi(exportMemoryVaultRoute, exportHandler);
   router.openapi(importMemoryVaultRoute, importHandler);
-  router.openapi(getMemoryVaultSharingRoute, getSharingHandler);
-  router.openapi(putMemoryVaultSharingRoute, putSharingHandler);
   router.openapi(updateMemoryVaultEntryRoute, updateHandler);
   router.openapi(deleteMemoryVaultEntryRoute, deleteHandler);
   return router;

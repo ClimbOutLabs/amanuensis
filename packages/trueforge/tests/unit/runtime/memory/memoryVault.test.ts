@@ -4,10 +4,8 @@ import path from 'node:path';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import {
   personaForVaultNamespace,
-  readVaultSharing,
   readVaultTombstones,
   vaultFilesystemNamespace,
-  writeVaultSharing,
 } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import type { MemoryVaultEntry } from '../../../../src/runtime/memory/memoryClient';
 
@@ -277,29 +275,6 @@ describe('memory vault', () => {
           timeoutMs: TIMEOUT_MS,
         });
         expect(outcome).toMatchObject({ ok: false, code: 'not_found' });
-      } finally {
-        await cleanup(dir);
-      }
-    });
-  });
-
-  describe('vault sharing', () => {
-    it('round-trips the sharing config and defaults to empty', async () => {
-      const dir = await mkdtemp(path.join(tmpdir(), 'vault-share-'));
-      try {
-        expect(await readVaultSharing({ baseDir: dir, tenantNamespace: 'tenant-1' })).toEqual({
-          version: 1,
-          shares: {},
-        });
-        await writeVaultSharing({
-          baseDir: dir,
-          tenantNamespace: 'tenant-1',
-          sharing: { version: 1, shares: { planner: ['work'], coach: ['health'] } },
-        });
-        expect(await readVaultSharing({ baseDir: dir, tenantNamespace: 'tenant-1' })).toEqual({
-          version: 1,
-          shares: { planner: ['work'], coach: ['health'] },
-        });
       } finally {
         await cleanup(dir);
       }

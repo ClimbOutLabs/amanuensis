@@ -135,5 +135,4 @@ export {
   memoryVaultErrorMessage,
   type MemoryVaultCatalog,
   type MemoryVaultEntry,
-  type MemoryVaultSharing,
 } from './catalogs/memoryVaultCatalog.js';

@@ -91,28 +91,3 @@ export const ImportMemoryVaultResponseSchema = z
     data: MemoryVaultImportResultSchema,
   })
   .openapi('ImportMemoryVaultResponse');
-
-/**
- * Per-persona sharing config: which vault namespaces each persona may read.
- * Keys are persona names; values are vault namespaces (`default` for the shared vault).
- */
-export const MemoryVaultSharingSchema = z
-  .object({
-    shares: z.record(z.string(), z.array(z.string())),
-  })
-  .openapi('MemoryVaultSharing');
-
-export type MemoryVaultSharing = z.infer<typeof MemoryVaultSharingSchema>;
-
-export const GetMemoryVaultSharingResponseSchema = z
-  .object({
-    data: MemoryVaultSharingSchema,
-  })
-  .openapi('GetMemoryVaultSharingResponse');
-
-/** Replaces the whole sharing config; an omitted persona loses its shares. */
-export const UpdateMemoryVaultSharingRequestSchema = z
-  .object({
-    shares: z.record(z.string(), z.array(z.string())),
-  })
-  .openapi('UpdateMemoryVaultSharingRequest');

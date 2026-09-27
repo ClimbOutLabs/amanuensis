@@ -8,12 +8,10 @@ import {
   DeleteMemoryVaultEntryResponseSchema,
   ExportMemoryVaultResponseSchema,
   GetMemoryVaultEntryResponseSchema,
-  GetMemoryVaultSharingResponseSchema,
   ImportMemoryVaultRequestSchema,
   ImportMemoryVaultResponseSchema,
   ListMemoryVaultEntriesResponseSchema,
   UpdateMemoryVaultEntryRequestSchema,
-  UpdateMemoryVaultSharingRequestSchema,
 } from '../schemas/memoryVault';
 import { OpenApiTag } from './openapiTags';
 
@@ -141,60 +139,6 @@ export const importMemoryVaultRoute = createRoute({
     400: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Invalid import payload.',
-    },
-    ...UNAUTHENTICATED,
-    ...SERVER_ERROR,
-    501: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The server does not run the markdown memory backend.',
-    },
-  },
-});
-
-export const getMemoryVaultSharingRoute = createRoute({
-  method: 'get',
-  path: '/sharing',
-  tags: [OpenApiTag.CAPABILITIES],
-  summary: 'Get memory vault sharing',
-  description: 'Get the per-persona sharing config: which vault namespaces each persona may read.',
-  'x-fern-sdk-group-name': ['memory', 'vault'],
-  'x-fern-sdk-method-name': 'get_sharing',
-  responses: {
-    200: {
-      content: { 'application/json': { schema: GetMemoryVaultSharingResponseSchema } },
-      description: 'The stored sharing config.',
-    },
-    ...UNAUTHENTICATED,
-    ...SERVER_ERROR,
-    501: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The server does not run the markdown memory backend.',
-    },
-  },
-});
-
-export const putMemoryVaultSharingRoute = createRoute({
-  method: 'put',
-  path: '/sharing',
-  tags: [OpenApiTag.CAPABILITIES],
-  summary: 'Replace memory vault sharing',
-  description: 'Replace the whole per-persona sharing config. An omitted persona loses its shares.',
-  'x-fern-sdk-group-name': ['memory', 'vault'],
-  'x-fern-sdk-method-name': 'update_sharing',
-  request: {
-    body: {
-      content: { 'application/json': { schema: UpdateMemoryVaultSharingRequestSchema } },
-      required: true,
-    },
-  },
-  responses: {
-    200: {
-      content: { 'application/json': { schema: GetMemoryVaultSharingResponseSchema } },
-      description: 'The stored sharing config after the update.',
-    },
-    400: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'Invalid sharing config.',
     },
     ...UNAUTHENTICATED,
     ...SERVER_ERROR,

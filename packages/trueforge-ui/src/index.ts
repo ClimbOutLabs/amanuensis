@@ -159,8 +159,6 @@ export { AgentInternalsDisclosure } from './atoms/agent-chat/AgentInternalsDiscl
 export type { AgentInternalsDisclosureProps } from './atoms/agent-chat/AgentInternalsDisclosure.js';
 export { MemoryContextCard } from './atoms/agent-chat/MemoryContextCard.js';
 export type { MemoryContextCardProps } from './atoms/agent-chat/MemoryContextCard.js';
-export { MemorySharing } from './atoms/memory/MemorySharing.js';
-export type { MemorySharingPersona } from './atoms/memory/MemorySharing.js';
 export { MemoryVaultEntryRow } from './atoms/memory/MemoryVaultEntry.js';
 export { MemoryVaultPage } from './atoms/memory/MemoryVaultPage.js';
 export { AttachmentCard, USER_MESSAGE_ATTACHMENT_PREVIEW_REM } from './atoms/AttachmentCard.js';

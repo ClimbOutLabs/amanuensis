@@ -172,9 +172,6 @@ const VAULT_MARKER_PREFIX = '> vault-entry ';
  * Markdown in the text (fences, headings) can never corrupt parsing.
  */
 
-/** Sharing config file inside the tenant's own namespace directory. */
-const VAULT_SHARING_FILE = '.vault-sharing.json';
-
 /** One vault edit/delete marker. `text` is the replacement text for updates. */
 export interface VaultTombstone {
   entryId: string;
@@ -415,77 +412,6 @@ export async function scanVaultEntries(options: {
   });
 }
 
-/** Per-persona sharing config: which vault namespaces each persona may read. */
-export interface VaultSharing {
-  version: 1;
-  shares: Record<string, string[]>;
-}
-
-const EMPTY_VAULT_SHARING: VaultSharing = { version: 1, shares: {} };
-
-function vaultSharingFileFor(baseDir: string, tenantNamespace: string): string {
-  return path.join(namespaceDirFor(baseDir, tenantNamespace), VAULT_SHARING_FILE);
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
-}
-
-function isVaultSharing(value: unknown): value is VaultSharing {
-  if (!isRecord(value)) {
-    return false;
-  }
-  if (value['version'] !== 1 || !isRecord(value['shares'])) {
-    return false;
-  }
-  for (const [persona, namespaces] of Object.entries(value['shares'])) {
-    if (typeof persona !== 'string' || !Array.isArray(namespaces)) {
-      return false;
-    }
-    for (const namespace of namespaces) {
-      if (typeof namespace !== 'string') {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
-/** Reads the tenant's vault sharing config; a missing or corrupt file reads as empty. */
-export async function readVaultSharing(options: {
-  baseDir: string;
-  tenantNamespace: string;
-}): Promise<VaultSharing> {
-  try {
-    const raw = await readFile(vaultSharingFileFor(options.baseDir, options.tenantNamespace), 'utf8');
-    const parsed: unknown = JSON.parse(raw);
-    if (isVaultSharing(parsed)) {
-      return parsed;
-    }
-    return EMPTY_VAULT_SHARING;
-  } catch {
-    return EMPTY_VAULT_SHARING;
-  }
-}
-
-/** Replaces the tenant's vault sharing config. */
-export async function writeVaultSharing(options: {
-  baseDir: string;
-  tenantNamespace: string;
-  sharing: VaultSharing;
-}): Promise<void> {
-  try {
-    const dir = namespaceDirFor(options.baseDir, options.tenantNamespace);
-    await ensureWritableDataDir({ dir, envVar: 'MEMORY_MARKDOWN_DIR' });
-    await writeFile(
-      vaultSharingFileFor(options.baseDir, options.tenantNamespace),
-      JSON.stringify(options.sharing),
-      'utf8',
-    );
-  } catch (error) {
-    if (isDataDirConfigurationError(error)) {
-      throw new Error(USER_FACING_STORAGE_UNAVAILABLE_MESSAGE, { cause: error });
-    }
-    throw error;
-  }
 }

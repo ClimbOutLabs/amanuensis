@@ -19,16 +19,13 @@ function fetchFor(handler: (path: string, method: string) => unknown) {
 }
 
 describe('createMemoryVaultCatalog', () => {
-  it('lists, updates, deletes, exports, imports, and round-trips sharing', async () => {
+  it('lists, updates, deletes, exports, and imports', async () => {
     const calls: Array<{ path: string; method: string }> = [];
     const catalog = createMemoryVaultCatalog({
       fetch: fetchFor((path, method) => {
         calls.push({ path, method });
         if (path === '/api/v1/memory/vault' && method === 'GET') return [ENTRY];
         if (path === '/api/v1/memory/vault?namespace=persona%3Aplanner' && method === 'GET') return [];
-        if (path === '/api/v1/memory/vault/sharing' && method === 'GET') return { shares: {} };
-        if (path === '/api/v1/memory/vault/sharing' && method === 'PUT')
-          return { shares: { planner: ['work'] } };
         if (path === '/api/v1/memory/vault/export' && method === 'GET')
           return { namespace: 'default', exported_at: '2026-09-27T12:00:00.000Z', entries: [ENTRY] };
         if (path === '/api/v1/memory/vault/import' && method === 'POST')
@@ -59,11 +56,6 @@ describe('createMemoryVaultCatalog', () => {
       entries: [{ text: 'Uses metric units' }],
     });
     assert.equal(imported.imported, 1);
-
-    const sharing = await catalog.getSharing();
-    assert.deepEqual(sharing.shares, {});
-    const saved = await catalog.updateSharing({ shares: { planner: ['work'] } });
-    assert.deepEqual(saved.shares, { planner: ['work'] });
 
     assert.ok(calls.some(call => call.method === 'PUT' && call.path.includes(encodeURIComponent(ENTRY.id))));
   });
