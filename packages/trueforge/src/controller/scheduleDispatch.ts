@@ -1,8 +1,20 @@
-import type { SessionHandle, Sessions, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
+import type {
+  SessionHandle,
+  Sessions,
+  TurnInputItem,
+  TurnStreamingEvent,
+} from '@truefoundry/trueforge-core/agent-session';
+import { EventType } from '@truefoundry/trueforge-core/agent-session';
+import { redisKey } from '@truefoundry/trueforge-core/core';
 import { TrueForge } from '@truefoundry/trueforge-sdk';
 import type { Logger } from 'winston';
 import configuration from '../config';
+import { buildBriefingPrompt } from '../runtime/briefingTemplates';
+import { nextTriggerAfter } from '../runtime/cron';
+import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
+import { formatAssistantMessageText } from '../runtime/messageText.js';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
+import type { INotificationStore } from '../db/notificationStore';
 import {
   cronRunName,
   type IScheduleStore,
@@ -12,8 +24,11 @@ import {
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import { createTlsFetch, normalizeTlsUrl } from '../http/tls';
-import { nextTriggerAfter } from '../runtime/cron';
-import { InvalidCronError, type ScheduleRunStatus } from '../schemas/schedule';
+import {
+  InvalidCronError,
+  type ScheduleManifest,
+  type ScheduleRunStatus,
+} from '../schemas/schedule';
 import type { ControlLoop } from './Controller';
 
 /**
@@ -88,11 +103,178 @@ export class ScheduleNotFoundError extends Error {
 }
 
 /**
+ * Resolve the first user message for a schedule run from its manifest.
+ *
+ * - `session` the schedule task, as before
+ * - `briefing` the briefing template prompt
+ * - `reminder` undefined: reminders never start an agent turn; the caller
+ *   writes the notification directly instead
+ */
+export function resolveScheduleRunPrompt(manifest: ScheduleManifest): string | undefined {
+  switch (manifest.kind) {
+    case 'reminder':
+      return undefined;
+    case 'briefing':
+      return buildBriefingPrompt(manifest.template ?? 'morning-briefing');
+    case 'session':
+      return manifest.task;
+  }
+}
+
+/**
+ * Write the reminder notification for a `reminder` schedule run. No agent turn
+ * is started and no session is created; the schedule task is the body.
+ */
+export async function writeReminderNotification<TTransaction>(params: {
+  notificationStore: INotificationStore<TTransaction>;
+  item: ScheduleDispatchItem;
+}): Promise<void> {
+  const { notificationStore, item } = params;
+  const { run, schedule } = item;
+  await notificationStore.createNotification({
+    tenant_id: schedule.tenant_id,
+    kind: 'reminder',
+    title: `Reminder: ${schedule.name}`,
+    body: schedule.manifest.task,
+    schedule_id: schedule.id,
+    schedule_run_id: run.id,
+    created_by_subject: schedule.created_by_subject,
+  });
+}
+
+/** Human-readable detail for a `schedule_failed` notification. */
+function scheduleTurnFailureDetail(error: unknown): string {
+  return error instanceof Error && error.message.trim() !== '' ? error.message : 'Schedule run failed';
+}
+
+/**
+ * Write the `schedule_failed` notification for a run that failed before its
+ * turn started (or whose turn never produced output). Honours
+ * `notify_on_failure`; callers must not await it on the request path.
+ */
+export async function writeScheduleFailureNotification<TTransaction>(params: {
+  notificationStore: INotificationStore<TTransaction>;
+  item: ScheduleDispatchItem;
+  error: unknown;
+  logger: Logger;
+}): Promise<void> {
+  const { notificationStore, item, error, logger } = params;
+  const { run, schedule } = item;
+  if (!schedule.manifest.notify_on_failure) {
+    return;
+  }
+  try {
+    await notificationStore.createNotification({
+      tenant_id: schedule.tenant_id,
+      kind: 'schedule_failed',
+      title: `Schedule failed: ${schedule.name}`,
+      body: scheduleTurnFailureDetail(error),
+      schedule_id: schedule.id,
+      schedule_run_id: run.id,
+      created_by_subject: schedule.created_by_subject,
+    });
+  } catch (notifyError) {
+    logger.error('Failed to write schedule failure notification', {
+      schedule_id: schedule.id,
+      run_id: run.id,
+      error: notifyError,
+    });
+  }
+}
+
+/**
+ * How long the completion watcher waits for a schedule turn's TURN_DONE before
+ * giving up. Schedule turns can run for many minutes; the notification is
+ * best-effort, so a hung turn eventually stops consuming the watcher.
+ */
+export const SCHEDULE_NOTIFICATION_WATCH_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * Watch a started schedule turn and write its completion/failure notification
+ * when TURN_DONE lands on the turn's event stream. Fire-and-forget: the caller
+ * starts it and moves on; the HTTP request lifecycle does not own it.
+ *
+ * - `briefing` always notifies on completion: the briefing output IS the delivery
+ * - `session` notifies on completion only when `notify_on_completion` is set
+ * - any kind notifies on turn error/cancellation only when `notify_on_failure` is set
+ */
+export function watchScheduleTurnForNotificationCompletion<TTransaction>(params: {
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
+  notificationStore: INotificationStore<TTransaction>;
+  logger: Logger;
+  item: ScheduleDispatchItem;
+}): void {
+  const { tenant_id, session_id, turn_id, eventSubscriptions, notificationStore, logger, item } = params;
+  const { run, schedule } = item;
+  const manifest = schedule.manifest;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SCHEDULE_NOTIFICATION_WATCH_TIMEOUT_MS);
+  const streamId = redisKey('agent', 'turn', tenant_id, session_id, turn_id, 'stream');
+  void (async () => {
+    try {
+      const subscription = eventSubscriptions.get(streamId);
+      for await (const event of subscription.poll(0, { signal: controller.signal })) {
+        if (event.type !== EventType.TURN_DONE) {
+          continue;
+        }
+        if (event.state.status === 'done') {
+          if (manifest.kind === 'briefing' || manifest.notify_on_completion) {
+            const body = formatAssistantMessageText(event.state.output?.content);
+            await notificationStore.createNotification({
+              tenant_id,
+              kind: manifest.kind === 'briefing' ? 'briefing' : 'schedule_complete',
+              title: manifest.kind === 'briefing' ? `Briefing: ${schedule.name}` : `Completed: ${schedule.name}`,
+              body: body === '' ? '(no output)' : body,
+              schedule_id: schedule.id,
+              schedule_run_id: run.id,
+              created_by_subject: schedule.created_by_subject,
+            });
+          }
+        } else if (manifest.notify_on_failure) {
+          const detail =
+            event.state.status === 'error' ? event.state.message : `Turn ended with status "${event.state.status}".`;
+          await notificationStore.createNotification({
+            tenant_id,
+            kind: 'schedule_failed',
+            title: `Schedule failed: ${schedule.name}`,
+            body: detail,
+            schedule_id: schedule.id,
+            schedule_run_id: run.id,
+            created_by_subject: schedule.created_by_subject,
+          });
+        }
+        return;
+      }
+    } catch (error) {
+      if (controller.signal.aborted) {
+        logger.warn('Schedule notification watch timed out waiting for turn completion', {
+          schedule_id: schedule.id,
+          run_id: run.id,
+          turn_id,
+        });
+        return;
+      }
+      logger.error('Schedule notification watch failed', {
+        schedule_id: schedule.id,
+        run_id: run.id,
+        turn_id,
+        error,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  })();
+}
+
+/**
  * Start a schedule run in-process: get-or-create a session keyed by `run.id`,
- * then prepare a non-streaming turn with the schedule task when that session has
- * none. Idempotent on retry — returns `undefined` when a turn already exists.
- * Session owner and turn `userRef` are the schedule creator so ownership stays
- * with the schedule even when an admin triggers run-now.
+ * then prepare a non-streaming turn with the schedule's resolved prompt when
+ * that session has none. Idempotent on retry — returns `undefined` when a turn
+ * already exists. Session owner and turn `userRef` are the schedule creator so
+ * ownership stays with the schedule even when an admin triggers run-now.
  *
  * Callers start the turn (e.g. via `startTurnInProcess`) with request-scoped stores.
  */
@@ -134,9 +316,16 @@ export async function startScheduleRun(params: {
     return undefined;
   }
 
+  // Reminders never reach turn preparation (the caller writes the notification
+  // directly); guard here so a direct caller cannot start a turn for one.
+  const prompt = resolveScheduleRunPrompt(schedule.manifest);
+  if (prompt === undefined) {
+    return undefined;
+  }
+
   return {
     session,
-    input: [{ type: 'user.message', content: schedule.manifest.task }],
+    input: [{ type: 'user.message', content: prompt }],
     previous_turn_id: 'none',
     userRef: schedule.created_by_subject.subject_id,
     agent: named,
@@ -270,8 +459,13 @@ export async function dispatchScheduledRuns<TTransaction>(params: {
   withTransaction: WithTransaction<TTransaction>;
   /** When aborted, stop before the next run; the current run still finishes. */
   signal?: AbortSignal;
+  /**
+   * When set, a handoff failure (the `onTriggered` throw) also writes a
+   * `schedule_failed` notification honouring `notify_on_failure`.
+   */
+  notificationStore?: INotificationStore<TTransaction>;
 }): Promise<{ dispatched: number; failed: number }> {
-  const { store, withTransaction, onTriggered, logger, signal } = params;
+  const { store, withTransaction, onTriggered, logger, signal, notificationStore } = params;
   // ONE clock for the whole pass: it selects the runs, judges lateness, and anchors
   // the next trigger time.
   const now = new Date();
@@ -304,6 +498,14 @@ export async function dispatchScheduledRuns<TTransaction>(params: {
           run_id: run.id,
           error,
         });
+        if (notificationStore !== undefined) {
+          await writeScheduleFailureNotification({
+            notificationStore,
+            item: { run, schedule },
+            error,
+            logger,
+          });
+        }
         await finishScheduledRun({
           store,
           run,
@@ -338,10 +540,11 @@ export async function dispatchScheduledRuns<TTransaction>(params: {
 
 export function scheduleDispatchLoop<TTransaction>(params: {
   scheduleStore: IScheduleStore<TTransaction>;
+  notificationStore: INotificationStore<TTransaction>;
   logger: Logger;
   withTransaction: WithTransaction<TTransaction>;
 }): ControlLoop {
-  const { scheduleStore, withTransaction, logger } = params;
+  const { scheduleStore, notificationStore, withTransaction, logger } = params;
   const executeRun = createHttpScheduleRunExecutor();
   return {
     name: SCHEDULE_DISPATCH_LOOP_NAME,
@@ -353,6 +556,7 @@ export function scheduleDispatchLoop<TTransaction>(params: {
         logger,
         withTransaction,
         signal,
+        notificationStore,
       });
       if (result.dispatched > 0 || result.failed > 0) {
         logger.debug('Scheduled runs dispatched or failed', result);

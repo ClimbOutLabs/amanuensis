@@ -59,6 +59,17 @@ function wireStatus(manifest: TrueForgeApi.ScheduleManifest): ScheduleStatus {
 
 function toUiSchedule(wire: TrueForgeApi.Schedule, index: AgentIndex): Schedule {
   const agentId = index.nameToId.get(wire.agentName) ?? wire.agentName;
+  // New manifest fields (kind, template, notify flags) are present when the
+  // backend serves them. The manifest is read through `unknown` so this keeps
+  // working against SDK types generated before those fields existed.
+  const manifest: unknown = wire.manifest;
+  const fields = typeof manifest === 'object' && manifest !== null ? manifest : {};
+  const kindRaw = 'kind' in fields ? fields.kind : undefined;
+  const kind: Schedule['kind'] = kindRaw === 'reminder' || kindRaw === 'briefing' ? kindRaw : 'session';
+  const templateRaw = 'template' in fields ? fields.template : undefined;
+  const template: Schedule['template'] = templateRaw === 'morning-briefing' ? templateRaw : undefined;
+  const notifyOnCompletion = 'notify_on_completion' in fields && fields.notify_on_completion === true;
+  const notifyOnFailure = 'notify_on_failure' in fields && fields.notify_on_failure === true;
   return {
     id: wire.id,
     name: wire.name,
@@ -68,6 +79,10 @@ function toUiSchedule(wire: TrueForgeApi.Schedule, index: AgentIndex): Schedule 
     cron: wire.manifest.cron,
     timezone: wire.manifest.timezone ?? 'UTC',
     status: wireStatus(wire.manifest),
+    kind,
+    template,
+    notifyOnCompletion,
+    notifyOnFailure,
     lastRunAt: null,
     createdBySubject: wire.createdBySubject,
   };

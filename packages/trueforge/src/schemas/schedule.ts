@@ -75,6 +75,17 @@ export const ScheduleTaskSchema = z
 export const ScheduleStatusSchema = z.enum(['active', 'paused']).openapi('ScheduleStatus');
 
 /**
+ * How a schedule run is delivered.
+ * - `session` an agent chat turn in the schedule's session (the historical behavior)
+ * - `reminder` a lightweight notification with the schedule task, no agent turn
+ * - `briefing` an agent turn whose output is delivered as a notification
+ */
+export const ScheduleKindSchema = z.enum(['session', 'reminder', 'briefing']).openapi('ScheduleKind');
+
+/** Briefing templates. `morning-briefing` is the only template for now. */
+export const BriefingTemplateSchema = z.enum(['morning-briefing']).openapi('BriefingTemplate');
+
+/**
  * Schedule document persisted as `schedule.manifest`.
  */
 export const ScheduleManifestObjectSchema = z
@@ -83,8 +94,28 @@ export const ScheduleManifestObjectSchema = z
     cron: CronExpressionSchema,
     timezone: TimezoneSchema.default('UTC'),
     status: ScheduleStatusSchema.default('active'),
+    kind: ScheduleKindSchema.default('session').describe(
+      'How the schedule run is delivered: an agent chat turn (`session`), a lightweight reminder notification (`reminder`), or an agent-generated briefing notification (`briefing`).',
+    ),
+    template: BriefingTemplateSchema.optional().describe(
+      'Briefing template used when `kind` is `briefing`. Defaults to `morning-briefing` when omitted.',
+    ),
+    notify_on_completion: z
+      .boolean()
+      .default(false)
+      .describe('Write a notification with the turn output when the run completes.'),
+    notify_on_failure: z.boolean().default(false).describe('Write a notification when the run fails.'),
   })
-  .strict();
+  .strict()
+  .superRefine((manifest, ctx) => {
+    if (manifest.kind !== 'briefing' && manifest.template != null) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['template'],
+        message: '`template` is only valid when `kind` is `briefing`.',
+      });
+    }
+  });
 
 export const ScheduleManifestSchema = ScheduleManifestObjectSchema.openapi('ScheduleManifest');
 
@@ -183,6 +214,8 @@ export const ExecuteScheduleRunRequestSchema = z
   .openapi('ExecuteScheduleRunRequest');
 
 export type ScheduleStatus = z.infer<typeof ScheduleStatusSchema>;
+export type ScheduleKind = z.infer<typeof ScheduleKindSchema>;
+export type BriefingTemplate = z.infer<typeof BriefingTemplateSchema>;
 export type ScheduleRunStatus = z.infer<typeof ScheduleRunStatusSchema>;
 export type ScheduleManifest = z.infer<typeof ScheduleManifestSchema>;
 export type Schedule = z.infer<typeof ScheduleSchema>;

@@ -581,6 +581,13 @@
         ],
         "type": "object"
       },
+      "BriefingTemplate": {
+        "description": "Briefing template used when `kind` is `briefing`. Defaults to `morning-briefing` when omitted.",
+        "enum": [
+          "morning-briefing"
+        ],
+        "type": "string"
+      },
       "BugReportBundle": {
         "properties": {
           "build": {
@@ -2073,6 +2080,10 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteNotificationResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeletePersonaResponse": {
         "properties": {},
         "type": "object"
@@ -2487,6 +2498,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ConfiguredModelProvider"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetNotificationResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Notification"
           }
         },
         "required": [
@@ -3681,6 +3703,24 @@
         },
         "required": [
           "data"
+        ],
+        "type": "object"
+      },
+      "ListNotificationsResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Notification"
+            },
+            "type": "array"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/TokenPagination"
+          }
+        },
+        "required": [
+          "data",
+          "pagination"
         ],
         "type": "object"
       },
@@ -5615,6 +5655,79 @@
         ],
         "type": "object"
       },
+      "Notification": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by_subject": {
+            "$ref": "#/components/schemas/CreatedBySubject"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NotificationKind"
+          },
+          "read_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schedule_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schedule_run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tenant_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "kind",
+          "title",
+          "body",
+          "schedule_id",
+          "schedule_run_id",
+          "created_by_subject",
+          "read_at",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "NotificationKind": {
+        "enum": [
+          "reminder",
+          "briefing",
+          "schedule_complete",
+          "schedule_failed"
+        ],
+        "type": "string"
+      },
       "OpenAIModelProvider": {
         "additionalProperties": false,
         "properties": {
@@ -6846,11 +6959,34 @@
         ],
         "type": "object"
       },
+      "ScheduleKind": {
+        "default": "session",
+        "description": "How the schedule run is delivered: an agent chat turn (`session`), a lightweight reminder notification (`reminder`), or an agent-generated briefing notification (`briefing`).",
+        "enum": [
+          "session",
+          "reminder",
+          "briefing"
+        ],
+        "type": "string"
+      },
       "ScheduleManifest": {
         "additionalProperties": false,
         "properties": {
           "cron": {
             "$ref": "#/components/schemas/CronExpression"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScheduleKind"
+          },
+          "notify_on_completion": {
+            "default": false,
+            "description": "Write a notification with the turn output when the run completes.",
+            "type": "boolean"
+          },
+          "notify_on_failure": {
+            "default": false,
+            "description": "Write a notification when the run fails.",
+            "type": "boolean"
           },
           "status": {
             "$ref": "#/components/schemas/ScheduleStatus"
@@ -6859,6 +6995,9 @@
             "description": "First user message sent to the agent on every run.",
             "minLength": 1,
             "type": "string"
+          },
+          "template": {
+            "$ref": "#/components/schemas/BriefingTemplate"
           },
           "timezone": {
             "$ref": "#/components/schemas/Timezone"
@@ -9347,6 +9486,7 @@
                   "iteration_limit",
                   "fatal_error",
                   "model_stream_fault",
+                  "model_response_timeout",
                   "loop_detected"
                 ],
                 "type": "string"
@@ -9601,6 +9741,7 @@
                   "iteration_limit",
                   "fatal_error",
                   "model_stream_fault",
+                  "model_response_timeout",
                   "loop_detected"
                 ],
                 "type": "string"
@@ -12317,6 +12458,209 @@
           "models"
         ],
         "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "description": "List notifications for the tenant, unread first and then newest first.",
+        "parameters": [
+          {
+            "description": "Page size. Defaults to 25",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "description": "Page size. Defaults to 25",
+              "maximum": 25,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque token from a previous response `next_page_token`.",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "description": "Opaque token from a previous response `next_page_token`.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListNotificationsResponse"
+                }
+              }
+            },
+            "description": "Paginated matching notifications."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid query parameters or page token."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthenticated."
+          }
+        },
+        "summary": "List notifications",
+        "tags": [
+          "Notifications"
+        ],
+        "x-fern-pagination": {
+          "cursor": "$request.page_token",
+          "next_cursor": "$response.pagination.next_page_token",
+          "results": "$response.data"
+        },
+        "x-fern-sdk-group-name": [
+          "notifications"
+        ],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/notifications/{notification_id}": {
+      "delete": {
+        "description": "Delete a notification. Idempotent.",
+        "parameters": [
+          {
+            "description": "Immutable notification identifier.",
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "description": "Immutable notification identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteNotificationResponse"
+                }
+              }
+            },
+            "description": "Deleted."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthenticated."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not the notification owner."
+          }
+        },
+        "summary": "Delete a notification",
+        "tags": [
+          "Notifications"
+        ],
+        "x-fern-sdk-group-name": [
+          "notifications"
+        ],
+        "x-fern-sdk-method-name": "delete"
+      }
+    },
+    "/api/v1/notifications/{notification_id}/read": {
+      "put": {
+        "description": "Mark a notification as read. Idempotent.",
+        "parameters": [
+          {
+            "description": "Immutable notification identifier.",
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "description": "Immutable notification identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetNotificationResponse"
+                }
+              }
+            },
+            "description": "The notification after marking it read."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthenticated."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not the notification owner."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Not found."
+          }
+        },
+        "summary": "Mark a notification as read",
+        "tags": [
+          "Notifications"
+        ],
+        "x-fern-sdk-group-name": [
+          "notifications"
+        ],
+        "x-fern-sdk-method-name": "mark_read"
       }
     },
     "/api/v1/personalization/context": {
@@ -18274,6 +18618,9 @@
     },
     {
       "name": "Schedules"
+    },
+    {
+      "name": "Notifications"
     },
     {
       "name": "Personalization"

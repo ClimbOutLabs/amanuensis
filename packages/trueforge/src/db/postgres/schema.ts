@@ -33,6 +33,7 @@ export const TABLES_TO_MOVE = [
   'agent',
   'schedule',
   'schedule_run',
+  'notification',
   'personalization_profile',
   'persona',
   'persona_name_key',

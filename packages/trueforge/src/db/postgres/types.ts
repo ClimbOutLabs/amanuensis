@@ -572,6 +572,29 @@ export interface ScheduleRunTable {
   updated_at: Date;
 }
 
+/**
+ * One row per in-app notification (reminder, briefing, schedule
+ * completion/failure) — mirrors the SQLite `notification` table.
+ * PRIMARY KEY (id). `schedule_id`/`schedule_run_id` are provenance links with no
+ * foreign key so notifications survive schedule deletion.
+ */
+export interface NotificationTable {
+  /** application-generated (ulid) */
+  id: string;
+  tenant_id: string;
+  /** `reminder` | `briefing` | `schedule_complete` | `schedule_failed` */
+  kind: string;
+  title: string;
+  body: string;
+  schedule_id: string | null;
+  schedule_run_id: string | null;
+  created_by_subject: JSONColumnType<CreatedBySubject, CreatedBySubject, CreatedBySubject>;
+  /** Instant the notification was marked read; null while unread */
+  read_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
 /** One explicitly user-owned profile per tenant/user identity. */
 export interface PersonalizationProfileTable {
   tenant_id: string;
@@ -804,6 +827,7 @@ export interface Database {
   agent: AgentTable;
   schedule: ScheduleTable;
   schedule_run: ScheduleRunTable;
+  notification: NotificationTable;
   personalization_profile: PersonalizationProfileTable;
   persona: PersonaTable;
   persona_name_key: PersonaNameKeyTable;

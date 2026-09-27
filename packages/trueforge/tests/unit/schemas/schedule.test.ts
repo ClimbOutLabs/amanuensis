@@ -1,5 +1,10 @@
 import { validateManifest } from '../../../src/apis/schedules';
-import { CronExpressionSchema, InvalidCronError, TimezoneSchema } from '../../../src/schemas/schedule';
+import {
+  CronExpressionSchema,
+  InvalidCronError,
+  ScheduleManifestSchema,
+  TimezoneSchema,
+} from '../../../src/schemas/schedule';
 
 const WEEKDAY_1PM = { cron: '0 13 * * 1-5', timezone: 'America/New_York' };
 
@@ -54,5 +59,60 @@ describe('validateManifest', () => {
     expect(() => {
       validateManifest({ cron: '0 0 30 2 *', timezone: 'UTC' });
     }).toThrow(InvalidCronError);
+  });
+});
+
+describe('ScheduleManifestSchema kind/template/notify fields', () => {
+  const base = {
+    task: 'Do the thing',
+    cron: '0 9 * * *',
+    timezone: 'UTC',
+  };
+
+  it('defaults kind to session and notify flags to false', () => {
+    const parsed = ScheduleManifestSchema.parse(base);
+    expect(parsed.kind).toBe('session');
+    expect(parsed.notify_on_completion).toBe(false);
+    expect(parsed.notify_on_failure).toBe(false);
+  });
+
+  it('accepts reminder kind', () => {
+    const parsed = ScheduleManifestSchema.parse({ ...base, kind: 'reminder' });
+    expect(parsed.kind).toBe('reminder');
+  });
+
+  it('accepts briefing kind with morning-briefing template', () => {
+    const parsed = ScheduleManifestSchema.parse({
+      ...base,
+      kind: 'briefing',
+      template: 'morning-briefing',
+    });
+    expect(parsed.kind).toBe('briefing');
+    expect(parsed.template).toBe('morning-briefing');
+  });
+
+  it('rejects template on non-briefing kinds', () => {
+    expect(() =>
+      ScheduleManifestSchema.parse({ ...base, kind: 'session', template: 'morning-briefing' }),
+    ).toThrow();
+    expect(() =>
+      ScheduleManifestSchema.parse({ ...base, kind: 'reminder', template: 'morning-briefing' }),
+    ).toThrow();
+  });
+
+  it('rejects explicit null template', () => {
+    expect(() =>
+      ScheduleManifestSchema.parse({ ...base, kind: 'briefing', template: null }),
+    ).toThrow();
+  });
+
+  it('allows omitted template on briefing (backend defaults to morning-briefing)', () => {
+    const parsed = ScheduleManifestSchema.parse({ ...base, kind: 'briefing' });
+    expect(parsed.kind).toBe('briefing');
+    expect(parsed.template).toBeUndefined();
+  });
+
+  it('rejects invalid kind', () => {
+    expect(() => ScheduleManifestSchema.parse({ ...base, kind: 'invalid' })).toThrow();
   });
 });

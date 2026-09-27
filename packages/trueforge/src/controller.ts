@@ -1,6 +1,7 @@
 import type { Logger } from 'winston';
 import { Controller } from './controller/Controller';
 import { scheduleDispatchLoop } from './controller/scheduleDispatch';
+import type { INotificationStore } from './db/notificationStore';
 import type { IScheduleStore } from './db/scheduleStore';
 import type { WithTransaction } from './db/transaction';
 
@@ -11,6 +12,7 @@ import type { WithTransaction } from './db/transaction';
  */
 export function createController<TTransaction>(params: {
   scheduleStore: IScheduleStore<TTransaction>;
+  notificationStore: INotificationStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   logger: Logger;
 }): Controller {
@@ -18,6 +20,7 @@ export function createController<TTransaction>(params: {
     loops: [
       scheduleDispatchLoop({
         scheduleStore: params.scheduleStore,
+        notificationStore: params.notificationStore,
         withTransaction: params.withTransaction,
         logger: params.logger,
       }),
@@ -31,6 +34,7 @@ export function createController<TTransaction>(params: {
  */
 export function runController<TTransaction>(params: {
   scheduleStore: IScheduleStore<TTransaction>;
+  notificationStore: INotificationStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   logger: Logger;
   gracefulTimeoutSeconds: number;

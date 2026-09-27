@@ -14,6 +14,7 @@
  */
 import configuration from './config';
 import { runController } from './controller';
+import { PostgresNotificationStore } from './db/postgres/notification-store/PostgresNotificationStore';
 import { createDb } from './db/postgres/client';
 import { PostgresScheduleStore } from './db/postgres/schedule-store/PostgresScheduleStore';
 import { createControllerLogger } from './logger';
@@ -48,6 +49,7 @@ try {
 
   runController({
     scheduleStore: new PostgresScheduleStore(db),
+    notificationStore: new PostgresNotificationStore(db),
     withTransaction: callback => db.transaction().execute(callback),
     logger,
     gracefulTimeoutSeconds: configuration.GRACEFUL_TIMEOUT_SECONDS,

@@ -24,11 +24,15 @@ import {
   scheduleRunFailureReason,
   ScheduleRunNotFoundError,
   startScheduleRun,
+  watchScheduleTurnForNotificationCompletion,
+  writeReminderNotification,
+  writeScheduleFailureNotification,
 } from '../controller/scheduleDispatch';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
+import type { INotificationStore } from '../db/notificationStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import {
@@ -73,6 +77,7 @@ import { getTurnExecutionError, startTurnInProcess } from './turns';
 /** Runtime + Context store resolvers needed to start a schedule turn. */
 export interface ScheduleTurnExecutionDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
+  notificationStore: INotificationStore<TTransaction>;
   sessions: Sessions<SessionCustom, TurnCustom>;
   activeTurns: ActiveTurnRegistry;
   /** Tracks in-flight turn event drains so shutdown can wait for them. */
@@ -119,6 +124,14 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
   deps: ScheduleTurnExecutionDeps<TTransaction>;
 }): Promise<void> {
   const { c, item, deps } = params;
+  const manifest = item.schedule.manifest;
+
+  // Reminders never start an agent turn: the task itself is the notification.
+  if (manifest.kind === 'reminder') {
+    await writeReminderNotification({ notificationStore: deps.notificationStore, item });
+    return;
+  }
+
   const prepared = await startScheduleRun({
     item,
     sessions: deps.sessions,
@@ -127,7 +140,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
   if (prepared === undefined) {
     return;
   }
-  await startTurnInProcess({
+  const turn = await startTurnInProcess({
     session: prepared.session,
     input: prepared.input,
     previous_turn_id: prepared.previous_turn_id,
@@ -150,6 +163,21 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       logger: deps.logger,
     },
   });
+
+  // Briefings always deliver their output as a notification; sessions do when
+  // the schedule opted into completion/failure notices. The watcher is
+  // fire-and-forget: the execute call returns after the first turn event.
+  if (manifest.kind === 'briefing' || manifest.notify_on_completion || manifest.notify_on_failure) {
+    watchScheduleTurnForNotificationCompletion({
+      tenant_id: item.schedule.tenant_id,
+      session_id: turn.session_id,
+      turn_id: turn.id,
+      eventSubscriptions: deps.eventSubscriptions,
+      notificationStore: deps.notificationStore,
+      logger: deps.logger,
+      item,
+    });
+  }
 }
 
 function toWireSchedule(record: ScheduleRecord): Schedule {
@@ -219,8 +247,9 @@ function isScheduleOwner(requestContext: Pick<RequestContext, 'subject'>, create
 export function createScheduleExecutionRouter<TTransaction>(deps: ScheduleTurnExecutionDeps<TTransaction>) {
   const handler: RouteHandler<typeof executeScheduleRunRoute> = async c => {
     const { schedule_run_id: scheduleRunId } = c.req.valid('json');
+    let item: ScheduleDispatchItem | undefined;
     try {
-      const item = await loadScheduleDispatchItem({
+      item = await loadScheduleDispatchItem({
         scheduleRunId,
         scheduleStore: deps.scheduleStore,
       });
@@ -238,7 +267,26 @@ export function createScheduleExecutionRouter<TTransaction>(deps: ScheduleTurnEx
         error instanceof ScheduleNotFoundError ||
         error instanceof ScheduleAgentNotFoundError
       ) {
+        // A deleted agent is a genuine run failure: notify when configured.
+        if (item !== undefined && error instanceof ScheduleAgentNotFoundError) {
+          await writeScheduleFailureNotification({
+            notificationStore: deps.notificationStore,
+            item,
+            error,
+            logger: deps.logger,
+          });
+        }
         return c.json({ error: { message: error.message } }, 404);
+      }
+      // The turn never started: honour notify_on_failure for the failure notice,
+      // then propagate so dispatch marks the run failed.
+      if (item !== undefined) {
+        await writeScheduleFailureNotification({
+          notificationStore: deps.notificationStore,
+          item,
+          error,
+          logger: deps.logger,
+        });
       }
       throw error;
     }

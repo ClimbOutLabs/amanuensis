@@ -67,6 +67,7 @@ import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtif
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
+import { formatAssistantMessageText } from '../runtime/messageText.js';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import { submitRetainWithVerification, type SummarizeTurnContext } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
@@ -679,18 +680,8 @@ export function turnStreamId(tenantId: string, sessionId: string, turnId: string
  * forward each sequenced event (SSE path). Shared by streaming and non-streaming
  * create-turn; the HTTP response lifecycle does not own execution.
  */
-/** Plain-text content of an assistant model message, `openai` chat-completion shaped. */
-function formatAssistantMessageText(
-  content: string | ({ type: 'text'; text: string } | { type: 'refusal'; refusal: string })[] | null | undefined,
-): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (!content) {
-    return '';
-  }
-  return content.map(part => (part.type === 'text' ? part.text : part.refusal)).join('\n');
-}
+/** Re-exported for callers that format turn output outside the turns API. */
+export { formatAssistantMessageText };
 
 /**
  * Re-reads the just-completed turn for its sandbox id, resolves the tenant's sandbox provider,

@@ -20,6 +20,7 @@ import { createCatalogRouter } from './apis/catalog';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
 import { createModelsRouter } from './apis/models';
+import { createNotificationsRouter } from './apis/notifications';
 import { createPermissionsRouter } from './apis/permissions';
 import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
@@ -52,6 +53,7 @@ import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
+import type { INotificationStore } from './db/notificationStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { IRepositoryStore } from './db/repositoryStore';
@@ -224,6 +226,7 @@ export interface ServerDeps<TTransaction> {
   spaceStore: ISpaceStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
+  notificationStore: INotificationStore<TTransaction>;
   sessionMetricsStore: ISessionMetricsStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
@@ -257,6 +260,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const authEnabled = getTrueForgeAuthMode() !== TrueForgeAuthMode.Standalone;
   const scheduleTurnDeps = {
     scheduleStore: deps.scheduleStore,
+    notificationStore: deps.notificationStore,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
     eventSubscriptions: deps.eventSubscriptions,
@@ -393,6 +397,16 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         withTransaction: deps.withTransaction,
         resolveRequestContext,
         authorizer: deps.authorizer,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/notifications',
+    withAuth(
+      createNotificationsRouter({
+        notificationStore: deps.notificationStore,
+        resolveRequestContext,
       }),
       authMiddleware,
     ),

@@ -1,8 +1,15 @@
+import type { BriefingTemplate, ScheduleKind } from '../../server/types.js';
+
 export type RecurrenceKind = 'hourly' | 'daily' | 'weekly' | 'custom';
 
 export type ScheduleFormValues = {
   name: string;
   task: string;
+  kind: ScheduleKind;
+  /** Briefing template; empty string selects the default template. Only used when kind is 'briefing'. */
+  template: BriefingTemplate | '';
+  notifyOnCompletion: boolean;
+  notifyOnFailure: boolean;
   recurrence: RecurrenceKind;
   hour: number;
   minute: number;
@@ -71,6 +78,10 @@ export function defaultScheduleFormValues(): ScheduleFormValues {
   return {
     name: '',
     task: '',
+    kind: 'session',
+    template: '',
+    notifyOnCompletion: false,
+    notifyOnFailure: true,
     recurrence: 'daily',
     hour: 9,
     minute: 0,
@@ -172,12 +183,23 @@ export function cronToFormValues(input: {
   task: string;
   cron: string;
   timezone: string;
+  kind?: ScheduleKind;
+  template?: BriefingTemplate | null;
+  notifyOnCompletion?: boolean;
+  notifyOnFailure?: boolean;
 }): ScheduleFormValues {
   const base = defaultScheduleFormValues();
+  const carry = {
+    kind: input.kind ?? base.kind,
+    template: input.template ?? base.template,
+    notifyOnCompletion: input.notifyOnCompletion ?? base.notifyOnCompletion,
+    notifyOnFailure: input.notifyOnFailure ?? base.notifyOnFailure,
+  };
   const parts = input.cron.trim().split(/\s+/);
   if (parts.length !== 5) {
     return {
       ...base,
+      ...carry,
       name: input.name,
       task: input.task,
       timezone: input.timezone,
@@ -193,6 +215,7 @@ export function cronToFormValues(input: {
   if (dom !== '*' || month !== '*') {
     return {
       ...base,
+      ...carry,
       name: input.name,
       task: input.task,
       timezone: input.timezone,
@@ -204,6 +227,7 @@ export function cronToFormValues(input: {
   if (hourRaw === '*' && dowRaw === '*' && !Number.isNaN(minute)) {
     return {
       ...base,
+      ...carry,
       name: input.name,
       task: input.task,
       timezone: input.timezone,
@@ -216,6 +240,7 @@ export function cronToFormValues(input: {
   if (dowRaw === '*' && !Number.isNaN(hour) && !Number.isNaN(minute)) {
     return {
       ...base,
+      ...carry,
       name: input.name,
       task: input.task,
       timezone: input.timezone,
@@ -229,6 +254,7 @@ export function cronToFormValues(input: {
   if (dowRaw != null && /^\d(?:,\d)*$/.test(dowRaw) && !Number.isNaN(hour) && !Number.isNaN(minute)) {
     return {
       ...base,
+      ...carry,
       name: input.name,
       task: input.task,
       timezone: input.timezone,
@@ -243,6 +269,7 @@ export function cronToFormValues(input: {
   // Weekdays 1-5 → treat as custom so the cron string is preserved on save.
   return {
     ...base,
+    ...carry,
     name: input.name,
     task: input.task,
     timezone: input.timezone,

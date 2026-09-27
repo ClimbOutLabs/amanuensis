@@ -32,6 +32,7 @@ import { SqlitePersonalizationStore } from '../src/db/sqlite/personalization-sto
 import { SqliteRepositoryStore } from '../src/db/sqlite/repository-store/SqliteRepositoryStore';
 import { SqliteSandboxProviderStore } from '../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteScheduleStore } from '../src/db/sqlite/schedule-store/SqliteScheduleStore';
+import { SqliteNotificationStore } from '../src/db/sqlite/notification-store/SqliteNotificationStore';
 import { SqliteSessionMetricsStore } from '../src/db/sqlite/session-metrics/SqliteSessionMetricsStore';
 import { SqliteSessionStore } from '../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSkillStore } from '../src/db/sqlite/skill-store/SqliteSkillStore';
@@ -98,6 +99,7 @@ const app = createServerApp({
   resolveImportAgentStore: () => agentStore,
   withTransaction: callback => db.transaction().execute(callback),
   scheduleStore: new SqliteScheduleStore(db),
+  notificationStore: new SqliteNotificationStore(db),
   turnArtifactStore: new SqliteTurnArtifactStore(db),
   globalSettingsStore: new SqliteGlobalSettingsStore(db),
   tokenStore,

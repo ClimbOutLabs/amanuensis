@@ -82,6 +82,10 @@ function ScheduleFormDrawerBody({
           task: schedule.task,
           cron: schedule.cron,
           timezone: schedule.timezone,
+          kind: schedule.kind,
+          template: schedule.template,
+          notifyOnCompletion: schedule.notifyOnCompletion,
+          notifyOnFailure: schedule.notifyOnFailure,
         }),
       );
       setAgentId(schedule.agentId);
@@ -144,6 +148,10 @@ function ScheduleFormDrawerBody({
         task: saved.task,
         cron: saved.cron,
         timezone: saved.timezone,
+        kind: saved.kind,
+        template: saved.template,
+        notifyOnCompletion: saved.notifyOnCompletion,
+        notifyOnFailure: saved.notifyOnFailure,
       }),
     );
     setAgentId(saved.agentId);
@@ -153,6 +161,8 @@ function ScheduleFormDrawerBody({
     event.preventDefault();
     if (!canSubmit) return;
     const cron = valuesToCron(form);
+    // An empty template selects the backend default for briefings.
+    const template = form.kind === 'briefing' && form.template !== '' ? form.template : undefined;
     setSaving(true);
     setError(null);
     try {
@@ -164,6 +174,10 @@ function ScheduleFormDrawerBody({
           cron,
           timezone: form.timezone,
           status: schedule.status,
+          kind: form.kind,
+          template,
+          notifyOnCompletion: form.notifyOnCompletion,
+          notifyOnFailure: form.notifyOnFailure,
         });
         onSaved?.();
         onOpenChange(false);
@@ -178,6 +192,10 @@ function ScheduleFormDrawerBody({
           cron,
           timezone: form.timezone,
           status: 'paused',
+          kind: form.kind,
+          template,
+          notifyOnCompletion: form.notifyOnCompletion,
+          notifyOnFailure: form.notifyOnFailure,
         });
         onSaved?.();
         enterTestView(saved);
@@ -195,6 +213,10 @@ function ScheduleFormDrawerBody({
         cron,
         timezone: form.timezone,
         status: 'paused',
+        kind: form.kind,
+        template,
+        notifyOnCompletion: form.notifyOnCompletion,
+        notifyOnFailure: form.notifyOnFailure,
       });
       onSaved?.();
       enterTestView(saved);
@@ -222,6 +244,10 @@ function ScheduleFormDrawerBody({
         cron: view.schedule.cron,
         timezone: view.schedule.timezone,
         status: 'active',
+        kind: view.schedule.kind,
+        template: view.schedule.template ?? undefined,
+        notifyOnCompletion: view.schedule.notifyOnCompletion,
+        notifyOnFailure: view.schedule.notifyOnFailure,
       });
       onSaved?.();
       toaster?.showSuccess({ title: 'Schedule activated' });

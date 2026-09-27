@@ -8,6 +8,7 @@ import type {
   AgentSessionsServer,
   AgentUIServer,
   CatalogServer,
+  NotificationsServer,
   PermissionsServer,
   ScheduleServer,
 } from './types.js';
@@ -133,6 +134,20 @@ export function useScheduleServer(): ScheduleServer {
 
 export function useOptionalScheduleServer(): ScheduleServer | null {
   return useOptionalServer()?.schedules ?? null;
+}
+
+export function useNotificationsServer(): NotificationsServer {
+  const server = useServer();
+  if (server.notifications == null) {
+    throw new Error(
+      'useNotificationsServer requires AgentUIServer.notifications. Pass notifications to createTrueFoundryServer.',
+    );
+  }
+  return server.notifications;
+}
+
+export function useOptionalNotificationsServer(): NotificationsServer | null {
+  return useOptionalServer()?.notifications ?? null;
 }
 
 export function useOptionalPermissionsServer(): PermissionsServer | null {

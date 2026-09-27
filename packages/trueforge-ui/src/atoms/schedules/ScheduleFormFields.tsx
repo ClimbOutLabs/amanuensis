@@ -1,7 +1,7 @@
 'use client';
 
 import { Icon } from '../../icons/Icon.js';
-import type { AgentLibraryEntry } from '../../server/types.js';
+import type { AgentLibraryEntry, BriefingTemplate, ScheduleKind } from '../../server/types.js';
 import { AgentSearchPicker } from '../AgentSearchPicker.js';
 import { cn } from '../lib/cn.js';
 import { auiInputClass } from '../lib/inputClasses.js';
@@ -14,6 +14,16 @@ import {
   type RecurrenceKind,
   type ScheduleFormValues,
 } from './cadence.js';
+
+export const SCHEDULE_KIND_OPTIONS: Array<{ value: ScheduleKind; label: string; hint: string }> = [
+  { value: 'session', label: 'Agent session', hint: 'Run the agent on a task' },
+  { value: 'reminder', label: 'Reminder', hint: 'Send a notification, no agent run' },
+  { value: 'briefing', label: 'Briefing', hint: 'Agent-built briefing delivered as a notification' },
+];
+
+export const BRIEFING_TEMPLATE_OPTIONS: Array<{ value: BriefingTemplate; label: string }> = [
+  { value: 'morning-briefing', label: 'Morning briefing' },
+];
 
 export const RECURRENCE_OPTIONS: Array<{ value: RecurrenceKind; label: string }> = [
   { value: 'hourly', label: 'Hourly' },
@@ -65,6 +75,14 @@ export function ScheduleFormFields({
     onChange({ ...values, weekdays: weekdays.length > 0 ? weekdays : [day] });
   };
 
+  const taskLabel = values.kind === 'reminder' ? 'Reminder message' : 'Task';
+  const taskPlaceholder =
+    values.kind === 'reminder'
+      ? 'Stand up in 10 minutes…'
+      : values.kind === 'briefing'
+        ? 'Optional extra focus for the briefing…'
+        : 'Summarise yesterdays harness runs and post the digest…';
+
   return (
     <div className="flex flex-col gap-4 px-5 py-4">
       <div className="block">
@@ -92,17 +110,87 @@ export function ScheduleFormFields({
         />
       </label>
 
+      <fieldset>
+        <legend className="mb-1.5 text-sm font-medium">Type</legend>
+        <div className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-primary-bg p-1">
+          {SCHEDULE_KIND_OPTIONS.map(opt => {
+            const selected = values.kind === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                title={opt.hint}
+                className={cn(
+                  'rounded-md border px-2 py-2 text-sm font-medium transition-colors',
+                  selected
+                    ? 'border-primary-button-bg/40 bg-primary-button-bg/10 font-semibold text-primary-button-bg'
+                    : 'border-transparent text-text-secondary hover:bg-ghost-button-hover',
+                )}
+                aria-pressed={selected}
+                onClick={() => set('kind', opt.value)}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-1.5 text-xs text-text-secondary">
+          {SCHEDULE_KIND_OPTIONS.find(opt => opt.value === values.kind)?.hint}
+        </p>
+      </fieldset>
+
+      {values.kind === 'briefing' ? (
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium">Briefing template</span>
+          <PopoverSelect
+            aria-label="Briefing template"
+            value={values.template === '' ? 'morning-briefing' : values.template}
+            options={BRIEFING_TEMPLATE_OPTIONS}
+            onValueChange={value => {
+              const match = BRIEFING_TEMPLATE_OPTIONS.find(opt => opt.value === value);
+              set('template', match == null || match.value === 'morning-briefing' ? '' : match.value);
+            }}
+          />
+        </label>
+      ) : null}
+
       <label className="block">
-        <span className="mb-1.5 block text-sm font-medium">Task</span>
+        <span className="mb-1.5 block text-sm font-medium">{taskLabel}</span>
         <textarea
           value={values.task}
           onChange={e => set('task', e.target.value)}
           rows={3}
-          placeholder="Summarise yesterday's harness runs and post the digest…"
+          placeholder={taskPlaceholder}
           className={auiInputClass('resize-y py-2')}
-          required
+          required={values.kind !== 'briefing'}
         />
       </label>
+
+      <fieldset>
+        <legend className="mb-1.5 text-sm font-medium">Notifications</legend>
+        <div className="flex flex-col gap-2">
+          {values.kind !== 'reminder' ? (
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={values.notifyOnCompletion}
+                onChange={e => set('notifyOnCompletion', e.target.checked)}
+                className="size-4 accent-primary-button-bg"
+              />
+              <span>Notify when the run completes</span>
+            </label>
+          ) : null}
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={values.notifyOnFailure}
+              onChange={e => set('notifyOnFailure', e.target.checked)}
+              className="size-4 accent-primary-button-bg"
+            />
+            <span>Notify when the run fails</span>
+          </label>
+        </div>
+      </fieldset>
 
       <fieldset>
         <legend className="mb-1.5 text-sm font-medium">Frequency</legend>

@@ -17,6 +17,7 @@ import { createHarnessChatServer } from './chatServer.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
 import { createHarnessPermissionsServer } from './permissionsServer.js';
 import { createScheduleServer } from './schedules/scheduleServer.js';
+import { createNotificationsServer } from './notifications/notificationServer.js';
 import type { HarnessAgentSpec } from './types.js';
 
 export { createHarnessAgentMetricsServer, type CreateHarnessAgentMetricsServerOptions } from './agentMetricsServer.js';
@@ -83,6 +84,7 @@ export { getCapabilities, getMemoryBankStatus, listConfiguredMcpServers, listMod
 export type { BuildIdentity } from './lists.js';
 export { createHarnessPermissionsServer, type CreateHarnessPermissionsServerOptions } from './permissionsServer.js';
 export { createScheduleServer } from './schedules/scheduleServer.js';
+export { createNotificationsServer } from './notifications/notificationServer.js';
 export type { HarnessAgentSpec, HarnessAuxiliaryModels, HarnessMcpServerMount, HarnessSkillMount } from './types.js';
 
 export type CreateTrueForgeAgentUIServerOptions = CreateTrueForgeClientOptions & {
@@ -114,6 +116,7 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
     sessions: createHarnessAgentSessionsServer({ ...clientOptions, client }),
     metrics: createHarnessAgentMetricsServer({ ...clientOptions, client }),
     schedules: createScheduleServer({ client }),
+    notifications: createNotificationsServer(clientOptions),
     permissions: permissions ?? createHarnessPermissionsServer({ client }),
   });
 

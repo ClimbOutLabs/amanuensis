@@ -76,6 +76,7 @@ import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerStore';
 import { McpServerWithAuthStore } from './db/McpServerWithAuthStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
+import type { INotificationStore } from './db/notificationStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
@@ -122,6 +123,7 @@ interface ServerPersistence<TTransaction> {
   sessionMetricsStore: ISessionMetricsStore;
   tokenStore: IOAuthTokenStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
+  notificationStore: INotificationStore<TTransaction>;
   mcpOAuthStore: IMcpServerWithAuthStore<TTransaction>;
   resolveModelProviderStore: (rc: RequestContext, runAsAgent?: AgentRecord) => IModelProviderStore<TTransaction>;
   resolveMcpServerStore: (
@@ -304,6 +306,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore'),
       import('./db/sqlite/agent-store/SqliteAgentStore'),
       import('./db/sqlite/schedule-store/SqliteScheduleStore'),
+      import('./db/sqlite/notification-store/SqliteNotificationStore'),
       import('./db/sqlite/personalization-store/SqlitePersonalizationStore'),
       import('./db/sqlite/persona-store/SqlitePersonaStore'),
       import('./db/sqlite/space-store/SqliteSpaceStore'),
@@ -322,6 +325,7 @@ async function createStandalonePersistence(options: {
     { SqliteSandboxProviderStore },
     { SqliteAgentStore },
     { SqliteScheduleStore },
+    { SqliteNotificationStore },
     { SqlitePersonalizationStore },
     { SqlitePersonaStore },
     { SqliteSpaceStore },
@@ -359,6 +363,7 @@ async function createStandalonePersistence(options: {
     mcpOAuthStore: mcpServerStore,
     tokenStore,
     scheduleStore: new SqliteScheduleStore(db),
+    notificationStore: new SqliteNotificationStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     resolveModelProviderStore: () => modelProviderStore,
@@ -402,6 +407,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/sandbox-provider-store/PostgresSandboxProviderStore'),
       import('./db/postgres/agent-store/PostgresAgentStore'),
       import('./db/postgres/schedule-store/PostgresScheduleStore'),
+      import('./db/postgres/notification-store/PostgresNotificationStore'),
       import('./db/postgres/personalization-store/PostgresPersonalizationStore'),
       import('./db/postgres/persona-store/PostgresPersonaStore'),
       import('./db/postgres/space-store/PostgresSpaceStore'),
@@ -420,6 +426,7 @@ async function createDistributedPersistence(options: {
     { PostgresSandboxProviderStore },
     { PostgresAgentStore },
     { PostgresScheduleStore },
+    { PostgresNotificationStore },
     { PostgresPersonalizationStore },
     { PostgresPersonaStore },
     { PostgresSpaceStore },
@@ -505,6 +512,7 @@ async function createDistributedPersistence(options: {
     mcpOAuthStore: mcpServerWithAuthStore,
     tokenStore,
     scheduleStore: new PostgresScheduleStore(db),
+    notificationStore: new PostgresNotificationStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     resolveModelProviderStore,
@@ -527,6 +535,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sessionMetricsStore,
     tokenStore,
     scheduleStore,
+    notificationStore,
     mcpOAuthStore,
     resolveImportAgentStore,
     agentStore,
@@ -603,6 +612,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const controller = configuration.STANDALONE
     ? createController({
         scheduleStore,
+        notificationStore,
         withTransaction,
         logger,
       })
@@ -639,6 +649,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     withTransaction,
     tokenStore,
     scheduleStore,
+    notificationStore,
     agentStore,
     skillStore,
     sandboxProviderStore,

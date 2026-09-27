@@ -72,6 +72,7 @@ function SidebarNavItems({
   const shell = useOptionalShellMode();
   const AgentsLibraryButton = useSlot('AgentsLibraryButton');
   const SchedulesButton = useSlot('SchedulesButton');
+  const NotificationsButton = useSlot('NotificationsButton');
   const SpacesButton = useSlot('SpacesButton');
   const showNewActions = shell?.isNewChatEnabled !== false;
   const overlayOpen =
@@ -149,6 +150,7 @@ function SidebarNavItems({
       ) : null}
       <SpacesButton compact />
       <SchedulesButton compact />
+      <NotificationsButton compact />
       <AgentsLibraryButton compact />
       {showNewActions && shell?.isComposerEnabled ? (
         <button

@@ -84,6 +84,8 @@ export { TestScheduleScreen } from './atoms/schedules/TestScheduleScreen.js';
 export type { ScheduleMcpMount, TestScheduleScreenProps } from './atoms/schedules/TestScheduleScreen.js';
 export { SchedulesButton } from './atoms/SchedulesButton.js';
 export type { SchedulesButtonProps } from './atoms/SchedulesButton.js';
+export { NotificationsButton } from './atoms/notifications/NotificationsButton.js';
+export type { NotificationsButtonProps } from './atoms/notifications/NotificationsButton.js';
 export { Icon } from './icons/Icon.js';
 export type { IconProps } from './icons/Icon.js';
 

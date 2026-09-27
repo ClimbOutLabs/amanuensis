@@ -2,11 +2,13 @@ import configuration, { STANDALONE_TRUEFORGE_API_KEY } from '../../../src/config
 import {
   createHttpScheduleRunExecutor,
   loadScheduleDispatchItem,
+  resolveScheduleRunPrompt,
   ScheduleAgentNotFoundError,
   scheduleDispatchLoop,
   scheduleRunFailureReason,
   ScheduleRunNotFoundError,
   startScheduleRun,
+  writeReminderNotification,
 } from '../../../src/controller/scheduleDispatch';
 import type { ScheduleDispatchItem, ScheduleRunRecord } from '../../../src/db/scheduleStore';
 import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
@@ -220,5 +222,81 @@ describe('loadScheduleDispatchItem', () => {
       }),
     ).rejects.toBeInstanceOf(ScheduleRunNotFoundError);
     expect(getSchedule).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveScheduleRunPrompt', () => {
+  it('returns undefined for reminder kind', () => {
+    const manifest = ScheduleManifestSchema.parse({
+      task: 'Stand up',
+      cron: '0 9 * * *',
+      timezone: 'UTC',
+      kind: 'reminder',
+    });
+    expect(resolveScheduleRunPrompt(manifest)).toBeUndefined();
+  });
+
+  it('returns the task for session kind', () => {
+    const manifest = ScheduleManifestSchema.parse({
+      task: 'Do the thing',
+      cron: '0 9 * * *',
+      timezone: 'UTC',
+      kind: 'session',
+    });
+    expect(resolveScheduleRunPrompt(manifest)).toBe('Do the thing');
+  });
+
+  it('returns the briefing prompt for briefing kind', () => {
+    const manifest = ScheduleManifestSchema.parse({
+      task: 'Brief me',
+      cron: '0 9 * * *',
+      timezone: 'UTC',
+      kind: 'briefing',
+    });
+    const prompt = resolveScheduleRunPrompt(manifest);
+    expect(prompt).toContain('briefing');
+  });
+});
+
+describe('writeReminderNotification', () => {
+  it('writes a reminder notification without starting a turn', async () => {
+    const dispatchItem = item();
+    dispatchItem.schedule.manifest = ScheduleManifestSchema.parse({
+      task: 'Stand up in 10 minutes',
+      cron: '0 9 * * *',
+      timezone: 'UTC',
+      kind: 'reminder',
+    });
+    const createNotification = jest.fn().mockResolvedValue({
+      id: 'notif-1',
+      tenant_id: 'default',
+      kind: 'reminder',
+      title: 'Reminder: test',
+      body: 'Stand up in 10 minutes',
+      schedule_id: 'sched-1',
+      schedule_run_id: 'run-1',
+      created_by_subject: { subject_id: 'tester', subject_type: 'user', subject_display_name: 'tester' },
+      read_at: null,
+      created_at: '2026-08-31T00:00:00.000Z',
+      updated_at: '2026-08-31T00:00:00.000Z',
+    });
+    const notificationStore = {
+      createNotification,
+      listNotifications: jest.fn(),
+      getNotification: jest.fn(),
+      markNotificationRead: jest.fn(),
+      deleteNotification: jest.fn(),
+    };
+    await writeReminderNotification({
+      notificationStore,
+      item: dispatchItem,
+    });
+    expect(createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'reminder',
+        title: expect.stringContaining('Reminder:'),
+        body: 'Stand up in 10 minutes',
+      }),
+    );
   });
 });

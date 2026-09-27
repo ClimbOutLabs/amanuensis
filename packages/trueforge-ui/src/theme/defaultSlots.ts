@@ -79,6 +79,7 @@ import { SaveAgentButton } from '../atoms/SaveAgentButton.js';
 import { SaveAgentForm } from '../atoms/SaveAgentForm.js';
 import type { SchedulesPageProps } from '../atoms/schedules/SchedulesPage.js';
 import { SchedulesButton } from '../atoms/SchedulesButton.js';
+import { NotificationsButton } from '../atoms/notifications/NotificationsButton.js';
 import { ScrollToBottomButton } from '../atoms/ScrollToBottomButton.js';
 import { SelectAgentEmptyState } from '../atoms/SelectAgentEmptyState.js';
 import { SessionsBrowserButton } from '../atoms/SessionsBrowserButton.js';
@@ -248,6 +249,7 @@ export const defaultSlots = {
   AgentCodeBlock,
   SchedulesPage,
   SchedulesButton,
+  NotificationsButton,
   SpacesButton,
   SaveAgentButton,
   SaveAgentForm,
