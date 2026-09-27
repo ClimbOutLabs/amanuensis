@@ -21,6 +21,7 @@ const ConnectorSettings = lazy(() => import('./ConnectorSettings.js'));
 const MemorySettings = lazy(() => import('./MemorySettings.js'));
 const SkillSettings = lazy(() => import('./SkillSettings.js'));
 const SandboxSettings = lazy(() => import('./SandboxSettings.js'));
+const ThemeSettings = lazy(() => import('./ThemeSettings.js'));
 const PersonalizationSettings = lazy(() =>
   import('@/components/PersonalizationPanel.js').then(module => ({ default: module.PersonalizationPanel })),
 );
@@ -86,13 +87,13 @@ const TruefoundrySettingsBuilder = () => {
     Array<{
       id: SettingsSection;
       label: string;
-      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot';
+      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette';
     }>
   >(() => {
     const baseSections: Array<{
       id: SettingsSection;
       label: string;
-      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot';
+      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette';
     }> = [
       { id: 'models', label: 'Models', icon: 'cpu' },
       { id: 'model-roles', label: 'Model roles', icon: 'brain' },
@@ -100,6 +101,7 @@ const TruefoundrySettingsBuilder = () => {
       // Not gated on a capability: memory is configured by pointing at a bank, so the section has
       // to be reachable while none is configured. It reads as off until one is.
       { id: 'memory', label: 'Memory', icon: 'box-archive' },
+      { id: 'themes', label: 'Themes', icon: 'palette' },
     ];
     if (hasSkills) {
       baseSections.push({ id: 'skills', label: 'Skills', icon: 'lightbulb' });
@@ -170,6 +172,7 @@ const TruefoundrySettingsBuilder = () => {
               {section === 'model-roles' ? <ModelRoleSettings /> : null}
               {section === 'connectors' ? <ConnectorSettings /> : null}
               {section === 'memory' ? <MemorySettings /> : null}
+              {section === 'themes' ? <ThemeSettings /> : null}
               {section === 'skills' && hasSkills ? <SkillSettings /> : null}
               {section === 'sandbox' && hasSandbox ? <SandboxSettings /> : null}
               {section === 'personalization' && hasPersonalization ? <PersonalizationSettings /> : null}
