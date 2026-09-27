@@ -1,13 +1,11 @@
 import { z } from 'zod';
 import type { AgentThreadExecutionContext } from '../../../../src/core/capabilities/AgentContextProcessor';
 import {
-  COMPACTION_BACKOFF_TOKEN_DELTA,
   compactionValidationFingerprint,
   contextCompaction,
   contextUsesSandboxTools,
   CONVERSATION_REQUIRED_SUMMARY_SECTIONS,
   DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
-  MAX_CONSECUTIVE_COMPACTION_SKIPS,
   replaceBoundRepositorySection,
   REQUIRED_SUMMARY_SECTIONS,
   resolveCompactionThresholdTokens,
@@ -1401,7 +1399,7 @@ describe('contextCompaction session mode', () => {
     expect(conversationContent).toContain("user's own conversational register");
   });
 
-  it('rejects a malformed conversation-mode summary without overwriting context, and emits a skipped_invalid compaction event', async () => {
+  it('falls back to truncation on a malformed conversation-mode summary, emitting a truncated_fallback compaction event', async () => {
     const missingSection = `<summary>
 ## user_goal
 Plan a trip.
@@ -1428,17 +1426,18 @@ none
         compactionThresholdTokens: ALWAYS_TRIGGERS_THRESHOLD,
       }),
     );
-    expect(events.find(event => event.type === 'agent.context.overwrite')).toBeUndefined();
+    const overwrite = events.find(event => event.type === 'agent.context.overwrite');
+    expect(overwrite).toBeDefined();
     const compactionEvent = events.find(event => event.type === 'agent.context.compaction');
     if (compactionEvent === undefined || compactionEvent.type !== 'agent.context.compaction') {
       throw new Error('expected a compaction event');
     }
     expect(compactionEvent.mode).toBe('conversation');
-    expect(compactionEvent.outcome).toBe('skipped_invalid');
+    expect(compactionEvent.outcome).toBe('truncated_fallback');
     expect(compactionEvent.summary_chars).toBe(0);
   });
 
-  it('rejects an over-length conversation-mode summary without overwriting context', async () => {
+  it('falls back to truncation on an over-length conversation-mode summary', async () => {
     const overlong = completedConversationSummary('x'.repeat(20_000));
     const model = makeMockILLM({
       createNonStream: jest.fn().mockResolvedValue({
@@ -1454,12 +1453,13 @@ none
         compactionThresholdTokens: ALWAYS_TRIGGERS_THRESHOLD,
       }),
     );
-    expect(events.find(event => event.type === 'agent.context.overwrite')).toBeUndefined();
+    const overwrite = events.find(event => event.type === 'agent.context.overwrite');
+    expect(overwrite).toBeDefined();
     const compactionEvent = events.find(event => event.type === 'agent.context.compaction');
     if (compactionEvent === undefined || compactionEvent.type !== 'agent.context.compaction') {
       throw new Error('expected a compaction event');
     }
-    expect(compactionEvent.outcome).toBe('skipped_invalid');
+    expect(compactionEvent.outcome).toBe('truncated_fallback');
   });
 
   it('emits a skipped_blocked compaction event when the turn is cancelled before compaction can run, and does not overwrite context', async () => {
@@ -2176,7 +2176,7 @@ describe('compaction reliability journey (spec 002)', () => {
   });
 
   // AC-3: duplicated sections are not salvageable; the warn log carries a content-free diagnostic.
-  it('skips on duplicated sections and logs a content-free fingerprint', async () => {
+  it('truncates on duplicated sections and logs a content-free fingerprint', async () => {
     const longBody = 'x'.repeat(2500);
     const duplicated = CONVERSATION_REQUIRED_SUMMARY_SECTIONS.map(
       name => `## ${name}\n${longBody}`,
@@ -2186,97 +2186,79 @@ describe('compaction reliability journey (spec 002)', () => {
     const logger = makeSilentLogger();
     const warnSpy = jest.spyOn(logger, 'warn');
     const events = await collectProcessPreLLM(makeCapability(model, logger));
-    expect(events.find(e => (e as { type?: string }).type === 'agent.context.overwrite')).toBeUndefined();
-    expect(findCompactionEvent(events).outcome).toBe('skipped_invalid');
+    const overwrite = events.find(e => (e as { type?: string }).type === 'agent.context.overwrite');
+    expect(overwrite).toBeDefined();
+    expect(findCompactionEvent(events).outcome).toBe('truncated_fallback');
     const warnCalls = warnSpy.mock.calls.map(call => String(call[0]));
-    const skipLog = warnCalls.find(message => message.includes('Skipping compaction'));
-    if (skipLog === undefined) throw new Error('expected a skip warn log');
-    expect(skipLog).toContain('duplicate_section');
+    const fallbackLog = warnCalls.find(message => message.includes('falling back to truncation'));
+    if (fallbackLog === undefined) throw new Error('expected a truncation fallback warn log');
+    expect(fallbackLog).toContain('duplicate_section');
     // Security: the log must NOT contain raw model output (which may include user secrets).
     // It carries a fingerprint digest only, per the oversizedResultFingerprint precedent.
-    expect(skipLog).toContain('fingerprint');
-    expect(skipLog).not.toContain(longBody);
-    expect(skipLog).not.toContain('output_preview');
+    expect(fallbackLog).toContain('fingerprint');
+    expect(fallbackLog).not.toContain(longBody);
+    expect(fallbackLog).not.toContain('output_preview');
     // The fingerprint diagnoses the shape: user_goal appears twice (duplicated).
-    expect(skipLog).toContain('user_goal=2');
+    expect(fallbackLog).toContain('user_goal=2');
   });
 
-  // AC-4: the breaker stops the per-turn retry loop.
-  it('stops calling the model after MAX_CONSECUTIVE_COMPACTION_SKIPS failures', async () => {
+  // Truncation fallback: every invalid summary truncates deterministically instead of
+  // skipping. The context shrinks on every attempt; there is no retry loop to break.
+  it('truncates on every invalid summary without a retry loop', async () => {
     const invalid = '<summary>\n## user_goal\nOnly one section.\n</summary>';
     const model = stubModel(invalid);
     const capability = makeCapability(model);
-    const processor = capability.preLLMProcessors?.[0];
-    if (processor === undefined) throw new Error('expected a preLLMProcessor');
-    for (let i = 0; i < MAX_CONSECUTIVE_COMPACTION_SKIPS; i++) {
-      await collectProcessPreLLM(capability);
+    for (let i = 0; i < 3; i++) {
+      const events = await collectProcessPreLLM(capability);
+      expect(events.find(e => (e as { type?: string }).type === 'agent.context.overwrite')).toBeDefined();
+      expect(findCompactionEvent(events).outcome).toBe('truncated_fallback');
     }
-    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(MAX_CONSECUTIVE_COMPACTION_SKIPS);
-    // Fourth attempt: backed off, no model call.
-    const events = await collectProcessPreLLM(capability);
-    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(MAX_CONSECUTIVE_COMPACTION_SKIPS);
-    expect(events.find(e => (e as { type?: string }).type === 'agent.context.overwrite')).toBeUndefined();
+    // Each attempt calls the model once for the summary, then truncates. No backoff.
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(3);
   });
 
-  // AC-5: growth past the backoff mark retries; success resets the breaker.
-  it('retries once the context grows past the backoff mark and resets on success', async () => {
-    const invalid = '<summary>\n## user_goal\nOnly one section.\n</summary>';
-    const model = stubModel(invalid);
-    const logger = makeSilentLogger();
-    const errorSpy = jest.spyOn(logger, 'error');
-    const capability = makeCapability(model, logger);
-    const processor = capability.preLLMProcessors?.[0];
-    if (processor === undefined) throw new Error('expected a preLLMProcessor');
-    for (let i = 0; i < MAX_CONSECUTIVE_COMPACTION_SKIPS; i++) {
-      await collectProcessPreLLM(capability);
-    }
-    expect(errorSpy).toHaveBeenCalled();
-    // Grow the context past the backoff mark and return valid output now.
-    jest.mocked(model.createNonStream).mockResolvedValue({
-      output: { role: 'assistant', content: completedConversationSummary('What is next?') },
-      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
-      finish_reason: 'stop',
-    });
-    const grownExecution: Parameters<typeof processor.processPreLLM>[0] = {
-      ...makeExecution(),
-      currentContextUsage: {
-        prompt_tokens: COMPACTION_BACKOFF_TOKEN_DELTA + 1,
-        completion_tokens: 0,
-      },
-    };
-    const events: unknown[] = [];
-    for await (const event of processor.processPreLLM(grownExecution)) {
-      events.push(event);
-    }
-    expect(findCompactionEvent(events).outcome).toBe('applied');
-    // Breaker reset: the next failure starts a fresh count, not an immediate trip.
-    jest.mocked(model.createNonStream).mockResolvedValue({
-      output: { role: 'assistant', content: invalid },
-      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
-      finish_reason: 'stop',
-    });
-    await collectProcessPreLLM(capability);
-    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(MAX_CONSECUTIVE_COMPACTION_SKIPS + 2);
-  });
-
-  // AC-6: forced compaction bypasses the backoff.
-  it('still attempts compaction when forceCompaction is set during backoff', async () => {
-    const invalid = '<summary>\n## user_goal\nOnly one section.\n</summary>';
+  it('preserves system messages and recent turns in the truncation fallback', async () => {
+    const invalid = '';
     const model = stubModel(invalid);
     const capability = makeCapability(model);
-    const processor = capability.preLLMProcessors?.[0];
-    if (processor === undefined) throw new Error('expected a preLLMProcessor');
-    for (let i = 0; i < MAX_CONSECUTIVE_COMPACTION_SKIPS; i++) {
-      await collectProcessPreLLM(capability);
+    const context: ContextMessage[] = [
+      { role: 'system', content: 'You are a helpful assistant.' },
+      { role: 'user', content: 'Old question 1' },
+      { role: 'assistant', content: 'Old answer 1' },
+      { role: 'user', content: 'Old question 2' },
+      { role: 'assistant', content: 'Old answer 2' },
+      { role: 'user', content: 'Recent question' },
+      { role: 'assistant', content: 'Recent answer' },
+    ];
+    const events = await collectProcessPreLLM(capability, context);
+    const overwrite = events.find(e => (e as { type?: string }).type === 'agent.context.overwrite');
+    if (overwrite === undefined || overwrite.type !== 'agent.context.overwrite') {
+      throw new Error('expected an overwrite event');
     }
-    const callsBefore = jest.mocked(model.createNonStream).mock.calls.length;
-    const forcedExecution: Parameters<typeof processor.processPreLLM>[0] = {
-      ...makeExecution(),
-      forceCompaction: true,
-    };
-    for await (const _event of processor.processPreLLM(forcedExecution)) {
-      // drain
+    const persisted = JSON.stringify(overwrite.context);
+    // System message preserved.
+    expect(persisted).toContain('You are a helpful assistant.');
+    // Recent turns preserved.
+    expect(persisted).toContain('Recent question');
+    expect(persisted).toContain('Recent answer');
+    // Truncation notice present.
+    expect(persisted).toContain('dropped because automatic summarization failed');
+    expect(findCompactionEvent(events).outcome).toBe('truncated_fallback');
+  });
+
+  it('never replaces context with nothing in the truncation fallback', async () => {
+    const invalid = '';
+    const model = stubModel(invalid);
+    const capability = makeCapability(model);
+    const context: ContextMessage[] = [
+      { role: 'system', content: 'System prompt.' },
+      { role: 'user', content: 'Hello' },
+    ];
+    const events = await collectProcessPreLLM(capability, context);
+    const overwrite = events.find(e => (e as { type?: string }).type === 'agent.context.overwrite');
+    if (overwrite === undefined || overwrite.type !== 'agent.context.overwrite') {
+      throw new Error('expected an overwrite event');
     }
-    expect(jest.mocked(model.createNonStream).mock.calls.length).toBe(callsBefore + 1);
+    expect(overwrite.context.length).toBeGreaterThan(0);
   });
 });
