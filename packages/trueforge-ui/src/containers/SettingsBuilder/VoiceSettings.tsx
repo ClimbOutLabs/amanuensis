@@ -114,7 +114,9 @@ const VoiceSettings = () => {
   const voiceOptions = useMemo(() => {
     const options = speech.voices.map(voice => ({
       value: voice.voiceURI,
-      label: voice.lang ? `${voice.name} (${voice.lang})` : voice.name,
+      // Network voices synthesize on the vendor's servers; label them so the
+      // choice is visible instead of silent.
+      label: `${voice.name}${voice.lang ? ` (${voice.lang})` : ''}${voice.local ? '' : ' (network)'}`,
     }));
     options.sort((a, b) => a.label.localeCompare(b.label));
     return [{ value: '', label: 'System default' }, ...options];
@@ -129,7 +131,9 @@ const VoiceSettings = () => {
       <header>
         <h3 className="text-base font-semibold text-text-primary">Voice</h3>
         <p className="mt-1 text-sm text-text-secondary">
-          Dictate messages and have replies read aloud. Everything runs in your browser, nothing is sent to a server.
+          Dictate messages and have replies read aloud. Dictation streams audio to your browser vendor&apos;s cloud
+          speech service (Google&apos;s in Chrome and Edge, Apple&apos;s in Safari). Read-aloud stays on your device
+          unless you pick a voice marked (network).
         </p>
       </header>
 
