@@ -52,7 +52,7 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
-import { buildPersonalizationContext, type PersonalizationContext } from '../personalization/profile';
+import type { PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
 import {
   createAndExecuteTurnRoute,
@@ -235,7 +235,7 @@ export type BeginTurnExecutionDeps = Pick<
   /** Same override point as the chat path's `TurnsRouterDeps.sandboxProviderResolver`; defaults to {@link resolveSandboxProvider}. */
   sandboxProviderResolver?: typeof resolveSandboxProvider | undefined;
   /** Optional: absent for callers (e.g. schedule run-now) that do not resolve a memory/persona context. */
-  personalizationContext?: PersonalizationContext | undefined;
+  personalizationProfile?: PersonalizationProfile | undefined;
   personaContext?: PersonaContext | undefined;
   boundRepository?: BoundRepository | undefined;
   memoryClient?: MemoryClient | undefined;
@@ -264,7 +264,7 @@ function createTurnResolver(deps: {
   userRef: string;
   session: SessionHandle<SessionCustom, TurnCustom>;
   turnId: string;
-  personalizationContext?: PersonalizationContext | undefined;
+  personalizationProfile?: PersonalizationProfile | undefined;
   personaContext?: PersonaContext | undefined;
   personaKnowledgeBlock?: string | undefined;
   personaKnowledgeHits?: readonly PersonaKnowledgeHit[] | undefined;
@@ -303,7 +303,7 @@ function createTurnResolver(deps: {
     userRef,
     session,
     turnId,
-    personalizationContext,
+    personalizationProfile,
     personaContext,
     personaKnowledgeBlock,
     personaKnowledgeHits,
@@ -502,7 +502,7 @@ function createTurnResolver(deps: {
           sessionStore.replaceTaskChecklist({ tenant_id, session_id: sessionId, ...input }),
       },
     },
-    personalizationContext,
+    personalizationProfile,
     personaContext,
     {
       client: memoryClient,
@@ -959,7 +959,7 @@ export async function beginTurnExecution(params: {
     session,
     turnId,
     boundRepository: deps.boundRepository,
-    personalizationContext: deps.personalizationContext,
+    personalizationProfile: deps.personalizationProfile,
     personaContext: deps.personaContext,
     memoryClient: deps.memoryClient,
     memoryProviderServerName: deps.memoryProviderServerName,
@@ -1651,11 +1651,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       userRef,
       session,
       turnId,
-      personalizationContext: profile
-        ? buildPersonalizationContext(profile, {
-            speaker: persona?.kind === 'persona' ? 'persona' : 'default_assistant',
-          })
-        : undefined,
+      personalizationProfile: profile,
       personaContext: persona?.kind === 'persona' ? persona.context : undefined,
       boundRepository,
       repositoryStore: deps.repositoryStore,
