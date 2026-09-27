@@ -142,7 +142,7 @@ describe('CAR D repro: pill switch A -> B', () => {
     'the next turn after a pill click answers as the picked persona',
     async () => {
       const sessionId = await createSession(server);
-      const squidwardId = await createPersona(server, {
+      await createPersona(server, {
         display_name: 'Squidward',
         aliases: [],
         instructions: 'You are Squidward Tentacles. You are grumpy and sarcastic.',
@@ -183,7 +183,7 @@ describe('CAR D repro: pill switch A -> B', () => {
     'pill and chat switching stay consistent (CAR D + #319 interplay)',
     async () => {
       const sessionId = await createSession(server);
-      const squidwardId = await createPersona(server, {
+      await createPersona(server, {
         display_name: 'SquidwardB',
         aliases: [],
         instructions: 'You are SquidwardB Tentacles. You are grumpy and sarcastic.',
