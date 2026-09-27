@@ -27,7 +27,7 @@ A standard integration framework for MCP servers with three guarantees: secrets 
 - Data-flow documentation per integration (what data flows where)
 
 ## Testing
-- Synthetic accounts only, never Sidd's real credentials
+- Synthetic accounts only, never the user's real credentials
 - Verify: connecting shows only the requested scopes
 - Verify: secret values never appear in UI, logs, or API responses
 - Verify: revoking access immediately stops the agent from using the integration
