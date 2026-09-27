@@ -61,4 +61,22 @@ export interface ITurnArtifactStore<TTransaction = never> {
   getArtifact(input: TurnArtifactIdentityInput, transaction?: TTransaction): Promise<TurnArtifactRecord | undefined>;
   /** The stored bytes for a digest, or undefined if somehow absent (index row would say `stored` regardless). */
   getBlob(input: TenantScopedInput & { digest: string }, transaction?: TTransaction): Promise<Buffer | undefined>;
+  /**
+   * Every artifact index row for one turn, newest first. The UI lists these
+   * without parsing assistant prose; run_code harvests appear under their
+   * `run_code/` paths alongside exec-sandbox `sandbox_artifacts` rows.
+   */
+  listArtifacts(
+    input: TenantScopedInput & { session_id: string; turn_id: string },
+    transaction?: TTransaction,
+  ): Promise<TurnArtifactRecord[]>;
+  /**
+   * Retention sweep: deletes index rows older than `older_than` (ISO 8601)
+   * across all tenants, then deletes blobs no remaining row references.
+   * Blobs shared with a surviving row are kept. Returns the deleted row count.
+   */
+  deleteArtifactsOlderThan(
+    input: { older_than: string },
+    transaction?: TTransaction,
+  ): Promise<number>;
 }

@@ -799,3 +799,265 @@
     animation: aui-wait-queue-arrive 1.4s ease-out infinite;
   }
 }
+
+/* ── State sprite: cute CSS-only assistant character ─────────────────────
+ * A 20px blob that mirrors the wait-queue station: Listening bobs with
+ * sound waves, Remembering floats thought bubbles, Doing jiggles with
+ * speed lines, Writing scribbles with a pencil. Pure CSS shapes and
+ * keyframes, no assets. Body uses the theme accent and eyes use the page
+ * background token, so contrast holds across every preset and mode.
+ * Animations honor prefers-reduced-motion and the --static modifier,
+ * matching the wait-queue track behavior. */
+.aui-state-sprite {
+  position: relative;
+  display: inline-block;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+}
+
+.aui-state-sprite__body {
+  position: absolute;
+  left: 0.125rem;
+  top: 0.125rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background: var(--brand-accent);
+}
+
+.aui-state-sprite__body::before,
+.aui-state-sprite__body::after {
+  content: '';
+  position: absolute;
+  top: 0.3125rem;
+  width: 0.1875rem;
+  height: 0.25rem;
+  border-radius: 9999px;
+  background: var(--primary-bg);
+}
+
+.aui-state-sprite__body::before {
+  left: 0.25rem;
+}
+
+.aui-state-sprite__body::after {
+  right: 0.25rem;
+}
+
+.aui-state-sprite__fx {
+  position: absolute;
+  display: none;
+  opacity: 0.75;
+}
+
+/* Listening: curious bob plus pulsing sound-wave arcs. */
+.aui-state-sprite--listening .aui-state-sprite__fx--1,
+.aui-state-sprite--listening .aui-state-sprite__fx--2 {
+  display: block;
+  top: 0.3125rem;
+  width: 0.3125rem;
+  height: 0.625rem;
+  border: 1.5px solid var(--brand-accent);
+}
+
+.aui-state-sprite--listening .aui-state-sprite__fx--1 {
+  left: -0.125rem;
+  border-right: none;
+  border-radius: 9999px 0 0 9999px;
+}
+
+.aui-state-sprite--listening .aui-state-sprite__fx--2 {
+  right: -0.125rem;
+  border-left: none;
+  border-radius: 0 9999px 9999px 0;
+}
+
+/* Remembering: eyes look up, thought bubbles rise. */
+.aui-state-sprite--remembering .aui-state-sprite__body::before,
+.aui-state-sprite--remembering .aui-state-sprite__body::after {
+  top: 0.1875rem;
+}
+
+.aui-state-sprite--remembering .aui-state-sprite__fx--1,
+.aui-state-sprite--remembering .aui-state-sprite__fx--2,
+.aui-state-sprite--remembering .aui-state-sprite__fx--3 {
+  display: block;
+  border-radius: 9999px;
+  background: var(--brand-accent);
+}
+
+.aui-state-sprite--remembering .aui-state-sprite__fx--1 {
+  width: 0.1875rem;
+  height: 0.1875rem;
+  right: 0.25rem;
+  top: 0;
+}
+
+.aui-state-sprite--remembering .aui-state-sprite__fx--2 {
+  width: 0.25rem;
+  height: 0.25rem;
+  right: 0.5rem;
+  top: -0.25rem;
+}
+
+.aui-state-sprite--remembering .aui-state-sprite__fx--3 {
+  width: 0.375rem;
+  height: 0.375rem;
+  right: 0.75rem;
+  top: -0.5625rem;
+}
+
+/* Doing: excited jiggle with trailing speed lines. */
+.aui-state-sprite--doing .aui-state-sprite__fx--1,
+.aui-state-sprite--doing .aui-state-sprite__fx--2,
+.aui-state-sprite--doing .aui-state-sprite__fx--3 {
+  display: block;
+  left: -0.4375rem;
+  height: 0.125rem;
+  border-radius: 9999px;
+  background: var(--brand-accent);
+}
+
+.aui-state-sprite--doing .aui-state-sprite__fx--1 {
+  top: 0.3125rem;
+  width: 0.375rem;
+}
+
+.aui-state-sprite--doing .aui-state-sprite__fx--2 {
+  top: 0.5625rem;
+  width: 0.5625rem;
+}
+
+.aui-state-sprite--doing .aui-state-sprite__fx--3 {
+  top: 0.8125rem;
+  width: 0.3125rem;
+}
+
+/* Writing: eyes look down at the scribbling pencil. */
+.aui-state-sprite--writing .aui-state-sprite__body::before,
+.aui-state-sprite--writing .aui-state-sprite__body::after {
+  top: 0.4375rem;
+}
+
+.aui-state-sprite--writing .aui-state-sprite__fx--1 {
+  display: block;
+  right: -0.0625rem;
+  bottom: -0.0625rem;
+  width: 0.1875rem;
+  height: 0.5625rem;
+  border-radius: 0.0625rem;
+  background: var(--text-secondary);
+  transform: rotate(35deg);
+}
+
+@keyframes aui-sprite-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.09375rem);
+  }
+}
+
+@keyframes aui-sprite-wave {
+  0% {
+    opacity: 0;
+    transform: scale(0.65);
+  }
+  40% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+}
+
+@keyframes aui-sprite-bubble {
+  0% {
+    opacity: 0;
+    transform: translateY(0.1875rem) scale(0.6);
+  }
+  35% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-0.1875rem) scale(1);
+  }
+}
+
+@keyframes aui-sprite-jiggle {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(7deg);
+  }
+  75% {
+    transform: rotate(-7deg);
+  }
+}
+
+@keyframes aui-sprite-dash {
+  0% {
+    opacity: 0;
+    transform: translateX(0.25rem);
+  }
+  40% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-0.25rem);
+  }
+}
+
+@keyframes aui-sprite-scribble {
+  0%,
+  100% {
+    transform: rotate(35deg) translateY(0);
+  }
+  50% {
+    transform: rotate(35deg) translateY(0.125rem);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--listening .aui-state-sprite__body {
+    animation: aui-sprite-bob 1.8s ease-in-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--listening .aui-state-sprite__fx--1 {
+    animation: aui-sprite-wave 1.8s ease-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--listening .aui-state-sprite__fx--2 {
+    animation: aui-sprite-wave 1.8s ease-out 0.35s infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--remembering .aui-state-sprite__fx--1 {
+    animation: aui-sprite-bubble 2.2s ease-in-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--remembering .aui-state-sprite__fx--2 {
+    animation: aui-sprite-bubble 2.2s ease-in-out 0.3s infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--remembering .aui-state-sprite__fx--3 {
+    animation: aui-sprite-bubble 2.2s ease-in-out 0.6s infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--doing .aui-state-sprite__body {
+    animation: aui-sprite-jiggle 0.55s ease-in-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--doing .aui-state-sprite__fx--1 {
+    animation: aui-sprite-dash 0.7s ease-in-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--doing .aui-state-sprite__fx--2 {
+    animation: aui-sprite-dash 0.7s ease-in-out 0.12s infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--doing .aui-state-sprite__fx--3 {
+    animation: aui-sprite-dash 0.7s ease-in-out 0.24s infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--writing .aui-state-sprite__fx--1 {
+    animation: aui-sprite-scribble 0.9s ease-in-out infinite;
+  }
+}

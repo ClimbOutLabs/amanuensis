@@ -36,7 +36,6 @@ import type {
   LLMUserMessage,
 } from '../llm/LLMTypes';
 import type { ToolCallMemoSnapshot } from '../mcp/executeToolCalls';
-import type { HostToolCallPolicy } from './HostToolCallPolicy';
 import type { Sandbox } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import type { AbnormalHandoffCause } from './AbnormalHandoff';
@@ -264,23 +263,15 @@ export interface AgentThreadConstructorInput {
    */
   toolDispatchMaxConcurrency?: number | undefined;
   /**
-   * Synchronous host policy consulted for every tool call during
-   * assistant-message enrichment, before provider dispatch. A block resolves
-   * the call as `policy_blocked` with the host message as the tool error.
-   * Undefined disables the hook.
-   */
-  toolCallPolicy?: HostToolCallPolicy | undefined;
-  /**
    * Per-tool-call dispatch deadline in milliseconds, forwarded to
    * executeToolCalls. Undefined falls back to the core default.
    */
   toolCallTimeoutMs?: number | undefined;
   /**
-   * Bound in milliseconds on waiting for a model call's first output before
-   * the turn fails visibly instead of hanging. Undefined falls back to the
-   * core default (DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS).
+   * sandbox/run_code's own dispatch deadline in milliseconds, forwarded to
+   * executeToolCalls. Undefined falls back to the core default.
    */
-  modelFirstResponseTimeoutMs?: number | undefined;
+  runCodeToolCallTimeoutMs?: number | undefined;
   tracing: AgentTracing;
   logger: Logger;
 }

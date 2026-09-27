@@ -477,42 +477,6 @@ function parseToolArguments(argumentsJson: string): Record<string, unknown> {
   return parsed;
 }
 
-function isTextBlock(block: unknown): block is { type: 'text'; text: string } {
-  return (
-    typeof block === 'object' &&
-    block !== null &&
-    'type' in block &&
-    'text' in block &&
-    block.type === 'text' &&
-    typeof block.text === 'string'
-  );
-}
-
-/**
- * Unwraps an error result's content blocks into a structured error payload.
- * Local tools report failures as one text block carrying a JSON error
- * envelope; handing the model the block array double-encoded lets it mistake
- * the failure for content, so the envelope is parsed back out. Anything that
- * is not a single JSON text block degrades to a plain error object.
- */
-function structuredErrorFromResultContent(content: unknown): unknown {
-  if (!Array.isArray(content)) {
-    return { error: content };
-  }
-  const texts = content.filter(isTextBlock).map(block => block.text);
-  if (texts.length === 1) {
-    try {
-      const parsed: unknown = JSON.parse(texts[0] ?? '');
-      // Keep the error shaped as an error object: a bare JSON scalar from a
-      // tool would otherwise read as a successful value in model context.
-      return typeof parsed === 'object' && parsed !== null ? parsed : { error: parsed };
-    } catch {
-      return { error: texts[0] };
-    }
-  }
-  return { error: texts };
-}
-
 /** Batches of failures in a row before the model is told to stop varying and read the error. */
 export const FAILED_BATCH_NUDGE_AT = 3;
 /** Batches of failures in a row before the host ends the turn. */
@@ -761,11 +725,30 @@ export const DEFAULT_TOOL_DISPATCH_MAX_CONCURRENCY = 4;
 
 /**
  * Fallback per-call dispatch deadline in milliseconds when the host does not
- * supply `toolCallTimeoutMs`. Mirrors the `TOOL_CALL_TIMEOUT_MS` default; it
- * must stay below `SERVER_EXECUTION_TIMEOUT_SECONDS` so a single hung provider
- * call cannot outlive the turn.
+ * supply `toolCallTimeoutMs`. 4 minutes: the normal ceiling for a single tool
+ * call. run_code is the exception — it gets its own provisioning-sized deadline via
+ * `runCodeToolCallTimeoutMs` (image-pull bound + max run + margin), so the
+ * long deadline is scoped to the one tool that needs it.
  */
 export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 240_000;
+
+/**
+ * Fallback run_code dispatch deadline in milliseconds when the host does not
+ * supply `runCodeToolCallTimeoutMs`. 21 minutes = 600 s image-pull bound +
+ * 600 s max run + 60 s margin at default sandbox bounds; the host should
+ * pass the value derived from its configured bounds instead of relying on
+ * this default.
+ */
+export const DEFAULT_RUN_CODE_TOOL_CALL_TIMEOUT_MS = 1_260_000;
+
+/**
+ * the long provisioning-sized deadline belongs to sandbox/run_code alone. Tool identity
+ * comes from the tool mapping (toolSet.name 'sandbox', originalToolName
+ * 'run_code').
+ */
+function isRunCodeToolCall(toolInfo: { toolSet: { name: string }; originalToolName: string }): boolean {
+  return toolInfo.toolSet.name === 'sandbox' && toolInfo.originalToolName === 'run_code';
+}
 
 /**
  * Phase-A classification: read-only calls that may dispatch concurrently.
@@ -904,6 +887,7 @@ export async function executeToolCalls({
   signal,
   toolDispatchMaxConcurrency,
   toolCallTimeoutMs,
+  runCodeToolCallTimeoutMs,
   logger,
 }: {
   assistantMessage: InternalEnrichedAssistantMessage;
@@ -937,6 +921,14 @@ export async function executeToolCalls({
    * not cancel the underlying provider call.
    */
   toolCallTimeoutMs?: number | undefined;
+  /**
+   * run_code's own dispatch deadline in milliseconds. Scoped to
+   * sandbox/run_code (the only tool whose honest worst case — a first-run
+   * image pull plus the longest run — needs the provisioning-sized deadline); every
+   * other tool uses `toolCallTimeoutMs`. Should be derived from the
+   * configured `image_pull_timeout_seconds` + `max_timeout_seconds` bounds.
+   */
+  runCodeToolCallTimeoutMs?: number | undefined;
   /**
    * Optional host logger. Used only for debug-level diagnostics that never
    * affect dispatch semantics — currently the late settlement of a provider
@@ -976,6 +968,7 @@ export async function executeToolCalls({
   // Per-batch permit pool shared by every Phase-A (read-only) dispatch below.
   const dispatchLimiter = createDispatchLimiter(toolDispatchMaxConcurrency ?? DEFAULT_TOOL_DISPATCH_MAX_CONCURRENCY);
   const callTimeoutMs = toolCallTimeoutMs ?? DEFAULT_TOOL_CALL_TIMEOUT_MS;
+  const runCodeCallTimeoutMs = runCodeToolCallTimeoutMs ?? DEFAULT_RUN_CODE_TOOL_CALL_TIMEOUT_MS;
 
   const executeOne = async (toolCall: InternalEnrichedToolCall): Promise<ToolCallExecutionOutcome> => {
     const toolInfo = toolMapping.get(toolCall.function.name);
@@ -1297,6 +1290,9 @@ export async function executeToolCalls({
           {
             admission_provenance: admission,
             dispatch_id: dispatchId,
+            // the turn's abort signal reaches tools that do bounded
+            // multi-phase work (run_code provisioning observes it).
+            signal,
             ...(toolCall.tool_info.structured_edit_precondition === undefined
               ? {}
               : { structured_edit_precondition: toolCall.tool_info.structured_edit_precondition }),
@@ -1322,7 +1318,8 @@ export async function executeToolCalls({
       }> => {
         throwIfSignalAborted(signal);
         const timeoutInput = {
-          timeoutMs: callTimeoutMs,
+          // the provisioning-sized deadline is scoped to sandbox/run_code alone.
+          timeoutMs: isRunCodeToolCall(toolInfo) ? runCodeCallTimeoutMs : callTimeoutMs,
           toolName: toolCall.function.name,
           toolCallId: toolCall.id,
         };
@@ -1661,12 +1658,7 @@ export async function executeToolCalls({
     let content: string;
     let isStructuredContent = false;
     if (result.isError) {
-      // Error results arrive as content blocks, usually one text block
-      // carrying a JSON error envelope. Unwrap them into a structured error
-      // object: the model must be able to parse the failure as data, never
-      // mistake a text blob for content.
-      content = JSON.stringify(structuredErrorFromResultContent(result.content));
-      isStructuredContent = true;
+      content = JSON.stringify({ error: result.content });
     } else if (result.structuredContent) {
       isStructuredContent = true;
       content = JSON.stringify(result.structuredContent);

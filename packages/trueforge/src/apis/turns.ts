@@ -37,7 +37,7 @@ import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
 import type { ResolveRequestContext } from '../auth/identity';
-import configuration, { isTrueFoundryModeEnabled } from '../config';
+import configuration, { getRunCodeToolCallTimeoutMs, isTrueFoundryModeEnabled } from '../config';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
@@ -52,12 +52,13 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
-import type { PersonalizationProfile } from '../personalization/profile';
+import { buildPersonalizationContext, type PersonalizationContext } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
 import {
   createAndExecuteTurnRoute,
   downloadSandboxFileRoute,
   getTurnRoute,
+  listTurnArtifactsRoute,
   listTurnEventsRoute,
   listTurnsRoute,
   subscribeTurnRoute,
@@ -100,20 +101,7 @@ import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/m
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
-import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
-import { extractKnowledgeQuery, resolvePersonaKnowledgeBlock } from '../personaKnowledge/knowledgeTurnContext';
-import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
-import {
-  buildInternalSourceToolPolicy,
-  createInternalSourceState,
-  PERSONA_LIBRARY_NEAR_MISS_MARKER,
-  type InternalSourceState,
-} from '../runtime/internalSourceGuard';
-import {
-  createKnowledgeRelevanceJudge,
-  type KnowledgeRelevanceJudge,
-} from '../personaKnowledge/knowledgeRelevanceJudge';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
@@ -240,17 +228,13 @@ export type BeginTurnExecutionDeps = Pick<
   repositoryStore: IRepositoryStore;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   spaceStore: ISpaceStore;
+  /** persists run_code's harvested result files as turn artifacts at harvest time. */
+  turnArtifactStore: ITurnArtifactStore;
   /** Same override point as the chat path's `TurnsRouterDeps.sandboxProviderResolver`; defaults to {@link resolveSandboxProvider}. */
   sandboxProviderResolver?: typeof resolveSandboxProvider | undefined;
-  /** Optional: absent for callers (e.g. schedule run-now) that do not resolve a profile/persona. The resolver projects it for the active speaker. */
-  personalizationProfile?: PersonalizationProfile | undefined;
+  /** Optional: absent for callers (e.g. schedule run-now) that do not resolve a memory/persona context. */
+  personalizationContext?: PersonalizationContext | undefined;
   personaContext?: PersonaContext | undefined;
-  /**
-   * Model-visible notice for a persona switch: the completed switch or an
-   * ambiguous request (sticky resolution is kept). Undefined when no switch
-   * was requested.
-   */
-  switchNotice?: PersonaSwitchNotice | undefined;
   boundRepository?: BoundRepository | undefined;
   memoryClient?: MemoryClient | undefined;
   memoryProviderServerName?: string | undefined;
@@ -278,34 +262,8 @@ function createTurnResolver(deps: {
   userRef: string;
   session: SessionHandle<SessionCustom, TurnCustom>;
   turnId: string;
-  personalizationProfile?: PersonalizationProfile | undefined;
+  personalizationContext?: PersonalizationContext | undefined;
   personaContext?: PersonaContext | undefined;
-  /**
-   * Retrieved knowledge block for the active persona, resolved once per turn
-   * by the caller. Undefined when no persona is active; when the library was
-   * consulted but the judge kept nothing, carries a host fact saying so. The
-   * resolver only decides where it lands in the prompt.
-   */
-  personaKnowledgeBlock?: string | undefined;
-  /**
-   * The hits behind personaKnowledgeBlock: the turn finalization hook uses
-   * them to enforce attribution on the assistant's final message.
-   * Empty/undefined when nothing was injected.
-   */
-  personaKnowledgeHits?: readonly PersonaKnowledgeHit[] | undefined;
-  /**
-   * Per-turn internal-source state shared by the knowledge lookup (records
-   * the lookup outcome before the turn exists), the memory capability
-   * (records what recall injected), and the turn's tool policy (blocks
-   * web_search as a substitute for either source).
-   */
-  internalSourceState: InternalSourceState;
-  /**
-   * Model-visible notice for a persona switch: the completed switch or an
-   * ambiguous request (sticky resolution is kept). Undefined when no switch
-   * was requested.
-   */
-  switchNotice?: PersonaSwitchNotice | undefined;
   boundRepository?: BoundRepository | undefined;
   repositoryStore: IRepositoryStore;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
@@ -317,6 +275,8 @@ function createTurnResolver(deps: {
   spaceStore: ISpaceStore;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
+  /** persists run_code's harvested result files as turn artifacts at harvest time. */
+  turnArtifactStore: ITurnArtifactStore;
   /**
    * Effective live tool-output screen on/off for this turn: the persisted override when one is
    * stored, else `TOOL_OUTPUT_SCREEN_ENABLED`, ANDed with a configured screening service —
@@ -338,11 +298,8 @@ function createTurnResolver(deps: {
     userRef,
     session,
     turnId,
-    personalizationProfile,
+    personalizationContext,
     personaContext,
-    personaKnowledgeBlock,
-    personaKnowledgeHits,
-    switchNotice,
     boundRepository,
     repositoryStore,
     sessionStore,
@@ -352,9 +309,9 @@ function createTurnResolver(deps: {
     previousTurnId,
     sessionTitle,
     spaceStore,
+    turnArtifactStore,
     clientTimezone,
     toolOutputScreenEnabled,
-    internalSourceState,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -483,6 +440,13 @@ function createTurnResolver(deps: {
                 },
           workspaceVerificationCoordinator: repositoryStore,
           workspaceLeaseOwnerId: configuration.EXECUTOR_ID,
+          // run_code harvests persist as turn artifacts before cleanup.
+          runCodeHarvestPersistence: {
+            tenantId: tenant_id,
+            sessionId,
+            turnId,
+            store: turnArtifactStore,
+          },
           onRepositorySources:
             boundRepository === undefined
               ? undefined
@@ -511,7 +475,9 @@ function createTurnResolver(deps: {
       compactionThresholdTokensDefault: configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS,
       toolDispatchMaxConcurrency: configuration.TOOL_DISPATCH_MAX_CONCURRENCY,
       toolCallTimeoutMs: configuration.TOOL_CALL_TIMEOUT_MS,
-      modelFirstResponseTimeoutMs: configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS,
+      // run_code's own provisioning-sized deadline, derived from the sandbox
+      // bounds — the 21-minute bound is scoped to sandbox/run_code alone.
+      runCodeToolCallTimeoutMs: getRunCodeToolCallTimeoutMs(),
       // Host-owned facts, capped and named-only, for the model-identity
       // section: what the host actually has configured, not what the model
       // is asked to believe about itself.
@@ -527,13 +493,8 @@ function createTurnResolver(deps: {
         replaceTaskChecklist: input =>
           sessionStore.replaceTaskChecklist({ tenant_id, session_id: sessionId, ...input }),
       },
-      // Host tool-call policy for the internal-source fallback pathology:
-      // once the persona library or recall has spoken (or been asked and had
-      // nothing), web_search can no longer substitute for them. Enforced at
-      // dispatch, not by instruction compliance.
-      toolCallPolicy: buildInternalSourceToolPolicy(internalSourceState, logger),
     },
-    personalizationProfile,
+    personalizationContext,
     personaContext,
     {
       client: memoryClient,
@@ -574,7 +535,6 @@ function createTurnResolver(deps: {
       providerServerName: memoryProviderServerName,
       // Will be derived from spec.config.memory.recall_enabled in resolveAgentDefinition
       recallEnabled: undefined,
-      internalSourceState,
     },
     {
       enabled: toolOutputScreenEnabled,
@@ -583,9 +543,6 @@ function createTurnResolver(deps: {
       threshold: configuration.MEMORY_SCREEN_THRESHOLD,
       timeoutMs: configuration.TOOL_OUTPUT_SCREEN_TIMEOUT_MS,
     },
-    personaKnowledgeBlock,
-    personaKnowledgeHits,
-    switchNotice,
     {
       store: spaceStore,
       authority: { tenantId: tenant_id, userRef },
@@ -927,74 +884,6 @@ export interface TurnEventDrainInput {
  * Shared create-turn engine: persist the turn, start execution, and return the
  * drain inputs. Does not wait for events and does not write HTTP/SSE.
  */
-/**
- * Builds the knowledge relevance judge for a turn, or undefined when no
- * model name is in play. The judge is the precision half of retrieval: one
- * bounded LLM pass over the floor-surviving candidates, judged by the same
- * model that will consume the block. Retrieval itself stays brain-agnostic;
- * only the API layer (which owns model access) builds the judge.
- */
-function buildKnowledgeRelevanceJudge(input: {
-  tenantId: string;
-  modelName: string | null | undefined;
-  modelProviderStore: IModelProviderStore;
-  logger: Logger;
-}): KnowledgeRelevanceJudge | undefined {
-  if (typeof input.modelName !== 'string' || input.modelName.length === 0) {
-    return undefined;
-  }
-  return createKnowledgeRelevanceJudge({
-    tenantId: input.tenantId,
-    modelName: input.modelName,
-    modelProviderStore: input.modelProviderStore,
-    logger: input.logger,
-  });
-}
-
-/**
- * Context for the persona-library approval-resubmission fallback: newest-first
- * input snapshots walking back past resubmission turns (which carry no user
- * message), plus whether the immediate previous turn recorded a library
- * near-miss. The walk ends at the first user-authored question, the root, or
- * a missing turn; a visited set guards against a corrupt cycle. Best-effort —
- * when the walk ends without a question, the policy simply does not arm,
- * exactly today's behavior.
- */
-async function collectLibraryFallbackContext(input: {
-  session: SessionHandle<SessionCustom, TurnCustom>;
-  previousTurnId: string | null | undefined;
-  /** Already-loaded immediate previous turn, when the caller has one. */
-  previousTurn?: TurnHandle<TurnCustom> | undefined;
-}): Promise<{ historyInputs: TurnInputItem[][]; previousTurnNearMiss: boolean }> {
-  const historyInputs: TurnInputItem[][] = [];
-  let previousTurnNearMiss = false;
-  const seen = new Set<string>();
-  let turnId = input.previousTurnId ?? null;
-  let turn = input.previousTurn;
-  for (;;) {
-    if (turn === undefined) {
-      if (turnId === null || seen.has(turnId)) {
-        break;
-      }
-      seen.add(turnId);
-      turn = await input.session.getTurn(turnId).catch(() => undefined);
-      if (turn === undefined) {
-        break;
-      }
-    }
-    if (historyInputs.length === 0) {
-      previousTurnNearMiss = turn.custom?.library_near_miss === true;
-    }
-    historyInputs.push(turn.input);
-    if (extractKnowledgeQuery(turn.input) !== undefined) {
-      break;
-    }
-    turnId = turn.previous_turn_id;
-    turn = undefined;
-  }
-  return { historyInputs, previousTurnNearMiss };
-}
-
 export async function beginTurnExecution(params: {
   session: SessionHandle<SessionCustom, TurnCustom>;
   input: TurnInputItem[] | undefined;
@@ -1042,44 +931,6 @@ export async function beginTurnExecution(params: {
     deps.memorySettings,
     memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
   );
-  // Per-turn internal-source state, created before the knowledge lookup so
-  // the lookup can record its outcome: library near-misses and recall
-  // content both arm the turn's web_search policy.
-  const internalSourceState = createInternalSourceState();
-  // Approval/tool-response resubmissions carry no user message in their input:
-  // re-arm the library rule from the history question when the previous turn
-  // recorded a near-miss. Retrieval itself stays input-scoped.
-  const libraryFallback = await collectLibraryFallbackContext({
-    session,
-    previousTurnId,
-  });
-  // Same one-read-per-turn contract for persona knowledge: retrieved once
-  // from the active persona's library. Never throws.
-  const personaKnowledge = await resolvePersonaKnowledgeBlock({
-    personaId: deps.personaContext?.persona_id,
-    tenantId: tenant_id,
-    turnInput: input,
-    historyInputs: libraryFallback.historyInputs,
-    previousTurnNearMiss: libraryFallback.previousTurnNearMiss,
-    knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
-    modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
-    logger: deps.logger,
-    judge: buildKnowledgeRelevanceJudge({
-      tenantId: tenant_id,
-      modelName: deps.personaContext?.model_name,
-      modelProviderStore: deps.modelProviderStore,
-      logger: deps.logger,
-    }),
-    sourceState: internalSourceState,
-  });
-  const personaKnowledgeBlock =
-    personaKnowledge?.block ??
-    // The library was consulted for this question and the relevance judge
-    // kept nothing: name that host fact in the prompt so the turn answers
-    // from the library or reports its absence instead of web-divining one.
-    (internalSourceState.libraryConsulted && !internalSourceState.libraryAnswered
-      ? PERSONA_LIBRARY_NEAR_MISS_MARKER
-      : undefined);
   const resolver = createTurnResolver({
     mcpServerStore: deps.mcpServerStore,
     tokenStore: deps.tokenStore,
@@ -1097,11 +948,8 @@ export async function beginTurnExecution(params: {
     session,
     turnId,
     boundRepository: deps.boundRepository,
-    personalizationProfile: deps.personalizationProfile,
+    personalizationContext: deps.personalizationContext,
     personaContext: deps.personaContext,
-    personaKnowledgeBlock,
-    personaKnowledgeHits: personaKnowledge?.hits,
-    switchNotice: deps.switchNotice,
     memoryClient: deps.memoryClient,
     memoryProviderServerName: deps.memoryProviderServerName,
     memorySettings: effectiveMemorySettings,
@@ -1109,7 +957,7 @@ export async function beginTurnExecution(params: {
     sessionTitle: deps.sessionTitle,
     clientTimezone: deps.clientTimezone,
     toolOutputScreenEnabled,
-    internalSourceState,
+    turnArtifactStore: deps.turnArtifactStore,
   });
 
   // First turn only: derive the title from the first user message. The store
@@ -1122,12 +970,6 @@ export async function beginTurnExecution(params: {
     previous_turn_id: previousTurnId,
     signal: abortController.signal,
     resolver,
-    // Carry a near-miss across the turn boundary so a later
-    // approval/tool-response resubmission can re-arm the library rule.
-    custom: {
-      library_near_miss:
-        internalSourceState.libraryConsulted && !internalSourceState.libraryAnswered ? true : null,
-    },
     update_session_title_if_not_exist: title,
     on_command_execution_started: execution => {
       executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
@@ -1302,6 +1144,52 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       }
       throw error;
     }
+  };
+
+  const listTurnArtifactsHandler: RouteHandler<typeof listTurnArtifactsRoute> = async c => {
+    const { session_id: sessionId, turn_id: turnId } = c.req.valid('param');
+    const requestContext = deps.resolveRequestContext(c);
+    const session = await deps.sessions.get({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+    });
+    if (!session) {
+      return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
+    }
+    if (
+      !(await canReadAgentBoundResource({
+        store: deps.resolveAgentStore(c),
+        context: requestContext,
+        authorizer: deps.authorizer,
+        agent_id: session.record.agent.type === 'reference' ? session.record.agent.id : undefined,
+        created_by_subject_id: session.record.created_by_subject.subject_id,
+      }))
+    ) {
+      return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
+    }
+    const turn = await session.getTurn(turnId);
+    if (!turn) {
+      return c.json({ error: { message: `Turn not found: ${turnId}` } }, 404);
+    }
+    const rows = await deps.turnArtifactStore.listArtifacts({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+      turn_id: turnId,
+    });
+    return c.json(
+      {
+        data: rows.map(row => ({
+          path: row.path,
+          name: row.name,
+          status: row.status,
+          size: row.size,
+          mime: row.mime,
+          skip_reason: row.skip_reason,
+          created_at: row.created_at,
+        })),
+      },
+      200,
+    );
   };
 
   const getTurnHandler: RouteHandler<typeof getTurnRoute> = async c => {
@@ -1601,9 +1489,13 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     const persona = await resolveTurnPersona({
       personaStore: deps.personaStore,
       modelProviderStore,
+      agentStore,
+      sessionAgent: session.record.agent,
+      logger: deps.logger,
       defaultAssistantName: profile?.assistant_name,
       tenant_id: requestContext.tenant_id,
       created_by: userRef,
+      session_id: sessionId,
       turnInput: body.input,
       previousTurnCustom,
       latestManualActivation,
@@ -1622,51 +1514,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             },
       manual_persona_activation_id: latestManualActivation?.id ?? null,
     };
-
-    // Per-turn internal-source state, created before the knowledge lookup so
-    // the lookup can record its outcome: library near-misses and recall
-    // content both arm the turn's web_search policy.
-    const internalSourceState = createInternalSourceState();
-    // Approval/tool-response resubmissions carry no user message in their input:
-    // re-arm the library rule from the history question when the previous turn
-    // recorded a near-miss. Retrieval itself stays input-scoped.
-    const libraryFallback = await collectLibraryFallbackContext({
-      session,
-      previousTurnId,
-      previousTurn,
-    });
-    // Persona knowledge: retrieved once per turn from the active persona's
-    // library, before the turn exists. Never throws — an unavailable library
-    // degrades to no block rather than failing the turn.
-    const personaKnowledge = await resolvePersonaKnowledgeBlock({
-      personaId: persona?.kind === 'persona' ? persona.persona.id : undefined,
-      tenantId: requestContext.tenant_id,
-      turnInput: body.input,
-      historyInputs: libraryFallback.historyInputs,
-      previousTurnNearMiss: libraryFallback.previousTurnNearMiss,
-      knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
-      modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
-      logger: deps.logger,
-      judge: buildKnowledgeRelevanceJudge({
-        tenantId: requestContext.tenant_id,
-        modelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
-        modelProviderStore,
-        logger: deps.logger,
-      }),
-      sourceState: internalSourceState,
-    });
-    const personaKnowledgeBlock =
-      personaKnowledge?.block ??
-      // The library was consulted for this question and the relevance judge
-      // kept nothing: name that host fact in the prompt so the turn answers
-      // from the library or reports its absence instead of web-divining one.
-      (internalSourceState.libraryConsulted && !internalSourceState.libraryAnswered
-        ? PERSONA_LIBRARY_NEAR_MISS_MARKER
-        : undefined);
-    // Carry a near-miss across the turn boundary so a later
-    // approval/tool-response resubmission can re-arm the library rule.
-    turnCustom.library_near_miss =
-      internalSourceState.libraryConsulted && !internalSourceState.libraryAnswered ? true : null;
 
     // Resolved before the turn exists, same as the model/sandbox lookups above: a missing or
     // invalid memory provider must never fail the turn, so this degrades to `undefined` rather
@@ -1797,11 +1644,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       userRef,
       session,
       turnId,
-      personalizationProfile: profile,
+      personalizationContext: profile
+        ? buildPersonalizationContext(profile, {
+            speaker: persona?.kind === 'persona' ? 'persona' : 'default_assistant',
+          })
+        : undefined,
       personaContext: persona?.kind === 'persona' ? persona.context : undefined,
-      personaKnowledgeBlock,
-      personaKnowledgeHits: personaKnowledge?.hits,
-      switchNotice: persona?.switchNotice,
       boundRepository,
       repositoryStore: deps.repositoryStore,
       sessionStore: deps.sessionStore,
@@ -1813,7 +1661,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       spaceStore: deps.spaceStore,
       clientTimezone: body.client_timezone,
       toolOutputScreenEnabled,
-      internalSourceState,
+      turnArtifactStore: deps.turnArtifactStore,
     });
 
     // First turn only: derive the title from the first user message. The store
@@ -1998,13 +1846,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           model_name: persona.kind === 'persona' ? persona.persona.model_name : null,
           source: persona.source,
         };
-        // A no-op switch (the invocation named the already-active identity, or an
-        // ambiguous request failed closed onto the already-active default)
-        // records nothing: the turn still runs under the resolved identity,
-        // but there is no state change to put in the activation log.
-        if (persona.skipActivationWrite === true) {
-          activationRecorded = true;
-        } else if (persona.selection === 'direct') {
+        if (persona.selection === 'direct') {
           await deps.personaStore.recordPersonaActivation(activation);
           activationRecorded = true;
         } else {
@@ -2213,6 +2055,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
   router.openapi(listTurnsRoute, listTurnsHandler);
   router.openapi(getTurnRoute, getTurnHandler);
   router.openapi(downloadSandboxFileRoute, downloadSandboxFileHandler);
+  router.openapi(listTurnArtifactsRoute, listTurnArtifactsHandler);
   router.openapi(listTurnEventsRoute, listTurnEventsHandler);
   router.openapi(subscribeTurnRoute, subscribeTurnHandler);
   return router;

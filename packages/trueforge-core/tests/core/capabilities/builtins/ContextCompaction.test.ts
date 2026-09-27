@@ -1,13 +1,17 @@
 import { z } from 'zod';
 import type { AgentThreadExecutionContext } from '../../../../src/core/capabilities/AgentContextProcessor';
 import {
+  COMPACTION_BACKOFF_TOKEN_DELTA,
+  compactionValidationFingerprint,
   contextCompaction,
   contextUsesSandboxTools,
   CONVERSATION_REQUIRED_SUMMARY_SECTIONS,
   DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
+  MAX_CONSECUTIVE_COMPACTION_SKIPS,
   replaceBoundRepositorySection,
   REQUIRED_SUMMARY_SECTIONS,
   resolveCompactionThresholdTokens,
+  salvageCompactionSummary,
   validateCompactionSummary,
 } from '../../../../src/core/capabilities/builtins/ContextCompaction';
 import { repositoryBindingContext } from '../../../../src/core/capabilities/builtins/RepositoryBindingContext';
@@ -2035,5 +2039,244 @@ describe('resolveCompactionThresholdTokens', () => {
         modelParams: { max_tokens: 32_768 },
       }),
     ).toBe(DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS);
+  });
+});
+
+describe('compactionValidationFingerprint (spec 002)', () => {
+  it('produces a content-free digest with section presence counts', () => {
+    const sections = CONVERSATION_REQUIRED_SUMMARY_SECTIONS;
+    const output = `<summary>\n${sections.map(name => `## ${name}\nBody`).join('\n\n')}\n\n## user_goal\nDuplicate\n</summary>`;
+    const fingerprint = compactionValidationFingerprint(output, sections);
+    // Contains length, hash prefix, and per-section counts; never the raw content.
+    expect(fingerprint).toMatch(/^len=\d+:prefix=[0-9a-f]+:sections=\[/);
+    expect(fingerprint).toContain('user_goal=2');
+    expect(fingerprint).toContain('last_request=1');
+    expect(fingerprint).not.toContain('Body');
+    expect(fingerprint).not.toContain('Duplicate');
+  });
+
+  it('marks missing sections as zero', () => {
+    const fingerprint = compactionValidationFingerprint('not a summary', CONVERSATION_REQUIRED_SUMMARY_SECTIONS);
+    expect(fingerprint).toContain('user_goal=0');
+  });
+});
+
+describe('salvageCompactionSummary (spec 002)', () => {
+  const sections = CONVERSATION_REQUIRED_SUMMARY_SECTIONS;
+  const body = (name: string) => `content for ${name}`;
+
+  function sectionsOnly(): string {
+    return sections.map(name => `## ${name}\n${body(name)}`).join('\n\n');
+  }
+
+  it('reconstructs a canonical block when the <summary> wrapper is missing', () => {
+    const salvaged = salvageCompactionSummary(sectionsOnly(), sections);
+    if (salvaged === undefined) throw new Error('expected salvage to succeed');
+    // The rebuilt block must pass the strict validator.
+    const validated = validateCompactionSummary(salvaged, sections);
+    expect(validated.reason).toBeUndefined();
+    for (const name of sections) {
+      expect(salvaged).toContain(`## ${name}`);
+      expect(salvaged).toContain(body(name));
+    }
+  });
+
+  it('ignores preamble text around the sections', () => {
+    const salvaged = salvageCompactionSummary(
+      `Here is your summary:\n\n${sectionsOnly()}`,
+      sections,
+    );
+    if (salvaged === undefined) throw new Error('expected salvage to succeed');
+    expect(validateCompactionSummary(salvaged, sections).reason).toBeUndefined();
+    expect(salvaged).not.toContain('Here is your summary');
+  });
+
+  it('treats a missing closing tag as the end of the last section', () => {
+    const salvaged = salvageCompactionSummary(`<summary>\n${sectionsOnly()}`, sections);
+    if (salvaged === undefined) throw new Error('expected salvage to succeed');
+    expect(validateCompactionSummary(salvaged, sections).reason).toBeUndefined();
+  });
+
+  it('strips trailing junk after a present closing tag', () => {
+    const salvaged = salvageCompactionSummary(
+      `<summary>\n${sectionsOnly()}\n</summary>\nSome trailing chatter.`,
+      sections,
+    );
+    if (salvaged === undefined) throw new Error('expected salvage to succeed');
+    expect(validateCompactionSummary(salvaged, sections).reason).toBeUndefined();
+    expect(salvaged).not.toContain('trailing chatter');
+  });
+
+  it('returns undefined when a required section is missing', () => {
+    const missing = sections
+      .filter(name => name !== 'last_request')
+      .map(name => `## ${name}\n${body(name)}`)
+      .join('\n\n');
+    expect(salvageCompactionSummary(missing, sections)).toBeUndefined();
+  });
+
+  it('returns undefined when a required section is duplicated', () => {
+    const duplicated = `${sectionsOnly()}\n\n## user_goal\nA different goal.`;
+    expect(salvageCompactionSummary(duplicated, sections)).toBeUndefined();
+  });
+
+  it('returns undefined for empty input', () => {
+    expect(salvageCompactionSummary('', sections)).toBeUndefined();
+  });
+});
+
+describe('compaction reliability journey (spec 002)', () => {
+  function stubModel(content: string) {
+    return makeMockILLM({
+      createNonStream: jest.fn().mockResolvedValue({
+        output: { role: 'assistant', content },
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+        finish_reason: 'stop',
+      }),
+    });
+  }
+
+  function makeCapability(model: ReturnType<typeof makeMockILLM>, logger?: ReturnType<typeof makeSilentLogger>) {
+    return contextCompaction({
+      logger,
+      definition: { modelId: undefined, configuredModels: undefined, modelClient: model },
+      compactionThresholdTokens: ALWAYS_TRIGGERS_THRESHOLD,
+    });
+  }
+
+  function findCompactionEvent(events: unknown[]) {
+    const event = events.find(e => (e as { type?: string }).type === 'agent.context.compaction');
+    if (event === undefined || (event as { type: string }).type !== 'agent.context.compaction') {
+      throw new Error('expected a compaction event');
+    }
+    return event as { outcome: string; reason?: string; summary_chars: number };
+  }
+
+  // AC-1: sections without the wrapper are salvaged and the context is compacted.
+  it('applies compaction when the model omits the <summary> wrapper', async () => {
+    const content = CONVERSATION_REQUIRED_SUMMARY_SECTIONS.map(
+      name => `## ${name}\nBody of ${name}.`,
+    ).join('\n\n');
+    const model = stubModel(content);
+    const events = await collectProcessPreLLM(makeCapability(model));
+    const overwrite = events.find(e => (e as { type?: string }).type === 'agent.context.overwrite');
+    expect(overwrite).toBeDefined();
+    const compactionEvent = findCompactionEvent(events);
+    expect(compactionEvent.outcome).toBe('applied');
+    expect(compactionEvent.summary_chars).toBeGreaterThan(0);
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(1);
+  });
+
+  // AC-2: trailing junk after the block is stripped and compaction applies.
+  it('applies compaction when the model appends trailing junk after </summary>', async () => {
+    const model = stubModel(`${completedConversationSummary('What is next?')}\nThanks for asking!`);
+    const events = await collectProcessPreLLM(makeCapability(model));
+    expect(events.find(e => (e as { type?: string }).type === 'agent.context.overwrite')).toBeDefined();
+    expect(findCompactionEvent(events).outcome).toBe('applied');
+  });
+
+  // AC-3: duplicated sections are not salvageable; the warn log carries a content-free diagnostic.
+  it('skips on duplicated sections and logs a content-free fingerprint', async () => {
+    const longBody = 'x'.repeat(2500);
+    const duplicated = CONVERSATION_REQUIRED_SUMMARY_SECTIONS.map(
+      name => `## ${name}\n${longBody}`,
+    ).join('\n\n');
+    const withDuplicate = `<summary>\n${duplicated}\n\n## user_goal\nAnother goal.\n</summary>`;
+    const model = stubModel(withDuplicate);
+    const logger = makeSilentLogger();
+    const warnSpy = jest.spyOn(logger, 'warn');
+    const events = await collectProcessPreLLM(makeCapability(model, logger));
+    expect(events.find(e => (e as { type?: string }).type === 'agent.context.overwrite')).toBeUndefined();
+    expect(findCompactionEvent(events).outcome).toBe('skipped_invalid');
+    const warnCalls = warnSpy.mock.calls.map(call => String(call[0]));
+    const skipLog = warnCalls.find(message => message.includes('Skipping compaction'));
+    if (skipLog === undefined) throw new Error('expected a skip warn log');
+    expect(skipLog).toContain('duplicate_section');
+    // Security: the log must NOT contain raw model output (which may include user secrets).
+    // It carries a fingerprint digest only, per the oversizedResultFingerprint precedent.
+    expect(skipLog).toContain('fingerprint');
+    expect(skipLog).not.toContain(longBody);
+    expect(skipLog).not.toContain('output_preview');
+    // The fingerprint diagnoses the shape: user_goal appears twice (duplicated).
+    expect(skipLog).toContain('user_goal=2');
+  });
+
+  // AC-4: the breaker stops the per-turn retry loop.
+  it('stops calling the model after MAX_CONSECUTIVE_COMPACTION_SKIPS failures', async () => {
+    const invalid = '<summary>\n## user_goal\nOnly one section.\n</summary>';
+    const model = stubModel(invalid);
+    const capability = makeCapability(model);
+    const processor = capability.preLLMProcessors?.[0];
+    if (processor === undefined) throw new Error('expected a preLLMProcessor');
+    for (let i = 0; i < MAX_CONSECUTIVE_COMPACTION_SKIPS; i++) {
+      await collectProcessPreLLM(capability);
+    }
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(MAX_CONSECUTIVE_COMPACTION_SKIPS);
+    // Fourth attempt: backed off, no model call.
+    const events = await collectProcessPreLLM(capability);
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(MAX_CONSECUTIVE_COMPACTION_SKIPS);
+    expect(events.find(e => (e as { type?: string }).type === 'agent.context.overwrite')).toBeUndefined();
+  });
+
+  // AC-5: growth past the backoff mark retries; success resets the breaker.
+  it('retries once the context grows past the backoff mark and resets on success', async () => {
+    const invalid = '<summary>\n## user_goal\nOnly one section.\n</summary>';
+    const model = stubModel(invalid);
+    const logger = makeSilentLogger();
+    const errorSpy = jest.spyOn(logger, 'error');
+    const capability = makeCapability(model, logger);
+    const processor = capability.preLLMProcessors?.[0];
+    if (processor === undefined) throw new Error('expected a preLLMProcessor');
+    for (let i = 0; i < MAX_CONSECUTIVE_COMPACTION_SKIPS; i++) {
+      await collectProcessPreLLM(capability);
+    }
+    expect(errorSpy).toHaveBeenCalled();
+    // Grow the context past the backoff mark and return valid output now.
+    jest.mocked(model.createNonStream).mockResolvedValue({
+      output: { role: 'assistant', content: completedConversationSummary('What is next?') },
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      finish_reason: 'stop',
+    });
+    const grownExecution: Parameters<typeof processor.processPreLLM>[0] = {
+      ...makeExecution(),
+      currentContextUsage: {
+        prompt_tokens: COMPACTION_BACKOFF_TOKEN_DELTA + 1,
+        completion_tokens: 0,
+      },
+    };
+    const events: unknown[] = [];
+    for await (const event of processor.processPreLLM(grownExecution)) {
+      events.push(event);
+    }
+    expect(findCompactionEvent(events).outcome).toBe('applied');
+    // Breaker reset: the next failure starts a fresh count, not an immediate trip.
+    jest.mocked(model.createNonStream).mockResolvedValue({
+      output: { role: 'assistant', content: invalid },
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      finish_reason: 'stop',
+    });
+    await collectProcessPreLLM(capability);
+    expect(jest.mocked(model.createNonStream).mock.calls).toHaveLength(MAX_CONSECUTIVE_COMPACTION_SKIPS + 2);
+  });
+
+  // AC-6: forced compaction bypasses the backoff.
+  it('still attempts compaction when forceCompaction is set during backoff', async () => {
+    const invalid = '<summary>\n## user_goal\nOnly one section.\n</summary>';
+    const model = stubModel(invalid);
+    const capability = makeCapability(model);
+    const processor = capability.preLLMProcessors?.[0];
+    if (processor === undefined) throw new Error('expected a preLLMProcessor');
+    for (let i = 0; i < MAX_CONSECUTIVE_COMPACTION_SKIPS; i++) {
+      await collectProcessPreLLM(capability);
+    }
+    const callsBefore = jest.mocked(model.createNonStream).mock.calls.length;
+    const forcedExecution: Parameters<typeof processor.processPreLLM>[0] = {
+      ...makeExecution(),
+      forceCompaction: true,
+    };
+    for await (const _event of processor.processPreLLM(forcedExecution)) {
+      // drain
+    }
+    expect(jest.mocked(model.createNonStream).mock.calls.length).toBe(callsBefore + 1);
   });
 });

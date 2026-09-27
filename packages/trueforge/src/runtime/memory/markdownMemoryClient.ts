@@ -40,14 +40,28 @@ import {
 } from './hindsightClient';
 import type { EmbeddingSubsystem } from './embeddingRetrieval';
 import {
+  appendVaultTombstone,
   estimateTokens,
   formatRetainEntry,
+  latestTombstonesByEntry,
   namespaceDirFor,
+  personaForVaultFilesystemNamespace,
+  personaForVaultNamespace,
+  readVaultTombstones,
   sanitizeNamespace,
   scanNamespaceEntries,
+  scanVaultEntries,
   splitEntries,
+  vaultFilesystemNamespace,
 } from './markdownMemoryFiles';
-import type { MemoryClient } from './memoryClient';
+import type {
+  DeleteMemoryVaultEntryOutcome,
+  ListMemoryVaultEntriesOutcome,
+  MemoryClient,
+  MemoryVaultEntry,
+  MemoryVaultFailure,
+  UpdateMemoryVaultEntryOutcome,
+} from './memoryClient';
 
 export interface MarkdownMemoryClientConfig {
   /** Base directory for all memory files; each namespace gets a subdirectory. */
@@ -92,6 +106,17 @@ function scoreEntry(words: string[], text: string): number {
 function failure(reason: string): { ok: false; code: 'request_failed'; reason: string } {
   return { ok: false, code: 'request_failed', reason };
 }
+
+function vaultTimeoutFailure(timeoutMs: number): MemoryVaultFailure {
+  return { ok: false, code: 'timeout', reason: `request timed out after ${String(timeoutMs)}ms` };
+}
+
+function vaultNotFound(entryId: string): MemoryVaultFailure {
+  return { ok: false, code: 'not_found', reason: `Memory vault entry not found: ${entryId}` };
+}
+
+/** Longest replacement text the vault accepts for one entry. */
+const VAULT_MAX_ENTRY_TEXT_LENGTH = 32768;
 
 /**
  * Builds the `reason` string for a failed memory operation. Storage
@@ -157,6 +182,9 @@ export class MarkdownMemoryClient implements MemoryClient {
         baseDir: this.baseDir,
         namespace: this.namespace,
         maxDailyFiles: RECALL_MAX_DAILY_FILES,
+        // Vault deletes hide entries and vault edits replace their text: recall
+        // must see the same effective entries the vault lists.
+        resolveTombstones: true,
       });
 
       // Curated memory first: it is the model's own long-term store.
@@ -312,6 +340,165 @@ export class MarkdownMemoryClient implements MemoryClient {
       return await withTimeout(Promise.resolve(outcome), params.timeoutMs, 'markdown listMentalModels');
     } catch {
       return timeoutFailure(params.timeoutMs);
+    }
+  }
+
+  /**
+   * Entry ids are positional (`md:{namespace}:{file}#{index}`); the id carries its
+   * own namespace, so it must stay inside this tenant's vaults to resolve.
+   */
+  private static readonly VAULT_ENTRY_ID_PATTERN = /^md:([^:]+):([^#]+)#(\d+)$/;
+
+  private vaultTenantScope(filesystemNamespace: string): boolean {
+    return (
+      filesystemNamespace === this.namespace || filesystemNamespace.startsWith(`${this.namespace}__`)
+    );
+  }
+
+  private async lookupVaultEntry(
+    entryId: string,
+    timeoutMs: number,
+  ): Promise<{ filesystemNamespace: string; deleted: boolean } | undefined> {
+    const match = MarkdownMemoryClient.VAULT_ENTRY_ID_PATTERN.exec(entryId);
+    const filesystemNamespace = match?.[1] ?? '';
+    if (match === null || !this.vaultTenantScope(filesystemNamespace)) {
+      return undefined;
+    }
+    // One budget for the whole lookup: the scan and the marker read share it.
+    return withTimeout(
+      (async (): Promise<{ filesystemNamespace: string; deleted: boolean } | undefined> => {
+        const scan = await scanNamespaceEntries({
+          baseDir: this.baseDir,
+          namespace: filesystemNamespace,
+          maxDailyFiles: Number.POSITIVE_INFINITY,
+        });
+        if (!scan.entries.some(entry => entry.id === entryId)) {
+          return undefined;
+        }
+        const tombstones = await readVaultTombstones({
+          baseDir: this.baseDir,
+          namespace: filesystemNamespace,
+        });
+        const deleted = latestTombstonesByEntry(tombstones).get(entryId)?.action === 'deleted';
+        return { filesystemNamespace, deleted };
+      })(),
+      timeoutMs,
+      `markdown vault lookup ${entryId}`,
+    );
+  }
+
+  async listEntries(params: {
+    namespace: string;
+    timeoutMs: number;
+  }): Promise<ListMemoryVaultEntriesOutcome> {
+    try {
+      const filesystemNamespace = vaultFilesystemNamespace(this.namespace, params.namespace);
+      const scanned = await withTimeout(
+        scanVaultEntries({ baseDir: this.baseDir, namespace: filesystemNamespace }),
+        params.timeoutMs,
+        'markdown vault list',
+      );
+      const persona = personaForVaultNamespace(params.namespace);
+      const entries: MemoryVaultEntry[] = scanned.map(entry => ({
+        id: entry.id,
+        text: entry.text,
+        timestamp: entry.timestamp,
+        persona,
+      }));
+      return { ok: true, entries };
+    } catch (error) {
+      if (error instanceof PromiseTimeoutError) {
+        return vaultTimeoutFailure(params.timeoutMs);
+      }
+      return { ok: false, code: 'request_failed', reason: failureReason('markdown vault list failed', error) };
+    }
+  }
+
+  async updateEntry(params: {
+    entryId: string;
+    text: string;
+    timeoutMs: number;
+  }): Promise<UpdateMemoryVaultEntryOutcome> {
+    try {
+      const clean = params.text.trim();
+      if (clean.length === 0) {
+        return { ok: false, code: 'request_failed', reason: 'Entry text must not be empty.' };
+      }
+      if (clean.length > VAULT_MAX_ENTRY_TEXT_LENGTH) {
+        return {
+          ok: false,
+          code: 'request_failed',
+          reason: `Entry text must be at most ${String(VAULT_MAX_ENTRY_TEXT_LENGTH)} characters.`,
+        };
+      }
+      const target = await this.lookupVaultEntry(params.entryId, params.timeoutMs);
+      if (target === undefined || target.deleted) {
+        return vaultNotFound(params.entryId);
+      }
+      const timestamp = new Date().toISOString();
+      await withTimeout(
+        appendVaultTombstone({
+          baseDir: this.baseDir,
+          namespace: target.filesystemNamespace,
+          tombstone: { entryId: params.entryId, action: 'updated', text: clean, timestamp },
+        }),
+        params.timeoutMs,
+        `markdown vault mark ${params.entryId}`,
+      );
+      // The shared vault is the namespace the turn-time client warms, so a vault
+      // edit re-indexes there right away; topic vaults converge on the next warm.
+      if (target.filesystemNamespace === this.namespace) {
+        this.embeddings?.ensureWarmed();
+        this.embeddings?.indexNewEntries([{ id: params.entryId, text: clean }]);
+      }
+      return {
+        ok: true,
+        entry: {
+          id: params.entryId,
+          text: clean,
+          timestamp,
+          persona: personaForVaultFilesystemNamespace(this.namespace, target.filesystemNamespace),
+        },
+      };
+    } catch (error) {
+      if (error instanceof PromiseTimeoutError) {
+        return vaultTimeoutFailure(params.timeoutMs);
+      }
+      return { ok: false, code: 'request_failed', reason: failureReason('markdown vault update failed', error) };
+    }
+  }
+
+  async deleteEntry(params: {
+    entryId: string;
+    timeoutMs: number;
+  }): Promise<DeleteMemoryVaultEntryOutcome> {
+    try {
+      const target = await this.lookupVaultEntry(params.entryId, params.timeoutMs);
+      if (target === undefined) {
+        return vaultNotFound(params.entryId);
+      }
+      if (!target.deleted) {
+        await withTimeout(
+          appendVaultTombstone({
+            baseDir: this.baseDir,
+            namespace: target.filesystemNamespace,
+            tombstone: {
+              entryId: params.entryId,
+              action: 'deleted',
+              text: undefined,
+              timestamp: new Date().toISOString(),
+            },
+          }),
+          params.timeoutMs,
+          `markdown vault mark ${params.entryId}`,
+        );
+      }
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof PromiseTimeoutError) {
+        return vaultTimeoutFailure(params.timeoutMs);
+      }
+      return { ok: false, code: 'request_failed', reason: failureReason('markdown vault delete failed', error) };
     }
   }
 

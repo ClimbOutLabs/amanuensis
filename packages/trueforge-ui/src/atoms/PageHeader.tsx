@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { cn } from './lib/cn.js';
 
 /** Shared title styles for page / chat chrome headers. */
-export const pageHeaderTitleClassName = 'text-text-primary min-w-0 truncate text-md font-semibold';
+export const pageHeaderTitleClassName = 'text-text-primary min-w-0 truncate text-base font-semibold';
 
 export type PageHeaderProps = {
   /** Page name, or a custom title node (e.g. `NamedAgentHeaderLabel`). Strings use the shared h1 styles. */

@@ -7,7 +7,6 @@ import type { ToolSelectorConfig } from '../core/mcp/ToolSelectorPolicy';
 import { ToolSet } from '../core/mcp/ToolSet';
 import type { AgentDefinition, ConfiguredModelSummary, ModelParams } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
-import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../core/tracing/NoopAgentTracing';
@@ -127,14 +126,10 @@ export class TurnResourceResolver<
        */
       toolCallTimeoutMs?: number | undefined;
       /**
-       * Host instance-wide bound in milliseconds on waiting for a model call's
-       * first output. See ITurnResourceResolver.modelFirstResponseTimeoutMs.
+       * sandbox/run_code's own dispatch deadline in milliseconds.
+       * See ITurnResourceResolver.runCodeToolCallTimeoutMs.
        */
-      modelFirstResponseTimeoutMs?: number | undefined;
-      /**
-       * Per-run host policy over tool calls. See ITurnResourceResolver.toolCallPolicy.
-       */
-      toolCallPolicy?: HostToolCallPolicy | undefined;
+      runCodeToolCallTimeoutMs?: number | undefined;
       /** Resolved T2 binding, independent of whether this turn enables a sandbox. */
       boundRepository?: BoundRepository | undefined;
       /** IANA timezone name the client sent with this turn. See ITurnResourceResolver.clientTimezone. */
@@ -184,12 +179,8 @@ export class TurnResourceResolver<
     return this.deps.toolCallTimeoutMs;
   }
 
-  get modelFirstResponseTimeoutMs(): number | undefined {
-    return this.deps.modelFirstResponseTimeoutMs;
-  }
-
-  get toolCallPolicy(): HostToolCallPolicy | undefined {
-    return this.deps.toolCallPolicy;
+  get runCodeToolCallTimeoutMs(): number | undefined {
+    return this.deps.runCodeToolCallTimeoutMs;
   }
 
   get boundRepository(): BoundRepository | undefined {

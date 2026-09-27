@@ -76,3 +76,7 @@ id_ed25519
 pr-body*
 pr_body*
 .pr-body*
+# Sandbox image build strays: the SBOM and any regenerated requirements live
+# in temp dirs by design; never commit these if a build drops them at the root.
+sbom-*.spdx.json
+requirements.hashed.txt
