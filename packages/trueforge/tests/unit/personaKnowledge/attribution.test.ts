@@ -162,7 +162,7 @@ describe('repairKnowledgeAttribution', () => {
         sourceUrl: 'https://example.com/exit-story',
       }),
     ]);
-    expect(repaired).toContain('Sources: Startup Exit Story — https://example.com/exit-story');
+    expect(repaired).toContain('Sources: Startup Exit Story, https://example.com/exit-story');
   });
 
   it('strips a model-echoed marker and renders the citation instead', () => {
@@ -199,7 +199,7 @@ describe('repairKnowledgeAttribution', () => {
       'Giant pandas eat almost exclusively bamboo, dozens of pounds daily. Separately, Maya Chen sold her startup for $20M in 2024.';
     const repaired = repairKnowledgeAttribution(answer, [first, second]);
     expect(repaired).toContain('Giant Panda Diet Notes (Panda Care Manual)');
-    expect(repaired).toContain('Startup Exit Story — https://example.com/exit-story');
+    expect(repaired).toContain('Startup Exit Story, https://example.com/exit-story');
   });
 
   it('still appends the single canonical footer when the model already named the title', () => {
@@ -307,7 +307,7 @@ describe('formatSourceEntry', () => {
     );
     // Parens cannot form a markdown link; they stay percent-encoded (still a
     // valid, copy-pasteable URL) instead of backslash-escaped.
-    expect(entry).toBe('Notes — https://en.wikipedia.org/wiki/Panda_%28disambiguation%29');
+    expect(entry).toBe('Notes, https://en.wikipedia.org/wiki/Panda_%28disambiguation%29');
   });
 
   it.each([
@@ -333,7 +333,7 @@ describe('formatSourceEntry', () => {
     const entry = formatSourceEntry(
       hit({ title: 'Docs', sourceUrl: 'https://docs.legit.example/path_(v2)/[draft]' }),
     );
-    expect(entry).toBe('Docs — https://docs.legit.example/path_%28v2%29/%5Bdraft%5D');
+    expect(entry).toBe('Docs, https://docs.legit.example/path_%28v2%29/%5Bdraft%5D');
   });
 
   it('neutralizes an angle-bracket autolink appended to a legit URL', () => {
@@ -361,7 +361,7 @@ describe('formatSourceEntry', () => {
   it('neutralizes marker-shaped text in URLs, like the title path does', () => {
     const entry = formatSourceEntry(hit({ title: 'Docs', sourceUrl: 'https://evil.example/⟦src:2⟧' }));
     expect(entry).not.toContain('⟦src:2⟧');
-    expect(entry).toBe('Docs — https://evil.example/%5Bsrc%5D');
+    expect(entry).toBe('Docs, https://evil.example/%5Bsrc%5D');
   });
 
   it('truncates overlong titles', () => {
@@ -486,13 +486,13 @@ describe('formatSourceEntry URL-title rendering', () => {
 
   it('prettifies a URL-slug title with spaces instead of escaped underscores', () => {
     const entry = formatSourceEntry(hit({ title: 'Giant_panda', sourceUrl: wiki }));
-    expect(entry).toBe(`Giant panda — ${wiki}`);
+    expect(entry).toBe(`Giant panda, ${wiki}`);
     expect(entry).not.toContain('\\_');
   });
 
   it('leaves prose titles alone', () => {
     expect(formatSourceEntry(hit({ title: 'Giant panda diet notes', sourceUrl: wiki }))).toBe(
-      `Giant panda diet notes — ${wiki}`,
+      `Giant panda diet notes, ${wiki}`,
     );
   });
 });

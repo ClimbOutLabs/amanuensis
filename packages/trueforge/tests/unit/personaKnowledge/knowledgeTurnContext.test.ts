@@ -92,7 +92,10 @@ async function resolveWithJudge(judge: KnowledgeRelevanceJudge | undefined) {
     { text: 'Negotiations took three months.', title: 'Exit story' },
   ]);
   const sourceState = createInternalSourceState();
-  const block = await resolvePersonaKnowledgeBlock({
+  // resolvePersonaKnowledgeBlock returns the turn context ({ block, hits }),
+  // not the block string: unwrap it so the assertions below read the prompt
+  // section text. Undefined on the near-miss path, same as before.
+  const context = await resolvePersonaKnowledgeBlock({
     personaId: 'zara',
     tenantId: 'default',
     turnInput: [userMessage(QUESTION)],
@@ -102,7 +105,7 @@ async function resolveWithJudge(judge: KnowledgeRelevanceJudge | undefined) {
     judge,
     sourceState,
   });
-  return { block, sourceState };
+  return { block: context?.block, sourceState };
 }
 
 describe('resolvePersonaKnowledgeBlock near-miss wiring', () => {
