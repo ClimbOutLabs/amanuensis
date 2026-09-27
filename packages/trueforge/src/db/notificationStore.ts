@@ -47,6 +47,11 @@ export interface ListNotificationsInput {
   page_token?: string | null;
   /** When set, only notifications created by this subject. */
   created_by_subject_id?: string;
+  /**
+   * When set, only notifications written for this schedule run. Used by
+   * dispatch to keep reminder writes idempotent across re-fired runs.
+   */
+  schedule_run_id?: string | null;
 }
 
 export interface GetNotificationInput {
