@@ -10,7 +10,7 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 
 **Build on Markdown memory, not a new backend.** The Markdown files are the source of truth. The vault is a management layer: parsing facts from the files, presenting them, and writing edits back.
 
-**Facts are the unit of management.** A fact is a single atomic claim extracted from the memory files (e.g. "Sidd prefers oat milk"). The vault lists facts with their source file and timestamp.
+**Facts are the unit of management.** A fact is a single atomic claim extracted from the memory files (e.g. "the user prefers oat milk"). The vault lists facts with their source file and timestamp.
 
 **Per-persona views.** Each persona gets a filtered view of the vault showing only facts visible to that persona. A global view shows everything.
 
@@ -30,7 +30,7 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 - Encrypted per-persona vaults are a separate feature (see private-by-architecture spec)
 
 ## Testing
-- Synthetic facts only, never Sidd's real memories
+- Synthetic facts only, never the user's real memories
 - Verify: create fact in chat, see it in vault, edit it, confirm the edit is reflected in a new chat
 - Verify: delete a fact, confirm the persona no longer recalls it
 - Verify: share a fact between two personas, confirm isolation of unshared facts
