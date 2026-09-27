@@ -47,7 +47,7 @@ export function CompactionStatusLine({ className }: { className?: string }) {
         : `${formatTokenCount(contextLimit)} token limit`;
     parts.push(usage);
   } else if (liveTokens != null) {
-    parts.push(`${formatTokenCount(liveTokens)} tokens`);
+    parts.push(`${formatTokenCount(liveTokens)} tokens in context`);
   }
 
   if (lastCompaction != null) {
