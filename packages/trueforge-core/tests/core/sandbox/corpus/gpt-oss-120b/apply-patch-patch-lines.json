@@ -1,0 +1,21 @@
+{
+  "tool": "apply_patch",
+  "args": {
+    "intent": "Rename a variable, patch sent as an array of lines",
+    "cwd": "/repo",
+    "patch_lines": [
+      "diff --git a/src/util.ts b/src/util.ts",
+      "--- a/src/util.ts",
+      "+++ b/src/util.ts",
+      "@@ -1 +1 @@",
+      "-const x = 1;",
+      "+const y = 1;"
+    ]
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": true,
+    "notes": ["joined patch_lines into patch"]
+  }
+}

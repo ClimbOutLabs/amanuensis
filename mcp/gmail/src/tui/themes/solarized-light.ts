@@ -1,0 +1,30 @@
+import type { Theme } from "./index.js";
+
+export const solarizedLightTheme: Theme = {
+  name: "solarized-light",
+  nerd: false,
+  fg: "#657b83",
+  bg: "#fdf6e3",
+  dim: "#93a1a1",
+  accent: "#268bd2",
+  error: "#dc322f",
+  warning: "#b58900",
+  success: "#859900",
+  selectedFg: "#fdf6e3",
+  selectedBg: "#268bd2",
+  sidebarBg: "#eee8d5",
+  modalBg: "#eee8d5",
+  statusBarBg: "#eee8d5",
+  statusBarFg: "#586e75",
+  helpBarFg: "#93a1a1",
+  border: "#93a1a1",
+  glyphs: {
+    mail: "@",
+    attachment: "*",
+    star: "-",
+    starOn: "+",
+    unread: "*",
+    chevronRight: ">",
+    chevronDown: "v",
+  },
+};

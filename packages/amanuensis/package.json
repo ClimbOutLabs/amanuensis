@@ -1,0 +1,80 @@
+{
+  "name": "amanuensis",
+  "version": "0.1.0",
+  "description": "Amanuensis: agent server and chat UI in one command (npx amanuensis)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/<your-fork>.git",
+    "directory": "packages/amanuensis"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "private": false,
+  "type": "module",
+  "bin": "./dist/cli.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "scripts": {
+    "build:clean": "node ../../scripts/rm-path.mjs dist",
+    "build:deps": "node scripts/sync-dependencies.mjs",
+    "build:server": "pnpm --filter @truefoundry/trueforge build",
+    "build": "pnpm run build:server && pnpm run build:deps && pnpm run build:clean && tsup && node ../../scripts/chmod-path.mjs dist/cli.js 755 && node scripts/vendor-server.mjs",
+    "pack:dry": "pnpm pack --dry-run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@truefoundry/trueforge": "workspace:*",
+    "@truefoundry/trueforge-core": "workspace:*",
+    "@types/node": "^24.13.3",
+    "tsup": "^8.5.1",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@ai-sdk/alibaba": "^2.0.37",
+    "@ai-sdk/anthropic": "^4.0.44",
+    "@ai-sdk/google": "^4.0.69",
+    "@ai-sdk/moonshotai": "^3.0.41",
+    "@ai-sdk/openai": "^4.0.49",
+    "@ai-sdk/openai-compatible": "^3.0.39",
+    "@ai-sdk/provider": "^4.0.8",
+    "@ai-sdk/provider-utils": "^5.0.32",
+    "@anthropic-ai/sandbox-runtime": "0.0.76",
+    "@daytona/sdk": "^0.211.2",
+    "@hono/node-server": "^2.1.1",
+    "@hono/swagger-ui": "^0.6.1",
+    "@hono/zod-openapi": "^1.6.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@nats-io/nats-core": "3.4.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/core": "^2.11.0",
+    "ai": "^7.0.99",
+    "bash-parser": "^0.5.0",
+    "better-sqlite3": "^13.0.3",
+    "cron-parser": "^5.10.1",
+    "dedent": "^1.7.2",
+    "diff": "^9.0.0",
+    "diff-match-patch": "^1.0.5",
+    "docx": "9.7.1",
+    "env-paths": "^4.0.0",
+    "hono": "^4.13.5",
+    "jose": "^6.2.10",
+    "kysely": "^0.29.5",
+    "openai": "^7.5.0",
+    "openid-client": "^6.8.7",
+    "pg": "^8.23.0",
+    "redis": "^5.12.1",
+    "ulid": "^3.0.2",
+    "undici": "7.29.1",
+    "winston": "^3.19.0",
+    "ws": "^8.21.3",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.4"
+  }
+}

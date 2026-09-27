@@ -1,0 +1,30 @@
+import type { Theme } from "./index.js";
+
+export const monoTheme: Theme = {
+  name: "mono",
+  nerd: false,
+  fg: "white",
+  bg: "black",
+  dim: "gray",
+  accent: "white",
+  error: "white",
+  warning: "white",
+  success: "white",
+  selectedFg: "black",
+  selectedBg: "white",
+  sidebarBg: "black",
+  modalBg: "black",
+  statusBarBg: "white",
+  statusBarFg: "black",
+  helpBarFg: "gray",
+  border: "white",
+  glyphs: {
+    mail: "@",
+    attachment: "*",
+    star: "-",
+    starOn: "+",
+    unread: "*",
+    chevronRight: ">",
+    chevronDown: "v",
+  },
+};

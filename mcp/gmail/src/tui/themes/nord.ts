@@ -1,0 +1,30 @@
+import type { Theme } from "./index.js";
+
+export const nordTheme: Theme = {
+  name: "nord",
+  nerd: false,
+  fg: "#d8dee9",
+  bg: "#2e3440",
+  dim: "#4c566a",
+  accent: "#88c0d0",
+  error: "#bf616a",
+  warning: "#ebcb8b",
+  success: "#a3be8c",
+  selectedFg: "#2e3440",
+  selectedBg: "#88c0d0",
+  sidebarBg: "#3b4252",
+  modalBg: "#434c5e",
+  statusBarBg: "#3b4252",
+  statusBarFg: "#e5e9f0",
+  helpBarFg: "#4c566a",
+  border: "#4c566a",
+  glyphs: {
+    mail: "@",
+    attachment: "*",
+    star: "-",
+    starOn: "+",
+    unread: "*",
+    chevronRight: ">",
+    chevronDown: "v",
+  },
+};

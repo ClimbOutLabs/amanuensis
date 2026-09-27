@@ -1,0 +1,15 @@
+{
+  "tool": "replace_text",
+  "args": {
+    "path": "src/windows.ts",
+    "old_text": "function test() {\n  return 42;\n}",
+    "new_text": "function test() {\n  return 100;\n}",
+    "replace_all": false
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": false,
+    "matchStatus": "no_match"
+  }
+}

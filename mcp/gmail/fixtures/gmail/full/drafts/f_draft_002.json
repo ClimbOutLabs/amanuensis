@@ -1,0 +1,23 @@
+{
+  "id": "f_draft_002",
+  "message": {
+    "id": "f_msg_002",
+    "threadId": "f_thr_007",
+    "labelIds": [
+      "DRAFT"
+    ],
+    "snippet": "Second draft",
+    "payload": {
+      "mimeType": "text/plain",
+      "headers": [
+        {
+          "name": "Subject",
+          "value": "Second draft"
+        }
+      ],
+      "body": {
+        "data": "U2Vjb25kIGRyYWZ0IGJvZHku"
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "tool": "replace_text",
+  "args": {
+    "intent": "old_text quoted with a line-number gutter and a trailing newline after the last line — the gutter must still be stripped and matched",
+    "path": "src/run.ts",
+    "old_text": "212: alpha();\n213: beta();\n",
+    "new_text": "gamma();\ndelta();\n",
+    "replace_all": false
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": true,
+    "normalizedPath": "src/run.ts",
+    "matchStatus": "exact_match",
+    "notes": []
+  }
+}

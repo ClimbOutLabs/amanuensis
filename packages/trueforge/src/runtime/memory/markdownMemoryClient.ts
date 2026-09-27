@@ -1,0 +1,373 @@
+/**
+ * Markdown-file memory backend (OpenClaw-style).
+ *
+ * Stores memories as plain Markdown under `{baseDir}/{namespace}/`:
+ * - `MEMORY.md`: curated long-term memory, read if present. No writer for this file
+ *   and no curation; it is populated manually or by a future phase. `recall()`
+ *   includes it when it exists.
+ * - `memory/YYYY-MM-DD.md`: append-only daily logs. `retain()` appends here.
+ *
+ * `recall()` reads `MEMORY.md` plus recent daily logs and ranks entries by keyword
+ * overlap with the query. When an `EmbeddingSubsystem` is attached, recall also
+ * ranks by meaning: a local embedding model scores entries by semantic similarity
+ * and the two rankings fuse (RRF). The vector leg only contributes when the model
+ * is ready and the background backfill has indexed the history; otherwise recall
+ * behaves exactly as the keyword-only version. No LLM calls, ever.
+ *
+ * Every method returns a discriminated `{ ok }` result and never throws, matching the
+ * `MemoryClient` contract: a memory failure degrades the turn instead of failing it.
+ */
+import { PromiseTimeoutError, withTimeout } from '@truefoundry/trueforge-core/core';
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import {
+  USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
+  ensureWritableDataDir,
+  isDataDirConfigurationError,
+} from '../../utils/dataDir';
+import {
+  timeoutFailure,
+  type GetOperationOutcome,
+  type GetProfileOutcome,
+  type ListMentalModelsOutcome,
+  type RecallItem,
+  type RecallOutcome,
+  type ReflectBudget,
+  type ReflectOutcome,
+  type RetainItem,
+  type RetainOutcome,
+  type RetryOperationOutcome,
+} from './hindsightClient';
+import type { EmbeddingSubsystem } from './embeddingRetrieval';
+import {
+  estimateTokens,
+  formatRetainEntry,
+  namespaceDirFor,
+  sanitizeNamespace,
+  scanNamespaceEntries,
+  splitEntries,
+} from './markdownMemoryFiles';
+import type { MemoryClient } from './memoryClient';
+
+export interface MarkdownMemoryClientConfig {
+  /** Base directory for all memory files; each namespace gets a subdirectory. */
+  baseDir: string;
+  /** Tenant namespace; sanitized before use as a directory name. */
+  namespace: string;
+  /**
+   * Meaning-based recall. When omitted, recall is keyword-only. The subsystem is a
+   * process-wide singleton shared across client instances (see `getEmbeddingSubsystem`).
+   */
+  embeddings?: EmbeddingSubsystem | undefined;
+}
+
+/** How many daily log files recall scans, newest first, before the token budget cuts it off. */
+const RECALL_MAX_DAILY_FILES = 14;
+
+/** Cap on tracked retain operation ids; oldest are dropped, newest kept. */
+const OPERATIONS_LOG_CAP = 2000;
+
+/** Lowercased query words worth matching; drops stopword-length fragments. */
+function queryWords(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(word => word.length > 2);
+}
+
+function scoreEntry(words: string[], text: string): number {
+  if (words.length === 0) {
+    return 0;
+  }
+  const lower = text.toLowerCase();
+  let score = 0;
+  for (const word of words) {
+    if (lower.includes(word)) {
+      score += 1;
+    }
+  }
+  return score;
+}
+
+function failure(reason: string): { ok: false; code: 'request_failed'; reason: string } {
+  return { ok: false, code: 'request_failed', reason };
+}
+
+/**
+ * Builds the `reason` string for a failed memory operation. Storage
+ * misconfiguration is an operator problem: the reason reaches the memory
+ * provider health UI, so a config failure surfaces the shared static sentence
+ * exactly — never the env var, path, or `-v` remediation from the thrown
+ * error. Logs keep the full detail.
+ */
+function failureReason(prefix: string, error: unknown): string {
+  if (isDataDirConfigurationError(error)) {
+    return USER_FACING_STORAGE_UNAVAILABLE_MESSAGE;
+  }
+  return `${prefix}: ${error instanceof Error ? error.message : String(error)}`;
+}
+
+export class MarkdownMemoryClient implements MemoryClient {
+  private readonly baseDir: string;
+  private readonly namespace: string;
+  private readonly embeddings: EmbeddingSubsystem | undefined;
+
+  constructor(input: MarkdownMemoryClientConfig) {
+    this.baseDir = input.baseDir;
+    this.namespace = sanitizeNamespace(input.namespace);
+    this.embeddings = input.embeddings;
+  }
+
+  private namespaceDir(): string {
+    return namespaceDirFor(this.baseDir, this.namespace);
+  }
+
+  private dailyDir(): string {
+    return path.join(this.namespaceDir(), 'memory');
+  }
+
+  private operationsFile(): string {
+    return path.join(this.namespaceDir(), '.operations.json');
+  }
+
+  async recall(params: {
+    query: string;
+    maxTokens: number;
+    queryTimestamp: string;
+    entityTokens: number;
+    timeoutMs: number;
+  }): Promise<RecallOutcome> {
+    try {
+      const words = queryWords(params.query);
+      const budget = Math.max(params.maxTokens, 0);
+      const results: RecallItem[] = [];
+      let usedTokens = 0;
+
+      const take = (item: RecallItem): boolean => {
+        const cost = estimateTokens(item.text);
+        if (usedTokens + cost > budget) {
+          return false;
+        }
+        usedTokens += cost;
+        results.push(item);
+        return true;
+      };
+
+      const scan = await scanNamespaceEntries({
+        baseDir: this.baseDir,
+        namespace: this.namespace,
+        maxDailyFiles: RECALL_MAX_DAILY_FILES,
+      });
+
+      // Curated memory first: it is the model's own long-term store.
+      if (scan.curated !== undefined) {
+        take({ id: `md:${this.namespace}:MEMORY.md`, text: scan.curated, type: 'markdown' });
+      }
+
+      // Daily logs, newest first, ranked by keyword overlap.
+      const scored = scan.entries
+        .map(entry => ({ entry, score: scoreEntry(words, entry.text) }))
+        .filter(candidate => candidate.score > 0)
+        .sort((a, b) => b.score - a.score || b.entry.file.localeCompare(a.entry.file));
+
+      // Meaning-based rank fuses with (never replaces) the keyword ranking. When the
+      // vector leg cannot contribute, this resolves undefined and ranking stays
+      // keyword-only — identical to the pre-embeddings behavior.
+      let ordered: { id: string; text: string }[] | undefined;
+      if (this.embeddings !== undefined) {
+        this.embeddings.ensureWarmed();
+        const fused = await this.embeddings.fusedRank({
+          query: params.query,
+          keywordHits: scored.map(candidate => ({
+            id: candidate.entry.id,
+            text: candidate.entry.text,
+          })),
+          entryTexts: new Map(scan.entries.map(entry => [entry.id, entry.text])),
+          timeoutMs: params.timeoutMs,
+        });
+        if (fused !== undefined) {
+          ordered = fused;
+        }
+      }
+      const ranked =
+        ordered ??
+        scored.map(candidate => ({ id: candidate.entry.id, text: candidate.entry.text }));
+      for (const item of ranked) {
+        const ok = take({ id: item.id, text: item.text, type: 'markdown' });
+        if (!ok) {
+          break;
+        }
+      }
+
+      return { ok: true, results, entities: [] };
+    } catch (error) {
+      return failure(failureReason('markdown recall failed', error));
+    }
+  }
+
+  async retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome> {
+    try {
+      if (params.items.length === 0) {
+        return { ok: true };
+      }
+      // Names MEMORY_MARKDOWN_DIR in the error instead of a bare EACCES; the
+      // caller's catch converts it into a failed outcome, never a throw.
+      await ensureWritableDataDir({ dir: this.dailyDir(), envVar: 'MEMORY_MARKDOWN_DIR' });
+
+      const seen = await this.readOperationIds();
+      if (seen.has(params.operationId)) {
+        return { ok: true };
+      }
+
+      // Group items by day so one retain spanning midnight lands in both files.
+      const byDay = new Map<string, RetainItem[]>();
+      for (const item of params.items) {
+        const day = this.dayOf(item.timestamp);
+        const list = byDay.get(day);
+        if (list === undefined) {
+          byDay.set(day, [item]);
+        } else {
+          list.push(item);
+        }
+      }
+      const indexed: { id: string; text: string }[] = [];
+      for (const [day, items] of byDay) {
+        const filePath = path.join(this.dailyDir(), `${day}.md`);
+        // Entry ids are positional; count what is already there before appending.
+        let existing = 0;
+        try {
+          existing = splitEntries(await readFile(filePath, 'utf8')).length;
+        } catch {
+          existing = 0;
+        }
+        const blocks = items.map((item, offset) => {
+          const text = formatRetainEntry(item);
+          indexed.push({ id: `md:${this.namespace}:${day}.md#${String(existing + offset)}`, text });
+          return text;
+        });
+        // Each block ends with a newline and blocks are blank-line separated,
+        // matching the historical append format exactly.
+        await writeFile(filePath, `${blocks.map(block => `${block}\n`).join('\n')}\n`, {
+          flag: 'a',
+          encoding: 'utf8',
+        });
+      }
+
+      seen.add(params.operationId);
+      await this.writeOperationIds(seen);
+
+      // New memories become searchable by meaning without waiting for a backfill.
+      // Kicking the warm here (not just on recall) means a retain-only session
+      // still downloads the model and builds the index in the background.
+      this.embeddings?.ensureWarmed();
+      this.embeddings?.indexNewEntries(indexed);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: failureReason('markdown retain failed', error) };
+    }
+  }
+
+  async getOperation(id: string, timeoutMs: number): Promise<GetOperationOutcome> {
+    try {
+      // Local reads are fast, but a stalled filesystem must not hold a turn open past its budget.
+      const seen = await withTimeout(this.readOperationIds(), timeoutMs, `markdown getOperation ${id}`);
+      // A vanished operation reads the same as "nothing to wait for" so a sweep drops it,
+      // mirroring HindsightClient's 404 handling.
+      return { ok: true, status: seen.has(id) ? 'completed' : 'unknown' };
+    } catch (error) {
+      if (error instanceof PromiseTimeoutError) {
+        return timeoutFailure(timeoutMs);
+      }
+      return failure(failureReason('markdown operation lookup failed', error));
+    }
+  }
+
+  async retryOperation(id: string, timeoutMs: number): Promise<RetryOperationOutcome> {
+    // File appends are synchronous: there is nothing to retry. The timeout race upholds the
+    // MemoryClient contract — no call settles later than its timeoutMs.
+    try {
+      return await withTimeout(Promise.resolve({ ok: true }), timeoutMs, `markdown retryOperation ${id}`);
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  async getProfile(timeoutMs: number): Promise<GetProfileOutcome> {
+    // Phase 1 has no bank profile concept; the curated MEMORY.md serves this purpose.
+    const outcome: GetProfileOutcome = {
+      ok: true,
+      profile: { name: undefined, mission: undefined, background: undefined },
+    };
+    try {
+      return await withTimeout(Promise.resolve(outcome), timeoutMs, 'markdown getProfile');
+    } catch {
+      return timeoutFailure(timeoutMs);
+    }
+  }
+
+  async listMentalModels(params: { limit: number; timeoutMs: number }): Promise<ListMentalModelsOutcome> {
+    // Phase 1 has no mental-model store; the curated MEMORY.md serves this purpose.
+    const outcome: ListMentalModelsOutcome = { ok: true, models: [] };
+    try {
+      return await withTimeout(Promise.resolve(outcome), params.timeoutMs, 'markdown listMentalModels');
+    } catch {
+      return timeoutFailure(params.timeoutMs);
+    }
+  }
+
+  async reflect(params: {
+    query: string;
+    budget: ReflectBudget;
+    maxTokens: number;
+    timeoutMs: number;
+  }): Promise<ReflectOutcome> {
+    const outcome: ReflectOutcome = {
+      ok: false,
+      code: 'request_failed',
+      reason: 'reflect is not supported by the markdown memory backend',
+    };
+    try {
+      return await withTimeout(Promise.resolve(outcome), params.timeoutMs, 'markdown reflect');
+    } catch {
+      return timeoutFailure(params.timeoutMs);
+    }
+  }
+
+  /** Plain-English embedding status for logs or settings UI; undefined when disabled. */
+  embeddingStatus(): { state: string; detail: string; indexedEntries: number } | undefined {
+    return this.embeddings?.getStatus();
+  }
+
+  private dayOf(timestamp: string): string {
+    const parsed = new Date(timestamp);
+    if (Number.isNaN(parsed.getTime())) {
+      return new Date().toISOString().slice(0, 10);
+    }
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  private async readOperationIds(): Promise<Set<string>> {
+    try {
+      const raw = await readFile(this.operationsFile(), 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return new Set();
+      }
+      const ids = new Set<string>();
+      for (const entry of parsed) {
+        if (typeof entry === 'string') {
+          ids.add(entry);
+        }
+      }
+      return ids;
+    } catch {
+      return new Set();
+    }
+  }
+
+  private async writeOperationIds(ids: Set<string>): Promise<void> {
+    const list = [...ids].slice(-OPERATIONS_LOG_CAP);
+    await ensureWritableDataDir({ dir: this.namespaceDir(), envVar: 'MEMORY_MARKDOWN_DIR' });
+    await writeFile(this.operationsFile(), JSON.stringify(list), 'utf8');
+  }
+}

@@ -1,0 +1,6 @@
+function setup() {
+  console.log('initialized');
+}
+
+const value = 42;
+export { setup, value };

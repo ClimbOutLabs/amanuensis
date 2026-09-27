@@ -1,0 +1,4 @@
+# CI remains the authoritative full merge gate. This hook runs the small,
+# changed-scope pre-push policy; pre-commit owns staged formatting, while the
+# inexpensive private-data scan is repeated here as a final outbound guard.
+pnpm run pre-push

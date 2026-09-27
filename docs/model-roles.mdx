@@ -1,0 +1,116 @@
+---
+title: 'Model Roles & Personas'
+sidebarTitle: 'Model Roles'
+description: 'Assign a model to each job the host does, and let one chat switch between named personas without starting a new conversation.'
+---
+
+**Settings → Models** manages provider connections, credentials, and which models exist.
+**Settings → Model roles** decides which of those models does which job. The two are
+deliberately separate: one is inventory, the other is assignment.
+
+## Roles
+
+Three configurable roles cover the assistant's normal answer, delegation, and compaction work.
+
+| Role                       | What it runs                                                      | When unset                     |
+| -------------------------- | ----------------------------------------------------------------- | ------------------------------ |
+| **Main chat model**        | Answers you directly (`model` on the agent spec)                   | —                              |
+| **Coding / subagent model** | Sub-agent threads (`auxiliary_models.delegation`)                  | Inherits the main chat model   |
+| **Compaction model**       | Context summarization (`auxiliary_models.compaction`)              | Inherits the main chat model   |
+
+Inheritance resolves when the role is used, not when it is saved, so changing the main
+chat model carries every inheriting role with it. Clearing a role removes it rather than
+freezing today's main model into it.
+
+A sub-agent that explicitly asks for a model still gets that model — a configured default
+never overrides a deliberate request.
+
+<Note>
+  Persona selection can make one short, tool-free control-plane call to the main chat model.
+  It is not a fourth role: the call only decides whether the user explicitly asked to change
+  speakers, and cannot answer the message or select an unconfigured model.
+</Note>
+
+### An assigned model that goes away
+
+If a role names a model that is no longer configured, the turn fails and says so. It is
+never quietly answered by a different model: work attributed to a model that did not do it
+is worse than a visible error.
+
+## Personas
+
+A persona is a name, a concise role, and a model — configured under **Settings → Model
+roles → Personas**. The model is a real assignment you can see and change, not something
+buried in prompt text.
+
+### Invoking one
+
+You can name a persona directly:
+
+```text
+Zara, what do you make of this?
+ask Zara to look at the second page
+let me talk to Zara
+@Zara
+Could Zara answer this one?
+```
+
+Direct address and the common lead-ins above use a deterministic fast path. Other wording that
+mentions a configured persona receives one short classification by the chat's main model. The
+classification sees only the current message, configured names and IDs, and the current speaker;
+it receives no persona instructions, tools, files, attachments, memory, or chat history. The host
+accepts only a valid structured selection naming a configured target with a complete, exact,
+unquoted request clause. It rejects a shorter identity that overlaps a longer configured name.
+Malformed, ambiguous, stale, or uncertain results keep the current speaker, and a newer selection
+made in the UI wins while the preflight is running. The preflight's model, finish reason, and usage
+are recorded separately from the answer completion.
+
+Nothing infers a persona from what a message is *about*. A name in ordinary prose ("I was reading
+about Zara yesterday"), a quotation, a hypothetical, or a negated switch switches nothing.
+
+To return naturally to the default assistant, use the assistant name saved under Personalization
+(for example, "Can I talk to Mannie again?") or say "default assistant" / "main assistant". The
+header control remains the deterministic alternative.
+
+### While a persona is active
+
+- Natural follow-ups keep answering as that persona, in the same conversation, with the
+  same history.
+- The chat header shows who is answering and on which model, with one control to return to
+  the default assistant.
+- Naming a different configured persona switches straight to it.
+- The chat's own **Main chat model** is never modified.
+- Compaction keeps using the compaction role (or the chat's model) — summarization for the
+  whole thread never follows a persona picked for a few turns.
+- Tools, approvals, workspace, and session boundaries are unchanged. A persona changes who
+  is answering, not what the assistant is allowed to do; its role text is one section of
+  the system prompt and cannot replace harness policy.
+
+Names and aliases must be unique across your personas. A duplicate is rejected when you
+save it, because an invocation that could mean two personas has no correct answer.
+
+If a persona's model is no longer configured, invoking it fails visibly and the assignment
+is kept, so you can point it at another model rather than losing it.
+
+## API
+
+```text
+GET    /api/v1/personas
+POST   /api/v1/personas
+PUT    /api/v1/personas/{persona_id}
+DELETE /api/v1/personas/{persona_id}
+GET    /api/v1/personas/{persona_id}/context
+GET    /api/v1/sessions/{session_id}/persona
+PUT    /api/v1/sessions/{session_id}/persona
+GET    /api/v1/sessions/{session_id}/persona-activations
+```
+
+`GET /api/v1/personas/{persona_id}/context` returns the exact text a root thread receives
+when that persona answers, so nothing about the persona is hidden.
+
+`persona-activations` is the newest-first record of which persona answered this chat and
+why. Entries carrying a `turn_id` are that turn's provenance; they survive deleting the
+persona, so a past turn can still say which persona and model answered it.
+
+Existing installs with no personas configured behave exactly as before: no persona is
+resolved, no activation is recorded, and every turn runs on the chat's own model.

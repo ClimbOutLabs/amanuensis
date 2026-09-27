@@ -1,0 +1,16 @@
+{
+  "tool": "write_file",
+  "args": {
+    "intent": "Create a new module",
+    "cwd": "/repo",
+    "path": "/repo/src/newModule.ts",
+    "content": "export const value = 1;\n"
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": true,
+    "normalizedPath": "src/newModule.ts",
+    "notes": ["rewrote absolute path in path as cwd-relative (\"src/newModule.ts\")"]
+  }
+}

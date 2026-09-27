@@ -1,0 +1,30 @@
+import type { Theme } from "./index.js";
+
+export const gruvboxTheme: Theme = {
+  name: "gruvbox",
+  nerd: false,
+  fg: "#ebdbb2",
+  bg: "#282828",
+  dim: "#928374",
+  accent: "#fabd2f",
+  error: "#fb4934",
+  warning: "#fe8019",
+  success: "#b8bb26",
+  selectedFg: "#282828",
+  selectedBg: "#fabd2f",
+  sidebarBg: "#3c3836",
+  modalBg: "#504945",
+  statusBarBg: "#3c3836",
+  statusBarFg: "#ebdbb2",
+  helpBarFg: "#928374",
+  border: "#504945",
+  glyphs: {
+    mail: "@",
+    attachment: "*",
+    star: "-",
+    starOn: "+",
+    unread: "*",
+    chevronRight: ">",
+    chevronDown: "v",
+  },
+};

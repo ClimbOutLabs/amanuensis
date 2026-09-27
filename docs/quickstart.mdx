@@ -1,0 +1,400 @@
+---
+title: 'Quickstart'
+description: 'Install Amanuensis from a fresh clone with no Docker, connect a model, and build your first reusable agent — step by step.'
+---
+
+## What this is
+
+Amanuensis (Aman) is a private, local-first AI workbench: a browser chat interface backed by your own choice of model, with optional tools (MCP connectors), reusable skills, sandboxed code execution, and memory. Nothing about a chat leaves your machine except the calls you explicitly configure — to a model provider, a connector, or a memory bank you point it at. This page takes a fresh checkout to a working chat end to end: install the prerequisites, start the app, connect one model, and send a first message.
+
+The app runs in two modes: **standalone** — one process on your own machine, SQLite storage, no login screen, meant for personal use — and **hosted** — Postgres and Redis, meant for a small team, gated by login once you configure it. This guide uses **standalone**: no Docker, no containers, just the app running on your machine. It is the fastest path to a working chat. The Docker Compose path, which runs the full hosted topology locally, is covered as an alternative under [Other ways to run it](#other-ways-to-run-it). See [Deployment Security](/deployment-security) before anyone besides you can reach the app.
+
+## Prerequisites
+
+| Requirement | Version | Get it |
+| --- | --- | --- |
+| Node.js | 22.14 or newer | [nodejs.org](https://nodejs.org/en/download) or `brew install node` |
+| pnpm | 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) | `corepack enable` (Corepack ships with Node.js; the exact pnpm version is pinned in `package.json`) |
+| Git | any recent version | [git-scm.com/downloads](https://git-scm.com/downloads) |
+| A Bash-compatible shell | — | macOS/Linux: built in. Windows: [WSL](https://learn.microsoft.com/windows/wsl/install) (recommended) or Git Bash, which ships with [Git for Windows](https://git-scm.com/downloads/win) |
+
+On Windows, run every command below from a WSL or Git Bash shell, not PowerShell or cmd — the setup scripts use POSIX-style environment variable assignments that neither of those understand.
+
+## Install and run
+
+From a terminal, in the folder where you want the code:
+
+```bash
+git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
+corepack enable
+pnpm install --frozen-lockfile
+cp packages/trueforge/.env.example packages/trueforge/.env
+pnpm standalone:dev
+```
+
+The install takes a few minutes the first time. When it finishes, open [http://localhost:3000](http://localhost:3000) — that is the app.
+
+<Note>
+  `pnpm standalone:dev` starts the API server without the file watcher: on some Windows machines the watcher
+  (`tsx watch`) stalls before the server ever starts, leaving the UI unable to reach the API. The UI itself still
+  hot-reloads; restart the command to pick up server-side changes. Contributors who want backend hot reload can run
+  the package-level watch scripts instead (`pnpm --filter @truefoundry/trueforge dev`).
+</Note>
+
+The defaults in `packages/trueforge/.env` work as-is for a local install; nothing else needs editing to reach this point. Two values worth knowing about:
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `TRUEFORGE_API_KEY` | `placeholder-value-please-generate-your-own` | Shared secret the internal schedule controller uses to call the server. Standalone defaults to a local-only value, so this is fine as-is for personal use; generate your own (`openssl rand -hex 32`) before a shared deployment. |
+| <Tooltip tip="Public origin at which users and external services reach the app. Used to build MCP OAuth and OIDC login callbacks." cta="See the FAQ" href="/quickstart#faq">`PUBLIC_BASE_URL`</Tooltip> | `http://localhost:<port>` | Only needs changing if you put the app behind a different host or port. |
+
+<Note>
+  Standalone mode stores its data in a SQLite file in your operating system's application-data directory — no database to
+  install or run. Set `SQLITE_PATH` to use another location; see `packages/trueforge/.env.example` for the exact
+  default path per OS.
+</Note>
+
+## Connect a model
+
+The app does not ship with a model configured — a fresh checkout has no default. Open **Settings → Models**. You have two options; either is enough to finish this guide.
+
+<Tabs>
+  <Tab title="A hosted API key">
+    Fastest to try. Open **Settings → Models**, pick a provider from the catalog (OpenAI, Anthropic, Google Gemini, and others), click **Configure**, paste an API key from that provider's own dashboard, and click **Create**. The provider's models become available immediately in the model selector. See [Setup Models](/models) for the full provider list.
+  </Tab>
+  <Tab title="A local model with Ollama">
+    Runs entirely on your machine — no API key, no data leaves it. Requires [Ollama](https://ollama.com/download) installed on the same machine.
+
+    ```bash
+    ollama pull qwen2.5:0.5b
+    ```
+
+    (Any Ollama model works; this one is small and fast to try with. Larger models such as `llama3.1:8b` give better answers.)
+
+    Because the app runs directly on your machine in standalone mode, it reaches Ollama at plain `localhost` — no container networking involved. Confirm Ollama is up:
+
+    ```bash
+    curl -s http://localhost:11434 && echo " (Ollama is running)"
+    ```
+
+    In **Settings → Models**, click **Add Custom Provider** and fill in:
+
+    - **Name** — anything, e.g. `ollama-local`.
+    - **Base URL** — `http://localhost:11434/v1`.
+    - **API key** — leave blank.
+    - Under **Models**, **Model ID** — `qwen2.5:0.5b` (or whatever you pulled), matching the name exactly. **Model name** here is actually a machine slug, not a display label: lowercase letters, digits, and hyphens only, starting with a letter — `qwen2-5-0-5b` works.
+    - Under **Advanced**, set **Context length** and **Max output tokens** — check the model's page on [ollama.com/library](https://ollama.com/library) for its real limits; `32000` and `4096` are safe placeholders for small models.
+
+    Click **Add provider**.
+  </Tab>
+</Tabs>
+
+## Confirm it works
+
+Start a **New Chat**, pick your model from the selector in the message box, and send a message. A reply streaming back confirms the app, the database, and the model connection are all working. The right-hand rail shows which model and memory bank (if any) are active for the session.
+
+## Optional add-ons
+
+None of these are required to chat with a model. Each is one sentence plus where to read more:
+
+- **Sandbox** — lets an agent run code and use skills that need a filesystem, via [Daytona](https://www.daytona.io). Standalone mode also supports a built-in local adapter on supported macOS and Linux hosts; hosted mode needs a configured provider. See [Sandbox](/sandbox).
+- **Memory (Hindsight)** — a self-hosted, long-term memory bank the app recalls from and writes to automatically. See the [Memory runbook](/../ops/memory/RUNBOOK.md) and the README's [Memory](https://github.com/ClimbOutLabs/amanuensis#memory) section.
+- **Prompt Guard** — an optional classifier sidecar that screens recalled memories and tool output for prompt injection before they reach the model. See [Deployment Security → Prompt Guard screens](/deployment-security#prompt-guard-screens).
+- **OIDC login** — required before this app is reachable by anyone but you; without it every request is one shared admin identity. See [Setup Login](/authentication/overview).
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="`pnpm install --frozen-lockfile` fails">
+    Check your Node.js version (`node --version`) — it must be 22.14 or newer. If `pnpm` is not found after `corepack enable`, open a fresh shell and try again; on some systems `corepack enable` needs administrator privileges the first time.
+  </Accordion>
+  <Accordion title="The app won't start: port 3000 is already in use">
+    Something else on your machine is using port 3000. Either stop it, or start the app on another port: `pnpm standalone:dev --port 3001` (or set `PORT=3001`), then open the app at that port instead.
+  </Accordion>
+  <Accordion title="A custom provider connects but chat says it can't reach the model">
+    For a local Ollama model, confirm Ollama is actually running: `curl -s http://localhost:11434` should return a short response (Ollama listens on `127.0.0.1` by default, which is exactly what standalone needs). For a hosted provider, double-check the base URL and API key in **Settings → Models**.
+  </Accordion>
+  <Accordion title="Installing Ollama on a fresh Ubuntu/WSL machine fails with a zstd error">
+    The official install script needs `zstd`, which is not on a minimal Ubuntu image by default: `sudo apt-get update && sudo apt-get install -y zstd`, then re-run the Ollama install script.
+  </Accordion>
+  <Accordion title="Add Custom Provider rejects the Model name field">
+    That field is a machine identifier, not a display label, despite the name: 2-64 lowercase letters, digits, and hyphens, starting with a letter and ending alphanumeric. Spaces, capitals, and periods are rejected.
+  </Accordion>
+</AccordionGroup>
+
+## Other ways to run it
+
+<Tabs>
+  <Tab title="Docker Compose (production path)">
+    The production path, for when the app serves more than just you: the server containerized, Postgres replacing
+    SQLite as durable storage, and Redis so streams and cancellations follow the client across server replicas — with
+    one command and no Node.js or pnpm needed.
+
+    The app is single-user: this stack binds everything to `127.0.0.1` and, as shipped, has no login screen. Its
+    `login` profile adds one (see [Turn on login](#turn-on-login) below); do that before anyone but you can reach
+    the app, and never expose the stack beyond localhost without it.
+
+    Prerequisites: Docker Desktop (macOS/Windows) or Docker Engine + Compose plugin (Linux), with Compose v2 (`docker compose`, not the old `docker-compose`). Confirm with `docker compose version` before continuing.
+
+    ```bash
+    git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
+    cp packages/trueforge/.env.example packages/trueforge/.env
+    docker compose up --build
+    ```
+
+    The first build takes a few minutes (it compiles the app from source). `docker compose up` stays in the foreground
+    and streams every container's log; the stack is ready when the `server` line `Agent server listening on http://0.0.0.0:8790`
+    appears. Open [http://localhost:8791](http://localhost:8791), which is the app. Stop the stack with `Ctrl+C`, or run it
+    detached with `docker compose up --build -d` and read logs with `docker compose logs -f server`.
+
+    The Compose project is named `trueforge` (the `name:` key in `docker-compose.yml`). If that name is already in use on
+    your machine, pass another one on every command, for example `docker compose -p aman up --build`.
+
+    The defaults in `packages/trueforge/.env` work as-is for a local install. The values that matter if you look inside:
+
+    | Variable | Default | What it is |
+    | --- | --- | --- |
+    | `POSTGRES_USER` / `POSTGRES_DB` | `trueforge` / `trueforge` | Credentials for the Postgres container this stack starts for you. |
+    | `POSTGRES_PASSWORD` | `trueforge` | Change it before running on any shared machine. |
+    | `TRUEFORGE_API_KEY` | `placeholder-value-please-generate-your-own` | Shared secret the internal schedule controller uses to call the server. Fine as-is for a local, single-machine install; generate your own (`openssl rand -hex 32`) before a shared deployment. |
+    | `PUBLIC_BASE_URL` | `http://localhost:8791` | Set by `docker-compose.yml` for this stack (the `.env.example` entry is commented out). Only needs changing if you put the app behind a different host or port. |
+    | Host ports | `8791`, `5433`, `6380` | App, Postgres, and Redis, all bound to `127.0.0.1` only by this Compose file — not reachable from other machines by default. |
+
+    <Warning>
+      This stack has no login by default (`REQUIRE_AUTH=false` in `docker-compose.yml`): anyone who can reach port `8791` has
+      full admin access. That is safe as shipped, because the port is bound to `127.0.0.1`. Do not change that port mapping,
+      put the app behind a reverse proxy, or open it on your network, without first turning on login (below) or configuring
+      your own identity provider; see [Deployment Security](/deployment-security).
+    </Warning>
+
+    ### Turn on login
+
+    The `login` profile runs [Dex](https://dexidp.io), a small OpenID Connect identity provider, next to the server, with
+    one account that you define in `.env`. Nothing external is involved: the app signs you in through the same OIDC
+    flow it uses with Okta or Entra ID, against an issuer that lives inside the stack.
+
+    1. Generate a client secret and a password hash. The hash, not the password, goes into `.env`:
+
+       ```bash
+       openssl rand -hex 32
+       docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 "" 'your-password' | cut -d: -f2
+       ```
+
+    2. In `packages/trueforge/.env`, uncomment every line of the **Compose login profile** block and fill in
+       `OIDC_CLIENT_SECRET`, `OIDC_ADMIN_ROLE_VALUE`, `DEX_USER_EMAIL`, `DEX_USER_NAME`, and `DEX_USER_PASSWORD_HASH`.
+       Keep the hash inside the single quotes; Compose would otherwise read its `$` signs as variables. The two email
+       values must match: with one local account, the email claim doubles as the role claim, which is what makes that
+       account an admin.
+
+    3. Start the stack with the profile (from now on, always with the profile, since the server refuses to start
+       without its issuer):
+
+       ```bash
+       docker compose --profile login up --build
+       ```
+
+    4. Open [http://localhost:8791](http://localhost:8791) and click **Let's Get Started**. The browser lands on
+       `https://localhost:5556/dex`, whose certificate the stack minted for itself on first start, so it warns once:
+       choose **Advanced**, then proceed to localhost. Sign in with the email and password you chose. You land in the
+       app as that user, with **Settings** available.
+
+    The certificate and its key live in the `dex-tls` Docker volume; `docker compose down -v` removes them and the
+    next start mints new ones. The account itself is only the `.env` lines, so changing the password means
+    generating a new hash and restarting the `dex` service.
+
+    **Ollama from Compose.** The app runs inside a container here, so `localhost` means the container itself. Point the custom provider at `http://host.docker.internal:11434/v1` instead of `http://localhost:11434/v1`. Docker Desktop provides that mapping automatically; plain Docker Engine needs the `extra_hosts` entry this repo's `docker-compose.yml` already ships. Ollama itself listens on `127.0.0.1` only by default — open it to the Docker network with `OLLAMA_HOST=0.0.0.0:11434` (systemd override on Linux/WSL, or the desktop app's Settings on macOS/Windows) and restart it.
+
+    **Docker prerequisite gotchas** (fresh machines hit these):
+    - `docker compose up --build` fails with `unknown flag: --build` — the Compose plugin isn't installed. On macOS/Windows, install [Docker Desktop](https://docs.docker.com/get-started/get-docker/) (it bundles Compose v2) and wait for it to report running.
+    - `error getting credentials - err: exec: "docker-credential-desktop": executable file not found in $PATH` — your `~/.docker/config.json` points at Docker Desktop's credential helper (`"credsStore": "desktop"`), which the CLI invokes for every registry operation, but the helper binary isn't on your `PATH`. The clean fix is to make it resolvable: quit and relaunch Docker Desktop so it finishes its first-run setup (which symlinks the helper into `/usr/local/bin`), or check with `ls /Applications/Docker.app/Contents/Resources/bin/ | grep credential` and link it yourself via `sudo ln -s /Applications/Docker.app/Contents/Resources/bin/docker-credential-desktop /usr/local/bin/docker-credential-desktop`. If you'd rather skip that — the images this stack pulls are public and need no login — remove the `"credsStore"` entry from `~/.docker/config.json` and retry.
+  </Tab>
+  <Tab title="Kubernetes (Hosted)">
+    The Helm chart deploys the server in hosted mode with bundled Postgres and Redis (or point it at your own).
+
+    Create a Secret for the controller↔server API key, then point `apiKey` at it. The chart ships a
+    well-known placeholder (`placeholder-value-please-generate-your-own`) — strongly recommended to
+    replace with a Secret before any shared deploy (the chart does not create one):
+
+    ```bash
+    kubectl create secret generic trueforge-api-key \
+      --from-literal=TRUEFORGE_API_KEY="$(openssl rand -hex 32)"
+    ```
+
+    ```yaml
+    # values.yaml (snippet)
+    apiKey:
+      valueFrom:
+        secretKeyRef:
+          name: trueforge-api-key
+          key: TRUEFORGE_API_KEY
+    ```
+
+    ```bash
+    helm install trueforge oci://tfy.jfrog.io/tfy-helm/trueforge \
+      --version <x.y.z> \
+      --values values.yaml
+    ```
+
+    Find the version you want to install in the [published Helm charts](https://tfy.jfrog.io/ui/packages/oci:%2F%2Ftrueforge).
+    See the [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#api-key) for full `apiKey` details.
+
+    To expose TrueForge through an Istio gateway, save this `VirtualService` in
+    `values.yaml` under `extraObjects`. Replace the host and gateway with your
+    own values:
+
+    ```yaml
+    extraObjects:
+      - apiVersion: networking.istio.io/v1
+        kind: VirtualService
+        metadata:
+          name: '{{ include "trueforge.fullname" . }}'
+        spec:
+          hosts:
+            - trueforge.example.com
+          gateways:
+            - istio-system/public-gateway
+          http:
+            - route:
+                - destination:
+                    host: '{{ include "trueforge.fullname" . }}'
+                    port:
+                      name: http
+    ```
+
+    Then install (or upgrade) with the values file that includes both `apiKey` and `extraObjects`:
+
+    ```bash
+    helm upgrade --install trueforge oci://tfy.jfrog.io/tfy-helm/trueforge \
+      --version <x.y.z> \
+      --values values.yaml
+    ```
+
+    | Value                  | Default | Description                                                             |
+    | ---------------------- | ------- | ------------------------------------------------------------------------ |
+    | `apiKey`               | placeholder string | Controller↔server key (`TRUEFORGE_API_KEY`). Prefer `valueFrom.secretKeyRef`. |
+    | `replicaCount`         | `1`     | Number of server replicas (peered over Redis).                           |
+    | `postgresql.enabled`   | `true`  | Bundle Postgres; set `false` + `externalPostgres.*` to bring your own.   |
+    | `redis.enabled`        | `true`  | Bundle Redis; set `false` + `externalRedis.url` (string or `valueFrom`). |
+    | `server.publicBaseUrl` | `""`    | Public origin; required for OIDC and MCP OAuth callbacks.                |
+    | `configs.oidc.enabled` | `false` | Enable IdP login via `configs.oidc.*`. Default off = shared local admin — see [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#dev-defaults-read-before-exposing). |
+
+  </Tab>
+</Tabs>
+
+<Note>
+  Standalone (`pnpm standalone:dev`) uses SQLite and needs no other services. Docker Compose and Kubernetes
+  run hosted mode: Postgres replaces SQLite as durable storage, and Redis peers the replicas so streams and cancellations
+  follow the client across them.
+</Note>
+
+## Build your first agent
+
+With the app open in your browser and a model connected (above), this walkthrough takes you from an empty workspace to a saved, reusable agent. The example builds a **web research briefer** — an agent that searches the web, fans out to parallel subagents, and turns its findings into an interactive one-page brief. This part needs a hosted model that can call tools well; the Ollama tiny model above is fine for confirming the install works, but swap in a stronger model here if you have one connected.
+
+<Steps>
+  <Step title="Confirm a model is connected">
+    You connected one in [Connect a model](#connect-a-model) above — check **Settings → Models** for it now if you skipped ahead. For this walkthrough's parallel research and tool use, a hosted model generally does better than a small local one.
+
+      </Step>
+
+  <Step title="Connect a web-search tool">
+    Open **Settings → Connectors** and add a [Model Context Protocol (MCP)](/mcp-servers) server — this is how your agent reaches external tools and data. TrueForge ships a catalog you can connect in one click; each entry shows its auth type (OAuth, an API key, or none), and you can register your own server by URL with **Add MCP Server**.
+
+    For this walkthrough, connect **Exa** — a web-search server that needs no authentication. Find it in the catalog and click **Connect**; it moves to **Configured**.
+
+      </Step>
+
+  <Step title="Add a skill">
+    Open **Settings → Skills**. A [skill](/skills) is a git-backed `SKILL.md` instruction pack the agent loads on demand. Enable one from the built-in list, or click **Import from GitHub** to add a skill from any public repository.
+
+    For this walkthrough, enable **web-artifacts-builder** from the built-in list — it lets the agent turn its findings into a self-contained, interactive web page. Click **Enable**; it moves to **Enabled**.
+
+      </Step>
+
+  <Step title="Add a sandbox provider">
+    A [sandbox](/sandbox) lets the agent run code, work with files, and use skills — so it's required for the skill you just enabled. TrueForge supports [Daytona](https://www.daytona.io) today. It's a one-time setup:
+
+    1. **Create a Daytona API key** with permission to write and delete snapshots and write sandboxes.
+    2. Open **Settings → Sandbox providers**, choose **Daytona**, click **Configure**, paste your API key, and click **Save**.
+
+    
+    See the [Sandbox guide](/sandbox) for provider setup details.
+  </Step>
+
+  <Step title="Compose an agent and start chatting">
+    Back in the chat, assemble the agent for this conversation. Pick a model from the selector in the composer, then open the **Tools** menu and set three things:
+
+    - **Connectors** — enable **Exa**.
+    - **Skills** — enable **web-artifacts-builder**.
+    - **Capabilities** — leave **Dynamic sub-agents** on (it's the default). This lets the agent research each item in parallel instead of one at a time.
+
+    
+    Then send your first message. For example:
+
+    ```text wrap
+    Research the current state of open-source vector databases. Compare Qdrant, Weaviate, and Milvus on performance, features, and licensing, then write a one-page brief with sources.
+    ```
+
+    The agent searches with Exa, delegates each database to a parallel subagent, and uses **web-artifacts-builder** in the sandbox to render an interactive brief.
+
+      </Step>
+
+  <Step title="Save it as an agent">
+    Happy with the setup? Click **Save Agent**, then in **Save agent** give it a name and instructions and click **Save changes** — this captures the model, connectors, skills, and prompt together as a reusable agent. For this example:
+
+    - **Name** — `web-research-brief`
+    - **Instructions** —
+
+    ```text wrap
+    You are a web research assistant. Given a topic or question, use Exa to search the web and pull content from the most relevant, recent sources. When the request compares several items, research each one in parallel, then synthesize the findings into a clear one-page brief.
+    ```
+
+      </Step>
+
+  <Step title="Find it under Agents">
+    Open **Agents** from the sidebar. Your saved agent is there — click **Try** to start a fresh chat with the same setup, or **Edit** to tweak it. See [Agents](/agent-library) for shared-visibility notes in hosted mode.
+
+      </Step>
+</Steps>
+
+## FAQ
+
+<AccordionGroup>
+  <Accordion title="How do I run the server on a different port?">
+    In standalone mode, pass `--port` or set `PORT`:
+
+    ```bash
+    pnpm standalone:dev --port 3001
+    # or
+    PORT=3001 pnpm standalone:dev
+    ```
+
+    In the Docker Compose path, edit the host-side port in `docker-compose.yml` (the middle number in the server service's `'127.0.0.1:<host>:<container>'` entry, `8791` by default) and re-run `docker compose up` — a port change needs no rebuild.
+  </Accordion>
+  <Accordion title="Where does standalone mode store its data?">
+    In a SQLite file in your OS's application data directory. To put it somewhere else, set the `SQLITE_PATH` environment variable before starting the server — see `packages/trueforge/.env.example` for the exact default path per OS.
+  </Accordion>
+  <Accordion title="What is PUBLIC_BASE_URL and when do I need to set it?">
+    The public origin the server hands to MCP servers for OAuth callbacks. It defaults to `http://localhost:<port>`, which is correct as long as you access the app from the same machine.
+
+    Set it in `packages/trueforge/.env` when the server is reachable at a different address instead — behind a domain, reverse proxy, or on another host. In Helm, use `server.publicBaseUrl`.
+
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Initial Setup" icon="sliders" href="/harness/initial-setup">
+    Models, MCP servers, skills, sandbox — and how catalogs work.
+  </Card>
+  <Card title="Create an Agent" icon="robot" href="/create-agent/overview">
+    Select resources and configure approvals, questions, and Generative UI.
+  </Card>
+  <Card title="Harness Capabilities" icon="layer-group" href="/key-features/overview">
+    Subagents, deferred tools, code mode, compaction, and more.
+  </Card>
+  <Card title="SDK" icon="code" href="/api/quickstart">
+    Sessions, turns, events, and the agent spec.
+  </Card>
+</CardGroup>

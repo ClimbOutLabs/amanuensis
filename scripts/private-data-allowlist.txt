@@ -1,0 +1,11 @@
+# Allowlist for scripts/check-no-private-data.mjs
+#
+# One path or glob per line, matched against the file's path relative to the
+# repo root (forward slashes, as reported by `git ls-files`). `*` matches
+# within a path segment, `**` matches across segments. Lines starting with
+# `#` are comments. Every entry that matches a file is printed by the script
+# when it runs, so exceptions here are never silent.
+#
+# Add an entry only for a confirmed false positive (e.g. a fixture that
+# deliberately contains a key-shaped string for a unit test) — never to
+# silence a real finding.

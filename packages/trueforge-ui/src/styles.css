@@ -1,0 +1,801 @@
+/**
+ * Tailwind authoring source for @truefoundry/trueforge-ui.
+ *
+ * The package build compiles this file through `build-styles.css` into the
+ * public `dist/styles.css` artifact. `ThemeProvider` injects that stylesheet
+ * at runtime — hosts do not need a CSS import. The `styles.css` export remains
+ * for SSR / explicit control.
+ *
+ * Tokens live on `.aui-theme-root` (light) and `.aui-theme-root.dark` so the
+ * host document is not rethemed. Override via host CSS on `.aui-theme-root` or
+ * `theme={{ tokens: { primaryButtonBg: "#e11d48" } }}`.
+ */
+@import './openui.css';
+
+/*
+ * GitHub Markdown styles (https://github.com/sindresorhus/github-markdown-css).
+ * Applied via `.markdown-body` on the Markdown atom. The bridge remaps light/dark
+ * CSS variables to the SDK ThemeProvider mode (class + data-theme).
+ */
+@import 'github-markdown-css/github-markdown.css';
+@import './github-markdown-bridge.css';
+@import './fonts.css';
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Owned palette scoped to `.aui-theme-root` so host `:root` / `html.dark`
+ * are untouched. ThemeProvider toggles `.dark` on this root.
+ * ──────────────────────────────────────────────────────────────────── */
+@layer tfy-agent-ui-base {
+  .aui-theme-root {
+    box-sizing: border-box;
+    /* Fallback palette: matches the `trueforge` preset so surfaces without
+     * ThemeProvider tokens render the same product (single token truth). */
+    --color-white: #ffffff;
+    --color-black: #09090b;
+    --font-agent-ui:
+      'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-display:
+      'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --sidebar-bg: #efe7d8;
+    --topbar-bg: #fbf8f2;
+    --primary-bg: #f7f2e8;
+    --secondary-bg: #ebe2d3;
+    --border: #d9ccb6;
+    --input-box-bg: #fffdf8;
+    --input-border: #d7c7aa;
+    --text-primary: #2c2a26;
+    --text-secondary: #746b5d;
+    --sidebar-text: var(--text-primary);
+    --text-xs: 0.75rem;
+    --text-sm: 0.8125rem;
+    --text-base: 0.9375rem;
+    --text-lg: 1.0625rem;
+    --text-xl: 1.25rem;
+    --text-2xl: 1.5rem;
+    --card-bg: #fffdf8;
+    --surface-elevated: #fffdf8;
+    --dropdown-selected-item-bg: #e9ddc9;
+    --dropdown-selected-item-text: #2c2a26;
+    --user-message-bg: #2c2a26;
+    --user-message-text: #fffdf8;
+    --assistant-message-bg: transparent;
+    --assistant-message-text: var(--text-primary);
+    --primary-button-bg: #b5894c;
+    --primary-button-hover: #c69c5d;
+    --primary-button-text: var(--text-primary);
+    --secondary-button-bg: var(--primary-bg);
+    --secondary-button-hover: var(--border);
+    --secondary-button-text: var(--text-primary);
+    --ghost-button-bg: transparent;
+    --ghost-button-hover: #ebe2d3;
+    --ghost-button-text: #2c2a26;
+    --success-bg: #4b8060;
+    --success-text: #fffdf8;
+    --failure-bg: #a95445;
+    --failure-text: #fffdf8;
+    --warning-bg: #b5894c;
+    --warning-text: #fffdf8;
+    /* Figma Agents approval banner (light 6747:4232): blue-50 / blue-500 / blue-600 */
+    --approval-banner-bg: #eff6ff;
+    --approval-banner-border: #3b82f6;
+    --approval-banner-fg: #2563eb;
+    --approval-banner-accent: #3b82f6;
+    --focus-ring: #b5894c;
+    /* Brand accent: the theme's brass. Shares the focus-ring token so a host
+     * that restyles the accent moves the mark's flourish with it. */
+    --brand-accent: var(--focus-ring);
+    --radius: 0.65rem;
+    --composer-radius: 1.25rem;
+    --overlay: rgb(44 42 38 / 0.42);
+    --shadow-color: #2c2a26;
+    --scrollbar-thumb: #bda886;
+    --chat-font-size: 0.875rem;
+  }
+
+  .aui-theme-root *,
+  .aui-theme-root *::before,
+  .aui-theme-root *::after {
+    box-sizing: border-box;
+  }
+
+  .aui-theme-root.dark {
+    --font-agent-ui:
+      'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-display:
+      'Inter Tight', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --sidebar-bg: #221f19;
+    --topbar-bg: #221f19;
+    --primary-bg: #28241c;
+    --secondary-bg: #2f2a21;
+    --border: #3e382b;
+    --input-box-bg: #2f2a21;
+    --input-border: #3e382b;
+    --text-primary: #f2ecdd;
+    --text-secondary: #a89a7f;
+    --sidebar-text: var(--text-primary);
+    --text-xs: 0.75rem;
+    --text-sm: 0.8125rem;
+    --text-base: 0.9375rem;
+    --text-lg: 1.0625rem;
+    --text-xl: 1.25rem;
+    --text-2xl: 1.5rem;
+    --card-bg: #2f2a21;
+    --surface-elevated: #38332a;
+    --dropdown-selected-item-bg: #3e382b;
+    --dropdown-selected-item-text: #f2ecdd;
+    --user-message-bg: #b5894c;
+    --user-message-text: #221f19;
+    --assistant-message-bg: transparent;
+    --assistant-message-text: #f2ecdd;
+    --primary-button-bg: #b5894c;
+    --primary-button-hover: #c69c5d;
+    --primary-button-text: #221f19;
+    --secondary-button-bg: #2f2a21;
+    --secondary-button-hover: #3e382b;
+    --secondary-button-text: #f2ecdd;
+    --ghost-button-bg: transparent;
+    --ghost-button-hover: #3e382b;
+    --ghost-button-text: #f2ecdd;
+    --success-bg: #4b8060;
+    --success-text: #f2ecdd;
+    --failure-bg: #a95445;
+    --failure-text: #f2ecdd;
+    --warning-bg: #b5894c;
+    --warning-text: #221f19;
+    /* Figma Agents approval banner (dark 6748:1977): #202636 / blue-600 top / Base_gray/750 text */
+    --approval-banner-bg: #202636;
+    --approval-banner-border: #2563eb;
+    --approval-banner-fg: #dfdfe2;
+    --approval-banner-accent: #2563eb;
+    --focus-ring: #b5894c;
+    --overlay: rgb(0 0 0 / 0.65);
+    --shadow-color: #000000;
+    --scrollbar-thumb: #6e6350;
+  }
+}
+
+/*
+ * Unlayered so it beats any @layer utilities rule (e.g. Tailwind's
+ * `.font-sans`) that might otherwise override the inherited font on
+ * descendant elements. `.aui-theme-root` covers all SDK chrome (including
+ * brand names and sidebars), while `.aui-root` covers standalone thread
+ * shells and consumer slot overrides. `.font-sans-flex` remains available
+ * for explicitly portaled surfaces. All three override `--font-sans`.
+ * Override `--font-agent-ui` in host CSS to brand the font (the SDK
+ * stylesheet does not load webfonts from a CDN).
+ */
+.aui-theme-root,
+.aui-root,
+.font-sans-flex {
+  --font-sans: var(
+    --font-agent-ui,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif
+  );
+  font-family: var(
+    --font-agent-ui,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif
+  );
+}
+
+/*
+ * Clone typography: conversation copy and composer text are regular weight;
+ * controls and headings keep their component-level medium/semibold utilities.
+ */
+.aui-theme-root:is([data-preset='claude'], [data-preset='chatgpt'], [data-preset='gemini'])
+  :is(
+    .aui-markdown,
+    [data-slot='aui_user-message-content'],
+    [data-slot='aui_composer-input'],
+    [data-slot='aui_user-edit-input']
+  ) {
+  font-weight: 400;
+}
+
+/*
+ * Display type: prose and welcome surfaces use the display face; chrome keeps
+ * the body face. Only the claude preset's display face is serif — for every
+ * other preset this is a no-op because both faces are the same stack.
+ */
+.aui-theme-root .aui-markdown.markdown-body,
+.aui-theme-root .aui-thread-welcome-message-inner {
+  font-family: var(--font-display);
+}
+
+/*
+ * Token-driven default color for every SDK surface, not just thread shells.
+ * Without this, chrome outside `.aui-root` (sidebar, headers, footers, icon
+ * buttons) inherits the host page color and goes unreadable in dark mode.
+ */
+.aui-theme-root {
+  --thread-list-item-radius: 0.5rem;
+  color: var(--text-primary);
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Slim scrollbars — flush to the edge, transparent track. Thumb color via
+ * `--scrollbar-thumb` (theme.tokens.scrollbarThumb). Theme-root covers
+ * sidebar/chrome; aui-root covers standalone thread shells.
+ * ──────────────────────────────────────────────────────────────────── */
+.aui-root {
+  color: var(--text-primary);
+}
+
+/* Keep the send action in the narrow composer footer instead of allowing the
+ * selector row to push it beyond a 320px viewport. The breakpoint is below
+ * the supported 390px layout, so ordinary mobile and desktop stay unchanged. */
+@media (max-width: 359px) {
+  [data-slot='aui_composer-shell'] .aui-composer-footer {
+    align-items: flex-start;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-leading,
+  [data-slot='aui_composer-shell'] .aui-composer-actions {
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-model-button {
+    max-width: 7rem;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-reasoning-button {
+    max-width: 6rem;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-send-button,
+  [data-slot='aui_composer-shell'] .aui-composer-cancel-button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-send-button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  /* The running-state Cancel replaces Send and inherits the 32px `sm` height; pin it to the same
+   * 44px touch target explicitly rather than relying on min-height alone. */
+  [data-slot='aui_composer-shell'] .aui-composer-cancel-button {
+    height: 2.75rem;
+  }
+}
+
+/* Amanuensis host chrome: warm paper, charcoal copy, and a restrained brass accent. */
+.aman-runtime-rail {
+  display: flex;
+  min-width: 15rem;
+  width: 17.5rem;
+  flex-direction: column;
+  gap: 1rem;
+  border-left: 1px solid var(--border);
+  background: var(--sidebar-bg);
+  padding: 1.25rem 0.75rem 0.75rem;
+  color: var(--text-primary);
+}
+
+/* Collapsed the rail keeps only its toggle, so the chat surface takes the freed grid width
+ * and nothing inside the rail is clipped. */
+.aman-runtime-rail--collapsed {
+  width: 2.75rem;
+  min-width: 0;
+  padding: 1.25rem 0.375rem 0.75rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .aman-runtime-rail {
+    transition: width 150ms ease;
+  }
+}
+
+.aman-runtime-rail__toolbar {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.aman-runtime-rail__collapse-toggle {
+  display: inline-flex;
+  min-width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 0 0.5rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.aman-runtime-rail__collapse-toggle:hover {
+  background: color-mix(in oklab, var(--text-primary) 8%, transparent);
+  color: var(--text-primary);
+}
+
+/* Expanded, no control in the rail is icon-only: the chevron carries a word beside it. */
+.aman-runtime-rail__button-label {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Collapsed the rail is a dot and a chevron, so the compact status is the only readout;
+ * its aria-label and tooltip carry the connection state and the active model name. */
+.aman-runtime-rail__compact-status {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem 0;
+}
+
+.aman-runtime-rail--collapsed .aman-runtime-rail__compact-status {
+  display: flex;
+}
+
+/* Static avatar, no box or tint: a plain image at the rail button hit-area footprint,
+   centered horizontally in the runtime rail (owner decision — no motion, no container). */
+.aman-runtime-rail__avatar-card {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+}
+
+/* The art is a full-bleed scene, so its rectangle reads as pasted onto the rail. Feathering
+   all four edges lets the rail background show through instead of a hard cut. The gradients
+   are alpha ramps, not rendered colour, so light and dark blend without naming either. */
+.aman-runtime-rail__avatar {
+  width: 100%;
+  max-width: 15rem;
+  height: auto;
+  object-fit: contain;
+  -webkit-mask-image:
+    linear-gradient(to right, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%),
+    linear-gradient(to bottom, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%);
+  mask-image:
+    linear-gradient(to right, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%),
+    linear-gradient(to bottom, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+
+.aman-runtime-rail__avatar-fallback {
+  width: 2.625rem;
+  height: 2.625rem;
+  object-fit: contain;
+  display: grid;
+  place-items: center;
+  color: var(--text-primary);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.aman-runtime-rail__status {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+/* Status colours come from the theme's semantic tokens so both palettes and both modes
+ * stay in step; the halo is the same hue mixed down rather than a second literal. */
+.aman-runtime-rail__status-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: var(--success-bg);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--success-bg) 14%, transparent);
+}
+
+.aman-runtime-rail__status[data-status='connecting'] .aman-runtime-rail__status-dot,
+.aman-runtime-rail__compact-status[data-status='connecting'] .aman-runtime-rail__status-dot,
+.aman-runtime-rail__status[data-status='degraded'] .aman-runtime-rail__status-dot,
+.aman-runtime-rail__compact-status[data-status='degraded'] .aman-runtime-rail__status-dot {
+  background: var(--warning-bg);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--warning-bg) 14%, transparent);
+}
+
+.aman-runtime-rail__status[data-status='offline'] .aman-runtime-rail__status-dot,
+.aman-runtime-rail__compact-status[data-status='offline'] .aman-runtime-rail__status-dot {
+  background: var(--failure-bg);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--failure-bg) 14%, transparent);
+}
+
+.aman-runtime-rail__latency {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.aman-runtime-rail__retry {
+  margin-left: auto;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.aman-runtime-rail__retry:hover {
+  background: color-mix(in oklab, var(--text-primary) 8%, transparent);
+}
+
+/* Memory recall reads as one control: the box and its word share a hit area. */
+.aman-runtime-rail__switch {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.aman-runtime-rail__identity {
+  padding: 0.25rem 0 1rem;
+}
+
+.aman-runtime-rail__identity h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.75rem;
+}
+
+.aman-runtime-rail__identity p:last-child {
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+/* Grouped rail sections: small-caps label over one value line. The top border carries
+ * the separation the old identity divider used to provide. */
+.aman-runtime-rail__section {
+  display: grid;
+  gap: 0.375rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+
+.aman-runtime-rail__section-label {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.aman-runtime-rail__section-value {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aman-runtime-rail__section-value a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* One disclosure at the foot of the rail holds the diagnostics; `margin-top: auto`
+ * keeps it and the release line at the bottom however few sections are shown. */
+.aman-runtime-rail__details {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+
+.aman-runtime-rail__details-summary {
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.aman-runtime-rail__details-list {
+  display: grid;
+  margin: 0.5rem 0 0;
+  gap: 0.15rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.aman-runtime-rail__details-list dt {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.aman-runtime-rail__details-list dd {
+  overflow-wrap: anywhere;
+  margin: 0 0 0.35rem;
+  color: var(--text-primary);
+}
+
+/* The release line is the smallest thing in the rail, and the last. */
+.aman-runtime-rail__footer {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Chat text: type-scale sizing with airy leading for reading rhythm. */
+.aman-chat-text {
+  font-size: var(--text-base);
+  line-height: 1.65;
+}
+
+.aui-theme-root,
+.aui-root {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb, var(--text-secondary)) transparent;
+}
+
+.aui-theme-root ::-webkit-scrollbar,
+.aui-root ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+}
+
+.aui-theme-root ::-webkit-scrollbar-track,
+.aui-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.aui-theme-root ::-webkit-scrollbar-thumb,
+.aui-root ::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb, var(--text-secondary));
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.aui-theme-root ::-webkit-scrollbar-corner,
+.aui-root ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Tailwind v4 `@theme inline` registrations.
+ * ──────────────────────────────────────────────────────────────────── */
+@theme inline {
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-topbar-bg: var(--topbar-bg);
+  --color-primary-bg: var(--primary-bg);
+  --color-secondary-bg: var(--secondary-bg);
+  --color-border: var(--border);
+  --color-input-box-bg: var(--input-box-bg);
+  --color-input-border: var(--input-border);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-card-bg: var(--card-bg);
+  --color-dropdown-selected-item-bg: var(--dropdown-selected-item-bg);
+  --color-dropdown-selected-item-text: var(--dropdown-selected-item-text);
+  --color-user-message-bg: var(--user-message-bg);
+  --color-user-message-text: var(--user-message-text);
+  --color-assistant-message-bg: var(--assistant-message-bg);
+  --color-assistant-message-text: var(--assistant-message-text);
+  --color-primary-button-bg: var(--primary-button-bg);
+  --color-primary-button-hover: var(--primary-button-hover);
+  --color-primary-button-text: var(--primary-button-text);
+  --color-secondary-button-bg: var(--secondary-button-bg);
+  --color-secondary-button-hover: var(--secondary-button-hover);
+  --color-secondary-button-text: var(--secondary-button-text);
+  --color-ghost-button-bg: var(--ghost-button-bg);
+  --color-ghost-button-hover: var(--ghost-button-hover);
+  --color-ghost-button-text: var(--ghost-button-text);
+  --color-success-bg: var(--success-bg);
+  --color-success-text: var(--success-text);
+  --color-failure-bg: var(--failure-bg);
+  --color-failure-text: var(--failure-text);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-text: var(--warning-text);
+  --color-focus-ring: var(--focus-ring);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-white: var(--color-white);
+  --color-black: var(--color-black);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Monaco embeds: blend into surrounding cards (transparent editor chrome). */
+.aui-monaco .monaco-editor,
+.aui-monaco .monaco-editor-background,
+.aui-monaco .margin,
+.aui-monaco .monaco-editor .inputarea.ime-input {
+  background-color: transparent !important;
+}
+
+.aui-monaco .monaco-editor .overflow-guard {
+  border-radius: inherit;
+}
+
+/* ChatGPT dark: transparent composer border + inset white edge */
+.aui-theme-root[data-preset='chatgpt'][data-theme='dark'] [data-slot='aui_composer-shell'] {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .aui-bottom-sheet[open] {
+    animation: aui-bottom-sheet-enter 180ms ease-out;
+  }
+}
+
+.aui-bottom-sheet {
+  height: min(70dvh, 30rem);
+  max-height: 85dvh;
+}
+
+@keyframes aui-bottom-sheet-enter {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+/* ── Wait queue (Disneyland-style turn journey) ──────────────────────────
+ * Station dots change ONLY on real turn events (see deriveWaitQueue): the
+ * track shows where the turn has been and where it is headed, never fake
+ * progress. Motion stays subtle by design; reduced-motion users and the
+ * --static modifier get the still show. */
+.aui-wait-queue {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
+}
+
+.aui-wait-queue__track {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.aui-wait-queue__link {
+  width: 0.875rem;
+  height: 1px;
+  background: var(--border);
+  flex: none;
+}
+
+.aui-wait-queue__station {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.aui-wait-queue__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  flex: none;
+}
+
+.aui-wait-queue__label {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.aui-wait-queue__station--active .aui-wait-queue__dot {
+  background: var(--brand-accent);
+  border-color: var(--brand-accent);
+}
+
+.aui-wait-queue__station--active .aui-wait-queue__label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.aui-wait-queue__station--done .aui-wait-queue__dot {
+  background: var(--text-secondary);
+  border-color: var(--text-secondary);
+}
+
+.aui-wait-queue__station--pending {
+  opacity: 0.75;
+}
+
+.aui-wait-queue__station--skipped {
+  opacity: 0.45;
+}
+
+.aui-wait-queue__line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 1.25rem;
+}
+
+.aui-wait-queue__microcopy {
+  color: var(--text-secondary);
+}
+
+.aui-wait-queue__ticks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+}
+
+.aui-wait-queue__tick {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.aui-wait-queue__longwait {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+@keyframes aui-wait-queue-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.7;
+  }
+}
+
+/* The Weenie: when the first tokens arrive and Writing lights up, the dot
+ * breathes a soft ring outward — the doors opening, not confetti. */
+@keyframes aui-wait-queue-arrive {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-accent) 50%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0.5rem transparent;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-wait-queue__station--active .aui-wait-queue__dot {
+    animation: aui-wait-queue-pulse 1.6s ease-in-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-wait-queue__station--arriving .aui-wait-queue__dot {
+    animation: aui-wait-queue-arrive 1.4s ease-out infinite;
+  }
+}

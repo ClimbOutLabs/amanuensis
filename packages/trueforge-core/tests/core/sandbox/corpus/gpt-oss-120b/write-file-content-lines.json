@@ -1,0 +1,16 @@
+{
+  "tool": "write_file",
+  "args": {
+    "intent": "Create a Python script",
+    "cwd": "/repo",
+    "path": "src/script.py",
+    "content_lines": ["def main():", "    print(\"hello\")", "", "main()"]
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": true,
+    "normalizedPath": "src/script.py",
+    "notes": ["joined content_lines into content"]
+  }
+}

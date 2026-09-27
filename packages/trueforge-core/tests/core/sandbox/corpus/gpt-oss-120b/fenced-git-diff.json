@@ -1,0 +1,14 @@
+{
+  "tool": "apply_patch",
+  "args": {
+    "intent": "Rename a variable, patch wrapped in a markdown code fence",
+    "cwd": "/repo",
+    "patch": "```diff\ndiff --git a/src/util.ts b/src/util.ts\n--- a/src/util.ts\n+++ b/src/util.ts\n@@ -1 +1 @@\n-const x = 1;\n+const y = 1;\n```\n"
+  },
+  "cwd": "/repo",
+  "repositoryRoot": "/repo",
+  "expect": {
+    "ok": true,
+    "notes": ["stripped a surrounding markdown code fence from patch"]
+  }
+}
