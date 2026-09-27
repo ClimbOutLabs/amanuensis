@@ -109,16 +109,9 @@ export function useSpeechRecognition(options: UseSpeechRecognitionOptions = {}) 
     }
   }, []);
 
-  useEffect(
-    () => () => {
-      try {
-        recognitionRef.current?.abort();
-      } catch {
-        // Unmounting with a live instance is fine.
-      }
-    },
-    [],
-  );
+  // Unmounting with a live instance aborts it. The try/catch inside `abort`
+  // covers engines that throw on an already-dead instance.
+  useEffect(() => abort, [abort]);
 
   // Stable identity: orchestrators depend on this object in effects.
   return useMemo(() => ({ supported, status, start, stop, abort }), [supported, status, start, stop, abort]);
