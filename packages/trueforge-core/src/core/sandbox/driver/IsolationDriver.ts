@@ -6,7 +6,10 @@
  * The old `SandboxProvider` interface is superseded by this contract.
  */
 
-/** Languages the `run_code` contract offers. Shell is deliberately NOT offered. */
+/** Languages the `run_code` contract offers. Bash is offered alongside
+ * python and node: it runs under the same hardening as the other languages
+ * (read-only rootfs, no network, no-new-privileges, seccomp via gVisor or
+ * Docker default), so shell access does not weaken the isolation boundary. */
 export type RunCodeLanguage = 'python' | 'node' | 'bash';
 
 /**

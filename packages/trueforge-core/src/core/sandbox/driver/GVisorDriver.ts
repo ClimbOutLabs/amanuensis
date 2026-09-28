@@ -14,18 +14,7 @@ import type {
  * Options for the gVisor driver. Mirrors DockerDriverOptions minus the
  * runtime (always 'runsc') — gVisor isolation is the point of this driver.
  */
-export interface GVisorDriverOptions {
-  /** tag@sha256:<digest>. The digest pin is enforced at ensureReady; a bare tag is refused. */
-  image: string;
-  /** Path to the cosign public-key PEM. Signature verification is fail-closed. */
-  cosignPublicKeyPath: string;
-  dockerBinary: string | undefined;
-  cosignBinary: string | undefined;
-  /** Bound for docker info / image inspect / cosign verify. Default 5000. */
-  commandTimeoutMs: number | undefined;
-  /** Bound for the wedged-daemon docker create probe. Default 30000. */
-  createTimeoutMs: number | undefined;
-}
+export type GVisorDriverOptions = Omit<DockerDriverOptions, 'runtime'>;
 
 /**
  * gVisor-isolated sandbox driver (the "sandboxd" backend).
@@ -45,16 +34,7 @@ export class GVisorDriver implements IsolationDriver {
   private readonly inner: DockerDriver;
 
   constructor(options: GVisorDriverOptions, commandRunner: DockerCommandRunner | undefined) {
-    const dockerOptions: DockerDriverOptions = {
-      image: options.image,
-      cosignPublicKeyPath: options.cosignPublicKeyPath,
-      dockerBinary: options.dockerBinary,
-      cosignBinary: options.cosignBinary,
-      commandTimeoutMs: options.commandTimeoutMs,
-      createTimeoutMs: options.createTimeoutMs,
-      runtime: 'runsc',
-    };
-    this.inner = new DockerDriver(dockerOptions, commandRunner);
+    this.inner = new DockerDriver({ ...options, runtime: 'runsc' }, commandRunner);
   }
 
   ensureReady(signal?: AbortSignal): Promise<DriverReadiness> {

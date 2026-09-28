@@ -1,6 +1,7 @@
 import type { AgentSpec, SessionHandle } from '@truefoundry/trueforge-core/agent-session';
 import {
   DockerDriver,
+  GVisorDriver,
   McpConnectionError,
   RunCodeService,
   Sandbox,
@@ -8,6 +9,7 @@ import {
   type AgentTracing,
   type BoundRepository,
   type GitSkill,
+  type IsolationDriver,
   type ModelParams,
   type RemoteMcpHeaders,
   type RepositoryCommandSourceObserver,
@@ -613,22 +615,37 @@ let sharedRunCodeService: RunCodeService | undefined;
  */
 function getSharedRunCodeService(logger: Logger): RunCodeService {
   if (sharedRunCodeService === undefined) {
-    if (configuration.SANDBOX_ISOLATION_DRIVER !== 'docker') {
+    const driverKind = configuration.SANDBOX_ISOLATION_DRIVER;
+    let driver: IsolationDriver;
+    if (driverKind === 'gvisor') {
+      driver = new GVisorDriver(
+        {
+          image: configuration.SANDBOX_IMAGE,
+          cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
+          dockerBinary: undefined,
+          cosignBinary: undefined,
+          commandTimeoutMs: undefined,
+          createTimeoutMs: undefined,
+        },
+        undefined,
+      );
+    } else if (driverKind === 'docker') {
+      driver = new DockerDriver(
+        {
+          image: configuration.SANDBOX_IMAGE,
+          cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
+          dockerBinary: undefined,
+          cosignBinary: undefined,
+          commandTimeoutMs: undefined,
+          createTimeoutMs: undefined,
+        },
+        undefined,
+      );
+    } else {
       throw new Error(
-        `run_code isolation driver "${configuration.SANDBOX_ISOLATION_DRIVER}" is not implemented in this build — refusing to dispatch.`,
+        `run_code isolation driver "${driverKind}" is not implemented in this build — refusing to dispatch.`,
       );
     }
-    const driver = new DockerDriver(
-      {
-        image: configuration.SANDBOX_IMAGE,
-        cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
-        dockerBinary: undefined,
-        cosignBinary: undefined,
-        commandTimeoutMs: undefined,
-        createTimeoutMs: undefined,
-      },
-      undefined,
-    );
     sharedRunCodeService = new RunCodeService({
       driver,
       dataDir: configuration.SANDBOX_RUNS_DIR,

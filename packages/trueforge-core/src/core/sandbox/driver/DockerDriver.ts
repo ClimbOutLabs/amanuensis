@@ -380,9 +380,10 @@ export class DockerDriver implements IsolationDriver {
     // Wedged-daemon escalation (plan §2.8): dockerd answers `docker info` but
     // `docker create` never returns → daemon_unavailable, manual remediation.
     // --entrypoint keeps the probe immune to the image's own entrypoint.
+    const runtimeArgs = this.runtime === undefined ? [] : ['--runtime', this.runtime];
     const probe = await this.runner.run(
       this.dockerBinary,
-      ['create', '--entrypoint', 'true', '--label', `${PROBE_LABEL}=1`, this.image],
+      ['create', ...runtimeArgs, '--entrypoint', 'true', '--label', `${PROBE_LABEL}=1`, this.image],
       { timeoutMs: this.createTimeoutMs, signal },
     );
     if (probe.timedOut) {
@@ -783,10 +784,12 @@ export class DockerDriver implements IsolationDriver {
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     const probeDir = await mkdtemp(join(tmpdir(), 'tf-sandbox-probe-'));
     try {
+      const runtimeArgs = this.runtime === undefined ? [] : ['--runtime', this.runtime];
       const result = await this.runner.run(
         this.dockerBinary,
         [
           'run',
+          ...runtimeArgs,
           '--rm',
           '--network',
           'none',

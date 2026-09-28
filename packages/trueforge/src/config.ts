@@ -227,7 +227,7 @@ function parseReflectBudget(options: {
 }
 
 /** Which process-isolation backend runs `run_code` executions. */
-export type SandboxIsolationDriver = 'docker' | 'firecracker';
+export type SandboxIsolationDriver = 'docker' | 'firecracker' | 'gvisor';
 
 /**
  * Parses `SANDBOX_ISOLATION_DRIVER`. Unset/blank → default. Anything else throws
@@ -242,10 +242,10 @@ function parseIsolationDriver(options: {
     return options.defaultValue;
   }
   const value = options.raw.trim().toLowerCase();
-  if (value === 'docker' || value === 'firecracker') {
+  if (value === 'docker' || value === 'firecracker' || value === 'gvisor') {
     return value;
   }
-  throw new Error(`${options.envKey} must be one of docker, firecracker; got ${JSON.stringify(options.raw)}`);
+  throw new Error(`${options.envKey} must be one of docker, firecracker, gvisor; got ${JSON.stringify(options.raw)}`);
 }
 
 /** Which long-term memory backend Aman uses. */
