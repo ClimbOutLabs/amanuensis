@@ -1,0 +1,33 @@
+---
+title: 'Voice input'
+sidebarTitle: 'Voice input'
+description: 'Record a voice message in the chat composer and have it transcribed locally by the aman-stt sidecar.'
+---
+
+The chat composer has a microphone button beside Send. Tap it to start recording, tap it again to stop: the recording is transcribed locally and the text is inserted into the composer, where it stays editable before sending. Typed input keeps working exactly as before, whether or not transcription is available.
+
+Transcription runs fully on your own hardware. The browser encodes the recording as 16 kHz mono WAV and posts it to the agent server (`POST /api/v1/voice/transcribe`); the server forwards the bytes to the `aman-stt` sidecar, which runs Whisper `small` (int8, CPU) via faster-whisper and returns the transcript. The browser never talks to the sidecar directly, and no audio or transcript ever leaves your machine. When the sidecar is unreachable, the mic button shows as unavailable and everything else keeps working.
+
+## Deployment
+
+`docker-compose.yml` runs `aman-stt` as a sidecar next to the server:
+
+- Built from `ops/aman-stt` (Python 3.11 slim, CPU-only; the image has no CUDA userspace and the app pins `device=cpu`).
+- Pinned to cores `16-19` with a 2 GB memory limit, so transcription work never contends with chat or embedding work, which stay on cores `0-15`.
+- No host port is published; the sidecar is reachable only inside the compose network at `http://aman-stt:8001`.
+- The Whisper model (~464 MB) downloads once at first startup into the persistent `stt-model-cache` volume; container recreates reuse it.
+- `restart: unless-stopped`, matching the server.
+
+The server reads the sidecar address from `STT_URL` (default `http://aman-stt:8001`; compose sets it explicitly). The server does not wait for the sidecar to be healthy before starting: typed chat stays available when transcription is down.
+
+## Tuning
+
+**Fewer or more CPU cores.** The `16-19` / `0-15` split assumes a 20-core host. On a host with a different core count, move both pins together and keep them disjoint: give the sidecar 4 cores and the server the rest. For example, on a 12-core host, pin `aman-stt` to `8-11` and the server to `0-7`. The server pin lives on the `server` service (`cpuset`), the sidecar pin on `aman-stt`.
+
+**Transcription threads.** `AMAN_STT_CPU_THREADS` (default `4`) sets the Whisper encoder thread count; keep it equal to the number of cores pinned to the sidecar.
+
+**Model size.** `AMAN_STT_MODEL` (default `small`) selects the Whisper model; `AMAN_STT_FALLBACK_MODEL` (default `base`) is used when the primary fails to load. Larger models transcribe more accurately and need more RAM; raise the service `mem_limit` accordingly.
+
+**Memory.** The default 2 GB limit covers the `small` int8 model with headroom. If the container is OOM-killed during warmup, raise `mem_limit` before changing anything else.
+
+**Request limits.** The sidecar caps audio bodies at 30 MB (`AMAN_STT_MAX_BODY_BYTES`); the server caps them at 6.4 MB, which is 200 seconds of 16 kHz mono 16-bit audio, enforcing the 3 minute recording cap server-side. The browser also caps recordings at 3 minutes client-side. Transcription requests time out after 120 seconds server-side.

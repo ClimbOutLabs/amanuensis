@@ -33,6 +33,7 @@ import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skills';
 import { createSpacesRouter } from './apis/spaces';
 import { createTurnsRouter } from './apis/turns';
+import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
 import { resolveRequestContext } from './auth/identity';
@@ -571,6 +572,15 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         mcpServerStore: deps.resolveMcpServerStore(),
         globalSettingsStore: deps.globalSettingsStore,
         resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/voice',
+    withAuth(
+      createVoiceRouter({
         logger: deps.logger,
       }),
       authMiddleware,

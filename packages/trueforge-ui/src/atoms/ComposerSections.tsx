@@ -6,6 +6,7 @@ import { Spinner } from '../atoms/primitives/Spinner.js';
 import { Icon } from '../icons/Icon.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { Button } from './primitives/Button.js';
+import { VoiceInputButton } from './VoiceInputButton.js';
 
 export type ComposerLeftSectionProps = {
   disabled: boolean;
@@ -46,8 +47,8 @@ export function ComposerLeftSection({ onAttach }: ComposerLeftSectionProps) {
   );
 }
 
-export function ComposerRightSection(_: ComposerRightSectionProps): ReactNode {
-  return null;
+export function ComposerRightSection({ disabled }: ComposerRightSectionProps): ReactNode {
+  return <VoiceInputButton disabled={disabled} />;
 }
 
 export function ComposerSendButton({ canSubmit, isRunning, onSubmit, onCancel }: ComposerSendButtonProps) {

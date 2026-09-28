@@ -13,6 +13,7 @@ import {
   ThemeProvider,
   TrueForgeUI,
   useTheme,
+  VoiceInputProvider,
   type AmanAvatarActivity,
   type AmanAvatarMotionSources,
   type MemoryBankStatus,
@@ -44,6 +45,7 @@ import { createPersonalizationApi } from './personalizationApi';
 import { API_BASE_URL, apiPath, uiRouterBasename } from './publicPath';
 import { isSetupComplete, mergeSetupRead, SETUP_REFRESH_MS, type SetupSnapshot } from './setupStatus';
 import { createSpaceStore } from './spaceStore';
+import { createVoiceInputApi } from './voiceInputApi';
 
 /** Shared cookie/OIDC fetch for boot helpers and `<TrueForgeUI server />`. */
 const authAwareFetch = createAuthAwareFetch();
@@ -351,6 +353,7 @@ export function App() {
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
   const implementationPlanGrantApi = useMemo(() => createImplementationPlanGrantApi(authAwareFetch), []);
   const bugReportApi = useMemo(() => createBugReportApi(authAwareFetch), []);
+  const voiceInputApi = useMemo(() => createVoiceInputApi(authAwareFetch), []);
   const memoryRecallApi = useMemo(() => createMemoryRecallApi(bootClient), []);
 
   const authErrorReason = shouldShowAuthErrorScreen({ authError, session });
@@ -402,30 +405,32 @@ export function App() {
         <PersonalizationProvider api={personalizationApi}>
           <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
             <BugReportProvider api={bugReportApi}>
-              <MemoryRecallProvider api={memoryRecallApi}>
-                <PersonaProvider api={personaApi}>
-                  <AmanSetupProvider
-                    value={{
-                      modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                      memoryBank: setup === null ? boot.memoryBank : setup.memoryBank,
-                      settingsHref: '/settings',
-                    }}
-                  >
-                    <ComposerDraftScopeProvider scope={draftScope}>
-                      <AmanShell
-                        defaultAgentSpec={boot.defaultAgentSpec}
-                        openSettings={boot.openSettings}
-                        displayName={session.displayName}
-                        overrides={overrides}
-                        modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
-                        memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
-                        version={boot.build?.version}
-                        buildRef={boot.build?.ref}
-                      />
-                    </ComposerDraftScopeProvider>
-                  </AmanSetupProvider>
-                </PersonaProvider>
-              </MemoryRecallProvider>
+              <VoiceInputProvider api={voiceInputApi}>
+                <MemoryRecallProvider api={memoryRecallApi}>
+                  <PersonaProvider api={personaApi}>
+                    <AmanSetupProvider
+                      value={{
+                        modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                        memoryBank: setup === null ? boot.memoryBank : setup.memoryBank,
+                        settingsHref: '/settings',
+                      }}
+                    >
+                      <ComposerDraftScopeProvider scope={draftScope}>
+                        <AmanShell
+                          defaultAgentSpec={boot.defaultAgentSpec}
+                          openSettings={boot.openSettings}
+                          displayName={session.displayName}
+                          overrides={overrides}
+                          modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
+                          memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
+                          version={boot.build?.version}
+                          buildRef={boot.build?.ref}
+                        />
+                      </ComposerDraftScopeProvider>
+                    </AmanSetupProvider>
+                  </PersonaProvider>
+                </MemoryRecallProvider>
+              </VoiceInputProvider>
             </BugReportProvider>
           </ImplementationPlanGrantProvider>
         </PersonalizationProvider>

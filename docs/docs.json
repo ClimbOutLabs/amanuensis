@@ -82,6 +82,7 @@
             "group": "UI Chat",
             "pages": [
               "chat-ui",
+              "voice-input",
               "ui-sdk/get-started/quickstart",
               {
                 "group": "Frontend Customisation",

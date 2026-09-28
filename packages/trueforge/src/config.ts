@@ -862,6 +862,12 @@ export interface SharedServerConfiguration {
    */
   MEMORY_SCREEN_URL: string;
   /**
+   * Base URL of the `aman-stt` speech-to-text sidecar (`POST {url}/v1/transcribe`).
+   * The browser never calls it directly; the voice endpoints proxy through this server.
+   * Env: `STT_URL`. Default `http://aman-stt:8001`.
+   */
+  STT_URL: string;
+  /**
    * Bearer token for the memory recall screen classifier. Distinct from any memory-provider
    * credential. Env: `MEMORY_SCREEN_AUTH_TOKEN`. Default empty.
    */
@@ -1409,6 +1415,7 @@ const shared: SharedServerConfiguration = {
     defaultValue: false,
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
+  STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
   MEMORY_SCREEN_AUTH_TOKEN: getEnv('MEMORY_SCREEN_AUTH_TOKEN', { defaultValue: '' }) ?? '',
   MEMORY_SCREEN_THRESHOLD: parseUnitInterval({
     envKey: 'MEMORY_SCREEN_THRESHOLD',
