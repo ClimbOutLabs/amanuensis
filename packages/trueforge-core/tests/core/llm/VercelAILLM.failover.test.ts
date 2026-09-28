@@ -4,7 +4,6 @@
  * Runs the actual user journey (local down -> cloud answers), not a narration of it.
  */
 import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import type { VercelAIProviderConfig } from '../../../src/core/llm/VercelAILLM';
 import { VercelAILLM } from '../../../src/core/llm/VercelAILLM';
 import { makeSilentLogger } from '../harnessMocks';
