@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import envPaths from 'env-paths';
 
 import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS } from '@truefoundry/trueforge-core/core';
+import { TOKEN_FACTORY_DEFAULT_BASE_URL } from '@truefoundry/trueforge-core/core';
 import { validateRunCodeStartupConfig } from '@truefoundry/trueforge-core/core';
 import {
   MEMORY_PROVIDER_MAX_TIMEOUT_MS,
@@ -268,6 +269,32 @@ function parseMemoryBackend(options: {
   }
   throw new Error(`${options.envKey} must be one of markdown, hindsight; got ${JSON.stringify(options.raw)}`);
 }
+
+/** How turns may route to Nebius Token Factory. */
+export type TokenFactoryMode = 'off' | 'fallback' | 'force';
+
+/**
+ * Parses `TOKEN_FACTORY_MODE`. Unset/blank → `off`. `fallback` tries the configured
+ * local provider first and uses Token Factory when it fails; `force` tries Token
+ * Factory first (for testing and demo paths) and falls back to the local provider.
+ */
+export function parseTokenFactoryMode(options: {
+  envKey: string;
+  raw: string | undefined;
+  defaultValue: TokenFactoryMode;
+}): TokenFactoryMode {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return options.defaultValue;
+  }
+  const value = options.raw.trim().toLowerCase();
+  if (value === 'off' || value === 'fallback' || value === 'force') {
+    return value;
+  }
+  throw new Error(`${options.envKey} must be one of off, fallback, force; got ${JSON.stringify(options.raw)}`);
+}
+
+/** Default Token Factory model used when `TOKEN_FACTORY_MODEL` is unset. */
+export const DEFAULT_TOKEN_FACTORY_MODEL = 'nvidia/nemotron-3-super-120b-a12b';
 
 function parseBoolean(options: { envKey: string; raw: string | undefined; defaultValue: boolean }): boolean {
   const { envKey, raw, defaultValue } = options;
@@ -979,6 +1006,29 @@ export interface SharedServerConfiguration {
    */
   MEMORY_SUMMARIZE: boolean;
   /**
+   * Nebius Token Factory API key. Populated from the Secure Vault into the deployment
+   * environment; never committed or logged. Env: `NEBIUS_API_KEY`. Unset by default.
+   */
+  NEBIUS_API_KEY: string | undefined;
+  /**
+   * Token Factory model id used for fallback and forced routing.
+   * Env: `TOKEN_FACTORY_MODEL`. Default `nvidia/nemotron-3-super-120b-a12b`.
+   */
+  TOKEN_FACTORY_MODEL: string;
+  /**
+   * Token Factory base URL.
+   * Env: `TOKEN_FACTORY_BASE_URL`. Default `https://api.tokenfactory.nebius.com/v1`.
+   */
+  TOKEN_FACTORY_BASE_URL: string;
+  /**
+   * How turns may route to Nebius Token Factory. `off` (the default) disables Token
+   * Factory routing entirely. `fallback` uses the configured local provider first and
+   * fails over to Token Factory when it is unavailable. `force` uses Token Factory
+   * first with the local provider as fallback, for testing and demo paths.
+   * Env: `TOKEN_FACTORY_MODE`. Default `off`.
+   */
+  TOKEN_FACTORY_MODE: TokenFactoryMode;
+  /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
    * memories by meaning in addition to keyword overlap. Everything runs on the
@@ -1497,6 +1547,15 @@ const shared: SharedServerConfiguration = {
     envKey: 'MEMORY_SUMMARIZE',
     raw: getEnv('MEMORY_SUMMARIZE'),
     defaultValue: true,
+  }),
+  NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
+  TOKEN_FACTORY_MODEL: getEnv('TOKEN_FACTORY_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_MODEL }) ?? DEFAULT_TOKEN_FACTORY_MODEL,
+  TOKEN_FACTORY_BASE_URL:
+    getEnv('TOKEN_FACTORY_BASE_URL', { defaultValue: TOKEN_FACTORY_DEFAULT_BASE_URL }) ?? TOKEN_FACTORY_DEFAULT_BASE_URL,
+  TOKEN_FACTORY_MODE: parseTokenFactoryMode({
+    envKey: 'TOKEN_FACTORY_MODE',
+    raw: getEnv('TOKEN_FACTORY_MODE'),
+    defaultValue: 'off',
   }),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',

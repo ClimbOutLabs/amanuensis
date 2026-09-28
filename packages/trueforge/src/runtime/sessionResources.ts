@@ -20,7 +20,7 @@ import {
 import { HTTPException } from 'hono/http-exception';
 import { join } from 'node:path';
 import type { Logger } from 'winston';
-import configuration from '../config';
+import configuration, { type TokenFactoryMode } from '../config';
 import type { IMcpServerStore, IMcpServerWithAuthStore, McpServerRecord } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
@@ -296,6 +296,47 @@ export async function getModelDetails({
     modelProperties: model.properties,
     streamTimeout: modelProviderStreamTimeout(stream_timeout),
   };
+}
+
+/**
+ * Applies Nebius Token Factory routing to an already-resolved primary provider config.
+ *
+ * `fallback` keeps the configured provider first and uses Token Factory when it fails
+ * before producing output; `force` routes to Token Factory first (for testing and demo
+ * paths) with the configured provider as fallback. Routing is inactive when the mode is
+ * `off`, when no API key is configured, or when the primary already is Token Factory.
+ * Failover itself happens inside `VercelAILLM` and only before any output is produced.
+ */
+export function applyTokenFactoryRouting(input: {
+  primary: VercelAIProviderConfig;
+  mode: TokenFactoryMode;
+  apiKey: string | undefined;
+  model: string;
+  baseUrl: string;
+}): {
+  providerConfig: VercelAIProviderConfig;
+  fallbackProviderConfig: VercelAIProviderConfig | undefined;
+} {
+  const { primary, mode, apiKey, model, baseUrl } = input;
+  const inactive = { providerConfig: primary, fallbackProviderConfig: undefined };
+  if (mode === 'off' || apiKey === undefined || apiKey === '') {
+    return inactive;
+  }
+  if (primary.provider.type === 'tokenfactory') {
+    return inactive;
+  }
+  const tokenFactoryConfig: VercelAIProviderConfig = {
+    provider: { type: 'tokenfactory', name: 'tokenfactory' },
+    model: { id: model, name: model },
+    name: `tokenfactory/${model}`,
+    baseUrl,
+    apiKey,
+    headers: {},
+  };
+  if (mode === 'force') {
+    return { providerConfig: tokenFactoryConfig, fallbackProviderConfig: primary };
+  }
+  return { providerConfig: primary, fallbackProviderConfig: tokenFactoryConfig };
 }
 
 /**

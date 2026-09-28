@@ -10,6 +10,7 @@ import {
   buildStreamTextArgs,
   convertTools,
   resolveMaxOutputTokens,
+  TOKEN_FACTORY_DEFAULT_BASE_URL,
 } from '../../../src/core/llm/VercelAILLM';
 
 function makeConfig(
@@ -54,6 +55,16 @@ describe('buildLanguageModel', () => {
   it('demands a baseUrl from alibaba even though its adapter ships a default', () => {
     expect(() => buildLanguageModel(makeConfig({ provider: 'alibaba' }))).toThrow('baseUrl');
     expect(buildLanguageModel(makeConfig({ provider: 'alibaba', baseUrl: 'http://localhost/v1' }))).toBeDefined();
+  });
+
+  // Token Factory has a single public endpoint, so the server default applies when the
+  // provider record does not set its own (for example the regional endpoint).
+  it('builds tokenfactory against the default endpoint when no baseUrl is configured', () => {
+    expect(TOKEN_FACTORY_DEFAULT_BASE_URL).toBe('https://api.tokenfactory.nebius.com/v1');
+    const model: unknown = buildLanguageModel(makeConfig({ provider: 'tokenfactory' }));
+    if (typeof model !== 'object' || model === null) throw new Error('Expected model to be an object');
+    expect(Reflect.get(model, 'supportsStructuredOutputs')).toBe(true);
+    expect(Reflect.get(model, 'modelId')).toBe('test-model');
   });
 
   it('throws for unknown provider string (exhaustive default branch)', () => {
