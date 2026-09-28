@@ -167,7 +167,7 @@ export class RunCodeService implements RunCodeBackend {
     this.sleepMs = options.sleepMs ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
   }
 
-  get driverKind(): 'docker' | 'firecracker' {
+  get driverKind(): 'docker' | 'firecracker' | 'gvisor' {
     return this.driver.kind;
   }
 
