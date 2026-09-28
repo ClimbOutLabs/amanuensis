@@ -81,6 +81,7 @@ import {
 import { synchronizeRepositoryCommandProposals } from '../runtime/repositoryCommandProposals';
 import { validateSandboxFilePath } from '../runtime/sandboxFilePath';
 import {
+  applyTokenFactoryRouting,
   buildGatewayMetadata,
   buildTurnSandbox,
   gatewayMetadataHeaders,
@@ -334,12 +335,28 @@ function createTurnResolver(deps: {
           name,
           store: modelProviderStore,
         });
+        const routed = applyTokenFactoryRouting({
+          primary: resolved.providerConfig,
+          mode: configuration.TOKEN_FACTORY_MODE,
+          apiKey: configuration.NEBIUS_API_KEY,
+          model: configuration.TOKEN_FACTORY_MODEL,
+          baseUrl: configuration.TOKEN_FACTORY_BASE_URL,
+        });
+        // Gateway metadata is only meaningful to the TrueFoundry gateway, so it is
+        // never sent to Token Factory (a different external party).
+        const withMetadataHeaders = (providerConfig: typeof routed.providerConfig) => ({
+          ...providerConfig,
+          headers: {
+            ...providerConfig.headers,
+            ...(providerConfig.provider.type === 'tokenfactory' ? {} : metadataHeaders),
+          },
+        });
         return {
           modelClient: new VercelAILLM({
-            providerConfig: {
-              ...resolved.providerConfig,
-              headers: { ...resolved.providerConfig.headers, ...metadataHeaders },
-            },
+            providerConfig: withMetadataHeaders(routed.providerConfig),
+            ...(routed.fallbackProviderConfig !== undefined
+              ? { fallbackProviderConfig: withMetadataHeaders(routed.fallbackProviderConfig) }
+              : {}),
             logger,
             signal,
             streamTimeout: resolved.streamTimeout,
@@ -348,7 +365,7 @@ function createTurnResolver(deps: {
           // The upstream identifier actually sent to the provider, not
           // `name` (the configured catalog alias), so the model-identity
           // prompt names what it really is.
-          modelId: resolved.providerConfig.model.id,
+          modelId: routed.providerConfig.model.id,
           // Absent means false, see ModelPropertiesSchema.vision.
           modelSupportsVision: resolved.modelProperties.vision ?? false,
         };

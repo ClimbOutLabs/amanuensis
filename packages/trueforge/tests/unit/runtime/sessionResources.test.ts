@@ -5,7 +5,7 @@ import {
   type SessionAgent,
   type SessionHandle,
 } from '@truefoundry/trueforge-core/agent-session';
-import { McpConnectionError } from '@truefoundry/trueforge-core/core';
+import { McpConnectionError, type VercelAIProviderConfig } from '@truefoundry/trueforge-core/core';
 import { HTTPException } from 'hono/http-exception';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,6 +22,7 @@ import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provi
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import {
+  applyTokenFactoryRouting,
   buildGatewayMetadata,
   getMcpConnection,
   getModelDetails,
@@ -814,5 +815,61 @@ describe('getMcpConnection — secret references in header auth', () => {
     await expect(connection.headers()).rejects.toMatchObject({
       message: expect.stringContaining(`\${env:${ENV_VAR}}`),
     });
+  });
+});
+
+describe('applyTokenFactoryRouting', () => {
+  const localConfig: VercelAIProviderConfig = {
+    provider: { type: 'custom', name: 'local' },
+    model: { id: 'nemotron-3', name: 'nemotron' },
+    name: 'local/nemotron',
+    baseUrl: 'http://localhost:11434/v1',
+    apiKey: 'none',
+    headers: {},
+  };
+  const routing = {
+    apiKey: 'tf-key',
+    model: 'nvidia/nemotron-3-super-120b-a12b',
+    baseUrl: 'https://api.tokenfactory.nebius.com/v1',
+  };
+
+  it('leaves the primary untouched when the mode is off', () => {
+    const routed = applyTokenFactoryRouting({ primary: localConfig, mode: 'off', ...routing });
+    expect(routed.providerConfig).toBe(localConfig);
+    expect(routed.fallbackProviderConfig).toBeUndefined();
+  });
+
+  it('leaves the primary untouched when no API key is configured', () => {
+    const routed = applyTokenFactoryRouting({ primary: localConfig, mode: 'fallback', ...routing, apiKey: undefined });
+    expect(routed.providerConfig).toBe(localConfig);
+    expect(routed.fallbackProviderConfig).toBeUndefined();
+  });
+
+  it('keeps local first with Token Factory as fallback in fallback mode', () => {
+    const routed = applyTokenFactoryRouting({ primary: localConfig, mode: 'fallback', ...routing });
+    expect(routed.providerConfig).toBe(localConfig);
+    expect(routed.fallbackProviderConfig).toMatchObject({
+      provider: { type: 'tokenfactory', name: 'tokenfactory' },
+      model: { id: 'nvidia/nemotron-3-super-120b-a12b' },
+      baseUrl: 'https://api.tokenfactory.nebius.com/v1',
+      apiKey: 'tf-key',
+    });
+  });
+
+  it('routes to Token Factory first with local as fallback in force mode', () => {
+    const routed = applyTokenFactoryRouting({ primary: localConfig, mode: 'force', ...routing });
+    expect(routed.providerConfig.provider.type).toBe('tokenfactory');
+    expect(routed.providerConfig.model.id).toBe('nvidia/nemotron-3-super-120b-a12b');
+    expect(routed.fallbackProviderConfig).toBe(localConfig);
+  });
+
+  it('does not wrap a primary that already is Token Factory', () => {
+    const tokenFactoryPrimary: VercelAIProviderConfig = {
+      ...localConfig,
+      provider: { type: 'tokenfactory', name: 'tokenfactory' },
+    };
+    const routed = applyTokenFactoryRouting({ primary: tokenFactoryPrimary, mode: 'force', ...routing });
+    expect(routed.providerConfig).toBe(tokenFactoryPrimary);
+    expect(routed.fallbackProviderConfig).toBeUndefined();
   });
 });

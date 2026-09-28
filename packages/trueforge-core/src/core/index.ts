@@ -166,6 +166,9 @@ export { ResponseFormatSchema, toOpenAIResponseFormat } from './llm/responseForm
 export type { ResponseFormat } from './llm/responseFormat';
 export { SUPPORTED_REASONING_EFFORTS, VERCEL_AI_PROVIDER_NAMES, VercelAILLM } from './llm/VercelAILLM';
 export type { StreamTimeout, VercelAILLMConfig, VercelAIProviderConfig, VercelAIProviderName } from './llm/VercelAILLM';
+export { TOKEN_FACTORY_DEFAULT_BASE_URL } from './llm/VercelAILLM';
+export { isFailoverRetryable, withFailover } from './llm/failoverLanguageModel';
+export type { FailoverLanguageModelOptions } from './llm/failoverLanguageModel';
 
 // Event contracts
 export {
