@@ -8,6 +8,7 @@ import {
   ExtendedChunkDeltaSchema,
   FinishReasonSchema,
   InternalEnrichedAssistantMessageSchema,
+  LLMSystemMessageSchema,
   LLMToolMessageSchema,
   LLMUserMessageSchema,
   RegisteredCommandExecutionSchema,
@@ -455,6 +456,7 @@ export const ThreadDoneEventSchema = BaseThreadDoneEventSchema.extend({
 
 const ContextMessageSchema = z.union([
   LLMUserMessageSchema,
+  LLMSystemMessageSchema,
   InternalEnrichedAssistantMessageSchema,
   LLMToolMessageSchema,
   AgentApprovalDecisionMessageSchema,
@@ -473,7 +475,7 @@ export const ThreadOverwriteContextEventSchema = z.object({
   thread_id: z.string(),
 
   // NOTE: add other reasons here.
-  reason: z.literal('compaction'),
+  reason: z.enum(['compaction', 'compaction_truncation_fallback']),
   context: z.array(ContextMessageSchema),
   current_context_usage: CurrentContextUsageSchema,
   usage: CompletionUsageSchema,
@@ -497,11 +499,11 @@ export const ContextCompactionEventSchema = z
     tokens_after: z.number().int().nonnegative().describe('Estimated context tokens after this attempt.'),
     summary_chars: z.number().int().nonnegative().describe('Length of the persisted summary text, in characters.'),
     outcome: z
-      .enum(['applied', 'skipped_invalid', 'skipped_blocked'])
+      .enum(['applied', 'skipped_invalid', 'skipped_blocked', 'truncated_fallback'])
       .describe(
         'applied: context was overwritten with the summary. skipped_invalid: the model produced a malformed ' +
           'summary and the attempt was discarded. skipped_blocked: the turn was cancelled before the attempt ' +
-          'could complete.',
+          'could complete. truncated_fallback: the summary was invalid so old turns were truncated instead.',
       ),
     reason: z
       .enum(['missing_block', 'missing_section', 'duplicate_section', 'self_referential', 'over_length'])

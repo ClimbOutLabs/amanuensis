@@ -32,6 +32,7 @@ import type {
 import type {
   CompletionUsage,
   InternalEnrichedAssistantMessage,
+  LLMSystemMessage,
   LLMToolMessage,
   LLMUserMessage,
 } from '../llm/LLMTypes';
@@ -107,7 +108,7 @@ export type InternalThreadDoneEvent = BaseThreadDoneEvent & {
   handoff_cause?: AbnormalHandoffCause | undefined;
 } & ({ status: 'done'; output: ModelMessageEvent } | { status: 'error'; error: string; output?: ModelMessageEvent });
 
-export type LLMContextMessage = LLMUserMessage | InternalEnrichedAssistantMessage | LLMToolMessage;
+export type LLMContextMessage = LLMUserMessage | LLMSystemMessage | InternalEnrichedAssistantMessage | LLMToolMessage;
 
 export type ContextMessage =
   LLMContextMessage | AgentApprovalDecisionMessage | ToolExecutionStartedEvent | ToolExecutionTrackingContext;

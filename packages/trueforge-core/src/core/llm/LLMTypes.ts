@@ -207,6 +207,13 @@ export const LLMUserMessageSchema = ChatCompletionUserMessageParamSchema.pick({
   content: true,
 }).openapi('LLMUserMessage');
 
+export const LLMSystemMessageSchema = z
+  .object({
+    role: z.literal('system'),
+    content: z.string(),
+  })
+  .openapi('LLMSystemMessage');
+
 export const LLMToolMessageSchema = ChatCompletionToolMessageParamSchema.omit({ content: true })
   .extend({
     // TODO(agent): Where do I update the Zod code for this change?
@@ -244,6 +251,7 @@ export type EnrichedAssistantMessage = z.infer<typeof EnrichedAssistantMessageSc
 export type ExtendedDeltaToolCall = z.infer<typeof ExtendedChunkDeltaToolCallSchema>;
 export type ExtendedDelta = z.infer<typeof ExtendedChunkDeltaSchema>;
 export type LLMUserMessage = z.infer<typeof LLMUserMessageSchema>;
+export type LLMSystemMessage = z.infer<typeof LLMSystemMessageSchema>;
 export type LLMToolMessage = z.infer<typeof LLMToolMessageSchema>;
 export type CompletionUsage = z.infer<typeof CompletionUsageSchema>;
 export type FinishReason = z.infer<typeof FinishReasonSchema>;

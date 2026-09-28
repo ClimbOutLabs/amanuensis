@@ -5,7 +5,7 @@ import { AgentThread, DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS } from '../../../src/co
 import type { AgentThreadEvent, InternalThreadDoneEvent } from '../../../src/core/runtime/AgentThread.types';
 import { InternalEventType } from '../../../src/core/runtime/AgentThread.types';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import { makeSilentLogger } from '../harnessMocks';
+import { makeSilentLogger, makeStubPublicSandbox } from '../harnessMocks';
 
 // eslint-disable-next-line @typescript-eslint/require-await -- async generator fixture, not awaiting I/O
 async function* promptStream(): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
@@ -23,23 +23,28 @@ async function* promptStream(): AsyncGenerator<ExtendedChatCompletionChunk, RawA
   };
 }
 
-const repositoryContext = { branch: 'main', head_sha: 'abc123' };
+const repositoryContext = {
+  repository_id: 'test-repo',
+  repository_revision: 1,
+  workspace_cwd: '/repo',
+  branch: 'main',
+  head_sha: 'abc123',
+};
 
 /** A sandbox whose repository refresh never settles. */
 function hangingSandbox() {
-  return {
-    getBoundRepositoryContext: () => repositoryContext,
-    refreshBoundRepositoryState: () => new Promise<never>(() => undefined),
-  };
+  const sandbox = makeStubPublicSandbox();
+  jest.spyOn(sandbox, 'getBoundRepositoryContext').mockReturnValue(repositoryContext);
+  jest.spyOn(sandbox, 'refreshBoundRepositoryState').mockImplementation(() => new Promise<never>(() => undefined));
+  return sandbox;
 }
 
 /** A sandbox whose repository refresh completes immediately. */
 function responsiveSandbox() {
-  return {
-    getBoundRepositoryContext: () => repositoryContext,
-    // eslint-disable-next-line @typescript-eslint/require-await
-    refreshBoundRepositoryState: async () => undefined,
-  };
+  const sandbox = makeStubPublicSandbox();
+  jest.spyOn(sandbox, 'getBoundRepositoryContext').mockReturnValue(repositoryContext);
+  jest.spyOn(sandbox, 'refreshBoundRepositoryState').mockResolvedValue(undefined);
+  return sandbox;
 }
 
 function makeThread(input: {
