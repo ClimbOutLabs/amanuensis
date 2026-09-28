@@ -30,4 +30,4 @@ The server reads the sidecar address from `STT_URL` (default `http://aman-stt:80
 
 **Memory.** The default 2 GB limit covers the `small` int8 model with headroom. If the container is OOM-killed during warmup, raise `mem_limit` before changing anything else.
 
-**Request limits.** The sidecar and the server both cap audio bodies at 30 MB (`AMAN_STT_MAX_BODY_BYTES`); the browser caps recordings at 3 minutes client-side. Transcription requests time out after 120 seconds server-side.
+**Request limits.** The sidecar caps audio bodies at 30 MB (`AMAN_STT_MAX_BODY_BYTES`); the server caps them at 6.4 MB, which is 200 seconds of 16 kHz mono 16-bit audio, enforcing the 3 minute recording cap server-side. The browser also caps recordings at 3 minutes client-side. Transcription requests time out after 120 seconds server-side.

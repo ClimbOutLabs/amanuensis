@@ -19,8 +19,13 @@ export interface VoiceRouterDeps {
   logger: Logger;
 }
 
-/** Audio body ceiling; matches the sidecar's 30 MB limit. */
-const MAX_AUDIO_BYTES = 30 * 1024 * 1024;
+/**
+ * Audio body ceiling. The sidecar only accepts 16 kHz mono 16-bit WAV, which is
+ * exactly 32,000 bytes per second, so this byte cap is also a duration cap:
+ * 200 seconds, with headroom over the 180 second UI recording cap. Anything
+ * larger cannot be a legitimate recording and is rejected before buffering.
+ */
+const MAX_AUDIO_BYTES = 200 * 16000 * 2;
 const STT_TRANSCRIBE_TIMEOUT_MS = 120_000;
 const STT_STATUS_TIMEOUT_MS = 2_000;
 /** Model label the sidecar serves; reported by /status while the probe succeeds. */
