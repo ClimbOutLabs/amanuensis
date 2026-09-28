@@ -895,6 +895,13 @@ export interface SharedServerConfiguration {
    */
   STT_URL: string;
   /**
+   * Shared secret the agent backend sends to the `aman-stt` sidecar as the
+   * `X-STT-Secret` header. The sidecar rejects requests without a matching
+   * secret, so a compromised container on the same network cannot return
+   * forged transcripts. Env: `STT_SHARED_SECRET`. Default empty (no auth).
+   */
+  STT_SHARED_SECRET: string;
+  /**
    * Bearer token for the memory recall screen classifier. Distinct from any memory-provider
    * credential. Env: `MEMORY_SCREEN_AUTH_TOKEN`. Default empty.
    */
@@ -1466,6 +1473,7 @@ const shared: SharedServerConfiguration = {
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
   STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
+  STT_SHARED_SECRET: getEnv('STT_SHARED_SECRET', { defaultValue: '' }) ?? '',
   MEMORY_SCREEN_AUTH_TOKEN: getEnv('MEMORY_SCREEN_AUTH_TOKEN', { defaultValue: '' }) ?? '',
   MEMORY_SCREEN_THRESHOLD: parseUnitInterval({
     envKey: 'MEMORY_SCREEN_THRESHOLD',

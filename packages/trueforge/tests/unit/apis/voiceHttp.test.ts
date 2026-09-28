@@ -54,13 +54,22 @@ describe('voice HTTP endpoints', () => {
 
   describe('GET /status', () => {
     it('reports available when the sidecar health probe shows a loaded model', async () => {
-      fetchMock.mockResolvedValue(jsonResponse({ model_loaded: true }, 200));
+      fetchMock.mockResolvedValue(jsonResponse({ model_loaded: true, model: 'whisper-small-int8' }, 200));
 
       const res = await router.request('/status');
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ data: { stt_available: true, model: 'whisper-small-int8' } });
       expect(fetchMock).toHaveBeenCalledWith('http://stt-test:8001/healthz', expect.anything());
+    });
+
+    it('reports the sidecar fallback model label instead of a hardcoded one', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ model_loaded: true, model: 'whisper-base-int8' }, 200));
+
+      const res = await router.request('/status');
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ data: { stt_available: true, model: 'whisper-base-int8' } });
     });
 
     it('reports unavailable when the sidecar model is not warm', async () => {

@@ -79,13 +79,16 @@ class HealthzTest(unittest.TestCase):
         with make_client() as client:
             response = client.get("/healthz")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"status": "ok", "model_loaded": True})
+        self.assertEqual(
+            response.json(),
+            {"status": "ok", "model_loaded": True, "model": "whisper-small-int8"},
+        )
 
     def test_model_not_loaded_when_factory_fails(self):
         with make_client(factory=BrokenTranscriber) as client:
             response = client.get("/healthz")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"status": "ok", "model_loaded": False})
+        self.assertEqual(response.json(), {"status": "ok", "model_loaded": False, "model": ""})
 
 
 class TranscribeTest(unittest.TestCase):
@@ -100,6 +103,32 @@ class TranscribeTest(unittest.TestCase):
         self.assertEqual(body["model"], "whisper-small-int8")
         self.assertIsInstance(body["duration_ms"], int)
         self.assertGreaterEqual(body["duration_ms"], 0)
+
+    def test_shared_secret_enforced_when_configured(self):
+        wav = make_sine_wav()
+        settings = Settings()
+        settings.shared_secret = "test-secret-123"
+        with make_client(settings=settings) as client:
+            no_header = client.post("/v1/transcribe", content=wav, headers={"Content-Type": "audio/wav"})
+            self.assertEqual(no_header.status_code, 401)
+            wrong = client.post(
+                "/v1/transcribe",
+                content=wav,
+                headers={"Content-Type": "audio/wav", "X-STT-Secret": "wrong"},
+            )
+            self.assertEqual(wrong.status_code, 401)
+            ok = client.post(
+                "/v1/transcribe",
+                content=wav,
+                headers={"Content-Type": "audio/wav", "X-STT-Secret": "test-secret-123"},
+            )
+            self.assertEqual(ok.status_code, 200)
+
+    def test_no_secret_required_when_unconfigured(self):
+        wav = make_sine_wav()
+        with make_client() as client:
+            response = client.post("/v1/transcribe", content=wav, headers={"Content-Type": "audio/wav"})
+        self.assertEqual(response.status_code, 200)
 
     def test_language_hint_forwarded(self):
         wav = make_sine_wav()

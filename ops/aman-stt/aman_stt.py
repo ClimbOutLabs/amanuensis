@@ -1,8 +1,11 @@
 """Local speech-to-text sidecar: Whisper `small` int8 via faster-whisper.
 
 HTTP contract:
-  GET  /healthz       -> {"status": "ok", "model_loaded": bool}
+  GET  /healthz       -> {"status": "ok", "model_loaded": bool, "model": str}
   POST /v1/transcribe -> {"text", "language", "duration_ms", "model"}
+
+When `STT_SHARED_SECRET` is set, `POST /v1/transcribe` requires a matching
+`X-STT-Secret` header and rejects others with 401.
 
 Accepts `audio/wav` (16 kHz mono 16-bit PCM) or `audio/x-raw-pcm` with
 `sample_rate`/`channels`/`sample_width` query params (defaults 16000/1/2).
@@ -55,6 +58,7 @@ class Settings:
     cpu_threads: int = field(default_factory=lambda: _env_int("AMAN_STT_CPU_THREADS", 4))
     max_body_bytes: int = field(default_factory=lambda: _env_int("AMAN_STT_MAX_BODY_BYTES", 30 * 1024 * 1024))
     model_dir: str | None = field(default_factory=lambda: os.environ.get("AMAN_STT_MODEL_DIR") or None)
+    shared_secret: str = field(default_factory=lambda: os.environ.get("STT_SHARED_SECRET", ""))
 
 
 class Transcriber(Protocol):
@@ -173,7 +177,12 @@ def create_app(
 
     @app.get("/healthz")
     def healthz() -> dict:
-        return {"status": "ok", "model_loaded": state.transcriber is not None}
+        transcriber = state.transcriber
+        return {
+            "status": "ok",
+            "model_loaded": transcriber is not None,
+            "model": transcriber.model_label if transcriber is not None else "",
+        }
 
     @app.post("/v1/transcribe")
     async def transcribe(
@@ -187,6 +196,11 @@ def create_app(
         if state.transcriber is None:
             LOGGER.warning("transcribe rejected: model not warm")
             raise HTTPException(status_code=503, detail="Model is not warm yet")
+        if settings.shared_secret:
+            presented = request.headers.get("x-stt-secret", "")
+            if presented != settings.shared_secret:
+                LOGGER.warning("transcribe rejected: bad or missing shared secret")
+                raise HTTPException(status_code=401, detail="Unauthorized")
         content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
         if content_type not in (WAV_CONTENT_TYPE, RAW_PCM_CONTENT_TYPE):
             raise HTTPException(

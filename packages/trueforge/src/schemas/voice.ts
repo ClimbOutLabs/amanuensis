@@ -7,7 +7,10 @@ import { z } from '@hono/zod-openapi';
 
 export const VoiceTranscriptionSchema = z
   .object({
-    text: z.string().describe('Transcribed utterance text.'),
+    text: z
+      .string()
+      .max(20000)
+      .describe('Transcribed utterance text.'),
     language: z.string().describe('Detected language code, e.g. `en`.'),
     duration_ms: z.number().int().nonnegative().describe('Sidecar transcription time in milliseconds.'),
     model: z.string().describe('STT model label, e.g. `whisper-small-int8`.'),

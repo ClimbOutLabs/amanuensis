@@ -109,67 +109,75 @@ export async function startVoiceRecording(options: StartVoiceRecordingOptions = 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
-  const context = new Ctor({ sampleRate: VOICE_SAMPLE_RATE });
-  const source = context.createMediaStreamSource(stream);
-  const processor = context.createScriptProcessor(4096, 1, 1);
-  // ScriptProcessorNode only fires while connected; route through a muted gain
-  // node so the mic is never played back through the speakers.
-  const mute = context.createGain();
-  mute.gain.value = 0;
-  const chunks: Float32Array[] = [];
-  let settled = false;
-  processor.onaudioprocess = event => {
-    if (settled) {
-      return;
-    }
-    chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
-  };
-  source.connect(processor);
-  processor.connect(mute);
-  mute.connect(context.destination);
+  // If anything below throws, release the mic before propagating; otherwise the
+  // stream stays live with no handle to stop it.
+  try {
+    const context = new Ctor({ sampleRate: VOICE_SAMPLE_RATE });
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    // ScriptProcessorNode only fires while connected; route through a muted gain
+    // node so the mic is never played back through the speakers.
+    const mute = context.createGain();
+    mute.gain.value = 0;
+    const chunks: Float32Array[] = [];
+    let settled = false;
+    processor.onaudioprocess = event => {
+      if (settled) {
+        return;
+      }
+      chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    };
+    source.connect(processor);
+    processor.connect(mute);
+    mute.connect(context.destination);
 
-  const teardown = () => {
-    settled = true;
-    if (timer !== undefined) {
+    const timer = window.setTimeout(() => {
+      options.onAutoStop?.();
+    }, VOICE_MAX_RECORD_SECONDS * 1000);
+
+    const teardown = () => {
+      settled = true;
       window.clearTimeout(timer);
-    }
-    processor.onaudioprocess = null;
-    try {
-      source.disconnect();
-      processor.disconnect();
-      mute.disconnect();
-    } catch {
-      // Nodes may already be disconnected; teardown is idempotent.
-    }
+      processor.onaudioprocess = null;
+      try {
+        source.disconnect();
+        processor.disconnect();
+        mute.disconnect();
+      } catch {
+        // Nodes may already be disconnected; teardown is idempotent.
+      }
+      for (const track of stream.getTracks()) {
+        track.stop();
+      }
+      void context.close().catch(() => undefined);
+    };
+
+    let stopImpl: () => Promise<Blob> = async () => {
+      teardown();
+      const mono = concatChunks(chunks);
+      const resampled = resampleLinear(mono, { fromRate: context.sampleRate, toRate: VOICE_SAMPLE_RATE });
+      return encodeWav(resampled, VOICE_SAMPLE_RATE);
+    };
+
+    return {
+      stop: () => {
+        const run = stopImpl;
+        stopImpl = async () => {
+          throw new Error('Recorder already stopped');
+        };
+        return run();
+      },
+      cancel: () => {
+        stopImpl = async () => {
+          throw new Error('Recorder already stopped');
+        };
+        teardown();
+      },
+    };
+  } catch (error) {
     for (const track of stream.getTracks()) {
       track.stop();
     }
-    void context.close().catch(() => undefined);
-  };
-
-  let stopImpl: () => Promise<Blob> = async () => {
-    teardown();
-    const mono = concatChunks(chunks);
-    const resampled = resampleLinear(mono, { fromRate: context.sampleRate, toRate: VOICE_SAMPLE_RATE });
-    return encodeWav(resampled, VOICE_SAMPLE_RATE);
-  };
-  const timer = window.setTimeout(() => {
-    options.onAutoStop?.();
-  }, VOICE_MAX_RECORD_SECONDS * 1000);
-
-  return {
-    stop: () => {
-      const run = stopImpl;
-      stopImpl = async () => {
-        throw new Error('Recorder already stopped');
-      };
-      return run();
-    },
-    cancel: () => {
-      stopImpl = async () => {
-        throw new Error('Recorder already stopped');
-      };
-      teardown();
-    },
-  };
+    throw error;
+  }
 }

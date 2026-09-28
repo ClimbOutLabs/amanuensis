@@ -28,8 +28,6 @@ export interface VoiceRouterDeps {
 const MAX_AUDIO_BYTES = 200 * 16000 * 2;
 const STT_TRANSCRIBE_TIMEOUT_MS = 120_000;
 const STT_STATUS_TIMEOUT_MS = 2_000;
-/** Model label the sidecar serves; reported by /status while the probe succeeds. */
-const STT_MODEL_LABEL = 'whisper-small-int8';
 
 class AudioTooLargeError extends Error {
   constructor() {
@@ -39,6 +37,15 @@ class AudioTooLargeError extends Error {
 
 function sttBaseUrl(): string {
   return configuration.STT_URL.replace(/\/+$/, '');
+}
+
+/**
+ * Shared-secret header for the sidecar. Empty when `STT_SHARED_SECRET` is not
+ * configured; the sidecar only enforces it when its own secret is set.
+ */
+function sttSecretHeaders(): Record<string, string> {
+  const secret = configuration.STT_SHARED_SECRET;
+  return secret === '' ? {} : { 'x-stt-secret': secret };
 }
 
 function errorJson(
@@ -100,7 +107,10 @@ async function probeStt(logger: Logger): Promise<VoiceStatus> {
     }
     const body: unknown = await response.json();
     const modelLoaded = isRecord(body) && body['model_loaded'] === true;
-    return modelLoaded ? { stt_available: true, model: STT_MODEL_LABEL } : { stt_available: false, model: '' };
+    // Use the sidecar's reported model label; it falls back to `base` when
+    // `small` fails to load, so a hardcoded label here would lie.
+    const model = isRecord(body) && typeof body['model'] === 'string' ? body['model'] : '';
+    return modelLoaded ? { stt_available: true, model } : { stt_available: false, model: '' };
   } catch (error) {
     logger.info('voice status probe failed', extractErrorLogFields(error));
     return { stt_available: false, model: '' };
@@ -139,7 +149,11 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
     try {
       upstream = await fetch(`${sttBaseUrl()}/v1/transcribe${params}`, {
         method: 'POST',
-        headers: { 'content-type': 'audio/wav', 'content-length': String(audio.byteLength) },
+        headers: {
+          'content-type': 'audio/wav',
+          'content-length': String(audio.byteLength),
+          ...sttSecretHeaders(),
+        },
         body: audio,
         signal: AbortSignal.timeout(STT_TRANSCRIBE_TIMEOUT_MS),
       });
