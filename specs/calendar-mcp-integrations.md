@@ -4,27 +4,29 @@
 Aman currently has Gmail MCP for email. But for a personal AI assistant to be useful with appointments, schedules, and smart departure times, it needs calendar access. Google Calendar is the most widely used. Outlook and iCal cover other users.
 
 ## Solution
-Build MCP servers for Google Calendar, Outlook Calendar, and iCal (ICS) following the same pattern as the existing Gmail MCP.
+Integrate official MCP servers where they exist (Google, Microsoft). Build a CalDAV integration for Apple/iCloud, which has no official MCP server.
 
 ## Integrations
 
 ### 1. Google Calendar (priority)
-- OAuth2 flow (same pattern as Gmail MCP)
+- Integrate Google's official Calendar MCP server
 - Read events, create events, update/delete
 - The user's primary calendar
 
 ### 2. Outlook Calendar
-- Microsoft Graph API
-- OAuth2
+- Integrate Microsoft's official Outlook Calendar MCP server (Agent 365)
+- Uses Microsoft Graph API under the hood
 - Read/create/update/delete
 
-### 3. iCal (ICS)
-- Subscribe to ICS feed URLs
-- Read-only (ICS is a subscription format)
-- Covers Apple Calendar, etc.
+### 3. Apple Calendar / iCloud (CalDAV)
+- Build a CalDAV integration (open standard, RFC 4791)
+- Connects to `caldav.icloud.com` with Apple ID + app-specific password
+- Read/write access to all iCloud calendars
+- No official Apple MCP server exists; CalDAV is the practical path
+- Also works with Fastmail, Nextcloud, and any CalDAV provider
 
 ## Design Principles (from feature #3: Privacy-safe MCP)
-- Masked secrets (OAuth tokens never shown in UI)
+- Masked secrets (OAuth tokens and app-specific passwords never shown in UI)
 - Per-integration permission scopes (user grants granular access)
 - Each integration can be enabled/disabled independently
 - Clear data-flow documentation
@@ -42,6 +44,5 @@ Build MCP servers for Google Calendar, Outlook Calendar, and iCal (ICS) followin
 - Verify: disabling an integration revokes access cleanly
 
 ## Out of Scope
-- CalDAV (can be added later if needed)
 - Shared calendar management
 - Meeting scheduling assistant (separate feature)
