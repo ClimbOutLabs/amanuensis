@@ -67,7 +67,7 @@ import {
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
-import { ModelStreamFault } from '../llm/VercelAILLM';
+import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
 import {
   allowsChatApproval,
   approvalGrantKey,
@@ -259,15 +259,15 @@ const OPERATION_TIMEOUT = Symbol('operation-timeout');
  */
 function awaitWithTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T | typeof OPERATION_TIMEOUT> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => resolve(OPERATION_TIMEOUT), timeoutMs);
+    const timer = setTimeout(() => { resolve(OPERATION_TIMEOUT); }, timeoutMs);
     operation.then(
       value => {
         clearTimeout(timer);
         resolve(value);
       },
-      error => {
+      (error: unknown) => {
         clearTimeout(timer);
-        reject(error);
+        reject(error instanceof Error ? error : new Error(String(error)));
       },
     );
   });
@@ -298,19 +298,17 @@ async function* drainWithNoProgressTimeout<T>(
   const iterator = iterable[Symbol.asyncIterator]();
   try {
     while (true) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
+      let timer: ReturnType<typeof setTimeout>;
       let result: IteratorResult<T, unknown>;
       try {
         result = await Promise.race([
           iterator.next(),
           new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new NoProgressTimeoutError(timeoutMessage)), timeoutMs);
+            timer = setTimeout(() => { reject(new NoProgressTimeoutError(timeoutMessage)); }, timeoutMs);
           }),
         ]);
       } finally {
-        if (timer !== undefined) {
-          clearTimeout(timer);
-        }
+        clearTimeout(timer);
       }
       if (result.done) {
         return;
@@ -1182,15 +1180,8 @@ export function replaceImagePartsForNonVisionModel(
     if (msg.role !== 'user' || typeof msg.content === 'string') {
       return msg;
     }
-    let replaced = false;
-    const content = msg.content.filter(part => {
-      if (part.type === 'image_url') {
-        replaced = true;
-        return false;
-      }
-      return true;
-    });
-    if (!replaced) {
+    const content = msg.content.filter(part => part.type !== 'image_url');
+    if (content.length === msg.content.length) {
       return msg;
     }
     return {
@@ -2348,7 +2339,7 @@ export class AgentThread {
   > {
     const timeoutMessage =
       `Pre-LLM context processors produced no output within ` +
-      `${describeTimeout(this.preLLMProcessorsTimeoutMs)}`;
+      describeTimeout(this.preLLMProcessorsTimeoutMs);
     yield* drainWithNoProgressTimeout(
       this.executeContextProcessors('preLLM', signal, options),
       this.preLLMProcessorsTimeoutMs,
@@ -2549,11 +2540,13 @@ export class AgentThread {
           throw error;
         }
         if (attempt >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
-          yield this.generateErrorEvent(
-            "The model's output stream broke twice in a row, usually because the context is too long for it; start a new chat or use a different model",
-            undefined,
-            'model_stream_fault',
-          );
+          // A repetition fault carries its own actionable guidance; surfacing the
+          // generic context-too-long text for it would mislead the user.
+          const message =
+            error instanceof ModelOutputRepetitionError
+              ? error.message
+              : "The model's output stream broke twice in a row, usually because the context is too long for it; start a new chat or use a different model";
+          yield this.generateErrorEvent(message, undefined, 'model_stream_fault');
           return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
         }
         this.logger.warn('Model stream fault; compacting context and retrying the call once', {

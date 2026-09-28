@@ -609,7 +609,7 @@ describe('contextCompaction model role', () => {
     expect(persisted).toContain('- none');
   });
 
-  it('degrades gracefully on malformed compaction output: no overwrite, no thrown error, compaction is skipped', async () => {
+  it('degrades gracefully on malformed compaction output: truncation fallback overwrites, no thrown error', async () => {
     const model = makeMockILLM({
       createNonStream: jest.fn().mockResolvedValue({
         output: { role: 'assistant', content: 'not a valid summary block' },
@@ -624,7 +624,13 @@ describe('contextCompaction model role', () => {
         compactionThresholdTokens: ALWAYS_TRIGGERS_THRESHOLD,
       }),
     );
-    expect(events.find(event => event.type === 'agent.context.overwrite')).toBeUndefined();
+    const overwrite = events.find(event => event.type === 'agent.context.overwrite');
+    if (overwrite === undefined || overwrite.type !== 'agent.context.overwrite') {
+      throw new Error('expected a truncation fallback overwrite');
+    }
+    if (overwrite.reason !== 'compaction_truncation_fallback') {
+      throw new Error('expected compaction_truncation_fallback reason');
+    }
     const usageEvent = events.find(event => event.type === InternalEventType.MODEL_USAGE);
     if (usageEvent === undefined || usageEvent.type !== InternalEventType.MODEL_USAGE) {
       throw new Error('expected a MODEL_USAGE event for the discarded compaction request');
@@ -632,7 +638,7 @@ describe('contextCompaction model role', () => {
     expect(usageEvent.usage).toEqual({ input_tokens: 1, output_tokens: 1, total_tokens: 2 });
   });
 
-  it('folds a discarded compaction request usage into thread billable metrics without overwriting context or counting a summarization', async () => {
+  it('folds a discarded compaction request usage into thread billable metrics with truncation fallback overwrite', async () => {
     const model = makeMockILLM({
       create: jest.fn(() => finalAnswerStream()),
       createNonStream: jest.fn().mockResolvedValue({
@@ -668,7 +674,7 @@ describe('contextCompaction model role', () => {
     const metrics = thread.getAgentThreadMetrics();
     expect(metrics.total_input_tokens).toBeGreaterThanOrEqual(11);
     expect(metrics.total_output_tokens).toBeGreaterThanOrEqual(7);
-    expect(metrics.total_summarizations).toBe(0);
+    expect(metrics.total_summarizations).toBe(1);
     expect(JSON.stringify(thread.toSnapshot().context)).not.toContain('not a valid summary block');
   });
 

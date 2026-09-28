@@ -14,6 +14,10 @@ export function toOpenAIChatMessage(msg: LLMContextMessage): ChatCompletionMessa
     return { role: 'user', content: toOpenAIUserContent(msg.content) };
   }
 
+  if (msg.role === 'system') {
+    return { role: 'system', content: msg.content };
+  }
+
   if (msg.role === 'tool') {
     return {
       role: 'tool',

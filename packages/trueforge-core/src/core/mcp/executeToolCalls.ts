@@ -1658,7 +1658,25 @@ export async function executeToolCalls({
     let content: string;
     let isStructuredContent = false;
     if (result.isError) {
-      content = JSON.stringify({ error: result.content });
+      // Error payloads are structured: unwrap a JSON error envelope to the parsed
+      // object instead of double-encoding the content blocks, and degrade plain
+      // text to a { error: text } object. The model gets a JSON payload either way.
+      const errorText = Array.isArray(result.content)
+        ? result.content
+            .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+            .map(c => c.text)
+            .join('\n')
+        : typeof result.content === 'string'
+          ? result.content
+          : JSON.stringify(result.content);
+      let errorPayload: unknown;
+      try {
+        errorPayload = JSON.parse(errorText);
+      } catch {
+        errorPayload = { error: errorText };
+      }
+      content = JSON.stringify(errorPayload);
+      isStructuredContent = true;
     } else if (result.structuredContent) {
       isStructuredContent = true;
       content = JSON.stringify(result.structuredContent);
