@@ -7,7 +7,7 @@
 # device=cpu. The model (~464 MB) downloads once from Hugging Face at first
 # startup into the stt-model-cache volume; pin AMAN_STT_MODEL_DIR to a baked-in
 # directory to ship the weights inside the image instead.
-FROM python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
+FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
