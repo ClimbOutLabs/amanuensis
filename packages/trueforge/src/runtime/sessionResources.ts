@@ -638,6 +638,7 @@ function getSharedRunCodeService(logger: Logger): RunCodeService {
           cosignBinary: undefined,
           commandTimeoutMs: undefined,
           createTimeoutMs: undefined,
+          runtime: undefined,
         },
         undefined,
       );

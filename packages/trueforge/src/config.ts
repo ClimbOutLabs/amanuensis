@@ -1933,9 +1933,9 @@ validateRunCodeStartupConfig({
 });
 // The cosign key is only needed once an image is configured; a dormant
 // install must not fail boot for a key it will never use.
-if (runCodeConfigured && configuration.SANDBOX_ISOLATION_DRIVER === 'docker' && configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() === '') {
+if (runCodeConfigured && (configuration.SANDBOX_ISOLATION_DRIVER === 'docker' || configuration.SANDBOX_ISOLATION_DRIVER === 'gvisor') && configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() === '') {
   throw new Error(
-    'SANDBOX_COSIGN_PUBLIC_KEY_PATH is required when SANDBOX_ISOLATION_DRIVER=docker and SANDBOX_IMAGE is set: ' +
+    'SANDBOX_COSIGN_PUBLIC_KEY_PATH is required when SANDBOX_ISOLATION_DRIVER=docker or SANDBOX_ISOLATION_DRIVER=gvisor and SANDBOX_IMAGE is set: ' +
       'the sandbox image signature is verified fail-closed. Point it at the release cosign public-key PEM.',
   );
 }

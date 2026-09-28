@@ -17,7 +17,7 @@ import type {
 export type GVisorDriverOptions = Omit<DockerDriverOptions, 'runtime'>;
 
 /**
- * gVisor-isolated sandbox driver (the "sandboxd" backend).
+ * gVisor-isolated sandbox driver.
  *
  * Spawns one micro-sandbox per execution using Docker with the runsc
  * (gVisor) runtime. The gVisor Sentry intercepts syscalls in userspace, so a

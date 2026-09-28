@@ -1003,7 +1003,7 @@ export class RunCodeService implements RunCodeBackend {
 /** Validate the startup invariants : fail closed, never warn-and-continue. */
 export function validateRunCodeStartupConfig(input: {
   networkEgress: boolean;
-  isolationDriver: 'docker' | 'firecracker';
+  isolationDriver: 'docker' | 'firecracker' | 'gvisor';
   platform: NodeJS.Platform;
   image: string;
   /**
