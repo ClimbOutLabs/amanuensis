@@ -229,6 +229,13 @@ export const DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS = 300_000;
  */
 export const DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS = 30_000;
 
+
+/**
+ * Last-resort ceiling on the assembled model request's text. Input-time guards bound each user
+ * message; this is the backstop for the whole assembly. 4M characters (~1M tokens) sits well
+ * above any legitimate request and far below a provider-hanging one.
+ */
+const MAX_MODEL_REQUEST_CHARS = 4_000_000;
 const MODEL_FIRST_RESPONSE_TIMEOUT = Symbol('model-first-response-timeout');
 
 /** Human duration for the watchdog timeout in the user-facing error, e.g. "10 minutes", "90 seconds". */
@@ -1848,41 +1855,6 @@ export class AgentThread {
   public getAgentThreadMetrics(): AgentThreadMetrics {
     return { ...this.metrics };
   }
-
-/**
- * Cheap text-length estimate over the raw context, without the full message
- * conversion that transformToLLMRequest performs. Used as a pre-flight guard so a
- * giant context compacts first (or fails fast) instead of blocking the event loop
- * inside the synchronous request assembly.
- */
-function estimateRawContextTextLength(context: readonly ContextMessage[]): number {
-  let total = 0;
-  for (const message of context) {
-    if (!isLLMContextMessage(message)) {
-      continue;
-    }
-    const content: unknown = message.content;
-    if (typeof content === 'string') {
-      total += content.length;
-    } else if (Array.isArray(content)) {
-      for (const part of content) {
-        if (
-          typeof part === 'object' &&
-          part !== null &&
-          (part as { type?: unknown }).type === 'text' &&
-          typeof (part as { text?: unknown }).text === 'string'
-        ) {
-          total += (part as { text: string }).text.length;
-        }
-      }
-    }
-    // Early exit: precision past the ceiling buys nothing.
-    if (total > MAX_MODEL_REQUEST_CHARS) {
-      return total;
-    }
-  }
-  return total;
-}
 
   private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
     // A long-running thread can cross UTC midnight between LLM steps. Within a
@@ -3858,6 +3830,40 @@ function estimateRawContextTextLength(context: readonly ContextMessage[]): numbe
   }
 }
 
+/**
+ * Cheap text-length estimate over the raw context, without the full message
+ * conversion that transformToLLMRequest performs. Used as a pre-flight guard so a
+ * giant context compacts first (or fails fast) instead of blocking the event loop
+ * inside the synchronous request assembly.
+ */
+function estimateRawContextTextLength(context: readonly ContextMessage[]): number {
+  let total = 0;
+  for (const message of context) {
+    if (!isLLMContextMessage(message)) {
+      continue;
+    }
+    const content: unknown = message.content;
+    if (typeof content === 'string') {
+      total += content.length;
+    } else if (Array.isArray(content)) {
+      for (const part of content) {
+        if (
+          typeof part === 'object' &&
+          part !== null &&
+          (part as { type?: unknown }).type === 'text' &&
+          typeof (part as { text?: unknown }).text === 'string'
+        ) {
+          total += (part as { text: string }).text.length;
+        }
+      }
+    }
+    // Early exit: precision past the ceiling buys nothing.
+    if (total > MAX_MODEL_REQUEST_CHARS) {
+      return total;
+    }
+  }
+  return total;
+}
 function assertUniqueStateKeys(capabilities: readonly AgentCapability[]): void {
   const seen = new Set<string>();
   for (const capability of capabilities) {
