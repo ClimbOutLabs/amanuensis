@@ -23,7 +23,7 @@ function capabilitiesFetcher(flags: boolean[], capture: { urls: string[] }): typ
   const fetcher: typeof fetch = async url => {
     capture.urls.push(String(url));
     const flag = flags.length > 0 ? flags.shift() : false;
-    return jsonResponse({ data: { voice: flag, sandbox: { enabled: false } } }, 200);
+    return jsonResponse({ data: { voice: { enabled: flag }, sandbox: { enabled: false } } }, 200);
   };
   return fetcher;
 }

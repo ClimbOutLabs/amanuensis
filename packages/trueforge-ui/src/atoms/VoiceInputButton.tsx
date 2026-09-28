@@ -78,6 +78,21 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, []);
 
+  // Fail-closed on SPA route changes: the voice session ends and tracks stop,
+  // even if the composer stays mounted across navigation.
+  useEffect(() => {
+    const onRouteChange = () => {
+      const recorder = recorderRef.current;
+      recorderRef.current = null;
+      recorder?.cancel();
+      abortRef.current?.abort();
+      abortRef.current = null;
+      setPhase(current => (current === 'recording' || current === 'transcribing' ? 'idle' : current));
+    };
+    window.addEventListener('trueforge:routechange', onRouteChange);
+    return () => window.removeEventListener('trueforge:routechange', onRouteChange);
+  }, []);
+
   const stopAndTranscribe = useCallback(
     async ({ autoStopped }: { autoStopped: boolean }): Promise<void> => {
       const recorder = recorderRef.current;

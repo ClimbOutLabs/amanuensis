@@ -21,7 +21,15 @@ function readVoiceFlag(body: unknown): boolean {
     return false;
   }
   const data: unknown = 'data' in body ? body.data : body;
-  return isRecord(data) && data.voice === true;
+  if (!isRecord(data)) {
+    return false;
+  }
+  const voice: unknown = data.voice;
+  // Backend shape is { enabled: boolean }; accept a bare boolean defensively.
+  if (typeof voice === 'boolean') {
+    return voice;
+  }
+  return isRecord(voice) && voice.enabled === true;
 }
 
 /**
