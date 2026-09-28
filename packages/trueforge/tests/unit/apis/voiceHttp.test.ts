@@ -48,6 +48,10 @@ describe('voice HTTP endpoints', () => {
     warnSpy.mockClear();
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   function loggedText(): string {
     return [...infoSpy.mock.calls, ...warnSpy.mock.calls].map(call => JSON.stringify(call)).join(' ');
   }
@@ -106,7 +110,7 @@ describe('voice HTTP endpoints', () => {
       expect(init?.body).toBeInstanceOf(Uint8Array);
     });
 
-    it('forwards the language hint as a query parameter', async () => {
+    it('passes no language hint; the sidecar auto-detects', async () => {
       fetchMock.mockResolvedValue(jsonResponse(sidecarTranscript, 200));
 
       const res = await router.request(
@@ -118,7 +122,7 @@ describe('voice HTTP endpoints', () => {
       );
 
       expect(res.status).toBe(200);
-      expect(fetchMock.mock.calls[0]?.[0]).toBe('http://stt-test:8001/v1/transcribe?language=en');
+      expect(fetchMock.mock.calls[0]?.[0]).toBe('http://stt-test:8001/v1/transcribe');
     });
 
     it('rejects a non-WAV content type with 400', async () => {
@@ -154,7 +158,7 @@ describe('voice HTTP endpoints', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it('returns 503 when the sidecar is unreachable', async () => {
+    it('returns 503 when the sidecar is unreachable, with no retry', async () => {
       fetchMock.mockRejectedValue(new Error('connection refused'));
 
       const res = await router.request(wavRequest(new Uint8Array([1, 2, 3])));
@@ -162,14 +166,45 @@ describe('voice HTTP endpoints', () => {
       expect(res.status).toBe(503);
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe('stt_unavailable');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it('returns 503 when the sidecar reports it is not warm', async () => {
-      fetchMock.mockResolvedValue(new Response('not ready', { status: 503 }));
+    it('does not retry when the forward times out', async () => {
+      const timeoutError = new Error('The operation was aborted due to timeout');
+      timeoutError.name = 'TimeoutError';
+      fetchMock.mockRejectedValue(timeoutError);
 
       const res = await router.request(wavRequest(new Uint8Array([1, 2, 3])));
 
       expect(res.status).toBe(503);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries an immediate 503 up to 3 attempts, 2s apart, then fails', async () => {
+      jest.useFakeTimers();
+      fetchMock.mockResolvedValue(new Response('not ready', { status: 503 }));
+
+      const pending = router.request(wavRequest(new Uint8Array([1, 2, 3])));
+      await jest.advanceTimersByTimeAsync(5_000);
+      const res = await pending;
+
+      expect(res.status).toBe(503);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('recovers when a retried 503 warms up', async () => {
+      jest.useFakeTimers();
+      fetchMock
+        .mockResolvedValueOnce(new Response('not ready', { status: 503 }))
+        .mockResolvedValueOnce(jsonResponse(sidecarTranscript, 200));
+
+      const pending = router.request(wavRequest(new Uint8Array([1, 2, 3])));
+      await jest.advanceTimersByTimeAsync(2_000);
+      const res = await pending;
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ data: sidecarTranscript });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     it('passes through a 400 sidecar rejection as 400', async () => {
