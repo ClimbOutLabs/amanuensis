@@ -53,7 +53,7 @@ export function useCompactionStatus(): CompactionStatusResult {
       setLiveTokens(null);
       return;
     }
-    if (!hasSessionResync(server)) return;
+    if (server == null || !hasSessionResync(server)) return;
     let cancelled = false;
     setLoading(true);
     Promise.all([
