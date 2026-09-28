@@ -13,9 +13,9 @@ async function readError(response: Response): Promise<Error> {
       return new Error(body.error.message);
     }
   } catch (error) {
-    return new Error(`The voice request failed with status ${response.status}.`, { cause: error });
+    return new Error(`The voice request failed with status ${String(response.status)}.`, { cause: error });
   }
-  return new Error(`The voice request failed with status ${response.status}.`);
+  return new Error(`The voice request failed with status ${String(response.status)}.`);
 }
 
 function parseStatus(value: unknown): VoiceStatus {

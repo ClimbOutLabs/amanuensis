@@ -56,7 +56,8 @@ async function readBoundedAudio(c: Context): Promise<Uint8Array> {
   if (body == null) {
     return new Uint8Array(0);
   }
-  const reader = body.getReader();
+  const stream: ReadableStream<Uint8Array> = body;
+  const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
