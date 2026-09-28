@@ -100,6 +100,11 @@ export interface DriverRunResult {
 
 export interface IsolationDriver {
   readonly kind: 'docker' | 'firecracker' | 'gvisor';
+  /**
+   * Driver identity for per-run audit logging: the sandbox image and the OCI
+   * runtime (undefined when the Docker default runtime is used).
+   */
+  readonly auditIdentity: { image: string; runtime: string | undefined };
   /** Idempotent readiness: image present, daemon/KVM reachable. Fast; no side effects. */
   ensureReady(signal?: AbortSignal): Promise<DriverReadiness>;
   /**

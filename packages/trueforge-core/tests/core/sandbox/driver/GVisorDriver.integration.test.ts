@@ -100,6 +100,7 @@ describe('GVisorDriver integration (live daemon + runsc)', () => {
           cosignBinary: undefined,
           commandTimeoutMs: undefined,
           createTimeoutMs: undefined,
+          runscVersion: undefined,
         },
         undefined,
       );
@@ -136,6 +137,7 @@ describe('GVisorDriver integration (live daemon + runsc)', () => {
           cosignBinary: undefined,
           commandTimeoutMs: undefined,
           createTimeoutMs: undefined,
+          runscVersion: undefined,
         },
         undefined,
       );
@@ -173,6 +175,7 @@ describe('GVisorDriver integration (live daemon + runsc)', () => {
           cosignBinary: undefined,
           commandTimeoutMs: undefined,
           createTimeoutMs: undefined,
+          runscVersion: undefined,
         },
         undefined,
       );

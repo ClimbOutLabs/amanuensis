@@ -37,6 +37,11 @@ export class GVisorDriver implements IsolationDriver {
     this.inner = new DockerDriver({ ...options, runtime: 'runsc' }, commandRunner);
   }
 
+  /** Delegates to the wrapped DockerDriver (image + 'runsc' runtime). */
+  get auditIdentity(): { image: string; runtime: string | undefined } {
+    return this.inner.auditIdentity;
+  }
+
   ensureReady(signal?: AbortSignal): Promise<DriverReadiness> {
     return this.inner.ensureReady(signal);
   }

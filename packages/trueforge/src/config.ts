@@ -718,6 +718,14 @@ export interface SharedServerConfiguration {
    */
   SANDBOX_COSIGN_PUBLIC_KEY_PATH: string;
   /**
+   * Pinned runsc version for the gVisor driver (e.g. `release-20260727.0`),
+   * recorded alongside the image manifest by the release process.
+   * Env: `SANDBOX_RUNSC_VERSION`. Blank means unpinned: the gVisor driver's
+   * readiness probe refuses to run without a pin (fail-closed). Only read
+   * when SANDBOX_ISOLATION_DRIVER=gvisor.
+   */
+  SANDBOX_RUNSC_VERSION: string;
+  /**
    * Turn artifact retention: index rows (and blobs no surviving row references)
    * older than this many days are deleted by a daily startup-anchored sweep.
    * Env: `TURN_ARTIFACT_RETENTION_DAYS`. Default 30.
@@ -1331,6 +1339,7 @@ const shared: SharedServerConfiguration = {
     defaultValue: false,
   }),
   SANDBOX_COSIGN_PUBLIC_KEY_PATH: getEnv('SANDBOX_COSIGN_PUBLIC_KEY_PATH', { defaultValue: '' }) ?? '',
+  SANDBOX_RUNSC_VERSION: getEnv('SANDBOX_RUNSC_VERSION', { defaultValue: '' }) ?? '',
   TURN_ARTIFACT_RETENTION_DAYS: parsePositiveInt({
     envKey: 'TURN_ARTIFACT_RETENTION_DAYS',
     raw: getEnv('TURN_ARTIFACT_RETENTION_DAYS'),

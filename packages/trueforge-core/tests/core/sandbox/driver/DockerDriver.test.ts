@@ -81,6 +81,7 @@ function driverOptions(): DockerDriverOptions {
     commandTimeoutMs: undefined,
     createTimeoutMs: undefined,
     runtime: undefined,
+    runscVersion: undefined,
   };
 }
 
@@ -162,6 +163,7 @@ describe('DockerDriver.create', () => {
       '--cap-drop=ALL',
       '--security-opt', 'no-new-privileges:true',
       '--pids-limit', '256',
+      '--ulimit', 'core=0',
       '--memory', '2048m',
       '--memory-swap', '2048m',
       '--oom-kill-disable', 'false',
@@ -540,6 +542,103 @@ describe('DockerDriver.ensureReady', () => {
       expect(readiness.error_code).toBe('daemon_unavailable');
       expect(readiness.error).toContain('wedged');
     }
+  });
+});
+
+describe('DockerDriver runsc readiness probe', () => {
+  const PINNED_RUNSC = 'release-20260727.0';
+
+  function gvisorDriverOptions(): DockerDriverOptions {
+    return { ...driverOptions(), runtime: 'runsc', runscVersion: PINNED_RUNSC };
+  }
+
+  /** Script the runsc probe outcome; the rest of the readiness path is the happy path. */
+  function scriptRunscProbe(runner: FakeRunner, versionStdout: string | undefined): void {
+    scriptReadyPath(runner);
+    const readyPath = runner.runHandler;
+    runner.runHandler = async (binary, args) => {
+      if (binary === 'runsc' && args[0] === '--version') {
+        if (versionStdout === undefined) {
+          // Missing binary: execFile fails to spawn (exitCode -1, like the real runner).
+          return { stdout: '', stderr: 'spawn runsc ENOENT', exitCode: -1, timedOut: false };
+        }
+        return { ...okResult, stdout: versionStdout };
+      }
+      return readyPath(binary, args);
+    };
+  }
+
+  test('missing runsc is daemon_unavailable naming runsc with install guidance (never a silent runc fallback)', async () => {
+    const runner = new FakeRunner();
+    scriptRunscProbe(runner, undefined);
+    const driver = new DockerDriver(gvisorDriverOptions(), runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('daemon_unavailable');
+      expect(readiness.error).toMatch(/runsc/);
+      expect(readiness.error).toMatch(/gvisor\.dev\/docs\/user_guide\/install/);
+      expect(readiness.error).toMatch(/SANDBOX_RUNSC_VERSION/);
+      expect(readiness.error).toMatch(/never falls back to runc/);
+    }
+    // The probe runs before any docker check: no docker call was made.
+    expect(runner.calls.filter(call => call.binary === 'docker')).toHaveLength(0);
+  });
+
+  test('version mismatch is daemon_unavailable naming installed and pinned versions', async () => {
+    const runner = new FakeRunner();
+    scriptRunscProbe(runner, 'runsc version release-20240101.0\nspec: 1.2.1\n');
+    const driver = new DockerDriver(gvisorDriverOptions(), runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('daemon_unavailable');
+      expect(readiness.error).toContain('release-20240101.0');
+      expect(readiness.error).toContain(PINNED_RUNSC);
+      expect(readiness.error).toMatch(/never falls back to runc/);
+    }
+  });
+
+  test('unparseable runsc version output is daemon_unavailable', async () => {
+    const runner = new FakeRunner();
+    scriptRunscProbe(runner, 'not a version line\n');
+    const driver = new DockerDriver(gvisorDriverOptions(), runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('daemon_unavailable');
+      expect(readiness.error).toMatch(/parseable/);
+    }
+  });
+
+  test.each([undefined, '', '   '])('blank pin (%s) refuses the run without a pinned version', async pin => {
+    const runner = new FakeRunner();
+    scriptRunscProbe(runner, `runsc version ${PINNED_RUNSC}\nspec: 1.2.1\n`);
+    const driver = new DockerDriver({ ...gvisorDriverOptions(), runscVersion: pin }, runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('daemon_unavailable');
+      expect(readiness.error).toMatch(/pinned/);
+    }
+  });
+
+  test('matching pinned version proceeds to the docker checks', async () => {
+    const runner = new FakeRunner();
+    scriptRunscProbe(runner, `runsc version ${PINNED_RUNSC}\nspec: 1.2.1\n`);
+    const driver = new DockerDriver(gvisorDriverOptions(), runner);
+    await expect(driver.ensureReady()).resolves.toEqual({ ready: true });
+    const probes = runner.calls.filter(call => call.binary === 'runsc');
+    expect(probes).toHaveLength(1);
+    expect(probes[0]?.args).toEqual(['--version']);
+  });
+
+  test('plain docker driver (runtime undefined) never probes runsc', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const driver = new DockerDriver(driverOptions(), runner);
+    await expect(driver.ensureReady()).resolves.toEqual({ ready: true });
+    expect(runner.calls.filter(call => call.binary === 'runsc')).toHaveLength(0);
   });
 });
 

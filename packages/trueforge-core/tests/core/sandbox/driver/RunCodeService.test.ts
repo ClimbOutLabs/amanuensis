@@ -2,6 +2,11 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import type { Logger } from 'winston';
+import {
+  RUN_CODE_RESERVED_PREFIX,
+  runCodeProgramPath,
+} from '../../../../src/core/sandbox/driver/IsolationDriver';
 import type {
   DriverReadiness,
   DriverRunParams,
@@ -26,6 +31,7 @@ const OK_RESULT: DriverRunResult = {
 
 class FakeDriver implements IsolationDriver {
   readonly kind = 'docker' as const;
+  readonly auditIdentity = { image: 'fake-sandbox-image', runtime: undefined as string | undefined };
   readiness: DriverReadiness = { ready: true };
   runBehavior: (params: DriverRunParams) => Promise<DriverRunResult> = () => Promise.resolve({ ...OK_RESULT });
   runs: DriverRunParams[] = [];
@@ -77,6 +83,25 @@ function makeService(driver: FakeDriver, dataDir: string, now?: () => number): R
     harvestGraceMs: 2000,
     logger: makeSilentLogger(),
     now,
+    sleepMs: () => new Promise<void>(resolve => setTimeout(resolve, 25)),
+  });
+}
+
+/** makeService with a caller-supplied logger (for asserting on log output). */
+function makeServiceWithLogger(driver: FakeDriver, dataDir: string, logger: Logger): RunCodeService {
+  return new RunCodeService({
+    driver,
+    dataDir,
+    defaultTimeoutSeconds: 120,
+    maxTimeoutSeconds: 600,
+    memoryMb: 512,
+    diskMb: 1024,
+    outputCapKb: 256,
+    maxConcurrentRuns: 2,
+    imagePullTimeoutSeconds: 120,
+    harvestGraceMs: 2000,
+    logger,
+    now: undefined,
     sleepMs: () => new Promise<void>(resolve => setTimeout(resolve, 25)),
   });
 }
@@ -301,6 +326,86 @@ describe('RunCodeService', () => {
     expect(staged['data.csv']).toBe('a,b\n1,2\n');
     expect(staged['__runcode_main.py']).toBe('print("hi")');
     expect(staged['photo.png']).toBe('img');
+  });
+
+  it.each(['python', 'node', 'bash'] as const)(
+    'stages the program under the canonical driver path for %s',
+    async language => {
+      // Regression: bash was staged as .mjs while the driver executes
+      // runCodeProgramPath('bash') (.sh). The staged filename must equal the
+      // basename of the canonical driver path for every language.
+      let stagedName: string | undefined;
+      driver.runBehavior = async params => {
+        const names = await readdir(params.ingressDir);
+        stagedName = names.find(name => name.startsWith(RUN_CODE_RESERVED_PREFIX));
+        return { ...OK_RESULT };
+      };
+      const result = await service.runCode({ language, code: 'print("hi")' });
+      expect(result.status).toBe('ok');
+      expect(stagedName).toBe(basename(runCodeProgramPath(language)));
+    },
+  );
+
+  it('emits one per-run audit log with image/timeout/runtime/exitCode/duration and no code bytes', async () => {
+    const logger = makeSilentLogger();
+    const infoSpy = jest.spyOn(logger, 'info');
+    const audited = makeServiceWithLogger(driver, dataDir, logger);
+    try {
+      const result = await audited.runCode({ language: 'python', code: 'print("audit-me-bytes")' });
+      expect(result.status).toBe('ok');
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      expect(infoSpy).toHaveBeenCalledWith(
+        'run_code run finished',
+        expect.objectContaining({
+          image: 'fake-sandbox-image',
+          timeoutMs: 120000,
+          runtime: undefined,
+          exitCode: 0,
+          terminatedBy: 'completed',
+          durationMs: expect.any(Number),
+          runId: expect.any(String),
+        }),
+      );
+      expect(JSON.stringify(infoSpy.mock.calls)).not.toContain('print("audit-me-bytes")');
+    } finally {
+      infoSpy.mockRestore();
+      await audited.dispose().catch(() => undefined);
+    }
+  });
+
+  it('emits the audit log on failed runs too', async () => {
+    const logger = makeSilentLogger();
+    const infoSpy = jest.spyOn(logger, 'info');
+    const audited = makeServiceWithLogger(driver, dataDir, logger);
+    const failedResult: DriverRunResult = {
+      exitCode: 1,
+      stdout: '',
+      stderr: '',
+      terminatedBy: 'killed',
+      internalError: 'container exploded',
+      harvestWarnings: [],
+    };
+    driver.runBehavior = () => Promise.resolve(failedResult);
+    try {
+      const result = await audited.runCode({ language: 'bash', code: 'exit 1' });
+      expect(result.status).toBe('failed');
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      expect(infoSpy).toHaveBeenCalledWith(
+        'run_code run finished',
+        expect.objectContaining({
+          image: 'fake-sandbox-image',
+          timeoutMs: 120000,
+          runtime: undefined,
+          exitCode: 1,
+          terminatedBy: 'killed',
+          durationMs: expect.any(Number),
+          runId: expect.any(String),
+        }),
+      );
+    } finally {
+      infoSpy.mockRestore();
+      await audited.dispose().catch(() => undefined);
+    }
   });
 
   it('rejects non-canonical base64, reserved names, and attachment collisions', async () => {

@@ -82,6 +82,12 @@ export interface DockerDriverOptions {
    * Docker's default runtime is used.
    */
   runtime: string | undefined;
+  /**
+   * Pinned runsc version (exact match against `runsc --version`, e.g.
+   * 'release-20260727.0'). Required when runtime is 'runsc': a blank or
+   * missing pin refuses the run. Ignored for the plain Docker driver.
+   */
+  runscVersion: string | undefined;
 }
 
 /** execFile-shaped failure: non-zero exit or timeout kill. */
@@ -228,6 +234,15 @@ export function createDefaultDockerCommandRunner(options: { dockerBinary: string
   };
 }
 
+/** First line of `runsc --version` is `runsc version <version>` (e.g. `runsc version release-20260727.0`). */
+const RUNSC_VERSION_PATTERN = /^runsc version (\S+)/;
+
+/** Parse the runsc version from `runsc --version` stdout; undefined when unparseable. */
+function parseRunscVersion(stdout: string): string | undefined {
+  const firstLine = stdout.split('\n')[0] ?? '';
+  return RUNSC_VERSION_PATTERN.exec(firstLine)?.[1];
+}
+
 /** docker image inspect → RepoDigest pin check. */
 function checkRepoDigest(input: {
   inspectJson: string;
@@ -283,6 +298,7 @@ export class DockerDriver implements IsolationDriver {
   private readonly commandTimeoutMs: number;
   private readonly createTimeoutMs: number;
   private readonly runtime: string | undefined;
+  private readonly runscVersion: string | undefined;
   private readonly runner: DockerCommandRunner;
   /** containerId → in-flight run, for dispose()'s drain-then-kill. */
   private readonly inFlight = new Map<string, Promise<DriverRunResult>>();
@@ -297,7 +313,13 @@ export class DockerDriver implements IsolationDriver {
     this.commandTimeoutMs = options.commandTimeoutMs ?? 5000;
     this.createTimeoutMs = options.createTimeoutMs ?? 30000;
     this.runtime = options.runtime;
+    this.runscVersion = options.runscVersion;
     this.runner = commandRunner ?? createDefaultDockerCommandRunner({ dockerBinary: this.dockerBinary });
+  }
+
+  /** Driver identity for per-run audit logging (image + OCI runtime). */
+  get auditIdentity(): { image: string; runtime: string | undefined } {
+    return { image: this.image, runtime: this.runtime };
   }
 
   /**
@@ -322,6 +344,16 @@ export class DockerDriver implements IsolationDriver {
         error_code: 'unsupported_platform',
         error: 'run_code is not supported on Windows in v1: the Docker driver needs a Linux container host.',
       };
+    }
+    // Fail-closed runsc gate (gVisor only): runsc must be present, healthy,
+    // and exactly at the pinned version before any docker check runs. The
+    // plain Docker driver (runtime undefined) never probes runsc, and a
+    // failed probe is never retried under a different runtime.
+    if (this.runtime === 'runsc') {
+      const runscReady = await this.probeRunsc(signal);
+      if (!runscReady.ready) {
+        return runscReady;
+      }
     }
     const expectedDigest = this.expectedDigest();
     if (expectedDigest === undefined) {
@@ -414,6 +446,57 @@ export class DockerDriver implements IsolationDriver {
     const ownership = await this.probeBindMountOwnership(signal);
     if (!ownership.ok) {
       return { ready: false, error_code: 'daemon_unavailable', error: ownership.error };
+    }
+    return { ready: true };
+  }
+
+  /**
+   * Fail-closed runsc verification for the gVisor driver: runsc must be
+   * present, healthy, and exactly at the pinned version. Any failure refuses
+   * the run with an error naming runsc, never a silent fallback to runc.
+   */
+  private async probeRunsc(signal: AbortSignal | undefined): Promise<DriverReadiness> {
+    const probe = await this.runner.run('runsc', ['--version'], { timeoutMs: this.commandTimeoutMs, signal });
+    if (probe.timedOut || probe.exitCode !== 0) {
+      return {
+        ready: false,
+        error_code: 'daemon_unavailable',
+        error:
+          'The gVisor sandbox driver needs runsc, but the `runsc --version` probe failed. ' +
+          'runsc may be missing or unhealthy. Install runsc per the gVisor install docs ' +
+          '(https://gvisor.dev/docs/user_guide/install/), register it as a Docker runtime, ' +
+          'and set SANDBOX_RUNSC_VERSION to the pinned version. The driver never falls back to runc.',
+      };
+    }
+    const installed = parseRunscVersion(probe.stdout);
+    if (installed === undefined) {
+      return {
+        ready: false,
+        error_code: 'daemon_unavailable',
+        error:
+          'The `runsc --version` probe did not produce a parseable version line. ' +
+          'Refusing to run the gVisor sandbox without a verified runsc version.',
+      };
+    }
+    const pinned = this.runscVersion?.trim();
+    if (pinned === undefined || pinned === '') {
+      return {
+        ready: false,
+        error_code: 'daemon_unavailable',
+        error:
+          `runsc ${installed} is installed but no runsc version is pinned (SANDBOX_RUNSC_VERSION). ` +
+          'Refusing to run the gVisor sandbox without a pinned runsc version.',
+      };
+    }
+    if (installed !== pinned) {
+      return {
+        ready: false,
+        error_code: 'daemon_unavailable',
+        error:
+          `runsc version mismatch: installed ${installed}, pinned ${pinned}. ` +
+          'Install the pinned runsc version, or update the pin and re-run the acceptance suite. ' +
+          'The driver never falls back to runc.',
+      };
     }
     return { ready: true };
   }
@@ -642,6 +725,9 @@ export class DockerDriver implements IsolationDriver {
       'no-new-privileges:true',
       '--pids-limit',
       '256',
+      // A crashing run must not dump core to host disk.
+      '--ulimit',
+      'core=0',
       '--memory',
       `${String(params.memoryMb)}m`,
       '--memory-swap',

@@ -626,6 +626,7 @@ function getSharedRunCodeService(logger: Logger): RunCodeService {
           cosignBinary: undefined,
           commandTimeoutMs: undefined,
           createTimeoutMs: undefined,
+          runscVersion: configuration.SANDBOX_RUNSC_VERSION,
         },
         undefined,
       );
@@ -639,6 +640,7 @@ function getSharedRunCodeService(logger: Logger): RunCodeService {
           commandTimeoutMs: undefined,
           createTimeoutMs: undefined,
           runtime: undefined,
+          runscVersion: undefined,
         },
         undefined,
       );

@@ -5,7 +5,7 @@ import { basename, join, relative } from 'node:path';
 import type { Logger } from 'winston';
 import { onSignalAbort, signalAbortError } from '../../util/abort';
 import { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './errors';
-import { RUN_CODE_RESERVED_PREFIX, OUTPUT_EXCEEDED_MARKER } from './IsolationDriver';
+import { RUN_CODE_RESERVED_PREFIX, OUTPUT_EXCEEDED_MARKER, runCodeProgramPath } from './IsolationDriver';
 import type { DriverReadiness, DriverRunParams, DriverRunResult, IsolationDriver } from './IsolationDriver';
 import {
   RunCodeInputSchema,
@@ -512,7 +512,9 @@ export class RunCodeService implements RunCodeBackend {
       await writeFile(join(ingressDir, attachment.name), attachment.bytes, { mode: 0o400 });
     }
     // The program itself rides in ingress under a reserved name (never harvested).
-    const programName = `${RUN_CODE_RESERVED_PREFIX}main.${input.input.language === 'python' ? 'py' : 'mjs'}`;
+    // The filename is the canonical driver's program path basename: the
+    // driver executes runCodeProgramPath(language), so staging must match it.
+    const programName = basename(runCodeProgramPath(input.input.language));
     await writeFile(join(ingressDir, programName), input.input.code, { mode: 0o400 });
 
     // Ownership handoff (E-B1): the sandbox uid owns the three dirs and every
@@ -599,6 +601,7 @@ export class RunCodeService implements RunCodeBackend {
     });
 
     let result: DriverRunResult;
+    const runStartMs = this.now();
     try {
       // Abandon deadline: timeoutMs + 5s kill grace + 10s harvest grace.
       // Past it the slot is released and the container/VM is left to the reaper.
@@ -629,6 +632,20 @@ export class RunCodeService implements RunCodeBackend {
     ) {
       result = { ...result, terminatedBy: 'killed', internalError: 'disk quota exceeded during run' };
     }
+
+    // Per-run audit log: image, timeout, runtime, exit code, duration. Code
+    // contents are never logged; they may contain user data. One line per
+    // run, on the ok and failed paths alike.
+    const identity = this.driver.auditIdentity;
+    this.logger.info('run_code run finished', {
+      runId: input.runId,
+      image: identity.image,
+      timeoutMs,
+      runtime: identity.runtime,
+      exitCode: result.exitCode,
+      terminatedBy: result.terminatedBy,
+      durationMs: this.now() - runStartMs,
+    });
 
     const harvestWarnings: string[] = [...result.harvestWarnings];
     const { filesOut, harvestedFiles } = await this.harvest({ runRoot, ingressDir, scratchDir, egressDir, harvestWarnings });
