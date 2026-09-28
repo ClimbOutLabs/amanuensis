@@ -297,8 +297,8 @@ async function* drainWithNoProgressTimeout<T>(
 ): AsyncGenerator<T, void, unknown> {
   const iterator = iterable[Symbol.asyncIterator]();
   try {
-    while (true) {
-      let timer: ReturnType<typeof setTimeout>;
+    for (;;) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       let result: IteratorResult<T, unknown>;
       try {
         result = await Promise.race([
