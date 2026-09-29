@@ -159,7 +159,7 @@ export type MemoryEmbeddingsCapability = z.infer<typeof MemoryEmbeddingsCapabili
 export const SandboxIsolationCapabilitySchema = z
   .object({
     isolation_driver: z
-      .enum(['docker', 'firecracker'])
+      .enum(['docker', 'firecracker', 'gvisor'])
       .describe('Process-isolation backend behind the run_code tool (`SANDBOX_ISOLATION_DRIVER`).'),
     image: z
       .string()

@@ -260,6 +260,8 @@ export { SANDBOX_ALLOWED_EGRESS_DOMAINS, sandboxEgressDomainAllowList } from './
 // run_code isolation-driver stack (Docker v1; Firecracker parked until /dev/kvm is confirmed)
 export { DockerDriver } from './sandbox/driver/DockerDriver';
 export type { DockerDriverOptions } from './sandbox/driver/DockerDriver';
+export { GVisorDriver } from './sandbox/driver/GVisorDriver';
+export type { GVisorDriverOptions } from './sandbox/driver/GVisorDriver';
 export { classifyExecCommand, interpreterInvocationRefusal } from './sandbox/driver/ExecGuard';
 export type { ExecGuardHost, ExecGuardVerdict } from './sandbox/driver/ExecGuard';
 export type {

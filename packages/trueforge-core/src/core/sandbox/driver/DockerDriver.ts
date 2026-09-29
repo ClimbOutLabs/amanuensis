@@ -77,6 +77,11 @@ export interface DockerDriverOptions {
   commandTimeoutMs: number | undefined;
   /** Bound for the wedged-daemon docker create probe. Default 30000. */
   createTimeoutMs: number | undefined;
+  /**
+   * OCI runtime for `docker create` (e.g. 'runsc' for gVisor). When undefined,
+   * Docker's default runtime is used.
+   */
+  runtime: string | undefined;
 }
 
 /** execFile-shaped failure: non-zero exit or timeout kill. */
@@ -277,6 +282,7 @@ export class DockerDriver implements IsolationDriver {
   private readonly cosignBinary: string;
   private readonly commandTimeoutMs: number;
   private readonly createTimeoutMs: number;
+  private readonly runtime: string | undefined;
   private readonly runner: DockerCommandRunner;
   /** containerId → in-flight run, for dispose()'s drain-then-kill. */
   private readonly inFlight = new Map<string, Promise<DriverRunResult>>();
@@ -290,6 +296,7 @@ export class DockerDriver implements IsolationDriver {
     this.cosignBinary = options.cosignBinary ?? 'cosign';
     this.commandTimeoutMs = options.commandTimeoutMs ?? 5000;
     this.createTimeoutMs = options.createTimeoutMs ?? 30000;
+    this.runtime = options.runtime;
     this.runner = commandRunner ?? createDefaultDockerCommandRunner({ dockerBinary: this.dockerBinary });
   }
 
@@ -373,9 +380,10 @@ export class DockerDriver implements IsolationDriver {
     // Wedged-daemon escalation (plan §2.8): dockerd answers `docker info` but
     // `docker create` never returns → daemon_unavailable, manual remediation.
     // --entrypoint keeps the probe immune to the image's own entrypoint.
+    const runtimeArgs = this.runtime === undefined ? [] : ['--runtime', this.runtime];
     const probe = await this.runner.run(
       this.dockerBinary,
-      ['create', '--entrypoint', 'true', '--label', `${PROBE_LABEL}=1`, this.image],
+      ['create', ...runtimeArgs, '--entrypoint', 'true', '--label', `${PROBE_LABEL}=1`, this.image],
       { timeoutMs: this.createTimeoutMs, signal },
     );
     if (probe.timedOut) {
@@ -598,7 +606,13 @@ export class DockerDriver implements IsolationDriver {
     // The wrapper stages the program into ingress (read-only) under a
     // reserved name; the driver executes it from there — no argv size limits.
     const program = runCodeProgramPath(language);
-    return language === 'python' ? ['python3', program] : ['node', program];
+    if (language === 'python') {
+      return ['python3', program];
+    }
+    if (language === 'node') {
+      return ['node', program];
+    }
+    return ['bash', program];
   }
 
   /**
@@ -608,11 +622,13 @@ export class DockerDriver implements IsolationDriver {
   private async createContainer(params: DriverRunParams): Promise<string> {
     const safeRunId = params.runId.replace(/[^a-zA-Z0-9_.-]/g, '_');
     const envArgs = Object.entries(params.env).flatMap(([key, value]: [string, string]) => ['-e', `${key}=${value}`]);
+    const runtimeArgs = this.runtime === undefined ? [] : ['--runtime', this.runtime];
     const args = [
       'create',
       // No --rm: the container must survive exit so .State.OOMKilled can be
       // inspected deterministically. Cleanup is explicit `rm -f` below plus
       // the label reaper for anything left behind by a crash.
+      ...runtimeArgs,
       '--network',
       'none',
       '--init',
@@ -768,10 +784,12 @@ export class DockerDriver implements IsolationDriver {
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     const probeDir = await mkdtemp(join(tmpdir(), 'tf-sandbox-probe-'));
     try {
+      const runtimeArgs = this.runtime === undefined ? [] : ['--runtime', this.runtime];
       const result = await this.runner.run(
         this.dockerBinary,
         [
           'run',
+          ...runtimeArgs,
           '--rm',
           '--network',
           'none',

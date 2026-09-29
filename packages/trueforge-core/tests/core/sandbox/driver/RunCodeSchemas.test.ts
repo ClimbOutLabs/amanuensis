@@ -16,9 +16,13 @@ describe('RunCodeInputSchema', () => {
     expect(parsed.timeout_seconds).toBe(30);
   });
 
+  it('accepts bash', () => {
+    const parsed = RunCodeInputSchema.parse({ language: 'bash', code: 'echo hi' });
+    expect(parsed.language).toBe('bash');
+  });
+
   it('rejects unknown languages', () => {
     expect(() => RunCodeInputSchema.parse({ ...valid, language: 'ruby' })).toThrow();
-    expect(() => RunCodeInputSchema.parse({ ...valid, language: 'bash' })).toThrow();
   });
 
   it('rejects empty code and code over the 512 KiB cap', () => {

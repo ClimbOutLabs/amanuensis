@@ -227,7 +227,7 @@ function parseReflectBudget(options: {
 }
 
 /** Which process-isolation backend runs `run_code` executions. */
-export type SandboxIsolationDriver = 'docker' | 'firecracker';
+export type SandboxIsolationDriver = 'docker' | 'firecracker' | 'gvisor';
 
 /**
  * Parses `SANDBOX_ISOLATION_DRIVER`. Unset/blank → default. Anything else throws
@@ -242,10 +242,10 @@ function parseIsolationDriver(options: {
     return options.defaultValue;
   }
   const value = options.raw.trim().toLowerCase();
-  if (value === 'docker' || value === 'firecracker') {
+  if (value === 'docker' || value === 'firecracker' || value === 'gvisor') {
     return value;
   }
-  throw new Error(`${options.envKey} must be one of docker, firecracker; got ${JSON.stringify(options.raw)}`);
+  throw new Error(`${options.envKey} must be one of docker, firecracker, gvisor; got ${JSON.stringify(options.raw)}`);
 }
 
 /** Which long-term memory backend Aman uses. */
@@ -1933,9 +1933,9 @@ validateRunCodeStartupConfig({
 });
 // The cosign key is only needed once an image is configured; a dormant
 // install must not fail boot for a key it will never use.
-if (runCodeConfigured && configuration.SANDBOX_ISOLATION_DRIVER === 'docker' && configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() === '') {
+if (runCodeConfigured && (configuration.SANDBOX_ISOLATION_DRIVER === 'docker' || configuration.SANDBOX_ISOLATION_DRIVER === 'gvisor') && configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() === '') {
   throw new Error(
-    'SANDBOX_COSIGN_PUBLIC_KEY_PATH is required when SANDBOX_ISOLATION_DRIVER=docker and SANDBOX_IMAGE is set: ' +
+    'SANDBOX_COSIGN_PUBLIC_KEY_PATH is required when SANDBOX_ISOLATION_DRIVER=docker or SANDBOX_ISOLATION_DRIVER=gvisor and SANDBOX_IMAGE is set: ' +
       'the sandbox image signature is verified fail-closed. Point it at the release cosign public-key PEM.',
   );
 }

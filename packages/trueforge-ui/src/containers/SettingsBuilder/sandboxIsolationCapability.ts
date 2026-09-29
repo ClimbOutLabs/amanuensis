@@ -12,7 +12,7 @@
 import { isObject } from './memoryScreenCapability.js';
 
 export interface SandboxIsolationStatus {
-  isolationDriver: 'docker' | 'firecracker';
+  isolationDriver: 'docker' | 'firecracker' | 'gvisor';
   image: string;
   defaultTimeoutSeconds: number;
   maxTimeoutSeconds: number;
@@ -30,10 +30,11 @@ function read({ raw, camel, snake }: { raw: object; camel: string; snake: string
   return value === undefined ? Reflect.get(raw, snake) : value;
 }
 
-function isolationDriver(value: unknown): 'docker' | 'firecracker' | null {
+function isolationDriver(value: unknown): 'docker' | 'firecracker' | 'gvisor' | null {
   switch (value) {
     case 'docker':
     case 'firecracker':
+    case 'gvisor':
       return value;
     default:
       return null;

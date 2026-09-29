@@ -1,13 +1,16 @@
 /**
- * Pluggable isolation contract for `run_code`. One interface, two drivers
- * (Docker default, Firecracker opt-in); the host wrapper owns the contract,
- * bounds, truncation, and harvesting — the driver owns ALL isolation.
+ * Pluggable isolation contract for `run_code`. One interface, three drivers
+ * (Docker default, Firecracker opt-in, gVisor opt-in); the host wrapper owns
+ * the contract, bounds, truncation, and harvesting — the driver owns ALL isolation.
  *
  * The old `SandboxProvider` interface is superseded by this contract.
  */
 
-/** Languages the `run_code` contract offers. Shell is deliberately NOT offered. */
-export type RunCodeLanguage = 'python' | 'node';
+/** Languages the `run_code` contract offers. Bash is offered alongside
+ * python and node: it runs under the same hardening as the other languages
+ * (read-only rootfs, no network, no-new-privileges, seccomp via gVisor or
+ * Docker default), so shell access does not weaken the isolation boundary. */
+export type RunCodeLanguage = 'python' | 'node' | 'bash';
 
 /**
  * Prefix a driver sets on DriverRunResult.internalError when the 4 MiB
@@ -23,7 +26,7 @@ export const RUN_CODE_RESERVED_PREFIX = '__runcode_';
 
 /** Container-side path of the staged program (ingress mounts read-only at /ingress). */
 export function runCodeProgramPath(language: RunCodeLanguage): string {
-  return `/ingress/${RUN_CODE_RESERVED_PREFIX}main.${language === 'python' ? 'py' : 'mjs'}`;
+  return `/ingress/${RUN_CODE_RESERVED_PREFIX}main.${language === 'python' ? 'py' : language === 'node' ? 'mjs' : 'sh'}`;
 }
 
 /** How a driver run ended, before the wrapper maps it onto the error taxonomy. */
@@ -96,7 +99,7 @@ export interface DriverRunResult {
 }
 
 export interface IsolationDriver {
-  readonly kind: 'docker' | 'firecracker';
+  readonly kind: 'docker' | 'firecracker' | 'gvisor';
   /** Idempotent readiness: image present, daemon/KVM reachable. Fast; no side effects. */
   ensureReady(signal?: AbortSignal): Promise<DriverReadiness>;
   /**

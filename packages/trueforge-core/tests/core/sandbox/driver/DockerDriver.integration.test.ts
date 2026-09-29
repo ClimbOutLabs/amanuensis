@@ -61,6 +61,7 @@ describe('DockerDriver integration (live daemon)', () => {
         cosignBinary: undefined,
         commandTimeoutMs: undefined,
         createTimeoutMs: undefined,
+        runtime: undefined,
       },
       undefined,
     );
@@ -97,6 +98,7 @@ describe('DockerDriver integration (live daemon)', () => {
           cosignBinary: undefined,
           commandTimeoutMs: undefined,
           createTimeoutMs: undefined,
+          runtime: undefined,
         },
         undefined,
       );

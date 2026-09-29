@@ -80,6 +80,7 @@ function driverOptions(): DockerDriverOptions {
     cosignBinary: undefined,
     commandTimeoutMs: undefined,
     createTimeoutMs: undefined,
+    runtime: undefined,
   };
 }
 
