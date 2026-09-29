@@ -12,6 +12,7 @@ import type {
   PreSendContextProcessor,
 } from '../capabilities/AgentContextProcessor';
 import { ASK_USER_QUESTION_TOOL_NAME } from '../capabilities/builtins/AskUserQuestion';
+import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/ContextCompaction';
 import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTools';
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
@@ -1847,6 +1848,41 @@ export class AgentThread {
     return { ...this.metrics };
   }
 
+  /**
+   * Estimates the full request size in tokens: instruction, definition messages,
+   * context, task state block, and tool definitions. Used by the token-based
+   * pre-flight guard to decide whether compaction must run before the request
+   * is assembled. Mirrors the message assembly in transformToLLMRequest without
+   * building the full request body.
+   */
+  private estimateFullRequestTokens(tools: ChatCompletionTool[]): number {
+    let total = 0;
+    if (this.instruction) {
+      total += estimateTokensForString(this.instruction);
+    }
+    if (this.definition.messages) {
+      for (const msg of this.definition.messages) {
+        if (isLLMContextMessage(msg)) {
+          total += estimateTokensForString(JSON.stringify(msg));
+        }
+      }
+    }
+    for (const message of this.context) {
+      if (isLLMContextMessage(message)) {
+        total += estimateTokensForString(JSON.stringify(toOpenAIChatMessage(message)));
+      }
+    }
+    const taskStateBlock = renderTaskStateBlock({
+      state: this.taskState,
+      budget: this.definition.toolCallBudget,
+    });
+    if (taskStateBlock !== null) {
+      total += estimateTokensForString(taskStateBlock);
+    }
+    total += estimateTokensForString(JSON.stringify(tools));
+    return total;
+  }
+
   private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
     // A long-running thread can cross UTC midnight between LLM steps. Within a
     // day the rebuilt string is byte-identical, so prefix caching is untouched;
@@ -2441,6 +2477,40 @@ export class AgentThread {
             `compaction; refusing to assemble a request that would hang or fail in provider prefill. ` +
             `Start a new chat or reduce the context and try again.`,
         );
+      }
+    }
+
+    // Token-based pre-flight guard: the character ceiling above does not account for
+    // the model's token context limit. Estimate the full request in tokens
+    // (instruction + definition messages + context + task state + tool definitions)
+    // and force compaction if input tokens plus reserved output tokens would reach
+    // the context length. The safety margin covers the provider-added BOS token,
+    // template overhead, and estimator imprecision.
+    const modelContextLength = this.definition.modelProperties?.contextLength;
+    if (typeof modelContextLength === 'number' && Number.isFinite(modelContextLength) && modelContextLength > 0) {
+      const configuredMaxOutputTokens =
+        this.definition.modelParams?.['max_completion_tokens'] ?? this.definition.modelParams?.['max_tokens'];
+      const maxOutputTokens =
+        typeof configuredMaxOutputTokens === 'number' && Number.isFinite(configuredMaxOutputTokens) && configuredMaxOutputTokens >= 0
+          ? configuredMaxOutputTokens
+          : 0;
+      const estimatedInputTokens = this.estimateFullRequestTokens(tools);
+      if (estimatedInputTokens + maxOutputTokens + TOKEN_BUDGET_SAFETY_MARGIN >= modelContextLength) {
+        for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
+          yield event;
+        }
+        if (signal?.aborted) {
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+        }
+        const postCompactionTokens = this.estimateFullRequestTokens(tools);
+        if (postCompactionTokens + maxOutputTokens + TOKEN_BUDGET_SAFETY_MARGIN >= modelContextLength) {
+          throw new Error(
+            `Estimated request is ${Math.ceil(postCompactionTokens).toLocaleString('en-US')} input tokens, above the ` +
+              `${modelContextLength.toLocaleString('en-US')}-token context limit even after compaction; ` +
+              `refusing to send a request the provider would reject. ` +
+              `Start a new chat or reduce the context and try again.`,
+          );
+        }
       }
     }
 

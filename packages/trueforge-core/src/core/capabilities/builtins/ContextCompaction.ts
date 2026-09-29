@@ -50,6 +50,15 @@ export const MAX_CONSECUTIVE_COMPACTION_SKIPS = 3;
 /** Unused: retained for API compatibility. The truncation fallback supersedes the skip circuit breaker. */
 export const COMPACTION_BACKOFF_TOKEN_DELTA = 10_000;
 export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
+/**
+ * Token budget held back from the compaction input threshold. Covers the
+ * provider-added BOS token, ChatML template overhead, estimator imprecision
+ * (estimateTokensForString is a length/4 heuristic), and the instruction and
+ * task-state messages transformToLLMRequest adds after compaction runs.
+ * Without this margin the request lands exactly at the context limit and the
+ * provider rejects it for exceeding it by one token.
+ */
+export const TOKEN_BUDGET_SAFETY_MARGIN = 512;
 
 /**
  * Content-free structural diagnostic for validation failures (spec 002 REQ-1, security-hardened).
@@ -101,7 +110,7 @@ export function resolveCompactionThresholdTokens(input: {
       Number.isFinite(configuredMaxOutputTokens) &&
       configuredMaxOutputTokens >= 0
     ) {
-      const inputBudget = Math.floor(input.modelContextLength - configuredMaxOutputTokens);
+      const inputBudget = Math.floor(input.modelContextLength - configuredMaxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN);
       if (inputBudget > 0) {
         return Math.min(ratioThreshold, inputBudget);
       }
