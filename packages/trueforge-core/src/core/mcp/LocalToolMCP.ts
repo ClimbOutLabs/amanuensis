@@ -43,6 +43,8 @@ export type ToolDefinition = ListToolsResult['tools'][number] & {
     approvalDecision?: ApprovalDecision,
     context?: ToolInvocationContext,
   ) => Promise<CallToolResponse>;
+  // Set when the tool needs internet access; surfaced in listTools() for offline filtering.
+  requiresNetwork?: boolean | undefined;
 };
 
 type ToolInputSchema = ListToolsResult['tools'][number]['inputSchema'];
@@ -51,6 +53,9 @@ export function defineTool<T extends z.ZodType>(config: {
   name: string;
   description: string;
   schema: T;
+  // Set when the tool needs internet access (geocoding, tiles, routing). Offline mode
+  // consumes the flag to withhold network tools from the model; listTools() surfaces it.
+  requiresNetwork?: boolean | undefined;
   // Handlers may opt into the approvalDecision (forwarded by the agent loop after the
   // user approves an approval-gated tool). Handlers that don't declare it ignore it.
   handler: (
@@ -66,6 +71,7 @@ export function defineTool<T extends z.ZodType>(config: {
     name: config.name,
     description: config.description,
     inputSchema: jsonSchema,
+    requiresNetwork: config.requiresNetwork,
     execute: withValidatedInput(config.schema, config.handler),
   };
 }
@@ -107,6 +113,7 @@ export abstract class LocalToolMCP implements IToolSet {
           description: t.description,
           inputSchema: t.inputSchema,
           preload: true,
+          requiresNetwork: t.requiresNetwork,
         })),
       },
       wasInitialized: undefined,

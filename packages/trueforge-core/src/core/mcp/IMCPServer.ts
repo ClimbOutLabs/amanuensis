@@ -33,6 +33,8 @@ export type ToolSchema = ListToolsResult['tools'][number];
 
 export interface AgentToolSchema extends ToolSchema {
   preload: boolean;
+  // Set when the tool needs internet access; offline mode consumes it to withhold the tool.
+  requiresNetwork?: boolean | undefined;
 }
 
 export interface AuthRequiredResponse {
