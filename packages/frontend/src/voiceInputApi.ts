@@ -103,14 +103,14 @@ function parseTranscription(value: unknown): VoiceTranscription {
  * change only, until the flag reads true. Once observed true the flag latches
  * and later refetches never hide the mic within the session.
  */
-export type CreateVoiceInputApiOptions = {
+export interface CreateVoiceInputApiOptions {
   /** Override the 5s capabilities poll cadence. */
   pollIntervalMs?: number;
   /** Override the ~1-minute poll attempt budget. */
   pollAttempts?: number;
   /** Override the 65s client-side transcription timeout. */
   transcribeTimeoutMs?: number;
-};
+}
 
 export function createVoiceInputApi(fetcher: typeof fetch, options: CreateVoiceInputApiOptions = {}): VoiceInputApi {
   const pollIntervalMs = options.pollIntervalMs ?? CAPABILITIES_POLL_INTERVAL_MS;
@@ -151,9 +151,6 @@ export function createVoiceInputApi(fetcher: typeof fetch, options: CreateVoiceI
         }
       } catch {
         flag = false;
-      }
-      if (latched) {
-        return;
       }
       if (flag) {
         latched = true;
@@ -209,7 +206,9 @@ export function createVoiceInputApi(fetcher: typeof fetch, options: CreateVoiceI
       // The caller's signal (cancel, unmount, route change) plus the 65s
       // client-side timeout drive one controller for the fetch.
       const controller = new AbortController();
-      const forwardAbort = () => controller.abort(signal?.reason);
+      const forwardAbort = () => {
+        controller.abort(signal?.reason);
+      };
       if (signal !== undefined) {
         if (signal.aborted) {
           controller.abort(signal.reason);
