@@ -182,6 +182,8 @@ export { ResumeUnavailable } from './atoms/ResumeUnavailable.js';
 export type { ResumeUnavailableProps } from './atoms/ResumeUnavailable.js';
 export { SandboxToolCallCard } from './atoms/SandboxToolCallCard.js';
 export type { SandboxToolCallCardProps } from './atoms/SandboxToolCallCard.js';
+export { MapCard } from './atoms/MapCard.js';
+export type { MapCardProps } from './atoms/MapCard.js';
 export { SubAgentCard } from './atoms/SubAgentCard.js';
 export type { SubAgentCardProps } from './atoms/SubAgentCard.js';
 export {

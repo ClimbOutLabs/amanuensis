@@ -91,6 +91,14 @@ export {
 } from './capabilities/builtins/LargeToolResponse';
 export { openUI } from './capabilities/builtins/OpenUI';
 export {
+  RENDER_MAP_SERVER_ID,
+  RENDER_MAP_TOOL_NAME,
+  RENDER_ROUTE_TOOL_NAME,
+  clampZoom,
+  renderMap,
+} from './capabilities/builtins/RenderMap';
+export type { MapPoiPin, RenderMapResult, RenderRouteResult } from './capabilities/builtins/RenderMap';
+export {
   REPLACE_TASK_CHECKLIST_TOOL_NAME,
   TASK_CHECKLIST_SERVER_ID,
   taskChecklist,

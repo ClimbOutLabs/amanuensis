@@ -10,7 +10,8 @@ import {
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import { useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
-import { useCallback, useState } from 'react';
+import { RENDER_MAP_TOOL_NAME, RENDER_ROUTE_TOOL_NAME } from '@truefoundry/trueforge-core/core';
+import { useCallback, useMemo, useState } from 'react';
 
 import { useSlot } from '../theme/SlotsProvider.js';
 import {
@@ -29,6 +30,7 @@ import {
   hasPendingToolApproval,
   mcpDisplayName,
   parseAskUserQuestionArgs,
+  parseMapCardProps,
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
@@ -167,6 +169,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const ToolCallCard = useSlot('ToolCallCard');
   const SubAgentCard = useSlot('SubAgentCard');
   const AskUserPrompt = useSlot('AskUserPrompt');
+  const MapCard = useSlot('MapCard');
   const elapsedMs = useToolCallElapsed();
   const isRequiresAction = part.status?.type === 'requires-action';
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
@@ -174,6 +177,13 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const approvalPart = approval === part.approval ? part : { ...part, approval };
   const isSubAgent = part.toolName === SUB_AGENT_TOOL_NAME;
   const isSandbox = SANDBOX_TOOL_NAMES.has(part.toolName);
+  const isMap = part.toolName === RENDER_MAP_TOOL_NAME || part.toolName === RENDER_ROUTE_TOOL_NAME;
+  // Memoized so MapCard keeps a stable props identity across container
+  // re-renders; otherwise its Leaflet map would rebuild on every render.
+  const mapProps = useMemo(
+    () => (isMap ? parseMapCardProps(part.toolName, part.result) : undefined),
+    [isMap, part.toolName, part.result],
+  );
   const [expanded, setExpanded] = useState(isRequiresAction);
   const [prevRequiresAction, setPrevRequiresAction] = useState(isRequiresAction);
   if (isRequiresAction !== prevRequiresAction) {
@@ -251,6 +261,19 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         </SubAgentCard>
       </div>
     );
+  }
+
+  if (isMap) {
+    // When the payload parses, render the interactive map. When the tool
+    // errored or the result is malformed, fall through to the default tool
+    // card so the error text stays visible.
+    if (mapProps !== undefined) {
+      return (
+        <div data-slot="tool-call-card" data-variant="map" className="w-full">
+          <MapCard {...mapProps} />
+        </div>
+      );
+    }
   }
 
   const resultString =

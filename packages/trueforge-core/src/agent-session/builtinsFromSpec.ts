@@ -12,6 +12,7 @@ import { dynamicSubAgents } from '../core/capabilities/builtins/DynamicSubAgents
 import { largeToolResponse } from '../core/capabilities/builtins/LargeToolResponse';
 import { openUI } from '../core/capabilities/builtins/OpenUI';
 import { repositoryBindingContext } from '../core/capabilities/builtins/RepositoryBindingContext';
+import { renderMap } from '../core/capabilities/builtins/RenderMap';
 import {
   TaskChecklistRequestState,
   taskChecklist,
@@ -74,6 +75,9 @@ export function builtinsFromSpec(input: {
     // Renders a search-tool JSON result to compact markdown before the large-tool-response
     // processor's threshold check runs, so a normal-sized search stays a single small result.
     webSearchRendering(),
+    // Interactive map cards for named places and routes between two places. The tools need
+    // network access; the requiresNetwork flag marks them so offline mode can withhold them.
+    renderMap({ tracing }),
   ];
 
   if (!isChild && sandboxAvailable && sandbox !== undefined) {

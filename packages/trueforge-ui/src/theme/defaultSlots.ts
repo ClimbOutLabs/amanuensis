@@ -83,6 +83,7 @@ import { ScrollToBottomButton } from '../atoms/ScrollToBottomButton.js';
 import { SelectAgentEmptyState } from '../atoms/SelectAgentEmptyState.js';
 import { SessionsBrowserButton } from '../atoms/SessionsBrowserButton.js';
 import { ShellActionsActionSlot } from '../atoms/ShellActionsActionSlot.js';
+import { MapCard } from '../atoms/MapCard.js';
 import { MessageListSkeleton } from '../atoms/Skeletons.js';
 import { SpacesButton } from '../atoms/SpacesButton.js';
 import { SubAgentCard } from '../atoms/SubAgentCard.js';
@@ -205,6 +206,7 @@ export const defaultSlots = {
   ToolGroupCard,
   SubAgentCard,
   SandboxToolCallCard,
+  MapCard,
   AgentStepsCard,
   ReasoningCard,
   AskUserPrompt,

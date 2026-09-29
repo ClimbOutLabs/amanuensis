@@ -1,6 +1,14 @@
 import type { ToolApprovalOption as AuiToolApprovalOption, ToolCallMessagePartProps } from '@assistant-ui/react';
+import {
+  RENDER_MAP_TOOL_NAME,
+  RENDER_ROUTE_TOOL_NAME,
+  clampZoom,
+  type RenderMapResult,
+  type RenderRouteResult,
+} from '@truefoundry/trueforge-core/core';
 import { parse as parsePartialJson } from 'partial-json';
 
+import type { MapCardProps, MapPinView } from '../atoms/MapCard.js';
 import type { ToolCallStatus } from '../atoms/ToolCallCard.js';
 
 export type ApprovalOptionView = {
@@ -551,6 +559,122 @@ export function resolveSubAgentMeta(part: ToolCallMessagePartProps): {
     instruction: subAgent?.input ?? artifactSubAgent?.agentInfo?.input ?? '',
     stepCount: part.messages?.length ?? 0,
   };
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function readNonEmptyString(value: unknown, key: string): string | undefined {
+  if (!isUnknownRecord(value)) {
+    return undefined;
+  }
+  const field = value[key];
+  return typeof field === 'string' && field.length > 0 ? field : undefined;
+}
+
+/**
+ * Type guard for the render_map success payload. Error payloads carry an
+ * `error` field and are rejected before this runs.
+ */
+function isRenderMapPayload(value: unknown): value is RenderMapResult {
+  return (
+    isUnknownRecord(value) &&
+    !('error' in value) &&
+    typeof value.resolved_name === 'string' &&
+    value.resolved_name.length > 0 &&
+    isFiniteNumber(value.lat) &&
+    isFiniteNumber(value.lng)
+  );
+}
+
+/**
+ * Type guard for the render_route success payload. Error payloads carry an
+ * `error` field and are rejected before this runs.
+ */
+function isRenderRoutePayload(value: unknown): value is RenderRouteResult {
+  return (
+    isUnknownRecord(value) &&
+    !('error' in value) &&
+    typeof value.from_resolved === 'string' &&
+    value.from_resolved.length > 0 &&
+    typeof value.to_resolved === 'string' &&
+    value.to_resolved.length > 0 &&
+    typeof value.route_geometry === 'string' &&
+    value.route_geometry.length > 0 &&
+    isFiniteNumber(value.distance_km) &&
+    isFiniteNumber(value.duration_min)
+  );
+}
+
+/** Collects the valid POI pins, skipping malformed entries. */
+function parsePlacePins(value: unknown): Array<MapPinView> | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const pins: Array<MapPinView> = [];
+  for (const item of value) {
+    if (!isUnknownRecord(item)) {
+      continue;
+    }
+    const name = readNonEmptyString(item, 'name');
+    const lat = item.lat;
+    const lng = item.lng;
+    if (name === undefined || !isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+      continue;
+    }
+    pins.push({ name, lat, lng });
+  }
+  return pins;
+}
+
+function placePropsFromPayload(payload: RenderMapResult): MapCardProps {
+  const address = readNonEmptyString(payload, 'address');
+  const pins = parsePlacePins(payload.pins);
+  return {
+    resolvedName: payload.resolved_name,
+    ...(address === undefined ? {} : { address }),
+    lat: payload.lat,
+    lng: payload.lng,
+    // Forged payloads can carry out-of-range zoom; clamp independently.
+    zoom: clampZoom(payload.zoom),
+    ...(pins === undefined ? {} : { pins }),
+  };
+}
+
+function routePropsFromPayload(payload: RenderRouteResult): MapCardProps {
+  return {
+    resolvedName: `${payload.from_resolved} to ${payload.to_resolved}`,
+    route: {
+      geometry: payload.route_geometry,
+      fromName: payload.from_resolved,
+      toName: payload.to_resolved,
+      distanceKm: payload.distance_km,
+      durationMin: payload.duration_min,
+    },
+  };
+}
+
+/**
+ * Parses a render_map or render_route tool result into MapCard props.
+ * Returns undefined when the result is missing, malformed, or an error,
+ * in which case the caller falls back to the default tool card rendering.
+ */
+export function parseMapCardProps(toolName: string, result: unknown): MapCardProps | undefined {
+  const content = getToolResultContent(result);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content.data);
+  } catch {
+    return undefined;
+  }
+  if (toolName === RENDER_MAP_TOOL_NAME && isRenderMapPayload(parsed)) {
+    return placePropsFromPayload(parsed);
+  }
+  if (toolName === RENDER_ROUTE_TOOL_NAME && isRenderRoutePayload(parsed)) {
+    return routePropsFromPayload(parsed);
+  }
+  return undefined;
 }
 
 export function mcpDisplayName(
