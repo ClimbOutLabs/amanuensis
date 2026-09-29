@@ -51,12 +51,20 @@ export const MAX_CONSECUTIVE_COMPACTION_SKIPS = 3;
 export const COMPACTION_BACKOFF_TOKEN_DELTA = 10_000;
 export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
 /**
- * Token budget held back from the compaction input threshold. Covers the
- * provider-added BOS token, ChatML template overhead, estimator imprecision
- * (estimateTokensForString is a length/4 heuristic), and the instruction and
- * task-state messages transformToLLMRequest adds after compaction runs.
+ * Token budget held back from the compaction input threshold. Covers additive
+ * overhead on top of the estimated request: the provider-added BOS token,
+ * ChatML template overhead, the instruction and task-state messages
+ * transformToLLMRequest adds after compaction runs, and general estimator slop
+ * (estimateTokensForString is a length/4 heuristic).
  * Without this margin the request lands exactly at the context limit and the
  * provider rejects it for exceeding it by one token.
+ *
+ * Known limitation: the margin is not sized for high token-density scripts.
+ * CJK text carries roughly 2-4x more tokens per character than the length/4
+ * heuristic assumes, which can exceed this margin by tens of thousands of
+ * tokens on a 128k model; the estimator is not script-aware and neither the
+ * margin nor the pre-flight guard catches that case. Treat the margin as
+ * additive-overhead cover, not estimator-accuracy cover.
  */
 export const TOKEN_BUDGET_SAFETY_MARGIN = 512;
 
@@ -88,6 +96,17 @@ export function compactionValidationFingerprint(
 }
 
 /**
+ * Resolves the configured max output tokens from modelParams: max_completion_tokens
+ * preferred, max_tokens as fallback; undefined when unset or unusable (non-numeric,
+ * non-finite, or negative). Shared by the compaction threshold and the token
+ * pre-flight guard in AgentThread so the two budgets cannot drift apart.
+ */
+export function resolveMaxOutputTokens(modelParams: AgentDefinition['modelParams']): number | undefined {
+  const configured = modelParams?.['max_completion_tokens'] ?? modelParams?.['max_tokens'];
+  return typeof configured === 'number' && Number.isFinite(configured) && configured >= 0 ? configured : undefined;
+}
+
+/**
  * Resolves the compaction trigger threshold: an explicit configured value wins;
  * otherwise a ratio of the model's context length (minus a reserved output budget
  * when known); otherwise the fixed default. Additive threshold-resolution helper
@@ -104,13 +123,9 @@ export function resolveCompactionThresholdTokens(input: {
   }
   if (input.modelContextLength !== undefined) {
     const ratioThreshold = Math.floor(input.modelContextLength * DEFAULT_CONTEXT_COMPACTION_RATIO);
-    const configuredMaxOutputTokens = input.modelParams?.['max_completion_tokens'] ?? input.modelParams?.['max_tokens'];
-    if (
-      typeof configuredMaxOutputTokens === 'number' &&
-      Number.isFinite(configuredMaxOutputTokens) &&
-      configuredMaxOutputTokens >= 0
-    ) {
-      const inputBudget = Math.floor(input.modelContextLength - configuredMaxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN);
+    const maxOutputTokens = resolveMaxOutputTokens(input.modelParams);
+    if (maxOutputTokens !== undefined) {
+      const inputBudget = Math.floor(input.modelContextLength - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN);
       if (inputBudget > 0) {
         return Math.min(ratioThreshold, inputBudget);
       }
