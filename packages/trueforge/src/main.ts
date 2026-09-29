@@ -100,6 +100,7 @@ import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRec
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { TurnDrainRegistry } from './runtime/turnDrains';
+import { startSttAvailabilityWatcher } from './voice/sttAvailability';
 import { printStandaloneStartupBanner } from './startupBanner';
 import {
   parsePerServerMcpHeaders,
@@ -864,6 +865,13 @@ try {
       log: message => logger.info(message),
     });
   }
+
+  // Voice input availability is probed in the background at boot instead of on
+  // first use: the STT sidecar `/healthz` check runs immediately without blocking
+  // startup, then repeats every 30s, so `capabilities.voice` flips on as soon as
+  // the sidecar is warm and recovers without a backend restart. The check is
+  // advisory only; the backend boots regardless of STT state.
+  startSttAvailabilityWatcher({ logger });
 
   const server = serve(
     {

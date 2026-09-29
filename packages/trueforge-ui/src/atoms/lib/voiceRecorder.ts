@@ -11,6 +11,11 @@
 export const VOICE_SAMPLE_RATE = 16000;
 /** Client-side recording cap; the sidecar additionally enforces its 30 MB body limit. */
 export const VOICE_MAX_RECORD_SECONDS = 180;
+/**
+ * Auto-stop fires this far before the hard cap so the recording tail is never
+ * clipped and the client still has budget to transcribe the segment.
+ */
+export const VOICE_AUTO_STOP_LEAD_SECONDS = 5;
 
 export type VoiceRecorder = {
   /** Stops capture and resolves with the recorded WAV. */
@@ -97,8 +102,13 @@ function concatChunks(chunks: Float32Array[]): Float32Array {
 }
 
 export type StartVoiceRecordingOptions = {
-  /** Called when the max-duration timer fires; the caller should stop the recorder. */
+  /** Called when the auto-stop timer fires; the caller should stop the recorder. */
   onAutoStop?: () => void;
+  /**
+   * Called when a mic track ends unexpectedly (e.g. the user revoked microphone
+   * access mid-recording). Never fires for the recorder's own teardown.
+   */
+  onStreamEnded?: () => void;
 };
 
 export async function startVoiceRecording(options: StartVoiceRecordingOptions = {}): Promise<VoiceRecorder> {
@@ -109,15 +119,38 @@ export async function startVoiceRecording(options: StartVoiceRecordingOptions = 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
-  const context = new Ctor({ sampleRate: VOICE_SAMPLE_RATE });
-  const source = context.createMediaStreamSource(stream);
-  const processor = context.createScriptProcessor(4096, 1, 1);
-  // ScriptProcessorNode only fires while connected; route through a muted gain
-  // node so the mic is never played back through the speakers.
-  const mute = context.createGain();
+  let settled = false;
+  // Surface mid-recording mic loss (e.g. permission revoked in site settings)
+  // so the UI can clear the recording indicator. Teardown sets `settled`
+  // first, so the recorder's own stop never triggers this.
+  for (const track of stream.getTracks()) {
+    track.onended = () => {
+      if (!settled) {
+        options.onStreamEnded?.();
+      }
+    };
+  }
+  // Fail-closed: if audio-graph setup throws after the mic was acquired,
+  // release the tracks instead of leaking a live stream.
+  let context: AudioContext;
+  let source: MediaStreamAudioSourceNode;
+  let processor: ScriptProcessorNode;
+  let mute: GainNode;
+  try {
+    context = new Ctor({ sampleRate: VOICE_SAMPLE_RATE });
+    source = context.createMediaStreamSource(stream);
+    processor = context.createScriptProcessor(4096, 1, 1);
+    mute = context.createGain();
+  } catch (error) {
+    for (const track of stream.getTracks()) {
+      track.stop();
+    }
+    throw error;
+  }
+  // Muted gain keeps the ScriptProcessorNode firing without playing the mic
+  // back through the speakers.
   mute.gain.value = 0;
   const chunks: Float32Array[] = [];
-  let settled = false;
   processor.onaudioprocess = event => {
     if (settled) {
       return;
@@ -153,9 +186,14 @@ export async function startVoiceRecording(options: StartVoiceRecordingOptions = 
     const resampled = resampleLinear(mono, { fromRate: context.sampleRate, toRate: VOICE_SAMPLE_RATE });
     return encodeWav(resampled, VOICE_SAMPLE_RATE);
   };
-  const timer = window.setTimeout(() => {
-    options.onAutoStop?.();
-  }, VOICE_MAX_RECORD_SECONDS * 1000);
+  // Auto-stop fires before the hard cap so the tail is never clipped and the
+  // client keeps budget to transcribe the segment.
+  const timer = window.setTimeout(
+    () => {
+      options.onAutoStop?.();
+    },
+    (VOICE_MAX_RECORD_SECONDS - VOICE_AUTO_STOP_LEAD_SECONDS) * 1000,
+  );
 
   return {
     stop: () => {

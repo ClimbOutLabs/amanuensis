@@ -16,6 +16,7 @@ import { readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { readToolOutputScreenSetting } from '../runtime/toolOutputScreenSettings';
 import { isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { checkSnapshotStatus, readPersistedSnapshotStatus } from '../sandbox/providerUtils';
+import { isVoiceAvailable } from '../voice/sttAvailability';
 import type { BuildIdentity, GetCapabilitiesResponseSchema, MemoryDefaultsCapability } from '../schemas/capability';
 import {
   MemoryEmbeddingsCapabilitySchema,
@@ -257,6 +258,7 @@ async function capabilitiesFromSandboxStatus({
     sandbox: { enabled: sandboxEnabled },
     skill: sandboxEnabled ? { enabled: true } : { enabled: false, reason: skillDisabledReason(status) },
     settings: { enabled: isAdmin },
+    voice: { enabled: isVoiceAvailable() },
     memory_screen: await memoryScreenCapability({
       mcpServerStore,
       globalSettingsStore,

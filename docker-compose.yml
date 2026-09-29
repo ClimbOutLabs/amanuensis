@@ -78,7 +78,7 @@ services:
     # The aman-stt sidecar owns cores 16-19 (see below); the server and its
     # in-process embedding workload stay on the remaining cores so a
     # transcription never steals latency from chat. Adjust both pins together
-    # on hosts with a different core count (see docs/voice-input.md).
+    # on hosts with a different core count (see docs/voice-input.mdx).
     cpuset: '0-15'
     # Ports are published by `loopback` above. Compose DNS therefore has no
     # `server` entry; other services reach this one as `loopback`.

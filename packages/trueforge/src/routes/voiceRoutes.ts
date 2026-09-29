@@ -12,10 +12,6 @@ import { RequestErrorResponseSchema } from '../schemas/errors';
 import { VoiceStatusResponseSchema, VoiceTranscriptionResponseSchema } from '../schemas/voice';
 import { OpenApiTag } from './openapiTags';
 
-export const TranscribeVoiceQuerySchema = z.object({
-  language: z.string().trim().min(1).max(16).optional().describe('Optional language hint, e.g. `en`.'),
-});
-
 export const transcribeVoiceRoute = createRoute({
   method: 'post',
   path: '/transcribe',
@@ -26,7 +22,6 @@ export const transcribeVoiceRoute = createRoute({
   'x-fern-sdk-group-name': ['voice'],
   'x-fern-sdk-method-name': 'transcribe',
   request: {
-    query: TranscribeVoiceQuerySchema,
     body: {
       content: {
         'audio/wav': {

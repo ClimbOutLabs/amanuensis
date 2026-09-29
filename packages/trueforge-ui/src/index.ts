@@ -269,7 +269,7 @@ export type { PersonalizationApi, PersonalizationProfile } from './components/Pe
 export { PersonalizationPanel } from './components/PersonalizationPanel.js';
 export type { PersonalizationPanelProps } from './components/PersonalizationPanel.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
-export type { VoiceInputApi, VoiceStatus, VoiceTranscription } from './components/VoiceInputContext.js';
+export type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from './components/VoiceInputContext.js';
 export { AgentStepsContainer } from './containers/AgentStepsContainer.js';
 export type { AgentStepsContainerProps } from './containers/AgentStepsContainer.js';
 export { ApprovalNavContainer } from './containers/ApprovalNavContainer.js';

@@ -11,23 +11,31 @@ import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import type { Logger } from 'winston';
 
-import configuration from '../config';
 import { getVoiceStatusRoute, transcribeVoiceRoute } from '../routes/voiceRoutes';
 import { VoiceTranscriptionSchema, type VoiceStatus, type VoiceTranscription } from '../schemas/voice';
+import { probeSttHealth, sttBaseUrl } from '../voice/sttAvailability';
 
 export interface VoiceRouterDeps {
   logger: Logger;
 }
 
 /**
- * Audio body ceiling. The sidecar only accepts 16 kHz mono 16-bit WAV, which is
- * exactly 32,000 bytes per second, so this byte cap is also a duration cap:
- * 200 seconds, with headroom over the 180 second UI recording cap. Anything
- * larger cannot be a legitimate recording and is rejected before buffering.
+ * Audio body ceiling: 30 MB. The sidecar only accepts 16 kHz mono 16-bit WAV at
+ * 32,000 bytes per second, so this is also a duration cap of about 16 minutes,
+ * with headroom over the 3 minute client-side recording cap. The cap is enforced
+ * while streaming the body, before the full upload is buffered.
  */
-const MAX_AUDIO_BYTES = 200 * 16000 * 2;
-const STT_TRANSCRIBE_TIMEOUT_MS = 120_000;
-const STT_STATUS_TIMEOUT_MS = 2_000;
+const MAX_AUDIO_BYTES = 30 * 1024 * 1024;
+/** Backend-to-sidecar forward timeout; the browser-side timeout is 65s. */
+const STT_TRANSCRIBE_TIMEOUT_MS = 60_000;
+/**
+ * An immediate 503 (sidecar up but the model not warm yet) is retried this many
+ * times, spaced STT_RETRY_DELAY_MS apart, for a retry budget under 10s, well
+ * inside the 65s client timeout. Every other outcome, including a forward
+ * timeout, fails immediately with no retry.
+ */
+const STT_TRANSCRIBE_MAX_ATTEMPTS = 3;
+const STT_RETRY_DELAY_MS = 2_000;
 /** Model label the sidecar serves; reported by /status while the probe succeeds. */
 const STT_MODEL_LABEL = 'whisper-small-int8';
 
@@ -35,10 +43,6 @@ class AudioTooLargeError extends Error {
   constructor() {
     super(`Audio body exceeds the ${String(MAX_AUDIO_BYTES)} byte limit`);
   }
-}
-
-function sttBaseUrl(): string {
-  return configuration.STT_URL.replace(/\/+$/, '');
 }
 
 function errorJson(
@@ -85,25 +89,37 @@ async function readBoundedAudio(c: Context): Promise<Uint8Array> {
   return merged;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 /** Probes the sidecar health endpoint; any failure degrades to unavailable. */
 async function probeStt(logger: Logger): Promise<VoiceStatus> {
-  try {
-    const response = await fetch(`${sttBaseUrl()}/healthz`, {
-      signal: AbortSignal.timeout(STT_STATUS_TIMEOUT_MS),
+  const healthy = await probeSttHealth({ logger });
+  return healthy ? { stt_available: true, model: STT_MODEL_LABEL } : { stt_available: false, model: '' };
+}
+
+/** Resolves after the given delay; backs the bounded 503 retry backoff. */
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * POSTs buffered audio to the sidecar's transcribe endpoint. Only immediate 503
+ * responses are retried; a forward timeout or connection failure rejects and
+ * the caller fails immediately with no retry.
+ */
+async function forwardToSidecar(audio: Uint8Array): Promise<Response> {
+  const url = `${sttBaseUrl()}/v1/transcribe`;
+  for (let attempt = 1; ; attempt += 1) {
+    const upstream = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'audio/wav', 'content-length': String(audio.byteLength) },
+      body: audio,
+      signal: AbortSignal.timeout(STT_TRANSCRIBE_TIMEOUT_MS),
     });
-    if (!response.ok) {
-      return { stt_available: false, model: '' };
+    if (upstream.status !== 503 || attempt >= STT_TRANSCRIBE_MAX_ATTEMPTS) {
+      return upstream;
     }
-    const body: unknown = await response.json();
-    const modelLoaded = isRecord(body) && body['model_loaded'] === true;
-    return modelLoaded ? { stt_available: true, model: STT_MODEL_LABEL } : { stt_available: false, model: '' };
-  } catch (error) {
-    logger.info('voice status probe failed', extractErrorLogFields(error));
-    return { stt_available: false, model: '' };
+    await delay(STT_RETRY_DELAY_MS);
   }
 }
 
@@ -115,7 +131,6 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
 
   const transcribeVoiceHandler: RouteHandler<typeof transcribeVoiceRoute> = async c => {
     const started = performance.now();
-    const { language } = c.req.valid('query');
     const contentType = (c.req.header('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
     if (contentType !== 'audio/wav') {
       return errorJson(c, { status: 400, message: 'Content-Type must be audio/wav', code: 'bad_content_type' });
@@ -134,15 +149,9 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
       return errorJson(c, { status: 400, message: 'Audio body is empty', code: 'empty_audio' });
     }
 
-    const params = language !== undefined ? `?language=${encodeURIComponent(language)}` : '';
     let upstream: Response;
     try {
-      upstream = await fetch(`${sttBaseUrl()}/v1/transcribe${params}`, {
-        method: 'POST',
-        headers: { 'content-type': 'audio/wav', 'content-length': String(audio.byteLength) },
-        body: audio,
-        signal: AbortSignal.timeout(STT_TRANSCRIBE_TIMEOUT_MS),
-      });
+      upstream = await forwardToSidecar(audio);
     } catch (error) {
       deps.logger.warn('voice transcribe failed: sidecar unreachable', extractErrorLogFields(error));
       return errorJson(c, { status: 503, message: 'Speech transcription is unavailable', code: 'stt_unavailable' });
