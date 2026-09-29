@@ -672,6 +672,9 @@ importers:
       katex:
         specifier: 0.18.7
         version: 0.18.7
+      leaflet:
+        specifier: 1.9.4
+        version: 1.9.4
       lucide-react:
         specifier: ^0.577.0
         version: 0.577.0(react@19.3.0)
@@ -745,6 +748,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.3
         version: 16.3.3(@testing-library/dom@10.4.1)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@types/leaflet':
+        specifier: 1.9.12
+        version: 1.9.12
       '@types/mdast':
         specifier: ^4.0.4
         version: 4.0.4
@@ -4456,6 +4462,9 @@ packages:
   '@types/katex@0.16.8':
     resolution: {integrity: sha512-trgaNyfU+Xh2Tc+ABIb44a5AYUpicB3uwirOioeOkNPPbmgRNtcWyDeeFRzjPZENO9Vq8gvVqfhaaXWLlevVwg==}
 
+  '@types/leaflet@1.9.12':
+    resolution: {integrity: sha512-BK7XS+NyRI291HIo0HCfE18Lp8oA30H1gpi1tf0mF3TgiCEzanQjOqNZ4x126SXzzi2oNSZhZ5axJp1k0iM6jg==}
+
   '@types/mdast@4.0.4':
     resolution: {integrity: sha512-kGaNbPh1k7AFzgpud/gMdvIm5xuECykRR+JnWKQno9TAXVa6WIVCGTPvYGekIDL4uwCZQSYbUxNBSb1aUo79oA==}
 
@@ -6917,6 +6926,9 @@ packages:
 
   launch-editor@2.14.1:
     resolution: {integrity: sha512-QWBrQsMpH7gPr965dsKD/3cKWiNoTjpATQf++Xq63N6sKRGMwlVXz41O1IZTMfZQgBctD/K5Zt06+/I6pP6+HA==}
+
+  leaflet@1.9.4:
+    resolution: {integrity: sha512-nxS1ynzJOmOlHp+iL3FyWqK89GtNL8U8rvlMOsQdTTssxZwCXh8N2NB3GDQOL+YR3XnWyZAxwQixURb+FA74PA==}
 
   leven@3.1.0:
     resolution: {integrity: sha512-qsda+H8jTaUaN/x5vzW2rzc+8Rw4TAQ/4KjB46IwK5VH+IlVeeeje/EoZRpiXvIqjFgK84QffqPztGI3VBLG1A==}
@@ -13024,6 +13036,7 @@ snapshots:
 
   '@types/katex@0.16.8': {}
 
+  '@types/leaflet@1.9.12': {}
   '@types/mdast@4.0.4':
     dependencies:
       '@types/unist': 3.0.3
@@ -16043,6 +16056,7 @@ snapshots:
       picocolors: 1.1.1
       shell-quote: 1.10.0
 
+  leaflet@1.9.4: {}
   leven@3.1.0: {}
 
   levn@0.4.1:
