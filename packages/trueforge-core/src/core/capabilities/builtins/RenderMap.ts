@@ -440,6 +440,43 @@ function poiBias(place: GeocodedPlace): SearchBias {
   };
 }
 
+/**
+ * Trims a place query to its trailing comma-separated address portion.
+ * Business names missing from OSM (e.g. "X-Clinic, Av. Engenheiro Duarte
+ * Pacheco 26, Lisboa") poison the full query; the street address alone
+ * often resolves. Returns undefined when there is nothing to trim.
+ */
+function trimToAddress(query: string): string | undefined {
+  const parts = query.split(',').map(p => p.trim()).filter(p => p.length > 0);
+  if (parts.length < 2) {
+    return undefined;
+  }
+  // Drop the leading business/venue name, keep the address portion.
+  const trimmed = parts.slice(1).join(', ');
+  return trimmed.length > 0 && trimmed !== query.trim() ? trimmed : undefined;
+}
+
+/**
+ * Geocodes a query, falling back to the trimmed address portion on not_found.
+ * Returns the outcome and whether the fallback was used.
+ */
+async function geocodeWithFallback(
+  query: string,
+  limit: number,
+  bias?: SearchBias,
+): Promise<{ outcome: NominatimOutcome; usedFallback: boolean }> {
+  const outcome = await searchNominatim(query, limit, bias);
+  if (outcome.kind !== 'results' || outcome.places.length > 0) {
+    return { outcome, usedFallback: false };
+  }
+  const trimmed = trimToAddress(query);
+  if (trimmed === undefined) {
+    return { outcome, usedFallback: false };
+  }
+  const fallback = await searchNominatim(trimmed, limit, bias);
+  return { outcome: fallback, usedFallback: true };
+}
+
 type RouteFetchOutcome =
   | { kind: 'route'; distanceM: number; durationS: number; geometry: string }
   | { kind: 'no_route' }
@@ -529,7 +566,7 @@ export class RenderMap extends LocalToolMCP {
     defineTool({
       name: RENDER_MAP_TOOL_NAME,
       description:
-        "Render an interactive map with a pin for a named place. Pass the place name as the user gave it (e.g. 'Paris', 'Eiffel Tower'). The tool geocodes the name and returns an inline map card. Use when the user explicitly asks to see a place on a map or asks where a place is.",
+        "Render an interactive map with a pin for a named place. Pass the place name as the user gave it (e.g. 'Paris', 'Eiffel Tower'). The tool geocodes the name and returns an inline map card. Use when the user explicitly asks to see a place on a map or asks where a place is. Do not call for a location mentioned in passing. If the user asks for 'nearest X' without naming a place, ask which area to search instead of calling; the tool does not track the user's location.",
       schema: renderMapInputSchema,
       requiresNetwork: true,
       handler: (input: RenderMapInput) => this.renderMap(input),
@@ -537,7 +574,7 @@ export class RenderMap extends LocalToolMCP {
     defineTool({
       name: RENDER_ROUTE_TOOL_NAME,
       description:
-        "Render a route map between two named places. Pass both place names as the user gave them (e.g. from_place 'Madrid', to_place 'Barcelona'). The tool geocodes both endpoints, routes via OSRM, and returns an inline map card with the route polyline, distance, and duration. Use when the user asks for directions between two named places. Both endpoints must be named by the user; there is no current-location mode.",
+        "Render a route map between two named places. Pass both place names as the user gave them (e.g. from_place 'Madrid', to_place 'Barcelona'). The tool geocodes both endpoints, routes via OSRM, and returns an inline map card with the route polyline, distance, and duration. Use when the user asks for directions between two named places. Both endpoints must be named by the user; there is no current-location mode. If the user asks for directions without a starting point, or uses a user-centric shorthand like 'from home' or 'my place', ask for a named starting point instead of calling. Never resolve 'home' to a memorized address.",
       schema: renderRouteInputSchema,
       requiresNetwork: true,
       handler: (input: RenderRouteInput) => this.renderRoute(input),
@@ -549,7 +586,7 @@ export class RenderMap extends LocalToolMCP {
   }
 
   private async renderMap(input: RenderMapInput): Promise<CallToolResponse> {
-    const geocode = await searchNominatim(input.place_name, 1);
+    const { outcome: geocode } = await geocodeWithFallback(input.place_name, 1);
     if (geocode.kind === 'unreachable') {
       return errorPayload({ error: 'service_unavailable' });
     }
@@ -585,21 +622,24 @@ export class RenderMap extends LocalToolMCP {
   }
 
   private async renderRoute(input: RenderRouteInput): Promise<CallToolResponse> {
-    const fromSearch = await searchNominatim(input.from_place, 1);
-    if (fromSearch.kind === 'unreachable') {
-      return errorPayload({ error: 'service_unavailable' });
-    }
-    const [fromPlace] = fromSearch.places;
-    if (fromPlace === undefined) {
-      return errorPayload({ error: 'not_found', field: 'from_place' });
-    }
-    const toSearch = await searchNominatim(input.to_place, 1);
+    // Geocode the destination first so the origin search can be biased to a
+    // viewbox around it. Colloquial origin names ("Rossio square") resolve to
+    // the wrong city without this bias.
+    const { outcome: toSearch } = await geocodeWithFallback(input.to_place, 1);
     if (toSearch.kind === 'unreachable') {
       return errorPayload({ error: 'service_unavailable' });
     }
     const [toPlace] = toSearch.places;
     if (toPlace === undefined) {
       return errorPayload({ error: 'not_found', field: 'to_place' });
+    }
+    const { outcome: fromSearch } = await geocodeWithFallback(input.from_place, 1, poiBias(toPlace));
+    if (fromSearch.kind === 'unreachable') {
+      return errorPayload({ error: 'service_unavailable' });
+    }
+    const [fromPlace] = fromSearch.places;
+    if (fromPlace === undefined) {
+      return errorPayload({ error: 'not_found', field: 'from_place' });
     }
     const route = await fetchRoute({ from: fromPlace, to: toPlace });
     if (route.kind === 'unreachable') {

@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from 'react';
 
+import 'leaflet/dist/leaflet.css';
+
 import { cn } from './lib/cn.js';
 
 export type MapPinView = {
