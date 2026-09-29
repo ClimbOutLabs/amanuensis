@@ -70,10 +70,10 @@ function isErrorPayload(value: unknown): value is ErrorPayload {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const RENDER_MAP_DESCRIPTION =
-  "Render an interactive map with a pin for a named place. Pass the place name as the user gave it (e.g. 'Paris', 'Eiffel Tower'). The tool geocodes the name and returns an inline map card. Use when the user explicitly asks to see a place on a map or asks where a place is.";
+  "Render an interactive map with a pin for a named place. Pass the place name as the user gave it (e.g. 'Paris', 'Eiffel Tower'). The tool geocodes the name and returns an inline map card. Use when the user explicitly asks to see a place on a map or asks where a place is. Do not call for a location mentioned in passing. If the user asks for 'nearest X' without naming a place, ask which area to search instead of calling; the tool does not track the user's location.";
 
 const RENDER_ROUTE_DESCRIPTION =
-  "Render a route map between two named places. Pass both place names as the user gave them (e.g. from_place 'Madrid', to_place 'Barcelona'). The tool geocodes both endpoints, routes via OSRM, and returns an inline map card with the route polyline, distance, and duration. Use when the user asks for directions between two named places. Both endpoints must be named by the user; there is no current-location mode.";
+  "Render a route map between two named places. Pass both place names as the user gave them (e.g. from_place 'Madrid', to_place 'Barcelona'). The tool geocodes both endpoints, routes via OSRM, and returns an inline map card with the route polyline, distance, and duration. Use when the user asks for directions between two named places. Both endpoints must be named by the user; there is no current-location mode. If the user asks for directions without a starting point, or uses a user-centric shorthand like 'from home' or 'my place', ask for a named starting point instead of calling. Never resolve 'home' to a memorized address.";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
