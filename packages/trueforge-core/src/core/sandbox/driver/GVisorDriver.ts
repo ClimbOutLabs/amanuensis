@@ -29,7 +29,7 @@ export type GVisorDriverOptions = Omit<DockerDriverOptions, 'runtime'>;
  * difference is the OCI runtime.
  */
 export class GVisorDriver implements IsolationDriver {
-  readonly kind: 'gvisor' = 'gvisor';
+  readonly kind = 'gvisor';
 
   private readonly inner: DockerDriver;
 
