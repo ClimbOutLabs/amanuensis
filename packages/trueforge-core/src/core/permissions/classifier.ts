@@ -8,6 +8,8 @@
  * stable reason codes, the Tier 3 card when required, Tier 2 matched
  * files/kind, and the tracked-execution approval binding.
  */
+import path from 'path';
+import { realpathSync } from 'fs';
 import {
   actionIdFor,
   normalizeCwd,
@@ -34,6 +36,7 @@ import {
 } from './shellAllowlist';
 import {
   canonicalFileIdentity,
+  canonicalWriteTarget,
   extractExecutedFileOperand,
   isInsideWorkspace,
   sha256FileContent,
@@ -397,6 +400,58 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     const matched = matchAllowlist(parsed, services.shell_allowlist);
     if (matched !== undefined) {
       const identityCwd = resolveIdentityCwd(ctx, cwd);
+      // SECURITY FIX (A2/A3): Verify cwd and all file operands are inside the workspace.
+      // Agent-controlled cwd (e.g. '/etc') or symlink escapes must not get Tier 2.
+      const workspaceRoot = ctx.workspace_cwd;
+      if (workspaceRoot !== null) {
+        const cwdInside = isInsideWorkspace({ p: identityCwd, cwd: '/', workspace_root: workspaceRoot });
+        if (!cwdInside) {
+          return tier3Decision({
+            card: {
+              plain_what: `Run \`${command}\` from outside the workspace.`,
+              plain_why: plainWhy(ctx.agent_intent),
+              cannot_be_undone: 'Running outside the workspace can access system files.',
+              why_asked_again: null,
+              destination: null,
+              recipient: null,
+              amount: null,
+              parsed_command: command,
+            },
+            reason: 'cwd_outside_workspace',
+            reason_detail: 'The working directory is outside the workspace.',
+            sensitive_read: false,
+          });
+        }
+        const files = operandIdentities(parsed, identityCwd);
+        for (const file of files) {
+          // file is already a canonical identity (realpath resolved), check if inside
+          const inside = (() => {
+            try {
+              const root = realpathSync(workspaceRoot);
+              return file === root || file.startsWith(`${root}${path.sep}`);
+            } catch {
+              return false;
+            }
+          })();
+          if (!inside) {
+            return tier3Decision({
+              card: {
+                plain_what: `Access \`${basenameOf(file)}\` outside the workspace.`,
+                plain_why: plainWhy(ctx.agent_intent),
+                cannot_be_undone: 'This file is outside the workspace boundary.',
+                why_asked_again: null,
+                destination: null,
+                recipient: null,
+                amount: null,
+                parsed_command: command,
+              },
+              reason: 'file_outside_workspace',
+              reason_detail: 'A file operand resolves outside the workspace.',
+              sensitive_read: false,
+            });
+          }
+        }
+      }
       const decision = tier2Decision({
         kind: 'shell',
         files: operandIdentities(parsed, identityCwd),
@@ -453,10 +508,19 @@ function mintPlainToken(input: {
 async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const target = stringParam(action.canonical_params, 'path') ?? stringParam(action.canonical_params, 'target');
   const identityCwd = resolveIdentityCwd(ctx, null);
-  const inside =
-    target !== null &&
-    ctx.workspace_cwd !== null &&
-    isInsideWorkspace({ p: target, cwd: identityCwd, workspace_root: ctx.workspace_cwd });
+  // SECURITY FIX (A4): Use canonicalWriteTarget for new files (resolves parent dir).
+  // canonicalFileIdentity returns null for non-existent paths, causing false "outside workspace".
+  const inside = (() => {
+    if (target === null || ctx.workspace_cwd === null) return false;
+    const identity = canonicalWriteTarget({ p: target, cwd: identityCwd });
+    if (identity === null) return false;
+    try {
+      const root = realpathSync(ctx.workspace_cwd);
+      return identity === root || identity.startsWith(`${root}${path.sep}`);
+    } catch {
+      return false;
+    }
+  })();
   if (!inside) {
     return tier3Decision({
       card: {
@@ -479,7 +543,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       }),
     });
   }
-  const identity = canonicalFileIdentity({ p: target, cwd: identityCwd });
+  const identity = canonicalWriteTarget({ p: target, cwd: identityCwd });
   const decision = tier2Decision({
     kind: 'file_write',
     files: identity === null ? [] : [identity],
