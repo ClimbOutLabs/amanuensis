@@ -18,6 +18,7 @@ import {
 } from '../core/runtime/AbnormalHandoff';
 import type { AgentDefinition } from '../core/runtime/AgentDefinition';
 import { AgentThread } from '../core/runtime/AgentThread';
+import { defaultSentinelServices, type SentinelHostContext } from '../core/permissions';
 import type {
   AgentThreadAppendContext,
   AgentThreadSendBatch,
@@ -209,6 +210,20 @@ export class SessionHandle<
 
   get session_id(): string {
     return this.session.session_id;
+  }
+
+  /**
+   * Creates the SentinelHostContext for this session. Session-scoped:
+   * tenant_id, created_by, and conversation_id (mapped from session_id)
+   * come from the authoritative session record.
+   */
+  private createSentinelContext(): SentinelHostContext {
+    return {
+      services: defaultSentinelServices(),
+      tenant_id: this.session.tenant_id,
+      created_by: this.session.created_by_subject.subject_id,
+      conversation_id: this.session.session_id,
+    };
   }
 
   get tenant_id(): string {
@@ -686,6 +701,9 @@ export class SessionHandle<
           previousTurn: input.previous,
           signal: input.signal,
           tracing: input.tracing,
+          tenant_id: this.session.tenant_id,
+          created_by: this.session.created_by_subject.subject_id,
+          session_id: this.session.session_id,
         });
         definitionsByThreadId.set(threadId, resolved);
       }),
@@ -785,6 +803,7 @@ export class SessionHandle<
       toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
       toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
       runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
+      sentinel: this.createSentinelContext(),
     });
   }
 
@@ -812,6 +831,9 @@ export class SessionHandle<
         previousTurn: input.previous,
         signal: params.signal,
         tracing: input.tracing,
+        tenant_id: this.session.tenant_id,
+        created_by: this.session.created_by_subject.subject_id,
+        session_id: this.session.session_id,
       });
       throwIfSignalAborted(params.signal);
       const { definition, extraCapabilities, compactionModel } = resolvedDefinition;
@@ -869,6 +891,7 @@ export class SessionHandle<
         toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
         toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
+        sentinel: this.createSentinelContext(),
       });
     };
   }

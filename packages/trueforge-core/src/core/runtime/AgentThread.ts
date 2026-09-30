@@ -103,6 +103,7 @@ import {
 } from '../mcp/executeToolCalls';
 import { isGithubFileRead } from '../mcp/githubFileContents';
 import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
+import type { SentinelHostContext } from '../permissions';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -1274,6 +1275,7 @@ export class AgentThread {
   private readonly modelFirstResponseTimeoutMs: number;
   private readonly preLLMProcessorsTimeoutMs: number;
   private readonly sandboxRefreshTimeoutMs: number;
+  private readonly sentinel?: SentinelHostContext | undefined;
   private implementationPlanGrants: ReadonlySet<string> = new Set();
   // One user request may span several execute() calls while approvals are
   // resolved. Keep orchestration limits across those continuations; reset only
@@ -1321,6 +1323,7 @@ export class AgentThread {
     this.modelFirstResponseTimeoutMs = input.modelFirstResponseTimeoutMs ?? DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
     this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
     this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
+    this.sentinel = input.sentinel;
     this.toolCallMemo = createToolCallMemoState(input.toolCallMemo);
     this.toolCallMemo.clarificationAnswered = requestHasAnsweredClarification(this.context);
     // A fresh AgentThread is built per turn AND per approval/tool-response
@@ -3117,6 +3120,7 @@ export class AgentThread {
       toolCallTimeoutMs: this.toolCallTimeoutMs,
       runCodeToolCallTimeoutMs: this.runCodeToolCallTimeoutMs,
       logger: this.logger,
+      sentinel: this.sentinel,
     });
     const resultsById = new Map(executedToolCallResults.map(result => [result.message.tool_call_id, result]));
     const toolCallResults = openCalls.flatMap(call => {

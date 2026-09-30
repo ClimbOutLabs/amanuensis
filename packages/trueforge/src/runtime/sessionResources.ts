@@ -688,6 +688,11 @@ export function buildTurnSandbox(input: {
         store: ITurnArtifactStore;
       }
     | undefined;
+  /**
+   * Sentinel permission context for this session. Passed through to Sandbox
+   * for run_code dispatch verification. Undefined means Sentinel is not active.
+   */
+  sentinel?: import('../../core/permissions').SentinelHostContext | undefined;
 }): Sandbox {
   // Empty mounter still uploads requested-skills file so existing skills are cleaned up.
   const skillMounter = new SkillMounter(
@@ -725,6 +730,7 @@ export function buildTurnSandbox(input: {
           }),
     tracing: input.tracing,
     logger: input.logger,
+    sentinel: input.sentinel,
   });
 }
 

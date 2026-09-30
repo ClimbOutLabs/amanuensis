@@ -291,6 +291,12 @@ export interface AgentThreadConstructorInput {
    * back to the core default (DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS).
    */
   sandboxRefreshTimeoutMs?: number | undefined;
+  /**
+   * Sentinel permission context for this session. Stored as an instance field
+   * and passed to executeToolCalls for Tier 3 dispatch verification.
+   * Undefined means Sentinel is not active for this thread.
+   */
+  sentinel?: import('../permissions').SentinelHostContext | undefined;
   tracing: AgentTracing;
   logger: Logger;
 }

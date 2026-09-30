@@ -122,6 +122,9 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
     previousTurn?: TurnRecord<TTurnCustom> | undefined;
     signal: AbortSignal;
     tracing: AgentTracing;
+    tenant_id: string;
+    created_by: string;
+    session_id: string;
   }): Promise<ResolvedAgentDefinition>;
   /**
    * Release per-run resources. Called by the harness at the end of the run:

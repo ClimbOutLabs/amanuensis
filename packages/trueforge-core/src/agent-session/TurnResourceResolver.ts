@@ -5,6 +5,7 @@ import type { ToolSource } from '../core/mcp/IMCPServer';
 import { RemoteMCP, type RemoteMcpHeaders } from '../core/mcp/RemoteMCP';
 import type { ToolSelectorConfig } from '../core/mcp/ToolSelectorPolicy';
 import { ToolSet } from '../core/mcp/ToolSet';
+import { defaultSentinelServices, type SentinelHostContext } from '../core/permissions';
 import type { AgentDefinition, ConfiguredModelSummary, ModelParams } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
@@ -276,8 +277,17 @@ export class TurnResourceResolver<
     previousTurn?: TurnRecord<TTurnCustom> | undefined;
     signal: AbortSignal;
     tracing: AgentTracing;
+    tenant_id: string;
+    created_by: string;
+    session_id: string;
   }): Promise<ResolvedAgentDefinition> {
-    const { spec, agent_info: agentInfo, previousTurn, signal, tracing } = input;
+    const { spec, agent_info: agentInfo, previousTurn, signal, tracing, tenant_id, created_by, session_id } = input;
+    const sentinel: SentinelHostContext = {
+      services: defaultSentinelServices(),
+      tenant_id,
+      created_by,
+      conversation_id: session_id,
+    };
     const toolSets = await Promise.all(
       (spec.mcp_servers ?? []).map(async entry => {
         const source = await this.getOrCreateToolSource({
@@ -302,6 +312,7 @@ export class TurnResourceResolver<
           source,
           selectors: toSelectors(entry),
           preload: entry.preload,
+          sentinel,
         });
       }),
     );
