@@ -1,5 +1,5 @@
 import type { AgentSpec, SessionHandle } from '@truefoundry/trueforge-core/agent-session';
-import type { SentinelHostContext } from '@truefoundry/trueforge-core/core/permissions';
+import type { SentinelHostContext } from '@truefoundry/trueforge-core/core';
 import {
   DockerDriver,
   McpConnectionError,
