@@ -2000,7 +2000,7 @@ describe('resolveCompactionThresholdTokens', () => {
         modelContextLength: 128_000,
         modelParams,
       }),
-    ).toBe(95_232);
+    ).toBe(94_720);
   });
 
   it('prefers max_completion_tokens over max_tokens', () => {
@@ -2010,7 +2010,7 @@ describe('resolveCompactionThresholdTokens', () => {
         modelContextLength: 128_000,
         modelParams: { max_completion_tokens: 32_768, max_tokens: 64_000 },
       }),
-    ).toBe(95_232);
+    ).toBe(94_720);
   });
 
   it('keeps the 80% threshold when it already leaves enough output budget', () => {

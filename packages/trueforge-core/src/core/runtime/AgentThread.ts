@@ -12,6 +12,7 @@ import type {
   PreSendContextProcessor,
 } from '../capabilities/AgentContextProcessor';
 import { ASK_USER_QUESTION_TOOL_NAME } from '../capabilities/builtins/AskUserQuestion';
+import { TOKEN_BUDGET_SAFETY_MARGIN, resolveMaxOutputTokens } from '../capabilities/builtins/ContextCompaction';
 import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTools';
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
@@ -1847,6 +1848,62 @@ export class AgentThread {
     return { ...this.metrics };
   }
 
+  /**
+   * Estimates the full request size in tokens: instruction, definition messages,
+   * context, task state block, and tool definitions. Used by the token-based
+   * pre-flight guard to decide whether compaction must run before the request
+   * is assembled. Mirrors the message assembly in transformToLLMRequest without
+   * building the full request body.
+   *
+   * Context messages are estimated text-only (see contextMessageTextTokens):
+   * toOpenAIChatMessage preserves image_url / input_audio / file parts with
+   * their full base64 payloads, which the length/4 heuristic would inflate
+   * wildly (a 1MB image reads as ~340k tokens) while the provider does not
+   * bill those bytes as text tokens.
+   *
+   * Bails out early once the running total already exceeds `limit`: this runs on
+   * every turn, and precision past the guard threshold buys nothing. Pass
+   * Number.POSITIVE_INFINITY when the full estimate is needed (for example for
+   * the fail-fast error message).
+   */
+  private estimateFullRequestTokens(tools: ChatCompletionTool[], limit: number): number {
+    let total = 0;
+    if (this.instruction) {
+      total += estimateTokensForString(this.instruction);
+      if (total > limit) {
+        return total;
+      }
+    }
+    if (this.definition.messages) {
+      for (const msg of this.definition.messages) {
+        if (isLLMContextMessage(msg)) {
+          total += estimateTokensForString(JSON.stringify(msg));
+          if (total > limit) {
+            return total;
+          }
+        }
+      }
+    }
+    for (const message of this.context) {
+      total += contextMessageTextTokens(message);
+      if (total > limit) {
+        return total;
+      }
+    }
+    const taskStateBlock = renderTaskStateBlock({
+      state: this.taskState,
+      budget: this.definition.toolCallBudget,
+    });
+    if (taskStateBlock !== null) {
+      total += estimateTokensForString(taskStateBlock);
+      if (total > limit) {
+        return total;
+      }
+    }
+    total += estimateTokensForString(JSON.stringify(tools));
+    return total;
+  }
+
   private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
     // A long-running thread can cross UTC midnight between LLM steps. Within a
     // day the rebuilt string is byte-identical, so prefix caching is untouched;
@@ -2370,8 +2427,20 @@ export class AgentThread {
     // The pre-LLM processors run behind a no-progress watchdog: a processor that
     // stalls without yielding (and without erroring) must fail the turn visibly,
     // not hang it.
+    // Whether a compaction pass already ran in this turn's normal pre-LLM
+    // processing. Forcing a second full LLM compaction pass in the same turn
+    // would re-summarize a fresh summary (diminishing returns, real information
+    // loss, extra latency), so the pre-flight guards below skip their forced
+    // pass when one already ran and fail clearly instead.
+    let compactedThisTurn = false;
     try {
       for await (const event of this.executePreLLMProcessorsWithTimeout(signal)) {
+        if (
+          event.type === EventType.AGENT_CONTEXT_COMPACTION &&
+          (event.outcome === 'applied' || event.outcome === 'truncated_fallback')
+        ) {
+          compactedThisTurn = true;
+        }
         yield event;
       }
     } catch (error) {
@@ -2427,11 +2496,15 @@ export class AgentThread {
     // the ceiling, force one compaction pass; if it is still past the ceiling after
     // that, fail fast instead of blocking the event loop on a doomed assembly.
     if (estimateRawContextTextLength(this.context) > MAX_MODEL_REQUEST_CHARS) {
-      for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
-        yield event;
-      }
-      if (signal?.aborted) {
-        return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+      // No double compaction in one turn: the normal pre-LLM pass above already
+      // compacted, so a second forced pass would re-summarize a fresh summary.
+      if (!compactedThisTurn) {
+        for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
+          yield event;
+        }
+        if (signal?.aborted) {
+          return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+        }
       }
       const postCompactionLength = estimateRawContextTextLength(this.context);
       if (postCompactionLength > MAX_MODEL_REQUEST_CHARS) {
@@ -2441,6 +2514,48 @@ export class AgentThread {
             `compaction; refusing to assemble a request that would hang or fail in provider prefill. ` +
             `Start a new chat or reduce the context and try again.`,
         );
+      }
+    }
+
+    // Token-based pre-flight guard: the character ceiling above does not account for
+    // the model's token context limit. Estimate the full request in tokens
+    // (instruction + definition messages + context + task state + tool definitions)
+    // and force compaction if input tokens plus reserved output tokens would reach
+    // the context length. The safety margin covers additive overhead on top of the
+    // estimate (provider-added BOS token, template overhead, post-compaction
+    // instruction/task-state messages); see TOKEN_BUDGET_SAFETY_MARGIN for its scope
+    // and known limitations.
+    const modelContextLength = this.definition.modelProperties?.contextLength;
+    if (typeof modelContextLength === 'number' && Number.isFinite(modelContextLength) && modelContextLength > 0) {
+      const maxOutputTokens = resolveMaxOutputTokens(this.definition.modelParams) ?? 0;
+      const inputTokenBudget = modelContextLength - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN;
+      const isOverLimit = (estimatedInputTokens: number): boolean =>
+        estimatedInputTokens + maxOutputTokens + TOKEN_BUDGET_SAFETY_MARGIN >= modelContextLength;
+      // The estimate bails out at the budget: precision past it cannot change the guard.
+      const estimatedInputTokens = this.estimateFullRequestTokens(tools, inputTokenBudget);
+      if (isOverLimit(estimatedInputTokens)) {
+        // No double compaction in one turn: when the normal pre-LLM pass above
+        // already compacted, skip the forced pass and fail clearly if the
+        // estimate is still over, instead of re-summarizing a fresh summary.
+        if (!compactedThisTurn) {
+          for await (const event of this.executeContextProcessors('preLLM', signal, { forceCompaction: true })) {
+            yield event;
+          }
+          if (signal?.aborted) {
+            return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+          }
+        }
+        // Full-precision estimate for the error message: the early exit above
+        // reports only a lower bound once past the budget.
+        const postCompactionTokens = this.estimateFullRequestTokens(tools, Number.POSITIVE_INFINITY);
+        if (isOverLimit(postCompactionTokens)) {
+          throw new Error(
+            `Estimated request is ${Math.ceil(postCompactionTokens).toLocaleString('en-US')} input tokens, above the ` +
+              `${modelContextLength.toLocaleString('en-US')}-token context limit even after compaction; ` +
+              `refusing to send a request the provider would reject. ` +
+              `Start a new chat or reduce the context and try again.`,
+          );
+        }
       }
     }
 
@@ -3829,27 +3944,47 @@ export class AgentThread {
  * giant context compacts first (or fails fast) instead of blocking the event loop
  * inside the synchronous request assembly.
  */
+/**
+ * Text-only character length of one context message: string content as-is, and only
+ * `text` parts of multipart content. Binary/base64 payloads in image_url,
+ * input_audio, and file parts are deliberately skipped: the length/4 token
+ * heuristic would inflate them wildly (a 1MB image reads as ~340k tokens)
+ * while the provider does not bill those bytes as text tokens.
+ */
+function contextMessageTextLength(message: ContextMessage): number {
+  if (!isLLMContextMessage(message)) {
+    return 0;
+  }
+  const content: unknown = message.content;
+  if (typeof content === 'string') {
+    return content.length;
+  }
+  if (Array.isArray(content)) {
+    let total = 0;
+    for (const part of content) {
+      if (
+        typeof part === 'object' &&
+        part !== null &&
+        (part as { type?: unknown }).type === 'text' &&
+        typeof (part as { text?: unknown }).text === 'string'
+      ) {
+        total += (part as { text: string }).text.length;
+      }
+    }
+    return total;
+  }
+  return 0;
+}
+
+/** Token estimate for one context message counting text only; see contextMessageTextLength. */
+function contextMessageTextTokens(message: ContextMessage): number {
+  return contextMessageTextLength(message) / 4;
+}
+
 function estimateRawContextTextLength(context: readonly ContextMessage[]): number {
   let total = 0;
   for (const message of context) {
-    if (!isLLMContextMessage(message)) {
-      continue;
-    }
-    const content: unknown = message.content;
-    if (typeof content === 'string') {
-      total += content.length;
-    } else if (Array.isArray(content)) {
-      for (const part of content) {
-        if (
-          typeof part === 'object' &&
-          part !== null &&
-          (part as { type?: unknown }).type === 'text' &&
-          typeof (part as { text?: unknown }).text === 'string'
-        ) {
-          total += (part as { text: string }).text.length;
-        }
-      }
-    }
+    total += contextMessageTextLength(message);
     // Early exit: precision past the ceiling buys nothing.
     if (total > MAX_MODEL_REQUEST_CHARS) {
       return total;
