@@ -1,4 +1,5 @@
 import type { AgentSpec, SessionHandle } from '@truefoundry/trueforge-core/agent-session';
+import type { SentinelHostContext } from '@truefoundry/trueforge-core/core/permissions';
 import {
   DockerDriver,
   McpConnectionError,
@@ -692,7 +693,7 @@ export function buildTurnSandbox(input: {
    * Sentinel permission context for this session. Passed through to Sandbox
    * for run_code dispatch verification. Undefined means Sentinel is not active.
    */
-  sentinel?: import('../../core/permissions').SentinelHostContext | undefined;
+  sentinel?: SentinelHostContext | undefined;
 }): Sandbox {
   // Empty mounter still uploads requested-skills file so existing skills are cleaned up.
   const skillMounter = new SkillMounter(

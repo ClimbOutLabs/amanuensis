@@ -35,6 +35,9 @@ export interface SentinelCallIdentity {
   agent_intent: string | null;
 }
 
+/** Default pinned PATH for unconfigured servers. Matches the fallback in classifyContextFor. */
+export const DEFAULT_PINNED_PATH = '/usr/bin:/bin';
+
 /** Default services for tests and unconfigured servers. */
 export function defaultSentinelServices(input: { pinned_path: string }): SentinelServices {
   return {
@@ -77,7 +80,7 @@ export function createSentinelHostContext(input: {
   services?: SentinelServices | undefined;
 }): SentinelHostContext {
   return {
-    services: input.services ?? defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    services: input.services ?? defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     tenant_id: input.tenant_id,
     created_by: input.created_by,
     conversation_id: input.conversation_id,
@@ -126,7 +129,7 @@ export function classifyContextFor(input: {
 } {
   const host = input.host;
   return {
-    services: host?.services ?? defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    services: host?.services ?? defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     tenant_id: host?.tenant_id ?? '',
     created_by: host?.created_by ?? '',
     conversation_id: host?.conversation_id ?? '',

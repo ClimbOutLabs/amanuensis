@@ -18,7 +18,7 @@ import {
 } from '../core/runtime/AbnormalHandoff';
 import type { AgentDefinition } from '../core/runtime/AgentDefinition';
 import { AgentThread } from '../core/runtime/AgentThread';
-import { defaultSentinelServices, createSentinelHostContext, type SentinelHostContext, type SentinelServices } from '../core/permissions';
+import { defaultSentinelServices, createSentinelHostContext, DEFAULT_PINNED_PATH, type SentinelHostContext, type SentinelServices } from '../core/permissions';
 import type {
   AgentThreadAppendContext,
   AgentThreadSendBatch,
@@ -212,7 +212,7 @@ export class SessionHandle<
   constructor(options: { store: ISessionStore<TSessionCustom, TTurnCustom>; session: SessionRecord<TSessionCustom> }) {
     this.store = options.store;
     this.session = options.session;
-    this.sentinelServices = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    this.sentinelServices = defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH });
   }
 
   get session_id(): string {
