@@ -30,6 +30,7 @@ import {
   VercelAILLM,
   type BoundRepository,
 } from '@truefoundry/trueforge-core/core';
+import { createSentinelHostContext } from '@truefoundry/trueforge-core/core/permissions';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { streamSSE } from 'hono/streaming';
@@ -444,6 +445,11 @@ function createTurnResolver(deps: {
           fileDownloadEnabled: spec.config.sandbox.file_downloads,
           existingSandboxId: carriedSandboxId,
           boundRepository,
+          sentinel: createSentinelHostContext({
+            tenant_id,
+            created_by: userRef,
+            conversation_id: sessionId,
+          }),
           loadBoundRepository:
             boundRepository === undefined
               ? undefined
