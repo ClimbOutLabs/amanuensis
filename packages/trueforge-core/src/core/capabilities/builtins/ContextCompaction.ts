@@ -24,6 +24,7 @@ import {
 } from '../../sandbox/Sandbox';
 import { awaitWithAbort, throwIfSignalAborted } from '../../util/abort';
 import type { AgentCapability, JsonValue } from '../AgentCapability';
+import { TOKEN_BUDGET_SAFETY_MARGIN } from './tokenBudgetConstants';
 import type {
   AgentContextProcessorCompactionEvent,
   AgentContextProcessorOutput,
@@ -65,8 +66,10 @@ export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
  * tokens on a 128k model; the estimator is not script-aware and neither the
  * margin nor the pre-flight guard catches that case. Treat the margin as
  * additive-overhead cover, not estimator-accuracy cover.
+ *
+ * Defined in ./tokenBudgetConstants.ts (leaf module) so UI clients can import
+ * it without pulling in this module's dependency graph.
  */
-export const TOKEN_BUDGET_SAFETY_MARGIN = 512;
 
 /**
  * Content-free structural diagnostic for validation failures (spec 002 REQ-1, security-hardened).

@@ -15,6 +15,7 @@ function stubStatus(overrides: Partial<ReturnType<typeof useCompactionStatus>>):
   mockedStatus.mockReturnValue({
     contextLimit: null,
     liveTokens: null,
+    maxOutputTokens: null,
     lastCompaction: null,
     loading: false,
     ...overrides,
@@ -80,5 +81,49 @@ describe('CompactionStatusLine token labels', () => {
     stubStatus({ contextLimit: 256000 });
     render(<CompactionStatusLine />);
     expect(screen.getByText('256k token limit')).toBeDefined();
+  });
+
+  it('falls back to used-over-limit when output reservation is unknown', () => {
+    stubStatus({ liveTokens: 77200, contextLimit: 256000, maxOutputTokens: null });
+    render(<CompactionStatusLine />);
+    expect(screen.getByText('77.2k / 256k tokens')).toBeDefined();
+  });
+});
+
+describe('CompactionStatusLine token budget', () => {
+  it('shows input, output, and free breakdown when all values are known', () => {
+    stubStatus({ liveTokens: 77200, contextLimit: 131072, maxOutputTokens: 32768 });
+    render(<CompactionStatusLine />);
+    // 131072 - 77200 - 32768 - 512 (safety margin) = 20592 free
+    expect(screen.getByText('77.2k / 131k input · 32.8k output · 20.6k free')).toBeDefined();
+  });
+
+  it('clamps free budget at zero when over budget', () => {
+    stubStatus({ liveTokens: 120000, contextLimit: 131072, maxOutputTokens: 32768 });
+    render(<CompactionStatusLine />);
+    expect(screen.getByText('120k / 131k input · 32.8k output · 0 free')).toBeDefined();
+  });
+
+  it('renders a stacked bar with input and output segments', () => {
+    stubStatus({ liveTokens: 65536, contextLimit: 131072, maxOutputTokens: 32768 });
+    const { container } = render(<CompactionStatusLine />);
+    const bar = container.querySelector('[role="img"]');
+    expect(bar).not.toBeNull();
+    const segments = bar?.querySelectorAll(':scope > div > div');
+    expect(segments?.length).toBe(2);
+    const inputSegment = segments?.[0];
+    const outputSegment = segments?.[1];
+    expect(inputSegment).not.toBeUndefined();
+    expect(outputSegment).not.toBeUndefined();
+    // input segment: 65536/131072 = 50%
+    expect(inputSegment?.getAttribute('style')).toContain('width: 50%');
+    // output segment: 32768/131072 = 25%
+    expect(outputSegment?.getAttribute('style')).toContain('width: 25%');
+  });
+
+  it('omits the bar when output reservation is unknown', () => {
+    stubStatus({ liveTokens: 77200, contextLimit: 131072, maxOutputTokens: null });
+    const { container } = render(<CompactionStatusLine />);
+    expect(container.querySelector('[role="img"]')).toBeNull();
   });
 });

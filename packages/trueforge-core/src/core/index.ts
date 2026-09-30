@@ -79,6 +79,7 @@ export {
   replaceBoundRepositorySection,
   validateCompactionSummary,
 } from './capabilities/builtins/ContextCompaction';
+export { TOKEN_BUDGET_SAFETY_MARGIN } from './capabilities/builtins/tokenBudgetConstants';
 export type { CompactionSessionMode } from './capabilities/builtins/ContextCompaction';
 export { currentDateTime } from './capabilities/builtins/CurrentDateTime';
 export { SUB_AGENT_IDENTITY, dynamicSubAgents } from './capabilities/builtins/DynamicSubAgents';
