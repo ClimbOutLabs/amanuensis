@@ -26,7 +26,6 @@ import {
   sha256FileContent,
   splitWordsLenient,
   canonicalFileIdentity,
-  isInsideWorkspace,
 } from './trackedExecutables';
 import { realpathSync } from 'node:fs';
 import { requiresNetwork, provenanceForToolType } from './networkRequirements';
