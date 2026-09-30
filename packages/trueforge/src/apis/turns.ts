@@ -435,6 +435,10 @@ function createTurnResolver(deps: {
           spec,
           store: mcpServerStore,
         });
+        const sentinelSession = await sessionStore.getSession({
+          tenant_id,
+          session_id: sessionId,
+        });
         return buildTurnSandbox({
           provider,
           logger,
@@ -449,6 +453,7 @@ function createTurnResolver(deps: {
             tenant_id,
             created_by: userRef,
             conversation_id: sessionId,
+            workspace_cwd: sentinelSession?.workspace_cwd ?? null,
           }),
           loadBoundRepository:
             boundRepository === undefined

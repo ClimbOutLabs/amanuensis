@@ -57,6 +57,8 @@ export interface SentinelHostContext {
   created_by: string;
   /** Session id: purges tracked grants on teardown. */
   conversation_id: string;
+  /** Workspace root for boundary checks; null when the session has no workspace. */
+  workspace_cwd: string | null;
 }
 
 /**
@@ -71,6 +73,7 @@ export function createSentinelHostContext(input: {
   tenant_id: string;
   created_by: string;
   conversation_id: string;
+  workspace_cwd?: string | null | undefined;
   services?: SentinelServices | undefined;
 }): SentinelHostContext {
   return {
@@ -78,6 +81,7 @@ export function createSentinelHostContext(input: {
     tenant_id: input.tenant_id,
     created_by: input.created_by,
     conversation_id: input.conversation_id,
+    workspace_cwd: input.workspace_cwd ?? null,
   };
 }
 
@@ -99,7 +103,7 @@ export function toDispatchSentinelContext(
       created_by: host.created_by,
       conversation_id: host.conversation_id,
       repository_id: null,
-      workspace_cwd: null,
+      workspace_cwd: host.workspace_cwd,
       agent_intent: null,
     },
   };

@@ -281,7 +281,7 @@ export class ToolSet implements IToolSet {
     const classifyCtx: ClassifyContext = classifyContextFor({
       host: sentinel,
       repository_id: null,
-      workspace_cwd: null,
+      workspace_cwd: sentinel.workspace_cwd,
     });
     const identity = {
       tenant_id: classifyCtx.tenant_id,

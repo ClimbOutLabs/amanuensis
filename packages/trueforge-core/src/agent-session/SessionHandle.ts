@@ -231,6 +231,7 @@ export class SessionHandle<
       tenant_id: this.session.tenant_id,
       created_by: this.session.created_by_subject.subject_id,
       conversation_id: this.session.session_id,
+      workspace_cwd: this.session.workspace_cwd ?? null,
     });
   }
 
@@ -713,6 +714,7 @@ export class SessionHandle<
           created_by: this.session.created_by_subject.subject_id,
           session_id: this.session.session_id,
           sentinel_services: this.sentinelServices,
+          workspace_cwd: this.session.workspace_cwd ?? null,
         });
         definitionsByThreadId.set(threadId, resolved);
       }),
@@ -844,6 +846,7 @@ export class SessionHandle<
         created_by: this.session.created_by_subject.subject_id,
         session_id: this.session.session_id,
         sentinel_services: this.sentinelServices,
+        workspace_cwd: this.session.workspace_cwd ?? null,
       });
       throwIfSignalAborted(params.signal);
       const { definition, extraCapabilities, compactionModel } = resolvedDefinition;

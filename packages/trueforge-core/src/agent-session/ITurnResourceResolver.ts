@@ -131,6 +131,8 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
      * and approval tokens are shared across threads in the session.
      */
     sentinel_services?: import('../core/permissions').SentinelServices | undefined;
+    /** Workspace root for classifier boundary checks; null when none. */
+    workspace_cwd?: string | null | undefined;
   }): Promise<ResolvedAgentDefinition>;
   /**
    * Release per-run resources. Called by the harness at the end of the run:

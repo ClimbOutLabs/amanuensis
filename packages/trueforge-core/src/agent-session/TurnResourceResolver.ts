@@ -281,13 +281,15 @@ export class TurnResourceResolver<
     created_by: string;
     session_id: string;
     sentinel_services?: SentinelServices | undefined;
+    workspace_cwd?: string | null | undefined;
   }): Promise<ResolvedAgentDefinition> {
-    const { spec, agent_info: agentInfo, previousTurn, signal, tracing, tenant_id, created_by, session_id, sentinel_services } = input;
+    const { spec, agent_info: agentInfo, previousTurn, signal, tracing, tenant_id, created_by, session_id, sentinel_services, workspace_cwd } = input;
     const sentinel: SentinelHostContext = createSentinelHostContext({
       services: sentinel_services,
       tenant_id,
       created_by,
       conversation_id: session_id,
+      workspace_cwd: workspace_cwd ?? null,
     });
     const toolSets = await Promise.all(
       (spec.mcp_servers ?? []).map(async entry => {
