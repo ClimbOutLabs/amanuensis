@@ -12,7 +12,8 @@ import type {
   PreSendContextProcessor,
 } from '../capabilities/AgentContextProcessor';
 import { ASK_USER_QUESTION_TOOL_NAME } from '../capabilities/builtins/AskUserQuestion';
-import { TOKEN_BUDGET_SAFETY_MARGIN, resolveMaxOutputTokens } from '../capabilities/builtins/ContextCompaction';
+import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
+import { resolveMaxOutputTokens } from '../capabilities/builtins/ContextCompaction';
 import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTools';
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
