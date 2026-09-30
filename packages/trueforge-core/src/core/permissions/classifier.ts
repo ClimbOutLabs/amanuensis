@@ -269,6 +269,26 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   const env = envOverrides(action.canonical_params);
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
 
+  // SECURITY FIX: Agent-controlled env vars (e.g. LD_PRELOAD, PYTHONPATH, NODE_OPTIONS)
+  // can inject code into allowlisted commands. Escalate to Tier 3 for approval.
+  if (env !== undefined && Object.keys(env).length > 0) {
+    return tier3Decision({
+      card: {
+        plain_what: `Run \`${command}\` with custom environment variables.`,
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: 'Environment variables like LD_PRELOAD can inject code into the command.',
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: command,
+      },
+      reason: 'env_overrides_present',
+      reason_detail: 'Custom environment variables require approval.',
+      sensitive_read: false,
+    });
+  }
+
   // Offline: only the explicit offline subset of the allowlist may run.
   if (offline) {
     const parsed = parseSimpleCommand(command);
@@ -472,14 +492,25 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
 
 async function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const workflowParam = action.canonical_params['workflow'];
-  const decision = tier2Decision({
-    kind: 'runner',
-    files: [],
+  const workflowName = typeof workflowParam === 'string' ? workflowParam : 'unknown';
+  // SECURITY FIX: Runner workflows execute agent-controlled package.json scripts/Makefile
+  // targets. Tier 2 is non-blocking, allowing arbitrary code execution without approval.
+  // Escalate to Tier 3 until a real stop control exists.
+  return tier3Decision({
+    card: {
+      plain_what: `Run the \`${workflowName}\` workflow (executes package.json scripts).`,
+      plain_why: plainWhy(ctx.agent_intent),
+      cannot_be_undone: 'The workflow runs scripts that the agent can modify.',
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: `pnpm ${workflowName}`,
+    },
     reason: 'runner_workflow',
-    reason_detail: `Run the \`${typeof workflowParam === 'string' ? workflowParam : 'unknown'}\` workflow.`,
+    reason_detail: `Run the \`${workflowName}\` workflow requires approval.`,
     sensitive_read: false,
   });
-  return applyAlwaysAsk({ decision, kind: 'runner', ctx, action });
 }
 
 /** Tier 2 decision escalated to Tier 3 by the user's "always ask me" toggle. */
@@ -691,7 +722,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
 export async function classifyTier(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const name = action.tool_name;
 
-  if (action.tool_type === 'truefoundry-system' || name === 'exec') {
+  // SECURITY FIX: Only the verified system exec tool gets the allowlist path.
+  // An MCP tool named 'exec' must not be downgraded to Tier 2; it falls through
+  // to the fail-closed Tier 3 default below.
+  if (action.tool_type === 'truefoundry-system') {
     if (name === 'exec') {
       return classifyExecShell(action, ctx);
     }
