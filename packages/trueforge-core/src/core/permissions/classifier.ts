@@ -274,7 +274,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
 
   // SECURITY FIX: Agent-controlled env vars (e.g. LD_PRELOAD, PYTHONPATH, NODE_OPTIONS)
   // can inject code into allowlisted commands. Escalate to Tier 3 for approval.
-  if (env !== undefined && Object.keys(env).length > 0) {
+  if (env !== null && Object.keys(env).length > 0) {
     return tier3Decision({
       card: {
         plain_what: `Run \`${command}\` with custom environment variables.`,
@@ -535,6 +535,28 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       },
       reason: 'write_outside_workspace',
       reason_detail: 'Write targets outside the workspace are never Tier 2.',
+      sensitive_read: false,
+      approval_token_id: mintPlainToken({
+        services: ctx.services,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+      }),
+    });
+  }
+  if (target === null) {
+    return tier3Decision({
+      card: {
+        plain_what: 'Write a file with an unresolvable target.',
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: 'The write target could not be resolved.',
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: null,
+      },
+      reason: 'unresolvable_write_target',
+      reason_detail: 'Write target is null after workspace check.',
       sensitive_read: false,
       approval_token_id: mintPlainToken({
         services: ctx.services,
