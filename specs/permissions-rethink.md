@@ -172,7 +172,3 @@ The tier classifier (`packages/trueforge-core/src/core/permissions/classifier.ts
 4. **Lifecycle:** Session-scoped. Create on session start (or lazily on first tool call). Tracked grants purged on teardown. Approval tokens expire via TTL.
 
 **Security note:** The sub-agent paths (`makeCreateDynamicSubAgentThread`) must be wired. Without them, Tier 3 operations could execute via delegated sub-agents with no approval gate.
-
-### Hard Rules
-
-- **No spaghetti code** (Sep 30, 2026): Quick hacks, hardcoded defaults, duplicated logic, and context threaded through layers it doesn't belong in are all spaghetti. The EFFICIENCY/CODE QUALITY reviewer explicitly checks for this. If a fix needs architectural design, stop and design; do not patch around it.
