@@ -550,10 +550,32 @@ function mintPlainToken(input: {
 async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const target = stringParam(action.canonical_params, 'path') ?? stringParam(action.canonical_params, 'target');
   const identityCwd = resolveIdentityCwd(ctx, null);
+  // Fail closed on null target or missing workspace: treat as outside workspace.
+  if (target === null || ctx.workspace_cwd === null) {
+    return tier3Decision({
+      card: {
+        plain_what: 'Write a file outside the workspace.',
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: 'The file will exist outside the workspace once written.',
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: null,
+      },
+      reason: 'write_outside_workspace',
+      reason_detail: 'Write target is null or workspace is unknown.',
+      sensitive_read: false,
+      approval_token_id: mintPlainToken({
+        services: ctx.services,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+      }),
+    });
+  }
   // SECURITY FIX (A4): Use canonicalWriteTarget for new files (resolves parent dir).
   // canonicalFileIdentity returns null for non-existent paths, causing false "outside workspace".
   const inside = (() => {
-    if (target === null || ctx.workspace_cwd === null) return false;
     const identity = canonicalWriteTarget({ p: target, cwd: identityCwd });
     if (identity === null) return false;
     try {
@@ -566,7 +588,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   if (!inside) {
     return tier3Decision({
       card: {
-        plain_what: `Write a file outside the workspace${target === null ? '' : ` at \`${target}\``}.`,
+        plain_what: `Write a file outside the workspace at \`${target}\`.`,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: 'The file will exist outside the workspace once written.',
         why_asked_again: null,
@@ -585,16 +607,15 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       }),
     });
   }
-  // `inside` is true only when target !== null and the resolved path is in the
-  // workspace (see the IIFE above). TypeScript cannot infer this, so assert.
-  const targetPath: string = target as string;
-  const identity = canonicalWriteTarget({ p: targetPath, cwd: identityCwd });
+  // `target` is `string` (not null) here: the early return above guarantees it.
+  // `inside` is true, so the path is in the workspace.
+  const identity = canonicalWriteTarget({ p: target, cwd: identityCwd });
   const decision = tier2Decision({
     kind: 'file_write',
     files: identity === null ? [] : [identity],
     reason: 'sandbox_write',
-    reason_detail: `Sandbox file write to \`${targetPath}\`.`,
-    sensitive_read: isSensitivePath(targetPath),
+    reason_detail: `Sandbox file write to \`${target}\`.`,
+    sensitive_read: isSensitivePath(target),
   });
   return applyAlwaysAsk({ decision, kind: 'file_write', ctx, action });
 }
