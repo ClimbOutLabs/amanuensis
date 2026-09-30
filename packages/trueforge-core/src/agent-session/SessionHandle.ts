@@ -18,7 +18,7 @@ import {
 } from '../core/runtime/AbnormalHandoff';
 import type { AgentDefinition } from '../core/runtime/AgentDefinition';
 import { AgentThread } from '../core/runtime/AgentThread';
-import { defaultSentinelServices, type SentinelHostContext } from '../core/permissions';
+import { defaultSentinelServices, createSentinelHostContext, type SentinelHostContext, type SentinelServices } from '../core/permissions';
 import type {
   AgentThreadAppendContext,
   AgentThreadSendBatch,
@@ -202,10 +202,17 @@ export class SessionHandle<
 > {
   private readonly store: ISessionStore<TSessionCustom, TTurnCustom>;
   private session: SessionRecord<TSessionCustom>;
+  /**
+   * Session-scoped Sentinel services. Created once per SessionHandle so
+   * tracked-executable grants and approval tokens are shared across the
+   * main thread, sub-agent threads, and ToolSet batches within the session.
+   */
+  private readonly sentinelServices: SentinelServices;
 
   constructor(options: { store: ISessionStore<TSessionCustom, TTurnCustom>; session: SessionRecord<TSessionCustom> }) {
     this.store = options.store;
     this.session = options.session;
+    this.sentinelServices = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
   }
 
   get session_id(): string {
@@ -215,15 +222,16 @@ export class SessionHandle<
   /**
    * Creates the SentinelHostContext for this session. Session-scoped:
    * tenant_id, created_by, and conversation_id (mapped from session_id)
-   * come from the authoritative session record.
+   * come from the authoritative session record. Services are the session's
+   * shared instance so grants and tokens are visible across threads.
    */
   private createSentinelContext(): SentinelHostContext {
-    return {
-      services: defaultSentinelServices(),
+    return createSentinelHostContext({
+      services: this.sentinelServices,
       tenant_id: this.session.tenant_id,
       created_by: this.session.created_by_subject.subject_id,
       conversation_id: this.session.session_id,
-    };
+    });
   }
 
   get tenant_id(): string {
@@ -704,6 +712,7 @@ export class SessionHandle<
           tenant_id: this.session.tenant_id,
           created_by: this.session.created_by_subject.subject_id,
           session_id: this.session.session_id,
+          sentinel_services: this.sentinelServices,
         });
         definitionsByThreadId.set(threadId, resolved);
       }),
@@ -834,6 +843,7 @@ export class SessionHandle<
         tenant_id: this.session.tenant_id,
         created_by: this.session.created_by_subject.subject_id,
         session_id: this.session.session_id,
+        sentinel_services: this.sentinelServices,
       });
       throwIfSignalAborted(params.signal);
       const { definition, extraCapabilities, compactionModel } = resolvedDefinition;

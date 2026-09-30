@@ -2,6 +2,7 @@ import type { Logger } from 'winston';
 import { z } from 'zod';
 import type { AgentCapability, CapabilityState, JsonValue } from '../capabilities/AgentCapability';
 import type { RegisteredPassthroughEvent, WithRegisteredPassthrough } from '../events/PassthroughEvents';
+import type { SentinelHostContext } from '../permissions';
 import type {
   ActionRequiredEvent,
   AgentApprovalDecisionMessage,
@@ -296,7 +297,7 @@ export interface AgentThreadConstructorInput {
    * and passed to executeToolCalls for Tier 3 dispatch verification.
    * Undefined means Sentinel is not active for this thread.
    */
-  sentinel?: import('../permissions').SentinelHostContext | undefined;
+  sentinel?: SentinelHostContext | undefined;
   tracing: AgentTracing;
   logger: Logger;
 }

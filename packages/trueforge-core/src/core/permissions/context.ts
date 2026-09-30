@@ -59,6 +59,28 @@ export interface SentinelHostContext {
   conversation_id: string;
 }
 
+/**
+ * Canonical factory for SentinelHostContext. Use this instead of building
+ * the object literal inline, so all call sites share one construction path.
+ *
+ * When services are omitted, defaults are used (same as classifyContextFor).
+ * For session-scoped sharing (tracked grants, approval tokens visible across
+ * threads), pass the session's services explicitly.
+ */
+export function createSentinelHostContext(input: {
+  tenant_id: string;
+  created_by: string;
+  conversation_id: string;
+  services?: SentinelServices | undefined;
+}): SentinelHostContext {
+  return {
+    services: input.services ?? defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    tenant_id: input.tenant_id,
+    created_by: input.created_by,
+    conversation_id: input.conversation_id,
+  };
+}
+
 /** Full per-call classification context from a host context. */
 export function classifyContextFor(input: {
   host: SentinelHostContext | undefined;

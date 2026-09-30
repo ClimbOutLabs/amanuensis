@@ -19,7 +19,7 @@ export {
 export type { AuditOutcome, AuditRecordInput, AuditLogWriter } from './audit';
 export { recordClassificationAudit } from './audit';
 export type { SentinelServices, SentinelCallIdentity, SentinelHostContext } from './context';
-export { defaultSentinelServices, classifyContextFor } from './context';
+export { defaultSentinelServices, classifyContextFor, createSentinelHostContext } from './context';
 export type { ExtractedCardFields, CardFieldExtractor, ExtractionResult } from './extractorRegistry';
 export { genericExtractor, extractCardFields, isExternalServiceAction } from './extractorRegistry';
 export type { ToolProvenance } from './networkRequirements';

@@ -125,6 +125,12 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
     tenant_id: string;
     created_by: string;
     session_id: string;
+    /**
+     * Session-scoped Sentinel services, owned by SessionHandle. When provided,
+     * the resolver uses these instead of minting its own, so tracked grants
+     * and approval tokens are shared across threads in the session.
+     */
+    sentinel_services?: import('../core/permissions').SentinelServices | undefined;
   }): Promise<ResolvedAgentDefinition>;
   /**
    * Release per-run resources. Called by the harness at the end of the run:
