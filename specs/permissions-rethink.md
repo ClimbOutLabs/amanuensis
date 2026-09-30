@@ -129,3 +129,50 @@ Tier 3 approvals are always per action (design principle 3). Tier 2 actions may 
 ## Deferred beyond v2
 
 - **"Trust this task" option** that auto-approves Tier 3 for the current task only. Not building this until we see how the base three-tier system behaves in practice.
+
+---
+
+## Implementation Status (Sep 30, 2026)
+
+### Classifier Hardening (Complete)
+
+The tier classifier (`packages/trueforge-core/src/core/permissions/classifier.ts`) has been hardened against bypasses found in adversarial review:
+
+**SECURITY fixes:**
+1. **Environment variable escalation:** `exec` with non-empty `env` now classifies as Tier 3 (was Tier 2). The executor honors `env`, so `LD_PRELOAD`, `NODE_OPTIONS`, `PYTHONPATH`, `BASH_ENV` and similar could be abused for code injection.
+2. **Runner workflows to Tier 3:** `run_workflow` (test, lint, typecheck, build) now classifies as Tier 3 (was Tier 2). The agent controls workflow inputs (`package.json` scripts, Makefile targets) and can route arbitrary execution through a named workflow.
+3. **MCP exec spoofing removed:** Shell `exec` classification now requires `tool_type: 'truefoundry-system'`. Any MCP tool named `exec` falls through to fail-closed Tier 3.
+
+**Workspace boundary fixes:**
+- **A2 (cwd validation):** Allowlisted command `cwd` is validated against the workspace. `exec({command: "cat passwd", cwd: "/etc"})` no longer reads outside the workspace at Tier 2.
+- **A3 (symlink escape):** File operands are resolved and symlink escapes outside the workspace are rejected.
+- **A4 (new-file cards):** New write targets use canonical path resolution so in-workspace new files are no longer mislabeled "outside the workspace."
+
+**Dead code removed:** `runner.ts` stripped to only `isRunnerWorkflow` (the only function actually used). Removed `defaultRunnerServerConfig`, `resolveWorkflowInputs`, `buildRunnerRuntimeRecord` and their types.
+
+### Host Wiring Design (APPROVED)
+
+**Status:** INTEGRATION reviewer APPROVED v3 on Sep 30, 2026.
+
+**Problem:** Three backend sites accept an optional `SentinelHostContext` but none construct or pass it. Without wiring, classification and dispatch verification are inert.
+
+**Design (summary):**
+1. **Creation point:** Per session, at the `SessionHandle` layer (has `this.session` with `tenant_id`, `session_id`, `created_by`).
+2. **Threading:**
+   - `TurnResourceResolver.resolveAgentDefinition`: Add `tenant_id`/`created_by`/`session_id` as per-method params (matches existing `resolveSandbox` pattern in the same class). Applies to both main thread and sub-agent thread (`makeCreateDynamicSubAgentThread`) call sites.
+   - `AgentThread`: Add `sentinel?: SentinelHostContext` to `AgentThreadConstructorInput`, store as field, pass to `executeToolCalls`. Applies to both `buildThread` and `makeCreateDynamicSubAgentThread`.
+   - `Sandbox`: Add to `buildTurnSandbox` input.
+   - Update `ITurnResourceResolver` interface to match.
+3. **Services:**
+   - Approval tokens: in-memory with TTL (single-use, short-lived)
+   - Tracked executables: in-memory, session-scoped, purged on teardown (per interface docs)
+   - Audit: append-only log via existing `audit.ts`
+   - Offline-state: use existing connectivity check
+   - Always-ask settings: via Sentinel settings API (routes to be implemented)
+4. **Lifecycle:** Session-scoped. Create on session start (or lazily on first tool call). Tracked grants purged on teardown. Approval tokens expire via TTL.
+
+**Security note:** The sub-agent paths (`makeCreateDynamicSubAgentThread`) must be wired. Without them, Tier 3 operations could execute via delegated sub-agents with no approval gate.
+
+### Hard Rules
+
+- **No spaghetti code** (Sep 30, 2026): Quick hacks, hardcoded defaults, duplicated logic, and context threaded through layers it doesn't belong in are all spaghetti. The EFFICIENCY/CODE QUALITY reviewer explicitly checks for this. If a fix needs architectural design, stop and design; do not patch around it.
