@@ -329,6 +329,66 @@ export function splitWordsLenient(command: string): string[] {
 }
 
 /**
+ * Split a shell command into segments by `;`, `&&`, `||`, and `|`.
+ * Respects single/double quotes and backslash escapes, so separators inside
+ * quoted arguments do not split. Used for A1/A2: every segment of a compound
+ * command must be scanned for tracked executed operands and hashed.
+ */
+export function splitCompoundSegments(command: string): string[] {
+  const segments: string[] = [];
+  let current = '';
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+
+  const pushSegment = (): void => {
+    const trimmed = current.trim();
+    if (trimmed.length > 0) {
+      segments.push(trimmed);
+    }
+    current = '';
+  };
+
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && quote !== "'") {
+      escaped = true;
+      current += ch;
+      continue;
+    }
+    if (quote !== null) {
+      if (ch === quote) {
+        quote = null;
+      }
+      current += ch;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    // Check for two-character operators first
+    if ((ch === '&' || ch === '|') && i + 1 < command.length && command[i + 1] === ch) {
+      pushSegment();
+      i++; // skip the second character
+      continue;
+    }
+    if (ch === ';' || ch === '|' || ch === '&') {
+      pushSegment();
+      continue;
+    }
+    current += ch;
+  }
+  pushSegment();
+  return segments;
+}
+
+/**
  * Extract `rm` targets from a parsed argv for the delete-path hook. Flags and
  * `--` are skipped; remaining tokens are targets as written (the caller
  * resolves them to file identities).

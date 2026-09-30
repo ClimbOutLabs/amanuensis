@@ -40,6 +40,7 @@ import {
   extractExecutedFileOperand,
   isInsideWorkspace,
   sha256FileContent,
+  splitCompoundSegments,
   splitWordsLenient,
   type TrackedExecutableScope,
 } from './trackedExecutables';
@@ -210,6 +211,15 @@ export function canonicalShellForm(input: {
         file_hashes: fileHashes,
       };
     }
+    // A2: Also hash the executed operand for simple non-allowlisted commands.
+    // These go to Tier 3, and the content binding must apply to all Tier 3 forms.
+    const simpleOperand = extractExecutedFileOperand({ argv: parsed.argv });
+    if (simpleOperand !== undefined) {
+      const simpleIdentity = canonicalFileIdentity({ p: simpleOperand, cwd: identityCwd });
+      if (simpleIdentity !== null) {
+        hashFile(simpleIdentity);
+      }
+    }
     return {
       kind: 'simple',
       argv: parsed.argv,
@@ -227,7 +237,31 @@ export function canonicalShellForm(input: {
     raw_command: input.command,
     cwd_resolved: cwdResolved,
     env_overrides: envOverrides,
-    file_hashes: fileHashes,
+    file_hashes: (() => {
+      // A2: Bind content hashes for compound commands too. For each segment,
+      // extract the executed file operand and hash it. This closes the
+      // post-approval rewrite window where a script could be modified between
+      // approval and dispatch without detection.
+      const hashes: Record<string, string> = {};
+      const hashSegFile = (p: string): void => {
+        const hash = sha256FileContent(p);
+        if (hash !== null) {
+          hashes[p] = hash;
+        }
+      };
+      for (const segment of splitCompoundSegments(input.command)) {
+        const segParsed = parseSimpleCommand(segment);
+        const argv = segParsed !== undefined ? segParsed.argv : splitWordsLenient(segment);
+        const operand = extractExecutedFileOperand({ argv });
+        if (operand !== undefined) {
+          const identity = canonicalFileIdentity({ p: operand, cwd: identityCwd });
+          if (identity !== null) {
+            hashSegFile(identity);
+          }
+        }
+      }
+      return hashes;
+    })(),
   };
 }
 
@@ -321,10 +355,18 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   }
 
   // Write-then-execute check BEFORE allowlist matching.
+  // A1: Scan every segment of compound commands (`;`, `&&`, `||`, `|`).
+  // A tracked script hidden behind a separator (e.g. `echo ok; sh payload.sh`)
+  // must not bypass the escalation.
   const parsed = parseSimpleCommand(command);
-  const argvForHash = parsed !== undefined ? parsed.argv : splitWordsLenient(command);
-  const executedOperand = extractExecutedFileOperand({ argv: argvForHash });
-  if (executedOperand !== undefined) {
+  const segments = splitCompoundSegments(command);
+  for (const segment of segments) {
+    const segParsed = parseSimpleCommand(segment);
+    const argvForHash = segParsed !== undefined ? segParsed.argv : splitWordsLenient(segment);
+    const executedOperand = extractExecutedFileOperand({ argv: argvForHash });
+    if (executedOperand === undefined) {
+      continue;
+    }
     const identityCwd = resolveIdentityCwd(ctx, cwd);
     const identity = canonicalFileIdentity({ p: executedOperand, cwd: identityCwd });
     if (identity === null) {
@@ -543,35 +585,16 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       }),
     });
   }
-  if (target === null) {
-    return tier3Decision({
-      card: {
-        plain_what: 'Write a file with an unresolvable target.',
-        plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: 'The write target could not be resolved.',
-        why_asked_again: null,
-        destination: null,
-        recipient: null,
-        amount: null,
-        parsed_command: null,
-      },
-      reason: 'unresolvable_write_target',
-      reason_detail: 'Write target is null after workspace check.',
-      sensitive_read: false,
-      approval_token_id: mintPlainToken({
-        services: ctx.services,
-        tool_name: action.tool_name,
-        params: action.canonical_params,
-      }),
-    });
-  }
-  const identity = canonicalWriteTarget({ p: target, cwd: identityCwd });
+  // `inside` is true only when target !== null and the resolved path is in the
+  // workspace (see the IIFE above). TypeScript cannot infer this, so assert.
+  const targetPath: string = target as string;
+  const identity = canonicalWriteTarget({ p: targetPath, cwd: identityCwd });
   const decision = tier2Decision({
     kind: 'file_write',
     files: identity === null ? [] : [identity],
     reason: 'sandbox_write',
-    reason_detail: `Sandbox file write to \`${target}\`.`,
-    sensitive_read: isSensitivePath(target),
+    reason_detail: `Sandbox file write to \`${targetPath}\`.`,
+    sensitive_read: isSensitivePath(targetPath),
   });
   return applyAlwaysAsk({ decision, kind: 'file_write', ctx, action });
 }

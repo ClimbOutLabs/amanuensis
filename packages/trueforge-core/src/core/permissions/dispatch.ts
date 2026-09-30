@@ -26,7 +26,9 @@ import {
   sha256FileContent,
   splitWordsLenient,
   canonicalFileIdentity,
+  isInsideWorkspace,
 } from './trackedExecutables';
+import { realpathSync } from 'node:fs';
 import { requiresNetwork, provenanceForToolType } from './networkRequirements';
 import { canonicalShellForm } from './classifier';
 import type { Tier, TierDecision, TrackedExecutionBinding } from './tier';
@@ -119,6 +121,40 @@ export function verifyPreDispatch(input: {
 }): string | undefined {
   const { call, ctx } = input;
   const { services } = ctx;
+
+  // G1/G2: Re-verify Tier 2 workspace containment at dispatch time.
+  // A symlinked parent repointed between classification and dispatch could
+  // turn an in-workspace Tier 2 operation into an out-of-workspace one.
+  // Fail closed if containment no longer holds.
+  if (call.tier === 2) {
+    const workspaceRoot = ctx.workspace_cwd;
+    if (workspaceRoot !== null) {
+      // Check file writes
+      if (call.tool_name === 'write_file') {
+        const target = stringParam(call.canonical_params, 'path') ?? stringParam(call.canonical_params, 'target');
+        if (target !== null) {
+          const cwd = stringParam(call.canonical_params, 'cwd') ?? workspaceRoot;
+          const identity = canonicalFileIdentity({ p: target, cwd });
+          // If the target cannot be resolved, or resolves outside the workspace,
+          // the Tier 2 grant is invalid.
+          if (identity === null) {
+            return 'Tier 2 write target cannot be resolved at dispatch; request approval again.';
+          }
+          // Re-verify containment using realpath
+          try {
+            const root = realpathSync(workspaceRoot);
+            const sep = '/';
+            if (!(identity === root || identity.startsWith(`${root}${sep}`))) {
+              return 'Tier 2 write target is outside the workspace at dispatch; request approval again.';
+            }
+          } catch {
+            return 'Tier 2 write target workspace check failed; request approval again.';
+          }
+        }
+      }
+    }
+    return undefined;
+  }
 
   if (call.tier !== 3) {
     return undefined;
