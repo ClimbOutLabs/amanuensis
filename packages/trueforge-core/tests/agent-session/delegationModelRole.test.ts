@@ -65,6 +65,9 @@ async function resolve(
     ...(agentInfo === undefined ? {} : { agent_info: agentInfo }),
     signal: new AbortController().signal,
     tracing: resolver.createTracing(),
+    tenant_id: 'test-tenant',
+    created_by: 'test-user',
+    session_id: 'test-session',
   });
   return definition;
 }
