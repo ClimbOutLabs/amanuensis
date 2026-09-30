@@ -81,6 +81,30 @@ export function createSentinelHostContext(input: {
   };
 }
 
+/**
+ * Converts a SentinelHostContext to the { services, identity } shape expected
+ * by executeToolCalls. Per-call fields not available at the host level
+ * (repository_id, workspace_cwd, agent_intent) default to null.
+ */
+export function toDispatchSentinelContext(
+  host: SentinelHostContext | undefined,
+): { services: SentinelServices; identity: SentinelCallIdentity } | undefined {
+  if (host === undefined) {
+    return undefined;
+  }
+  return {
+    services: host.services,
+    identity: {
+      tenant_id: host.tenant_id,
+      created_by: host.created_by,
+      conversation_id: host.conversation_id,
+      repository_id: null,
+      workspace_cwd: null,
+      agent_intent: null,
+    },
+  };
+}
+
 /** Full per-call classification context from a host context. */
 export function classifyContextFor(input: {
   host: SentinelHostContext | undefined;

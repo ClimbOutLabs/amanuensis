@@ -104,6 +104,7 @@ import {
 import { isGithubFileRead } from '../mcp/githubFileContents';
 import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
 import type { SentinelHostContext } from '../permissions';
+import { toDispatchSentinelContext } from '../permissions';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -3120,7 +3121,7 @@ export class AgentThread {
       toolCallTimeoutMs: this.toolCallTimeoutMs,
       runCodeToolCallTimeoutMs: this.runCodeToolCallTimeoutMs,
       logger: this.logger,
-      sentinel: this.sentinel,
+      sentinel: toDispatchSentinelContext(this.sentinel),
     });
     const resultsById = new Map(executedToolCallResults.map(result => [result.message.tool_call_id, result]));
     const toolCallResults = openCalls.flatMap(call => {
