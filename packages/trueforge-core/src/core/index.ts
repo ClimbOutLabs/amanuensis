@@ -356,3 +356,27 @@ export type { GitSkill, ISkillMounter, Skill, SkillMounterOptions, SkillPromptMo
 // Host tool-call policy: lets the host review model-authored tool calls before dispatch
 export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCall } from './runtime/HostToolCallPolicy';
 export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';
+
+// Sentinel: three-tier permission system for tool execution
+export type { Tier, Tier2ActionKind, AutoDenyReason, Tier3Card, TierDecision, TrackedExecutionBinding } from './permissions/tier';
+export {
+  TierSchema,
+  TIER2_ACTION_KINDS,
+  AUTO_DENY_REASONS,
+  Tier3CardSchema,
+  failClosedDecision,
+  tier1Decision,
+  tier2Decision,
+  tier3Decision,
+  autoDenyDecision,
+} from './permissions/tier';
+export type { AuditOutcome, AuditRecordInput, AuditLogWriter } from './permissions/audit';
+export { recordClassificationAudit } from './permissions/audit';
+export type { SentinelServices, SentinelCallIdentity, SentinelHostContext } from './permissions/context';
+export { defaultSentinelServices, classifyContextFor, createSentinelHostContext, toDispatchSentinelContext, DEFAULT_PINNED_PATH } from './permissions/context';
+export type { SentinelAction, ClassifyContext } from './permissions/classifier';
+export { classifyTier, canonicalShellForm, shellBindingFromForm, validateSentinelShellConfig } from './permissions/classifier';
+export type { VerifiableCall, DispatchCheckContext } from './permissions/dispatch';
+export { verifyPreDispatch } from './permissions/dispatch';
+export type { ApprovalTokenStore } from './permissions/approvalTokens';
+export { InMemoryApprovalTokenStore } from './permissions/approvalTokens';
