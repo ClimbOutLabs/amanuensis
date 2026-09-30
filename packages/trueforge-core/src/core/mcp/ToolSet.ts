@@ -2,6 +2,14 @@ import type { CallToolRequest, ToolAnnotations } from '@modelcontextprotocol/sdk
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
+import {
+  classifyContextFor,
+  classifyTier,
+  recordClassificationAudit,
+  type ClassifyContext,
+  type SentinelHostContext,
+  type TierDecision,
+} from '../permissions';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -18,12 +26,64 @@ import {
 import { ToolSelectorPolicy, type ToolSelectorConfig } from './ToolSelectorPolicy';
 
 /**
+ * Type guard for plain-object tool arguments. Tool arguments arrive as parsed
+ * JSON; arrays and null are not valid parameter objects.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
  * The tool result a denied call produces. Shared with OpenToolCallCloser, which writes it
  * for a call that was denied and then never dispatched, so the model reads one wording
  * either way.
  */
 export function deniedToolCallText(reason: string | undefined): string {
   return JSON.stringify({ error: `User denied tool call: ${reason ?? 'no reason provided'}` });
+}
+
+/**
+ * Stamp a TierDecision onto host-only InternalToolCallInfo fields. The
+ * classifier result replaces the policy approval stamp: only Tier 3 carded
+ * actions require approval; auto-denied actions surface as a
+ * pre-dispatch failure instead of a card.
+ */
+export function stampSentinelDecision(input: {
+  decision: TierDecision;
+}): Pick<
+  InternalToolCallInfo,
+  | 'tier'
+  | 'tier3_card'
+  | 'tier2_kind'
+  | 'tier2_files'
+  | 'approval_token_id'
+  | 'approval_binding'
+  | 'shell_binding'
+  | 'is_approval_required'
+  | 'pre_dispatch_failure'
+> {
+  const decision = input.decision;
+  return {
+    tier: decision.tier,
+    tier3_card: decision.card,
+    tier2_kind: decision.tier2_kind,
+    tier2_files: decision.tier2_files,
+    approval_token_id: decision.approval_token_id,
+    approval_binding: decision.approval_binding,
+    shell_binding: decision.shell_binding,
+    is_approval_required: decision.tier === 3 && decision.auto_deny === null,
+    ...(decision.auto_deny === null
+      ? {}
+      : {
+          pre_dispatch_failure: {
+            kind: 'policy_blocked' as const,
+            message:
+              decision.auto_deny === 'offline_mode'
+                ? 'Auto-denied: offline mode is on.'
+                : 'Auto-denied: the destination of this external action could not be verified.',
+          },
+        }),
+  };
 }
 
 /**
@@ -37,8 +97,20 @@ export class ToolSet implements IToolSet {
 
   private readonly source: ToolSource;
   private readonly policy: ToolSelectorPolicy;
+  private readonly sentinel: SentinelHostContext | undefined;
 
-  constructor(params: { source: ToolSource; selectors: ToolSelectorConfig; preload: boolean | undefined }) {
+  constructor(params: {
+    source: ToolSource;
+    selectors: ToolSelectorConfig;
+    preload: boolean | undefined;
+    /**
+     * Sentinel classification context. When present, every tool call the
+     * source has not already classified is classified here and the classifier
+     * result replaces the policy approval stamp. Absent, the source's own
+     * approval stamping is preserved and no classification runs.
+     */
+    sentinel?: SentinelHostContext | undefined;
+  }) {
     this.source = params.source;
     this.name = params.source.name;
     this.id = params.source.id;
@@ -47,6 +119,7 @@ export class ToolSet implements IToolSet {
       selectors: params.selectors,
       preload: params.preload,
     });
+    this.sentinel = params.sentinel;
   }
 
   // True when every exposed tool is eager. Tracks the policy live: for an auto-preload server
@@ -187,10 +260,55 @@ export class ToolSet implements IToolSet {
   ): Promise<InternalToolCallInfo> {
     // Hints go under the source's info, not over it: a deferred call resolves to the
     // underlying tool's own hints, and `tool` here only describes the dispatch wrapper.
+    const sourceInfo = await this.source.toolCallInfo(params, resolveUnderlyingTool);
+    if (sourceInfo.tier !== undefined) {
+      // Already classified by the source (the sandbox classifies its own
+      // tools with normalized arguments): keep the classifier result, do not
+      // re-classify or re-stamp.
+      return { ...toolEffectHints(tool), ...sourceInfo };
+    }
+    const sentinel = this.sentinel;
+    if (sentinel === undefined) {
+      // No Sentinel context wired by the host: preserve the legacy policy
+      // approval stamping. Classification only runs when the host opts in.
+      return {
+        ...toolEffectHints(tool),
+        ...sourceInfo,
+        is_approval_required: this.policy.requiresApproval(params.name, tool?.annotations),
+      };
+    }
+    const services = sentinel.services;
+    const classifyCtx: ClassifyContext = classifyContextFor({
+      host: sentinel,
+      repository_id: null,
+      workspace_cwd: null,
+    });
+    const identity = {
+      tenant_id: classifyCtx.tenant_id,
+      created_by: classifyCtx.created_by,
+      conversation_id: classifyCtx.conversation_id,
+      repository_id: classifyCtx.repository_id,
+      workspace_cwd: classifyCtx.workspace_cwd,
+      agent_intent: classifyCtx.agent_intent,
+    };
+    const decision = await classifyTier(
+      {
+        tool_name: params.name,
+        canonical_params: isRecord(params.arguments) ? params.arguments : {},
+        tool_type: sourceInfo.type,
+        mcp_hints: {
+          read_only_hint: sourceInfo.read_only_hint,
+          destructive_hint: sourceInfo.destructive_hint,
+          open_world_hint: sourceInfo.open_world_hint,
+        },
+      },
+      classifyCtx,
+    );
+    await recordClassificationAudit({ services, identity, tool_name: params.name, decision });
     return {
       ...toolEffectHints(tool),
-      ...(await this.source.toolCallInfo(params, resolveUnderlyingTool)),
-      is_approval_required: this.policy.requiresApproval(params.name, tool?.annotations),
+      ...sourceInfo,
+      ...stampSentinelDecision({ decision }),
     };
   }
 

@@ -36,6 +36,16 @@ import {
   type ImplementationPlanGrantScope,
 } from '../mcp/implementationPlanGrant';
 import { defineTool, LocalToolMCP } from '../mcp/LocalToolMCP';
+import { stampSentinelDecision } from '../mcp/ToolSet';
+import {
+  canonicalFileIdentity,
+  canonicalWriteTarget,
+  classifyContextFor,
+  classifyTier,
+  observeShellCreatedFiles,
+  recordClassificationAudit,
+  type SentinelHostContext,
+} from '../permissions';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
 import {
   DEFERRED_TOOLS_SERVER_ID,
@@ -242,6 +252,14 @@ export interface SandboxOptions {
   onRunCodeHarvestedFiles?: ((files: HarvestedFile[]) => Promise<void>) | undefined;
   tracing: AgentTracing;
   logger: Logger;
+  /**
+   * Sentinel classification context: shared services plus the per-turn
+   * identity. When present, toolCallInfo classifies every call and the
+   * classifier result replaces the effect-based approval override. Absent,
+   * no classification runs and the legacy effect-based approval behavior
+   * is preserved.
+   */
+  sentinel?: SentinelHostContext | undefined;
 }
 
 export const SANDBOX_EXEC_TOOL_NAME = 'exec';
@@ -1834,6 +1852,7 @@ export class Sandbox extends LocalToolMCP {
   override readonly description = 'Persistent sandbox environment for code execution';
 
   private readonly provider: SandboxProvider;
+  private readonly sentinelContext: SentinelHostContext | undefined;
   private readonly boundRepository: BoundRepository | undefined;
   private readonly loadBoundRepository: (() => Promise<BoundRepository | undefined>) | undefined;
   private implementationPlanGrantContext: ImplementationPlanGrantContext | undefined;
@@ -1946,6 +1965,7 @@ export class Sandbox extends LocalToolMCP {
     this.runCodeHarvestSink = options.onRunCodeHarvestedFiles;
     this.webConnectorToolHint = options.webConnectorToolHint ?? "the web connector's fetch or extract tool";
     this.ocrLanguages = options.ocrLanguages ?? '';
+    this.sentinelContext = options.sentinel;
 
     if (this.existingSandboxId) {
       this.existingSandboxInfo = { sandbox_id: this.existingSandboxId };
@@ -2132,6 +2152,62 @@ export class Sandbox extends LocalToolMCP {
             kind: 'policy_blocked',
             message: structuredEditPreconditionFailure,
           };
+    // Sentinel: authoritative tier classification over the normalized
+    // arguments, but only when the host wired a Sentinel context. Without
+    // one, no classification runs and the legacy effect-based approval
+    // override applies. Invalid calls are fail-closed to
+    // approval-required=false with their existing pre-dispatch failure.
+    const sentinelHost = this.sentinelContext;
+    let sentinelStamp: ReturnType<typeof stampSentinelDecision> | undefined;
+    if (sentinelHost !== undefined) {
+      const sentinelCtx = classifyContextFor({
+        host: sentinelHost,
+        repository_id: this.boundRepository?.repository_id ?? null,
+        workspace_cwd: this.boundRepository?.workspace_cwd ?? cwd ?? null,
+      });
+      const sentinelDecision = await classifyTier(
+        {
+          tool_name: params.name,
+          canonical_params: effectiveArguments ?? {},
+          tool_type: 'truefoundry-system',
+          sandbox_effect: effect,
+          mcp_hints: {
+            read_only_hint: info.read_only_hint,
+            destructive_hint: info.destructive_hint,
+            open_world_hint: networkIntent ? true : info.open_world_hint,
+          },
+        },
+        sentinelCtx,
+      );
+      await recordClassificationAudit({
+        services: sentinelCtx.services,
+        identity: {
+          tenant_id: sentinelCtx.tenant_id,
+          created_by: sentinelCtx.created_by,
+          conversation_id: sentinelCtx.conversation_id,
+          repository_id: sentinelCtx.repository_id,
+          workspace_cwd: sentinelCtx.workspace_cwd,
+          agent_intent: sentinelCtx.agent_intent,
+        },
+        tool_name: params.name,
+        decision: sentinelDecision,
+      });
+      sentinelStamp = stampSentinelDecision({ decision: sentinelDecision });
+    }
+    const invalidCall =
+      invalidGitMetadataEdit ||
+      invalidExecPreflight ||
+      invalidWriteFilePath ||
+      writeFileScopeFailure ||
+      invalidRegisteredCommand ||
+      invalidImplementationPlan ||
+      structuredEditPreconditionFailure !== undefined;
+    // Legacy approval when Sentinel is not configured: the pre-Sentinel
+    // effect-based override. Tools with a classified effect need approval
+    // unless the effect is pure inspection; tools without an effect keep the
+    // source's own stamping.
+    const legacyApprovalRequired =
+      effect !== undefined ? sandboxCommandRequiresApproval(effect) : info.is_approval_required;
     return {
       ...info,
       original_tool_name:
@@ -2178,23 +2254,23 @@ export class Sandbox extends LocalToolMCP {
                 ? structuredEditPrecondition.summary
                 : `${info.description} ${structuredEditPrecondition.summary}`,
           }),
-      ...(structuredEditPreDispatchFailure === undefined
+      ...(sentinelStamp?.pre_dispatch_failure === undefined
+        ? structuredEditPreDispatchFailure === undefined
+          ? {}
+          : { pre_dispatch_failure: structuredEditPreDispatchFailure }
+        : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
+      is_approval_required: invalidCall ? false : (sentinelStamp?.is_approval_required ?? legacyApprovalRequired),
+      ...(sentinelStamp === undefined
         ? {}
-        : { pre_dispatch_failure: structuredEditPreDispatchFailure }),
-      is_approval_required:
-        invalidGitMetadataEdit ||
-        invalidExecPreflight ||
-        invalidWriteFilePath ||
-        writeFileScopeFailure ||
-        invalidRegisteredCommand ||
-        invalidImplementationPlan ||
-        structuredEditPreconditionFailure !== undefined
-          ? false
-          : params.name === SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME
-            ? true
-            : effect === undefined
-              ? info.is_approval_required
-              : sandboxCommandRequiresApproval(effect),
+        : {
+            tier: sentinelStamp.tier,
+            tier3_card: sentinelStamp.tier3_card,
+            tier2_kind: sentinelStamp.tier2_kind,
+            tier2_files: sentinelStamp.tier2_files,
+            approval_token_id: sentinelStamp.approval_token_id,
+            approval_binding: sentinelStamp.approval_binding,
+            shell_binding: sentinelStamp.shell_binding,
+          }),
     };
   }
 
@@ -4173,6 +4249,35 @@ export class Sandbox extends LocalToolMCP {
     });
   }
 
+  /**
+   * Sentinel: record agent-created or agent-modified files as tracked
+   * executables, so a later attempt to execute them escalates for approval.
+   * Best effort and host-side: paths that do not resolve on the host (for
+   * example a remote sandbox checkout) are skipped silently.
+   */
+  private observeSentinelWrites(input: { paths: readonly string[]; cwd: string }): void {
+    const ctx = classifyContextFor({
+      host: this.sentinelContext,
+      repository_id: this.boundRepository?.repository_id ?? null,
+      workspace_cwd: this.boundRepository?.workspace_cwd ?? null,
+    });
+    const store = ctx.services.tracked_store;
+    const scope = {
+      tenant_id: ctx.tenant_id,
+      created_by: ctx.created_by,
+      repository_id: ctx.repository_id,
+      workspace_cwd: ctx.workspace_cwd,
+    };
+    for (const p of input.paths) {
+      const identity =
+        canonicalFileIdentity({ p, cwd: input.cwd }) ?? canonicalWriteTarget({ p, cwd: input.cwd });
+      if (identity === null) {
+        continue;
+      }
+      store.track({ scope, file_identity: identity });
+    }
+  }
+
   private async handleExec(
     input: SandboxRuntimeExecInput,
     approvalDecision?: ApprovalDecision,
@@ -4197,10 +4302,19 @@ export class Sandbox extends LocalToolMCP {
       return hostRefusalResponse(preflightFailure);
     }
     const effect = sandboxInvocationPolicy({ command: resolvedInput.command, purpose: resolvedInput.purpose }).effect;
-    if (sandboxCommandRequiresApproval(effect) && approvalDecision === undefined) {
-      return {
-        approvalRequired: { tool_info: await this.toolCallInfo({ name: SANDBOX_EXEC_TOOL_NAME, arguments: input }) },
-      };
+    if (approvalDecision === undefined) {
+      // Same authoritative classification as toolCallInfo: auto-denied calls
+      // are refused, and Tier 3 calls surface the approval card instead of
+      // the old effect-based gate.
+      const tool_info = await this.toolCallInfo({ name: SANDBOX_EXEC_TOOL_NAME, arguments: input });
+      if (tool_info.pre_dispatch_failure !== undefined) {
+        return hostRefusalResponse(tool_info.pre_dispatch_failure.message);
+      }
+      if (tool_info.is_approval_required) {
+        return {
+          approvalRequired: { tool_info },
+        };
+      }
     }
     let sandboxInfo: SandboxInfo;
     let sandboxCreated: SandboxInfo | undefined;
@@ -4251,6 +4365,12 @@ export class Sandbox extends LocalToolMCP {
       );
       if (execution.status === 'blocked') {
         return hostRefusalResponse(execution.reason);
+      }
+      if (isExecResultOk(execution.result) && typeof resolvedInput.cwd === 'string') {
+        this.observeSentinelWrites({
+          paths: observeShellCreatedFiles({ command: resolvedInput.command }),
+          cwd: resolvedInput.cwd,
+        });
       }
 
       return {
@@ -4493,6 +4613,9 @@ export class Sandbox extends LocalToolMCP {
     }
     const write = observedWrite.value;
     const succeeded = write.success && write.response.exitCode === 0;
+    if (succeeded) {
+      this.observeSentinelWrites({ paths: [normalizedPath], cwd: scopeResolution.scope.cwd });
+    }
     if (!succeeded) {
       // Unwrap the script's own JSON error (`{"error": "..."}` on stdout) so a failed write
       // surfaces as a top-level rejection, never nested inside a `write` field a caller has to
@@ -4857,6 +4980,9 @@ export class Sandbox extends LocalToolMCP {
       throw new Error('Patch validation succeeded without an apply result');
     }
     const succeeded = apply.success && apply.response.exitCode === 0;
+    if (succeeded && workspaceRoot !== undefined) {
+      this.observeSentinelWrites({ paths: finalPaths, cwd: workspaceRoot });
+    }
     return {
       result: {
         content: [
@@ -5046,6 +5172,9 @@ export class Sandbox extends LocalToolMCP {
     }
     const { exec: replace, payloadDigest } = outcome;
     const succeeded = replace.success && replace.response.exitCode === 0;
+    if (succeeded) {
+      this.observeSentinelWrites({ paths: [normalizedPath], cwd: input.cwd });
+    }
     if (!succeeded) {
       // Unwrap the script's own JSON error (`{"error": "..."}` on stdout) so a failed replace
       // surfaces as a top-level rejection, never nested inside a `replace` field a caller has to

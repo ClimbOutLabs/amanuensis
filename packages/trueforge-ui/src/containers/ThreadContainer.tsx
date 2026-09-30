@@ -12,6 +12,7 @@ import { isNewChatView } from '../utils/isNewChatView.js';
 import { ApprovalFocusProvider } from './approvalFocus.js';
 import { AssistantMessageContainer } from './AssistantMessageContainer.js';
 import { DocumentIngestionStatusProvider } from './DocumentIngestionStatusProvider.js';
+import { SentinelStateProvider } from '../sentinel/SentinelStateProvider.js';
 import { HistoryLoaderContainer } from './HistoryLoaderContainer.js';
 import { PendingApprovalsBanner } from './PendingApprovalsBanner.js';
 import { ThreadImplementationPlanGrantControls } from './ImplementationPlanGrantControls.js';
@@ -101,7 +102,8 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
   return (
     <MemoryTurnContextProvider>
       <DocumentIngestionStatusProvider>
-        <ComposerBusyProvider>
+        <SentinelStateProvider>
+          <ComposerBusyProvider>
           <AvatarActivityBridge />
           <ApprovalFocusProvider>
             <ThreadPrimitive.Root asChild>
@@ -147,6 +149,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
             </ThreadPrimitive.Root>
           </ApprovalFocusProvider>
         </ComposerBusyProvider>
+        </SentinelStateProvider>
       </DocumentIngestionStatusProvider>
     </MemoryTurnContextProvider>
   );
