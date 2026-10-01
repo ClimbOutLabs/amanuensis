@@ -850,6 +850,23 @@ describe('mapStreamToChunks', () => {
     expect(rejection).not.toBeInstanceOf(ModelStreamFault);
   });
 
+  it('keeps a provider error carrying data.code as a plain Error, not a ModelStreamFault', async () => {
+    // The AI SDK provider error shape (a provider-side 500, for example from a request the
+    // provider rejects): a definite provider response, not a broken stream, so the
+    // compact-and-retry recovery must not apply.
+    const cause = Object.assign(new Error('Internal Server Error'), {
+      data: { message: '', type: 'InternalServerError', param: null, code: 500 },
+    });
+    const rejection: unknown = await drainStream(
+      mapStreamToChunks({
+        stream: makeStream([{ type: 'error', error: cause }]),
+        chunkMeta: CHUNK_META,
+      }),
+    ).catch((error: unknown) => error);
+    expect(rejection).not.toBeInstanceOf(ModelStreamFault);
+    expect(rejection).toBeInstanceOf(Error);
+  });
+
   it('raises ModelStreamFault when the stream ends with no text, no tool call, and no finish signal', async () => {
     // The shape a provider closing the connection mid-response takes: the stream's own async
     // iterable simply ends, with no 'error' part and nothing thrown.
