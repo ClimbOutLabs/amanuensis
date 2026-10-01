@@ -189,4 +189,57 @@ describe('ModelStreamFault retry', () => {
     expect(doneEvent.error).toBe(new ModelOutputRepetitionError('reasoning').message);
     expect(doneEvent.error).toMatch(/smaller parts/);
   });
+
+  it('surfaces a definite provider error immediately without compaction or retry', async () => {
+    // The provider error shape (a definite status, not a broken stream): must not trigger the
+    // ModelStreamFault recovery path.
+    async function* providerErrorStream(): AsyncGenerator<
+      ExtendedChatCompletionChunk,
+      RawAssistantMessageWithUsage,
+      unknown
+    > {
+      await Promise.resolve();
+      const cause = Object.assign(new Error('Internal Server Error'), {
+        data: { message: '', type: 'InternalServerError', param: null, code: 500 },
+      });
+      throw new Error('Internal Server Error', { cause });
+    }
+    const create = jest.fn(
+      (): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
+        providerErrorStream(),
+    );
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const compaction = new RecordingCompaction();
+    const thread = new AgentThread({
+      threadId: 'main',
+      title: 'Main',
+      toolCallMemo: undefined,
+      taskState: undefined,
+      isRequestContinuation: undefined,
+      tracing: NOOP_AGENT_TRACING,
+      logger: makeSilentLogger(),
+      definition: { modelClient, modelId: undefined, configuredModels: undefined, instruction: 'test', toolSets: [] },
+      context: [{ role: 'user', content: 'A question.' }],
+      capabilities: [{ preLLMProcessors: [compaction] }],
+    });
+
+    let doneEvent: InternalThreadDoneEvent | undefined;
+    for await (const event of thread.execute({ signal: new AbortController().signal })) {
+      if (event.type === InternalEventType.AGENT_DONE) {
+        doneEvent = event;
+      }
+    }
+
+    // Exactly one attempt: no retry for a definite provider error.
+    expect(create).toHaveBeenCalledTimes(1);
+    // No forced compaction: the only preLLM pass is the ordinary one before the attempt.
+    expect(compaction.forcedFlags).toEqual([false]);
+    expect(doneEvent?.status).toBe('error');
+    expect(doneEvent?.handoff_cause).not.toBe('model_stream_fault');
+    if (doneEvent?.status !== 'error') {
+      throw new Error('expected an error-status AGENT_DONE event');
+    }
+    expect(doneEvent.error).toBe('Internal Server Error');
+    expect(doneEvent.error).not.toContain('context is too long');
+  });
 });
