@@ -577,7 +577,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   // canonicalFileIdentity returns null for non-existent paths, causing false "outside workspace".
   const inside = (() => {
     const identity = canonicalWriteTarget({ p: target, cwd: identityCwd });
-    if (identity === null) return false;
+    if (identity === null) { return false; }
     try {
       const root = realpathSync(ctx.workspace_cwd);
       return identity === root || identity.startsWith(`${root}${path.sep}`);
@@ -620,7 +620,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   return applyAlwaysAsk({ decision, kind: 'file_write', ctx, action });
 }
 
-async function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const workflowParam = action.canonical_params['workflow'];
   const workflowName = typeof workflowParam === 'string' ? workflowParam : 'unknown';
   // SECURITY FIX: Runner workflows execute agent-controlled package.json scripts/Makefile

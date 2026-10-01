@@ -349,7 +349,7 @@ export function splitCompoundSegments(command: string): string[] {
   };
 
   for (let i = 0; i < command.length; i++) {
-    const ch = command[i];
+    const ch = command.charAt(i);
     if (escaped) {
       current += ch;
       escaped = false;
