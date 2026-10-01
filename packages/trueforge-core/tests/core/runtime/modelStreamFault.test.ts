@@ -7,13 +7,14 @@ import { EventType, newEventId } from '../../../src/core/events/schema';
 import type { ILLM } from '../../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
-import { ModelOutputRepetitionError, ModelStreamFault } from '../../../src/core/llm/VercelAILLM';
+import { mapStreamToChunks, ModelOutputRepetitionError, ModelStreamFault } from '../../../src/core/llm/VercelAILLM';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { ContextMessage, InternalThreadDoneEvent } from '../../../src/core/runtime/AgentThread.types';
 import { InternalEventType } from '../../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../../src/core/runtime/contextUsage';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
+import type { TextStreamPart, ToolSet } from 'ai';
 
 /** A stream whose async iterable breaks before producing any content: the shape a provider
  * closing the connection mid-response takes (see VercelAILLM.mapStreamToChunks). */
@@ -192,21 +193,20 @@ describe('ModelStreamFault retry', () => {
 
   it('surfaces a definite provider error immediately without compaction or retry', async () => {
     // The provider error shape (a definite status, not a broken stream): must not trigger the
-    // ModelStreamFault recovery path.
-    async function* providerErrorStream(): AsyncGenerator<
-      ExtendedChatCompletionChunk,
-      RawAssistantMessageWithUsage,
-      unknown
-    > {
+    // ModelStreamFault recovery path. Goes through the real mapStreamToChunks classification so
+    // the test fails if the classification regresses.
+    async function* providerErrorParts(): AsyncGenerator<TextStreamPart<ToolSet>> {
       await Promise.resolve();
       const cause = Object.assign(new Error('Internal Server Error'), {
         data: { message: '', type: 'InternalServerError', param: null, code: 500 },
       });
-      throw new Error('Internal Server Error', { cause });
+      yield { type: 'error', error: cause };
     }
-    const create = jest.fn(
-      (): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
-        providerErrorStream(),
+    const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
+      mapStreamToChunks({
+        stream: providerErrorParts(),
+        chunkMeta: { id: 'test-id', created: 0, model: 'test-model' },
+      }),
     );
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const compaction = new RecordingCompaction();
