@@ -1072,6 +1072,25 @@ export function describeStreamError(raw: unknown): string {
   return describeUnknownError(raw);
 }
 
+/**
+ * Definite provider status carried by a stream error part, when the provider answered with a
+ * real HTTP status rather than the stream itself breaking. Covers APICallError (statusCode)
+ * and the AI SDK's provider error shape (data.code), so a provider-side 500 from a request
+ * the provider rejects is not mistaken for a broken stream that compaction could fix.
+ */
+export function providerStatusCode(raw: unknown): number | undefined {
+  if (APICallError.isInstance(raw) && typeof raw.statusCode === 'number') {
+    return raw.statusCode;
+  }
+  if (typeof raw === 'object' && raw !== null && 'data' in raw) {
+    const data: unknown = raw.data;
+    if (typeof data === 'object' && data !== null && 'code' in data && typeof data.code === 'number') {
+      return data.code;
+    }
+  }
+  return undefined;
+}
+
 export function toStreamError(raw: unknown): Error {
   if (raw instanceof Error) {
     return raw;
@@ -1627,13 +1646,14 @@ export async function* mapStreamToChunks({
         const message = describeStreamError(raw);
         // Preserve the original stream error as cause; toast/turn use .message only.
         const cause = raw instanceof Error ? raw : new Error(message);
-        // A definite provider response (an APICallError carrying a status code: auth, rate
-        // limit, bad request) is a real answer from the provider, not a broken stream:
-        // compacting context and retrying would not change it, so it stays a plain Error. Any
-        // other error part (no status code: a transport failure or a malformed-response parse
-        // failure, the shape a cut/malformed stream like vLLM's mid-response HarmonyError takes)
-        // is the stream itself breaking, so it is a ModelStreamFault.
-        if (APICallError.isInstance(raw) && raw.statusCode != null) {
+        // A definite provider response (a status code on the error: auth, rate limit, bad
+        // request, or a provider-side 500) is a real answer from the provider, not a broken
+        // stream: compacting context and retrying would not change it, so it stays a plain
+        // Error. Any other error part (no status code: a transport failure or a
+        // malformed-response parse failure, the shape a cut/malformed stream like vLLM's
+        // mid-response HarmonyError takes) is the stream itself breaking, so it is a
+        // ModelStreamFault.
+        if (providerStatusCode(raw) != null) {
           throw new Error(message, { cause });
         }
         throw new ModelStreamFault(message, { cause });
