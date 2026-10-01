@@ -620,7 +620,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   return applyAlwaysAsk({ decision, kind: 'file_write', ctx, action });
 }
 
-function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierDecision {
   const workflowParam = action.canonical_params['workflow'];
   const workflowName = typeof workflowParam === 'string' ? workflowParam : 'unknown';
   // SECURITY FIX: Runner workflows execute agent-controlled package.json scripts/Makefile
