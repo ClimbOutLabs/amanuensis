@@ -49,7 +49,7 @@ const LOCAL_EXECUTOR_ID = 'local';
 /** OS-standard data dir for SQLite in standalone mode. */
 const ENV_PATHS_APP_NAME = 'trueforge';
 const DEFAULT_POSTGRES_USER = 'trueforge';
-const DEFAULT_POSTGRES_PASSWORD = process.env['POSTGRES_PASSWORD'] || 'changeme';
+const DEFAULT_POSTGRES_PASSWORD = process.env.POSTGRES_PASSWORD || 'changeme';
 const DEFAULT_POSTGRES_DB = 'trueforge';
 const DEFAULT_POSTGRES_HOST = 'localhost';
 const DEFAULT_POSTGRES_PORT = 5432;
@@ -58,7 +58,7 @@ const DEFAULT_REDIS_URL = 'redis://localhost:6379';
  * Fixed local service credential when `STANDALONE=true` and `TRUEFORGE_API_KEY` is unset.
  * Local testing only — not for distributed deployments.
  */
-export const STANDALONE_TRUEFORGE_API_KEY = process.env['TRUEFORGE_API_KEY'] || 'dev-only-placeholder';
+export const STANDALONE_TRUEFORGE_API_KEY = process.env.TRUEFORGE_API_KEY || 'dev-only-placeholder';
 
 /**
  * `BUILD_REF` when nothing stamped the build: host development, and image builds
