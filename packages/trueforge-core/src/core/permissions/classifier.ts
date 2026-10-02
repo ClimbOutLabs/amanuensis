@@ -210,6 +210,49 @@ interface CanonicalShellForm {
  * Canonical form of a shell action: what the approval token binds to. Rebuilt
  * identically at pre-dispatch re-verification.
  */
+const INLINE_CODE_FLAGS = new Set(['-c', '-e', '--eval', '--command']);
+
+/**
+ * Recursively hash file operands hidden inside -c style inline code.
+ * `sh -c 'sh /ws/payload.sh'` parses as a simple command where
+ * extractExecutedFileOperand bails on -c, leaving the inner script unbound.
+ * Depth is bounded to prevent pathological recursion.
+ */
+function hashInlineCodeOperands(input: {
+  argv: readonly string[];
+  cwd: string;
+  hashFile: (p: string) => void;
+  depth: number;
+}): void {
+  if (input.depth > 3) {
+    return;
+  }
+  for (let i = 0; i < input.argv.length; i++) {
+    const flag = input.argv[i];
+    if (flag === undefined || !INLINE_CODE_FLAGS.has(flag)) {
+      continue;
+    }
+    const code = input.argv[i + 1];
+    if (typeof code !== 'string' || code.length === 0) {
+      continue;
+    }
+    // The inline code is itself a shell command; scan its segments.
+    for (const segment of splitCompoundSegments(code)) {
+      const segParsed = parseSimpleCommand(segment);
+      const segArgv = segParsed !== undefined ? segParsed.argv : splitWordsLenient(segment);
+      const operand = extractExecutedFileOperand({ argv: segArgv });
+      if (operand !== undefined) {
+        const identity = canonicalFileIdentity({ p: operand, cwd: input.cwd });
+        if (identity !== null) {
+          input.hashFile(identity);
+        }
+      }
+      // Recurse for nested -c (e.g. sh -c 'sh -c "sh /ws/x.sh"').
+      hashInlineCodeOperands({ argv: segArgv, cwd: input.cwd, hashFile: input.hashFile, depth: input.depth + 1 });
+    }
+  }
+}
+
 export function canonicalShellForm(input: {
   command: string;
   cwd: string | null;
@@ -254,6 +297,10 @@ export function canonicalShellForm(input: {
         hashFile(simpleIdentity);
       }
     }
+    // Recurse into -c style inline code: `sh -c 'sh /ws/payload.sh'` hides
+    // the inner script from extractExecutedFileOperand (which bails on -c).
+    // An unbound inner script is a post-approval rewrite waiting to happen.
+    hashInlineCodeOperands({ argv: parsed.argv, cwd: identityCwd, hashFile, depth: 0 });
     return {
       kind: 'simple',
       argv: parsed.argv,
@@ -296,6 +343,8 @@ export function canonicalShellForm(input: {
             hashSegFile(identity);
           }
         }
+        // Recurse into -c inline code within compound segments too.
+        hashInlineCodeOperands({ argv, cwd: identityCwd, hashFile: hashSegFile, depth: 0 });
       }
       for (const token of splitWordsLenient(input.command)) {
         if (token.startsWith('-')) {

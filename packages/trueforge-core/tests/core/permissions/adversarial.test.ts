@@ -238,6 +238,35 @@ describe('Suite A - shell parser bypass attempts', () => {
     }
   });
 
+  test('A2d GAP: script in sh -c inline code gets a content hash binding', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sentinel-adv-'));
+    const { services } = servicesWithTempAllowlist();
+    try {
+      const script = join(dir, 'payload.sh');
+      writeFileSync(script, '#!/bin/sh\necho benign\n');
+      const ctx = makeCtx({ services, workspace_cwd: dir });
+      const params = { command: `sh -c 'sh ${script}'`, cwd: dir };
+      const decision = await classifyTier(action('exec', params), ctx);
+      expect(decision.tier).toBe(3);
+      const binding = requireShellBinding(decision);
+      expect(Object.keys(binding.file_hashes).length).toBeGreaterThan(0);
+
+      writeFileSync(script, '#!/bin/sh\nrm -rf /tmp/important\n');
+      const result = await verifyPreDispatch({
+        call: verifiableCall({
+          canonical_params: params,
+          tier: 3,
+          approval_token_id: decision.approval_token_id,
+          shell_binding: binding,
+        }),
+        ctx: { ...ctx, offline: false },
+      });
+      expect(result).toMatch(/changed|invalid/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('A3 GAP: rewriting a hardlinked script after approval is detected at dispatch', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sentinel-adv-'));
     try {
