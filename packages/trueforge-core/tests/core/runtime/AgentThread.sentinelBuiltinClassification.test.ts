@@ -159,7 +159,10 @@ test('replace_task_checklist (agent scratchpad) classifies Tier 1 silent', async
     },
     tracing: NOOP_AGENT_TRACING,
   });
-  const toolset = capability.systemToolSets[0];
+  const toolset = capability.systemToolSets?.[0];
+  if (!toolset) {
+    throw new Error('Expected taskChecklist to provide a system tool set');
+  }
   const info = await toolset.toolCallInfo({ name: REPLACE_TASK_CHECKLIST_TOOL_NAME, arguments: {} });
   expect(info.tier).toBeUndefined();
   const stamped = await classifyUnstampedToolCall({
