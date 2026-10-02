@@ -89,7 +89,7 @@ import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
 import { SentinelAuditStore, type ISentinelAuditStore, type SentinelAuditDatabase } from './db/sentinelAuditStore';
-import { SentinelUserSettingsStore, type SentinelUserSettingsDatabase } from './db/sentinelUserSettingsStore';
+import { SentinelUserSettingsStore, type ISentinelUserSettingsStore, type SentinelUserSettingsDatabase } from './db/sentinelUserSettingsStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
@@ -155,7 +155,7 @@ interface ServerPersistence<TTransaction> {
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
-  sentinelUserSettingsStore: SentinelUserSettingsStore;
+  sentinelUserSettingsStore: ISentinelUserSettingsStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
   /** One shared client for TrueFoundry store resolvers + auth; undefined when TrueFoundry mode is off. */

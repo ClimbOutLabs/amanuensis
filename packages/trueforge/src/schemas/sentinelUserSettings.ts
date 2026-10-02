@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-export const Tier2ActionKindSchema = z.enum(['file_write', 'shell', 'runner', 'branch']).openapi('Tier2ActionKind');
+import { TIER2_ACTION_KINDS } from '@truefoundry/trueforge-core/core';
+
+export const Tier2ActionKindSchema = z.enum(TIER2_ACTION_KINDS).openapi('Tier2ActionKind');
 
 export const SentinelUserSettingsSchema = z
   .object({

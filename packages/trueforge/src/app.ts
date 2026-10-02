@@ -62,7 +62,7 @@ import type { IScheduleStore } from './db/scheduleStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISentinelAuditStore } from './db/sentinelAuditStore';
-import type { SentinelUserSettingsStore } from './db/sentinelUserSettingsStore';
+import type { ISentinelUserSettingsStore } from './db/sentinelUserSettingsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { WithTransaction } from './db/transaction';
@@ -230,7 +230,7 @@ export interface ServerDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   sessionMetricsStore: ISessionMetricsStore;
   sentinelAuditStore: ISentinelAuditStore;
-  sentinelUserSettingsStore: SentinelUserSettingsStore;
+  sentinelUserSettingsStore: ISentinelUserSettingsStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;

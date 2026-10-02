@@ -7,7 +7,8 @@ export interface SentinelUserSettingsDatabase {
   sentinel_user_settings: {
     tenant_id: string;
     created_by: string;
-    tier2_always_ask: string;
+    /** TEXT on SQLite, jsonb (parsed array) on Postgres. */
+    tier2_always_ask: string | Tier2ActionKind[];
     offline_mode: number | boolean;
     updated_at: string | Date;
   };
@@ -37,19 +38,20 @@ const DEFAULT_SETTINGS: SentinelUserSettings = {
 
 function toSettings(row: SentinelUserSettingsDatabase['sentinel_user_settings'] | undefined): SentinelUserSettings {
   if (row === undefined) return { ...DEFAULT_SETTINGS };
-  let kinds: Tier2ActionKind[] = [];
-  try {
-    const parsed: unknown = JSON.parse(row.tier2_always_ask);
-    if (Array.isArray(parsed)) {
-      kinds = parsed.filter((v): v is Tier2ActionKind => typeof v === 'string');
-    }
-  } catch {
-    kinds = [];
-  }
+  const raw: unknown = typeof row.tier2_always_ask === 'string' ? JSON.parse(row.tier2_always_ask) : row.tier2_always_ask;
+  const kinds: Tier2ActionKind[] = Array.isArray(raw)
+    ? raw.filter((v): v is Tier2ActionKind => typeof v === 'string')
+    : [];
   return {
     tier2_always_ask: kinds,
     offline_mode: row.offline_mode === true || row.offline_mode === 1,
   };
+}
+
+/** Public API of the Sentinel user settings store, for wiring without generic parameters. */
+export interface ISentinelUserSettingsStore {
+  get(input: GetSentinelUserSettingsInput): Promise<SentinelUserSettings>;
+  upsert(input: UpdateSentinelUserSettingsInput): Promise<SentinelUserSettings>;
 }
 
 /**
@@ -57,7 +59,7 @@ function toSettings(row: SentinelUserSettingsDatabase['sentinel_user_settings'] 
  * and offline mode in the UI, and feeds the classifier's alwaysAsk/isOffline
  * service readers.
  */
-export class SentinelUserSettingsStore {
+export class SentinelUserSettingsStore implements ISentinelUserSettingsStore {
   readonly #db: Kysely<SentinelUserSettingsDatabase>;
 
   constructor(db: Kysely<SentinelUserSettingsDatabase>) {

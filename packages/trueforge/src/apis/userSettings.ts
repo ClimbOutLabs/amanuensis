@@ -4,14 +4,14 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 
 import type { ResolveRequestContext } from '../auth/identity';
-import type { SentinelUserSettingsStore } from '../db/sentinelUserSettingsStore';
+import type { ISentinelUserSettingsStore } from '../db/sentinelUserSettingsStore';
 import {
   getSentinelUserSettingsRoute,
   updateSentinelUserSettingsRoute,
 } from '../routes/userSettingsRoutes';
 
 export interface UserSettingsRouterDeps {
-  sentinelUserSettingsStore: SentinelUserSettingsStore;
+  sentinelUserSettingsStore: ISentinelUserSettingsStore;
   resolveRequestContext: ResolveRequestContext;
 }
 
