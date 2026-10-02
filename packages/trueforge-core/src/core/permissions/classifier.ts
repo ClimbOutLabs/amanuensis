@@ -162,6 +162,41 @@ function operandIdentities(parsed: ParsedSimpleCommand, cwd: string): string[] {
   return out;
 }
 
+/**
+ * True when every non-flag operand of a parsed simple command resolves inside
+ * the workspace. An existing operand resolves by its own realpath (so a
+ * symlinked file pointing outside is caught); a not-yet-existing operand
+ * resolves via its parent directory (so a symlinked parent escaping the
+ * workspace is caught even before the file is created). Anything
+ * unresolvable fails closed.
+ */
+function shellOperandsInsideWorkspace(input: {
+  parsed: ParsedSimpleCommand;
+  cwd: string;
+  workspace_root: string;
+}): boolean {
+  let root: string;
+  try {
+    root = realpathSync(input.workspace_root);
+  } catch {
+    return false;
+  }
+  for (const token of input.parsed.argv.slice(1)) {
+    if (token.startsWith('-')) {
+      continue;
+    }
+    const identity =
+      canonicalFileIdentity({ p: token, cwd: input.cwd }) ?? canonicalWriteTarget({ p: token, cwd: input.cwd });
+    if (identity === null) {
+      return false;
+    }
+    if (!(identity === root || identity.startsWith(`${root}${path.sep}`))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 interface CanonicalShellForm {
   kind: 'simple' | 'compound';
   argv: string[];
@@ -211,7 +246,7 @@ export function canonicalShellForm(input: {
         file_hashes: fileHashes,
       };
     }
-    // A2: Also hash the executed operand for simple non-allowlisted commands.
+    // Hash the executed operand for simple non-allowlisted commands too.
     // These go to Tier 3, and the content binding must apply to all Tier 3 forms.
     const simpleOperand = extractExecutedFileOperand({ argv: parsed.argv });
     if (simpleOperand !== undefined) {
@@ -238,10 +273,9 @@ export function canonicalShellForm(input: {
     cwd_resolved: cwdResolved,
     env_overrides: envOverrides,
     file_hashes: (() => {
-      // A2: Bind content hashes for compound commands too. For each segment,
-      // extract the executed file operand and hash it. This closes the
-      // post-approval rewrite window where a script could be modified between
-      // approval and dispatch without detection.
+      // Bind content hashes for compound commands too: for each segment,
+      // extract the executed file operand and hash it, so a script rewritten
+      // between approval and dispatch is detected at re-verification.
       const hashes: Record<string, string> = {};
       const hashSegFile = (p: string): void => {
         const hash = sha256FileContent(p);
@@ -306,8 +340,8 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   const env = envOverrides(action.canonical_params);
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
 
-  // SECURITY FIX: Agent-controlled env vars (e.g. LD_PRELOAD, PYTHONPATH, NODE_OPTIONS)
-  // can inject code into allowlisted commands. Escalate to Tier 3 for approval.
+  // Agent-controlled env vars (e.g. LD_PRELOAD, PYTHONPATH, NODE_OPTIONS)
+  // can inject code into allowlisted commands: escalate for approval.
   if (env !== null && Object.keys(env).length > 0) {
     return tier3Decision({
       card: {
@@ -354,10 +388,9 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     return applyAlwaysAsk({ decision, kind: 'shell', ctx, action });
   }
 
-  // Write-then-execute check BEFORE allowlist matching.
-  // A1: Scan every segment of compound commands (`;`, `&&`, `||`, `|`).
-  // A tracked script hidden behind a separator (e.g. `echo ok; sh payload.sh`)
-  // must not bypass the escalation.
+  // Write-then-execute check BEFORE allowlist matching. Scan every segment
+  // of a compound command (`;`, `&&`, `||`, `|`): a tracked script hidden
+  // behind a separator (e.g. `echo ok; sh payload.sh`) must not bypass this.
   const parsed = parseSimpleCommand(command);
   const segments = splitCompoundSegments(command);
   for (const segment of segments) {
@@ -442,8 +475,8 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     const matched = matchAllowlist(parsed, services.shell_allowlist);
     if (matched !== undefined) {
       const identityCwd = resolveIdentityCwd(ctx, cwd);
-      // SECURITY FIX (A2/A3): Verify cwd and all file operands are inside the workspace.
-      // Agent-controlled cwd (e.g. '/etc') or symlink escapes must not get Tier 2.
+      // The cwd and every file operand must resolve inside the workspace.
+      // An agent-controlled cwd or a symlink escape must not get Tier 2.
       const workspaceRoot = ctx.workspace_cwd;
       if (workspaceRoot !== null) {
         const cwdInside = isInsideWorkspace({ p: identityCwd, cwd: '/', workspace_root: workspaceRoot });
@@ -464,34 +497,22 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
             sensitive_read: false,
           });
         }
-        const files = operandIdentities(parsed, identityCwd);
-        for (const file of files) {
-          // file is already a canonical identity (realpath resolved), check if inside
-          const inside = (() => {
-            try {
-              const root = realpathSync(workspaceRoot);
-              return file === root || file.startsWith(`${root}${path.sep}`);
-            } catch {
-              return false;
-            }
-          })();
-          if (!inside) {
-            return tier3Decision({
-              card: {
-                plain_what: `Access \`${basenameOf(file)}\` outside the workspace.`,
-                plain_why: plainWhy(ctx.agent_intent),
-                cannot_be_undone: 'This file is outside the workspace boundary.',
-                why_asked_again: null,
-                destination: null,
-                recipient: null,
-                amount: null,
-                parsed_command: command,
-              },
-              reason: 'file_outside_workspace',
-              reason_detail: 'A file operand resolves outside the workspace.',
-              sensitive_read: false,
-            });
-          }
+        if (!shellOperandsInsideWorkspace({ parsed, cwd: identityCwd, workspace_root: workspaceRoot })) {
+          return tier3Decision({
+            card: {
+              plain_what: `Access a file outside the workspace with \`${command}\`.`,
+              plain_why: plainWhy(ctx.agent_intent),
+              cannot_be_undone: 'This file is outside the workspace boundary.',
+              why_asked_again: null,
+              destination: null,
+              recipient: null,
+              amount: null,
+              parsed_command: command,
+            },
+            reason: 'file_outside_workspace',
+            reason_detail: 'A file operand resolves outside the workspace.',
+            sensitive_read: false,
+          });
         }
       }
       const decision = tier2Decision({
@@ -573,8 +594,9 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       }),
     });
   }
-  // SECURITY FIX (A4): Use canonicalWriteTarget for new files (resolves parent dir).
-  // canonicalFileIdentity returns null for non-existent paths, causing false "outside workspace".
+  // Resolve the write target via its parent directory: the target itself may
+  // not exist yet, and resolving it directly would misread every new-file
+  // write as outside the workspace.
   const inside = (() => {
     const identity = canonicalWriteTarget({ p: target, cwd: identityCwd });
     if (identity === null) { return false; }
@@ -623,9 +645,9 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
 function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierDecision {
   const workflowParam = action.canonical_params['workflow'];
   const workflowName = typeof workflowParam === 'string' ? workflowParam : 'unknown';
-  // SECURITY FIX: Runner workflows execute agent-controlled package.json scripts/Makefile
-  // targets. Tier 2 is non-blocking, allowing arbitrary code execution without approval.
-  // Escalate to Tier 3 until a real stop control exists.
+  // Runner workflows execute agent-controlled package.json script targets.
+  // Tier 2 is non-blocking, which would allow code execution without
+  // approval: escalate to Tier 3.
   return tier3Decision({
     card: {
       plain_what: `Run the \`${workflowName}\` workflow (executes package.json scripts).`,
@@ -852,9 +874,9 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
 export async function classifyTier(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const name = action.tool_name;
 
-  // SECURITY FIX: Only the verified system exec tool gets the allowlist path.
-  // An MCP tool named 'exec' must not be downgraded to Tier 2; it falls through
-  // to the fail-closed Tier 3 default below.
+  // Only the verified system exec tool gets the allowlist path. An MCP tool
+  // named 'exec' must not be downgraded to Tier 2; it falls through to the
+  // fail-closed Tier 3 default below.
   if (action.tool_type === 'truefoundry-system') {
     if (name === 'exec') {
       return classifyExecShell(action, ctx);

@@ -22,12 +22,14 @@ import {
 import { extractCardFields } from './extractorRegistry';
 import { hashArgv, matchAllowlist, OFFLINE_SHELL_COMMANDS, parseSimpleCommand } from './shellAllowlist';
 import {
+  canonicalFileIdentity,
+  canonicalWriteTarget,
   extractExecutedFileOperand,
   sha256FileContent,
   splitWordsLenient,
-  canonicalFileIdentity,
 } from './trackedExecutables';
 import { realpathSync } from 'node:fs';
+import path from 'node:path';
 import { requiresNetwork, provenanceForToolType } from './networkRequirements';
 import { canonicalShellForm } from './classifier';
 import type { Tier, TierDecision, TrackedExecutionBinding } from './tier';
@@ -110,9 +112,73 @@ function offlineViolation(call: VerifiableCall, ctx: DispatchCheckContext): stri
 }
 
 /**
+ * Tier 2 decisions are notice-only, but they still promise workspace
+ * containment: the classifier escalates out-of-workspace cwd and operands.
+ * Re-verify that containment against the current filesystem state, because a
+ * symlinked parent repointed between classification and dispatch could
+ * otherwise turn an in-workspace operation into an out-of-workspace one.
+ */
+function verifyTier2Containment(input: {
+  call: VerifiableCall;
+  workspace_root: string;
+}): string | undefined {
+  const { call, workspace_root } = input;
+  let root: string;
+  try {
+    root = realpathSync(workspace_root);
+  } catch {
+    return 'Tier 2 workspace check failed at dispatch; request approval again.';
+  }
+  const insideRoot = (identity: string): boolean =>
+    identity === root || identity.startsWith(`${root}${path.sep}`);
+
+  if (call.tool_name === 'write_file' || call.tool_name === 'apply_patch' || call.tool_name === 'replace_text') {
+    const target = stringParam(call.canonical_params, 'path') ?? stringParam(call.canonical_params, 'target');
+    if (target !== null) {
+      const cwd = stringParam(call.canonical_params, 'cwd') ?? workspace_root;
+      // The target may not exist yet: resolve via its parent directory.
+      const identity = canonicalWriteTarget({ p: target, cwd });
+      if (identity === null || !insideRoot(identity)) {
+        return 'Tier 2 write target is outside the workspace at dispatch; request approval again.';
+      }
+    }
+    return undefined;
+  }
+
+  if (call.tool_name === 'exec') {
+    const command = stringParam(call.canonical_params, 'command') ?? '';
+    const parsed = parseSimpleCommand(command);
+    if (parsed === undefined) {
+      return 'Tier 2 shell command cannot be parsed at dispatch; request approval again.';
+    }
+    const cwd = stringParam(call.canonical_params, 'cwd') ?? workspace_root;
+    const cwdIdentity = canonicalFileIdentity({ p: cwd, cwd: '/' });
+    if (cwdIdentity === null || !insideRoot(cwdIdentity)) {
+      return 'Tier 2 shell working directory is outside the workspace at dispatch; request approval again.';
+    }
+    for (const token of parsed.argv.slice(1)) {
+      if (token.startsWith('-')) {
+        continue;
+      }
+      const identity =
+        canonicalFileIdentity({ p: token, cwd }) ?? canonicalWriteTarget({ p: token, cwd });
+      // Unresolvable operands were not bound at classify time; only a
+      // resolved-outside operand invalidates the Tier 2 grant.
+      if (identity !== null && !insideRoot(identity)) {
+        return 'Tier 2 shell operand is outside the workspace at dispatch; request approval again.';
+      }
+    }
+    return undefined;
+  }
+
+  return undefined;
+}
+
+/**
  * Returns an error message when the call must not execute, or undefined when
- * it is cleared to run. Only approved Tier 3 calls need verification; Tier
- * 1/2 return undefined immediately.
+ * it is cleared to run. Tier 3 calls are verified against their approval
+ * token; Tier 2 calls get a workspace-containment re-check; Tier 1 passes
+ * through.
  */
 export function verifyPreDispatch(input: {
   call: VerifiableCall;
@@ -121,38 +187,12 @@ export function verifyPreDispatch(input: {
   const { call, ctx } = input;
   const { services } = ctx;
 
-  // G1/G2: Re-verify Tier 2 workspace containment at dispatch time.
-  // A symlinked parent repointed between classification and dispatch could
-  // turn an in-workspace Tier 2 operation into an out-of-workspace one.
-  // Fail closed if containment no longer holds.
   if (call.tier === 2) {
     const workspaceRoot = ctx.workspace_cwd;
-    if (workspaceRoot !== null) {
-      // Check file writes
-      if (call.tool_name === 'write_file') {
-        const target = stringParam(call.canonical_params, 'path') ?? stringParam(call.canonical_params, 'target');
-        if (target !== null) {
-          const cwd = stringParam(call.canonical_params, 'cwd') ?? workspaceRoot;
-          const identity = canonicalFileIdentity({ p: target, cwd });
-          // If the target cannot be resolved, or resolves outside the workspace,
-          // the Tier 2 grant is invalid.
-          if (identity === null) {
-            return 'Tier 2 write target cannot be resolved at dispatch; request approval again.';
-          }
-          // Re-verify containment using realpath
-          try {
-            const root = realpathSync(workspaceRoot);
-            const sep = '/';
-            if (!(identity === root || identity.startsWith(`${root}${sep}`))) {
-              return 'Tier 2 write target is outside the workspace at dispatch; request approval again.';
-            }
-          } catch {
-            return 'Tier 2 write target workspace check failed; request approval again.';
-          }
-        }
-      }
+    if (workspaceRoot === null) {
+      return undefined;
     }
-    return undefined;
+    return verifyTier2Containment({ call, workspace_root: workspaceRoot });
   }
 
   if (call.tier !== 3) {

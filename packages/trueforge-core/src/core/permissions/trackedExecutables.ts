@@ -331,8 +331,8 @@ export function splitWordsLenient(command: string): string[] {
 /**
  * Split a shell command into segments by `;`, `&&`, `||`, and `|`.
  * Respects single/double quotes and backslash escapes, so separators inside
- * quoted arguments do not split. Used for A1/A2: every segment of a compound
- * command must be scanned for tracked executed operands and hashed.
+ * quoted arguments do not split. Every segment of a compound command is
+ * scanned for tracked executed operands and hashed.
  */
 export function splitCompoundSegments(command: string): string[] {
   const segments: string[] = [];
