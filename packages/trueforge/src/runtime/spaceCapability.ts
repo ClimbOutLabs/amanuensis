@@ -654,6 +654,7 @@ class SpaceTool extends LocalToolMCP {
       description:
         'List every persistent space visible to the user, without body content: id, name, purpose, status, revision, and updated_at for each, plus the current aggregate_revision. Call this before create_space to check whether a space already covers the subject you are about to create, so you update it instead of making a duplicate. Use get_space to read one space’s full body.',
       schema: LIST_SPACES_INPUT_SCHEMA,
+      annotations: { readOnlyHint: true },
       handler: async () => this.read(() => this.list()),
     }),
     defineTool({
@@ -661,6 +662,7 @@ class SpaceTool extends LocalToolMCP {
       description:
         'Read one persistent space by id: its metadata (name, purpose, status, format, revision) plus the current aggregate_revision, with the full body included unless include_body is false. Call this before update_space to read the current body and revision. Pass revision to read a retained historical revision instead of the current one (for example to inspect what a bad update overwrote). Pass include_body: false when you already have the body from a recent get_space and only need the current revision: this avoids duplicating large HTML in the prompt. include_body: false is for metadata-only reads — do not combine it with revision when you want to inspect the historical body. Use list_spaces first if you do not already have the space id.',
       schema: GET_SPACE_INPUT_SCHEMA,
+      annotations: { readOnlyHint: true },
       handler: async input => this.read(() => this.get(input)),
     }),
     defineTool({
@@ -700,6 +702,7 @@ class SpaceTool extends LocalToolMCP {
       description:
         'List the addressable blocks of one persistent space without resending the body: each block\u2019s anchor name, an 80-character preview of its content, and how many times the anchor occurs. A space whose body has no <!-- @block:\u2026 --> markers reports a single "auto-body" block covering the whole body. Text before the first marker (the preamble) is not addressable by anchor; it is reported separately with its preview and length, and edited via a full-body update_space. A <!-- @block:\u2026 --> marker inside a fenced code block (``` / ~~~) or a <pre>/<code> element is documentation text, not a block, and is not listed. Call this after a context compaction \u2014 or before update_space block_edits \u2014 to recover the current anchors cheaply instead of re-reading the full body with get_space.',
       schema: LIST_BLOCKS_INPUT_SCHEMA,
+      annotations: { readOnlyHint: true },
       handler: async input => this.read(() => this.listBlocks(input)),
     }),
   ];

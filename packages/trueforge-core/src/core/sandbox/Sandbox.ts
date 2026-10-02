@@ -41,9 +41,8 @@ import {
   canonicalFileIdentity,
   canonicalWriteTarget,
   classifyContextFor,
-  classifyTier,
+  classifyHostToolCall,
   observeShellCreatedFiles,
-  recordClassificationAudit,
   type SentinelHostContext,
 } from '../permissions';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
@@ -2160,13 +2159,11 @@ export class Sandbox extends LocalToolMCP {
     const sentinelHost = this.sentinelContext;
     let sentinelStamp: ReturnType<typeof stampSentinelDecision> | undefined;
     if (sentinelHost !== undefined) {
-      const sentinelCtx = classifyContextFor({
-        host: sentinelHost,
+      const sentinelDecision = await classifyHostToolCall({
+        sentinel: sentinelHost,
         repository_id: this.boundRepository?.repository_id ?? null,
         workspace_cwd: this.boundRepository?.workspace_cwd ?? cwd ?? null,
-      });
-      const sentinelDecision = await classifyTier(
-        {
+        action: {
           tool_name: params.name,
           canonical_params: effectiveArguments ?? {},
           tool_type: 'truefoundry-system',
@@ -2177,20 +2174,6 @@ export class Sandbox extends LocalToolMCP {
             open_world_hint: networkIntent ? true : info.open_world_hint,
           },
         },
-        sentinelCtx,
-      );
-      await recordClassificationAudit({
-        services: sentinelCtx.services,
-        identity: {
-          tenant_id: sentinelCtx.tenant_id,
-          created_by: sentinelCtx.created_by,
-          conversation_id: sentinelCtx.conversation_id,
-          repository_id: sentinelCtx.repository_id,
-          workspace_cwd: sentinelCtx.workspace_cwd,
-          agent_intent: sentinelCtx.agent_intent,
-        },
-        tool_name: params.name,
-        decision: sentinelDecision,
       });
       sentinelStamp = stampSentinelDecision({ decision: sentinelDecision });
     }

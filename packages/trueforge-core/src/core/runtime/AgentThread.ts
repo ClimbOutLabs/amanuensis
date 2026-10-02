@@ -103,8 +103,9 @@ import {
 } from '../mcp/executeToolCalls';
 import { isGithubFileRead } from '../mcp/githubFileContents';
 import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
+import { stampSentinelDecision } from '../mcp/ToolSet';
 import type { SentinelHostContext } from '../permissions';
-import { toDispatchSentinelContext } from '../permissions';
+import { classifyHostToolCall, toDispatchSentinelContext } from '../permissions';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -1099,14 +1100,63 @@ function findUnavailableMcpCause(error: unknown): McpConnectionError | undefined
   return undefined;
 }
 
+/**
+ * Sentinel classification for tool calls whose toolset left them unstamped.
+ * MCP servers (ToolSet) and the sandbox classify their own tools with
+ * normalized arguments; built-in host tools (LocalToolMCP) do not, so an
+ * unrecognized builtin would otherwise execute with no permission check.
+ * Classifying here, the single funnel every tool call passes through with
+ * its final arguments, covers all sources uniformly. Calls that already
+ * carry a tier are never re-classified.
+ *
+ * Client-side tools run on the client and thread-creation calls are
+ * orchestration, not host-executed data actions, so the host has nothing to
+ * gate there; they keep the toolset's own stamping. A created sub-agent's
+ * own calls are classified in its own thread.
+ */
+export async function classifyUnstampedToolCall(input: {
+  sentinel: SentinelHostContext | undefined;
+  canonical_params: Record<string, unknown>;
+  info: InternalToolCallInfo;
+}): Promise<InternalToolCallInfo> {
+  const { sentinel, canonical_params, info } = input;
+  if (
+    sentinel === undefined ||
+    info.tier !== undefined ||
+    info.pre_dispatch_failure !== undefined ||
+    info.is_client_side === true ||
+    info.is_thread_creation === true
+  ) {
+    return info;
+  }
+  const decision = await classifyHostToolCall({
+    sentinel,
+    repository_id: null,
+    workspace_cwd: sentinel.workspace_cwd,
+    action: {
+      tool_name: info.original_tool_name,
+      canonical_params,
+      tool_type: info.type,
+      mcp_hints: {
+        read_only_hint: info.read_only_hint,
+        destructive_hint: info.destructive_hint,
+        open_world_hint: info.open_world_hint,
+      },
+    },
+  });
+  return { ...info, ...stampSentinelDecision({ decision }) };
+}
+
 async function enrichAssistantMessage({
   assistantMessage,
   toolMapping,
   resolveUnderlyingTool,
+  sentinel,
 }: {
   assistantMessage: RawAssistantMessage;
   toolMapping: Map<string, MappedMCPTool>;
   resolveUnderlyingTool: boolean;
+  sentinel: SentinelHostContext | undefined;
 }): Promise<InternalEnrichedAssistantMessage> {
   // Omit tool_calls when empty; OpenAI rejects `tool_calls: []` on replay.
   if (!assistantMessage.tool_calls?.length) {
@@ -1125,13 +1175,15 @@ async function enrichAssistantMessage({
       enrichedToolCalls.push({ ...toolCall, tool_info: makeUnknownToolInfo(toolCall.function.name) });
       continue;
     }
-    const tool_info = await resolveToolCallInfo({
-      toolInfo,
-      params: {
-        name: toolInfo.originalToolName,
-        ...(resolveUnderlyingTool ? { arguments: tryParseToolArgs(toolCall.function.arguments) } : {}),
-      },
-      resolveUnderlyingTool,
+    const params = {
+      name: toolInfo.originalToolName,
+      ...(resolveUnderlyingTool ? { arguments: tryParseToolArgs(toolCall.function.arguments) } : {}),
+    };
+    const resolved = await resolveToolCallInfo({ toolInfo, params, resolveUnderlyingTool });
+    const tool_info = await classifyUnstampedToolCall({
+      sentinel,
+      canonical_params: params.arguments ?? {},
+      info: resolved,
     });
     enrichedToolCalls.push({ ...toolCall, tool_info });
   }
@@ -2716,6 +2768,7 @@ export class AgentThread {
       // During context persistence, we have the complete message and hence the tool arguments are available.
       // Hence, we resolve the underlying tool to get the tool information.
       resolveUnderlyingTool: true,
+      sentinel: this.sentinel,
     });
     const finishReason = result.value.finish_reason;
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the

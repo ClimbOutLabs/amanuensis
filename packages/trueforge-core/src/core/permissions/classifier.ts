@@ -45,7 +45,8 @@ import {
 } from './trackedExecutables';
 import { requiresNetwork, provenanceForToolType } from './networkRequirements';
 import { isRunnerWorkflow } from './runner';
-import type { SentinelCallIdentity, SentinelServices } from './context';
+import { classifyContextFor, type SentinelCallIdentity, type SentinelHostContext, type SentinelServices } from './context';
+import { recordClassificationAudit } from './audit';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
@@ -998,4 +999,37 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
 
   return classifyGenericTool(action, ctx);
+}
+
+/**
+ * Classify one host tool call and audit the decision. Canonical owner of the
+ * classify-then-audit sequence: ToolSet, Sandbox, and the AgentThread
+ * builtin choke point all go through here so the logic lives in one place.
+ */
+export async function classifyHostToolCall(input: {
+  sentinel: SentinelHostContext;
+  repository_id: string | null;
+  workspace_cwd: string | null;
+  action: SentinelAction;
+}): Promise<TierDecision> {
+  const ctx = classifyContextFor({
+    host: input.sentinel,
+    repository_id: input.repository_id,
+    workspace_cwd: input.workspace_cwd,
+  });
+  const decision = await classifyTier(input.action, ctx);
+  await recordClassificationAudit({
+    services: ctx.services,
+    identity: {
+      tenant_id: ctx.tenant_id,
+      created_by: ctx.created_by,
+      conversation_id: ctx.conversation_id,
+      repository_id: ctx.repository_id,
+      workspace_cwd: ctx.workspace_cwd,
+      agent_intent: ctx.agent_intent,
+    },
+    tool_name: input.action.tool_name,
+    decision,
+  });
+  return decision;
 }

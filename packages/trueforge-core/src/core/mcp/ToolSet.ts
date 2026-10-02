@@ -3,10 +3,7 @@ import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
 import {
-  classifyContextFor,
-  classifyTier,
-  recordClassificationAudit,
-  type ClassifyContext,
+  classifyHostToolCall,
   type SentinelHostContext,
   type TierDecision,
 } from '../permissions';
@@ -16,6 +13,7 @@ import {
   isCallToolResponseResult,
   toolResultResponse,
   type AgentToolSchema,
+  type ToolSchema,
   type AuthRequiredResponse,
   type CallToolResponse,
   type IToolSet,
@@ -277,22 +275,11 @@ export class ToolSet implements IToolSet {
         is_approval_required: this.policy.requiresApproval(params.name, tool?.annotations),
       };
     }
-    const services = sentinel.services;
-    const classifyCtx: ClassifyContext = classifyContextFor({
-      host: sentinel,
+    const decision = await classifyHostToolCall({
+      sentinel,
       repository_id: null,
       workspace_cwd: sentinel.workspace_cwd,
-    });
-    const identity = {
-      tenant_id: classifyCtx.tenant_id,
-      created_by: classifyCtx.created_by,
-      conversation_id: classifyCtx.conversation_id,
-      repository_id: classifyCtx.repository_id,
-      workspace_cwd: classifyCtx.workspace_cwd,
-      agent_intent: classifyCtx.agent_intent,
-    };
-    const decision = await classifyTier(
-      {
+      action: {
         tool_name: params.name,
         canonical_params: isRecord(params.arguments) ? params.arguments : {},
         tool_type: sourceInfo.type,
@@ -302,9 +289,7 @@ export class ToolSet implements IToolSet {
           open_world_hint: sourceInfo.open_world_hint,
         },
       },
-      classifyCtx,
-    );
-    await recordClassificationAudit({ services, identity, tool_name: params.name, decision });
+    });
     return {
       ...toolEffectHints(tool),
       ...sourceInfo,
@@ -347,7 +332,12 @@ function isReadOnlyLocalTool(annotations: ToolAnnotations | undefined): boolean 
  * Copies only the hints the server actually published. Keys are omitted rather than
  * set to undefined so an unannotated tool stays visibly unannotated downstream.
  */
-function toolEffectHints(tool: AgentToolSchema | undefined): ToolEffectHints {
+/**
+ * Effect hints from a tool's MCP annotations. Shared by ToolSet (remote MCP
+ * tools) and LocalToolMCP (built-in host tools) so both read the same
+ * server-declared metadata.
+ */
+export function toolEffectHints(tool: ToolSchema | undefined): ToolEffectHints {
   const annotations: ToolAnnotations | undefined = tool?.annotations;
   return {
     ...(tool?.description !== undefined && { description: tool.description }),
