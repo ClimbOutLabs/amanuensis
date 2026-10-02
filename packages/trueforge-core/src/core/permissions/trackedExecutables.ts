@@ -329,7 +329,7 @@ export function splitWordsLenient(command: string): string[] {
 }
 
 /**
- * Split a shell command into segments by `;`, `&&`, `||`, and `|`.
+ * Split a shell command into segments by `;`, `&&`, `||`, `|`, and newlines.
  * Respects single/double quotes and backslash escapes, so separators inside
  * quoted arguments do not split. Every segment of a compound command is
  * scanned for tracked executed operands and hashed.
@@ -378,7 +378,7 @@ export function splitCompoundSegments(command: string): string[] {
       i++; // skip the second character
       continue;
     }
-    if (ch === ';' || ch === '|' || ch === '&') {
+    if (ch === ';' || ch === '|' || ch === '&' || ch === '\n') {
       pushSegment();
       continue;
     }

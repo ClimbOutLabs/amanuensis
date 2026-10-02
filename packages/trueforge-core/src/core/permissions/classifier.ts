@@ -276,6 +276,10 @@ export function canonicalShellForm(input: {
       // Bind content hashes for compound commands too: for each segment,
       // extract the executed file operand and hash it, so a script rewritten
       // between approval and dispatch is detected at re-verification.
+      // Also hash every file-like token in the raw command: nested constructs
+      // like $(), backticks, or <() can hide executed scripts from the
+      // segment parser, and an unbound script is a post-approval rewrite
+      // waiting to happen.
       const hashes: Record<string, string> = {};
       const hashSegFile = (p: string): void => {
         const hash = sha256FileContent(p);
@@ -292,6 +296,21 @@ export function canonicalShellForm(input: {
           if (identity !== null) {
             hashSegFile(identity);
           }
+        }
+      }
+      for (const token of splitWordsLenient(input.command)) {
+        if (token.startsWith('-')) {
+          continue;
+        }
+        // Strip shell metacharacters that splitWordsLenient leaves attached:
+        // $(...), `...`, <(...), trailing ), ;, &, |, etc.
+        const cleaned = token.replace(/^[$`<(]+/, '').replace(/[)>;|&`]+$/, '');
+        if (cleaned.length === 0) {
+          continue;
+        }
+        const identity = canonicalFileIdentity({ p: cleaned, cwd: identityCwd });
+        if (identity !== null) {
+          hashSegFile(identity);
         }
       }
       return hashes;
