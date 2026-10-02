@@ -30,6 +30,14 @@ export const TIER2_ACTION_KINDS = ['file_write', 'shell', 'runner', 'branch'] as
 
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 
+/** Human-readable labels for Tier 2 action kinds. */
+export const TIER2_ACTION_LABELS: Record<Tier2ActionKind, string> = {
+  file_write: 'Write files',
+  shell: 'Run shell commands',
+  runner: 'Run code',
+  branch: 'Manage git branches',
+};
+
 export function parseTier2ActionKind(value: unknown): Tier2ActionKind | undefined {
   for (const kind of TIER2_ACTION_KINDS) {
     if (value === kind) return kind;

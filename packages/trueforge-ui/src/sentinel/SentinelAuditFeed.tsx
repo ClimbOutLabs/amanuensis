@@ -8,6 +8,7 @@ import { useOptionalSentinelApiState } from './SentinelApiContext.js';
 import { Tier2EscalationToggle } from './Tier2EscalationToggle.js';
 import {
   TIER2_ACTION_KINDS,
+  TIER2_ACTION_LABELS,
   type SentinelAuditEntry,
   type SentinelAuditOutcome,
   type SentinelUserSettings,
@@ -129,8 +130,8 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
         <ul className="space-y-1.5">
           {tier2ActionKinds.map(kind => (
             <li key={kind} className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate font-mono text-[0.6875rem] text-text-secondary">
-                {kind}
+              <span className="min-w-0 truncate text-[0.6875rem] text-text-secondary">
+                {TIER2_ACTION_LABELS[kind]}
               </span>
               <Tier2EscalationToggle
                 actionType={kind}

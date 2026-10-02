@@ -21,6 +21,7 @@ export interface SentinelAuditDatabase {
 
 export interface SentinelAuditRecord {
   id: string;
+  conversation_id: string;
   tier: number;
   tool_name: string;
   description: string;
@@ -40,6 +41,7 @@ export interface ListSentinelAuditInput {
 function toRecord(row: SentinelAuditDatabase['sentinel_audit']): SentinelAuditRecord {
   return {
     id: row.id,
+    conversation_id: row.conversation_id,
     tier: row.tier,
     tool_name: row.tool_name,
     description: row.description,

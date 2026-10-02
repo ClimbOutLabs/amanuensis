@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const SentinelAuditRecordSchema = z
   .object({
     id: z.string(),
+    conversation_id: z.string(),
     tier: z.number().int().min(1).max(3),
     tool_name: z.string(),
     description: z.string(),
@@ -21,6 +22,6 @@ export const ListSessionAuditLogRequestQuerySchema = z
 
 export const ListSessionAuditLogResponseSchema = z
   .object({
-    data: z.array(SentinelAuditRecordSchema),
+    entries: z.array(SentinelAuditRecordSchema),
   })
   .openapi('ListSessionAuditLogResponse');

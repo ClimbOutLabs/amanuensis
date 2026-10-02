@@ -705,14 +705,14 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
     }
-    const data = await deps.sentinelAuditStore.list({
+    const entries = await deps.sentinelAuditStore.list({
       tenant_id: requestContext.tenant_id,
       created_by: requestContext.subject.id,
       conversation_id: sessionId,
       limit: query.limit,
       offset: query.offset,
     });
-    return c.json({ data }, 200);
+    return c.json({ entries }, 200);
   };
 
   const router = new OpenAPIHono();
