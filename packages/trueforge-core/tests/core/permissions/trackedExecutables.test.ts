@@ -1,6 +1,5 @@
 import {
   extractExecutedFileOperand,
-  extractRmTargets,
   InMemoryTrackedExecutableStore,
   observeShellCreatedFiles,
   skipWrapperPrefix,
@@ -83,11 +82,5 @@ describe('observeShellCreatedFiles', () => {
 
   test('returns nothing for read-only commands', () => {
     expect(observeShellCreatedFiles({ command: 'ls -la' })).toEqual([]);
-  });
-});
-
-describe('extractRmTargets', () => {
-  test('extracts non-flag operands', () => {
-    expect(extractRmTargets({ argv: ['rm', '-rf', 'dist'] })).toEqual(['dist']);
   });
 });

@@ -32,7 +32,7 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { requiresNetwork, provenanceForToolType } from './networkRequirements';
 import { canonicalShellForm } from './classifier';
-import type { Tier, TierDecision, TrackedExecutionBinding } from './tier';
+import type { Tier, TrackedExecutionBinding } from './tier';
 import type { ShellApprovalBinding } from './approvalTokens';
 import type { SentinelCallIdentity, SentinelServices } from './context';
 
@@ -52,23 +52,6 @@ export interface DispatchCheckContext extends SentinelCallIdentity {
 }
 
 /** Build a VerifiableCall from a classified tool call's host-only info. */
-export function verifiableCallFromDecision(input: {
-  tool_name: string;
-  tool_type: 'truefoundry-system' | 'mcp';
-  canonical_params: Record<string, unknown>;
-  decision: TierDecision;
-}): VerifiableCall {
-  return {
-    tool_name: input.tool_name,
-    tool_type: input.tool_type,
-    canonical_params: input.canonical_params,
-    tier: input.decision.tier,
-    approval_token_id: input.decision.approval_token_id,
-    approval_binding: input.decision.approval_binding,
-    shell_binding: input.decision.shell_binding,
-  };
-}
-
 function stringParam(params: Record<string, unknown>, key: string): string | null {
   const value = params[key];
   return typeof value === 'string' ? value : null;

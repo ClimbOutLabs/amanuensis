@@ -27,7 +27,7 @@ export { requiresNetwork, provenanceForToolType } from './networkRequirements';
 export type { RunnerWorkflow } from './runner';
 export { RUNNER_WORKFLOWS, isRunnerWorkflow } from './runner';
 export type { SentinelAction, ClassifyContext } from './classifier';
-export { classifyTier, canonicalShellForm, shellBindingFromForm, validateSentinelShellConfig } from './classifier';
+export { classifyTier, canonicalShellForm, shellBindingFromForm } from './classifier';
 export type { VerifiableCall, DispatchCheckContext } from './dispatch';
 export { verifyPreDispatch } from './dispatch';
 export type { TrackedExecutableScope, TrackedExecutableStore, TrackApprovalGrantInput } from './trackedExecutables';
@@ -40,9 +40,7 @@ export {
   extractExecutedFileOperand,
   skipWrapperPrefix,
   splitWordsLenient,
-  extractRmTargets,
   observeShellCreatedFiles,
-  trackedFileExists,
   InMemoryTrackedExecutableStore,
 } from './trackedExecutables';
 export type { ApprovalTokenStore } from './approvalTokens';

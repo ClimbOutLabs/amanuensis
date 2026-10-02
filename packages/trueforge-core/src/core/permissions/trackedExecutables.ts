@@ -17,7 +17,7 @@
  * escalates.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 
 /** Scope key for tracked entries: the session's (repository_id, workspace_cwd) pair. */
@@ -388,31 +388,6 @@ export function splitCompoundSegments(command: string): string[] {
   return segments;
 }
 
-/**
- * Extract `rm` targets from a parsed argv for the delete-path hook. Flags and
- * `--` are skipped; remaining tokens are targets as written (the caller
- * resolves them to file identities).
- */
-export function extractRmTargets(input: { argv: readonly string[] }): string[] {
-  const argv = skipWrapperPrefix(input.argv);
-  if (path.basename(argv[0] ?? '') !== 'rm') {
-    return [];
-  }
-  const targets: string[] = [];
-  let seenDoubleDash = false;
-  for (const token of argv.slice(1)) {
-    if (!seenDoubleDash && token === '--') {
-      seenDoubleDash = true;
-      continue;
-    }
-    if (!seenDoubleDash && token.startsWith('-') && token !== '-') {
-      continue;
-    }
-    targets.push(token);
-  }
-  return targets;
-}
-
 const FILE_CREATION_COMMANDS: Record<string, 'all_operands' | 'last_operand'> = {
   touch: 'all_operands',
   cp: 'last_operand',
@@ -475,9 +450,4 @@ export function observeShellCreatedFiles(input: { command: string }): string[] {
     }
   }
   return created;
-}
-
-/** True when the file exists and is readable. Exists only for the orphan check. */
-export function trackedFileExists(fileIdentity: string): boolean {
-  return existsSync(fileIdentity);
 }

@@ -30,7 +30,6 @@ import {
   matchAllowlist,
   OFFLINE_SHELL_COMMANDS,
   parseSimpleCommand,
-  validateOfflineSubset,
   type ParsedSimpleCommand,
   type ShellAllowlistConfig,
 } from './shellAllowlist';
@@ -935,9 +934,4 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
 
   return classifyGenericTool(action, ctx);
-}
-
-/** Validate the seeded shell allowlist's offline subset at startup. */
-export function validateSentinelShellConfig(config: ShellAllowlistConfig): boolean {
-  return validateOfflineSubset(config);
 }

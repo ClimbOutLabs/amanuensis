@@ -495,10 +495,10 @@ async function verifySentinelPreDispatch(input: {
     return undefined;
   }
   const info = toolCall.tool_info;
-  if (info.tier !== 3) {
+  if (info.tier !== 3 && info.tier !== 2) {
     return undefined;
   }
-  if (approvalDecisions.get(toolCall.id)?.status !== 'allow') {
+  if (info.tier === 3 && approvalDecisions.get(toolCall.id)?.status !== 'allow') {
     return undefined;
   }
   let canonicalParams: Record<string, unknown>;

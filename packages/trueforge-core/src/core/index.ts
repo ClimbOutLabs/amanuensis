@@ -375,7 +375,7 @@ export { recordClassificationAudit } from './permissions/audit';
 export type { SentinelServices, SentinelCallIdentity, SentinelHostContext } from './permissions/context';
 export { defaultSentinelServices, classifyContextFor, createSentinelHostContext, toDispatchSentinelContext, DEFAULT_PINNED_PATH } from './permissions/context';
 export type { SentinelAction, ClassifyContext } from './permissions/classifier';
-export { classifyTier, canonicalShellForm, shellBindingFromForm, validateSentinelShellConfig } from './permissions/classifier';
+export { classifyTier, canonicalShellForm, shellBindingFromForm } from './permissions/classifier';
 export type { VerifiableCall, DispatchCheckContext } from './permissions/dispatch';
 export { verifyPreDispatch } from './permissions/dispatch';
 export type { ApprovalTokenStore } from './permissions/approvalTokens';
