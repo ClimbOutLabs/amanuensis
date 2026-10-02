@@ -18,6 +18,13 @@ import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import type { AgentTracing } from '../../../src/core/tracing/AgentTracing';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
+import {
+  taskChecklist,
+  REPLACE_TASK_CHECKLIST_TOOL_NAME,
+} from '../../../src/core/capabilities/builtins/TaskChecklist';
+import { emptyTaskChecklist } from '../../../src/agent-session/schemas/taskChecklist';
+import { TaskStateToolSet } from '../../../src/core/runtime/TaskStateToolSet';
+import { TASK_STATE_TOOL_NAME } from '../../../src/core/runtime/taskState';
 
 class SyntheticTools extends LocalToolMCP {
   readonly name = 'synthetic';
@@ -142,4 +149,39 @@ test('no sentinel context leaves the call unstamped', async () => {
     info,
   });
   expect(result).toBe(info);
+});
+
+test('replace_task_checklist (agent scratchpad) classifies Tier 1 silent', async () => {
+  const capability = taskChecklist({
+    access: {
+      getTaskChecklist: () => Promise.resolve(emptyTaskChecklist()),
+      replaceTaskChecklist: () => Promise.resolve(emptyTaskChecklist()),
+    },
+    tracing: NOOP_AGENT_TRACING,
+  });
+  const toolset = capability.systemToolSets[0];
+  const info = await toolset.toolCallInfo({ name: REPLACE_TASK_CHECKLIST_TOOL_NAME, arguments: {} });
+  expect(info.tier).toBeUndefined();
+  const stamped = await classifyUnstampedToolCall({
+    sentinel: makeSentinel(),
+    canonical_params: {},
+    info,
+  });
+  expect(stamped.tier).toBe(1);
+  expect(stamped.is_approval_required).toBe(false);
+  expect(stamped.tier3_card).toBeNull();
+});
+
+test('record_finding (agent scratchpad) classifies Tier 1 silent', async () => {
+  const toolset = new TaskStateToolSet({ tracing: NOOP_AGENT_TRACING, bankedCount: () => 0 });
+  const info = await toolset.toolCallInfo({ name: TASK_STATE_TOOL_NAME, arguments: {} });
+  expect(info.tier).toBeUndefined();
+  const stamped = await classifyUnstampedToolCall({
+    sentinel: makeSentinel(),
+    canonical_params: {},
+    info,
+  });
+  expect(stamped.tier).toBe(1);
+  expect(stamped.is_approval_required).toBe(false);
+  expect(stamped.tier3_card).toBeNull();
 });
