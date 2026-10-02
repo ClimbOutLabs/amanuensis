@@ -250,6 +250,21 @@ function hashInlineCodeOperands(input: {
       // Recurse for nested -c (e.g. sh -c 'sh -c "sh /ws/x.sh"').
       hashInlineCodeOperands({ argv: segArgv, cwd: input.cwd, hashFile: input.hashFile, depth: input.depth + 1 });
     }
+    // Also scan raw tokens in the inline code for $(), backticks, <() hidden
+    // scripts, mirroring the compound branch's metachar-stripping scan.
+    for (const token of splitWordsLenient(code)) {
+      if (token.startsWith('-')) {
+        continue;
+      }
+      const cleaned = token.replace(/^[$`<(]+/, '').replace(/[)>;|&`]+$/, '');
+      if (cleaned.length === 0) {
+        continue;
+      }
+      const identity = canonicalFileIdentity({ p: cleaned, cwd: input.cwd });
+      if (identity !== null) {
+        input.hashFile(identity);
+      }
+    }
   }
 }
 
