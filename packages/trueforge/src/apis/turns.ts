@@ -221,7 +221,7 @@ const CONFIGURED_MODELS_PROMPT_LIMIT = 20;
  */
 export type BeginTurnExecutionDeps = Pick<
   TurnsRouterDeps,
-  'activeTurns' | 'turnDrains' | 'eventSubscriptions' | 'logger' | 'globalSettingsStore'
+  'activeTurns' | 'turnDrains' | 'eventSubscriptions' | 'logger' | 'globalSettingsStore' | 'sentinelServices'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -255,6 +255,7 @@ export type BeginTurnExecutionDeps = Pick<
  * the same way: async factories over the corresponding stores.
  */
 function createTurnResolver(deps: {
+  sentinelServices: SentinelServices;
   mcpServerStore: IMcpServerWithAuthStore;
   tokenStore: IOAuthTokenStore;
   skillStore: ISkillStore;
@@ -973,6 +974,7 @@ export async function beginTurnExecution(params: {
     memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
   );
   const resolver = createTurnResolver({
+    sentinelServices: deps.sentinelServices,
     mcpServerStore: deps.mcpServerStore,
     tokenStore: deps.tokenStore,
     skillStore: deps.skillStore,
@@ -1669,6 +1671,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
     );
     const resolver = createTurnResolver({
+      sentinelServices: deps.sentinelServices,
       mcpServerStore,
       tokenStore: deps.tokenStore,
       skillStore,
