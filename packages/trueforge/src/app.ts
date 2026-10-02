@@ -62,6 +62,7 @@ import type { IScheduleStore } from './db/scheduleStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISentinelAuditStore } from './db/sentinelAuditStore';
+import type { SentinelServices } from '@truefoundry/trueforge-core/core';
 import type { ISentinelUserSettingsStore } from './db/sentinelUserSettingsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
@@ -231,6 +232,7 @@ export interface ServerDeps<TTransaction> {
   sessionMetricsStore: ISessionMetricsStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelUserSettingsStore: ISentinelUserSettingsStore;
+  sentinelServices: SentinelServices;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
