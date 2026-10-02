@@ -43,6 +43,7 @@ import {
   toolResultResponse,
 } from './IMCPServer';
 import { deniedToolCallText } from './ToolSet';
+import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
 
 export interface ToolCallResult {
   message: LLMToolMessage;
@@ -477,6 +478,53 @@ function parseToolArguments(argumentsJson: string): Record<string, unknown> {
   return parsed;
 }
 
+/**
+ * Sentinel pre-dispatch verification for an approved Tier 3 call. Returns an
+ * error message when the call must not execute (stale offline context,
+ * invalid or already-used approval token, parameters changed since
+ * approval), or undefined when cleared. A valid tracked-execution approval
+ * records its grant as a side effect.
+ */
+async function verifySentinelPreDispatch(input: {
+  toolCall: InternalEnrichedToolCall;
+  approvalDecisions: Map<string, ApprovalDecision>;
+  sentinel: { services: SentinelServices; identity: SentinelCallIdentity } | undefined;
+}): Promise<string | undefined> {
+  const { toolCall, approvalDecisions, sentinel } = input;
+  if (sentinel === undefined) {
+    return undefined;
+  }
+  const info = toolCall.tool_info;
+  if (info.tier !== 3 && info.tier !== 2) {
+    return undefined;
+  }
+  if (info.tier === 3 && approvalDecisions.get(toolCall.id)?.status !== 'allow') {
+    return undefined;
+  }
+  let canonicalParams: Record<string, unknown>;
+  try {
+    canonicalParams = parseToolArguments(toolCall.function.arguments);
+  } catch {
+    return 'Tool arguments could not be parsed; request approval again.';
+  }
+  const offline = await sentinel.services.isOffline({
+    tenant_id: sentinel.identity.tenant_id,
+    created_by: sentinel.identity.created_by,
+  });
+  return verifyPreDispatch({
+    call: {
+      tool_name: info.original_tool_name,
+      tool_type: info.type,
+      canonical_params: canonicalParams,
+      tier: info.tier,
+      approval_token_id: info.approval_token_id ?? null,
+      approval_binding: info.approval_binding ?? null,
+      shell_binding: info.shell_binding ?? null,
+    },
+    ctx: { ...sentinel.identity, services: sentinel.services, offline },
+  });
+}
+
 /** Batches of failures in a row before the model is told to stop varying and read the error. */
 export const FAILED_BATCH_NUDGE_AT = 3;
 /** Batches of failures in a row before the host ends the turn. */
@@ -889,6 +937,7 @@ export async function executeToolCalls({
   toolCallTimeoutMs,
   runCodeToolCallTimeoutMs,
   logger,
+  sentinel,
 }: {
   assistantMessage: InternalEnrichedAssistantMessage;
   toolMapping: Map<string, MappedMCPTool>;
@@ -935,6 +984,17 @@ export async function executeToolCalls({
    * call the turn already stopped waiting for after a dispatch timeout.
    */
   logger?: Logger | undefined;
+  /**
+   * Sentinel pre-dispatch verification and Tier 3 outcome audit. When present,
+   * approved Tier 3 calls are re-verified byte-for-byte immediately before
+   * invocation, and Tier 3 approved/denied outcomes are audit-logged.
+   */
+  sentinel?:
+    | {
+        services: SentinelServices;
+        identity: SentinelCallIdentity;
+      }
+    | undefined;
 }): Promise<ExecuteToolCallsResult> {
   const toolMessages: ToolCallResult[] = [];
   const initializationInfo: MCPServerInitInfo[] = [];
@@ -1026,6 +1086,38 @@ export async function executeToolCalls({
               message: 'The tool could not be prepared and was not executed. Retry once or choose another tool.',
               suggested_action: 'retry',
             },
+        admissionProvenance: admission,
+      };
+    }
+
+    // Sentinel: re-verify an approved Tier 3 call byte-for-byte immediately
+    // before invocation. A failed verification blocks dispatch (policy_blocked)
+    // and never records a side-effect attempt or memo entry.
+    const sentinelVerificationError = await verifySentinelPreDispatch({
+      toolCall,
+      approvalDecisions,
+      sentinel,
+    });
+    if (sentinelVerificationError !== undefined) {
+      return {
+        toolCall,
+        toolInfo,
+        response: toolResultResponse({
+          text: JSON.stringify({ error: sentinelVerificationError }),
+          isError: true,
+        }),
+        failure: true,
+        completedAt: new Date().toISOString(),
+        memoized: false,
+        repeatCount: 1,
+        blockedPrivateFallback: false,
+        repeatedSideEffect: false,
+        disposition: 'policy_blocked',
+        remediation: {
+          reason_code: 'sentinel_verification_failed',
+          message: sentinelVerificationError,
+          suggested_action: 'change_strategy',
+        },
         admissionProvenance: admission,
       };
     }
@@ -1588,6 +1680,31 @@ export async function executeToolCalls({
     }
     return outcome;
   });
+  // Sentinel: record Tier 3 carded outcomes. Auto-denied calls were recorded
+  // at classify time; 'approved'/'denied' land here once the user decided.
+  if (sentinel?.services.audit !== null && sentinel?.services.audit !== undefined) {
+    const audit = sentinel.services.audit;
+    for (const toolCall of assistantMessage.tool_calls ?? []) {
+      const info = toolCall.tool_info;
+      if (info.tier !== 3 || info.tier3_card === null) {
+        continue;
+      }
+      const status = approvalDecisions.get(toolCall.id)?.status;
+      if (status !== 'allow' && status !== 'deny') {
+        continue;
+      }
+      await audit.record({
+        tenant_id: sentinel.identity.tenant_id,
+        created_by: sentinel.identity.created_by,
+        conversation_id: sentinel.identity.conversation_id,
+        tier: 3,
+        tool_name: info.original_tool_name,
+        description: info.tier3_card?.plain_what ?? info.original_tool_name,
+        outcome: status === 'allow' ? 'approved' : 'denied',
+        auto_deny_reason: null,
+      });
+    }
+  }
   for (const {
     toolCall,
     toolInfo,

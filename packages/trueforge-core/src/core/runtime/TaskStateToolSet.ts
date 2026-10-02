@@ -43,6 +43,7 @@ export class TaskStateToolSet extends LocalToolMCP {
           `At most ${String(MAX_TASK_FINDINGS)} findings per request.`,
         ].join(' '),
         schema: TaskFindingSchema,
+        annotations: { readOnlyHint: true },
         // eslint-disable-next-line @typescript-eslint/require-await -- defineTool requires an async handler
         handler: async input => {
           if (this.bankedCount() + this.pendingFindings.length >= MAX_TASK_FINDINGS) {

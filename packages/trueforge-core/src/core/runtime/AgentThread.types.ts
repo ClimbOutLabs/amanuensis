@@ -2,6 +2,7 @@ import type { Logger } from 'winston';
 import { z } from 'zod';
 import type { AgentCapability, CapabilityState, JsonValue } from '../capabilities/AgentCapability';
 import type { RegisteredPassthroughEvent, WithRegisteredPassthrough } from '../events/PassthroughEvents';
+import type { SentinelHostContext } from '../permissions';
 import type {
   ActionRequiredEvent,
   AgentApprovalDecisionMessage,
@@ -291,6 +292,12 @@ export interface AgentThreadConstructorInput {
    * back to the core default (DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS).
    */
   sandboxRefreshTimeoutMs?: number | undefined;
+  /**
+   * Sentinel permission context for this session. Stored as an instance field
+   * and passed to executeToolCalls for Tier 3 dispatch verification.
+   * Undefined means Sentinel is not active for this thread.
+   */
+  sentinel?: SentinelHostContext | undefined;
   tracing: AgentTracing;
   logger: Logger;
 }

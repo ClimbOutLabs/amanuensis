@@ -30,6 +30,7 @@ import {
   VercelAILLM,
   type BoundRepository,
 } from '@truefoundry/trueforge-core/core';
+import { createSentinelHostContext } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { streamSSE } from 'hono/streaming';
@@ -434,6 +435,10 @@ function createTurnResolver(deps: {
           spec,
           store: mcpServerStore,
         });
+        const sentinelSession = await sessionStore.getSession({
+          tenant_id,
+          session_id: sessionId,
+        });
         return buildTurnSandbox({
           provider,
           logger,
@@ -444,6 +449,12 @@ function createTurnResolver(deps: {
           fileDownloadEnabled: spec.config.sandbox.file_downloads,
           existingSandboxId: carriedSandboxId,
           boundRepository,
+          sentinel: createSentinelHostContext({
+            tenant_id,
+            created_by: userRef,
+            conversation_id: sessionId,
+            workspace_cwd: sentinelSession?.workspace_cwd ?? null,
+          }),
           loadBoundRepository:
             boundRepository === undefined
               ? undefined

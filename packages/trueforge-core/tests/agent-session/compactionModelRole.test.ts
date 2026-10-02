@@ -39,6 +39,9 @@ describe('auxiliary_models.compaction wiring', () => {
         spec,
         signal: new AbortController().signal,
         tracing: resolver.createTracing(),
+        tenant_id: 'test-tenant',
+        created_by: 'test-user',
+        session_id: 'test-session',
       }),
     ).rejects.toThrow(`Unknown model "${COMPACTION_MODEL}" — not configured on provider`);
   });
@@ -71,6 +74,9 @@ describe('auxiliary_models.compaction wiring', () => {
       spec,
       signal: new AbortController().signal,
       tracing: resolver.createTracing(),
+      tenant_id: 'test-tenant',
+      created_by: 'test-user',
+      session_id: 'test-session',
     });
     expect(compactionModel).toBeUndefined();
   });

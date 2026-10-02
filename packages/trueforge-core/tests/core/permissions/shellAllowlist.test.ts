@@ -1,0 +1,219 @@
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  hashArgv,
+  matchAllowlist,
+  OFFLINE_SHELL_COMMANDS,
+  parseSimpleCommand,
+  resolveOnPinnedPath,
+  seedShellAllowlist,
+  validateOfflineSubset,
+  type ShellAllowlistConfig,
+} from '../../../src/core/permissions/shellAllowlist';
+
+const PINNED = '/usr/bin:/bin';
+
+/** A pinned dir containing one fake executable, for environment-independent tests. */
+function tempBin(name: string): { dir: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'sentinel-bin-'));
+  writeFileSync(join(dir, name), '#!/bin/sh\n');
+  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+function tempConfig(): { config: ShellAllowlistConfig; cleanup: () => void } {
+  const { dir, cleanup } = tempBin('mycmd');
+  const config: ShellAllowlistConfig = {
+    pinned_path: dir,
+    commands: {
+      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
+    },
+  };
+  return { config, cleanup };
+}
+
+describe('parseSimpleCommand', () => {
+  test('parses a simple command with quoted args', () => {
+    const parsed = parseSimpleCommand(`ls -la "my dir"`);
+    expect(parsed).toBeDefined();
+    expect(parsed?.argv).toEqual(['ls', '-la', 'my dir']);
+  });
+
+  test('rejects compound commands', () => {
+    expect(parseSimpleCommand('ls; rm -rf /')).toBeUndefined();
+    expect(parseSimpleCommand('ls && pwd')).toBeUndefined();
+    expect(parseSimpleCommand('ls || pwd')).toBeUndefined();
+    expect(parseSimpleCommand('ls | cat')).toBeUndefined();
+  });
+
+  test('rejects redirects and heredocs', () => {
+    expect(parseSimpleCommand('ls > out.txt')).toBeUndefined();
+    expect(parseSimpleCommand('cat < in.txt')).toBeUndefined();
+    expect(parseSimpleCommand('cat <<EOF')).toBeUndefined();
+  });
+
+  test('rejects newlines, substitutions, and expansions', () => {
+    expect(parseSimpleCommand('ls\npwd')).toBeUndefined();
+    expect(parseSimpleCommand('echo $(whoami)')).toBeUndefined();
+    expect(parseSimpleCommand('echo `whoami`')).toBeUndefined();
+    expect(parseSimpleCommand('echo $HOME')).toBeUndefined();
+    expect(parseSimpleCommand('echo ${HOME}')).toBeUndefined();
+  });
+
+  test('rejects parentheses and malformed quoting', () => {
+    expect(parseSimpleCommand('echo (hi)')).toBeUndefined();
+    expect(parseSimpleCommand(`echo 'unterminated`)).toBeUndefined();
+  });
+
+  test('rejects environment prefixes', () => {
+    expect(parseSimpleCommand('FOO=bar ls')).toBeUndefined();
+  });
+
+  test('rejects empty input', () => {
+    expect(parseSimpleCommand('')).toBeUndefined();
+    expect(parseSimpleCommand('   ')).toBeUndefined();
+  });
+
+  test('treats a quoted semicolon as literal', () => {
+    const parsed = parseSimpleCommand(`echo 'a;b'`);
+    expect(parsed?.argv).toEqual(['echo', 'a;b']);
+  });
+
+  test('accepts the bare nice wrapper and rejects other wrappers', () => {
+    const bare = parseSimpleCommand('nice ls');
+    expect(bare?.argv).toEqual(['ls']);
+    expect(bare?.wrapper).toBe('nice');
+    expect(parseSimpleCommand('nice -n 10 ls')).toBeUndefined();
+    expect(parseSimpleCommand('env ls')).toBeUndefined();
+    expect(parseSimpleCommand('sudo ls')).toBeUndefined();
+    expect(parseSimpleCommand('timeout 5 ls')).toBeUndefined();
+    expect(parseSimpleCommand('xargs ls')).toBeUndefined();
+  });
+});
+
+describe('resolveOnPinnedPath', () => {
+  test('resolves a unique executable in the pinned dir', () => {
+    const { dir, cleanup } = tempBin('mycmd');
+    try {
+      expect(resolveOnPinnedPath('mycmd', dir)).toBe(join(dir, 'mycmd'));
+      expect(resolveOnPinnedPath('missing', dir)).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('rejects names with directory separators', () => {
+    const { dir, cleanup } = tempBin('mycmd');
+    try {
+      expect(resolveOnPinnedPath('./mycmd', dir)).toBeNull();
+      expect(resolveOnPinnedPath('/bin/mycmd', dir)).toBeNull();
+      expect(resolveOnPinnedPath('', dir)).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('rejects duplicate matches across pinned dirs', () => {
+    const first = tempBin('dup');
+    const second = tempBin('dup');
+    try {
+      expect(resolveOnPinnedPath('dup', `${first.dir}:${second.dir}`)).toBeNull();
+    } finally {
+      first.cleanup();
+      second.cleanup();
+    }
+  });
+
+  test('dedupes PATH entries that alias the same file', () => {
+    const { dir, cleanup } = tempBin('mycmd');
+    const aliasDir = join(tmpdir(), `sentinel-alias-${process.pid}`);
+    try {
+      symlinkSync(dir, aliasDir);
+      expect(resolveOnPinnedPath('mycmd', `${dir}:${aliasDir}`)).toBe(join(dir, 'mycmd'));
+    } finally {
+      rmSync(aliasDir, { force: true });
+      cleanup();
+    }
+  });
+});
+
+describe('matchAllowlist', () => {
+  test('matches seeded read-only commands exactly', () => {
+    const { config, cleanup } = tempConfig();
+    try {
+      const parsed = parseSimpleCommand('mycmd -l');
+      expect(parsed).toBeDefined();
+      if (parsed === undefined) {
+        return;
+      }
+      const matched = matchAllowlist(parsed, config);
+      expect(matched).toBeDefined();
+      expect(matched?.argv[0]).toBe(join(config.pinned_path, 'mycmd'));
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('rejects flag smuggling on an allowlisted binary', () => {
+    const { config, cleanup } = tempConfig();
+    try {
+      const parsed = parseSimpleCommand('mycmd --evil');
+      expect(parsed).toBeDefined();
+      if (parsed === undefined) {
+        return;
+      }
+      expect(matchAllowlist(parsed, config)).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('rejects non-allowlisted commands', () => {
+    const { config, cleanup } = tempConfig();
+    try {
+      const parsed = parseSimpleCommand('othercmd');
+      expect(parsed).toBeDefined();
+      if (parsed === undefined) {
+        return;
+      }
+      expect(matchAllowlist(parsed, config)).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('rejects wrappers around allowlisted binaries', () => {
+    // 'sh' is a rejected wrapper: the strict parser refuses it outright, so
+    // it never reaches allowlist matching.
+    expect(parseSimpleCommand('sh -c "mycmd"')).toBeUndefined();
+    const { config, cleanup } = tempConfig();
+    try {
+      const parsed = parseSimpleCommand('nice mycmd -l');
+      expect(parsed).toBeDefined();
+      if (parsed === undefined) {
+        return;
+      }
+      // The bare nice wrapper parses, but 'mycmd' under nice still matches
+      // the allowlist entry for the underlying command.
+      expect(matchAllowlist(parsed, config)).toBeDefined();
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe('hashArgv', () => {
+  test('is deterministic and sensitive to order', () => {
+    expect(hashArgv(['ls', '-la'])).toBe(hashArgv(['ls', '-la']));
+    expect(hashArgv(['ls', '-la'])).not.toBe(hashArgv(['-la', 'ls']));
+  });
+});
+
+describe('offline subset', () => {
+  test('offline commands are a subset of the seeded allowlist', () => {
+    expect(validateOfflineSubset(seedShellAllowlist(PINNED))).toBe(true);
+    for (const name of OFFLINE_SHELL_COMMANDS) {
+      expect(parseSimpleCommand(name)).toBeDefined();
+    }
+  });
+});

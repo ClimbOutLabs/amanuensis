@@ -61,6 +61,12 @@ export type TrueForgeUIProps = {
    */
   onAgentActivity?: (activity: AmanAvatarActivity) => void;
   /**
+   * Reports the active thread's remote session id (`undefined` for a fresh unsaved chat).
+   * Hosts use this to mount per-session UI outside the chat tree, such as a right-rail
+   * audit feed.
+   */
+  onActiveSessionChange?: (sessionId: string | undefined) => void;
+  /**
    * Agent / library / composer shell mode.
    * Defaults to `{ mode: "AgentLibraryWithComposer" }`.
    */
@@ -304,12 +310,22 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
     chatFolders,
     spaces,
     upgradeSandboxRuntime,
+    onActiveSessionChange,
     ...providerRest
   } = props;
 
   const resolved = useResolvedServer(serverConfig, onError);
   const [activeRemoteId, setActiveRemoteId] = useState<string | undefined>(undefined);
-  const handleRemoteIdChange = useCallback((id: string | undefined) => setActiveRemoteId(id), []);
+  // The internal route sync only consumes `activeRemoteId`; the host callback reports the
+  // same id outward so per-session UI can live outside the chat tree. The bridge reports
+  // idempotently, so mounting it without routes is harmless.
+  const handleRemoteIdChange = useCallback(
+    (id: string | undefined) => {
+      setActiveRemoteId(id);
+      onActiveSessionChange?.(id);
+    },
+    [onActiveSessionChange],
+  );
 
   if (resolved.status === 'loading') {
     return (
@@ -345,7 +361,7 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
       <ChatProviderFromShell
         server={server}
         onError={onError}
-        onRemoteIdChange={resolvedRoutes != null ? handleRemoteIdChange : undefined}
+        onRemoteIdChange={handleRemoteIdChange}
         {...providerRest}
       >
         {layoutTree}

@@ -10,6 +10,8 @@ import {
   MemoryRecallProvider,
   PersonalizationProvider,
   PersonaProvider,
+  SentinelApiProvider,
+  SentinelAuditFeed,
   ThemeProvider,
   TrueForgeUI,
   useTheme,
@@ -43,6 +45,7 @@ import { createMemoryRecallApi } from './memoryRecallApi';
 import { createPersonaApi } from './personaApi';
 import { createPersonalizationApi } from './personalizationApi';
 import { API_BASE_URL, apiPath, uiRouterBasename } from './publicPath';
+import { createSentinelApi } from './sentinelApi';
 import { isSetupComplete, mergeSetupRead, SETUP_REFRESH_MS, type SetupSnapshot } from './setupStatus';
 import { createSpaceStore } from './spaceStore';
 import { createVoiceInputApi } from './voiceInputApi';
@@ -146,6 +149,9 @@ function AmanShell({
   // component applies the display policy (debounce, dwell, error auto-clear); this stays
   // the ground truth straight from the chat runtime.
   const [avatarActivity, setAvatarActivity] = useState<AmanAvatarActivity>('idle');
+  // Active session id, lifted out of the chat runtime so the right-rail permissions
+  // feed can follow the session the user is looking at.
+  const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
   return (
     <div className="aman-shell">
       <main className="aman-chat-surface">
@@ -165,6 +171,7 @@ function AmanShell({
           initialSettingsOpen={openSettings}
           currentUser={{ displayName }}
           onAgentActivity={setAvatarActivity}
+          onActiveSessionChange={setActiveSessionId}
           overrides={overrides}
           className="app-assistant"
         />
@@ -179,6 +186,9 @@ function AmanShell({
         buildRef={buildRef}
         memoryBank={memoryBank}
         settingsHref="/settings"
+        auditFeed={
+          activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />
+        }
       />
     </div>
   );
@@ -355,6 +365,29 @@ export function App() {
   const bugReportApi = useMemo(() => createBugReportApi(authAwareFetch), []);
   const voiceInputApi = useMemo(() => createVoiceInputApi(authAwareFetch), []);
   const memoryRecallApi = useMemo(() => createMemoryRecallApi(bootClient), []);
+  // Raw persisted session events for Sentinel's durable read (approval cards and Tier 2
+  // notices rebuilt after a reload). Paginates the whole event history; the parser in
+  // trueforge-ui drops everything that is not a Sentinel event.
+  const sentinelApi = useMemo(
+    () =>
+      createSentinelApi({
+        fetcher: authAwareFetch,
+        listSessionEvents: async (sessionId: string): Promise<unknown[]> => {
+          const events: unknown[] = [];
+          let pageToken: string | undefined;
+          do {
+            const page = await bootClient.sessions.listEvents(sessionId, {
+              limit: 200,
+              ...(pageToken === undefined ? {} : { pageToken }),
+            });
+            for (const item of page.data) events.push(item.event);
+            pageToken = page.response.pagination.nextPageToken;
+          } while (pageToken !== undefined);
+          return events;
+        },
+      }),
+    [],
+  );
 
   const authErrorReason = shouldShowAuthErrorScreen({ authError, session });
   if (authErrorReason != null) {
@@ -402,38 +435,40 @@ export function App() {
   return (
     <div className="app-root">
       <ThemeProvider theme={AMAN_THEME}>
-        <PersonalizationProvider api={personalizationApi}>
-          <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
-            <BugReportProvider api={bugReportApi}>
-              <VoiceInputProvider api={voiceInputApi}>
-                <MemoryRecallProvider api={memoryRecallApi}>
-                  <PersonaProvider api={personaApi}>
-                    <AmanSetupProvider
-                      value={{
-                        modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                        memoryBank: setup === null ? boot.memoryBank : setup.memoryBank,
-                        settingsHref: '/settings',
-                      }}
-                    >
-                      <ComposerDraftScopeProvider scope={draftScope}>
-                        <AmanShell
-                          defaultAgentSpec={boot.defaultAgentSpec}
-                          openSettings={boot.openSettings}
-                          displayName={session.displayName}
-                          overrides={overrides}
-                          modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
-                          memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
-                          version={boot.build?.version}
-                          buildRef={boot.build?.ref}
-                        />
-                      </ComposerDraftScopeProvider>
-                    </AmanSetupProvider>
-                  </PersonaProvider>
-                </MemoryRecallProvider>
-              </VoiceInputProvider>
-            </BugReportProvider>
-          </ImplementationPlanGrantProvider>
-        </PersonalizationProvider>
+        <SentinelApiProvider api={sentinelApi}>
+          <PersonalizationProvider api={personalizationApi}>
+            <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
+              <BugReportProvider api={bugReportApi}>
+                <VoiceInputProvider api={voiceInputApi}>
+                  <MemoryRecallProvider api={memoryRecallApi}>
+                    <PersonaProvider api={personaApi}>
+                      <AmanSetupProvider
+                        value={{
+                          modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                          memoryBank: setup === null ? boot.memoryBank : setup.memoryBank,
+                          settingsHref: '/settings',
+                        }}
+                      >
+                        <ComposerDraftScopeProvider scope={draftScope}>
+                          <AmanShell
+                            defaultAgentSpec={boot.defaultAgentSpec}
+                            openSettings={boot.openSettings}
+                            displayName={session.displayName}
+                            overrides={overrides}
+                            modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
+                            memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
+                            version={boot.build?.version}
+                            buildRef={boot.build?.ref}
+                          />
+                        </ComposerDraftScopeProvider>
+                      </AmanSetupProvider>
+                    </PersonaProvider>
+                  </MemoryRecallProvider>
+                </VoiceInputProvider>
+              </BugReportProvider>
+            </ImplementationPlanGrantProvider>
+          </PersonalizationProvider>
+        </SentinelApiProvider>
       </ThemeProvider>
     </div>
   );

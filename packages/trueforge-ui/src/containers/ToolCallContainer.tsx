@@ -43,6 +43,9 @@ import { NestedApprovalBridgeContext, useNestedApprovalBridge } from './nestedAp
 import { SandboxToolCallContainer } from './SandboxToolCallContainer.js';
 import { ToolApprovalContainer } from './ToolApprovalContainer.js';
 import { ToolCallContentBlockContainer } from './ToolCallContentBlockContainer.js';
+import { Tier2Indicator } from '../sentinel/Tier2Indicator.js';
+import { Tier3ApprovalCard } from '../sentinel/Tier3ApprovalCard.js';
+import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 
 function NestedReasoningContainer() {
   const isRunning = useAuiState(s => s.part.status?.type === 'running');
@@ -128,6 +131,28 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     return respond({ optionId, reason });
   };
 
+  // A Tier 3 approval whose server-built plain-language card arrived on the
+  // `tool.approval_required` event replaces the generic approval card. The branch keys
+  // on the explicit numeric `tier` the server sent; without it the generic card
+  // renders as before. Approve/Deny reuse the same option plumbing, so grants and
+  // confirmations behave identically.
+  const sentinel = useOptionalSentinelState();
+  const approvalInfo = sentinel?.approvalFor(part.toolCallId);
+  if (approvalInfo?.tier === 3) {
+    const options = buildApprovalOptions(part.approval?.options);
+    const allowOption = options.find(option => option.isAllow);
+    const denyOption = options.find(option => !option.isAllow);
+    return (
+      <Tier3ApprovalCard
+        toolName={part.toolName}
+        card={approvalInfo.card}
+        onApprove={() => onSelectOption(allowOption?.id ?? '__allow')}
+        onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
+        disabled={isNestedReadonly}
+      />
+    );
+  }
+
   return (
     <ToolApprovalContainer
       toolName={part.toolName}
@@ -163,7 +188,7 @@ function RequestResponseSlots({
   };
 }
 
-export const ToolCallContainer: ToolCallMessagePartComponent = part => {
+const ToolCallContainerInner: ToolCallMessagePartComponent = part => {
   const ToolCallCard = useSlot('ToolCallCard');
   const SubAgentCard = useSlot('SubAgentCard');
   const AskUserPrompt = useSlot('AskUserPrompt');
@@ -361,3 +386,28 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
     />
   );
 };
+
+/**
+ * Subtle non-blocking Tier 2 notice rendered under the tool card when the server
+ * reported one for this tool call. Renders nothing without a notice, so every
+ * existing card layout is untouched.
+ */
+function SentinelNoticeSlot({ toolCallId }: { toolCallId: string }) {
+  const sentinel = useOptionalSentinelState();
+  const notice = sentinel?.noticeFor(toolCallId);
+  if (sentinel === null || notice === undefined) return null;
+  return (
+    <Tier2Indicator
+      notice={notice}
+      onUndo={() => sentinel.undoNotice(toolCallId)}
+      onStop={() => sentinel.stopNotice(toolCallId)}
+    />
+  );
+}
+
+export const ToolCallContainer: ToolCallMessagePartComponent = part => (
+  <>
+    <ToolCallContainerInner {...part} />
+    <SentinelNoticeSlot toolCallId={part.toolCallId} />
+  </>
+);

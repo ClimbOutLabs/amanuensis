@@ -129,7 +129,7 @@ describe('SlotsProvider', () => {
     expect(screen.getByTestId('slotted-preset')).toHaveTextContent('trueforge');
 
     act(() => {
-      screen.getAllByText('gemini')[0].click();
+      screen.getAllByText('gemini')[0]?.click();
     });
 
     // One shared context: the host chrome follows the preset change made
