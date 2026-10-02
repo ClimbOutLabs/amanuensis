@@ -29,6 +29,7 @@ import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/sch
 import { createSessionFolderAssignmentsRouter, createSessionFoldersRouter } from './apis/sessionFolders';
 import { createInternalMetricsRouter } from './apis/sessionMetrics';
 import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessions';
+import { createUserSettingsRouter } from './apis/userSettings';
 import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skills';
 import { createSpacesRouter } from './apis/spaces';
@@ -61,6 +62,7 @@ import type { IScheduleStore } from './db/scheduleStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISentinelAuditStore } from './db/sentinelAuditStore';
+import type { SentinelUserSettingsStore } from './db/sentinelUserSettingsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { WithTransaction } from './db/transaction';
@@ -228,6 +230,7 @@ export interface ServerDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   sessionMetricsStore: ISessionMetricsStore;
   sentinelAuditStore: ISentinelAuditStore;
+  sentinelUserSettingsStore: SentinelUserSettingsStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
@@ -563,6 +566,16 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         globalSettingsStore: deps.globalSettingsStore,
         resolveRequestContext,
         logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user',
+    withAuth(
+      createUserSettingsRouter({
+        sentinelUserSettingsStore: deps.sentinelUserSettingsStore,
+        resolveRequestContext,
       }),
       authMiddleware,
     ),
