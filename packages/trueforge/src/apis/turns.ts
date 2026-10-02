@@ -30,7 +30,7 @@ import {
   VercelAILLM,
   type BoundRepository,
 } from '@truefoundry/trueforge-core/core';
-import { createSentinelHostContext } from '@truefoundry/trueforge-core/core';
+import { createSentinelHostContext, type SentinelServices } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { streamSSE } from 'hono/streaming';
@@ -208,6 +208,7 @@ export interface TurnsRouterDeps {
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
   authorizer: Authorizer;
+  sentinelServices: SentinelServices;
 }
 
 /** Names only, bounded: enough for the model to know the host's catalog exists without inflating the prompt. */
@@ -454,6 +455,7 @@ function createTurnResolver(deps: {
             created_by: userRef,
             conversation_id: sessionId,
             workspace_cwd: sentinelSession?.workspace_cwd ?? null,
+            services: deps.sentinelServices,
           }),
           loadBoundRepository:
             boundRepository === undefined

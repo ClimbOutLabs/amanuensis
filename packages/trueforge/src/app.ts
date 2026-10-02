@@ -659,6 +659,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         logger: deps.logger,
         resolveRequestContext,
         authorizer: deps.authorizer,
+        sentinelServices: deps.sentinelServices,
       }),
       authMiddleware,
     ),

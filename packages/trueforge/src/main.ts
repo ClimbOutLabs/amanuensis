@@ -678,6 +678,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sessionStore,
     sessionMetricsStore,
     sentinelAuditStore,
+    sentinelUserSettingsStore,
+    sentinelServices,
     sessions,
     activeTurns,
     turnDrains,
