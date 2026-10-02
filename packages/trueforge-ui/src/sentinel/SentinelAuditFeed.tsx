@@ -145,7 +145,7 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
       {error !== null && (
         <p className="flex items-center gap-1.5 px-3 py-2 text-xs text-failure-bg" role="alert">
           <Icon name="circle-exclamation" className="shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1">Could not load the audit feed: {error}</span>
+          <span className="min-w-0 flex-1 break-words">Could not load the audit feed: {error}</span>
           <button
             type="button"
             className="shrink-0 underline"
