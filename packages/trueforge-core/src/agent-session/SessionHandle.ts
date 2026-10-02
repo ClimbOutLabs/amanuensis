@@ -209,10 +209,14 @@ export class SessionHandle<
    */
   private readonly sentinelServices: SentinelServices;
 
-  constructor(options: { store: ISessionStore<TSessionCustom, TTurnCustom>; session: SessionRecord<TSessionCustom> }) {
+  constructor(options: {
+    store: ISessionStore<TSessionCustom, TTurnCustom>;
+    session: SessionRecord<TSessionCustom>;
+    sentinelServices?: SentinelServices | undefined;
+  }) {
     this.store = options.store;
     this.session = options.session;
-    this.sentinelServices = defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH });
+    this.sentinelServices = options.sentinelServices ?? defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH });
   }
 
   get session_id(): string {

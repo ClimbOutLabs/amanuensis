@@ -53,6 +53,11 @@ import {
   type ISessionStore,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
+import {
+  DEFAULT_PINNED_PATH,
+  defaultSentinelServices,
+  type SentinelServices,
+} from '@truefoundry/trueforge-core/core';
 import { heartbeatKey, RequestReplyExecutor, RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Kysely, Transaction } from 'kysely';
 import type { RedisClientType } from 'redis';
@@ -83,6 +88,7 @@ import type { Database as PostgresDatabase } from './db/postgres/types';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
+import { SentinelAuditStore, type ISentinelAuditStore, type SentinelAuditDatabase } from './db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
@@ -147,6 +153,7 @@ interface ServerPersistence<TTransaction> {
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  sentinelAuditStore: ISentinelAuditStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
   /** One shared client for TrueFoundry store resolvers + auth; undefined when TrueFoundry mode is off. */
@@ -361,6 +368,7 @@ async function createStandalonePersistence(options: {
     scheduleStore: new SqliteScheduleStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
+    sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
     resolveSandboxProviderStore: () => sandboxProviderStore,
@@ -507,6 +515,7 @@ async function createDistributedPersistence(options: {
     scheduleStore: new PostgresScheduleStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
+    sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     resolveModelProviderStore,
     resolveMcpServerStore,
     resolveSandboxProviderStore,
@@ -538,6 +547,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     repositoryStore,
     turnArtifactStore,
     globalSettingsStore,
+    sentinelAuditStore,
     destroyDb,
     redis,
     serviceFoundryClient,
@@ -561,7 +571,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const turnDrains = new TurnDrainRegistry();
   const requestReplyRouter = new RequestReplyRouter();
   const eventSubscriptions = new EventSubscriptionRegistry<TurnStreamingEvent>(redis);
-  const sessions = new Sessions({ sessionStore });
+  const sentinelServices: SentinelServices = {
+    ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
+    audit: sentinelAuditStore,
+  };
+  const sessions = new Sessions({ sessionStore, sentinelServices });
 
   const oidc = isOidcConfigured(configuration) ? configuration.OIDC : undefined;
   if (oidc) {
@@ -650,6 +664,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     globalSettingsStore,
     sessionStore,
     sessionMetricsStore,
+    sentinelAuditStore,
     sessions,
     activeTurns,
     turnDrains,

@@ -29,12 +29,14 @@ import type { IAgentStore } from '../db/agentStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
+import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import {
   cancelSessionRoute,
   createSessionRoute,
   deleteSessionRoute,
   getOrCreateSessionByExternalIdRoute,
+  getSessionAuditLogRoute,
   getSessionRoute,
   listImplementationPlanGrantsRoute,
   listSessionEventsRoute,
@@ -81,6 +83,7 @@ export function toWireSession(record: SessionRecord): Session {
 export interface SessionsRouterDeps {
   sessions: Sessions<SessionCustom, TurnCustom>;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  sentinelAuditStore: ISentinelAuditStore;
   activeTurns: ActiveTurnRegistry;
   resolveModelProviderStore: (c: Context) => IModelProviderStore;
   resolveMcpServerStore: (c: Context) => IMcpServerStore;
@@ -686,6 +689,32 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     }
   };
 
+  const getSessionAuditLogHandler: RouteHandler<typeof getSessionAuditLogRoute> = async c => {
+    const { session_id: sessionId } = c.req.valid('param');
+    const query = c.req.valid('query');
+    const requestContext = deps.resolveRequestContext(c);
+    const record = await deps.sessionStore.getSession({ tenant_id: requestContext.tenant_id, session_id: sessionId });
+    if (record === undefined) {
+      return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
+    }
+    if (
+      !isSessionOwner({
+        subject_id: requestContext.subject.id,
+        created_by_subject: record.created_by_subject,
+      })
+    ) {
+      return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
+    }
+    const entries = await deps.sentinelAuditStore.list({
+      tenant_id: requestContext.tenant_id,
+      created_by: requestContext.subject.id,
+      conversation_id: sessionId,
+      limit: query.limit,
+      offset: query.offset,
+    });
+    return c.json({ entries }, 200);
+  };
+
   const router = new OpenAPIHono();
   router.openapi(createSessionRoute, createSessionHandler);
   router.openapi(getSessionRoute, getSessionHandler);
@@ -696,6 +725,7 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
   router.openapi(listSessionEventsRoute, listSessionEventsHandler);
   router.openapi(listImplementationPlanGrantsRoute, listImplementationPlanGrantsHandler);
   router.openapi(revokeImplementationPlanGrantRoute, revokeImplementationPlanGrantHandler);
+  router.openapi(getSessionAuditLogRoute, getSessionAuditLogHandler);
   deps.requestReplyRouter.registerRoute(SESSIONS_CANCEL_PATH, cancelSessionTurnPeerHandler(deps.activeTurns));
   return router;
 }

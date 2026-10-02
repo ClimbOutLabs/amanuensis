@@ -291,6 +291,10 @@
   background: var(--sidebar-bg);
   padding: 1.25rem 0.75rem 0.75rem;
   color: var(--text-primary);
+  /* Tall rail content (e.g. the permissions audit feed) scrolls inside the rail
+   * instead of stretching the page and pushing the chat composer below the fold. */
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* Collapsed the rail keeps only its toggle, so the chat surface takes the freed grid width

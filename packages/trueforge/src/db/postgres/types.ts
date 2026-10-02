@@ -166,6 +166,23 @@ export interface SpaceRevisionTable {
   created_at: Date;
 }
 
+/**
+ * Append-only Sentinel permission audit log. One row per classified tool call,
+ * written before the action executes. PRIMARY KEY (id).
+ */
+export interface SentinelAuditTable {
+  id: string;
+  tenant_id: string;
+  created_by: string;
+  conversation_id: string;
+  tier: number;
+  tool_name: string;
+  description: string;
+  outcome: 'logged' | 'ran' | 'stopped_by_user' | 'undone' | 'approved' | 'denied' | 'auto_denied';
+  auto_deny_reason: string | null;
+  created_at: Date;
+}
+
 /** Content-addressed artifact bytes, deduplicated by digest within a tenant. PRIMARY KEY (tenant_id, digest). */
 export interface ArtifactBlobTable {
   tenant_id: string;
@@ -791,6 +808,7 @@ export interface Database {
   space_aggregate: SpaceAggregateTable;
   space: SpaceTable;
   space_revision: SpaceRevisionTable;
+  sentinel_audit: SentinelAuditTable;
   implementation_plan_grant: ImplementationPlanGrantTable;
   implementation_plan_dispatch: ImplementationPlanDispatchTable;
   turn: TurnTable;

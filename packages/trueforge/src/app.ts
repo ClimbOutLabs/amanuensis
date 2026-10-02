@@ -60,6 +60,7 @@ import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
+import type { ISentinelAuditStore } from './db/sentinelAuditStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { WithTransaction } from './db/transaction';
@@ -226,6 +227,7 @@ export interface ServerDeps<TTransaction> {
   repositoryStore: IRepositoryStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
   sessionMetricsStore: ISessionMetricsStore;
+  sentinelAuditStore: ISentinelAuditStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
@@ -534,6 +536,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createSessionsRouter({
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
+        sentinelAuditStore: deps.sentinelAuditStore,
         activeTurns: deps.activeTurns,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
