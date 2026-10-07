@@ -125,7 +125,7 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
     <div className="flex min-h-0 flex-col">
       <div className="border-b border-border/60 px-3 py-2">
         <p className="mb-1.5 text-[0.6875rem] font-medium uppercase tracking-wide text-text-secondary">
-          Sensitive actions
+          Critical actions
         </p>
         <ul className="space-y-1.5">
           {tier2ActionKinds.map(kind => (
