@@ -86,11 +86,11 @@ function action(
   canonical_params: Record<string, unknown>,
   mcp_hints?: Record<string, unknown>,
 ): SentinelAction {
-  return { tool_name, canonical_params, tool_type: 'truefoundry-system', mcp_hints: mcp_hints ?? {} };
+  return { tool_name, canonical_params, tool_type: 'truefoundry-system', mcp_server_id: '', mcp_hints: mcp_hints ?? {} };
 }
 
 function mcpAction(tool_name: string, canonical_params: Record<string, unknown>): SentinelAction {
-  return { tool_name, canonical_params, tool_type: 'mcp', mcp_hints: {} };
+  return { tool_name, canonical_params, tool_type: 'mcp', mcp_server_id: 'test-server', mcp_hints: {} };
 }
 
 function trackScript(ctx: ClassifyContext, file_identity: string): void {

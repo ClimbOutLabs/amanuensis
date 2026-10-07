@@ -1137,6 +1137,7 @@ export async function classifyUnstampedToolCall(input: {
       tool_name: info.original_tool_name,
       canonical_params,
       tool_type: info.type,
+      mcp_server_id: info.mcp_server_id,
       mcp_hints: {
         read_only_hint: info.read_only_hint,
         destructive_hint: info.destructive_hint,

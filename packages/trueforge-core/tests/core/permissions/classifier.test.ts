@@ -48,6 +48,7 @@ function action(tool_name: string, canonical_params: Record<string, unknown>): S
     tool_name,
     canonical_params,
     tool_type: 'truefoundry-system',
+    mcp_server_id: '',
     mcp_hints: {},
   };
 }
