@@ -146,6 +146,7 @@ describe('classifyTier external services', () => {
         tool_name: 'send_email',
         canonical_params: { subject: 'hi' },
         tool_type: 'mcp',
+        mcp_server_id: 'test-server',
         mcp_hints: {},
       },
       makeCtx(),
