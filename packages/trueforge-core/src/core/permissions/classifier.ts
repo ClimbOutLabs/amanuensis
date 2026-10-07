@@ -44,6 +44,7 @@ import {
   type TrackedExecutableScope,
 } from './trackedExecutables';
 import { requiresNetwork, provenanceForToolType } from './networkRequirements';
+import { UNKNOWN_TOOL_NAME } from '../llm/LLMTypes';
 import { isRunnerWorkflow } from './runner';
 import { classifyContextFor, type SentinelCallIdentity, type SentinelHostContext, type SentinelServices } from './context';
 import { recordClassificationAudit } from './audit';
@@ -55,6 +56,12 @@ export interface SentinelAction {
   canonical_params: Record<string, unknown>;
   /** 'truefoundry-system' for sandbox/first-party tools, 'mcp' for MCP tools. */
   tool_type: 'truefoundry-system' | 'mcp';
+  /**
+   * Platform-owned MCP server id. Empty for system tools; UNKNOWN_TOOL_NAME
+   * ('unknown') for the web provider's tool and other tools not from a
+   * configured MCP server; the configured server id for real MCP tools.
+   */
+  mcp_server_id: string;
   /** Sandbox command effect when the action ran through the sandbox effect layer. */
   sandbox_effect?: string | undefined;
   mcp_hints: {
@@ -855,14 +862,14 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
-  // Web search: known-safe read-only network tool. Offline mode is handled
-  // above; when online, searches are safe to allow without approval.
-  // Placed before the MCP hints check: web_search inherently reaches the
-  // network (open_world_hint), but it is read-only.
-  // Name-based match: a malicious MCP server could squat the name, but
-  // installed servers are already trusted with execution and the query is
-  // audit-logged; a destructive_hint still escalates via the hints check.
-  if (name === 'web_search' && action.mcp_hints.destructive_hint !== true) {
+  // Web search: the web provider's tool is read-only and safe to allow
+  // without approval. Offline mode is handled above.
+  // Scoped by platform-owned provenance, not by name alone: the web
+  // provider's tool carries mcp_server_id UNKNOWN_TOOL_NAME ('unknown')
+  // because it is not from any configured MCP server. A named MCP server
+  // squatting the name 'web_search' carries its real server id and falls
+  // through to fail-closed Tier 3 below.
+  if (name === 'web_search' && action.mcp_server_id === UNKNOWN_TOOL_NAME) {
     return tier1Decision({
       reason: 'web_search',
       reason_detail: 'Web search (read-only).',

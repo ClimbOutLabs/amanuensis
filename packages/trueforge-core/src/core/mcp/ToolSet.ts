@@ -283,6 +283,7 @@ export class ToolSet implements IToolSet {
         tool_name: params.name,
         canonical_params: isRecord(params.arguments) ? params.arguments : {},
         tool_type: sourceInfo.type,
+        mcp_server_id: sourceInfo.mcp_server_id,
         mcp_hints: {
           read_only_hint: sourceInfo.read_only_hint,
           destructive_hint: sourceInfo.destructive_hint,

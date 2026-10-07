@@ -2167,6 +2167,7 @@ export class Sandbox extends LocalToolMCP {
           tool_name: params.name,
           canonical_params: effectiveArguments ?? {},
           tool_type: 'truefoundry-system',
+           mcp_server_id: '',
           sandbox_effect: effect,
           mcp_hints: {
             read_only_hint: info.read_only_hint,
