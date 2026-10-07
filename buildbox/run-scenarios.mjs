@@ -10,9 +10,9 @@
  *
  * Usage: node buildbox/run-scenarios.mjs --scenario <name>
  *
- * Needs: pnpm install already done at the repo root, outbound network access
- * to the Spark model endpoint, and (for the browser) a Chromium binary —
- * installed on first run via `npx playwright-core install chromium`.
+ * Needs: pnpm install already done at the repo root, a Token Factory API key at
+ * /home/opc/.config/tokenfactory-key (chmod 600), and (for the browser) a
+ * Chromium binary — installed on first run via `npx playwright-core install chromium`.
  *
  * Only Node builtins are used, plus playwright-core resolved from
  * packages/frontend/node_modules at runtime.
@@ -27,19 +27,39 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const API = 'http://127.0.0.1:8790';
 const UI = 'http://127.0.0.1:5173';
-const MODEL_FQN = 'spark/gpt-oss-120b-derestricted';
-const PROVIDER_MANIFEST = {
-  type: 'custom',
-  name: 'spark',
-  base_url: 'https://spark-2516.tail0e1aa9.ts.net:8456/v1',
-  models: [
-    {
-      model_id: 'gpt-oss-120b-derestricted',
-      name: 'gpt-oss-120b-derestricted',
-      properties: { context_length: 131072 },
-    },
-  ],
-};
+const TOKEN_FACTORY_KEY_FILE = '/home/opc/.config/tokenfactory-key';
+const TOKEN_FACTORY_BASE_URL = 'https://api.tokenfactory.nebius.com/v1';
+const TOKEN_FACTORY_MODEL_ID = 'nvidia/Nemotron-3_5-Lightning';
+
+function readTokenFactoryKey() {
+  let key = '';
+  try {
+    key = readFileSync(TOKEN_FACTORY_KEY_FILE, 'utf8').trim();
+  } catch {
+    /* missing or unreadable */
+  }
+  if (!key) {
+    fail(
+      `token factory key missing: write it to ${TOKEN_FACTORY_KEY_FILE} and chmod 600 it ` +
+        `(echo '<key>' > ${TOKEN_FACTORY_KEY_FILE} && chmod 600 ${TOKEN_FACTORY_KEY_FILE})`,
+    );
+  }
+  return key;
+}
+
+function providerManifest() {
+  return {
+    type: 'tokenfactory',
+    auth: { api_key: readTokenFactoryKey() },
+    models: [
+      {
+        model_id: TOKEN_FACTORY_MODEL_ID,
+        name: TOKEN_FACTORY_MODEL_ID,
+        properties: { context_length: 1048576 },
+      },
+    ],
+  };
+}
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -91,15 +111,18 @@ async function api(method, p, body, { timeoutMs = 30000 } = {}) {
 }
 
 // ------------------------------------------------------------ preflight ----
-function sparkReachable() {
-  const url = `${PROVIDER_MANIFEST.base_url}/models`;
-  for (const extra of [[], ['-k']]) {
-    const r = spawnSync('curl', ['-sS', '-m', '20', ...extra, url], { encoding: 'utf8' });
-    if (r.status === 0) {
-      log(`spark reachable (${extra.includes('-k') ? 'insecure TLS' : 'strict TLS'})`);
-      return true;
-    }
+function tokenFactoryReachable() {
+  const key = readTokenFactoryKey();
+  const r = spawnSync(
+    'curl',
+    ['-sS', '-m', '20', '-H', `Authorization: Bearer ${key}`, `${TOKEN_FACTORY_BASE_URL}/models`],
+    { encoding: 'utf8' },
+  );
+  if (r.status === 0) {
+    log('token factory reachable');
+    return true;
   }
+  log('token factory preflight failed:', (r.stderr || r.stdout || '').slice(0, 300));
   return false;
 }
 
@@ -173,8 +196,8 @@ function stopServers() {
 
 // --------------------------------------------------------------- setup -----
 async function ensureProvider() {
-  log('registering spark provider ...');
-  await api('PUT', '/api/v1/settings/model-providers', { manifest: PROVIDER_MANIFEST }, { timeoutMs: 60000 });
+  log('registering token factory provider ...');
+  await api('PUT', '/api/v1/settings/model-providers', { manifest: providerManifest() }, { timeoutMs: 60000 });
   log('provider ok');
 }
 
@@ -520,7 +543,7 @@ async function runSentinelScenario(pw) {
 // ------------------------------------------------------------------ main ---
 try {
   log(`scenario: ${scenarioName} (browser-driven UI test)`);
-  if (!sparkReachable()) fail('spark model endpoint unreachable (strict and insecure TLS both failed)');
+  if (!tokenFactoryReachable()) fail('token factory unreachable (check key and network)');
   await startServers();
   await ensureProvider();
   const pw = loadPlaywright();
