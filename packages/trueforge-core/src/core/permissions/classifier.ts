@@ -877,68 +877,28 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
-  // Tavily search: known-safe read-only network tool. Offline mode is handled
-  // above; when online, searches are safe to allow without approval.
-  // Placed before the MCP hints check: tavily_search inherently reaches the
-  // network (open_world_hint), but it is read-only.
-  // Name-based match: installed servers are already trusted with execution
-  // and the query is audit-logged; a destructive_hint still escalates via
-  // the hints check.
-  if (name === 'tavily_search' && action.mcp_hints.destructive_hint !== true) {
-    return tier1Decision({
-      reason: 'tavily_search',
-      reason_detail: 'Tavily web search (read-only).',
-      sensitive_read: false,
-    });
-  }
-
-  // Tavily extract: known-safe read-only network tool. Fetches a URL and
-  // extracts its content; read-only.
-  // Placed before the MCP hints check: tavily_extract inherently reaches the
-  // network (open_world_hint), but it is read-only.
-  // Name-based match: installed servers are already trusted with execution
-  // and the query is audit-logged; a destructive_hint still escalates via
-  // the hints check.
-  if (name === 'tavily_extract' && action.mcp_hints.destructive_hint !== true) {
-    return tier1Decision({
-      reason: 'tavily_extract',
-      reason_detail: 'Tavily content extraction (read-only).',
-      sensitive_read: false,
-    });
-  }
-
   // call_tool dispatcher: classify by the inner tool being invoked. The
   // dispatcher carries the inner tool name in the `tool_name` param.
-  if (name === 'call_tool' && action.mcp_hints.destructive_hint !== true) {
+  // Scoped by platform-owned provenance: only the platform DeferredTool
+  // (mcp_server_id 'deferred-tools', see DEFERRED_TOOLS_SERVER_ID in
+  // runtime/DeferredTool.ts) may dispatch. A named MCP server squatting the
+  // name 'call_tool' carries its real server id and falls through to
+  // fail-closed Tier 3 below. String literal avoids a classifier ->
+  // DeferredTool -> LocalToolMCP -> ToolSet -> classifier import cycle.
+  if (
+    name === 'call_tool' &&
+    action.mcp_server_id === 'deferred-tools' &&
+    action.mcp_hints.destructive_hint !== true
+  ) {
     const innerParam = action.canonical_params['tool_name'];
     const inner = typeof innerParam === 'string' ? innerParam.toLowerCase() : '';
-    if (
-      inner === 'web_search' ||
-      inner === 'web_fetch' ||
-      inner === 'tavily_search' ||
-      inner === 'tavily_extract'
-    ) {
+    if (inner === 'web_search' || inner === 'web_fetch') {
       return tier1Decision({
         reason: 'call_tool',
         reason_detail: `Dispatch to ${inner} (read-only).`,
         sensitive_read: false,
       });
     }
-  }
-
-  // Web fetch: known-safe read-only network tool. Offline mode is handled
-  // above; when online, fetching a URL is safe to allow without approval.
-  // Placed before the MCP hints check: web_fetch inherently reaches the
-  // network (open_world_hint), but it is read-only.
-  // Name-based match: installed servers are already trusted with execution
-  // and the query is audit-logged; a destructive_hint still escalates via
-  // the hints check.
-  if (name === 'web_fetch' && action.mcp_hints.destructive_hint !== true) {
-    return tier1Decision({
-      reason: 'web_fetch',
-      reason_detail: 'Web fetch (read-only).',
-      sensitive_read: false,
-    });
   }
 
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.

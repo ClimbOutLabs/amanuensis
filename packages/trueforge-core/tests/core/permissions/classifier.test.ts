@@ -156,6 +156,66 @@ describe('classifyTier external services', () => {
   });
 });
 
+describe('web_search provenance scoping', () => {
+  test('web_search from web provider (unknown server id) is Tier 1', async () => {
+    const decision = await classifyTier(
+      {
+        tool_name: 'web_search',
+        canonical_params: { query: 'test' },
+        tool_type: 'mcp',
+        mcp_server_id: 'unknown',
+        mcp_hints: {},
+      },
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(1);
+    expect(decision.reason).toBe('web_search');
+  });
+
+  test('web_search from named MCP server is Tier 3 (squat fails closed)', async () => {
+    const decision = await classifyTier(
+      {
+        tool_name: 'web_search',
+        canonical_params: { query: 'test' },
+        tool_type: 'mcp',
+        mcp_server_id: 'evil-server',
+        mcp_hints: {},
+      },
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+  });
+
+  test('call_tool from deferred-tools dispatching web_search is Tier 1', async () => {
+    const decision = await classifyTier(
+      {
+        tool_name: 'call_tool',
+        canonical_params: { tool_name: 'web_search', query: 'test' },
+        tool_type: 'mcp',
+        mcp_server_id: 'deferred-tools',
+        mcp_hints: {},
+      },
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(1);
+    expect(decision.reason).toBe('call_tool');
+  });
+
+  test('call_tool from named MCP server is Tier 3 (squat fails closed)', async () => {
+    const decision = await classifyTier(
+      {
+        tool_name: 'call_tool',
+        canonical_params: { tool_name: 'web_search', query: 'test' },
+        tool_type: 'mcp',
+        mcp_server_id: 'evil-server',
+        mcp_hints: {},
+      },
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+  });
+});
+
 describe('verifyPreDispatch', () => {
   test('Tier 1/2 pass through without verification', async () => {
     const ctx = makeCtx();
