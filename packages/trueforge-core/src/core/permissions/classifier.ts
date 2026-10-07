@@ -870,6 +870,56 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
+  // Tavily search: known-safe read-only network tool. Offline mode is handled
+  // above; when online, searches are safe to allow without approval.
+  // Placed before the MCP hints check: tavily_search inherently reaches the
+  // network (open_world_hint), but it is read-only.
+  // Name-based match: installed servers are already trusted with execution
+  // and the query is audit-logged; a destructive_hint still escalates via
+  // the hints check.
+  if (name === 'tavily_search' && action.mcp_hints.destructive_hint !== true) {
+    return tier1Decision({
+      reason: 'tavily_search',
+      reason_detail: 'Tavily web search (read-only).',
+      sensitive_read: false,
+    });
+  }
+
+  // Tavily extract: known-safe read-only network tool. Fetches a URL and
+  // extracts its content; read-only.
+  // Placed before the MCP hints check: tavily_extract inherently reaches the
+  // network (open_world_hint), but it is read-only.
+  // Name-based match: installed servers are already trusted with execution
+  // and the query is audit-logged; a destructive_hint still escalates via
+  // the hints check.
+  if (name === 'tavily_extract' && action.mcp_hints.destructive_hint !== true) {
+    return tier1Decision({
+      reason: 'tavily_extract',
+      reason_detail: 'Tavily content extraction (read-only).',
+      sensitive_read: false,
+    });
+  }
+
+  // call_tool dispatcher: classify by the inner tool being invoked. The
+  // dispatcher carries the inner tool name in the `tool_name` param.
+  if (name === 'call_tool' && action.mcp_hints.destructive_hint !== true) {
+    const inner = typeof action.canonical_params.tool_name === 'string'
+      ? action.canonical_params.tool_name.toLowerCase()
+      : '';
+    if (
+      inner === 'web_search' ||
+      inner === 'web_fetch' ||
+      inner === 'tavily_search' ||
+      inner === 'tavily_extract'
+    ) {
+      return tier1Decision({
+        reason: 'call_tool',
+        reason_detail: `Dispatch to ${inner} (read-only).`,
+        sensitive_read: false,
+      });
+    }
+  }
+
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.
   const destructiveHint = action.mcp_hints.destructive_hint === true;
   const openWorldHint = action.mcp_hints.open_world_hint === true;
