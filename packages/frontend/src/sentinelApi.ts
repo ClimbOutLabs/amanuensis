@@ -37,7 +37,7 @@ function errorMessageFrom(body: unknown): string | undefined {
     return error;
   }
   if (typeof error === 'object' && error !== null) {
-    const nested = Object.entries(error).find(([key]) => key === 'message')?.[1];
+    const nested: unknown = Object.entries(error).find(([key]) => key === 'message')?.[1];
     if (typeof nested === 'string' && nested !== '') {
       return nested;
     }
