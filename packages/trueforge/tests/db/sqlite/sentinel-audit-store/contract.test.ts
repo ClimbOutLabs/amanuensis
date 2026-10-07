@@ -3,7 +3,7 @@ import { createSqliteTestDatabase, type SqliteTestDatabase } from '../testDataba
 
 describe('SentinelAuditStore', () => {
   let env: SqliteTestDatabase;
-  let store: SentinelAuditStore<any>;
+  let store: SentinelAuditStore;
 
   beforeEach(async () => {
     env = await createSqliteTestDatabase();
