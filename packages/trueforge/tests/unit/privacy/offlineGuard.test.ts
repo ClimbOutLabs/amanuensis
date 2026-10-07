@@ -195,6 +195,43 @@ describe('createOfflineFetch', () => {
     expect(crossOrigin.get('cookie')).toBeNull();
     expect(crossOrigin.get('proxy-authorization')).toBeNull();
   });
+
+  it('keeps credentials stripped on later hops after a cross-origin redirect', async () => {
+    const received: { url: string; headers: Headers }[] = [];
+    const baseFetch: typeof globalThis.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      received.push({ url, headers: new Headers(init?.headers) });
+      if (url === `http://${ip(127, 0, 0, 1)}:8080/start`) {
+        return new Response(null, { status: 302, headers: { location: `http://${ip(127, 0, 0, 2)}:8080/hop` } });
+      }
+      if (url === `http://${ip(127, 0, 0, 2)}:8080/hop`) {
+        return new Response(null, { status: 302, headers: { location: '/final' } });
+      }
+      return new Response('ok');
+    };
+    const guarded = createOfflineFetch({ baseFetch });
+
+    setOfflineModeEnabled(true);
+    await guarded(`http://${ip(127, 0, 0, 1)}:8080/start`, { headers: { authorization: 'Bearer secret' } });
+
+    const findHeaders = (url: string): Headers => {
+      const entry = received.find(candidate => candidate.url === url);
+      if (entry === undefined) {
+        throw new Error(`expected a recorded request to ${url}`);
+      }
+      return entry.headers;
+    };
+    expect(received.map(entry => entry.url)).toEqual([
+      `http://${ip(127, 0, 0, 1)}:8080/start`,
+      `http://${ip(127, 0, 0, 2)}:8080/hop`,
+      `http://${ip(127, 0, 0, 2)}:8080/final`,
+    ]);
+    // Hop 1 crosses origins: the credential is stripped like native fetch.
+    expect(findHeaders(`http://${ip(127, 0, 0, 2)}:8080/hop`).get('authorization')).toBeNull();
+    // Hop 2 stays on the same origin as hop 1: the credential stays stripped
+    // instead of being re-attached from the original request.
+    expect(findHeaders(`http://${ip(127, 0, 0, 2)}:8080/final`).get('authorization')).toBeNull();
+  });
 });
 
 describe('installOfflineFetchGuard', () => {

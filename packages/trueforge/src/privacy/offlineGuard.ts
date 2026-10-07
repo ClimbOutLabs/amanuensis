@@ -194,6 +194,10 @@ export function createOfflineFetch(options: { baseFetch?: typeof globalThis.fetc
         : { method: input.method, headers: input.headers, ...(init ?? {}) };
     let currentInput: string | URL | Request = input;
     let currentInit = init;
+    // The previous hop's effective init: threaded through the redirect loop
+    // so credential stripping and method conversion accumulate like native
+    // fetch instead of being recomputed from the original request each hop.
+    let hopInit = followInit;
     let url = startUrl;
     for (let hop = 0; ; hop += 1) {
       const response = await baseFetch(currentInput, { ...currentInit, redirect: 'manual' });
@@ -220,13 +224,14 @@ export function createOfflineFetch(options: { baseFetch?: typeof globalThis.fetc
       // Native fetch strips credential headers on cross-origin redirects so
       // the original request's credentials never leak to a new origin.
       const crossOrigin = new URL(url).origin !== new URL(previousUrl).origin;
-      let nextInit: RequestInit | undefined = followInit;
+      let nextInit: RequestInit | undefined = hopInit;
       if (toGet) {
         nextInit = { ...nextInit, method: 'GET' };
         delete nextInit.body;
       }
       currentInput = url;
-      currentInit = crossOrigin ? stripCredentialHeaders(nextInit) : nextInit;
+      hopInit = crossOrigin ? stripCredentialHeaders(nextInit) : nextInit;
+      currentInit = hopInit;
     }
   };
 }
