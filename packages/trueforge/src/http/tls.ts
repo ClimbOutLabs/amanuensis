@@ -14,6 +14,8 @@ import { rootCertificates, TLSSocket } from 'node:tls';
 import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
 import type { Logger } from 'winston';
 
+import { assertOnlineAllowed } from '../privacy/offlineGuard';
+
 const TLS_CERT_FILE = 'tls.crt';
 const TLS_KEY_FILE = 'tls.key';
 const TLS_CA_FILE = 'ca.crt';
@@ -98,7 +100,13 @@ export function createTlsFetch(options: TlsOptions): typeof fetch | undefined {
     return undefined;
   }
   // Casts bridge undici ↔ DOM fetch types (Fern only needs string URL + init + dispatcher).
-  return (input, init) => undiciFetch(requestUrlFromFetchInput(input), { ...(init as object), dispatcher });
+  return (input, init) => {
+    const url = requestUrlFromFetchInput(input);
+    // This undici fetch bypasses the process-wide fetch guard, so the
+    // offline-mode destination check runs here explicitly.
+    assertOnlineAllowed(url);
+    return undiciFetch(url, { ...(init as object), dispatcher });
+  };
 }
 
 /** HTTPS `serve` options when mTLS is on; undefined → plain HTTP. */

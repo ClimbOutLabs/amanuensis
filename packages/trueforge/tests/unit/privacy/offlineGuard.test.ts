@@ -48,6 +48,7 @@ describe('isLocalHostname', () => {
     ip(172, 15, 0, 1),
     ip(172, 32, 0, 1),
     ip(192, 167, 1, 1),
+    ip(169, 254, 169, 254),
     '999.1.1.1',
     'localhost.example.com',
     'huggingface.co',
@@ -109,6 +110,51 @@ describe('createOfflineFetch', () => {
 
     await guarded('http://127.0.0.1:8080/v1');
     expect(calls).toHaveLength(1);
+  });
+
+  it('blocks a redirect hop to a remote destination when enabled', async () => {
+    const calls: string[] = [];
+    const inits: (RequestInit | undefined)[] = [];
+    const baseFetch: typeof globalThis.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      calls.push(url);
+      inits.push(init);
+      if (url === `http://${ip(127, 0, 0, 1)}:8080/start`) {
+        return new Response(null, { status: 302, headers: { location: 'https://api.example.com/v1' } });
+      }
+      return new Response('ok');
+    };
+    const guarded = createOfflineFetch({ baseFetch });
+
+    setOfflineModeEnabled(true);
+    await expect(guarded(`http://${ip(127, 0, 0, 1)}:8080/start`)).rejects.toThrow(OfflineBlockedError);
+    // The remote hop was never fetched.
+    expect(calls).toEqual([`http://${ip(127, 0, 0, 1)}:8080/start`]);
+    // Redirects are handled manually so every hop can be validated.
+    for (const init of inits) {
+      expect(init?.redirect).toBe('manual');
+    }
+  });
+
+  it('follows redirects between local destinations when enabled', async () => {
+    const calls: string[] = [];
+    const baseFetch: typeof globalThis.fetch = async input => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      calls.push(url);
+      if (url === `http://${ip(127, 0, 0, 1)}:8080/start`) {
+        return new Response(null, { status: 302, headers: { location: '/final' } });
+      }
+      return new Response('final');
+    };
+    const guarded = createOfflineFetch({ baseFetch });
+
+    setOfflineModeEnabled(true);
+    const response = await guarded(`http://${ip(127, 0, 0, 1)}:8080/start`);
+    expect(await response.text()).toBe('final');
+    expect(calls).toEqual([
+      `http://${ip(127, 0, 0, 1)}:8080/start`,
+      `http://${ip(127, 0, 0, 1)}:8080/final`,
+    ]);
   });
 });
 

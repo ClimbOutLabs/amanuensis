@@ -28,6 +28,10 @@ const SECRET_KEYS = new Set([
   'private_key',
   'client_secret',
   'authorization',
+  'db_password',
+  'webhook_secret',
+  'signing_secret',
+  'session_token',
 ]);
 
 /** Credential-shaped values, wherever they appear. */

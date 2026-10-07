@@ -81,6 +81,11 @@ function isLocalIpv6(host: string): boolean {
  */
 export function isLocalHostname(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === '169.254.169.254') {
+    // Cloud instance metadata endpoint: never local, even though it sits
+    // inside the 169.254.0.0/16 link-local range matched below.
+    return false;
+  }
   if (host === 'localhost' || host === '::1') {
     return true;
   }
@@ -145,13 +150,65 @@ export function assertOnlineAllowed(url: string | URL): void {
   }
 }
 
-/** fetch wrapper enforcing offline mode. Reads the flag per call so toggles apply instantly. */
+/** Cap on the redirect hops the offline guard follows on its own. */
+const MAX_GUARD_REDIRECTS = 5;
+
+/**
+ * fetch wrapper enforcing offline mode. Reads the flag per call so toggles
+ * apply instantly.
+ *
+ * Redirect-aware: requests go out with `redirect: 'manual'` and every
+ * redirect hop is validated with `assertOnlineAllowed` before following.
+ * fetch's default `follow` would let a permitted local URL bounce to a
+ * remote destination unchecked, which is exactly the exfiltration path
+ * offline mode exists to close. Follows the same manual-redirect pattern as
+ * document ingestion's URL snapshots.
+ */
 export function createOfflineFetch(options: { baseFetch?: typeof globalThis.fetch } = {}): typeof globalThis.fetch {
   const baseFetch = options.baseFetch ?? globalThis.fetch.bind(globalThis);
   return async (input, init) => {
-    const url = typeof input === 'string' || input instanceof URL ? input : input.url;
-    assertOnlineAllowed(url);
-    return baseFetch(input, init);
+    const startUrl = typeof input === 'string' || input instanceof URL ? input.toString() : input.url;
+    assertOnlineAllowed(startUrl);
+    // Follow-up hops re-issue as (url, init): seed the init from a Request
+    // input so its method and headers survive a redirect. The body stream
+    // cannot be re-sent, so a 307/308 that must preserve it fails closed below.
+    const followInit: RequestInit | undefined =
+      typeof input === 'string' || input instanceof URL
+        ? init
+        : { method: input.method, headers: input.headers, ...(init ?? {}) };
+    let currentInput: string | URL | Request = input;
+    let currentInit = init;
+    let url = startUrl;
+    for (let hop = 0; ; hop += 1) {
+      const response = await baseFetch(currentInput, { ...currentInit, redirect: 'manual' });
+      const location = response.headers.get('location');
+      if (response.status < 300 || response.status >= 400 || location === null) {
+        return response;
+      }
+      // Drain the redirect response so its connection can be reused.
+      await response.arrayBuffer().catch(() => undefined);
+      if (hop >= MAX_GUARD_REDIRECTS) {
+        throw new Error(
+          `Blocked a request starting at ${startUrl}: more than ${String(MAX_GUARD_REDIRECTS)} redirects.`,
+        );
+      }
+      url = new URL(location, url).toString();
+      assertOnlineAllowed(url);
+      const method = (currentInit?.method ?? (currentInput instanceof Request ? currentInput.method : 'GET')).toUpperCase();
+      // 301/302/303 become a GET without a body; 307/308 repeat the request.
+      const toGet = response.status === 303 || ((response.status === 301 || response.status === 302) && method === 'POST');
+      if (!toGet && (response.status === 307 || response.status === 308) && currentInput instanceof Request) {
+        throw new Error(`Blocked a request starting at ${startUrl}: cannot re-send a Request body across a redirect.`);
+      }
+      currentInput = url;
+      if (toGet) {
+        const nextInit: RequestInit = { ...followInit, method: 'GET' };
+        delete nextInit.body;
+        currentInit = nextInit;
+      } else {
+        currentInit = followInit;
+      }
+    }
   };
 }
 

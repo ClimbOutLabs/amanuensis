@@ -5,6 +5,7 @@ import type { Logger } from 'winston';
 import { z } from 'zod';
 
 import type { McpAuthStatus } from '../schemas/mcpServer';
+import { assertOnlineAllowed } from '../privacy/offlineGuard';
 import { createInternalTlsDispatcher, normalizeInternalTlsUrl, type InternalTlsOptions } from './internalTls';
 import { mapResolvedAgentSkillVersions, type ResolvedAgentSkillVersion } from './mapSfyAgentSkills';
 import { parseSfyMcpAuthStatus, parseSfyMcpAuthorizeResult, type SfyMcpAuthSource } from './mapSfyMcpServers';
@@ -613,6 +614,9 @@ export class TrueFoundryServiceFoundryServerClient {
     }
     let response: Awaited<ReturnType<typeof undiciFetch>>;
     try {
+      // This undici fetch bypasses the process-wide fetch guard, so the
+      // offline-mode destination check runs here explicitly.
+      assertOnlineAllowed(input.url);
       response = await undiciFetch(input.url, {
         method: input.method,
         headers,
