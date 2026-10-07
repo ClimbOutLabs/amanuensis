@@ -149,6 +149,7 @@ async function startServers() {
       NODE_ENV: 'development',
       TRUEFORGE_API_KEY: 'trueforge-local-dev',
       PORT: '8790',
+      HOST: '127.0.0.1',
     },
     detached: true,
     stdio: ['ignore', logFd, logFd],
