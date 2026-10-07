@@ -124,7 +124,9 @@ async function main() {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
   frontend.stdout.on('data', () => {}); // Discard, too noisy
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
   frontend.stderr.on('data', () => {});
 
   const frontendOk = await waitFor('http://localhost:3000', 120000, 'frontend');
