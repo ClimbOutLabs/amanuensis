@@ -15,7 +15,7 @@ export type Tier2EscalationToggleProps = {
 };
 
 /**
- * "Always ask me" switch for one Tier 2 action kind. Off by default; the checked
+ * "Always ask me" switch for one Tier 2 action kind. On by default; the checked
  * state always reflects the server settings, and flipping it writes through the user
  * settings API. Lives in the audit feed next to the kind it controls, never in
  * Settings.
