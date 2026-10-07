@@ -1,6 +1,6 @@
 import type { Kysely } from 'kysely';
 
-import type { Tier2ActionKind } from '@truefoundry/trueforge-core/core';
+import { TIER2_ACTION_KINDS, type Tier2ActionKind } from '@truefoundry/trueforge-core/core';
 
 /** Minimal database shape this store needs. Both SQLite and Postgres provide it. */
 export interface SentinelUserSettingsDatabase {
@@ -32,7 +32,7 @@ export interface UpdateSentinelUserSettingsInput {
 }
 
 const DEFAULT_SETTINGS: SentinelUserSettings = {
-  tier2_always_ask: [],
+  tier2_always_ask: [...TIER2_ACTION_KINDS],
   offline_mode: false,
 };
 
