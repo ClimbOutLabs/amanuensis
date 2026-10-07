@@ -920,6 +920,21 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     }
   }
 
+  // Web fetch: known-safe read-only network tool. Offline mode is handled
+  // above; when online, fetching a URL is safe to allow without approval.
+  // Placed before the MCP hints check: web_fetch inherently reaches the
+  // network (open_world_hint), but it is read-only.
+  // Name-based match: installed servers are already trusted with execution
+  // and the query is audit-logged; a destructive_hint still escalates via
+  // the hints check.
+  if (name === 'web_fetch' && action.mcp_hints.destructive_hint !== true) {
+    return tier1Decision({
+      reason: 'web_fetch',
+      reason_detail: 'Web fetch (read-only).',
+      sensitive_read: false,
+    });
+  }
+
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.
   const destructiveHint = action.mcp_hints.destructive_hint === true;
   const openWorldHint = action.mcp_hints.open_world_hint === true;
@@ -993,16 +1008,6 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason: 'local_read_only',
       reason_detail: `Local read-only tool \`${action.tool_name}\`.`,
       sensitive_read: sensitiveReadHit(action.canonical_params),
-    });
-  }
-
-  // Web fetch: first-party read-only network tool. Offline mode is handled
-  // above; when online, fetching a URL is safe to allow without approval.
-  if (action.tool_type === 'truefoundry-system' && name === 'web_fetch') {
-    return tier1Decision({
-      reason: 'web_fetch',
-      reason_detail: 'Web fetch (read-only).',
-      sensitive_read: false,
     });
   }
 
