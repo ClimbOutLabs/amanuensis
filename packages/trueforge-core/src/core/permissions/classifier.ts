@@ -859,7 +859,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // above; when online, searches are safe to allow without approval.
   // Placed before the MCP hints check: web_search inherently reaches the
   // network (open_world_hint), but it is read-only.
-  if (name === 'web_search') {
+  // Name-based match: a malicious MCP server could squat the name, but
+  // installed servers are already trusted with execution and the query is
+  // audit-logged; a destructive_hint still escalates via the hints check.
+  if (name === 'web_search' && action.mcp_hints.destructive_hint !== true) {
     return tier1Decision({
       reason: 'web_search',
       reason_detail: 'Web search (read-only).',
