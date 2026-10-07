@@ -156,6 +156,45 @@ describe('createOfflineFetch', () => {
       `http://${ip(127, 0, 0, 1)}:8080/final`,
     ]);
   });
+
+  it('strips credential headers on cross-origin redirects but keeps them same-origin', async () => {
+    const received: { url: string; headers: Headers }[] = [];
+    const baseFetch: typeof globalThis.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      received.push({ url, headers: new Headers(init?.headers) });
+      if (url === `http://${ip(127, 0, 0, 1)}:8080/same`) {
+        return new Response(null, { status: 302, headers: { location: '/same-final' } });
+      }
+      if (url === `http://${ip(127, 0, 0, 1)}:8080/cross`) {
+        return new Response(null, { status: 302, headers: { location: `http://${ip(127, 0, 0, 2)}:8080/final` } });
+      }
+      return new Response('ok');
+    };
+    const guarded = createOfflineFetch({ baseFetch });
+    const headers = { authorization: 'Bearer secret', cookie: 'session=abc', 'proxy-authorization': 'Basic xyz' };
+
+    setOfflineModeEnabled(true);
+    await guarded(`http://${ip(127, 0, 0, 1)}:8080/same`, { headers });
+    await guarded(`http://${ip(127, 0, 0, 1)}:8080/cross`, { headers });
+
+    const findHeaders = (url: string): Headers => {
+      const entry = received.find(candidate => candidate.url === url);
+      if (entry === undefined) {
+        throw new Error(`expected a recorded request to ${url}`);
+      }
+      return entry.headers;
+    };
+    // Same-origin redirect keeps the original request's credentials.
+    const sameOrigin = findHeaders(`http://${ip(127, 0, 0, 1)}:8080/same-final`);
+    expect(sameOrigin.get('authorization')).toBe('Bearer secret');
+    expect(sameOrigin.get('cookie')).toBe('session=abc');
+    expect(sameOrigin.get('proxy-authorization')).toBe('Basic xyz');
+    // Cross-origin redirect drops credential headers, matching native fetch.
+    const crossOrigin = findHeaders(`http://${ip(127, 0, 0, 2)}:8080/final`);
+    expect(crossOrigin.get('authorization')).toBeNull();
+    expect(crossOrigin.get('cookie')).toBeNull();
+    expect(crossOrigin.get('proxy-authorization')).toBeNull();
+  });
 });
 
 describe('installOfflineFetchGuard', () => {

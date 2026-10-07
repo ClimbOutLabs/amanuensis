@@ -153,6 +153,22 @@ export function assertOnlineAllowed(url: string | URL): void {
 /** Cap on the redirect hops the offline guard follows on its own. */
 const MAX_GUARD_REDIRECTS = 5;
 
+/** Credential headers native fetch drops when a redirect changes origin. */
+const REDIRECT_CREDENTIAL_HEADERS = ['authorization', 'cookie', 'proxy-authorization'];
+
+/**
+ * Rebuilds a RequestInit without credential headers. Used when a redirect
+ * hop changes origin, so the original request's credentials are never
+ * forwarded to a different origin the response bounced to.
+ */
+function stripCredentialHeaders(init: RequestInit | undefined): RequestInit {
+  const headers = new Headers(init?.headers);
+  for (const name of REDIRECT_CREDENTIAL_HEADERS) {
+    headers.delete(name);
+  }
+  return { ...init, headers };
+}
+
 /**
  * fetch wrapper enforcing offline mode. Reads the flag per call so toggles
  * apply instantly.
@@ -192,6 +208,7 @@ export function createOfflineFetch(options: { baseFetch?: typeof globalThis.fetc
           `Blocked a request starting at ${startUrl}: more than ${String(MAX_GUARD_REDIRECTS)} redirects.`,
         );
       }
+      const previousUrl = url;
       url = new URL(location, url).toString();
       assertOnlineAllowed(url);
       const method = (currentInit?.method ?? (currentInput instanceof Request ? currentInput.method : 'GET')).toUpperCase();
@@ -200,14 +217,16 @@ export function createOfflineFetch(options: { baseFetch?: typeof globalThis.fetc
       if (!toGet && (response.status === 307 || response.status === 308) && currentInput instanceof Request) {
         throw new Error(`Blocked a request starting at ${startUrl}: cannot re-send a Request body across a redirect.`);
       }
-      currentInput = url;
+      // Native fetch strips credential headers on cross-origin redirects so
+      // the original request's credentials never leak to a new origin.
+      const crossOrigin = new URL(url).origin !== new URL(previousUrl).origin;
+      let nextInit: RequestInit | undefined = followInit;
       if (toGet) {
-        const nextInit: RequestInit = { ...followInit, method: 'GET' };
+        nextInit = { ...nextInit, method: 'GET' };
         delete nextInit.body;
-        currentInit = nextInit;
-      } else {
-        currentInit = followInit;
       }
+      currentInput = url;
+      currentInit = crossOrigin ? stripCredentialHeaders(nextInit) : nextInit;
     }
   };
 }
