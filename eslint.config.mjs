@@ -249,4 +249,14 @@ export default defineConfig(
       },
     },
   },
+  {
+    // Buildbox test runner scripts are not production code; the strict
+    // curly rule adds churn with no behavior change (same rationale as
+    // the vendored mcp/ exception above).
+    files: ['buildbox/**/*.mjs'],
+    rules: {
+      curly: 'off',
+      'no-empty': 'off',
+    },
+  },
 );
