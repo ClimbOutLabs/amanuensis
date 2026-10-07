@@ -517,13 +517,19 @@ async function verifySentinelPreDispatch(input: {
   if (info.is_deferred === true && info.original_tool_name !== CALL_TOOL_NAME) {
     canonicalParams = tryUnwrapCallToolInput(canonicalParams) ?? canonicalParams;
   }
+  // When the mint site recorded its exact identity (sandbox: invoked name and
+  // normalized args, while original_tool_name is remapped for display), verify
+  // against the recorded values instead of reconstructing.
+  if (info.mint_canonical_params !== undefined) {
+    canonicalParams = info.mint_canonical_params;
+  }
   const offline = await sentinel.services.isOffline({
     tenant_id: sentinel.identity.tenant_id,
     created_by: sentinel.identity.created_by,
   });
   return verifyPreDispatch({
     call: {
-      tool_name: info.original_tool_name,
+      tool_name: info.mint_tool_name ?? info.original_tool_name,
       tool_type: info.type,
       canonical_params: canonicalParams,
       tier: info.tier,
