@@ -55,4 +55,29 @@ describe('createZip', () => {
     expect(entries).toHaveLength(0);
     expect(centralCount).toBe(0);
   });
+
+  it('points the EOCD at the central directory for entries larger than 64KB', () => {
+    // Regression test: the comment length was once written at EOCD offset +18,
+    // clobbering the high 16 bits of the central directory offset (+16..+19).
+    // Archives under 64KB were unaffected, so this needs an entry above 64KB.
+    const data = new Uint8Array(100 * 1024);
+    for (let i = 0; i < data.length; i++) data[i] = (i * 31 + 7) & 0xff;
+    const zip = createZip([{ name: 'big.bin', data }]);
+    expect(zip.length).toBeGreaterThan(65536);
+    const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+    // Locate the EOCD the way a real parser does: scan backwards for its signature.
+    let eocd = -1;
+    for (let i = zip.length - 22; i >= 0; i--) {
+      if (view.getUint32(i, true) === 0x06054b50) {
+        eocd = i;
+        break;
+      }
+    }
+    expect(eocd).toBeGreaterThanOrEqual(0);
+    const centralSize = view.getUint32(eocd + 12, true);
+    const centralOffset = view.getUint32(eocd + 16, true);
+    expect(view.getUint16(eocd + 20, true)).toBe(0);
+    expect(view.getUint32(centralOffset, true)).toBe(0x02014b50);
+    expect(centralOffset + centralSize).toBe(eocd);
+  });
 });

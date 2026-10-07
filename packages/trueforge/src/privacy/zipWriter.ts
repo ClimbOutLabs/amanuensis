@@ -135,7 +135,7 @@ export function createZip(entries: ZipEntry[]): Uint8Array {
   writeU16(view, offset + 10, prepared.length);
   writeU32(view, offset + 12, centralSize);
   writeU32(view, offset + 16, centralStart);
-  writeU16(view, offset + 18, 0); // comment length
+  writeU16(view, offset + 20, 0); // comment length
 
   return bytes;
 }
