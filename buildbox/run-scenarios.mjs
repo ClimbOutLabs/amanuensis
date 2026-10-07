@@ -315,26 +315,38 @@ async function runSentinelScenario(pw) {
   check('UI loads and chat works', true);
 
   // --- 2. find the Permissions section (right rail) ----------------------
-  const permissionsVisible = await page.evaluate(() => {
-    const el = document.querySelector('[data-section="permissions"]');
-    if (el) return el.getBoundingClientRect().width > 0;
-    return document.body.innerText.includes('Tier 2 actions');
-  });
-  if (!permissionsVisible) {
-    // The rail may be collapsed; look for a toggle.
-    const railToggle = await page.$('[aria-label*="rail" i], [aria-label*="panel" i], [aria-label*="sidebar" i]');
-    if (railToggle) {
-      await railToggle.click();
+  // The toggle is the real target; wait for it directly instead of text.
+  const toggleSelector = '[aria-label="Always ask before shell"]';
+  async function ensureToggleVisible() {
+    // Try to expand the rail if it's collapsed.
+    const expandBtn = await page.$('[aria-label="Expand rail"]');
+    if (expandBtn) {
+      log('expanding collapsed rail ...');
+      await expandBtn.click();
       await sleep(1500);
     }
+    try {
+      await page.waitForSelector(toggleSelector, { timeout: 20000 });
+      return true;
+    } catch {
+      return false;
+    }
   }
-  const tier2Visible = await waitForText('Tier 2 actions', 15000, 'Tier 2 actions section');
-  check('Permissions / Tier 2 actions section visible', tier2Visible);
-
-  // --- 3. toggle "Always ask" for shell ---------------------------------
-  const toggleSelector = '[aria-label="Always ask before shell"]';
+  let toggleFound = await ensureToggleVisible();
+  if (!toggleFound) {
+    // Debug: dump what's actually in the rail.
+    const railDebug = await page.evaluate(() => {
+      const rail = document.querySelector('[aria-label="Amanuensis runtime status"]');
+      if (!rail) return 'no runtime rail in DOM';
+      const sections = [...rail.querySelectorAll('[data-section]')].map((s) => s.getAttribute('data-section'));
+      const text = rail.innerText.slice(0, 500);
+      return `sections=[${sections.join(',')}] text=${JSON.stringify(text)}`;
+    });
+    log('rail debug:', railDebug);
+    await shot('02-rail-debug.png');
+  }
+  check('shell "Always ask" toggle found', toggleFound);
   const toggle = await page.$(toggleSelector);
-  check('shell "Always ask" toggle found', !!toggle);
   const wasChecked = await toggle.evaluate((e) => e.getAttribute('aria-checked') === 'true' || e.checked === true);
   log('toggle was checked:', wasChecked);
   if (!wasChecked) {
@@ -350,7 +362,8 @@ async function runSentinelScenario(pw) {
   // --- 4. refresh: persistence -------------------------------------------
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 90000 });
   await sleep(4000);
-  await waitForText('Tier 2 actions', 30000, 'Tier 2 actions after reload');
+  const persistedVisible = await ensureToggleVisible();
+  check('toggle visible after refresh', persistedVisible);
   const persisted = await page.$(toggleSelector).then((el) =>
     el ? el.evaluate((e) => e.getAttribute('aria-checked') === 'true' || e.checked === true) : false,
   );
