@@ -44,7 +44,7 @@ function makeSandbox(fileDownloadEnabled: boolean): Sandbox {
 }
 
 describe('Sandbox file-output guidance', () => {
-  it('states the exact sandbox_artifacts line format with an example, and that it is the only way the user gets a download', () => {
+  it('states the exact sandbox_artifacts line format with an example, and names both download mechanisms', () => {
     const sandbox = makeSandbox(true);
     const builder = new InstructionBuilder('root');
     sandbox.buildInstruction(builder);
@@ -53,7 +53,7 @@ describe('Sandbox file-output guidance', () => {
     expect(prompt).toContain('[display name](/absolute/path)');
     expect(prompt).toContain('```sandbox_artifacts');
     expect(prompt).toContain('[Lily James tribute video](/opt/tf/workspace/tribute.mp4)');
-    expect(prompt).toContain('the only way the user gets a download');
+    expect(prompt).toContain('Downloads reach the user via the sandbox_artifacts block below (for exec-sandbox outputs) or as run_code/<name> paths (for run_code outputs)');
   });
 
   it('omits the file-output section when file downloads are disabled', () => {

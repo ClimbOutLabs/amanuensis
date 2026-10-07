@@ -1,4 +1,4 @@
-import type { HostToolCallPolicy } from '@truefoundry/trueforge-core/core';
+import type { HostToolCallPolicy, HostToolCallPolicyCall } from '@truefoundry/trueforge-core/core';
 
 /**
  * Per-turn host facts about the internal sources, written once per turn by the
@@ -378,7 +378,7 @@ export function buildInternalSourceToolPolicy(
     }
     return recallExpanded;
   };
-  return call => {
+  return (call: HostToolCallPolicyCall) => {
     const name = call.underlyingToolName ?? call.functionName;
     if (name.toLowerCase() !== 'web_search') {
       return undefined;

@@ -20,6 +20,8 @@ import { fileURLToPath } from 'node:url';
 import envPaths from 'env-paths';
 
 import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS } from '@truefoundry/trueforge-core/core';
+import { TOKEN_FACTORY_DEFAULT_BASE_URL } from '@truefoundry/trueforge-core/core';
+import { validateRunCodeStartupConfig } from '@truefoundry/trueforge-core/core';
 import {
   MEMORY_PROVIDER_MAX_TIMEOUT_MS,
   MEMORY_SETTINGS_LIMITS,
@@ -47,7 +49,7 @@ const LOCAL_EXECUTOR_ID = 'local';
 /** OS-standard data dir for SQLite in standalone mode. */
 const ENV_PATHS_APP_NAME = 'trueforge';
 const DEFAULT_POSTGRES_USER = 'trueforge';
-const DEFAULT_POSTGRES_PASSWORD = 'trueforge';
+const DEFAULT_POSTGRES_PASSWORD = process.env['POSTGRES_PASSWORD'] || 'changeme';
 const DEFAULT_POSTGRES_DB = 'trueforge';
 const DEFAULT_POSTGRES_HOST = 'localhost';
 const DEFAULT_POSTGRES_PORT = 5432;
@@ -56,7 +58,7 @@ const DEFAULT_REDIS_URL = 'redis://localhost:6379';
  * Fixed local service credential when `STANDALONE=true` and `TRUEFORGE_API_KEY` is unset.
  * Local testing only — not for distributed deployments.
  */
-export const STANDALONE_TRUEFORGE_API_KEY = 'trueforge-standalone';
+export const STANDALONE_TRUEFORGE_API_KEY = process.env['TRUEFORGE_API_KEY'] || 'dev-only-placeholder';
 
 /**
  * `BUILD_REF` when nothing stamped the build: host development, and image builds
@@ -224,6 +226,28 @@ function parseReflectBudget(options: {
   throw new Error(`${options.envKey} must be one of low, mid, high; got ${JSON.stringify(options.raw)}`);
 }
 
+/** Which process-isolation backend runs `run_code` executions. */
+export type SandboxIsolationDriver = 'docker' | 'firecracker';
+
+/**
+ * Parses `SANDBOX_ISOLATION_DRIVER`. Unset/blank → default. Anything else throws
+ * instead of silently falling back to a different isolation backend.
+ */
+function parseIsolationDriver(options: {
+  envKey: string;
+  raw: string | undefined;
+  defaultValue: SandboxIsolationDriver;
+}): SandboxIsolationDriver {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return options.defaultValue;
+  }
+  const value = options.raw.trim().toLowerCase();
+  if (value === 'docker' || value === 'firecracker') {
+    return value;
+  }
+  throw new Error(`${options.envKey} must be one of docker, firecracker; got ${JSON.stringify(options.raw)}`);
+}
+
 /** Which long-term memory backend Aman uses. */
 export type MemoryBackend = 'markdown' | 'hindsight';
 
@@ -245,6 +269,32 @@ function parseMemoryBackend(options: {
   }
   throw new Error(`${options.envKey} must be one of markdown, hindsight; got ${JSON.stringify(options.raw)}`);
 }
+
+/** How turns may route to Nebius Token Factory. */
+export type TokenFactoryMode = 'off' | 'fallback' | 'force';
+
+/**
+ * Parses `TOKEN_FACTORY_MODE`. Unset/blank → `off`. `fallback` tries the configured
+ * local provider first and uses Token Factory when it fails; `force` tries Token
+ * Factory first (for testing and demo paths) and falls back to the local provider.
+ */
+export function parseTokenFactoryMode(options: {
+  envKey: string;
+  raw: string | undefined;
+  defaultValue: TokenFactoryMode;
+}): TokenFactoryMode {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return options.defaultValue;
+  }
+  const value = options.raw.trim().toLowerCase();
+  if (value === 'off' || value === 'fallback' || value === 'force') {
+    return value;
+  }
+  throw new Error(`${options.envKey} must be one of off, fallback, force; got ${JSON.stringify(options.raw)}`);
+}
+
+/** Default Token Factory model used when `TOKEN_FACTORY_MODEL` is unset. */
+export const DEFAULT_TOKEN_FACTORY_MODEL = 'nvidia/nemotron-3-super-120b-a12b';
 
 function parseBoolean(options: { envKey: string; raw: string | undefined; defaultValue: boolean }): boolean {
   const { envKey, raw, defaultValue } = options;
@@ -590,17 +640,12 @@ export interface SharedServerConfiguration {
    * Per-tool-call dispatch deadline in milliseconds: how long a turn waits for
    * one provider call before recording `outcome_unknown`. It does not cancel
    * the underlying provider call. Env: `TOOL_CALL_TIMEOUT_MS`. Default 240000
-   * (4 minutes, below `SERVER_EXECUTION_TIMEOUT_SECONDS`).
+   * (4 minutes). run_code is scoped out of this — it gets its own provisioning-sized
+   * deadline (see `getRunCodeToolCallTimeoutMs`), so the 21-minute bound
+   * applies to sandbox/run_code alone, not every tool.
+   * Must stay below `SERVER_EXECUTION_TIMEOUT_SECONDS`.
    */
   TOOL_CALL_TIMEOUT_MS: number;
-  /**
-   * Bound in milliseconds on waiting for a model call's first output before
-   * the turn fails visibly instead of hanging. A provider that accepts the
-   * request but never produces a first chunk would otherwise leave the turn
-   * active indefinitely. Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default
-   * 600000 (10 minutes).
-   */
-  MODEL_FIRST_RESPONSE_TIMEOUT_MS: number;
   /**
    * Client name used for Dynamic Client Registration (DCR) of MCP servers.
    * This is the client name shown on authorization-server consent screens.
@@ -612,6 +657,81 @@ export interface SharedServerConfiguration {
    * Env: `SANDBOX_FILE_MAX_BYTES_FOR_DOWNLOAD`. Default 25 MiB (document limit).
    */
   SANDBOX_FILE_MAX_BYTES_FOR_DOWNLOAD: number;
+  /**
+   * run_code isolation driver. Env: `SANDBOX_ISOLATION_DRIVER`. Default 'docker';
+   * 'firecracker' is opt-in but config-only in this build (the driver is not
+   * implemented yet, so selecting it refuses to start). Selection happens once at
+   * server start; changing it requires a config change and restart.
+   */
+  SANDBOX_ISOLATION_DRIVER: SandboxIsolationDriver;
+  /**
+   * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
+   * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
+   * Blank (the default) leaves run_code dormant — existing standalone installs
+   * boot without it; the release process stamps the built digest here to opt
+   * in, and a non-blank value gets the full fail-closed startup validation.
+   */
+  SANDBOX_IMAGE: string;
+  /**
+   * Parent directory for per-run run_code isolation dirs
+   * (`<dir>/sandbox-runs/<runId>/{ingress,scratch,egress}`).
+   * Derived: `{env-paths data}/sandbox-runs` (both topologies — the Docker
+   * driver is host-local even in distributed mode).
+   */
+  SANDBOX_RUNS_DIR: string;
+  /**
+   * Default per-run timeout for run_code, seconds. Env: `SANDBOX_DEFAULT_TIMEOUT_SECONDS`. Default 60.
+   */
+  SANDBOX_DEFAULT_TIMEOUT_SECONDS: number;
+  /**
+   * Max per-run timeout for run_code, seconds. Env: `SANDBOX_MAX_TIMEOUT_SECONDS`. Default 600.
+   */
+  SANDBOX_MAX_TIMEOUT_SECONDS: number;
+  /**
+   * Container memory limit for run_code, MiB. Env: `SANDBOX_MEMORY_MB`. Default 2048.
+   */
+  SANDBOX_MEMORY_MB: number;
+  /**
+   * Scratch+egress disk quota for run_code, MiB. Env: `SANDBOX_DISK_MB`. Default 1024.
+   */
+  SANDBOX_DISK_MB: number;
+  /**
+   * Per-stream stdout/stderr cap for run_code, KiB. Env: `SANDBOX_STDOUT_STDERR_CAP_KB`. Default 256.
+   */
+  SANDBOX_STDOUT_STDERR_CAP_KB: number;
+  /**
+   * Bound for the first-run image pull, seconds. Startup asserts
+   * run_code's own dispatch deadline (`getRunCodeToolCallTimeoutMs`) covers
+   * this plus max_timeout_seconds, fail-closed — the normal per-tool timeout
+   * is scoped out. Env: `SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS`. Default 600.
+   */
+  SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS: number;
+  /**
+   * RESERVED for a future version. v1 drivers ignore it; startup FAILS CLOSED
+   * when true. Env: `SANDBOX_NETWORK_EGRESS`. Default false.
+   */
+  SANDBOX_NETWORK_EGRESS: boolean;
+  /**
+   * Path to the cosign public-key PEM used to verify the sandbox image signature
+   * (fail-closed). Env: `SANDBOX_COSIGN_PUBLIC_KEY_PATH`. Required when
+   * the isolation driver is docker; the release process ships the key.
+   */
+  SANDBOX_COSIGN_PUBLIC_KEY_PATH: string;
+  /**
+   * Turn artifact retention: index rows (and blobs no surviving row references)
+   * older than this many days are deleted by a daily startup-anchored sweep.
+   * Env: `TURN_ARTIFACT_RETENTION_DAYS`. Default 30.
+   */
+  TURN_ARTIFACT_RETENTION_DAYS: number;
+  /**
+   * Firecracker stanza — config only in this build; the driver is parked until
+   * /dev/kvm is confirmed on the target host. Only read when
+   * SANDBOX_ISOLATION_DRIVER=firecracker.
+   */
+  SANDBOX_FIRECRACKER_KVM_DEVICE: string;
+  SANDBOX_FIRECRACKER_KERNEL: string;
+  SANDBOX_FIRECRACKER_ROOTFS: string;
+  SANDBOX_FIRECRACKER_SNAPSHOT_ENABLED: boolean;
   /**
    * Max bytes for an HTTP request body. Env: `MAX_REQUEST_BODY_BYTES`. Default 36 MiB.
    */
@@ -636,7 +756,11 @@ export interface SharedServerConfiguration {
   TURN_DRAIN_SHUTDOWN_TIMEOUT_MS: number;
   /**
    * Max seconds a single turn may execute before it is cancelled with
-   * `server-execution-timeout`. Env: `SERVER_EXECUTION_TIMEOUT_SECONDS`. Default 600 (10 minutes).
+   * `server-execution-timeout`. Env: `SERVER_EXECUTION_TIMEOUT_SECONDS`.
+   * Default 1380 (23 minutes): must stay above run_code's dispatch deadline
+   * (21 minutes at default sandbox bounds — 600 s image pull + 600 s run —
+   * see `getRunCodeToolCallTimeoutMs`) so a worst-case run_code call is not
+   * killed by the turn deadline first.
    */
   SERVER_EXECUTION_TIMEOUT_SECONDS: number;
   /**
@@ -765,6 +889,12 @@ export interface SharedServerConfiguration {
    */
   MEMORY_SCREEN_URL: string;
   /**
+   * Base URL of the `aman-stt` speech-to-text sidecar (`POST {url}/v1/transcribe`).
+   * The browser never calls it directly; the voice endpoints proxy through this server.
+   * Env: `STT_URL`. Default `http://aman-stt:8001`.
+   */
+  STT_URL: string;
+  /**
    * Bearer token for the memory recall screen classifier. Distinct from any memory-provider
    * credential. Env: `MEMORY_SCREEN_AUTH_TOKEN`. Default empty.
    */
@@ -876,6 +1006,29 @@ export interface SharedServerConfiguration {
    */
   MEMORY_SUMMARIZE: boolean;
   /**
+   * Nebius Token Factory API key. Populated from the Secure Vault into the deployment
+   * environment; never committed or logged. Env: `NEBIUS_API_KEY`. Unset by default.
+   */
+  NEBIUS_API_KEY: string | undefined;
+  /**
+   * Token Factory model id used for fallback and forced routing.
+   * Env: `TOKEN_FACTORY_MODEL`. Default `nvidia/nemotron-3-super-120b-a12b`.
+   */
+  TOKEN_FACTORY_MODEL: string;
+  /**
+   * Token Factory base URL.
+   * Env: `TOKEN_FACTORY_BASE_URL`. Default `https://api.tokenfactory.nebius.com/v1`.
+   */
+  TOKEN_FACTORY_BASE_URL: string;
+  /**
+   * How turns may route to Nebius Token Factory. `off` (the default) disables Token
+   * Factory routing entirely. `fallback` uses the configured local provider first and
+   * fails over to Token Factory when it is unavailable. `force` uses Token Factory
+   * first with the local provider as fallback, for testing and demo paths.
+   * Env: `TOKEN_FACTORY_MODE`. Default `off`.
+   */
+  TOKEN_FACTORY_MODE: TokenFactoryMode;
+  /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
    * memories by meaning in addition to keyword overlap. Everything runs on the
@@ -889,14 +1042,6 @@ export interface SharedServerConfiguration {
    * Env: `MEMORY_EMBEDDINGS_MODEL_DIR`. Default `<MEMORY_MARKDOWN_DIR>/.embedding-model`.
    */
   MEMORY_EMBEDDINGS_MODEL_DIR: string;
-  /**
-   * Root directory for persona knowledge libraries. Each persona gets its own
-   * SQLite database file under a sanitized tenant subdirectory, so knowledge
-   * can never leak across personas. Persist it (Docker volume) or libraries
-   * vanish on container recreate.
-   * Env: `PERSONA_KNOWLEDGE_DIR`. Default `./data/persona-knowledge` (relative to the process cwd).
-   */
-  PERSONA_KNOWLEDGE_DIR: string;
   /**
    * Memories embedded per background-backfill batch. Smaller batches yield to the
    * event loop more often; larger batches finish sooner.
@@ -1076,7 +1221,8 @@ export type ServerConfiguration = StandaloneServerConfiguration | DistributedSer
 const serverExecutionTimeoutSeconds = parsePositiveInt({
   envKey: 'SERVER_EXECUTION_TIMEOUT_SECONDS',
   raw: getEnv('SERVER_EXECUTION_TIMEOUT_SECONDS'),
-  defaultValue: 600,
+  // Must stay above run_code's dispatch deadline (getRunCodeToolCallTimeoutMs); see its comment.
+  defaultValue: 1380,
 });
 
 const standalone = parseBoolean({
@@ -1130,14 +1276,10 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('TOOL_CALL_TIMEOUT_MS'),
     // Literal mirror of DEFAULT_TOOL_CALL_TIMEOUT_MS in trueforge-core's
     // executeToolCalls.ts; must stay below SERVER_EXECUTION_TIMEOUT_SECONDS.
+    // the normal per-tool-call ceiling. run_code alone gets the provisioning-sized
+    // deadline (see getRunCodeToolCallTimeoutMs), so the long bound is scoped
+    // to the one tool that needs it instead of every tool.
     defaultValue: 240_000,
-  }),
-  MODEL_FIRST_RESPONSE_TIMEOUT_MS: parsePositiveInt({
-    envKey: 'MODEL_FIRST_RESPONSE_TIMEOUT_MS',
-    raw: getEnv('MODEL_FIRST_RESPONSE_TIMEOUT_MS'),
-    // Literal mirror of DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS in
-    // trueforge-core's AgentThread.ts (the canonical owner).
-    defaultValue: 600_000,
   }),
   MCP_DCR_OAUTH_CLIENT_NAME:
     getEnv('MCP_DCR_OAUTH_CLIENT_NAME', { defaultValue: 'truefoundry-harness' }) ?? 'truefoundry-harness',
@@ -1145,6 +1287,62 @@ const shared: SharedServerConfiguration = {
     envKey: 'SANDBOX_FILE_MAX_BYTES_FOR_DOWNLOAD',
     raw: getEnv('SANDBOX_FILE_MAX_BYTES_FOR_DOWNLOAD'),
     defaultValue: 26_214_400,
+  }),
+  SANDBOX_ISOLATION_DRIVER: parseIsolationDriver({
+    envKey: 'SANDBOX_ISOLATION_DRIVER',
+    raw: getEnv('SANDBOX_ISOLATION_DRIVER'),
+    defaultValue: 'docker',
+  }),
+  SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
+  SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
+  SANDBOX_DEFAULT_TIMEOUT_SECONDS: parsePositiveInt({
+    envKey: 'SANDBOX_DEFAULT_TIMEOUT_SECONDS',
+    raw: getEnv('SANDBOX_DEFAULT_TIMEOUT_SECONDS'),
+    defaultValue: 60,
+  }),
+  SANDBOX_MAX_TIMEOUT_SECONDS: parsePositiveInt({
+    envKey: 'SANDBOX_MAX_TIMEOUT_SECONDS',
+    raw: getEnv('SANDBOX_MAX_TIMEOUT_SECONDS'),
+    defaultValue: 600,
+  }),
+  SANDBOX_MEMORY_MB: parsePositiveInt({
+    envKey: 'SANDBOX_MEMORY_MB',
+    raw: getEnv('SANDBOX_MEMORY_MB'),
+    defaultValue: 2048,
+  }),
+  SANDBOX_DISK_MB: parsePositiveInt({
+    envKey: 'SANDBOX_DISK_MB',
+    raw: getEnv('SANDBOX_DISK_MB'),
+    defaultValue: 1024,
+  }),
+  SANDBOX_STDOUT_STDERR_CAP_KB: parsePositiveInt({
+    envKey: 'SANDBOX_STDOUT_STDERR_CAP_KB',
+    raw: getEnv('SANDBOX_STDOUT_STDERR_CAP_KB'),
+    defaultValue: 256,
+  }),
+  SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS: parsePositiveInt({
+    envKey: 'SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS',
+    raw: getEnv('SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS'),
+    defaultValue: 600,
+  }),
+  SANDBOX_NETWORK_EGRESS: parseBoolean({
+    envKey: 'SANDBOX_NETWORK_EGRESS',
+    raw: getEnv('SANDBOX_NETWORK_EGRESS'),
+    defaultValue: false,
+  }),
+  SANDBOX_COSIGN_PUBLIC_KEY_PATH: getEnv('SANDBOX_COSIGN_PUBLIC_KEY_PATH', { defaultValue: '' }) ?? '',
+  TURN_ARTIFACT_RETENTION_DAYS: parsePositiveInt({
+    envKey: 'TURN_ARTIFACT_RETENTION_DAYS',
+    raw: getEnv('TURN_ARTIFACT_RETENTION_DAYS'),
+    defaultValue: 30,
+  }),
+  SANDBOX_FIRECRACKER_KVM_DEVICE: getEnv('SANDBOX_FIRECRACKER_KVM_DEVICE', { defaultValue: '/dev/kvm' }) ?? '/dev/kvm',
+  SANDBOX_FIRECRACKER_KERNEL: getEnv('SANDBOX_FIRECRACKER_KERNEL', { defaultValue: '' }) ?? '',
+  SANDBOX_FIRECRACKER_ROOTFS: getEnv('SANDBOX_FIRECRACKER_ROOTFS', { defaultValue: '' }) ?? '',
+  SANDBOX_FIRECRACKER_SNAPSHOT_ENABLED: parseBoolean({
+    envKey: 'SANDBOX_FIRECRACKER_SNAPSHOT_ENABLED',
+    raw: getEnv('SANDBOX_FIRECRACKER_SNAPSHOT_ENABLED'),
+    defaultValue: false,
   }),
   MAX_REQUEST_BODY_BYTES: parsePositiveInt({
     envKey: 'MAX_REQUEST_BODY_BYTES',
@@ -1267,6 +1465,7 @@ const shared: SharedServerConfiguration = {
     defaultValue: false,
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
+  STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
   MEMORY_SCREEN_AUTH_TOKEN: getEnv('MEMORY_SCREEN_AUTH_TOKEN', { defaultValue: '' }) ?? '',
   MEMORY_SCREEN_THRESHOLD: parseUnitInterval({
     envKey: 'MEMORY_SCREEN_THRESHOLD',
@@ -1349,6 +1548,15 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_SUMMARIZE'),
     defaultValue: true,
   }),
+  NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
+  TOKEN_FACTORY_MODEL: getEnv('TOKEN_FACTORY_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_MODEL }) ?? DEFAULT_TOKEN_FACTORY_MODEL,
+  TOKEN_FACTORY_BASE_URL:
+    getEnv('TOKEN_FACTORY_BASE_URL', { defaultValue: TOKEN_FACTORY_DEFAULT_BASE_URL }) ?? TOKEN_FACTORY_DEFAULT_BASE_URL,
+  TOKEN_FACTORY_MODE: parseTokenFactoryMode({
+    envKey: 'TOKEN_FACTORY_MODE',
+    raw: getEnv('TOKEN_FACTORY_MODE'),
+    defaultValue: 'off',
+  }),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
     raw: getEnv('MEMORY_EMBEDDINGS_ENABLED'),
@@ -1364,9 +1572,6 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE'),
     defaultValue: 8,
   }),
-  PERSONA_KNOWLEDGE_DIR:
-    getEnv('PERSONA_KNOWLEDGE_DIR', { defaultValue: './data/persona-knowledge' }) ??
-    './data/persona-knowledge',
   MEMORY_REFLECT_MAX_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_REFLECT_MAX_TOKENS',
     raw: getEnv('MEMORY_REFLECT_MAX_TOKENS'),
@@ -1704,6 +1909,37 @@ if (isTrueFoundryModeEnabled(configuration)) {
   }
 }
 
+// run_code isolation driver: fail closed at startup. Selection happens
+// once at server start; changing it requires a config change and restart.
+// the image pin is the feature opt-in. A blank SANDBOX_IMAGE (the default
+// for existing standalone installs) leaves run_code dormant — Docker is
+// required only when run_code executes (plan §2.8), not at boot — while a
+// configured image gets the full fail-closed validation.
+const runCodeConfigured = configuration.SANDBOX_IMAGE.trim() !== '';
+validateRunCodeStartupConfig({
+  networkEgress: configuration.SANDBOX_NETWORK_EGRESS,
+  isolationDriver: configuration.SANDBOX_ISOLATION_DRIVER,
+  platform: process.platform,
+  image: configuration.SANDBOX_IMAGE,
+  imageConfigured: runCodeConfigured,
+  imagePullTimeoutSeconds: configuration.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS,
+  defaultTimeoutSeconds: configuration.SANDBOX_DEFAULT_TIMEOUT_SECONDS,
+  maxTimeoutSeconds: configuration.SANDBOX_MAX_TIMEOUT_SECONDS,
+  memoryMb: configuration.SANDBOX_MEMORY_MB,
+  diskMb: configuration.SANDBOX_DISK_MB,
+  outputCapKb: configuration.SANDBOX_STDOUT_STDERR_CAP_KB,
+  runCodeToolCallTimeoutMs: getRunCodeToolCallTimeoutMs(),
+  serverExecutionTimeoutSeconds: configuration.SERVER_EXECUTION_TIMEOUT_SECONDS,
+});
+// The cosign key is only needed once an image is configured; a dormant
+// install must not fail boot for a key it will never use.
+if (runCodeConfigured && configuration.SANDBOX_ISOLATION_DRIVER === 'docker' && configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() === '') {
+  throw new Error(
+    'SANDBOX_COSIGN_PUBLIC_KEY_PATH is required when SANDBOX_ISOLATION_DRIVER=docker and SANDBOX_IMAGE is set: ' +
+      'the sandbox image signature is verified fail-closed. Point it at the release cosign public-key PEM.',
+  );
+}
+
 if (!configuration.STANDALONE && configuration.TRUEFORGE_API_KEY.trim() === '') {
   throw new Error('TRUEFORGE_API_KEY must not be empty when STANDALONE=false.');
 }
@@ -1732,6 +1968,17 @@ export function getPublicBaseUrl(config: ServerConfiguration = configuration): s
     throw new Error('PUBLIC_BASE_URL is required for OIDC callbacks but was empty');
   }
   return publicBaseUrl;
+}
+
+/**
+ * run_code's own dispatch deadline in milliseconds. Derived from the
+ * configured sandbox bounds — `image_pull_timeout_seconds` +
+ * `max_timeout_seconds` + 60 s margin — so the long deadline tracks the
+ * bounds it protects and stays scoped to sandbox/run_code instead of every
+ * tool (which use `TOOL_CALL_TIMEOUT_MS`).
+ */
+export function getRunCodeToolCallTimeoutMs(config: ServerConfiguration = configuration): number {
+  return (config.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS + config.SANDBOX_MAX_TIMEOUT_SECONDS) * 1000 + 60_000;
 }
 
 /** `/` or `/custom/proxy/path/` — trailing slash for asset URLs and the boot script. Empty / standalone non-dev → `/`. */

@@ -4,6 +4,7 @@
  */
 import { ulid } from 'ulid';
 import { SessionHandle } from './SessionHandle';
+import type { SentinelServices } from '../core/permissions';
 import type {
   CreateSessionInput,
   GetSessionByExternalIdInput,
@@ -29,9 +30,11 @@ export class Sessions<
   TTurnCustom extends object = Record<string, never>,
 > {
   private readonly store: ISessionStore<TSessionCustom, TTurnCustom>;
+  private readonly sentinelServices: SentinelServices | undefined;
 
-  constructor(deps: { sessionStore: ISessionStore<TSessionCustom, TTurnCustom> }) {
+  constructor(deps: { sessionStore: ISessionStore<TSessionCustom, TTurnCustom>; sentinelServices?: SentinelServices | undefined }) {
     this.store = deps.sessionStore;
+    this.sentinelServices = deps.sentinelServices;
   }
 
   /**
@@ -54,6 +57,7 @@ export class Sessions<
     return new SessionHandle({
       store: this.store,
       session: record,
+      sentinelServices: this.sentinelServices,
     });
   }
 
@@ -69,6 +73,7 @@ export class Sessions<
     return new SessionHandle({
       store: this.store,
       session: record,
+      sentinelServices: this.sentinelServices,
     });
   }
 
@@ -86,6 +91,7 @@ export class Sessions<
     return new SessionHandle({
       store: this.store,
       session: record,
+      sentinelServices: this.sentinelServices,
     });
   }
 

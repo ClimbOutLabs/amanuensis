@@ -3888,7 +3888,9 @@ describe('Sandbox provider-owned paths', () => {
         expect.objectContaining({ is_approval_required: false }),
       );
       const response = await sandbox.callTool(wrapped);
-      expect(JSON.stringify(response)).toContain('not allowed for verify-purpose exec calls');
+      // The interpreter guard fires before the old verify-purpose screening and
+      // redirects to run_code — still rejected before approval and dispatch.
+      expect(JSON.stringify(response)).toContain('use the run_code tool instead');
     }
     expect(exec).not.toHaveBeenCalled();
   });

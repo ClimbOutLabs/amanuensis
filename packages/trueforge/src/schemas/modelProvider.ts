@@ -3,7 +3,11 @@
  * and OpenAPI request/response shapes. Catalog file schemas live on ModelCatalog.
  */
 import { z } from '@hono/zod-openapi';
-import { SUPPORTED_REASONING_EFFORTS, VERCEL_AI_PROVIDER_NAMES } from '@truefoundry/trueforge-core/core';
+import {
+  SUPPORTED_REASONING_EFFORTS,
+  TOKEN_FACTORY_DEFAULT_BASE_URL,
+  VERCEL_AI_PROVIDER_NAMES,
+} from '@truefoundry/trueforge-core/core';
 import { NameSchema, uniqueNames, type ResourceName } from './common';
 
 /** Every type the harness has an adapter for; a test asserts each one has a schema below. */
@@ -162,6 +166,11 @@ const AlibabaModelProviderSchema = wellKnownProviderSchema({
   base_url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
 }).openapi('AlibabaModelProvider');
 
+const TokenFactoryModelProviderSchema = wellKnownProviderSchema({
+  type: 'tokenfactory',
+  base_url: TOKEN_FACTORY_DEFAULT_BASE_URL,
+}).openapi('TokenFactoryModelProvider');
+
 /**
  * Managed by TrueFoundry: modelled like `custom` (its own `base_url` + `auth`), but unnamed like a
  * well-known type. The gateway endpoint and passthrough token are populated by the store at runtime;
@@ -208,6 +217,7 @@ const ModelProviderBodySchema = z
     MoonshotModelProviderSchema,
     TogetherAIModelProviderSchema,
     AlibabaModelProviderSchema,
+    TokenFactoryModelProviderSchema,
     TrueFoundryModelProviderSchema,
     CustomModelProviderSchema,
   ])

@@ -174,6 +174,10 @@ export type {
 } from './atoms/ComposerSections.js';
 export { ComposerShell } from './atoms/ComposerShell.js';
 export type { ComposerShellProps } from './atoms/ComposerShell.js';
+export { MemorySharing } from './atoms/memory/MemorySharing.js';
+export type { MemorySharingPersona } from './atoms/memory/MemorySharing.js';
+export { MemoryVaultEntryRow } from './atoms/memory/MemoryVaultEntry.js';
+export { MemoryVaultPage } from './atoms/memory/MemoryVaultPage.js';
 export { ResumeUnavailable } from './atoms/ResumeUnavailable.js';
 export type { ResumeUnavailableProps } from './atoms/ResumeUnavailable.js';
 export { SandboxToolCallCard } from './atoms/SandboxToolCallCard.js';
@@ -204,11 +208,10 @@ export { ToolCallContentBlock } from './atoms/ToolCallContentBlock.js';
 export type { ToolCallContentBlockProps } from './atoms/ToolCallContentBlock.js';
 export { ToolGroupCard } from './atoms/ToolGroupCard.js';
 export type { ToolGroupCardProps } from './atoms/ToolGroupCard.js';
-export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
-export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanAvatarMotion } from './components/AmanAvatarMotion.js';
 export type { AmanAvatarMotionSources } from './components/AmanAvatarMotion.js';
-export type { AmanAvatarActivity } from './hooks/useAvatarActivity.js';
+export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
+export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanSetupProvider, useOptionalAmanSetup } from './components/AmanSetupContext.js';
 export type { AmanSetupState, MemoryBankStatus } from './components/AmanSetupContext.js';
 export { AmanWelcome, amanSetupItems, amanWelcomeHeading } from './components/AmanWelcome.js';
@@ -265,6 +268,42 @@ export {
 export type { PersonalizationApi, PersonalizationProfile } from './components/PersonalizationContext.js';
 export { PersonalizationPanel } from './components/PersonalizationPanel.js';
 export type { PersonalizationPanelProps } from './components/PersonalizationPanel.js';
+export {
+  SentinelApiProvider,
+  useOptionalSentinelApi,
+  useOptionalSentinelApiState,
+} from './sentinel/SentinelApiContext.js';
+export type { SentinelApiState } from './sentinel/SentinelApiContext.js';
+export { SentinelAuditFeed } from './sentinel/SentinelAuditFeed.js';
+export type { SentinelAuditFeedProps } from './sentinel/SentinelAuditFeed.js';
+export { OfflineIndicator } from './sentinel/OfflineIndicator.js';
+export { SentinelSettings } from './sentinel/SentinelSettings.js';
+export { Tier2EscalationToggle } from './sentinel/Tier2EscalationToggle.js';
+export type { Tier2EscalationToggleProps } from './sentinel/Tier2EscalationToggle.js';
+export { Tier2Indicator } from './sentinel/Tier2Indicator.js';
+export type { Tier2IndicatorProps } from './sentinel/Tier2Indicator.js';
+export { Tier3ApprovalCard } from './sentinel/Tier3ApprovalCard.js';
+export type { Tier3ApprovalCardProps } from './sentinel/Tier3ApprovalCard.js';
+export {
+  extractSentinelFromEvent,
+  extractSentinelSessionContext,
+  parseAuditEntries,
+  parseToolTier,
+  parseUserSettings,
+} from './sentinel/types.js';
+export type {
+  SentinelApi,
+  SentinelApprovalCard,
+  SentinelApprovalInfo,
+  SentinelAuditEntry,
+  SentinelAuditOutcome,
+  SentinelSessionContext,
+  SentinelUserSettings,
+  Tier2Notice,
+  ToolTier,
+} from './sentinel/types.js';
+export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
+export type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from './components/VoiceInputContext.js';
 export { AgentStepsContainer } from './containers/AgentStepsContainer.js';
 export type { AgentStepsContainerProps } from './containers/AgentStepsContainer.js';
 export { ApprovalNavContainer } from './containers/ApprovalNavContainer.js';
@@ -319,6 +358,7 @@ export { UserEditComposerContainer } from './containers/UserEditComposerContaine
 export { UserMessageContainer } from './containers/UserMessageContainer.js';
 export { useApprovalNav } from './hooks/useApprovalNav.js';
 export type { ApprovalNavState } from './hooks/useApprovalNav.js';
+export type { AmanAvatarActivity } from './hooks/useAvatarActivity.js';
 export { ComposerBusyProvider, useComposerBusyState } from './hooks/useComposerBusyState.js';
 export type { ComposerBusyState } from './hooks/useComposerBusyState.js';
 export {

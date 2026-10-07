@@ -501,6 +501,9 @@ export class EmbeddingSubsystem {
         baseDir: this.options.baseDir,
         namespace: this.options.namespace,
         maxDailyFiles: Number.POSITIVE_INFINITY,
+        // Vault deletes drop entries from the live id set so reconcile clears
+        // their vectors; vault edits change the text so the hash check re-embeds.
+        resolveTombstones: true,
       });
       const liveIds = new Set(scan.entries.map(entry => entry.id));
       if (store.reconcile(liveIds)) {

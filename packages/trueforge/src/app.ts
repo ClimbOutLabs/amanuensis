@@ -19,10 +19,10 @@ import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
+import { createMemoryVaultRouter } from './apis/memoryVault';
 import { createModelsRouter } from './apis/models';
 import { createPermissionsRouter } from './apis/permissions';
 import { createPersonalizationRouter } from './apis/personalization';
-import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
 import { createPrivacyRouter } from './apis/privacy';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
@@ -34,6 +34,7 @@ import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skills';
 import { createSpacesRouter } from './apis/spaces';
 import { createTurnsRouter } from './apis/turns';
+import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
 import { resolveRequestContext } from './auth/identity';
@@ -60,6 +61,7 @@ import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
+import type { ISentinelAuditStore } from './db/sentinelAuditStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { WithTransaction } from './db/transaction';
@@ -226,6 +228,7 @@ export interface ServerDeps<TTransaction> {
   repositoryStore: IRepositoryStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
   sessionMetricsStore: ISessionMetricsStore;
+  sentinelAuditStore: ISentinelAuditStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
@@ -272,6 +275,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     repositoryStore: deps.repositoryStore,
     sessionStore: deps.sessionStore,
     spaceStore: deps.spaceStore,
+    turnArtifactStore: deps.turnArtifactStore,
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
   };
@@ -399,6 +403,16 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     ),
   );
   app.route(
+    '/api/v1/memory/vault',
+    withAuth(
+      createMemoryVaultRouter({
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
     '/api/v1/settings',
     withAdminAuth(
       createSettingsRouter({
@@ -500,20 +514,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         personaStore: deps.personaStore,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveRequestContext,
-        knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
-      }),
-      authMiddleware,
-    ),
-  );
-  app.route(
-    '/api/v1/personas',
-    withAuth(
-      createPersonaKnowledgeRouter({
-        personaStore: deps.personaStore,
-        resolveRequestContext,
-        knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
-        modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
-        logger: deps.logger,
       }),
       authMiddleware,
     ),
@@ -554,6 +554,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createSessionsRouter({
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
+        sentinelAuditStore: deps.sentinelAuditStore,
         activeTurns: deps.activeTurns,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
@@ -592,6 +593,15 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         mcpServerStore: deps.resolveMcpServerStore(),
         globalSettingsStore: deps.globalSettingsStore,
         resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/voice',
+    withAuth(
+      createVoiceRouter({
         logger: deps.logger,
       }),
       authMiddleware,

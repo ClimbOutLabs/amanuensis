@@ -1,13 +1,13 @@
 import type { Logger } from 'winston';
 import type { AgentCapability } from '../core/capabilities/AgentCapability';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
-import type { ModelMessageEvent } from '../core/events/schema';
 import type { ILLM } from '../core/llm/ILLM';
 import type { AgentDefinition, ModelParams } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
-import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
+import type { ModelMessageEvent } from '../core/events/schema';
+import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { TurnRecord } from './models/TurnRecord';
 import type { AgentSpec } from './schemas/agentSpec';
 
@@ -53,6 +53,13 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
    * Undefined falls back to the core default (see DEFAULT_TOOL_CALL_TIMEOUT_MS).
    */
   readonly toolCallTimeoutMs?: number | undefined;
+  /**
+   * sandbox/run_code's own dispatch deadline in milliseconds — the provisioning-sized
+   * bound (image-pull + longest run + margin), scoped to that one tool.
+   * Undefined falls back to the core default (see
+   * DEFAULT_RUN_CODE_TOOL_CALL_TIMEOUT_MS).
+   */
+  readonly runCodeToolCallTimeoutMs?: number | undefined;
   /**
    * Host instance-wide bound in milliseconds on waiting for a model call's
    * first output before the turn fails visibly instead of hanging. Undefined
@@ -115,6 +122,17 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
     previousTurn?: TurnRecord<TTurnCustom> | undefined;
     signal: AbortSignal;
     tracing: AgentTracing;
+    tenant_id: string;
+    created_by: string;
+    session_id: string;
+    /**
+     * Session-scoped Sentinel services, owned by SessionHandle. When provided,
+     * the resolver uses these instead of minting its own, so tracked grants
+     * and approval tokens are shared across threads in the session.
+     */
+    sentinel_services?: import('../core/permissions').SentinelServices | undefined;
+    /** Workspace root for classifier boundary checks; null when none. */
+    workspace_cwd?: string | null | undefined;
   }): Promise<ResolvedAgentDefinition>;
   /**
    * Release per-run resources. Called by the harness at the end of the run:

@@ -29,6 +29,7 @@ export class CurrentDateTime extends LocalToolMCP {
         'Returns the current datetime. Reports the local date, time, IANA zone and UTC offset when the ' +
         "client's timezone is known, and always also reports UTC in ISO-8601 and unix epoch MS format.",
       schema: inputSchema,
+      annotations: { readOnlyHint: true },
       handler: () => Promise.resolve(this.getCurrentDateTime()),
     }),
   ];

@@ -1,9 +1,10 @@
 import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
-import { useCallback, useState, type FC } from 'react';
+import { useCallback, useState, type FC, type ReactNode } from 'react';
 
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { useRuntimeConnectivity } from '../hooks/useRuntimeConnectivity.js';
 import { Icon } from '../icons/Icon.js';
+import { OfflineIndicator } from '../sentinel/OfflineIndicator.js';
 import { AmanAvatarMotion, type AmanAvatarMotionSources } from './AmanAvatarMotion.js';
 import type { MemoryBankStatus } from './AmanSetupContext.js';
 import {
@@ -49,6 +50,12 @@ export type AmanRuntimeRailProps = {
   settingsHref?: string | undefined;
   /** @deprecated Wrap the rail and chat shell in `PersonalizationProvider` instead. */
   personalizationApi?: PersonalizationApi;
+  /**
+   * Live permissions audit feed node, provided by the host (e.g. `SentinelAuditFeed`
+   * for the active session). Renders as a "Permissions" section; omitted leaves the
+   * section out entirely.
+   */
+  auditFeed?: ReactNode;
 };
 
 /** Same `aui-` prefixed style as the left rail's `aui-history-collapsed` preference. */
@@ -150,6 +157,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   buildRef,
   memoryBank,
   settingsHref,
+  auditFeed,
 }) => {
   const profile = useOptionalPersonalization()?.profile;
   const [collapsed, setCollapsed] = useState(readStoredRailCollapsed);
@@ -215,6 +223,8 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
 
       {collapsed ? null : (
         <>
+          <OfflineIndicator />
+
           <div className="aman-runtime-rail__avatar-card">
             {avatarMotion ? (
               <AmanAvatarMotion
@@ -335,6 +345,19 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
           )}
 
           {/* Everything an ordinary user would not act on sits behind one closed disclosure. */}
+          {auditFeed === undefined ? null : (
+            <section
+              className="aman-runtime-rail__section"
+              data-section="permissions"
+              aria-labelledby="aman-runtime-rail-permissions-label"
+            >
+              <h3 id="aman-runtime-rail-permissions-label" className="aman-runtime-rail__section-label">
+                Permissions
+              </h3>
+              {auditFeed}
+            </section>
+          )}
+
           <details className="aman-runtime-rail__details">
             <summary className="aman-runtime-rail__details-summary">Details</summary>
             <dl className="aman-runtime-rail__details-list">

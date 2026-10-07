@@ -48,7 +48,7 @@ export function ComposerShell({
         // padding-box paints the surface; border-box bleeds the ramp into the transparent border.
         '[background-clip:padding-box,border-box] [background-image:linear-gradient(var(--card-bg),var(--card-bg)),linear-gradient(to_bottom,color-mix(in_oklab,var(--primary-button-bg)_25%,transparent),var(--primary-button-bg))] [background-origin:border-box]',
         // Gradient + glow are light-only; dark falls back to the palette's neutral hairline.
-        'dark:border-border/60 dark:shadow-none dark:[background-clip:border-box] dark:[background-image:none]',
+        'dark:border-border/60 dark:shadow-[0_0.625rem_1.75rem_-0.875rem_rgb(0_0_0/0.7)] dark:[background-clip:border-box] dark:[background-image:none]',
         className,
       )}
     >

@@ -33,6 +33,8 @@ import { SqliteRepositoryStore } from '../src/db/sqlite/repository-store/SqliteR
 import { SqliteSandboxProviderStore } from '../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteScheduleStore } from '../src/db/sqlite/schedule-store/SqliteScheduleStore';
 import { SqliteSessionMetricsStore } from '../src/db/sqlite/session-metrics/SqliteSessionMetricsStore';
+import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentinelAuditStore';
+import type { Kysely } from 'kysely';
 import { SqliteSessionStore } from '../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSkillStore } from '../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteSpaceStore } from '../src/db/sqlite/space-store/SqliteSpaceStore';
@@ -103,6 +105,7 @@ const app = createServerApp({
   tokenStore,
   sessionStore,
   sessionMetricsStore: new SqliteSessionMetricsStore(db),
+  sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
   sessions: new Sessions({ sessionStore }),
   activeTurns: new ActiveTurnRegistry(),
   turnDrains: new TurnDrainRegistry(),

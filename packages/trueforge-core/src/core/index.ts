@@ -17,8 +17,6 @@ export type {
 } from './runtime/AbnormalHandoff';
 export type { AgentDefinition, ConfiguredModelSummary, ModelParams } from './runtime/AgentDefinition';
 export { AgentThread } from './runtime/AgentThread';
-export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCall } from './runtime/HostToolCallPolicy';
-export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';
 export type {
   AgentInfo,
   AgentParent,
@@ -81,6 +79,7 @@ export {
   replaceBoundRepositorySection,
   validateCompactionSummary,
 } from './capabilities/builtins/ContextCompaction';
+export { TOKEN_BUDGET_SAFETY_MARGIN } from './capabilities/builtins/tokenBudgetConstants';
 export type { CompactionSessionMode } from './capabilities/builtins/ContextCompaction';
 export { currentDateTime } from './capabilities/builtins/CurrentDateTime';
 export { SUB_AGENT_IDENTITY, dynamicSubAgents } from './capabilities/builtins/DynamicSubAgents';
@@ -168,6 +167,9 @@ export { ResponseFormatSchema, toOpenAIResponseFormat } from './llm/responseForm
 export type { ResponseFormat } from './llm/responseFormat';
 export { SUPPORTED_REASONING_EFFORTS, VERCEL_AI_PROVIDER_NAMES, VercelAILLM } from './llm/VercelAILLM';
 export type { StreamTimeout, VercelAILLMConfig, VercelAIProviderConfig, VercelAIProviderName } from './llm/VercelAILLM';
+export { TOKEN_FACTORY_DEFAULT_BASE_URL } from './llm/VercelAILLM';
+export { isFailoverRetryable, withFailover } from './llm/failoverLanguageModel';
+export type { FailoverLanguageModelOptions } from './llm/failoverLanguageModel';
 
 // Event contracts
 export {
@@ -256,6 +258,25 @@ export type { CodeModeClientInstall, CodeModeTransport } from './sandbox/codeMod
 export { CodeModeErrorSourceSchema, CodeModeReplySchema, CodeModeRequestSchema } from './sandbox/codeMode/types';
 export type { CodeModeErrorSource, CodeModeReply, CodeModeRequest } from './sandbox/codeMode/types';
 export { SANDBOX_ALLOWED_EGRESS_DOMAINS, sandboxEgressDomainAllowList } from './sandbox/egressPolicy';
+// run_code isolation-driver stack (Docker v1; Firecracker parked until /dev/kvm is confirmed)
+export { DockerDriver } from './sandbox/driver/DockerDriver';
+export type { DockerDriverOptions } from './sandbox/driver/DockerDriver';
+export { classifyExecCommand, interpreterInvocationRefusal } from './sandbox/driver/ExecGuard';
+export type { ExecGuardHost, ExecGuardVerdict } from './sandbox/driver/ExecGuard';
+export type {
+  DriverReadiness,
+  DriverRunParams,
+  DriverRunResult,
+  DriverTermination,
+  IsolationDriver,
+  RunCodeLanguage,
+} from './sandbox/driver/IsolationDriver';
+export { OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX, runCodeProgramPath } from './sandbox/driver/IsolationDriver';
+export { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './sandbox/driver/errors';
+export { RUN_CODE_ERROR_CODES, RunCodeInputSchema, RunCodeResultSchema } from './sandbox/driver/RunCodeSchemas';
+export type { RunCodeErrorCode, RunCodeInput, RunCodeResult } from './sandbox/driver/RunCodeSchemas';
+export { RunCodeService, validateRunCodeStartupConfig } from './sandbox/driver/RunCodeService';
+export type { HarvestedFile, RunCodeCallOptions, RunCodeServiceOptions, TurnAttachment } from './sandbox/driver/RunCodeService';
 export { DaytonaSandboxProvider } from './sandbox/provider/DaytonaProvider';
 export type { DaytonaSandboxProviderOptions } from './sandbox/provider/DaytonaProvider';
 export { absolutizeRelativeExecEnv } from './sandbox/provider/execEnv';
@@ -331,3 +352,31 @@ export {
   renderSkillPromptBody,
 } from './sandbox/skills';
 export type { GitSkill, ISkillMounter, Skill, SkillMounterOptions, SkillPromptMode } from './sandbox/skills';
+
+// Host tool-call policy: lets the host review model-authored tool calls before dispatch
+export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCall } from './runtime/HostToolCallPolicy';
+export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';
+
+// Sentinel: three-tier permission system for tool execution
+export type { Tier, Tier2ActionKind, AutoDenyReason, Tier3Card, TierDecision, TrackedExecutionBinding } from './permissions/tier';
+export {
+  TierSchema,
+  TIER2_ACTION_KINDS,
+  AUTO_DENY_REASONS,
+  Tier3CardSchema,
+  failClosedDecision,
+  tier1Decision,
+  tier2Decision,
+  tier3Decision,
+  autoDenyDecision,
+} from './permissions/tier';
+export type { AuditOutcome, AuditRecordInput, AuditLogWriter } from './permissions/audit';
+export { recordClassificationAudit } from './permissions/audit';
+export type { SentinelServices, SentinelCallIdentity, SentinelHostContext } from './permissions/context';
+export { defaultSentinelServices, classifyContextFor, createSentinelHostContext, toDispatchSentinelContext, DEFAULT_PINNED_PATH } from './permissions/context';
+export type { SentinelAction, ClassifyContext } from './permissions/classifier';
+export { classifyTier, classifyHostToolCall, canonicalShellForm, shellBindingFromForm } from './permissions/classifier';
+export type { VerifiableCall, DispatchCheckContext } from './permissions/dispatch';
+export { verifyPreDispatch } from './permissions/dispatch';
+export type { ApprovalTokenStore } from './permissions/approvalTokens';
+export { InMemoryApprovalTokenStore } from './permissions/approvalTokens';

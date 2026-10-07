@@ -16,12 +16,15 @@ import { readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { readToolOutputScreenSetting } from '../runtime/toolOutputScreenSettings';
 import { isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { checkSnapshotStatus, readPersistedSnapshotStatus } from '../sandbox/providerUtils';
+import { isVoiceAvailable } from '../voice/sttAvailability';
 import type { BuildIdentity, GetCapabilitiesResponseSchema, MemoryDefaultsCapability } from '../schemas/capability';
 import {
   MemoryEmbeddingsCapabilitySchema,
   MemoryScreenCapabilitySchema,
+  SandboxIsolationCapabilitySchema,
   ToolOutputScreenCapabilitySchema,
 } from '../schemas/capability';
+import type { SandboxIsolationCapability } from '../schemas/capability';
 import type { SandboxBuildStatus } from '../schemas/sandboxProvider';
 import { TENANT_ID } from './sessions';
 
@@ -44,6 +47,26 @@ function skillDisabledReason(status: SandboxBuildStatus | undefined): string {
 
 /** Reason reported when the Settings > Memory screen switch cannot be turned on because no classifier service is configured. */
 export const MEMORY_SCREEN_NOT_CONFIGURED_REASON = 'No screening service configured';
+
+/**
+ * The run_code isolation driver's effective, non-secret config. Read-only:
+ * selection happens once at server start; changing it requires a config change
+ * and restart. The cosign key path is never exposed — only whether one is set.
+ */
+function sandboxIsolationCapability(): SandboxIsolationCapability {
+  return SandboxIsolationCapabilitySchema.parse({
+    isolation_driver: configuration.SANDBOX_ISOLATION_DRIVER,
+    image: configuration.SANDBOX_IMAGE,
+    default_timeout_seconds: configuration.SANDBOX_DEFAULT_TIMEOUT_SECONDS,
+    max_timeout_seconds: configuration.SANDBOX_MAX_TIMEOUT_SECONDS,
+    memory_mb: configuration.SANDBOX_MEMORY_MB,
+    disk_mb: configuration.SANDBOX_DISK_MB,
+    stdout_stderr_cap_kb: configuration.SANDBOX_STDOUT_STDERR_CAP_KB,
+    image_pull_timeout_seconds: configuration.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS,
+    network_egress: configuration.SANDBOX_NETWORK_EGRESS,
+    cosign_key_configured: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() !== '',
+  });
+}
 
 /**
  * The memory recall screen's effective on/off status and non-secret config. `configured` reflects
@@ -235,6 +258,7 @@ async function capabilitiesFromSandboxStatus({
     sandbox: { enabled: sandboxEnabled },
     skill: sandboxEnabled ? { enabled: true } : { enabled: false, reason: skillDisabledReason(status) },
     settings: { enabled: isAdmin },
+    voice: { enabled: isVoiceAvailable() },
     memory_screen: await memoryScreenCapability({
       mcpServerStore,
       globalSettingsStore,
@@ -243,6 +267,7 @@ async function capabilitiesFromSandboxStatus({
     tool_output_screen: await toolOutputScreenCapability({ globalSettingsStore, logger }),
     memory_defaults: memoryDefaultsCapability(isAdmin),
     memory_embeddings: memoryEmbeddingsCapability(tenantId),
+    sandbox_isolation: sandboxIsolationCapability(),
     build: toBuildIdentity({ version: PACKAGE_VERSION, buildRef: configuration.BUILD_REF }),
   };
 }

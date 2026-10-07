@@ -154,6 +154,52 @@ export class SqliteTurnArtifactStore implements ITurnArtifactStore<Transaction<D
     return row?.data;
   }
 
+  async listArtifacts(
+    input: TenantScopedInput & { session_id: string; turn_id: string },
+    transaction?: Transaction<Database>,
+  ): Promise<TurnArtifactRecord[]> {
+    const db = transaction ?? this.#db;
+    const rows = await db
+      .selectFrom('turn_artifact')
+      .selectAll()
+      .where('tenant_id', '=', input.tenant_id)
+      .where('session_id', '=', input.session_id)
+      .where('turn_id', '=', input.turn_id)
+      .orderBy('created_at', 'desc')
+      .execute();
+    return rows.map(toRecord);
+  }
+
+  async deleteArtifactsOlderThan(
+    input: { older_than: string },
+    transaction?: Transaction<Database>,
+  ): Promise<number> {
+    return await this.#write(transaction, async trx => {
+      const deleted = await trx
+        .deleteFrom('turn_artifact')
+        .where('created_at', '<', input.older_than)
+        .executeTakeFirst();
+      const deletedRows = Number(deleted.numDeletedRows);
+      // Blobs are content-addressed and shared across turns: only delete a
+      // blob when no surviving index row references its digest.
+      await trx
+        .deleteFrom('artifact_blob')
+        .where(eb =>
+          eb.not(
+            eb.exists(
+              eb
+                .selectFrom('turn_artifact as ta')
+                .select('ta.digest')
+                .whereRef('ta.tenant_id', '=', 'artifact_blob.tenant_id')
+                .whereRef('ta.digest', '=', 'artifact_blob.digest'),
+            ),
+          ),
+        )
+        .execute();
+      return deletedRows;
+    });
+  }
+
   async #write<T>(
     transaction: Transaction<Database> | undefined,
     run: (trx: Transaction<Database>) => Promise<T>,

@@ -94,9 +94,10 @@ export const ListTurnEventsRequestQuerySchema = z
 export const ListTurnEventsResponseSchema = z
   .object({
     // SessionEventSchema (agent-session, core) excludes passthrough events by design;
-    // aman.memory.recall, aman.profile.learned, and aman.skill.used are passthrough events
-    // this package registers (see runtime/memory/memoryEvents.ts, runtime/profileLearning.ts,
-    // schemas/skillEvents.ts), so the persisted stream this route lists can include them.
+    // aman.memory.recall, aman.profile.learned, aman.skill.used, and aman.sandbox.provisioning
+    // are passthrough events this package registers (see runtime/memory/memoryEvents.ts,
+    // runtime/profileLearning.ts, schemas/skillEvents.ts, schemas/provisionEvents.ts),
+    // so the persisted stream this route lists can include them.
     data: z.array(SessionEventWithPassthroughSchema),
     pagination: TokenPaginationSchema,
   })
@@ -108,7 +109,38 @@ export const DownloadSandboxFileRequestQuerySchema = z
       .string()
       .min(1)
       .describe(
-        "Absolute or sandbox-working-directory-relative file path, as listed in the assistant's `sandbox_artifacts` block.",
+        'Artifact path as listed by the list-turn-artifacts route: exec-sandbox `sandbox_artifacts` rows and run_code harvested files (`run_code/<name>` paths).',
       ),
   })
   .openapi('DownloadSandboxFileRequestQuery');
+
+/**
+ * One persisted turn-artifact index row, as the artifacts list returns it.
+ * Covers both exec-sandbox `sandbox_artifacts` rows and run_code harvest rows
+ * (path `run_code/<name>`). `digest`/`size`/`mime` are set only when `status`
+ * is `stored`; the bytes themselves download through the download-sandbox-file
+ * route, never through this listing.
+ */
+export const TurnArtifactSchema = z
+  .object({
+    path: z.string().describe('Artifact path, as passed to the download-sandbox-file route.'),
+    name: z.string().describe('Display name of the file.'),
+    status: z
+      .enum(['stored', 'skipped_size', 'skipped_missing'])
+      .describe('Whether the bytes were kept, and why not when they were not.'),
+    size: z.number().int().nullable().describe('File size in bytes when known.'),
+    mime: z.string().nullable().describe('Stored MIME type when the bytes were kept.'),
+    skip_reason: z.string().nullable().describe('Why the file was not kept, when it was not.'),
+    created_at: z.string().describe('ISO 8601 timestamp when the artifact row was recorded.'),
+  })
+  .openapi('TurnArtifact');
+
+export type TurnArtifact = z.infer<typeof TurnArtifactSchema>;
+
+export const ListTurnArtifactsResponseSchema = z
+  .object({
+    data: z.array(TurnArtifactSchema).describe('Persisted artifact rows for the turn, newest first.'),
+  })
+  .openapi('ListTurnArtifactsResponse');
+
+export type ListTurnArtifactsResponse = z.infer<typeof ListTurnArtifactsResponseSchema>;

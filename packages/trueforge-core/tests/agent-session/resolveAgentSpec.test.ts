@@ -51,6 +51,9 @@ describe('TurnResourceResolver.resolveAgentDefinition', () => {
       },
       signal: new AbortController().signal,
       tracing: resolver.createTracing(),
+      tenant_id: 'test-tenant',
+      created_by: 'test-user',
+      session_id: 'test-session',
     });
 
     expect(definition.messages).toEqual([
@@ -81,6 +84,9 @@ describe('TurnResourceResolver.resolveAgentDefinition', () => {
       spec: makeAgentSpec(),
       signal: new AbortController().signal,
       tracing: resolver.createTracing(),
+      tenant_id: 'test-tenant',
+      created_by: 'test-user',
+      session_id: 'test-session',
     });
 
     expect(definition.modelProperties).toBeUndefined();
@@ -125,6 +131,9 @@ describe('TurnResourceResolver.resolveAgentDefinition', () => {
       spec,
       signal: new AbortController().signal,
       tracing: resolver.createTracing(),
+      tenant_id: 'test-tenant',
+      created_by: 'test-user',
+      session_id: 'test-session',
     });
 
     expect(definition.modelParams?.['max_tokens']).toBe(expected);

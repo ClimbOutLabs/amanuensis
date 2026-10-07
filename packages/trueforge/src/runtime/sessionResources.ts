@@ -1,6 +1,9 @@
 import type { AgentSpec, SessionHandle } from '@truefoundry/trueforge-core/agent-session';
+import type { SentinelHostContext } from '@truefoundry/trueforge-core/core';
 import {
+  DockerDriver,
   McpConnectionError,
+  RunCodeService,
   Sandbox,
   SkillMounter,
   type AgentTracing,
@@ -18,12 +21,13 @@ import {
 import { HTTPException } from 'hono/http-exception';
 import { join } from 'node:path';
 import type { Logger } from 'winston';
-import configuration from '../config';
+import configuration, { type TokenFactoryMode } from '../config';
 import type { IMcpServerStore, IMcpServerWithAuthStore, McpServerRecord } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { ISkillStore } from '../db/skillStore';
+import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
@@ -33,6 +37,7 @@ import { resolveConfiguredMcpRequestHeaders, type McpServerManifest } from '../s
 import type { ModelProperties, ModelProviderStreamTimeout } from '../schemas/modelProvider';
 import { parseGitSkill } from '../schemas/skill';
 import { isSecretReference, resolveSecretReference } from '../utils/secretReferences';
+import { buildRunCodeHarvestSink } from './artifacts/persistRunCodeHarvests';
 
 export interface McpConnection {
   url: string;
@@ -295,6 +300,47 @@ export async function getModelDetails({
 }
 
 /**
+ * Applies Nebius Token Factory routing to an already-resolved primary provider config.
+ *
+ * `fallback` keeps the configured provider first and uses Token Factory when it fails
+ * before producing output; `force` routes to Token Factory first (for testing and demo
+ * paths) with the configured provider as fallback. Routing is inactive when the mode is
+ * `off`, when no API key is configured, or when the primary already is Token Factory.
+ * Failover itself happens inside `VercelAILLM` and only before any output is produced.
+ */
+export function applyTokenFactoryRouting(input: {
+  primary: VercelAIProviderConfig;
+  mode: TokenFactoryMode;
+  apiKey: string | undefined;
+  model: string;
+  baseUrl: string;
+}): {
+  providerConfig: VercelAIProviderConfig;
+  fallbackProviderConfig: VercelAIProviderConfig | undefined;
+} {
+  const { primary, mode, apiKey, model, baseUrl } = input;
+  const inactive = { providerConfig: primary, fallbackProviderConfig: undefined };
+  if (mode === 'off' || apiKey === undefined || apiKey === '') {
+    return inactive;
+  }
+  if (primary.provider.type === 'tokenfactory') {
+    return inactive;
+  }
+  const tokenFactoryConfig: VercelAIProviderConfig = {
+    provider: { type: 'tokenfactory', name: 'tokenfactory' },
+    model: { id: model, name: model },
+    name: `tokenfactory/${model}`,
+    baseUrl,
+    apiKey,
+    headers: {},
+  };
+  if (mode === 'force') {
+    return { providerConfig: tokenFactoryConfig, fallbackProviderConfig: primary };
+  }
+  return { providerConfig: primary, fallbackProviderConfig: tokenFactoryConfig };
+}
+
+/**
  * Server-wide defaults (see VercelAILLM) apply unless the provider manifest overrides one or both
  * deadlines; a manifest without `stream_timeout` passes `undefined` through so the harness's own
  * defaults are what take effect.
@@ -553,6 +599,61 @@ export async function resolveSandboxProvider({
 /**
  * Builds a Sandbox for one turn from a resolved provider and skill mounts.
  */
+/** Process-wide cap on concurrent run_code container executions. */
+const RUN_CODE_MAX_CONCURRENT_RUNS = 4;
+
+let sharedRunCodeService: RunCodeService | undefined;
+
+/**
+ * Process-shared run_code backend. One instance per process: the concurrency
+ * semaphore and the stale-container reaper are process-wide resources, and the
+ * Docker driver is stateless across turns (per-run containers). Built lazily on
+ * the first turn that needs it; the isolation config is validated fail-closed
+ * at startup, so construction here only fails on unexpected driver errors.
+ * Keeps the first caller's logger for the service lifetime.
+ */
+function getSharedRunCodeService(logger: Logger): RunCodeService {
+  if (sharedRunCodeService === undefined) {
+    if (configuration.SANDBOX_ISOLATION_DRIVER !== 'docker') {
+      throw new Error(
+        `run_code isolation driver "${configuration.SANDBOX_ISOLATION_DRIVER}" is not implemented in this build — refusing to dispatch.`,
+      );
+    }
+    const driver = new DockerDriver(
+      {
+        image: configuration.SANDBOX_IMAGE,
+        cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
+        dockerBinary: undefined,
+        cosignBinary: undefined,
+        commandTimeoutMs: undefined,
+        createTimeoutMs: undefined,
+      },
+      undefined,
+    );
+    sharedRunCodeService = new RunCodeService({
+      driver,
+      dataDir: configuration.SANDBOX_RUNS_DIR,
+      defaultTimeoutSeconds: configuration.SANDBOX_DEFAULT_TIMEOUT_SECONDS,
+      maxTimeoutSeconds: configuration.SANDBOX_MAX_TIMEOUT_SECONDS,
+      memoryMb: configuration.SANDBOX_MEMORY_MB,
+      diskMb: configuration.SANDBOX_DISK_MB,
+      outputCapKb: configuration.SANDBOX_STDOUT_STDERR_CAP_KB,
+      maxConcurrentRuns: RUN_CODE_MAX_CONCURRENT_RUNS,
+      imagePullTimeoutSeconds: configuration.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS,
+      // Docker ignores the FC pull-before-kill grace.
+      harvestGraceMs: 0,
+      logger: logger.child({ module: 'run-code' }),
+      now: undefined,
+      sleepMs: undefined,
+    });
+    // the singleton owns the stale-container reaper; starting it here (it
+    // is idempotent) covers every construction path, including the lazy
+    // per-turn path that never went through server startup.
+    sharedRunCodeService.startReaper();
+  }
+  return sharedRunCodeService;
+}
+
 export function buildTurnSandbox(input: {
   provider: SandboxProvider;
   logger: Logger;
@@ -574,6 +675,25 @@ export function buildTurnSandbox(input: {
   workspaceVerificationCoordinator?: WorkspaceVerificationCoordinator | undefined;
   workspaceLeaseOwnerId?: string | undefined;
   tracing: AgentTracing;
+  /**
+   * when present, run_code's harvested result files are persisted as turn
+   * artifacts at harvest time (before run-root cleanup) so the user can
+   * download them after the turn. Absent (e.g. unit tests, non-turn
+   * sandboxes), harvest bytes are still discarded at cleanup as before.
+   */
+  runCodeHarvestPersistence?:
+    | {
+        tenantId: string;
+        sessionId: string;
+        turnId: string;
+        store: ITurnArtifactStore;
+      }
+    | undefined;
+  /**
+   * Sentinel permission context for this session. Passed through to Sandbox
+   * for run_code dispatch verification. Undefined means Sentinel is not active.
+   */
+  sentinel?: SentinelHostContext | undefined;
 }): Sandbox {
   // Empty mounter still uploads requested-skills file so existing skills are cleaned up.
   const skillMounter = new SkillMounter(
@@ -597,8 +717,21 @@ export function buildTurnSandbox(input: {
     mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
     ocrLanguages: configuration.DOCUMENT_OCR_LANGUAGES,
     skillMounter,
+    runCodeService: getSharedRunCodeService(input.logger),
+    // persist harvested bytes per turn before the run root is cleaned up.
+    onRunCodeHarvestedFiles:
+      input.runCodeHarvestPersistence === undefined
+        ? undefined
+        : buildRunCodeHarvestSink({
+            store: input.runCodeHarvestPersistence.store,
+            tenantId: input.runCodeHarvestPersistence.tenantId,
+            sessionId: input.runCodeHarvestPersistence.sessionId,
+            turnId: input.runCodeHarvestPersistence.turnId,
+            logger: input.logger,
+          }),
     tracing: input.tracing,
     logger: input.logger,
+    sentinel: input.sentinel,
   });
 }
 

@@ -36,6 +36,15 @@ import {
   type ImplementationPlanGrantScope,
 } from '../mcp/implementationPlanGrant';
 import { defineTool, LocalToolMCP } from '../mcp/LocalToolMCP';
+import { stampSentinelDecision } from '../mcp/ToolSet';
+import {
+  canonicalFileIdentity,
+  canonicalWriteTarget,
+  classifyContextFor,
+  classifyHostToolCall,
+  observeShellCreatedFiles,
+  type SentinelHostContext,
+} from '../permissions';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
 import {
   DEFERRED_TOOLS_SERVER_ID,
@@ -63,6 +72,10 @@ import {
   type SandboxCommandEffect,
   type SandboxInvocationPurpose,
 } from './commandClassification';
+import { classifyExecCommand, interpreterInvocationRefusal, type ExecGuardHost } from './driver/ExecGuard';
+import { buildProvisioningEvent } from './driver/provisionEvents';
+import { RunCodeInputSchema, type RunCodeInput, type RunCodeResult } from './driver/RunCodeSchemas';
+import { type HarvestedFile, type RunCodeBackend, type TurnAttachment } from './driver/RunCodeService';
 import { buildExecResultShape } from './execResultSemantics';
 import { getGithubConnectorHint, type GithubConnectorState } from './githubConnectorHint';
 import { ensureExecSuccess, shellEscape, type ExecResult, type SandboxProvider } from './provider/Provider';
@@ -70,7 +83,8 @@ import { SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErro
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
 // Import submodules, not the ./skills barrel, to avoid a cycle (the mounters import from Sandbox).
 import { createHash, randomUUID } from 'node:crypto';
-import { dirname, join, posix, relative } from 'node:path';
+import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
+import { dirname, join, delimiter as pathDelimiter, posix, relative } from 'node:path';
 import { convertOpenAIPatchToGitDiff, detectApplyPatchFormat } from './openaiPatchFormat';
 import { matchReplaceText } from './replaceTextDiagnostics';
 import type { ISkillMounter } from './skills/ISkillMounter';
@@ -223,11 +237,32 @@ export interface SandboxOptions {
   mcpConnectTimeoutMs: number;
   /** Space-separated Tesseract language codes for OCR. Empty string means Tesseract default (English). */
   ocrLanguages?: string | undefined;
+  /**
+   * The code-execution backend behind the `run_code` tool. Undefined when the
+   * deployment has no isolation driver configured — the tool then refuses with
+   * a model-actionable message instead of failing open.
+   */
+  runCodeService?: RunCodeBackend | undefined;
+  /**
+   * host sink for harvested run_code file bytes (per-turn download
+   * persistence, plan §2.1). Invoked by the service after harvest, before
+   * run-root cleanup; bytes never enter the model-visible result.
+   */
+  onRunCodeHarvestedFiles?: ((files: HarvestedFile[]) => Promise<void>) | undefined;
   tracing: AgentTracing;
   logger: Logger;
+  /**
+   * Sentinel classification context: shared services plus the per-turn
+   * identity. When present, toolCallInfo classifies every call and the
+   * classifier result replaces the effect-based approval override. Absent,
+   * no classification runs and the legacy effect-based approval behavior
+   * is preserved.
+   */
+  sentinel?: SentinelHostContext | undefined;
 }
 
 export const SANDBOX_EXEC_TOOL_NAME = 'exec';
+export const SANDBOX_RUN_CODE_TOOL_NAME = 'run_code';
 export const SANDBOX_APPLY_PATCH_TOOL_NAME = 'apply_patch';
 export const SANDBOX_REPLACE_TEXT_TOOL_NAME = 'replace_text';
 export const SANDBOX_WRITE_FILE_TOOL_NAME = 'write_file';
@@ -1221,8 +1256,22 @@ IMPORTANT: Never list, print, or expose environment variables or git credential 
 Use write_file to create a new file, apply_patch for source edits, and replace_text for one exact existing-text replacement. Do not bypass these primitives with sed, Perl, Python, heredocs, or temporary shell patch files.
 For large output, pass output.head_lines, output.tail_lines, and/or output.grep to bound the model-visible result.
 Declare purpose=verify for any command whose successful result should authorize a later commit. Use purpose=commit only for running a \`git commit\` command.
+exec MUST NOT be used to run python/node code — use run_code. Interpreter invocations in exec are rejected by a harness guard; use the run_code tool instead.
 Result status is "ok" (success), "exited" (command ran, non-zero exit — check exit_code), or "failed" (host could not run it).
 Exec provides retrieval of an already identified public source; it does not provide search or discovery. Network egress requires PermissionGate admission. Make separate tool calls in one response; the host runs read-only calls concurrently.
+`;
+
+/**
+ * Static base of the `run_code` tool description. The harness appends the
+ * per-turn `/ingress` file list at render time (see `renderRunCodeDescription`),
+ * so attachments staged by the harness are advertised without the model
+ * ever base64-encoding them.
+ */
+export const SANDBOX_RUN_CODE_DESCRIPTION = `Run Python or Node.js code in an isolated, offline sandbox.
+language is 'python' (3.13) or 'node' (22). Code runs with cwd=/scratch; read inputs from /ingress/<name>; write result files under /egress (files left in /scratch are collected too). Returns separate stdout/stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name/size/sha256 — bytes never inline into context; download from the UI). Reference files_out in your response as run_code/<name> (e.g. [chart](run_code/chart.png)) — that is the path the UI uses for download. A non-zero exit is the program's own result, not an infra failure.
+Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. No network and no installs at runtime: if a package is missing, say so instead of installing it.
+files_in is for content you compose yourself (a small CSV or JSON you write). Never re-upload an /ingress file via files_in.
+If run_code fails, do NOT fall back to exec (or any shell tool) to run the code — interpreter invocations in exec are rejected by a harness guard. Fix the code, reduce the input, or report the failure.
 `;
 
 export const SANDBOX_APPLY_PATCH_DESCRIPTION =
@@ -1494,6 +1543,65 @@ function applyExecOutputBounds(rawOutput: string, output: SandboxExecOutputInput
   return `${selected.join(lineSeparator)}${hasTrailingNewline && selected.length > 0 ? lineSeparator : ''}`;
 }
 
+/**
+ * Host binding for the exec interpreter guard (classifier in `./driver/ExecGuard`).
+ * Threat model: `exec` is a trusted-operator tool — the operator already consented
+ * to shell access in this session. This guard does not try to contain a malicious
+ * model (a determined one has git, npm, and awk); it prevents accidental drift back
+ * to shell-based code execution now that `run_code` is the supported path, and it
+ * stops a run_code failure from becoming an exec workaround.
+ *
+ * Runs inside `sandboxExecPreflightFailure`, so interpreter invocations are rejected
+ * before approval and before the provider ever sees the command. Resolution is
+ * best-effort: bare interpreter names are caught without any filesystem access;
+ * PATH lookup (from the call's own `env` when it sets PATH — no ambient
+ * `process.env` read in core) and shebang reads only sharpen evasion cases.
+ * Resolutions are cached per Sandbox because preflight runs on every exec call.
+ */
+function execInterpreterGuardFailure(input: {
+  command: string;
+  env: Readonly<Record<string, string>> | undefined;
+  resolveCache: Map<string, string | undefined>;
+}): string | undefined {
+  const pathValue = input.env?.['PATH'];
+  const searchDirs = pathValue === undefined || pathValue === '' ? [] : pathValue.split(pathDelimiter);
+  const host: ExecGuardHost = {
+    resolveExecutable: name => {
+      if (input.resolveCache.has(name)) {
+        return input.resolveCache.get(name);
+      }
+      let resolved: string | undefined;
+      for (const dir of searchDirs) {
+        if (dir === '') {
+          continue;
+        }
+        const candidate = join(dir, name);
+        try {
+          accessSync(candidate, fsConstants.X_OK);
+          resolved = candidate;
+          break;
+        } catch {
+          // Not executable here — keep scanning.
+        }
+      }
+      input.resolveCache.set(name, resolved);
+      return resolved;
+    },
+    readShebang: path => {
+      try {
+        const head = readFileSync(path, 'utf8').slice(0, 128);
+        const newline = head.indexOf('\n');
+        const first = newline === -1 ? head : head.slice(0, newline);
+        return first.startsWith('#!') ? first.slice(2).trim() : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+  };
+  const verdict = classifyExecCommand({ command: input.command, host });
+  return verdict.verdict === 'reject' ? interpreterInvocationRefusal(verdict.reason) : undefined;
+}
+
 function sandboxExecPreflightFailure(input: {
   command: string;
   purpose: SandboxInvocationPurpose | undefined;
@@ -1502,10 +1610,19 @@ function sandboxExecPreflightFailure(input: {
   output: unknown;
   webConnectorAttached: boolean;
   webConnectorToolHint: string;
+  resolveCache: Map<string, string | undefined>;
 }): string | undefined {
   const outputFailure = sandboxOutputPreflightFailure(input.output);
   if (outputFailure !== undefined) {
     return outputFailure;
+  }
+  const interpreterGuardFailure = execInterpreterGuardFailure({
+    command: input.command,
+    env: input.env,
+    resolveCache: input.resolveCache,
+  });
+  if (interpreterGuardFailure !== undefined) {
+    return interpreterGuardFailure;
   }
   if (input.purpose === undefined) {
     return 'A terminal invocation must declare its purpose explicitly.';
@@ -1734,6 +1851,7 @@ export class Sandbox extends LocalToolMCP {
   override readonly description = 'Persistent sandbox environment for code execution';
 
   private readonly provider: SandboxProvider;
+  private readonly sentinelContext: SentinelHostContext | undefined;
   private readonly boundRepository: BoundRepository | undefined;
   private readonly loadBoundRepository: (() => Promise<BoundRepository | undefined>) | undefined;
   private implementationPlanGrantContext: ImplementationPlanGrantContext | undefined;
@@ -1766,6 +1884,18 @@ export class Sandbox extends LocalToolMCP {
   private unavailableSkillsCache: Map<string, string> = new Map<string, string>();
   /** Flag to track if we've already checked prerequisites. */
   private prerequisitesChecked = false;
+  /** PATH-resolution cache for the exec interpreter guard (preflight runs per call). */
+  private readonly execGuardResolveCache = new Map<string, string | undefined>();
+  /** Code-execution backend behind `run_code`; undefined when no isolation driver is configured. */
+  private readonly runCodeService: RunCodeBackend | undefined;
+  /** host sink for harvested run_code file bytes; undefined when the host wires no persistence. */
+  private readonly runCodeHarvestSink: ((files: HarvestedFile[]) => Promise<void>) | undefined;
+  /**
+   * Turn attachments staged by {@link uploadUserFile}, keyed by staged filePath.
+   * `run_code` passes these to the isolation driver as `/ingress` files, so the
+   * model reads them by filename instead of re-uploading bytes via `files_in`.
+   */
+  private readonly runCodeIngressStaging = new Map<string, TurnAttachment>();
 
   private tools = [
     defineTool({
@@ -1773,6 +1903,13 @@ export class Sandbox extends LocalToolMCP {
       description: SANDBOX_EXEC_DESCRIPTION,
       schema: sandboxExecSchema,
       handler: (input, approvalDecision, context) => this.handleExec(input, approvalDecision, context),
+    }),
+    defineTool({
+      name: SANDBOX_RUN_CODE_TOOL_NAME,
+      // Description is rendered per turn in getTools(): the /ingress list is dynamic.
+      description: SANDBOX_RUN_CODE_DESCRIPTION,
+      schema: RunCodeInputSchema,
+      handler: (input, _approvalDecision, context) => this.handleRunCode(input, context),
     }),
     defineTool({
       name: SANDBOX_APPLY_PATCH_TOOL_NAME,
@@ -1823,8 +1960,11 @@ export class Sandbox extends LocalToolMCP {
     this.resolvedGitCredentialsContent = options.resolvedGitCredentialsContent ?? null;
     this.githubConnectorAttached = options.githubConnectorAttached ?? false;
     this.webConnectorAttached = options.webConnectorAttached ?? false;
+    this.runCodeService = options.runCodeService;
+    this.runCodeHarvestSink = options.onRunCodeHarvestedFiles;
     this.webConnectorToolHint = options.webConnectorToolHint ?? "the web connector's fetch or extract tool";
     this.ocrLanguages = options.ocrLanguages ?? '';
+    this.sentinelContext = options.sentinel;
 
     if (this.existingSandboxId) {
       this.existingSandboxInfo = { sandbox_id: this.existingSandboxId };
@@ -1889,6 +2029,7 @@ export class Sandbox extends LocalToolMCP {
         output,
         webConnectorAttached: this.webConnectorAttached,
         webConnectorToolHint: this.webConnectorToolHint,
+        resolveCache: this.execGuardResolveCache,
       }) !== undefined;
     const invalidWriteFilePath =
       params.name === SANDBOX_WRITE_FILE_TOOL_NAME &&
@@ -2010,6 +2151,46 @@ export class Sandbox extends LocalToolMCP {
             kind: 'policy_blocked',
             message: structuredEditPreconditionFailure,
           };
+    // Sentinel: authoritative tier classification over the normalized
+    // arguments, but only when the host wired a Sentinel context. Without
+    // one, no classification runs and the legacy effect-based approval
+    // override applies. Invalid calls are fail-closed to
+    // approval-required=false with their existing pre-dispatch failure.
+    const sentinelHost = this.sentinelContext;
+    let sentinelStamp: ReturnType<typeof stampSentinelDecision> | undefined;
+    if (sentinelHost !== undefined) {
+      const sentinelDecision = await classifyHostToolCall({
+        sentinel: sentinelHost,
+        repository_id: this.boundRepository?.repository_id ?? null,
+        workspace_cwd: this.boundRepository?.workspace_cwd ?? cwd ?? null,
+        action: {
+          tool_name: params.name,
+          canonical_params: effectiveArguments ?? {},
+          tool_type: 'truefoundry-system',
+          sandbox_effect: effect,
+          mcp_hints: {
+            read_only_hint: info.read_only_hint,
+            destructive_hint: info.destructive_hint,
+            open_world_hint: networkIntent ? true : info.open_world_hint,
+          },
+        },
+      });
+      sentinelStamp = stampSentinelDecision({ decision: sentinelDecision });
+    }
+    const invalidCall =
+      invalidGitMetadataEdit ||
+      invalidExecPreflight ||
+      invalidWriteFilePath ||
+      writeFileScopeFailure ||
+      invalidRegisteredCommand ||
+      invalidImplementationPlan ||
+      structuredEditPreconditionFailure !== undefined;
+    // Legacy approval when Sentinel is not configured: the pre-Sentinel
+    // effect-based override. Tools with a classified effect need approval
+    // unless the effect is pure inspection; tools without an effect keep the
+    // source's own stamping.
+    const legacyApprovalRequired =
+      effect !== undefined ? sandboxCommandRequiresApproval(effect) : info.is_approval_required;
     return {
       ...info,
       original_tool_name:
@@ -2056,23 +2237,23 @@ export class Sandbox extends LocalToolMCP {
                 ? structuredEditPrecondition.summary
                 : `${info.description} ${structuredEditPrecondition.summary}`,
           }),
-      ...(structuredEditPreDispatchFailure === undefined
+      ...(sentinelStamp?.pre_dispatch_failure === undefined
+        ? structuredEditPreDispatchFailure === undefined
+          ? {}
+          : { pre_dispatch_failure: structuredEditPreDispatchFailure }
+        : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
+      is_approval_required: invalidCall ? false : (sentinelStamp?.is_approval_required ?? legacyApprovalRequired),
+      ...(sentinelStamp === undefined
         ? {}
-        : { pre_dispatch_failure: structuredEditPreDispatchFailure }),
-      is_approval_required:
-        invalidGitMetadataEdit ||
-        invalidExecPreflight ||
-        invalidWriteFilePath ||
-        writeFileScopeFailure ||
-        invalidRegisteredCommand ||
-        invalidImplementationPlan ||
-        structuredEditPreconditionFailure !== undefined
-          ? false
-          : params.name === SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME
-            ? true
-            : effect === undefined
-              ? info.is_approval_required
-              : sandboxCommandRequiresApproval(effect),
+        : {
+            tier: sentinelStamp.tier,
+            tier3_card: sentinelStamp.tier3_card,
+            tier2_kind: sentinelStamp.tier2_kind,
+            tier2_files: sentinelStamp.tier2_files,
+            approval_token_id: sentinelStamp.approval_token_id,
+            approval_binding: sentinelStamp.approval_binding,
+            shell_binding: sentinelStamp.shell_binding,
+          }),
     };
   }
 
@@ -2403,13 +2584,19 @@ export class Sandbox extends LocalToolMCP {
   }
 
   protected getTools() {
-    return this.boundRepository === undefined
-      ? this.tools.filter(
-          tool =>
-            tool.name !== SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME &&
-            tool.name !== SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
-        )
-      : this.tools;
+    const base =
+      this.boundRepository === undefined
+        ? this.tools.filter(
+            tool =>
+              tool.name !== SANDBOX_RUN_REGISTERED_COMMAND_TOOL_NAME &&
+              tool.name !== SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME,
+          )
+        : this.tools;
+    // run_code's /ingress list is per-turn: re-render its description on every
+    // tool-list read so newly staged attachments are advertised.
+    return base.map(tool =>
+      tool.name === SANDBOX_RUN_CODE_TOOL_NAME ? { ...tool, description: this.renderRunCodeDescription() } : tool,
+    );
   }
 
   /** Atomically refreshes model-visible repository root, branch, and HEAD before each model request. */
@@ -2642,7 +2829,7 @@ export class Sandbox extends LocalToolMCP {
       dedent`
         ## File outputs
 
-        The user does not have direct access to the sandbox filesystem. The sandbox_artifacts block below is the only way the user gets a download; a file mentioned in prose without it is invisible to the user. When the Agent wants to output a file to the user, it MUST:
+        The user does not have direct access to the sandbox filesystem. Downloads reach the user via the sandbox_artifacts block below (for exec-sandbox outputs) or as run_code/<name> paths (for run_code outputs); a file mentioned in prose without either is invisible to the user. When the Agent wants to output a file to the user, it MUST:
         1. Ensure that the file is present in the sandbox.
         2. Then emit a fenced sandbox_artifacts block referencing the file, using exactly this line format: [display name](/absolute/path), one file per line. Example:
 
@@ -3966,6 +4153,114 @@ export class Sandbox extends LocalToolMCP {
     }
   }
 
+  /**
+   * Renders the model-visible `run_code` description with the current turn's
+   * `/ingress` file list appended. Attachments staged by the harness (via
+   * {@link uploadUserFile}) are advertised with filename and size so the model
+   * reads them directly instead of re-uploading bytes through `files_in`.
+   */
+  private renderRunCodeDescription(): string {
+    const staged = [...this.runCodeIngressStaging.values()];
+    if (staged.length === 0) {
+      return SANDBOX_RUN_CODE_DESCRIPTION;
+    }
+    const lines = staged.map(attachment => `- ${attachment.name} (${String(attachment.bytes.length)} bytes)`);
+    return (
+      SANDBOX_RUN_CODE_DESCRIPTION +
+      `Available in /ingress (read directly by filename — do NOT re-upload via files_in):\n` +
+      `${lines.join('\n')}\n`
+    );
+  }
+
+  /** Dispatches `run_code` through the configured isolation driver. */
+  private async handleRunCode(input: RunCodeInput, context?: ToolInvocationContext): Promise<CallToolResponse> {
+    const service = this.runCodeService;
+    if (service === undefined) {
+      return hostRefusalResponse(
+        'run_code is not available: no sandbox isolation driver is configured for this deployment. Report the failure instead of running the code another way.',
+      );
+    }
+    // the turn's abort signal reaches the backend (provisioning observes
+    // it); provisioning progress is honest — every driver message is logged
+    // immediately and, when the step ran, rides a passthrough event to the
+    // UI/chat stream on the tool response.
+    const provisioningMessages: string[] = [];
+    let result: RunCodeResult;
+    try {
+      result = await service.runCode(input, {
+        signal: context?.signal,
+        attachments: [...this.runCodeIngressStaging.values()],
+        onProgress: (message: string) => {
+          provisioningMessages.push(message);
+          this.logger.info('run_code provisioning progress', { message });
+        },
+        onHarvestedFiles: this.runCodeHarvestSink,
+      });
+    } catch (error) {
+      // The service contract reports failures as data; a throw means dispatch
+      // itself broke before a runRoot existed — still model-visible, still
+      // never an exec fallback, and host paths scrubbed via the backend-owned
+      // scrubber. Also log it host-side with the cause chain intact.
+      const rawText = error instanceof Error ? error.message : String(error);
+      this.logger.error('run_code dispatch throw escaped the service', {
+        error: error instanceof Error ? error : String(error),
+      });
+      return toolResultResponse({
+        text: JSON.stringify({
+          status: 'failed',
+          error_code: 'internal',
+          detail: service.scrubDispatchErrorText(rawText),
+        }),
+        isError: true,
+      });
+    }
+    return toolResultResponse({
+      text: JSON.stringify(result),
+      isError: result.status === 'failed',
+      ...(provisioningMessages.length > 0
+        ? {
+            overrides: {
+              events: [
+                buildProvisioningEvent({
+                  succeeded: !(result.status === 'failed' && result.error_code === 'image_unavailable'),
+                  messages: provisioningMessages,
+                }),
+              ],
+            },
+          }
+        : {}),
+    });
+  }
+
+  /**
+   * Sentinel: record agent-created or agent-modified files as tracked
+   * executables, so a later attempt to execute them escalates for approval.
+   * Best effort and host-side: paths that do not resolve on the host (for
+   * example a remote sandbox checkout) are skipped silently.
+   */
+  private observeSentinelWrites(input: { paths: readonly string[]; cwd: string }): void {
+    const ctx = classifyContextFor({
+      host: this.sentinelContext,
+      repository_id: this.boundRepository?.repository_id ?? null,
+      workspace_cwd: this.boundRepository?.workspace_cwd ?? null,
+    });
+    const store = ctx.services.tracked_store;
+    const scope = {
+      tenant_id: ctx.tenant_id,
+      created_by: ctx.created_by,
+      repository_id: ctx.repository_id,
+      workspace_cwd: ctx.workspace_cwd,
+    };
+    for (const p of input.paths) {
+      const identity =
+        canonicalFileIdentity({ p, cwd: input.cwd }) ?? canonicalWriteTarget({ p, cwd: input.cwd });
+      if (identity === null) {
+        continue;
+      }
+      store.track({ scope, file_identity: identity });
+    }
+  }
+
   private async handleExec(
     input: SandboxRuntimeExecInput,
     approvalDecision?: ApprovalDecision,
@@ -3984,15 +4279,25 @@ export class Sandbox extends LocalToolMCP {
       output: resolvedInput.output,
       webConnectorAttached: this.webConnectorAttached,
       webConnectorToolHint: this.webConnectorToolHint,
+      resolveCache: this.execGuardResolveCache,
     });
     if (preflightFailure !== undefined) {
       return hostRefusalResponse(preflightFailure);
     }
     const effect = sandboxInvocationPolicy({ command: resolvedInput.command, purpose: resolvedInput.purpose }).effect;
-    if (sandboxCommandRequiresApproval(effect) && approvalDecision === undefined) {
-      return {
-        approvalRequired: { tool_info: await this.toolCallInfo({ name: SANDBOX_EXEC_TOOL_NAME, arguments: input }) },
-      };
+    if (approvalDecision === undefined) {
+      // Same authoritative classification as toolCallInfo: auto-denied calls
+      // are refused, and Tier 3 calls surface the approval card instead of
+      // the old effect-based gate.
+      const tool_info = await this.toolCallInfo({ name: SANDBOX_EXEC_TOOL_NAME, arguments: input });
+      if (tool_info.pre_dispatch_failure !== undefined) {
+        return hostRefusalResponse(tool_info.pre_dispatch_failure.message);
+      }
+      if (tool_info.is_approval_required) {
+        return {
+          approvalRequired: { tool_info },
+        };
+      }
     }
     let sandboxInfo: SandboxInfo;
     let sandboxCreated: SandboxInfo | undefined;
@@ -4043,6 +4348,12 @@ export class Sandbox extends LocalToolMCP {
       );
       if (execution.status === 'blocked') {
         return hostRefusalResponse(execution.reason);
+      }
+      if (isExecResultOk(execution.result) && typeof resolvedInput.cwd === 'string') {
+        this.observeSentinelWrites({
+          paths: observeShellCreatedFiles({ command: resolvedInput.command }),
+          cwd: resolvedInput.cwd,
+        });
       }
 
       return {
@@ -4285,6 +4596,9 @@ export class Sandbox extends LocalToolMCP {
     }
     const write = observedWrite.value;
     const succeeded = write.success && write.response.exitCode === 0;
+    if (succeeded) {
+      this.observeSentinelWrites({ paths: [normalizedPath], cwd: scopeResolution.scope.cwd });
+    }
     if (!succeeded) {
       // Unwrap the script's own JSON error (`{"error": "..."}` on stdout) so a failed write
       // surfaces as a top-level rejection, never nested inside a `write` field a caller has to
@@ -4649,6 +4963,9 @@ export class Sandbox extends LocalToolMCP {
       throw new Error('Patch validation succeeded without an apply result');
     }
     const succeeded = apply.success && apply.response.exitCode === 0;
+    if (succeeded && workspaceRoot !== undefined) {
+      this.observeSentinelWrites({ paths: finalPaths, cwd: workspaceRoot });
+    }
     return {
       result: {
         content: [
@@ -4838,6 +5155,9 @@ export class Sandbox extends LocalToolMCP {
     }
     const { exec: replace, payloadDigest } = outcome;
     const succeeded = replace.success && replace.response.exitCode === 0;
+    if (succeeded) {
+      this.observeSentinelWrites({ paths: [normalizedPath], cwd: input.cwd });
+    }
     if (!succeeded) {
       // Unwrap the script's own JSON error (`{"error": "..."}` on stdout) so a failed replace
       // surfaces as a top-level rejection, never nested inside a `replace` field a caller has to
@@ -5050,6 +5370,11 @@ export class Sandbox extends LocalToolMCP {
     return { filePath, sandboxCreated };
   }
 
+  /** Whether the `run_code` tool is backed by an isolation driver in this turn. */
+  isRunCodeAvailable(): boolean {
+    return this.runCodeService !== undefined;
+  }
+
   async uploadUserFile(input: { fileName: string; content: Buffer; mime: string }): Promise<SandboxStoredFile> {
     validateNoPathTraversal(input.fileName);
     const { sandboxCreated, sandboxInfo } = await this.ensureReadySandbox();
@@ -5069,6 +5394,10 @@ export class Sandbox extends LocalToolMCP {
       throw error;
     }
     const created = sandboxCreated ?? result.sandboxCreated;
+    // Stage for run_code: the isolation driver serves these bytes as /ingress
+    // files, so the model reads attachments by filename instead of
+    // re-uploading them via files_in.
+    this.runCodeIngressStaging.set(result.filePath, { name: input.fileName, bytes: input.content });
     return {
       filePath: result.filePath,
       ...(created && { sandboxCreated: created }),
@@ -5078,6 +5407,8 @@ export class Sandbox extends LocalToolMCP {
   /** Remove a file staged by {@link uploadUserFile}, for atomic multipart rollback. */
   async deleteUserFile(input: { filePath: string }): Promise<void> {
     const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath);
+    this.runCodeIngressStaging.delete(input.filePath);
+    this.runCodeIngressStaging.delete(canonicalFilePath);
     await this.removeSandboxFile({ sandboxId, filePath: canonicalFilePath });
   }
 

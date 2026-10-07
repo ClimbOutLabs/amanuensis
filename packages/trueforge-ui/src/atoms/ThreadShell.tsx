@@ -8,7 +8,7 @@ const THREAD_CSS_VARS: CSSProperties & { '--thread-max-width': string; '--compos
   // never drift apart). Capped at ~48rem with 1rem side margins: chat-prose rhythm,
   // not a full-viewport spread.
   '--thread-max-width': 'min(48rem, 100% - 2rem)',
-  '--composer-padding': '8px',
+  '--composer-padding': '0.75rem',
 };
 
 export type ThreadRootShellProps = ComponentPropsWithRef<'div'>;
@@ -46,7 +46,7 @@ export const ThreadViewportShell = forwardRef<HTMLDivElement, ThreadViewportShel
       <div
         className={cn(
           'mx-auto flex w-full min-w-0 max-w-(--thread-max-width) flex-col px-3 pt-3',
-          isEmpty ? 'min-h-full justify-center pb-4' : 'pb-32',
+          isEmpty ? 'min-h-full justify-center pb-4' : 'pb-24',
         )}
       >
         {children}

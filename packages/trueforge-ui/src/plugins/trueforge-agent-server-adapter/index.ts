@@ -9,6 +9,7 @@ import { createHarnessBuilderServer } from './builderServer.js';
 import { createConnectorCatalog } from './catalogs/connectorCatalog.js';
 import { createMemorySummarizeCatalog } from './catalogs/memorySummarizeCatalog.js';
 import { createMemoryScreenCatalog } from './catalogs/memoryScreenCatalog.js';
+import { createMemoryVaultCatalog } from './catalogs/memoryVaultCatalog.js';
 import { createModelProviderCatalog } from './catalogs/modelProviderCatalog.js';
 import { createPrivacyCatalog } from './catalogs/privacyCatalog.js';
 import { createSandboxProviderCatalog } from './catalogs/sandboxProviderCatalog.js';
@@ -127,5 +128,14 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
     memoryScreen: createMemoryScreenCatalog(clientOptions),
     memorySummarize: createMemorySummarizeCatalog(clientOptions),
     privacy: createPrivacyCatalog(clientOptions),
+    memoryVault: createMemoryVaultCatalog(clientOptions),
   };
 }
+
+export {
+  createMemoryVaultCatalog,
+  memoryVaultErrorMessage,
+  type MemoryVaultCatalog,
+  type MemoryVaultEntry,
+  type MemoryVaultSharing,
+} from './catalogs/memoryVaultCatalog.js';

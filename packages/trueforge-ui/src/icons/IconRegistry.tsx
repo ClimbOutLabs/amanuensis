@@ -47,8 +47,10 @@ import {
   Maximize2,
   Menu,
   MessageSquareText,
+  Mic,
   Minimize2,
   Moon,
+  Palette,
   PanelLeftClose,
   PanelLeftOpen,
   Paperclip,
@@ -122,6 +124,7 @@ export function resolveIconName(icon: string | readonly string[]): string {
 }
 
 const defaults: Record<string, IconEntry> = {
+  palette: Palette,
   paperclip: Paperclip,
   'arrow-up': ArrowUp,
   'arrow-down': ArrowDown,
@@ -157,6 +160,7 @@ const defaults: Record<string, IconEntry> = {
   copy: Copy,
   'dollar-sign': DollarSign,
   bars: Menu,
+  mic: Mic,
   'panel-left-close': PanelLeftClose,
   'panel-left-open': PanelLeftOpen,
   plus: Plus,

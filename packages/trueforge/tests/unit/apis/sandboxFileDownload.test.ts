@@ -24,6 +24,7 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
+import { buildRunCodeHarvestSink } from '../../../src/runtime/artifacts/persistRunCodeHarvests';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
@@ -349,6 +350,88 @@ describe('GET /{session_id}/turns/{turn_id}/download-sandbox-file', () => {
     expect(response.status).toBe(410);
     const body: unknown = await response.json();
     expect(body).toEqual({ error: { message: 'This file was not kept: File not found: /tmp/never-there.txt' } });
+  });
+});
+
+describe('GET /{session_id}/turns/{turn_id}/artifacts', () => {
+  function artifactsUrl({ sessionId, turnId = 'turn-1' }: { sessionId: string; turnId?: string }): string {
+    return `http://localhost/${sessionId}/turns/${turnId}/artifacts`;
+  }
+
+  it('lists run_code harvests under their run_code/<name> paths, newest first', async () => {
+    const { app, sessions, sessionStore, turnArtifactStore } = await buildApp();
+    await createSessionWithSandboxTurn({
+      sessionStore,
+      sessions,
+      sessionId: 's1',
+      turnId: 'turn-1',
+      sandboxId: 'sbx-1',
+    });
+    const sink = buildRunCodeHarvestSink({
+      store: turnArtifactStore,
+      tenantId: STANDALONE_REQUEST_CONTEXT.tenant_id,
+      sessionId: 's1',
+      turnId: 'turn-1',
+      logger: createLogger({ silent: true }),
+    });
+    const plot = Buffer.from('fake png bytes');
+    await sink([{ name: 'plot.png', bytes: plot, size_bytes: plot.length, sha256: 'x' }]);
+
+    const response = await app.request(artifactsUrl({ sessionId: 's1' }));
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: { path: string; name: string; status: string; size: number | null }[];
+    };
+    expect(body.data.map(row => row.path)).toEqual(['run_code/plot.png']);
+    expect(body.data[0]).toMatchObject({ name: 'plot.png', status: 'stored', size: plot.length });
+  });
+
+  it('returns an empty list for a turn with no persisted artifacts', async () => {
+    const { app, sessions, sessionStore } = await buildApp();
+    await createSessionWithSandboxTurn({
+      sessionStore,
+      sessions,
+      sessionId: 's1',
+      turnId: 'turn-1',
+      sandboxId: 'sbx-1',
+    });
+
+    // The harness mock returns the scripted turn for any turn id; the store
+    // lookup still uses the requested id, so an artifact-less turn lists empty.
+    const response = await app.request(artifactsUrl({ sessionId: 's1', turnId: 'nope' }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: [] });
+  });
+});
+
+describe('run_code harvest download journey', () => {
+  it('serves sink-persisted bytes through the download route at the run_code/<name> path', async () => {
+    const provider = new FakeSandboxProvider(new Map()); // any live-sandbox read here would fail the test
+    const { app, sessions, sessionStore, turnArtifactStore } = await buildApp({ sandboxProvider: provider });
+    await createSessionWithSandboxTurn({
+      sessionStore,
+      sessions,
+      sessionId: 's1',
+      turnId: 'turn-1',
+      sandboxId: 'sbx-1',
+    });
+    const data = Buffer.from('fake png bytes');
+    const sink = buildRunCodeHarvestSink({
+      store: turnArtifactStore,
+      tenantId: STANDALONE_REQUEST_CONTEXT.tenant_id,
+      sessionId: 's1',
+      turnId: 'turn-1',
+      logger: createLogger({ silent: true }),
+    });
+    await sink([{ name: 'plot.png', bytes: data, size_bytes: data.length, sha256: 'x' }]);
+
+    const response = await app.request(downloadUrl({ sessionId: 's1', path: 'run_code/plot.png' }));
+
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(data);
+    expect(response.headers.get('content-disposition')).toContain('plot.png');
   });
 });
 

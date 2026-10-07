@@ -43,6 +43,7 @@ import {
   toolResultResponse,
 } from './IMCPServer';
 import { deniedToolCallText } from './ToolSet';
+import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
 
 export interface ToolCallResult {
   message: LLMToolMessage;
@@ -477,40 +478,51 @@ function parseToolArguments(argumentsJson: string): Record<string, unknown> {
   return parsed;
 }
 
-function isTextBlock(block: unknown): block is { type: 'text'; text: string } {
-  return (
-    typeof block === 'object' &&
-    block !== null &&
-    'type' in block &&
-    'text' in block &&
-    block.type === 'text' &&
-    typeof block.text === 'string'
-  );
-}
-
 /**
- * Unwraps an error result's content blocks into a structured error payload.
- * Local tools report failures as one text block carrying a JSON error
- * envelope; handing the model the block array double-encoded lets it mistake
- * the failure for content, so the envelope is parsed back out. Anything that
- * is not a single JSON text block degrades to a plain error object.
+ * Sentinel pre-dispatch verification for an approved Tier 3 call. Returns an
+ * error message when the call must not execute (stale offline context,
+ * invalid or already-used approval token, parameters changed since
+ * approval), or undefined when cleared. A valid tracked-execution approval
+ * records its grant as a side effect.
  */
-function structuredErrorFromResultContent(content: unknown): unknown {
-  if (!Array.isArray(content)) {
-    return { error: content };
+async function verifySentinelPreDispatch(input: {
+  toolCall: InternalEnrichedToolCall;
+  approvalDecisions: Map<string, ApprovalDecision>;
+  sentinel: { services: SentinelServices; identity: SentinelCallIdentity } | undefined;
+}): Promise<string | undefined> {
+  const { toolCall, approvalDecisions, sentinel } = input;
+  if (sentinel === undefined) {
+    return undefined;
   }
-  const texts = content.filter(isTextBlock).map(block => block.text);
-  if (texts.length === 1) {
-    try {
-      const parsed: unknown = JSON.parse(texts[0] ?? '');
-      // Keep the error shaped as an error object: a bare JSON scalar from a
-      // tool would otherwise read as a successful value in model context.
-      return typeof parsed === 'object' && parsed !== null ? parsed : { error: parsed };
-    } catch {
-      return { error: texts[0] };
-    }
+  const info = toolCall.tool_info;
+  if (info.tier !== 3 && info.tier !== 2) {
+    return undefined;
   }
-  return { error: texts };
+  if (info.tier === 3 && approvalDecisions.get(toolCall.id)?.status !== 'allow') {
+    return undefined;
+  }
+  let canonicalParams: Record<string, unknown>;
+  try {
+    canonicalParams = parseToolArguments(toolCall.function.arguments);
+  } catch {
+    return 'Tool arguments could not be parsed; request approval again.';
+  }
+  const offline = await sentinel.services.isOffline({
+    tenant_id: sentinel.identity.tenant_id,
+    created_by: sentinel.identity.created_by,
+  });
+  return verifyPreDispatch({
+    call: {
+      tool_name: info.original_tool_name,
+      tool_type: info.type,
+      canonical_params: canonicalParams,
+      tier: info.tier,
+      approval_token_id: info.approval_token_id ?? null,
+      approval_binding: info.approval_binding ?? null,
+      shell_binding: info.shell_binding ?? null,
+    },
+    ctx: { ...sentinel.identity, services: sentinel.services, offline },
+  });
 }
 
 /** Batches of failures in a row before the model is told to stop varying and read the error. */
@@ -761,11 +773,30 @@ export const DEFAULT_TOOL_DISPATCH_MAX_CONCURRENCY = 4;
 
 /**
  * Fallback per-call dispatch deadline in milliseconds when the host does not
- * supply `toolCallTimeoutMs`. Mirrors the `TOOL_CALL_TIMEOUT_MS` default; it
- * must stay below `SERVER_EXECUTION_TIMEOUT_SECONDS` so a single hung provider
- * call cannot outlive the turn.
+ * supply `toolCallTimeoutMs`. 4 minutes: the normal ceiling for a single tool
+ * call. run_code is the exception — it gets its own provisioning-sized deadline via
+ * `runCodeToolCallTimeoutMs` (image-pull bound + max run + margin), so the
+ * long deadline is scoped to the one tool that needs it.
  */
 export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 240_000;
+
+/**
+ * Fallback run_code dispatch deadline in milliseconds when the host does not
+ * supply `runCodeToolCallTimeoutMs`. 21 minutes = 600 s image-pull bound +
+ * 600 s max run + 60 s margin at default sandbox bounds; the host should
+ * pass the value derived from its configured bounds instead of relying on
+ * this default.
+ */
+export const DEFAULT_RUN_CODE_TOOL_CALL_TIMEOUT_MS = 1_260_000;
+
+/**
+ * the long provisioning-sized deadline belongs to sandbox/run_code alone. Tool identity
+ * comes from the tool mapping (toolSet.name 'sandbox', originalToolName
+ * 'run_code').
+ */
+function isRunCodeToolCall(toolInfo: { toolSet: { name: string }; originalToolName: string }): boolean {
+  return toolInfo.toolSet.name === 'sandbox' && toolInfo.originalToolName === 'run_code';
+}
 
 /**
  * Phase-A classification: read-only calls that may dispatch concurrently.
@@ -904,7 +935,9 @@ export async function executeToolCalls({
   signal,
   toolDispatchMaxConcurrency,
   toolCallTimeoutMs,
+  runCodeToolCallTimeoutMs,
   logger,
+  sentinel,
 }: {
   assistantMessage: InternalEnrichedAssistantMessage;
   toolMapping: Map<string, MappedMCPTool>;
@@ -938,11 +971,30 @@ export async function executeToolCalls({
    */
   toolCallTimeoutMs?: number | undefined;
   /**
+   * run_code's own dispatch deadline in milliseconds. Scoped to
+   * sandbox/run_code (the only tool whose honest worst case — a first-run
+   * image pull plus the longest run — needs the provisioning-sized deadline); every
+   * other tool uses `toolCallTimeoutMs`. Should be derived from the
+   * configured `image_pull_timeout_seconds` + `max_timeout_seconds` bounds.
+   */
+  runCodeToolCallTimeoutMs?: number | undefined;
+  /**
    * Optional host logger. Used only for debug-level diagnostics that never
    * affect dispatch semantics — currently the late settlement of a provider
    * call the turn already stopped waiting for after a dispatch timeout.
    */
   logger?: Logger | undefined;
+  /**
+   * Sentinel pre-dispatch verification and Tier 3 outcome audit. When present,
+   * approved Tier 3 calls are re-verified byte-for-byte immediately before
+   * invocation, and Tier 3 approved/denied outcomes are audit-logged.
+   */
+  sentinel?:
+    | {
+        services: SentinelServices;
+        identity: SentinelCallIdentity;
+      }
+    | undefined;
 }): Promise<ExecuteToolCallsResult> {
   const toolMessages: ToolCallResult[] = [];
   const initializationInfo: MCPServerInitInfo[] = [];
@@ -976,6 +1028,7 @@ export async function executeToolCalls({
   // Per-batch permit pool shared by every Phase-A (read-only) dispatch below.
   const dispatchLimiter = createDispatchLimiter(toolDispatchMaxConcurrency ?? DEFAULT_TOOL_DISPATCH_MAX_CONCURRENCY);
   const callTimeoutMs = toolCallTimeoutMs ?? DEFAULT_TOOL_CALL_TIMEOUT_MS;
+  const runCodeCallTimeoutMs = runCodeToolCallTimeoutMs ?? DEFAULT_RUN_CODE_TOOL_CALL_TIMEOUT_MS;
 
   const executeOne = async (toolCall: InternalEnrichedToolCall): Promise<ToolCallExecutionOutcome> => {
     const toolInfo = toolMapping.get(toolCall.function.name);
@@ -1033,6 +1086,38 @@ export async function executeToolCalls({
               message: 'The tool could not be prepared and was not executed. Retry once or choose another tool.',
               suggested_action: 'retry',
             },
+        admissionProvenance: admission,
+      };
+    }
+
+    // Sentinel: re-verify an approved Tier 3 call byte-for-byte immediately
+    // before invocation. A failed verification blocks dispatch (policy_blocked)
+    // and never records a side-effect attempt or memo entry.
+    const sentinelVerificationError = await verifySentinelPreDispatch({
+      toolCall,
+      approvalDecisions,
+      sentinel,
+    });
+    if (sentinelVerificationError !== undefined) {
+      return {
+        toolCall,
+        toolInfo,
+        response: toolResultResponse({
+          text: JSON.stringify({ error: sentinelVerificationError }),
+          isError: true,
+        }),
+        failure: true,
+        completedAt: new Date().toISOString(),
+        memoized: false,
+        repeatCount: 1,
+        blockedPrivateFallback: false,
+        repeatedSideEffect: false,
+        disposition: 'policy_blocked',
+        remediation: {
+          reason_code: 'sentinel_verification_failed',
+          message: sentinelVerificationError,
+          suggested_action: 'change_strategy',
+        },
         admissionProvenance: admission,
       };
     }
@@ -1297,6 +1382,9 @@ export async function executeToolCalls({
           {
             admission_provenance: admission,
             dispatch_id: dispatchId,
+            // the turn's abort signal reaches tools that do bounded
+            // multi-phase work (run_code provisioning observes it).
+            signal,
             ...(toolCall.tool_info.structured_edit_precondition === undefined
               ? {}
               : { structured_edit_precondition: toolCall.tool_info.structured_edit_precondition }),
@@ -1322,7 +1410,8 @@ export async function executeToolCalls({
       }> => {
         throwIfSignalAborted(signal);
         const timeoutInput = {
-          timeoutMs: callTimeoutMs,
+          // the provisioning-sized deadline is scoped to sandbox/run_code alone.
+          timeoutMs: isRunCodeToolCall(toolInfo) ? runCodeCallTimeoutMs : callTimeoutMs,
           toolName: toolCall.function.name,
           toolCallId: toolCall.id,
         };
@@ -1591,6 +1680,31 @@ export async function executeToolCalls({
     }
     return outcome;
   });
+  // Sentinel: record Tier 3 carded outcomes. Auto-denied calls were recorded
+  // at classify time; 'approved'/'denied' land here once the user decided.
+  if (sentinel?.services.audit !== null && sentinel?.services.audit !== undefined) {
+    const audit = sentinel.services.audit;
+    for (const toolCall of assistantMessage.tool_calls ?? []) {
+      const info = toolCall.tool_info;
+      if (info.tier !== 3 || info.tier3_card === null) {
+        continue;
+      }
+      const status = approvalDecisions.get(toolCall.id)?.status;
+      if (status !== 'allow' && status !== 'deny') {
+        continue;
+      }
+      await audit.record({
+        tenant_id: sentinel.identity.tenant_id,
+        created_by: sentinel.identity.created_by,
+        conversation_id: sentinel.identity.conversation_id,
+        tier: 3,
+        tool_name: info.original_tool_name,
+        description: info.tier3_card?.plain_what ?? info.original_tool_name,
+        outcome: status === 'allow' ? 'approved' : 'denied',
+        auto_deny_reason: null,
+      });
+    }
+  }
   for (const {
     toolCall,
     toolInfo,
@@ -1661,11 +1775,24 @@ export async function executeToolCalls({
     let content: string;
     let isStructuredContent = false;
     if (result.isError) {
-      // Error results arrive as content blocks, usually one text block
-      // carrying a JSON error envelope. Unwrap them into a structured error
-      // object: the model must be able to parse the failure as data, never
-      // mistake a text blob for content.
-      content = JSON.stringify(structuredErrorFromResultContent(result.content));
+      // Error payloads are structured: unwrap a JSON error envelope to the parsed
+      // object instead of double-encoding the content blocks, and degrade plain
+      // text to a { error: text } object. The model gets a JSON payload either way.
+      const errorText = Array.isArray(result.content)
+        ? result.content
+            .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+            .map(c => c.text)
+            .join('\n')
+        : typeof result.content === 'string'
+          ? result.content
+          : JSON.stringify(result.content);
+      let errorPayload: unknown;
+      try {
+        errorPayload = JSON.parse(errorText);
+      } catch {
+        errorPayload = { error: errorText };
+      }
+      content = JSON.stringify(errorPayload);
       isStructuredContent = true;
     } else if (result.structuredContent) {
       isStructuredContent = true;

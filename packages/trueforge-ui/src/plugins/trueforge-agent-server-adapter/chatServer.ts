@@ -15,6 +15,8 @@ import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { readSessionAgentDetails, type AgentDetailsVisibility } from '../../atoms/lib/sessionAgentDetails.js';
 import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js';
 import { awaitPendingPersonaMutation } from '../../personaMutationGate.js';
+import { extractSentinelFromEvent } from '../../sentinel/types.js';
+import { publishSentinelEvent } from '../../sentinel/sentinelEvents.js';
 import type { MemoryTurnContext } from '../../components/MemoryRecallContext.js';
 import type {
   AgentChatServer,
@@ -403,6 +405,22 @@ function publishDocumentIngestionEvent(turnId: string, event: TrueForgeApi.Docum
 }
 
 /**
+ * Taps Sentinel permission events off a raw SSE stream item before `toUiStreamingEvent`
+ * narrows it away: the vendor `TurnStreamingEvent` union has no case for
+ * `tool.approval_required` / `tool.tier2_notice`, so they cannot travel the normal chat
+ * pipeline. The SDK parser passes unknown event types and fields through, so the raw
+ * `type` string is readable here and `extractSentinelFromEvent` parses the rest
+ * defensively. Published per tool call; `SentinelStateProvider` subscribes.
+ */
+function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent): void {
+  const eventType: string = data.type;
+  if (eventType !== 'tool.approval_required' && eventType !== 'tool.tier2_notice') return;
+  const { approvals, notices } = extractSentinelFromEvent(data);
+  for (const info of approvals) publishSentinelEvent({ kind: 'approval', info });
+  for (const notice of notices) publishSentinelEvent({ kind: 'notice', notice });
+}
+
+/**
  * Every `document.ingestion` event this session has recorded, folded to one entry per file per
  * turn (the later of a file's `started`/`finished`/`failed`/`cancelled` events wins) — so a status
  * line can show which files are still being read ('started' with no later event) without the
@@ -483,6 +501,7 @@ async function* subscribeTurnOnce(
     if (item.data.type === 'document.ingestion') {
       publishDocumentIngestionEvent(turnId, item.data);
     }
+    tapSentinelStreamEvent(item.data);
     if (item.data.type === 'turn.done') {
       seenTurnDone.done = true;
       return;
@@ -748,6 +767,7 @@ export function createHarnessChatServer(
           if (item.data.type === 'document.ingestion' && turnId !== undefined) {
             publishDocumentIngestionEvent(turnId, item.data);
           }
+          tapSentinelStreamEvent(item.data);
           if (item.data.type === 'turn.done') {
             seenTurnDone.done = true;
             return;

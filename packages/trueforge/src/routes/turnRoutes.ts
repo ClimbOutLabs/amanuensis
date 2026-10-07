@@ -11,6 +11,7 @@ import {
   CreateTurnRequestSchema,
   DownloadSandboxFileRequestQuerySchema,
   GetTurnResponseSchema,
+  ListTurnArtifactsResponseSchema,
   ListTurnEventsRequestQuerySchema,
   ListTurnEventsResponseSchema,
   ListTurnsRequestQuerySchema,
@@ -88,7 +89,7 @@ export const downloadSandboxFileRoute = createRoute({
   tags: [OpenApiTag.AGENT_SESSIONS],
   summary: 'Download a file from the turn sandbox',
   description:
-    "Download a file from the sandbox this turn ran in. Paths come from the assistant's `sandbox_artifacts` block. Only the session creator may download.",
+    "Download a file from the sandbox this turn ran in. Paths come from the turn's persisted artifacts: exec-sandbox `sandbox_artifacts` rows and run_code harvested files (`run_code/<name>` paths). List them via the artifacts route. Only the session creator may download.",
   'x-fern-sdk-group-name': ['sessions'],
   'x-fern-sdk-method-name': 'download_sandbox_file',
   request: {
@@ -127,6 +128,34 @@ export const downloadSandboxFileRoute = createRoute({
     424: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Sandbox infrastructure error.',
+    },
+  },
+});
+
+export const listTurnArtifactsRoute = createRoute({
+  method: 'get',
+  path: '/{session_id}/turns/{turn_id}/artifacts',
+  tags: [OpenApiTag.AGENT_SESSIONS],
+  summary: 'List persisted files for a turn',
+  description:
+    'List files the turn persisted for download: exec-sandbox `sandbox_artifacts` rows and run_code harvested files (`run_code/<name>` paths). Deterministic — no assistant prose parsing. Only the session creator may list.',
+  'x-fern-sdk-group-name': ['sessions'],
+  'x-fern-sdk-method-name': 'list_turn_artifacts',
+  request: {
+    params: TurnIdParamsSchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: ListTurnArtifactsResponseSchema } },
+      description: 'Persisted artifact rows, newest first.',
+    },
+    403: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Caller is not the session creator.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Session or turn not found.',
     },
   },
 });

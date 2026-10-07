@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import type { ComponentProps, ReactNode } from 'react';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { WelcomeScreen } from '@/atoms/WelcomeScreen.js';
 import { SlotsProvider, useSlot, useThemeMode } from '@/theme/SlotsProvider.js';
+import { ThemeProvider, useTheme } from '@/theme/ThemeProvider.js';
 
 function WelcomeConsumer() {
   const SlotWelcome = useSlot('WelcomeScreen');
@@ -24,6 +25,9 @@ function CustomAccordion({ children }: { children?: ReactNode }) {
 }
 
 describe('SlotsProvider', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
   it('resolves the default WelcomeScreen when no override is provided', () => {
     render(<WelcomeConsumer />);
     expect(screen.getByText('hello')).toBeInTheDocument();
@@ -83,5 +87,54 @@ describe('SlotsProvider', () => {
     expect(screen.getByTestId('custom-accordion')).toHaveTextContent('nested-ok');
     expect(screen.getByText('nested-ok')).toBeInTheDocument();
     expect(screen.getByText('dark')).toBeInTheDocument();
+  });
+
+  it('does not nest a second theme root when the host already provides one', () => {
+    const { container } = render(
+      <ThemeProvider theme={{ mode: 'light' }}>
+        <SlotsProvider theme={{ mode: 'light' }}>
+          <ThemeModeConsumer />
+        </SlotsProvider>
+      </ThemeProvider>,
+    );
+
+    expect(container.querySelectorAll('.aui-theme-root')).toHaveLength(1);
+    expect(screen.getByText('light')).toBeInTheDocument();
+  });
+
+  it('shares one preset between host chrome and slotted content', () => {
+    function PresetProbe({ testId }: { testId: string }) {
+      const { preset, setPreset } = useTheme();
+      return (
+        <div>
+          <output data-testid={testId}>{preset}</output>
+          <button type="button" onClick={() => setPreset('gemini')}>
+            gemini
+          </button>
+        </div>
+      );
+    }
+
+    render(
+      <ThemeProvider theme={{ mode: 'light' }}>
+        {/* Host chrome outside the slotted tree, like the runtime rail. */}
+        <PresetProbe testId="host-preset" />
+        <SlotsProvider theme={{ mode: 'light' }}>
+          <PresetProbe testId="slotted-preset" />
+        </SlotsProvider>
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByTestId('host-preset')).toHaveTextContent('trueforge');
+    expect(screen.getByTestId('slotted-preset')).toHaveTextContent('trueforge');
+
+    act(() => {
+      screen.getAllByText('gemini')[0]?.click();
+    });
+
+    // One shared context: the host chrome follows the preset change made
+    // inside the slotted tree instead of keeping its mount-time preset.
+    expect(screen.getByTestId('host-preset')).toHaveTextContent('gemini');
+    expect(screen.getByTestId('slotted-preset')).toHaveTextContent('gemini');
   });
 });

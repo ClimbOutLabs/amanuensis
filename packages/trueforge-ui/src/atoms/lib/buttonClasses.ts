@@ -19,7 +19,7 @@ const sizeClasses: Record<AuiButtonSize, string> = {
 };
 
 const baseClasses =
-  'inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-50';
 
 /** Sidebar / rail nav control corner radius: 12px. */
 export const sidebarButtonRadiusClassName = 'rounded-[0.75rem]';

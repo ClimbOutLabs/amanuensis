@@ -14,6 +14,13 @@ import {
 } from '../mcp/implementationPlanGrant';
 import { StructuredEditPreconditionSchema } from '../sandbox/structuredEditPrecondition';
 import {
+  Tier3CardSchema,
+  TierSchema,
+  TIER2_ACTION_KINDS,
+  TrackedExecutionBindingSchema,
+} from '../permissions/tier';
+import { ShellApprovalBindingSchema } from '../permissions/approvalTokens';
+import {
   ChatCompletionAssistantMessageParamSchema,
   ChatCompletionChunkDeltaSchema,
   ChatCompletionChunkDeltaToolCallSchema,
@@ -110,6 +117,31 @@ export const InternalToolCallInfoSchema = z.object({
   structured_edit_precondition: StructuredEditPreconditionSchema.optional().describe(
     'Host-observed structured-edit target state captured before approval. Never model-authored or client supplied.',
   ),
+  // Sentinel host-only classification. Populated by the classifier in
+  // ToolSet/Sandbox; always present on classified calls, never wire-visible.
+  tier: TierSchema.optional().describe('Server-owned Sentinel permission tier. Never model-authored.'),
+  tier3_card: Tier3CardSchema.nullable().optional().describe('Server-rendered Tier 3 approval card, or null.'),
+  tier2_kind: z
+    .enum(TIER2_ACTION_KINDS)
+    .nullable()
+    .optional()
+    .describe('Tier 2 member kind for the per-action "always ask me" toggle, or null.'),
+  tier2_files: z
+    .array(z.string())
+    .nullable()
+    .optional()
+    .describe('Tracked executable files named in the Tier 2 inline indicator, or null.'),
+  approval_token_id: z
+    .string()
+    .nullable()
+    .optional()
+    .describe('Single-use approval token id for Tier 3 carded actions, or null.'),
+  approval_binding: TrackedExecutionBindingSchema.nullable()
+    .optional()
+    .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),
+  shell_binding: ShellApprovalBindingSchema.nullable()
+    .optional()
+    .describe('Host-derived parsed shell binding for Tier 3 shell approvals. Never model-authored.'),
   ...ToolEffectHintsSchema.shape,
 });
 
@@ -207,6 +239,13 @@ export const LLMUserMessageSchema = ChatCompletionUserMessageParamSchema.pick({
   content: true,
 }).openapi('LLMUserMessage');
 
+export const LLMSystemMessageSchema = z
+  .object({
+    role: z.literal('system'),
+    content: z.string(),
+  })
+  .openapi('LLMSystemMessage');
+
 export const LLMToolMessageSchema = ChatCompletionToolMessageParamSchema.omit({ content: true })
   .extend({
     // TODO(agent): Where do I update the Zod code for this change?
@@ -244,6 +283,7 @@ export type EnrichedAssistantMessage = z.infer<typeof EnrichedAssistantMessageSc
 export type ExtendedDeltaToolCall = z.infer<typeof ExtendedChunkDeltaToolCallSchema>;
 export type ExtendedDelta = z.infer<typeof ExtendedChunkDeltaSchema>;
 export type LLMUserMessage = z.infer<typeof LLMUserMessageSchema>;
+export type LLMSystemMessage = z.infer<typeof LLMSystemMessageSchema>;
 export type LLMToolMessage = z.infer<typeof LLMToolMessageSchema>;
 export type CompletionUsage = z.infer<typeof CompletionUsageSchema>;
 export type FinishReason = z.infer<typeof FinishReasonSchema>;

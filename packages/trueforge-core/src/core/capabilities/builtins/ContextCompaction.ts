@@ -24,11 +24,14 @@ import {
 } from '../../sandbox/Sandbox';
 import { awaitWithAbort, throwIfSignalAborted } from '../../util/abort';
 import type { AgentCapability, JsonValue } from '../AgentCapability';
+import { TOKEN_BUDGET_SAFETY_MARGIN } from './tokenBudgetConstants';
 import type {
+  AgentContextProcessorCompactionEvent,
   AgentContextProcessorOutput,
   AgentThreadExecutionContext,
   PreLLMAgentContextProcessor,
 } from '../AgentContextProcessor';
+import type { ContextCompactionEvent } from '../../events/schema';
 import { formatBoundRepositoryContext } from './RepositoryBindingContext';
 import { TaskChecklistRequestState, type TaskChecklistAccess } from './TaskChecklist';
 
@@ -41,7 +44,70 @@ const MAX_DONE_SO_FAR_SUMMARY_CHARS = 8_000;
 const HOST_TOUCHED_PATHS_HEADING = '### host_owned_touched_paths';
 /** Bounds a conversation-mode summary overall; the coding template bounds only done_so_far. */
 const MAX_CONVERSATION_SUMMARY_CHARS = 12_000;
+/** Bound for the raw rejected-output preview in the validation-failure warn log (spec 002 REQ-1). */
+export const MAX_REJECTED_OUTPUT_PREVIEW_CHARS = 2_000;
+/** Unused: retained for API compatibility. The truncation fallback supersedes the skip circuit breaker. */
+export const MAX_CONSECUTIVE_COMPACTION_SKIPS = 3;
+/** Unused: retained for API compatibility. The truncation fallback supersedes the skip circuit breaker. */
+export const COMPACTION_BACKOFF_TOKEN_DELTA = 10_000;
 export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
+/**
+ * Token budget held back from the compaction input threshold. Covers additive
+ * overhead on top of the estimated request: the provider-added BOS token,
+ * ChatML template overhead, the instruction and task-state messages
+ * transformToLLMRequest adds after compaction runs, and general estimator slop
+ * (estimateTokensForString is a length/4 heuristic).
+ * Without this margin the request lands exactly at the context limit and the
+ * provider rejects it for exceeding it by one token.
+ *
+ * Known limitation: the margin is not sized for high token-density scripts.
+ * CJK text carries roughly 2-4x more tokens per character than the length/4
+ * heuristic assumes, which can exceed this margin by tens of thousands of
+ * tokens on a 128k model; the estimator is not script-aware and neither the
+ * margin nor the pre-flight guard catches that case. Treat the margin as
+ * additive-overhead cover, not estimator-accuracy cover.
+ *
+ * Defined in ./tokenBudgetConstants.ts (leaf module) so UI clients can import
+ * it without pulling in this module's dependency graph.
+ */
+
+/**
+ * Content-free structural diagnostic for validation failures (spec 002 REQ-1, security-hardened).
+ * Logs the malformation shape without logging user/attacker-controlled text, following the
+ * `oversizedResultFingerprint` precedent: the log carries the digest only, never raw content.
+ * Includes output length, a hash prefix (shape probe), and per-section presence counts
+ * (0=missing, 1=present, 2+=duplicated) to diagnose which sections failed.
+ */
+export function compactionValidationFingerprint(
+  modelOutput: string,
+  requiredSections: readonly string[],
+): string {
+  // FNV-1a hash of a short prefix (shape probe, not content).
+  const prefix = modelOutput.slice(0, 64);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < prefix.length; index++) {
+    hash ^= prefix.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  const sectionCounts = requiredSections.map(name => {
+    const pattern = `(?:^|\\n)##\\s+${name}\\s*(?:\\n|$)`;
+    const matches = modelOutput.match(new RegExp(pattern, 'g'));
+    const count = matches === null ? 0 : matches.length;
+    return `${name}=${String(count)}`;
+  });
+  return `len=${String(modelOutput.length)}:prefix=${(hash >>> 0).toString(16)}:sections=[${sectionCounts.join(',')}]`;
+}
+
+/**
+ * Resolves the configured max output tokens from modelParams: max_completion_tokens
+ * preferred, max_tokens as fallback; undefined when unset or unusable (non-numeric,
+ * non-finite, or negative). Shared by the compaction threshold and the token
+ * pre-flight guard in AgentThread so the two budgets cannot drift apart.
+ */
+export function resolveMaxOutputTokens(modelParams: AgentDefinition['modelParams']): number | undefined {
+  const configured = modelParams?.['max_completion_tokens'] ?? modelParams?.['max_tokens'];
+  return typeof configured === 'number' && Number.isFinite(configured) && configured >= 0 ? configured : undefined;
+}
 
 /**
  * Resolves the compaction trigger threshold: an explicit configured value wins;
@@ -60,13 +126,9 @@ export function resolveCompactionThresholdTokens(input: {
   }
   if (input.modelContextLength !== undefined) {
     const ratioThreshold = Math.floor(input.modelContextLength * DEFAULT_CONTEXT_COMPACTION_RATIO);
-    const configuredMaxOutputTokens = input.modelParams?.['max_completion_tokens'] ?? input.modelParams?.['max_tokens'];
-    if (
-      typeof configuredMaxOutputTokens === 'number' &&
-      Number.isFinite(configuredMaxOutputTokens) &&
-      configuredMaxOutputTokens >= 0
-    ) {
-      const inputBudget = Math.floor(input.modelContextLength - configuredMaxOutputTokens);
+    const maxOutputTokens = resolveMaxOutputTokens(input.modelParams);
+    if (maxOutputTokens !== undefined) {
+      const inputBudget = Math.floor(input.modelContextLength - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN);
       if (inputBudget > 0) {
         return Math.min(ratioThreshold, inputBudget);
       }
@@ -617,7 +679,7 @@ function rejectSelfReferentialGoal(summaryBody: string, userText: string): void 
 function normalizeCompactionOutput(
   content: string,
   requiredSections: readonly string[] = REQUIRED_SUMMARY_SECTIONS,
-): { normalized: string; reason?: string } {
+): { normalized: string; reason?: ContextCompactionEvent['reason'] } {
   let normalized = content.trim();
 
   // If text contains <summary> but doesn't start with it, drop everything before <summary>
@@ -683,7 +745,7 @@ export function validateCompactionSummary(
   content: string,
   requiredSections: readonly string[] = REQUIRED_SUMMARY_SECTIONS,
   userText = '',
-): { summary: string; reason?: string } {
+): { summary: string; reason?: ContextCompactionEvent['reason'] } {
   // First normalize the output
   const { normalized, reason: normalizationReason } = normalizeCompactionOutput(content, requiredSections);
   if (normalizationReason) {
@@ -716,6 +778,47 @@ export function validateCompactionSummary(
   }
 
   return { summary: `<summary>${summary}</summary>` };
+}
+
+/**
+ * Best-effort recovery of a malformed compaction summary (spec 002 REQ-2). When the
+ * model produced every required section exactly once but botched the envelope —
+ * missing <summary> wrapper, preamble/postamble, trailing junk after </summary> —
+ * extract the section bodies and rebuild a canonical block. Returns undefined when
+ * any section is missing or duplicated: the content is then ambiguous and must not
+ * be guessed at. The caller re-validates the rebuilt block, so self-referential
+ * and length checks still apply. Only required-section headings split bodies;
+ * arbitrary ## lines inside a body do not.
+ */
+export function salvageCompactionSummary(
+  content: string,
+  requiredSections: readonly string[] = REQUIRED_SUMMARY_SECTIONS,
+): string | undefined {
+  const found: { name: string; start: number; end: number }[] = [];
+  for (const name of requiredSections) {
+    const pattern = `(?:^|\\n)##\\s+${name}\\s*(?:\\n|$)`;
+    const matches = [...content.matchAll(new RegExp(pattern, 'g'))];
+    if (matches.length !== 1) {
+      return undefined;
+    }
+    const match = matches[0];
+    if (match?.index === undefined) {
+      return undefined;
+    }
+    found.push({ name, start: match.index, end: match.index + match[0].length });
+  }
+  const ordered = [...found].sort((a, b) => a.start - b.start);
+  const parts: string[] = [];
+  for (const [i, current] of ordered.entries()) {
+    const next = ordered[i + 1];
+    let body = content.slice(current.end, next === undefined ? content.length : next.start);
+    const closingTag = body.indexOf('</summary>');
+    if (closingTag !== -1) {
+      body = body.slice(0, closingTag);
+    }
+    parts.push(`## ${current.name}\n${body.trim()}`);
+  }
+  return `<summary>\n${parts.join('\n\n')}\n</summary>`;
 }
 
 export class ContextCompaction implements PreLLMAgentContextProcessor {
@@ -816,10 +919,10 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     tokensBefore: number;
     tokensAfter: number;
     summaryChars: number;
-    outcome: 'applied' | 'skipped_invalid' | 'skipped_blocked';
-    reason?: string;
-  }): AgentContextProcessorOutput {
-    const event: Record<string, unknown> = {
+    outcome: 'applied' | 'skipped_invalid' | 'skipped_blocked' | 'truncated_fallback';
+    reason?: ContextCompactionEvent['reason'];
+  }): AgentContextProcessorCompactionEvent {
+    return {
       type: EventType.AGENT_CONTEXT_COMPACTION,
       id: newEventId(),
       created_at: new Date().toISOString(),
@@ -828,11 +931,8 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
       tokens_after: input.tokensAfter,
       summary_chars: input.summaryChars,
       outcome: input.outcome,
+      ...(input.reason !== undefined ? { reason: input.reason } : {}),
     };
-    if (input.reason !== undefined) {
-      Reflect.set(event, 'reason', input.reason);
-    }
-    return event as AgentContextProcessorOutput;
   }
 
   async *processPreLLM(
@@ -969,52 +1069,87 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     }
 
     let summary: string;
-    let validationReason: string | undefined;
+    let validationReason: ContextCompactionEvent['reason'];
     const modelOutput = formatAssistantContent(response.output.content);
+    const requiredSections = mode === 'coding' ? REQUIRED_SUMMARY_SECTIONS : CONVERSATION_REQUIRED_SUMMARY_SECTIONS;
 
-    if (mode === 'coding') {
-      const validated = validateCompactionSummary(modelOutput, REQUIRED_SUMMARY_SECTIONS, userText);
-      if (validated.reason) {
-        validationReason = validated.reason;
-        summary = '';
-      } else {
-        summary = replaceDoneSoFarSection(
-          replaceBoundRepositorySection(validated.summary, repository, commands),
-          this.touchedPaths,
-          this.touchedPathsOverflowed,
-        );
-      }
+    const validated = validateCompactionSummary(modelOutput, requiredSections, userText);
+    if (validated.reason === undefined) {
+      summary = validated.summary;
     } else {
-      const validated = validateCompactionSummary(modelOutput, CONVERSATION_REQUIRED_SUMMARY_SECTIONS, userText);
-      if (validated.reason) {
+      // Salvage (spec 002 REQ-2): the sections may be usable even when the envelope
+      // is malformed. Re-validate the rebuilt block so self-referential and length
+      // checks still apply; decline silently when sections are missing or ambiguous.
+      const salvagedBlock = salvageCompactionSummary(modelOutput, requiredSections);
+      const revalidated =
+        salvagedBlock === undefined ? undefined : validateCompactionSummary(salvagedBlock, requiredSections, userText);
+      if (revalidated !== undefined && revalidated.reason === undefined) {
+        this.logger?.warn(
+          `Compaction summary salvaged from malformed model output (reason: ${validated.reason}, mode: ${mode})`,
+        );
+        summary = revalidated.summary;
+      } else {
         validationReason = validated.reason;
         summary = '';
-      } else {
-        if (validated.summary.length > MAX_CONVERSATION_SUMMARY_CHARS) {
-          validationReason = 'over_length';
-          summary = '';
-        } else {
-          summary = validated.summary;
-        }
       }
     }
 
-    if (validationReason) {
-      // Genuinely malformed model output (missing <summary> block, a missing or
-      // duplicated required section, or over the bounded length). Skip this
-      // compaction attempt rather than failing the turn: the context is
-      // unchanged, so the next preLLM check still sees it over threshold and
-      // retries compaction on the next call. The request still completed and
-      // consumed billable tokens, so fold its usage into thread metrics through
-      // the same path as any other model call rather than dropping it.
-      this.logger?.warn(`Skipping compaction: model produced an invalid summary (reason: ${validationReason})`);
+    if (validationReason === undefined) {
+      if (mode === 'coding') {
+        summary = replaceDoneSoFarSection(
+          replaceBoundRepositorySection(summary, repository, commands),
+          this.touchedPaths,
+          this.touchedPathsOverflowed,
+        );
+      } else if (summary.length > MAX_CONVERSATION_SUMMARY_CHARS) {
+        validationReason = 'over_length';
+        summary = '';
+      }
+    }
+
+    if (validationReason !== undefined) {
+      // The summary is unusable even after salvage. Fall back to deterministic
+      // old-turn truncation instead of skipping: skipping leaves the context
+      // over threshold, so the next turn retries (and bills) another doomed
+      // summarization while the prompt grows unbounded. Truncation drops the
+      // oldest turns while preserving system messages and the recent tail,
+      // guaranteeing the context shrinks without ever replacing it with nothing.
+      // REQ-1 (security-hardened): log a content-free structural diagnostic, never
+      // raw model output. Follows the oversizedResultFingerprint precedent.
+      const fingerprint = compactionValidationFingerprint(modelOutput, requiredSections);
+      this.logger?.warn(
+        `Compaction summary invalid (reason: ${validationReason}, mode: ${mode}, fingerprint: ${fingerprint}); falling back to truncation`,
+      );
+      const tailSet = new Set(recentTail);
+      const systemMessages = execution.context.filter(
+        message => isLLMContextMessage(message) && message.role === 'system' && !tailSet.has(message),
+      );
+      const truncationNotice = internalSystemMessage(
+        'Earlier conversation turns were dropped because automatic summarization failed. ' +
+          'Continue with the remaining context.',
+      );
+      const truncatedContext: ContextMessage[] = [...systemMessages, truncationNotice, ...recentTail];
+      const tokensAfterTruncation = estimateTokensForContextMessages(truncatedContext).prompt_tokens;
+
       yield { type: InternalEventType.MODEL_USAGE, usage: response.usage };
+      yield {
+        type: EventType.AGENT_CONTEXT_OVERWRITE,
+        id: newEventId(),
+        created_at: new Date().toISOString(),
+        reason: 'compaction_truncation_fallback',
+        context: truncatedContext,
+        current_context_usage: {
+          prompt_tokens: tokensAfterTruncation,
+          completion_tokens: 0,
+        },
+        usage: response.usage,
+      };
       yield this.compactionEvent({
         mode,
         tokensBefore: contextTokens,
-        tokensAfter: contextTokens,
+        tokensAfter: tokensAfterTruncation,
         summaryChars: 0,
-        outcome: 'skipped_invalid',
+        outcome: 'truncated_fallback',
         reason: validationReason,
       });
       return;

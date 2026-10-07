@@ -7,7 +7,7 @@ import { Button } from '../../atoms/primitives/Button.js';
 import { Tooltip } from '../../atoms/primitives/Tooltip.js';
 import { useOptionalSandboxRuntimeUpgrade } from '../../components/SandboxRuntimeUpgradeContext.js';
 import { Icon } from '../../icons/Icon.js';
-import { useCatalogServer } from '../../server/ServerContext.js';
+import { useCatalogServer, useServerCapabilities } from '../../server/ServerContext.js';
 import type {
   SandboxProviderBase,
   SandboxProviderCatalogEntry,
@@ -18,6 +18,7 @@ import type {
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import ConfigureSandboxForm, { type SandboxConfigDraft } from './ConfigureSandboxForm.js';
+import { readSandboxIsolationStatus } from './sandboxIsolationCapability.js';
 
 const SNAPSHOT_STATUS_POLL_INTERVAL_MS = 10000;
 
@@ -31,8 +32,30 @@ const configFrom = (config: SandboxConfigWithEndpoint): SandboxConfigWithEndpoin
   ...(config.apiUrl ? { apiUrl: config.apiUrl } : {}),
 });
 
-const statusPresentation = (status: SandboxSnapshotSyncStatus['status']): { label: string; className: string } => {
-  switch (status) {
+function IsolationRow({
+  label,
+  value,
+  mono = false,
+  breakAll = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  breakAll?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-1 px-4 py-2.5 sm:flex-row sm:items-baseline sm:justify-between">
+      <dt className="text-text-secondary">{label}</dt>
+      <dd
+        className={`text-text-primary ${mono ? 'font-mono text-[0.8125rem]' : ''} ${breakAll ? 'break-all' : ''}`}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+const statusPresentation = (status: SandboxSnapshotSyncStatus['status']): { label: string; className: string } => {  switch (status) {
     case 'pending':
       return {
         label: 'Syncing image...',
@@ -58,6 +81,8 @@ const statusPresentation = (status: SandboxSnapshotSyncStatus['status']): { labe
 
 const SandboxSettings = () => {
   const { sandboxCatalog } = useCatalogServer();
+  const capabilities = useServerCapabilities();
+  const isolationStatus = readSandboxIsolationStatus(capabilities);
   const upgradeSandboxRuntime = useOptionalSandboxRuntimeUpgrade();
   const toaster = useToasterOptional();
 
@@ -242,6 +267,44 @@ const SandboxSettings = () => {
 
   return (
     <>
+      <section className="mb-6">
+        <h3 className="text-xl font-semibold tracking-tight text-text-primary">Code execution</h3>
+        <p className="mt-1 text-sm text-text-secondary">
+          The <span className="font-mono">run_code</span> tool runs Python and Node.js in an isolated, offline
+          sandbox. These values come from the server configuration and take a restart to change.
+        </p>
+        <div className="mt-3 overflow-hidden rounded-xl border border-border bg-card-bg">
+          {isolationStatus == null ? (
+            <p className="px-4 py-3 text-sm text-text-secondary">Isolation status unavailable.</p>
+          ) : (
+            <dl className="divide-y divide-border text-sm">
+              <IsolationRow label="Isolation driver" value={isolationStatus.isolationDriver} mono />
+              <IsolationRow label="Image" value={isolationStatus.image} mono breakAll />
+              <IsolationRow
+                label="Run timeout"
+                value={`${String(isolationStatus.defaultTimeoutSeconds)}s default · ${String(isolationStatus.maxTimeoutSeconds)}s max`}
+              />
+              <IsolationRow
+                label="Limits"
+                value={`${String(isolationStatus.memoryMb)} MiB memory · ${String(isolationStatus.diskMb)} MiB disk · ${String(isolationStatus.stdoutStderrCapKb)} KiB output cap`}
+              />
+              <IsolationRow
+                label="Image pull bound"
+                value={`${String(isolationStatus.imagePullTimeoutSeconds)}s`}
+              />
+              <IsolationRow
+                label="Network egress"
+                value={isolationStatus.networkEgress ? 'enabled' : 'disabled'}
+              />
+              <IsolationRow
+                label="Image signature check"
+                value={isolationStatus.cosignKeyConfigured ? 'cosign key configured' : 'no cosign key configured'}
+              />
+            </dl>
+          )}
+        </div>
+      </section>
+
       <h3 className="text-xl font-semibold tracking-tight text-text-primary">Sandbox providers</h3>
       <p className="mt-1 text-sm text-text-secondary">
         Choose a provider that runs sandboxes for code, files and shell commands. Only one can be active at a time.

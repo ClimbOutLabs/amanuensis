@@ -35,6 +35,7 @@ export type ThemeContextValue = {
   preference: ThemeMode;
   isDark: boolean;
   setTheme: (mode: ThemeMode) => void;
+  setPreset: (preset: ThemePreset) => void;
   /** Partial: `theme.brand` is optional, so consumers fall back to SDK defaults. */
   brand: Partial<BrandConfig>;
   icons: IconMap;
@@ -47,6 +48,18 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 export { ThemeContext };
 
 const STORAGE_KEY = 'aui-theme-preference';
+const PRESET_STORAGE_KEY = 'aui-theme-preset';
+
+const VALID_PRESETS: ReadonlyArray<ThemePreset> = [
+  'trueforge',
+  'claude',
+  'chatgpt',
+  'gemini',
+  'midnight',
+  'forest',
+  'sunset',
+  'volt',
+];
 
 function getSystemTheme(): 'light' | 'dark' {
   if (typeof window === 'undefined') return 'light';
@@ -67,6 +80,20 @@ function readStoredPreference(): ThemeMode | null {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/** Returns the stored preset, or `null` when nothing is stored yet. */
+function readStoredPreset(): ThemePreset | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const stored = localStorage.getItem(PRESET_STORAGE_KEY);
+    if (stored != null && (VALID_PRESETS as ReadonlyArray<string>).includes(stored)) {
+      return stored as ThemePreset;
+    }
   } catch {
     /* ignore */
   }
@@ -98,6 +125,8 @@ export function ThemeProvider({ theme, children }: { theme?: ThemeConfig; childr
   const initialPreference = () => theme?.mode ?? readStoredPreference() ?? theme?.defaultMode ?? 'system';
   const [preference, setPreference] = useState<ThemeMode>(initialPreference);
   const [mode, setMode] = useState<'light' | 'dark'>(() => resolveMode(initialPreference()));
+  // Preset is uncontrolled: the stored preset wins, else the host config, else 'trueforge'.
+  const [preset, setPresetState] = useState<ThemePreset>(() => readStoredPreset() ?? theme?.preset ?? 'trueforge');
 
   useLayoutEffect(() => {
     ensureStyles();
@@ -141,30 +170,40 @@ export function ThemeProvider({ theme, children }: { theme?: ThemeConfig; childr
     [isControlled],
   );
 
+  const setPreset = useCallback((next: ThemePreset) => {
+    setPresetState(next);
+    try {
+      localStorage.setItem(PRESET_STORAGE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const hostTokens = useMemo(() => resolveHostTokens(theme?.tokens, mode), [theme?.tokens, mode]);
 
   const value = useMemo<ThemeContextValue>(
     () => ({
-      preset: theme?.preset ?? 'trueforge',
+      preset,
       mode,
       preference,
       isDark: mode === 'dark',
       setTheme,
+      setPreset,
       brand: theme?.brand ?? {},
       icons: theme?.icons ?? {},
       classNames: theme?.classNames ?? {},
       tokens: hostTokens,
     }),
-    [mode, preference, setTheme, theme?.preset, theme?.brand, theme?.icons, theme?.classNames, hostTokens],
+    [preset, mode, preference, setTheme, setPreset, theme?.brand, theme?.icons, theme?.classNames, hostTokens],
   );
 
   const rootStyle = useMemo(
     () =>
       tokensToStyle({
-        ...resolvePresetTokens(theme?.preset, mode),
+        ...resolvePresetTokens(preset, mode),
         ...hostTokens,
       }),
-    [theme?.preset, hostTokens, mode],
+    [preset, hostTokens, mode],
   );
 
   return (
@@ -172,7 +211,7 @@ export function ThemeProvider({ theme, children }: { theme?: ThemeConfig; childr
       <div
         className={cn('aui-theme-root h-full min-h-0', mode === 'dark' && 'dark', theme?.className)}
         data-theme={mode}
-        data-preset={theme?.preset ?? 'trueforge'}
+        data-preset={preset}
         style={rootStyle}
       >
         {children}
@@ -189,9 +228,12 @@ function useThemeContext(): ThemeContextValue {
   return ctx;
 }
 
-export function useTheme(): Pick<ThemeContextValue, 'preset' | 'mode' | 'preference' | 'isDark' | 'setTheme'> {
-  const { preset, mode, preference, isDark, setTheme } = useThemeContext();
-  return { preset, mode, preference, isDark, setTheme };
+export function useTheme(): Pick<
+  ThemeContextValue,
+  'preset' | 'mode' | 'preference' | 'isDark' | 'setTheme' | 'setPreset'
+> {
+  const { preset, mode, preference, isDark, setTheme, setPreset } = useThemeContext();
+  return { preset, mode, preference, isDark, setTheme, setPreset };
 }
 
 /** Configured branding. Fields are optional — `theme.brand` may be omitted entirely. */

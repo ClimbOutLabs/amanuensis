@@ -75,6 +75,11 @@ services:
       # From-source image; root Dockerfile is the npm-install prod recipe.
       dockerfile: Dockerfile.dev
     image: truefoundry-server:latest
+    # The aman-stt sidecar owns cores 16-19 (see below); the server and its
+    # in-process embedding workload stay on the remaining cores so a
+    # transcription never steals latency from chat. Adjust both pins together
+    # on hosts with a different core count (see docs/voice-input.mdx).
+    cpuset: '0-15'
     # Ports are published by `loopback` above. Compose DNS therefore has no
     # `server` entry; other services reach this one as `loopback`.
     network_mode: 'service:loopback'
@@ -108,6 +113,10 @@ services:
       # cached under MEMORY_EMBEDDINGS_MODEL_DIR (inside /data/memory), so it
       # is persistent too and downloads exactly once.
       PERSONA_KNOWLEDGE_DIR: /data/persona-knowledge
+      # Local speech-to-text sidecar. The browser never talks to it directly;
+      # the server forwards recorded WAV audio and degrades gracefully when
+      # the sidecar is unreachable (typed chat keeps working).
+      STT_URL: http://aman-stt:8001
     # Secrets and Postgres credentials (POSTGRES_USER, …).
     # `environment` above overrides any colliding keys from this file.
     env_file:
@@ -151,6 +160,31 @@ services:
     # Above the app's default GRACEFUL_TIMEOUT_SECONDS (30) so SIGKILL does not
     # cut off turn drain.
     stop_grace_period: 35s
+    restart: unless-stopped
+
+  # Local speech-to-text sidecar (faster-whisper, Whisper small int8, CPU-only).
+  # The server forwards recorded WAV audio here and returns the transcript to
+  # the browser. No host port is published: it is reachable only inside the
+  # compose network, and the server degrades gracefully when it is down.
+  aman-stt:
+    build:
+      context: ops/aman-stt
+    image: amanuensis-aman-stt:latest
+    # Dedicated cores, disjoint from the server's 0-15 pin above, so a
+    # transcription never contends with chat or embedding work.
+    cpuset: '16-19'
+    mem_limit: 2g
+    environment:
+      # Whisper encoder threads; 4 matches the 4 pinned cores.
+      AMAN_STT_CPU_THREADS: '4'
+      # Model cache location; matches the stt-model-cache volume below.
+      AMAN_STT_MODEL_DIR: /data/stt-cache
+    volumes:
+      # Persistent Whisper model cache; without this the ~464 MB model
+      # downloads again on every container recreate.
+      - stt-model-cache:/data/stt-cache
+    # CPU-only by construction: the image has no CUDA userspace and the app
+    # pins device=cpu. No GPU reservations here.
     restart: unless-stopped
 
   # Schedule controller: runs the periodic control loops (schedule dispatch) as a separate service.
@@ -234,3 +268,5 @@ volumes:
   memory-data:
   # Persistent persona knowledge libraries (SQLite per persona).
   persona-knowledge-data:
+  # Persistent Whisper model weights for the aman-stt sidecar.
+  stt-model-cache:

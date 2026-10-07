@@ -5,9 +5,9 @@ import type { ToolSource } from '../core/mcp/IMCPServer';
 import { RemoteMCP, type RemoteMcpHeaders } from '../core/mcp/RemoteMCP';
 import type { ToolSelectorConfig } from '../core/mcp/ToolSelectorPolicy';
 import { ToolSet } from '../core/mcp/ToolSet';
+import { createSentinelHostContext, type SentinelHostContext, type SentinelServices } from '../core/permissions';
 import type { AgentDefinition, ConfiguredModelSummary, ModelParams } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
-import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../core/tracing/NoopAgentTracing';
@@ -127,14 +127,10 @@ export class TurnResourceResolver<
        */
       toolCallTimeoutMs?: number | undefined;
       /**
-       * Host instance-wide bound in milliseconds on waiting for a model call's
-       * first output. See ITurnResourceResolver.modelFirstResponseTimeoutMs.
+       * sandbox/run_code's own dispatch deadline in milliseconds.
+       * See ITurnResourceResolver.runCodeToolCallTimeoutMs.
        */
-      modelFirstResponseTimeoutMs?: number | undefined;
-      /**
-       * Per-run host policy over tool calls. See ITurnResourceResolver.toolCallPolicy.
-       */
-      toolCallPolicy?: HostToolCallPolicy | undefined;
+      runCodeToolCallTimeoutMs?: number | undefined;
       /** Resolved T2 binding, independent of whether this turn enables a sandbox. */
       boundRepository?: BoundRepository | undefined;
       /** IANA timezone name the client sent with this turn. See ITurnResourceResolver.clientTimezone. */
@@ -184,12 +180,8 @@ export class TurnResourceResolver<
     return this.deps.toolCallTimeoutMs;
   }
 
-  get modelFirstResponseTimeoutMs(): number | undefined {
-    return this.deps.modelFirstResponseTimeoutMs;
-  }
-
-  get toolCallPolicy(): HostToolCallPolicy | undefined {
-    return this.deps.toolCallPolicy;
+  get runCodeToolCallTimeoutMs(): number | undefined {
+    return this.deps.runCodeToolCallTimeoutMs;
   }
 
   get boundRepository(): BoundRepository | undefined {
@@ -285,8 +277,20 @@ export class TurnResourceResolver<
     previousTurn?: TurnRecord<TTurnCustom> | undefined;
     signal: AbortSignal;
     tracing: AgentTracing;
+    tenant_id: string;
+    created_by: string;
+    session_id: string;
+    sentinel_services?: SentinelServices | undefined;
+    workspace_cwd?: string | null | undefined;
   }): Promise<ResolvedAgentDefinition> {
-    const { spec, agent_info: agentInfo, previousTurn, signal, tracing } = input;
+    const { spec, agent_info: agentInfo, previousTurn, signal, tracing, tenant_id, created_by, session_id, sentinel_services, workspace_cwd } = input;
+    const sentinel: SentinelHostContext = createSentinelHostContext({
+      services: sentinel_services,
+      tenant_id,
+      created_by,
+      conversation_id: session_id,
+      workspace_cwd: workspace_cwd ?? null,
+    });
     const toolSets = await Promise.all(
       (spec.mcp_servers ?? []).map(async entry => {
         const source = await this.getOrCreateToolSource({
@@ -311,6 +315,7 @@ export class TurnResourceResolver<
           source,
           selectors: toSelectors(entry),
           preload: entry.preload,
+          sentinel,
         });
       }),
     );

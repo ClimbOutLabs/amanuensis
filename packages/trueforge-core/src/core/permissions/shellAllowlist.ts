@@ -1,0 +1,341 @@
+/**
+ * Server-side shell allowlist for Sentinel Tier 2 shell commands.
+ *
+ * A command qualifies only when it parses as a SINGLE simple command. The
+ * operative rule is structural: pipes, redirects, lists (`;`, `&&`, `||`,
+ * newlines), command substitution, process substitution, and any other
+ * compound structure fail closed to Tier 3. The metacharacter check runs on the
+ * raw string with quote awareness, so a `;` inside a quoted argument is not
+ * misread.
+ *
+ * Matching requires argv[0] to resolve under a pinned PATH at parse time and
+ * every remaining token to match the command's enumerated subcommand/flag
+ * list exactly (`--flag=value` and `--flag value` are distinct spellings and
+ * are listed separately). The parsed argv is executed exec-style, never
+ * re-serialized through a shell.
+ */
+import { createHash } from 'node:crypto';
+import { existsSync, realpathSync } from 'node:fs';
+import path from 'node:path';
+
+/** Result of parsing a command that is a single simple command. */
+export interface ParsedSimpleCommand {
+  /** Bare `nice` wrapper when present; any other wrapper fails the parse. */
+  wrapper: 'nice' | null;
+  /** argv with the wrapper removed; argv[0] is the command name as written. */
+  argv: string[];
+}
+
+/** Curated per-command argument list. Operands are workspace-relative paths only. */
+export interface ShellAllowlistEntry {
+  /** Exact tokens allowed after argv[0]: subcommands and every flag spelling. */
+  args: readonly string[];
+  /** Whether non-flag tokens are allowed, and how they are constrained. */
+  operands: 'none' | 'workspace_relative';
+  /** True when the command has no network capability (offline-mode subset). */
+  offline_ok: boolean;
+}
+
+export interface ShellAllowlistConfig {
+  /** Pinned PATH used to resolve argv[0] at parse time. */
+  pinned_path: string;
+  commands: Record<string, ShellAllowlistEntry>;
+}
+
+/** Wrapper tokens that are never allowlisted (handled structurally, not matched). */
+const REJECTED_WRAPPERS = new Set(['env', 'timeout', 'sudo', 'su', 'xargs', 'find', 'sh', 'bash']);
+
+const ENV_PREFIX_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+/**
+ * Quote-aware tokenizer. Returns undefined when the command is anything other
+ * than one simple command. A `$` outside single quotes disqualifies (variable
+ * expansion and `$(...)`/`${...}` substitution read agent-influenced or
+ * hidden state); inside single quotes `$` is a literal and is safe.
+ */
+export function parseSimpleCommand(command: string): ParsedSimpleCommand | undefined {
+  const words: string[] = [];
+  let current = '';
+  let hasCurrent = false;
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+
+  const pushWord = (): void => {
+    if (hasCurrent) {
+      words.push(current);
+      current = '';
+      hasCurrent = false;
+    }
+  };
+
+  for (const ch of command) {
+    if (escaped) {
+      current += ch;
+      hasCurrent = true;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote !== null) {
+      if (ch === quote) {
+        quote = null;
+        continue;
+      }
+      // Substitution still applies inside double quotes.
+      if (quote === '"' && (ch === '$' || ch === '`')) {
+        return undefined;
+      }
+      current += ch;
+      hasCurrent = true;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      hasCurrent = true;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t') {
+      pushWord();
+      continue;
+    }
+    // Structural metacharacters outside quotes: anything compound fails closed.
+    if (
+      ch === '|' ||
+      ch === '&' ||
+      ch === ';' ||
+      ch === '<' ||
+      ch === '>' ||
+      ch === '(' ||
+      ch === ')' ||
+      ch === '`' ||
+      ch === '\n' ||
+      ch === '\r'
+    ) {
+      return undefined;
+    }
+    if (ch === '$' || ch === '~') {
+      // Unquoted `$` (expansion/substitution) and `~` (home expansion) are out.
+      return undefined;
+    }
+    current += ch;
+    hasCurrent = true;
+  }
+  if (escaped || quote !== null) {
+    return undefined;
+  }
+  pushWord();
+  if (words.length === 0) {
+    return undefined;
+  }
+  // `VAR=val` env-prefix assignments would inject agent-controlled environment
+  // (LD_PRELOAD, PYTHONPATH) into the allowlisted binary: rejected outright.
+  const first = words[0];
+  if (first === undefined || ENV_PREFIX_PATTERN.test(first)) {
+    return undefined;
+  }
+  if (REJECTED_WRAPPERS.has(first)) {
+    return undefined;
+  }
+  let wrapper: 'nice' | null = null;
+  let argv = words;
+  if (first === 'nice') {
+    // Bare form only: `nice` immediately followed by the allowlisted command.
+    // Any wrapper argument (e.g. `nice -n 10`) fails closed to Tier 3.
+    wrapper = 'nice';
+    argv = words.slice(1);
+    const argv0 = argv[0];
+    if (argv0 === undefined || argv0.startsWith('-') || ENV_PREFIX_PATTERN.test(argv0)) {
+      return undefined;
+    }
+  }
+  const argv0 = argv[0];
+  if (argv0 === undefined) {
+    return undefined;
+  }
+  return { wrapper, argv };
+}
+
+/**
+ * Resolve a command name to an absolute path under the pinned PATH. Returns
+ * null when the name does not resolve to exactly one executable. Absolute or
+ * relative paths (`./x`, `/bin/x`) never resolve: argv[0] must be a bare name.
+ * PATH entries that alias the same file (merged-/usr layouts where /bin is a
+ * symlink to /usr/bin) count as one match: they name the same binary.
+ */
+export function resolveOnPinnedPath(name: string, pinnedPath: string): string | null {
+  if (name.includes('/') || name === '' || name === '.' || name === '..') {
+    return null;
+  }
+  const matches: string[] = [];
+  const seenRealPaths = new Set<string>();
+  for (const dir of pinnedPath.split(':')) {
+    if (dir === '') {
+      continue;
+    }
+    const candidate = path.join(dir, name);
+    try {
+      if (!existsSync(candidate)) {
+        continue;
+      }
+      const real = realpathSync(candidate);
+      if (seenRealPaths.has(real)) {
+        continue;
+      }
+      seenRealPaths.add(real);
+      matches.push(candidate);
+    } catch {
+      return null;
+    }
+  }
+  const only = matches.length === 1 ? matches[0] : undefined;
+  return only ?? null;
+}
+
+/** Canonical hash of an argv vector, for approval-token binding. */
+export function hashArgv(argv: readonly string[]): string {
+  return createHash('sha256').update(JSON.stringify(argv)).digest('hex');
+}
+
+function isWorkspaceRelativeOperand(token: string): boolean {
+  if (token === '' || token.startsWith('/') || token.startsWith('~')) {
+    return false;
+  }
+  const segments = token.split('/');
+  if (segments.some(segment => segment === '..')) {
+    return false;
+  }
+  return true;
+}
+
+export interface AllowlistMatch {
+  /** argv with argv[0] resolved to its absolute path at parse time. */
+  argv: string[];
+  argv0_resolved: string;
+  wrapper: 'nice' | null;
+}
+
+/**
+ * Match a parsed simple command against the allowlist. Remaining tokens match
+ * exactly against the command's enumerated args; `--flag=value` and
+ * `--flag value` are distinct and must each be listed. Non-flag tokens are
+ * allowed only when the entry permits workspace-relative operands.
+ */
+export function matchAllowlist(
+  parsed: ParsedSimpleCommand,
+  config: ShellAllowlistConfig,
+): AllowlistMatch | undefined {
+  const argv0 = parsed.argv[0];
+  if (argv0 === undefined) {
+    return undefined;
+  }
+  const entry = config.commands[argv0];
+  if (entry === undefined) {
+    return undefined;
+  }
+  const argv0Resolved = resolveOnPinnedPath(argv0, config.pinned_path);
+  if (argv0Resolved === null) {
+    return undefined;
+  }
+  for (const token of parsed.argv.slice(1)) {
+    if (token.startsWith('-')) {
+      // Flags match exactly; unlisted flags (including smuggled `--config`/`-c`
+      // style overrides) fail closed. Listed long-flag tokens are full
+      // spellings, never unambiguous prefixes of dangerous flags.
+      if (!entry.args.includes(token)) {
+        return undefined;
+      }
+      continue;
+    }
+    if (entry.args.includes(token)) {
+      continue;
+    }
+    if (entry.operands === 'workspace_relative' && isWorkspaceRelativeOperand(token)) {
+      continue;
+    }
+    return undefined;
+  }
+  return { argv: [argv0Resolved, ...parsed.argv.slice(1)], argv0_resolved: argv0Resolved, wrapper: parsed.wrapper };
+}
+
+/**
+ * Conservative seed allowlist. Every entry has no network capability and no
+ * external effects; curation excludes flag-smuggling (`git --config`/`-c`
+ * overrides are absent, so they fail closed). Versioned with server releases;
+ * never derived from model output.
+ */
+export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
+  return {
+    pinned_path: pinnedPath,
+    commands: {
+      ls: {
+        args: ['-l', '-a', '-la', '-al', '-lh', '-1', '--all', '--almost-all'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+      },
+      cat: {
+        args: ['-n'],
+        operands: 'workspace_relative',
+        offline_ok: true,
+      },
+      pwd: {
+        args: [],
+        operands: 'none',
+        offline_ok: true,
+      },
+      git: {
+        // Read-only subcommands only. Mutating subcommands (checkout -b,
+        // branch, commit, push) and `--config`/`-c` overrides are absent by
+        // curation, so they fail closed to Tier 3.
+        args: [
+          'status',
+          '--short',
+          '--porcelain',
+          '--branch',
+          'log',
+          '--oneline',
+          '--stat',
+          '--name-only',
+          '-n',
+          'diff',
+          '--cached',
+          '--staged',
+          'show',
+          '--no-patch',
+          'rev-parse',
+          '--git-dir',
+          '--show-toplevel',
+          'HEAD',
+        ],
+        operands: 'workspace_relative',
+        offline_ok: true,
+      },
+      node: {
+        args: ['--version'],
+        operands: 'none',
+        offline_ok: true,
+      },
+      python3: {
+        args: ['--version'],
+        operands: 'none',
+        offline_ok: true,
+      },
+    },
+  };
+}
+
+/**
+ * Explicit no-network subset of the allowlist for offline mode. Curated
+ * separately from the allowlist itself: a network-capable command added to the
+ * allowlist later is not offline-usable until it is listed here.
+ * ("read-only" does not imply "no network": `git ls-remote` is read-only and
+ * phones home, so it is absent from both lists.)
+ */
+export const OFFLINE_SHELL_COMMANDS: readonly string[] = ['ls', 'cat', 'pwd', 'git', 'node', 'python3'];
+
+/** True when every allowlisted name in the offline subset exists in the allowlist. */
+export function validateOfflineSubset(config: ShellAllowlistConfig): boolean {
+  return OFFLINE_SHELL_COMMANDS.every(name => config.commands[name]?.offline_ok === true);
+}

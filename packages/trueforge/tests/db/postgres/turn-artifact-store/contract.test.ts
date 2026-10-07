@@ -25,10 +25,20 @@ describePg('PostgresTurnArtifactStore (ITurnArtifactStore contract)', () => {
     }
   });
 
-  runTurnArtifactStoreContractSuite(() => {
-    if (env === undefined) {
-      throw new Error('Postgres test environment not initialized');
-    }
-    return new PostgresTurnArtifactStore(env.db);
+  runTurnArtifactStoreContractSuite({
+    getStore: () => {
+      if (env === undefined) {
+        throw new Error('Postgres test environment not initialized');
+      }
+      return new PostgresTurnArtifactStore(env.db);
+    },
+    backdate: async identity => {
+      if (env === undefined) {
+        throw new Error('Postgres test environment not initialized');
+      }
+      await sql`UPDATE turn_artifact SET created_at = ${identity.created_at}::timestamptz
+        WHERE tenant_id = ${identity.tenant_id} AND session_id = ${identity.session_id}
+          AND turn_id = ${identity.turn_id} AND path = ${identity.path}`.execute(env.db);
+    },
   });
 });

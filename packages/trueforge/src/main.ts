@@ -53,6 +53,11 @@ import {
   type ISessionStore,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
+import {
+  DEFAULT_PINNED_PATH,
+  defaultSentinelServices,
+  type SentinelServices,
+} from '@truefoundry/trueforge-core/core';
 import { heartbeatKey, RequestReplyExecutor, RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Kysely, Transaction } from 'kysely';
 import type { RedisClientType } from 'redis';
@@ -84,6 +89,7 @@ import type { Database as PostgresDatabase } from './db/postgres/types';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
+import { SentinelAuditStore, type ISentinelAuditStore, type SentinelAuditDatabase } from './db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
@@ -101,8 +107,8 @@ import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRec
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { TurnDrainRegistry } from './runtime/turnDrains';
+import { startSttAvailabilityWatcher } from './voice/sttAvailability';
 import { printStandaloneStartupBanner } from './startupBanner';
-import { ensureWritableDataDir } from './utils/dataDir';
 import {
   parsePerServerMcpHeaders,
   X_TFG_MCP_HEADERS,
@@ -148,6 +154,7 @@ interface ServerPersistence<TTransaction> {
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  sentinelAuditStore: ISentinelAuditStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
   /** One shared client for TrueFoundry store resolvers + auth; undefined when TrueFoundry mode is off. */
@@ -362,6 +369,7 @@ async function createStandalonePersistence(options: {
     scheduleStore: new SqliteScheduleStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
+    sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
     resolveSandboxProviderStore: () => sandboxProviderStore,
@@ -508,6 +516,7 @@ async function createDistributedPersistence(options: {
     scheduleStore: new PostgresScheduleStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
+    sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     resolveModelProviderStore,
     resolveMcpServerStore,
     resolveSandboxProviderStore,
@@ -539,6 +548,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     repositoryStore,
     turnArtifactStore,
     globalSettingsStore,
+    sentinelAuditStore,
     destroyDb,
     redis,
     serviceFoundryClient,
@@ -562,7 +572,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const turnDrains = new TurnDrainRegistry();
   const requestReplyRouter = new RequestReplyRouter();
   const eventSubscriptions = new EventSubscriptionRegistry<TurnStreamingEvent>(redis);
-  const sessions = new Sessions({ sessionStore });
+  const sentinelServices: SentinelServices = {
+    ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
+    audit: sentinelAuditStore,
+  };
+  const sessions = new Sessions({ sessionStore, sentinelServices });
 
   const oidc = isOidcConfigured(configuration) ? configuration.OIDC : undefined;
   if (oidc) {
@@ -651,6 +665,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     globalSettingsStore,
     sessionStore,
     sessionMetricsStore,
+    sentinelAuditStore,
     sessions,
     activeTurns,
     turnDrains,
@@ -674,7 +689,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     });
   }
 
-  return { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnDrains };
+  return { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnArtifactStore, turnDrains };
 }
 
 try {
@@ -683,21 +698,6 @@ try {
     standalone: configuration.STANDALONE,
     version: PACKAGE_VERSION,
   });
-
-  // Fail fast on unwritable data directories: the persona knowledge library and
-  // (with the markdown backend) the memory store write here at query time, and
-  // a bare EACCES mid-request is a silent production outage. This throws a
-  // configuration-shaped error naming the env var instead.
-  await ensureWritableDataDir({
-    dir: configuration.PERSONA_KNOWLEDGE_DIR,
-    envVar: 'PERSONA_KNOWLEDGE_DIR',
-  });
-  if (configuration.MEMORY_BACKEND === 'markdown') {
-    await ensureWritableDataDir({
-      dir: configuration.MEMORY_MARKDOWN_DIR,
-      envVar: 'MEMORY_MARKDOWN_DIR',
-    });
-  }
 
   if (configuration.STANDALONE) {
     printStandaloneStartupBanner({ version: PACKAGE_VERSION, color: shouldColorize() });
@@ -725,13 +725,42 @@ try {
     logger.info('TrueForge starting', { mode: 'distributed' });
   }
 
-  const { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnDrains } =
+  const { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnArtifactStore, turnDrains } =
     configuration.STANDALONE
       ? await createServerRuntime(
           await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
           logger,
         )
       : await createServerRuntime(await createDistributedPersistence({ configuration, logger }), logger);
+
+  // Turn artifact retention: persisted run_code/sandbox result files are
+  // downloads, not a permanent archive. One startup-anchored sweep a day
+  // deletes index rows older than TURN_ARTIFACT_RETENTION_DAYS plus blobs no
+  // surviving row references. Best effort: failures are logged, never fatal.
+  let artifactRetentionInFlight = false;
+  const sweepExpiredTurnArtifacts = async (): Promise<void> => {
+    if (artifactRetentionInFlight) {
+      return;
+    }
+    artifactRetentionInFlight = true;
+    try {
+      const deleted = await turnArtifactStore.deleteArtifactsOlderThan({
+        older_than: new Date(Date.now() - configuration.TURN_ARTIFACT_RETENTION_DAYS * 86_400_000).toISOString(),
+      });
+      if (deleted > 0) {
+        logger.info('Deleted expired turn artifact rows', { count: deleted });
+      }
+    } catch (error) {
+      logger.warn('Turn artifact retention sweep failed', extractErrorLogFields(error));
+    } finally {
+      artifactRetentionInFlight = false;
+    }
+  };
+  void sweepExpiredTurnArtifacts();
+  const artifactRetentionTimer = setInterval(() => {
+    void sweepExpiredTurnArtifacts();
+  }, 86_400_000);
+  artifactRetentionTimer.unref();
 
   if (
     mountFrontend(app, {
@@ -864,6 +893,13 @@ try {
     });
   }
 
+  // Voice input availability is probed in the background at boot instead of on
+  // first use: the STT sidecar `/healthz` check runs immediately without blocking
+  // startup, then repeats every 30s, so `capabilities.voice` flips on as soon as
+  // the sidecar is warm and recovers without a backend restart. The check is
+  // advisory only; the backend boots regardless of STT state.
+  startSttAvailabilityWatcher({ logger });
+
   const server = serve(
     {
       fetch: app.fetch,
@@ -926,6 +962,7 @@ try {
       }
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       clearInterval(commandExecutionRecoveryTimer);
+      clearInterval(artifactRetentionTimer);
       // Stop serving peer requests (waits for in-flight replies), then close
       // the clients this process owns: the subscriber duplicate and the primary.
       await requestReplyExecutor?.drain();

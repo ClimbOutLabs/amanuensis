@@ -1,7 +1,7 @@
 'use client';
 
 import { ThreadPrimitive, useAuiState } from '@assistant-ui/react';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { preloadMarkdownOpenUI } from '../atoms/Markdown.js';
 import { ComposerBusyProvider } from '../hooks/useComposerBusyState.js';
 import { AvatarActivityBridge } from '../hooks/useAvatarActivity.js';
@@ -12,6 +12,7 @@ import { isNewChatView } from '../utils/isNewChatView.js';
 import { ApprovalFocusProvider } from './approvalFocus.js';
 import { AssistantMessageContainer } from './AssistantMessageContainer.js';
 import { DocumentIngestionStatusProvider } from './DocumentIngestionStatusProvider.js';
+import { SentinelStateProvider } from '../sentinel/SentinelStateProvider.js';
 import { HistoryLoaderContainer } from './HistoryLoaderContainer.js';
 import { PendingApprovalsBanner } from './PendingApprovalsBanner.js';
 import { ThreadImplementationPlanGrantControls } from './ImplementationPlanGrantControls.js';
@@ -23,9 +24,21 @@ import { UserMessageContainer } from './UserMessageContainer.js';
 
 export { isNewChatView } from '../utils/isNewChatView.js';
 
-/** Mount-only lift. Keyed by message.id via ThreadPrimitive.Messages — not content (streaming). */
-function AnimatedMessageShell({ children }: { children: ReactNode }) {
-  return <div className="animate-in fade-in slide-in-from-bottom-1 fill-mode-both duration-200">{children}</div>;
+/** Mount-only lift, keyed by message.id via ThreadPrimitive.Messages. Only messages
+ * that arrive after the thread's first paint animate; the initial history mounts
+ * silently so opening a thread does not shimmer. Honors reduced-motion. */
+function AnimatedMessageShell({ children, animate }: { children: ReactNode; animate: boolean }) {
+  return (
+    <div
+      className={
+        animate
+          ? 'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:fill-mode-both motion-safe:duration-200'
+          : undefined
+      }
+    >
+      {children}
+    </div>
+  );
 }
 
 function ThreadMessage({ isEditing }: { isEditing: boolean }) {
@@ -61,6 +74,22 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
 
   const isEmpty = useAuiState(isNewChatView);
   const isLoading = useAuiState(s => s.thread.isLoading);
+  // Entrance animation gate: shells mounted during the thread's first paint stay
+  // static; only messages arriving afterwards animate. Resets on thread switch
+  // since the container does not remount between threads.
+  const threadKey = useAuiState(s => s.threadListItem.remoteId ?? 'new');
+  const initialPaintDone = useRef(false);
+  const paintedThreadKey = useRef(threadKey);
+  if (paintedThreadKey.current !== threadKey) {
+    paintedThreadKey.current = threadKey;
+    initialPaintDone.current = false;
+  }
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      initialPaintDone.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [threadKey]);
   const welcomeHeading =
     shell?.mode.status === 'active'
       ? shell.mode.agentName != null && shell.mode.agentName.length > 0
@@ -73,7 +102,8 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
   return (
     <MemoryTurnContextProvider>
       <DocumentIngestionStatusProvider>
-        <ComposerBusyProvider>
+        <SentinelStateProvider>
+          <ComposerBusyProvider>
           <AvatarActivityBridge />
           <ApprovalFocusProvider>
             <ThreadPrimitive.Root asChild>
@@ -92,7 +122,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
                           <MessageGroup>
                             <ThreadPrimitive.Messages>
                               {({ message }) => (
-                                <AnimatedMessageShell>
+                                <AnimatedMessageShell animate={initialPaintDone.current}>
                                   <ThreadMessage isEditing={message.role === 'user' && message.composer.isEditing} />
                                 </AnimatedMessageShell>
                               )}
@@ -119,6 +149,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
             </ThreadPrimitive.Root>
           </ApprovalFocusProvider>
         </ComposerBusyProvider>
+        </SentinelStateProvider>
       </DocumentIngestionStatusProvider>
     </MemoryTurnContextProvider>
   );

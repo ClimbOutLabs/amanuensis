@@ -1,8 +1,20 @@
-import type { ITurnArtifactStore } from '../../src/db/turnArtifactStore';
+import type { ITurnArtifactStore, TurnArtifactIdentityInput } from '../../src/db/turnArtifactStore';
 
 const OWNER = { tenant_id: 'default', session_id: 's1', turn_id: 't1' };
 
-export function runTurnArtifactStoreContractSuite(getStore: () => ITurnArtifactStore): void {
+export interface TurnArtifactContractFixtures {
+  getStore: () => ITurnArtifactStore;
+  /**
+   * Test seam: rewrites created_at on one index row so retention tests can age
+   * rows without widening the store API with a test-only timestamp override.
+   */
+  backdate: (identity: TurnArtifactIdentityInput & { created_at: string }) => Promise<void>;
+}
+
+const daysAgo = (days: number): string => new Date(Date.now() - days * 86_400_000).toISOString();
+
+export function runTurnArtifactStoreContractSuite(fixtures: TurnArtifactContractFixtures): void {
+  const { getStore, backdate } = fixtures;
   it('stores a blob and index row, content-addressed by sha256 digest', async () => {
     const store = getStore();
     const data = Buffer.from('the finished tribute video');
@@ -139,5 +151,65 @@ export function runTurnArtifactStoreContractSuite(getStore: () => ITurnArtifactS
     expect(
       await store.getArtifact({ tenant_id: 'default', session_id: 's1', turn_id: 't2', path: '/tmp/report.pdf' }),
     ).toBeUndefined();
+  });
+
+  it('retention: keeps rows newer than the cutoff, and their blobs', async () => {
+    const store = getStore();
+    const data = Buffer.from('still fresh');
+    const record = await store.recordStoredArtifact({
+      ...OWNER,
+      path: '/tmp/fresh.txt',
+      name: 'fresh.txt',
+      data,
+      mime: 'application/octet-stream',
+    });
+    await backdate({ ...OWNER, path: '/tmp/fresh.txt', created_at: daysAgo(10) });
+
+    const deleted = await store.deleteArtifactsOlderThan({ older_than: daysAgo(30) });
+
+    expect(deleted).toBe(0);
+    expect(await store.getArtifact({ ...OWNER, path: '/tmp/fresh.txt' })).toBeDefined();
+    expect(await store.getBlob({ tenant_id: OWNER.tenant_id, digest: record.digest ?? '' })).toEqual(data);
+  });
+
+  it('retention: deletes rows older than the cutoff, and blobs no row references', async () => {
+    const store = getStore();
+    const data = Buffer.from('long gone');
+    const record = await store.recordStoredArtifact({
+      ...OWNER,
+      path: '/tmp/old.txt',
+      name: 'old.txt',
+      data,
+      mime: 'application/octet-stream',
+    });
+    await backdate({ ...OWNER, path: '/tmp/old.txt', created_at: daysAgo(40) });
+
+    const deleted = await store.deleteArtifactsOlderThan({ older_than: daysAgo(30) });
+
+    expect(deleted).toBe(1);
+    expect(await store.getArtifact({ ...OWNER, path: '/tmp/old.txt' })).toBeUndefined();
+    expect(await store.getBlob({ tenant_id: OWNER.tenant_id, digest: record.digest ?? '' })).toBeUndefined();
+  });
+
+  it('retention: keeps a blob still referenced by a surviving row', async () => {
+    const store = getStore();
+    const data = Buffer.from('shared bytes');
+    const oldIdentity = { tenant_id: 'default', session_id: 's1', turn_id: 't1', path: '/tmp/shared-a.txt' };
+    const newIdentity = { tenant_id: 'default', session_id: 's1', turn_id: 't2', path: '/tmp/shared-b.txt' };
+    await store.recordStoredArtifact({ ...oldIdentity, name: 'shared-a.txt', data, mime: 'application/octet-stream' });
+    const survivor = await store.recordStoredArtifact({
+      ...newIdentity,
+      name: 'shared-b.txt',
+      data,
+      mime: 'application/octet-stream',
+    });
+    await backdate({ ...oldIdentity, created_at: daysAgo(40) });
+
+    const deleted = await store.deleteArtifactsOlderThan({ older_than: daysAgo(30) });
+
+    expect(deleted).toBe(1);
+    expect(await store.getArtifact(oldIdentity)).toBeUndefined();
+    expect(await store.getArtifact(newIdentity)).toBeDefined();
+    expect(await store.getBlob({ tenant_id: 'default', digest: survivor.digest ?? '' })).toEqual(data);
   });
 }
