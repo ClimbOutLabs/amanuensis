@@ -1,12 +1,12 @@
-import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
 import { chown, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import type { Logger } from 'winston';
 import { onSignalAbort, signalAbortError } from '../../util/abort';
 import { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './errors';
-import { RUN_CODE_RESERVED_PREFIX, OUTPUT_EXCEEDED_MARKER } from './IsolationDriver';
 import type { DriverReadiness, DriverRunParams, DriverRunResult, IsolationDriver } from './IsolationDriver';
+import { OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX } from './IsolationDriver';
 import {
   FILE_BASENAME_PATTERN,
   RunCodeInputSchema,
@@ -630,7 +630,13 @@ export class RunCodeService implements RunCodeBackend {
     }
 
     const harvestWarnings: string[] = [...result.harvestWarnings];
-    const { filesOut, harvestedFiles } = await this.harvest({ runRoot, ingressDir, scratchDir, egressDir, harvestWarnings });
+    const { filesOut, harvestedFiles } = await this.harvest({
+      runRoot,
+      ingressDir,
+      scratchDir,
+      egressDir,
+      harvestWarnings,
+    });
 
     // persist harvested bytes for per-turn download BEFORE run-root
     // cleanup. The sink never fails the run — a sink failure becomes a
@@ -800,7 +806,9 @@ export class RunCodeService implements RunCodeBackend {
         if (seen.has(name)) {
           // Egress was considered first, so its file wins; the shadowed one
           // is reported rather than silently dropped.
-          input.harvestWarnings.push(`Skipped result file "${name}": an earlier file with the same name takes precedence.`);
+          input.harvestWarnings.push(
+            `Skipped result file "${name}": an earlier file with the same name takes precedence.`,
+          );
           continue;
         }
         let fileStat;
@@ -825,7 +833,9 @@ export class RunCodeService implements RunCodeBackend {
           continue;
         }
         if (totalBytes + fileStat.size > RUN_CODE_HARVEST_MAX_TOTAL_BYTES) {
-          input.harvestWarnings.push('Stopped collecting result files at the 100 MiB total cap; remaining files were skipped.');
+          input.harvestWarnings.push(
+            'Stopped collecting result files at the 100 MiB total cap; remaining files were skipped.',
+          );
           return;
         }
         // a file that vanishes or becomes unreadable between lstat and
