@@ -855,6 +855,18 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
+  // Web search: known-safe read-only network tool. Offline mode is handled
+  // above; when online, searches are safe to allow without approval.
+  // Placed before the MCP hints check: web_search inherently reaches the
+  // network (open_world_hint), but it is read-only.
+  if (name === 'web_search') {
+    return tier1Decision({
+      reason: 'web_search',
+      reason_detail: 'Web search (read-only).',
+      sensitive_read: false,
+    });
+  }
+
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.
   const destructiveHint = action.mcp_hints.destructive_hint === true;
   const openWorldHint = action.mcp_hints.open_world_hint === true;
@@ -928,16 +940,6 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason: 'local_read_only',
       reason_detail: `Local read-only tool \`${action.tool_name}\`.`,
       sensitive_read: sensitiveReadHit(action.canonical_params),
-    });
-  }
-
-  // Web search: first-party read-only network tool. Offline mode is handled
-  // above; when online, searches are safe to allow without approval.
-  if (action.tool_type === 'truefoundry-system' && name === 'web_search') {
-    return tier1Decision({
-      reason: 'web_search',
-      reason_detail: 'Web search (read-only).',
-      sensitive_read: false,
     });
   }
 
