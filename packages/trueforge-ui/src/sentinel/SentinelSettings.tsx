@@ -51,7 +51,7 @@ export const SentinelSettings: FC = () => {
           <p className="text-sm font-medium text-text-primary">Offline mode</p>
           <p className="mt-1 text-sm text-text-secondary">
             While on, actions outside this device that would need your approval are denied
-            automatically instead of showing an approval card. Tier 1 reads and Tier 2
+            automatically instead of showing an approval card. Reads and sensitive action
             notices are unaffected.
           </p>
           {error !== null && (
