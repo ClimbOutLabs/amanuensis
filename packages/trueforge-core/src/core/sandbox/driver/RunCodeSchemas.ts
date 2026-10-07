@@ -16,7 +16,7 @@ export const RUN_CODE_ERROR_CODES = [
 export type RunCodeErrorCode = (typeof RUN_CODE_ERROR_CODES)[number];
 
 /** Basename-only: no separators, no traversal, 1-256 chars. */
-const FILE_BASENAME_PATTERN = /^(?!\.{1,2}$)[^/\\]{1,256}$/;
+const FILE_BASENAME_PATTERN = /^([^./\\]|\.[^./\\]|\.\.[^/\\])[^/\\]{0,255}$/;
 
 export const RunCodeLanguageSchema = z.enum(['python', 'node']);
 
