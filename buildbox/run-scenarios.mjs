@@ -30,6 +30,7 @@ const UI = 'http://127.0.0.1:5173';
 const TOKEN_FACTORY_KEY_FILE = '/home/opc/.config/tokenfactory-key';
 const TOKEN_FACTORY_BASE_URL = 'https://api.tokenfactory.nebius.com/v1';
 const TOKEN_FACTORY_MODEL_ID = 'nvidia/Nemotron-3_5-Lightning';
+const TOKEN_FACTORY_MODEL_NAME = 'nemotron-3-5-lightning';
 
 function readTokenFactoryKey() {
   let key = '';
@@ -54,7 +55,7 @@ function providerManifest() {
     models: [
       {
         model_id: TOKEN_FACTORY_MODEL_ID,
-        name: TOKEN_FACTORY_MODEL_ID,
+        name: TOKEN_FACTORY_MODEL_NAME,
         properties: { context_length: 1048576 },
       },
     ],
