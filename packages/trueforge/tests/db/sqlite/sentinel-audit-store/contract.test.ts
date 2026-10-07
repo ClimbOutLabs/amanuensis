@@ -3,7 +3,7 @@ import { createSqliteTestDatabase, type SqliteTestDatabase } from '../testDataba
 
 describe('SentinelAuditStore', () => {
   let env: SqliteTestDatabase;
-  let store: SentinelAuditStore<any>;
+  let store: SentinelAuditStore;
 
   beforeEach(async () => {
     env = await createSqliteTestDatabase();
@@ -35,11 +35,11 @@ describe('SentinelAuditStore', () => {
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0].tool_name).toBe('update_space');
-    expect(rows[0].tier).toBe(3);
-    expect(rows[0].outcome).toBe('ran');
-    expect(rows[0].id).toBeDefined();
-    expect(rows[0].created_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(rows[0]!.tool_name).toBe('update_space');
+    expect(rows[0]!.tier).toBe(3);
+    expect(rows[0]!.outcome).toBe('ran');
+    expect(rows[0]!.id).toBeDefined();
+    expect(rows[0]!.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it('list is scoped by tenant, user, and session', async () => {
@@ -66,7 +66,7 @@ describe('SentinelAuditStore', () => {
 
     const s1 = await store.list({ tenant_id: 't1', created_by: 'u1', conversation_id: 's1', limit: 50, offset: 0 });
     expect(s1).toHaveLength(1);
-    expect(s1[0].tool_name).toBe('read');
+    expect(s1[0]!.tool_name).toBe('read');
 
     const otherTenant = await store.list({ tenant_id: 't2', created_by: 'u1', conversation_id: 's1', limit: 50, offset: 0 });
     expect(otherTenant).toHaveLength(0);
@@ -85,10 +85,10 @@ describe('SentinelAuditStore', () => {
     });
     const [row] = await store.list({ tenant_id: 't1', created_by: 'u1', conversation_id: 's1', limit: 50, offset: 0 });
 
-    await store.updateOutcome({ entry_id: row.id, outcome: 'stopped_by_user' });
+    await store.updateOutcome({ entry_id: row!.id, outcome: 'stopped_by_user' });
 
     const [updated] = await store.list({ tenant_id: 't1', created_by: 'u1', conversation_id: 's1', limit: 50, offset: 0 });
-    expect(updated.outcome).toBe('stopped_by_user');
+    expect(updated!.outcome).toBe('stopped_by_user');
   });
 
   it('list orders by created_at desc and paginates', async () => {
@@ -108,10 +108,10 @@ describe('SentinelAuditStore', () => {
 
     const page1 = await store.list({ tenant_id: 't1', created_by: 'u1', conversation_id: 's1', limit: 2, offset: 0 });
     expect(page1).toHaveLength(2);
-    expect(page1[0].tool_name).toBe('tool_2');
+    expect(page1[0]!.tool_name).toBe('tool_2');
 
     const page2 = await store.list({ tenant_id: 't1', created_by: 'u1', conversation_id: 's1', limit: 2, offset: 2 });
     expect(page2).toHaveLength(1);
-    expect(page2[0].tool_name).toBe('tool_0');
+    expect(page2[0]!.tool_name).toBe('tool_0');
   });
 });

@@ -380,7 +380,9 @@ export function App() {
               limit: 200,
               ...(pageToken === undefined ? {} : { pageToken }),
             });
-            for (const item of page.data) events.push(item.event);
+            for (const item of page.data) {
+              events.push(item.event);
+            }
             pageToken = page.response.pagination.nextPageToken;
           } while (pageToken !== undefined);
           return events;
