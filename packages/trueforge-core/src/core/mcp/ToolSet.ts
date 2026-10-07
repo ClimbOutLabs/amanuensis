@@ -281,7 +281,7 @@ export class ToolSet implements IToolSet {
       workspace_cwd: sentinel.workspace_cwd,
       action: {
         tool_name: params.name,
-        canonical_params: isRecord(params.arguments) ? params.arguments : {},
+        canonical_params: isRecord(params.arguments) ? JSON.parse(JSON.stringify(params.arguments)) : {},
         tool_type: sourceInfo.type,
         mcp_hints: {
           read_only_hint: sourceInfo.read_only_hint,
