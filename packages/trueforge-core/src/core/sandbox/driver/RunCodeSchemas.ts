@@ -22,8 +22,7 @@ export type RunCodeErrorCode = (typeof RUN_CODE_ERROR_CODES)[number];
  * so `(?!.{1,2}$)` would crash EngineCore. Each branch carries its own tail
  * bound so the total length never exceeds 256.
  */
-export const FILE_BASENAME_PATTERN =
-  /^([^./\\][^/\\]{0,255}|\.[^./\\][^/\\]{0,254}|\.\.[^/\\][^/\\]{0,253})$/;
+export const FILE_BASENAME_PATTERN = /^([^./\\][^/\\]{0,255}|\.[^./\\][^/\\]{0,254}|\.\.[^/\\][^/\\]{0,253})$/;
 
 export const RunCodeLanguageSchema = z.enum(['python', 'node']);
 
