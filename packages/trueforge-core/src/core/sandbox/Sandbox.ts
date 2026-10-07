@@ -2193,6 +2193,12 @@ export class Sandbox extends LocalToolMCP {
       effect !== undefined ? sandboxCommandRequiresApproval(effect) : info.is_approval_required;
     return {
       ...info,
+      // The approval token (if any) was minted over the invoked name and the
+      // normalized effective arguments, not the remapped original_tool_name or
+      // the raw wire arguments. Record the exact mint identity so pre-dispatch
+      // verification hashes the same values.
+      mint_tool_name: params.name,
+      mint_canonical_params: effectiveArguments ?? {},
       original_tool_name:
         params.name === SANDBOX_EXEC_TOOL_NAME
           ? purpose === undefined
