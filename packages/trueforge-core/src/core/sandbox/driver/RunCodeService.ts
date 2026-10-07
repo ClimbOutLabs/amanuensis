@@ -8,6 +8,7 @@ import { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './err
 import { RUN_CODE_RESERVED_PREFIX, OUTPUT_EXCEEDED_MARKER } from './IsolationDriver';
 import type { DriverReadiness, DriverRunParams, DriverRunResult, IsolationDriver } from './IsolationDriver';
 import {
+  FILE_BASENAME_PATTERN,
   RunCodeInputSchema,
   RunCodeResultSchema,
   type RunCodeErrorCode,
@@ -31,8 +32,6 @@ export const RUN_CODE_SANDBOX_UID = 65532;
 export const RUN_CODE_SANDBOX_GID = 65532;
 /** successful readiness probes are trusted for 60s (failures re-probe). */
 export const RUN_CODE_READINESS_CACHE_TTL_MS = 60_000;
-/** Basename-only: no separators, no traversal, 1–256 chars. */
-const BASENAME_PATTERN = /^(?!\.{1,2}$)[^/\\]{1,256}$/;
 
 /**
  * Ownership handoff (plan E-B1): the sandbox uid must own the run dirs AND the
@@ -794,7 +793,7 @@ export class RunCodeService implements RunCodeBackend {
         }
         const path = entry.path;
         const name = basename(path);
-        if (!BASENAME_PATTERN.test(name) || name.startsWith(RUN_CODE_RESERVED_PREFIX)) {
+        if (!FILE_BASENAME_PATTERN.test(name) || name.startsWith(RUN_CODE_RESERVED_PREFIX)) {
           input.harvestWarnings.push(`Skipped result file with an invalid name: ${name}.`);
           continue;
         }
