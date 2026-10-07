@@ -150,6 +150,8 @@ async function startServers() {
       TRUEFORGE_API_KEY: 'trueforge-local-dev',
       PORT: '8790',
       HOST: '127.0.0.1',
+      FRONTEND_PORT: '5173',
+      VITE_HOST: '127.0.0.1',
     },
     detached: true,
     stdio: ['ignore', logFd, logFd],
