@@ -126,6 +126,9 @@ function makeSpec(
 function resolve(resolver: PersonaTurnResourceResolver, spec: AgentSpec, subAgent = false) {
   return resolver.resolveAgentDefinition({
     spec,
+    tenant_id: 't1',
+    created_by: 'u1',
+    session_id: 's1',
     ...(subAgent ? { agent_info: { type: 'dynamic' as const, name: 'reviewer', input: 'do the thing' } } : {}),
     signal: new AbortController().signal,
     tracing: resolver.createTracing(),
