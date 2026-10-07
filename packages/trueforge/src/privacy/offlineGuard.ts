@@ -43,7 +43,11 @@ function ipv4Octets(hostname: string): [number, number, number, number] | undefi
   if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) {
     return undefined;
   }
-  return [parts[0], parts[1], parts[2], parts[3]];
+  const [a, b, c, d] = parts;
+  if (a === undefined || b === undefined || c === undefined || d === undefined) {
+    return undefined;
+  }
+  return [a, b, c, d];
 }
 
 /**

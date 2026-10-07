@@ -26,8 +26,14 @@ const CRC_TABLE: Uint32Array = (() => {
 
 export function crc32(data: Uint8Array): number {
   let crc = 0xffffffff;
-  for (let i = 0; i < data.length; i++) {
-    crc = CRC_TABLE[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
+  for (const byte of data) {
+    const tableEntry = CRC_TABLE[(crc ^ byte) & 0xff];
+    if (tableEntry === undefined) {
+      // The table is built with all 256 entries, so this cannot happen; fail
+      // loudly instead of silently producing a corrupt checksum.
+      throw new Error('crc32: CRC table lookup failed');
+    }
+    crc = tableEntry ^ (crc >>> 8);
   }
   return (crc ^ 0xffffffff) >>> 0;
 }
@@ -94,6 +100,12 @@ export function createZip(entries: ZipEntry[]): Uint8Array {
 
   const centralStart = offset;
   prepared.forEach((p, index) => {
+    const localHeaderOffset = centralOffsets[index];
+    if (localHeaderOffset === undefined) {
+      // centralOffsets is pushed once per prepared entry, so this cannot
+      // happen; fail loudly instead of writing a corrupt archive.
+      throw new Error('createZip: missing local header offset');
+    }
     writeU32(view, offset, 0x02014b50); // central directory signature
     writeU16(view, offset + 4, 20); // version made by
     writeU16(view, offset + 6, 20); // version needed
@@ -110,7 +122,7 @@ export function createZip(entries: ZipEntry[]): Uint8Array {
     writeU16(view, offset + 34, 0); // disk number
     writeU16(view, offset + 36, 0); // internal attrs
     writeU32(view, offset + 38, 0); // external attrs
-    writeU32(view, offset + 42, centralOffsets[index]); // local header offset
+    writeU32(view, offset + 42, localHeaderOffset); // local header offset
     offset += 46;
     bytes.set(p.nameBytes, offset);
     offset += p.nameBytes.length;
