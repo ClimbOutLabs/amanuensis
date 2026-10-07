@@ -5,8 +5,11 @@
  * REAL browser-driven UI testing for Sentinel (and other scenarios).
  *
  * Drives a headless Chromium through the actual Amanuensis UI:
- * clicking toggles, sending chat messages, approving/denying cards,
- * and attempting break-ins — screenshotting every step.
+ * registering the model provider, clicking toggles, sending chat messages,
+ * approving/denying cards, and attempting break-ins, screenshotting every step.
+ *
+ * Maya rule: UI-only. The harness makes no calls to the app API; every setup
+ * step, including model provider registration, goes through the browser.
  *
  * Usage: node buildbox/run-scenarios.mjs --scenario <name>
  *
@@ -48,19 +51,17 @@ function readTokenFactoryKey() {
   return key;
 }
 
-function providerManifest() {
-  return {
-    type: 'tokenfactory',
-    auth: { api_key: readTokenFactoryKey() },
-    models: [
-      {
-        model_id: TOKEN_FACTORY_MODEL_ID,
-        name: TOKEN_FACTORY_MODEL_NAME,
-        properties: { context_length: 1048576 },
-      },
-    ],
-  };
-}
+// Values typed into the Add Custom Provider form in Settings > Models.
+// A custom provider is OpenAI-compatible, so it drives Token Factory exactly
+// like the well-known tokenfactory type; only the base URL default differs.
+const PROVIDER_FORM = {
+  providerName: 'tokenfactory',
+  baseUrl: 'https://api.tokenfactory.nebius.com/v1',
+  modelId: TOKEN_FACTORY_MODEL_ID,
+  modelName: TOKEN_FACTORY_MODEL_NAME,
+  contextLength: '1048576',
+  maxOutputTokens: '8192',
+};
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -85,31 +86,6 @@ const scenario = JSON.parse(readFileSync(scenarioPath, 'utf8'));
 const outDir = path.join(HERE, 'out', scenarioName);
 const shotDir = path.join(outDir, 'screenshots');
 mkdirSync(shotDir, { recursive: true });
-
-// ---------------------------------------------------------------- http -----
-async function api(method, p, body, { timeoutMs = 30000 } = {}) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(API + p, {
-      method,
-      headers: { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: ctrl.signal,
-    });
-    const text = await res.text();
-    let json = null;
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch {
-      /* non-JSON body */
-    }
-    if (!res.ok) throw new Error(`${method} ${p} -> HTTP ${res.status}: ${text.slice(0, 600)}`);
-    return json;
-  } finally {
-    clearTimeout(t);
-  }
-}
 
 // ------------------------------------------------------------ preflight ----
 function tokenFactoryReachable() {
@@ -193,13 +169,6 @@ function stopServers() {
     }
   }
   killStale();
-}
-
-// --------------------------------------------------------------- setup -----
-async function ensureProvider() {
-  log('registering token factory provider ...');
-  await api('PUT', '/api/v1/settings/model-providers', { manifest: providerManifest() }, { timeoutMs: 60000 });
-  log('provider ok');
 }
 
 // ----------------------------------------------------------- playwright ----
@@ -311,17 +280,94 @@ async function runSentinelScenario(pw) {
     }
   }
 
-  // --- 1. open the UI ---------------------------------------------------
+  // --- UI-only helpers -------------------------------------------------
+  // Click the button whose visible text exactly matches `label`, scoped to
+  // `containerSel`. Playwright's :has-text is substring-based, and "Models"
+  // would also match "Model roles", so compare the trimmed text instead.
+  async function clickExactButton(containerSel, label) {
+    const buttons = await page.$$(`${containerSel} button`);
+    for (const b of buttons) {
+      const text = ((await b.textContent()) || '').trim();
+      if (text === label) {
+        await b.click();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // --- 1. register the model provider through the Settings UI ---------------
+  // Maya rule: no harness API calls. The provider is added via Settings >
+  // Models > Add Custom Provider, exactly as a user would do it.
+  async function registerProviderViaUI() {
+    log('registering token factory provider through the UI ...');
+    const apiKey = readTokenFactoryKey();
+
+    await page.goto(UI + '/settings', { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await sleep(3000);
+    let sectionsNav = await page.$('nav[aria-label="Settings sections"]');
+    if (!sectionsNav) {
+      log('settings route did not render the panel; falling back to home (settings auto-opens when no model is set)');
+      await page.goto(UI + '/', { waitUntil: 'domcontentloaded', timeout: 90000 });
+      await sleep(4000);
+      sectionsNav = await page.$('nav[aria-label="Settings sections"]');
+    }
+    check('settings panel opened', !!sectionsNav);
+
+    check('Models section opened', await clickExactButton('nav[aria-label="Settings sections"]', 'Models'));
+    await sleep(1500);
+
+    // A previous run may already have configured the provider; reuse it then.
+    const alreadyConfigured = await page.evaluate(() => document.body.innerText.includes('tokenfactory'));
+    if (alreadyConfigured) {
+      log('token factory provider already configured; skipping the form');
+    } else {
+      check('Add Custom Provider opened', await clickExactButton('body', 'Add Custom Provider'));
+      await page.waitForSelector('#custom-provider-name', { timeout: 20000 });
+
+      await page.fill('#custom-provider-name', PROVIDER_FORM.providerName);
+      await page.fill('#custom-provider-base-url', PROVIDER_FORM.baseUrl);
+      await page.fill('#custom-provider-api-key', apiKey);
+      await page.fill('#custom-provider-model-0-id', PROVIDER_FORM.modelId);
+      // The model name auto-derives from the id; set it explicitly for determinism.
+      await page.fill('#custom-provider-model-0-name', PROVIDER_FORM.modelName);
+      await page.fill('#custom-provider-model-0-context-length', PROVIDER_FORM.contextLength);
+      await page.fill('#custom-provider-model-0-max-output-tokens', PROVIDER_FORM.maxOutputTokens);
+      await sleep(800);
+      await shot('00-provider-form-filled.png');
+
+      const addBtn = await page.$('button[type="submit"]:has-text("Add provider")');
+      const addEnabled = addBtn ? await addBtn.isEnabled() : false;
+      check('Add provider submit enabled', addEnabled);
+      await addBtn.click();
+      // The modal closes on success and stays open with an inline error on failure.
+      await page.waitForSelector('#custom-provider-name', { state: 'detached', timeout: 60000 }).catch(() => {});
+      const stillOpen = !!(await page.$('#custom-provider-name'));
+      if (stillOpen) {
+        const formText = await page.evaluate(() => document.body.innerText.slice(0, 600));
+        log('provider form stayed open; page text:', JSON.stringify(formText));
+      }
+      check('provider form submitted (modal closed)', !stillOpen);
+    }
+
+    const listed = await waitForText('tokenfactory', 30000, 'provider in Configured list');
+    check('token factory provider appears in Configured', listed);
+    await shot('00-provider-configured.png');
+  }
+
+  await registerProviderViaUI();
+
+  // Reload so boot re-reads the model list; the first model becomes the default
+  // agent model. This is a browser navigation, not an API call.
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 90000 });
+  await sleep(4000);
+  const modelChosen = await page.evaluate(() => !document.body.innerText.includes('No model chosen yet'));
+  check('model chosen after reload (setup checklist cleared)', modelChosen);
+
+  // --- 2. open the UI and start a chat --------------------------------------
   log('opening UI ...');
   await page.goto(UI + '/', { waitUntil: 'domcontentloaded', timeout: 90000 });
   await sleep(4000);
-
-  // If a setup / get-started screen is showing, it means the provider didn't register.
-  const bodyText = await page.evaluate(() => document.body.innerText);
-  if (/get started|complete setup|add a model/i.test(bodyText) && !(await findComposer())) {
-    await shot('00-setup-screen.png');
-    fail('setup screen is showing; provider registration did not take effect');
-  }
 
   // Start a session by sending a first message through the real composer.
   await sendChatMessage('Hello, are you ready?');
@@ -338,7 +384,7 @@ async function runSentinelScenario(pw) {
   await shot('01-initial-state.png');
   check('UI loads and chat works', true);
 
-  // --- 2. find the Permissions section (right rail) ----------------------
+  // --- 3. find the Permissions section (right rail) ----------------------
   // The toggle is the real target; wait for it directly instead of text.
   const toggleSelector = '[aria-label="Always ask before shell"]';
   async function ensureToggleVisible() {
@@ -546,7 +592,6 @@ try {
   log(`scenario: ${scenarioName} (browser-driven UI test)`);
   if (!tokenFactoryReachable()) fail('token factory unreachable (check key and network)');
   await startServers();
-  await ensureProvider();
   const pw = loadPlaywright();
   await ensureChromium(pw);
   if (scenario.kind === 'sentinel-ui' || scenarioName === 'sentinel-settings') {
