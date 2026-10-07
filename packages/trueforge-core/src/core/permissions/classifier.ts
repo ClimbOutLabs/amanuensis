@@ -910,9 +910,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // call_tool dispatcher: classify by the inner tool being invoked. The
   // dispatcher carries the inner tool name in the `tool_name` param.
   if (name === 'call_tool' && action.mcp_hints.destructive_hint !== true) {
-    const inner = typeof action.canonical_params.tool_name === 'string'
-      ? action.canonical_params.tool_name.toLowerCase()
-      : '';
+    const innerParam = action.canonical_params['tool_name'];
+    const inner = typeof innerParam === 'string' ? innerParam.toLowerCase() : '';
     if (
       inner === 'web_search' ||
       inner === 'web_fetch' ||
