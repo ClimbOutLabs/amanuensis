@@ -87,7 +87,7 @@ const callToolSchema = z.object({
  * Mirrors the unwrap branch of DeferredTool.toolCallInfo: when mint classified
  * the underlying tool, the approval token covers (underlying_name, input), so
  * the verifier must hash the same inner input. Returns undefined when the
- * wrapper does not parse — mint then classified the wrapper itself, and the
+ * wrapper does not parse: mint then classified the wrapper itself, and the
  * verifier must hash the wrapper too.
  */
 export function tryUnwrapCallToolInput(
