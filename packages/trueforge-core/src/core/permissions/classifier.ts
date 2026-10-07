@@ -931,6 +931,16 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
+  // Web search: first-party read-only network tool. Offline mode is handled
+  // above; when online, searches are safe to allow without approval.
+  if (action.tool_type === 'truefoundry-system' && name === 'web_search') {
+    return tier1Decision({
+      reason: 'web_search',
+      reason_detail: 'Web search (read-only).',
+      sensitive_read: false,
+    });
+  }
+
   // Fail closed: anything unrecognized is Tier 3 with a card.
   return tier3Decision({
     card: {
