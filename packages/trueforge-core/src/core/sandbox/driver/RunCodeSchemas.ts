@@ -27,7 +27,10 @@ const RunCodeFileInSchema = z.object({
 
 export const RunCodeInputSchema = z.object({
   language: RunCodeLanguageSchema,
-  code: z.string().min(1).max(512 * 1024),
+  code: z
+    .string()
+    .min(1)
+    .max(512 * 1024),
   // Model-authored content only (e.g. CSV text the model composes). Conversation
   // attachments are staged into ingress automatically by the harness and
   // advertised in the tool description — the model never base64-encodes them.
