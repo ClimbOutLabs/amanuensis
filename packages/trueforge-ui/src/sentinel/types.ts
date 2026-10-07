@@ -130,7 +130,7 @@ export type SentinelAuditEntry = {
 export type SentinelUserSettings = {
   /** While on, external Tier 3 actions are auto-denied without an approval card. */
   offline_mode: boolean;
-  /** Tier 2 action kinds the user escalated to always ask. Default: none. */
+  /** Tier 2 action kinds the user escalated to always ask. Default: all kinds. */
   tier2_always_ask: Tier2ActionKind[];
 };
 
