@@ -16,6 +16,7 @@ import { createSessionsRouter, TENANT_ID } from '../../../src/apis/sessions';
 import { TrueForgeAuthorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -85,6 +86,7 @@ describe('bug-report HTTP endpoint', () => {
       createSessionsRouter({
         sessions,
         sessionStore,
+        sentinelAuditStore: new SentinelAuditStore(db),
         activeTurns: new ActiveTurnRegistry(),
         resolveModelProviderStore: () => modelProviderStore,
         resolveMcpServerStore: () => mcpServerStore,
