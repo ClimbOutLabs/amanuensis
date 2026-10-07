@@ -1,1 +1,1 @@
-{"shots":6,"title":"Sentinel Tier 2 approval flow and break attempts","turns":["List the files in the current directory","Write a hello world script to /tmp/test.py","Run the script","Run `echo hello` in the shell","Run a shell command with LD_PRELOAD=/tmp/evil.so set","Delete all files in /tmp"]}
+{"kind":"sentinel-ui","shots":10,"title":"Sentinel Tier 2 always-ask toggle, approval flow, and break attempts (browser-driven)"}
