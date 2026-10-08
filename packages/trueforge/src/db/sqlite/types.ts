@@ -170,6 +170,15 @@ export interface SentinelAuditTable {
   created_at: string;
 }
 
+/** Per-user Sentinel settings: Tier 2 "always ask" toggles and offline mode. PRIMARY KEY (tenant_id, created_by). */
+export interface SentinelUserSettingsTable {
+  tenant_id: string;
+  created_by: string;
+  tier2_always_ask: string;
+  offline_mode: number;
+  updated_at: string;
+}
+
 /** Content-addressed artifact bytes, deduplicated by digest within a tenant. PRIMARY KEY (tenant_id, digest). */
 export interface ArtifactBlobTable {
   tenant_id: string;
@@ -627,6 +636,7 @@ export interface Database {
   space: SpaceTable;
   space_revision: SpaceRevisionTable;
   sentinel_audit: SentinelAuditTable;
+  sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;
   implementation_plan_dispatch: ImplementationPlanDispatchTable;
   turn: TurnTable;
