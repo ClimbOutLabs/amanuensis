@@ -1,7 +1,22 @@
 import type { CompletionUsage } from './LLMTypes';
 
+/**
+ * Conservative characters-per-token divisor used by estimateTokensForString.
+ *
+ * Plain prose tokenizes near 4 chars/token on the DeepSeek tokenizer, but the
+ * strings this estimates are mostly JSON-serialized chat history (message
+ * envelopes, tool-call names and arguments) plus code, which run denser:
+ * production histories measured 3-3.9 chars/token. The estimate feeds
+ * compaction budgets and the pre-flight context-limit guard, where
+ * undercounting lets a request through that the provider then rejects, while
+ * overcounting only compacts a little early. 3 chars/token is therefore the
+ * safe bound for Latin-script content. CJK scripts tokenize denser than this
+ * bound; see the known-limitation note on TOKEN_BUDGET_SAFETY_MARGIN.
+ */
+export const ESTIMATE_CHARS_PER_TOKEN = 3;
+
 export function estimateTokensForString(s: string): number {
-  return s.length / 4;
+  return s.length / ESTIMATE_CHARS_PER_TOKEN;
 }
 
 function sumOptional(a: number | undefined, b: number | undefined): number | undefined {

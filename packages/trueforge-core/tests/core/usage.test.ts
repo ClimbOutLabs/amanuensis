@@ -1,5 +1,5 @@
 import { CompletionUsageSchema, getEmptyUsage } from '../../src/core/llm/LLMTypes';
-import { mergeUsage } from '../../src/core/llm/usage';
+import { ESTIMATE_CHARS_PER_TOKEN, estimateTokensForString, mergeUsage } from '../../src/core/llm/usage';
 import {
   addAgentThreadMetrics,
   createEmptyAgentThreadMetrics,
@@ -30,6 +30,27 @@ describe('CompletionUsage', () => {
       output_tokens: 0,
       total_tokens: 0,
     });
+  });
+});
+
+describe('estimateTokensForString', () => {
+  it('uses the conservative chars-per-token bound', () => {
+    expect(ESTIMATE_CHARS_PER_TOKEN).toBe(3);
+    expect(estimateTokensForString('abcdef')).toBe(2);
+  });
+
+  it('never undercounts dense JSON chat history below the bound', () => {
+    // Regression test: a JSON-serialized history measured ~3.9 chars/token in
+    // production, which the old length/4 heuristic undercounted past the
+    // pre-flight guard. The conservative bound must estimate at or above the
+    // true count for Latin-script content.
+    const message = JSON.stringify({ role: 'user', content: 'Hello, how are you today?' });
+    const trueTokensUpperBound = message.length / 3.9;
+    expect(estimateTokensForString(message)).toBeGreaterThanOrEqual(trueTokensUpperBound);
+  });
+
+  it('returns zero for empty input', () => {
+    expect(estimateTokensForString('')).toBe(0);
   });
 });
 

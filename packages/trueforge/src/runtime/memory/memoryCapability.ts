@@ -426,9 +426,10 @@ export function extractPreviousExchange(
 }
 
 function estimateTokens(text: string): number {
-  // Mirrors trueforge-core's internal (non-exported) estimateTokensForString formula, kept in
-  // sync manually since that helper is not part of the package's public entry point.
-  return text.length / 4;
+  // Mirrors trueforge-core's ESTIMATE_CHARS_PER_TOKEN bound (see
+  // packages/trueforge-core/src/core/llm/usage.ts), kept in sync manually
+  // since that helper is not part of the package's public entry point.
+  return text.length / 3;
 }
 
 // Matches `<aman-memory` and `</aman-memory`, case-insensitively, so a recalled memory cannot

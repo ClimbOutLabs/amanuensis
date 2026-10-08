@@ -68,7 +68,7 @@ import {
 } from '../llm/LLMTypes';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
-import { estimateTokensForString } from '../llm/usage';
+import { ESTIMATE_CHARS_PER_TOKEN, estimateTokensForString } from '../llm/usage';
 import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
 import {
   allowsChatApproval,
@@ -1914,9 +1914,9 @@ export class AgentThread {
    *
    * Context messages are estimated text-only (see contextMessageTextTokens):
    * toOpenAIChatMessage preserves image_url / input_audio / file parts with
-   * their full base64 payloads, which the length/4 heuristic would inflate
-   * wildly (a 1MB image reads as ~340k tokens) while the provider does not
-   * bill those bytes as text tokens.
+   * their full base64 payloads, which the conservative chars-per-token
+   * heuristic would inflate wildly (a 1MB image reads as ~340k tokens)
+   * while the provider does not bill those bytes as text tokens.
    *
    * Bails out early once the running total already exceeds `limit`: this runs on
    * every turn, and precision past the guard threshold buys nothing. Pass
@@ -4006,9 +4006,9 @@ export class AgentThread {
 /**
  * Text-only character length of one context message: string content as-is, and only
  * `text` parts of multipart content. Binary/base64 payloads in image_url,
- * input_audio, and file parts are deliberately skipped: the length/4 token
- * heuristic would inflate them wildly (a 1MB image reads as ~340k tokens)
- * while the provider does not bill those bytes as text tokens.
+ * input_audio, and file parts are deliberately skipped: the conservative
+ * chars-per-token heuristic would inflate them wildly (a 1MB image reads as
+ * ~340k tokens) while the provider does not bill those bytes as text tokens.
  */
 function contextMessageTextLength(message: ContextMessage): number {
   if (!isLLMContextMessage(message)) {
@@ -4037,7 +4037,7 @@ function contextMessageTextLength(message: ContextMessage): number {
 
 /** Token estimate for one context message counting text only; see contextMessageTextLength. */
 function contextMessageTextTokens(message: ContextMessage): number {
-  return contextMessageTextLength(message) / 4;
+  return contextMessageTextLength(message) / ESTIMATE_CHARS_PER_TOKEN;
 }
 
 function estimateRawContextTextLength(context: readonly ContextMessage[]): number {
