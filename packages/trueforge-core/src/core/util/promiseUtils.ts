@@ -73,7 +73,7 @@ export async function* mergeAsyncGenerators<T>(
     await Promise.allSettled(
       generators.map(async gen => {
         try {
-          await gen.return(undefined as unknown as T);
+          await gen.return(undefined);
         } catch (error: unknown) {
           logger.error('Error closing inner generator in mergeAsyncGenerators', extractErrorLogFields(error));
         }
