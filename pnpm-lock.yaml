@@ -524,6 +524,9 @@ importers:
       '@daytona/sdk':
         specifier: ^0.211.2
         version: 0.211.2(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
+      '@dqbd/tiktoken':
+        specifier: ^1.0.22
+        version: 1.0.22
       '@hono/zod-openapi':
         specifier: ^1.6.1
         version: 1.6.3(hono@4.13.7)(zod@4.6.4)
@@ -1454,6 +1457,9 @@ packages:
 
   '@daytona/toolbox-api-client@0.211.2':
     resolution: {integrity: sha512-88CUophLGD1XVO8SJMttImrKw/iu2PC0Zz82S5DZkCJc70zBHpIm+svaepGGxQaLJ0EEtNbm7G1sJnIMQZ7zXw==}
+
+  '@dqbd/tiktoken@1.0.22':
+    resolution: {integrity: sha512-RYhO8xeHkMNX5Ixqf4M1Ve3siCYJY/dI0yLnlX4M4oIEDOvjMIQ+E+3OUpAaZcWTaMtQJzGcDAghYfllpx3i/w==}
 
   '@emnapi/runtime@1.11.3':
     resolution: {integrity: sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==}
@@ -10172,6 +10178,8 @@ snapshots:
     transitivePeerDependencies:
       - debug
       - supports-color
+
+  '@dqbd/tiktoken@1.0.22': {}
 
   '@emnapi/runtime@1.11.3':
     dependencies:
