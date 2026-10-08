@@ -30,7 +30,7 @@ import {
   VercelAILLM,
   type BoundRepository,
 } from '@truefoundry/trueforge-core/core';
-import { createSentinelHostContext, type SentinelServices } from '@truefoundry/trueforge-core/core';
+import { createSentinelHostContext } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { streamSSE } from 'hono/streaming';
@@ -208,7 +208,6 @@ export interface TurnsRouterDeps {
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
   authorizer: Authorizer;
-  sentinelServices: SentinelServices;
 }
 
 /** Names only, bounded: enough for the model to know the host's catalog exists without inflating the prompt. */
@@ -221,7 +220,7 @@ const CONFIGURED_MODELS_PROMPT_LIMIT = 20;
  */
 export type BeginTurnExecutionDeps = Pick<
   TurnsRouterDeps,
-  'activeTurns' | 'turnDrains' | 'eventSubscriptions' | 'logger' | 'globalSettingsStore' | 'sentinelServices'
+  'activeTurns' | 'turnDrains' | 'eventSubscriptions' | 'logger' | 'globalSettingsStore'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -255,7 +254,6 @@ export type BeginTurnExecutionDeps = Pick<
  * the same way: async factories over the corresponding stores.
  */
 function createTurnResolver(deps: {
-  sentinelServices: SentinelServices;
   mcpServerStore: IMcpServerWithAuthStore;
   tokenStore: IOAuthTokenStore;
   skillStore: ISkillStore;
@@ -456,7 +454,6 @@ function createTurnResolver(deps: {
             created_by: userRef,
             conversation_id: sessionId,
             workspace_cwd: sentinelSession?.workspace_cwd ?? null,
-            services: deps.sentinelServices,
           }),
           loadBoundRepository:
             boundRepository === undefined
@@ -974,7 +971,6 @@ export async function beginTurnExecution(params: {
     memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
   );
   const resolver = createTurnResolver({
-    sentinelServices: deps.sentinelServices,
     mcpServerStore: deps.mcpServerStore,
     tokenStore: deps.tokenStore,
     skillStore: deps.skillStore,
@@ -1671,7 +1667,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
     );
     const resolver = createTurnResolver({
-      sentinelServices: deps.sentinelServices,
       mcpServerStore,
       tokenStore: deps.tokenStore,
       skillStore,

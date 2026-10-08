@@ -4167,7 +4167,7 @@ export class Sandbox extends LocalToolMCP {
     const lines = staged.map(attachment => `- ${attachment.name} (${String(attachment.bytes.length)} bytes)`);
     return (
       SANDBOX_RUN_CODE_DESCRIPTION +
-      `Available in /ingress (read directly by filename — do NOT re-upload via files_in):\n` +
+      `Available in /ingress (read directly by filename, do NOT re-upload via files_in):\n` +
       `${lines.join('\n')}\n`
     );
   }

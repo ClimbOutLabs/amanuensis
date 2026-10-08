@@ -15,8 +15,14 @@ export const RUN_CODE_ERROR_CODES = [
 
 export type RunCodeErrorCode = (typeof RUN_CODE_ERROR_CODES)[number];
 
-/** Basename-only: no separators, no traversal, 1-256 chars. */
-const FILE_BASENAME_PATTERN = /^(?!\.{1,2}$)[^/\\]{1,256}$/;
+/**
+ * Basename-only: no separators, no traversal, 1-256 chars.
+ * The three alternatives enumerate the `.`/`..` rejection without lookahead:
+ * xgrammar (vLLM's grammar compiler) cannot compile lookahead assertions,
+ * so `(?!.{1,2}$)` would crash EngineCore. Each branch carries its own tail
+ * bound so the total length never exceeds 256.
+ */
+export const FILE_BASENAME_PATTERN = /^([^./\\][^/\\]{0,255}|\.[^./\\][^/\\]{0,254}|\.\.[^/\\][^/\\]{0,253})$/;
 
 export const RunCodeLanguageSchema = z.enum(['python', 'node']);
 
@@ -27,7 +33,10 @@ const RunCodeFileInSchema = z.object({
 
 export const RunCodeInputSchema = z.object({
   language: RunCodeLanguageSchema,
-  code: z.string().min(1).max(512 * 1024),
+  code: z
+    .string()
+    .min(1)
+    .max(512 * 1024),
   // Model-authored content only (e.g. CSV text the model composes). Conversation
   // attachments are staged into ingress automatically by the harness and
   // advertised in the tool description — the model never base64-encodes them.

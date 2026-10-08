@@ -1778,6 +1778,26 @@ export class VercelAILLM implements ILLM {
       logger: this.logger,
     });
     const tools = convertTools(body.tools ?? undefined);
+    if (
+      this.logger.isDebugEnabled() &&
+      body.tools !== undefined &&
+      body.messages.some(
+        m =>
+          Array.isArray(m.content) &&
+          m.content.some(p => p.type === 'image_url' || p.type === 'file'),
+      )
+    ) {
+      this.logger.debug('Multimodal chat completion request payload', {
+        model: model.id,
+        tools: body.tools,
+        messages: body.messages.map(m => ({
+          role: m.role,
+          partTypes: Array.isArray(m.content)
+            ? m.content.map(p => p.type)
+            : typeof m.content,
+        })),
+      });
+    }
     const structuredOutputSpec = toStructuredOutputSpec(body.response_format);
     const output = buildOutput(structuredOutputSpec);
 

@@ -89,7 +89,6 @@ import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
 import { SentinelAuditStore, type ISentinelAuditStore, type SentinelAuditDatabase } from './db/sentinelAuditStore';
-import { SentinelUserSettingsStore, type ISentinelUserSettingsStore, type SentinelUserSettingsDatabase } from './db/sentinelUserSettingsStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
@@ -155,7 +154,6 @@ interface ServerPersistence<TTransaction> {
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
-  sentinelUserSettingsStore: ISentinelUserSettingsStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
   /** One shared client for TrueFoundry store resolvers + auth; undefined when TrueFoundry mode is off. */
@@ -371,7 +369,6 @@ async function createStandalonePersistence(options: {
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
-    sentinelUserSettingsStore: new SentinelUserSettingsStore(db as Kysely<SentinelUserSettingsDatabase>),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
     resolveSandboxProviderStore: () => sandboxProviderStore,
@@ -519,7 +516,6 @@ async function createDistributedPersistence(options: {
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
-    sentinelUserSettingsStore: new SentinelUserSettingsStore(db as Kysely<SentinelUserSettingsDatabase>),
     resolveModelProviderStore,
     resolveMcpServerStore,
     resolveSandboxProviderStore,
@@ -552,7 +548,6 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     turnArtifactStore,
     globalSettingsStore,
     sentinelAuditStore,
-    sentinelUserSettingsStore,
     destroyDb,
     redis,
     serviceFoundryClient,
@@ -579,14 +574,6 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const sentinelServices: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     audit: sentinelAuditStore,
-    isOffline: async input => {
-      const settings = await sentinelUserSettingsStore.get(input);
-      return settings.offline_mode;
-    },
-    alwaysAsk: async input => {
-      const settings = await sentinelUserSettingsStore.get(input);
-      return new Set(settings.tier2_always_ask);
-    },
   };
   const sessions = new Sessions({ sessionStore, sentinelServices });
 
@@ -678,8 +665,6 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sessionStore,
     sessionMetricsStore,
     sentinelAuditStore,
-    sentinelUserSettingsStore,
-    sentinelServices,
     sessions,
     activeTurns,
     turnDrains,

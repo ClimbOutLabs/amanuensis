@@ -26,6 +26,7 @@ import { TrueForgeAuthMode } from '../../src/config';
 import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
+import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -100,6 +101,7 @@ function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): O
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore,
     sessionStore,
+    sentinelAuditStore: new SentinelAuditStore(db),
     sessions: new Sessions({ sessionStore }),
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),
