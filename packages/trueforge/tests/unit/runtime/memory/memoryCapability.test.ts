@@ -169,8 +169,8 @@ describe('formatMemoryBlock', () => {
     expect(formatted.droppedOverBudget).toBe(0);
     // The estimate of the full assembled block (wrapper tags, framing sentence, and stats line
     // included), not just the sum of item line lengths. Mirrors formatMemoryBlock's own
-    // `text.length / 4` estimator rather than a hand-computed magic number.
-    expect(formatted.estimatedTokens).toBe(Math.round(formatted.block.length / 4));
+    // conservative `text.length / 3` estimator rather than a hand-computed magic number.
+    expect(formatted.estimatedTokens).toBe(Math.round(formatted.block.length / 3));
   });
 
   it('formats an undated item and omits the entities line when there are none', () => {
