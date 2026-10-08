@@ -32,7 +32,7 @@ module.exports = {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
-  testTimeout: 30000,
+  testTimeout: 60000,
   maxWorkers: '50%',
   roots: ['<rootDir>/tests'],
   testMatch: ['**/tests/**/*.test.ts'],

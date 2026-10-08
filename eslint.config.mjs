@@ -239,7 +239,32 @@ export default defineConfig(
         exports: 'writable',
         console: 'readonly',
         process: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        fetch: 'readonly',
+        AbortController: 'readonly',
+        AbortSignal: 'readonly',
       },
+    },
+  },
+  {
+    // Buildbox test runner scripts are not production code; the strict
+    // curly rule adds churn with no behavior change (same rationale as
+    // the vendored mcp/ exception above). Browser globals are needed for
+    // Playwright page.evaluate() callbacks which run in page context.
+    files: ['buildbox/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        document: 'readonly',
+        window: 'readonly',
+      },
+    },
+    rules: {
+      curly: 'off',
+      'no-empty': 'off',
+      '@typescript-eslint/no-unused-vars': 'off',
     },
   },
 );
