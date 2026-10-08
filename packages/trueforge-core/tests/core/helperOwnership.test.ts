@@ -34,16 +34,6 @@ describe('canonical helper ownership fidelity', () => {
     expect(extractErrorLogFields(circular).error).toMatch(/^unserialisable error \(/);
   });
 
-  it('DaytonaProvider owns http→ws URL conversion (no shared helper module)', () => {
-    // Folded into DaytonaProvider per ISSUE-042; assert the conversion contract via URL API.
-    const https = new URL('https://example.com/path');
-    https.protocol = 'wss:';
-    expect(https.toString()).toBe('wss://example.com/path');
-    const http = new URL('http://example.com/path');
-    http.protocol = 'ws:';
-    expect(http.toString()).toBe('ws://example.com/path');
-  });
-
   it('withTimeout rejects with PromiseTimeoutError', async () => {
     await expect(withTimeout(new Promise(() => undefined), 5)).rejects.toBeInstanceOf(PromiseTimeoutError);
   });

@@ -3230,7 +3230,9 @@ export function runStoreContractSuite<
     // InMemory rejects unknown thread_id; Postgres/SQLite only fence on a running turn and
     // will upsert an orphan capability row. Production callers (TurnHandle) only patch threads
     // that already exist on the turn — not enforced at the SQL store boundary yet.
-    it.skip('patchThreadCapabilityState rejects a thread_id not present on the turn', async () => {
+    // Un-skipped per QA audit: the contract requires rejection. Postgres/SQLite must
+    // be fixed to match before PG_STORE_TESTS_ENABLED=1 will pass.
+    it('patchThreadCapabilityState rejects a thread_id not present on the turn', async () => {
       const store = createStore();
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));

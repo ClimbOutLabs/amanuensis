@@ -135,7 +135,7 @@ describe("Test createRequestUrl", () => {
             description: "should handle URL with existing query parameters",
             baseUrl: "https://api.example.com?existing=param",
             queryParams: { new: "value" },
-            expected: "https://api.example.com?existing=param?new=value",
+            expected: "https://api.example.com?existing=param&new=value",
         },
         {
             description: "should handle complex nested structures",
