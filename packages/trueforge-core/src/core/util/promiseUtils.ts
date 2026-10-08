@@ -48,18 +48,36 @@ export async function* mergeAsyncGenerators<T>(
     return nextPromise;
   };
 
-  for (let i = 0; i < generators.length; i++) {
-    pending.set(i, getNextIteration(i));
-  }
-
-  while (pending.size > 0) {
-    const { idx, result } = await Promise.race(pending.values());
-    if (result.done) {
-      pending.delete(idx);
-      continue;
+  try {
+    for (let i = 0; i < generators.length; i++) {
+      pending.set(i, getNextIteration(i));
     }
 
-    yield result.value;
-    pending.set(idx, getNextIteration(idx));
+    while (pending.size > 0) {
+      const { idx, result } = await Promise.race(pending.values());
+      if (result.done) {
+        pending.delete(idx);
+        continue;
+      }
+
+      yield result.value;
+      pending.set(idx, getNextIteration(idx));
+    }
+  } finally {
+    // Propagate cancellation to inner generators. Without this, calling
+    // return() on the merged generator (e.g. on abort) would leave inner
+    // generators suspended forever, hanging cleanup. This ensures a stuck
+    // inner generator (like a never-settling provider stream) is properly
+    // closed via its return() method.
+    pending.clear();
+    await Promise.allSettled(
+      generators.map(async gen => {
+        try {
+          await gen.return(undefined as unknown as T);
+        } catch (error: unknown) {
+          logger.error('Error closing inner generator in mergeAsyncGenerators', extractErrorLogFields(error));
+        }
+      }),
+    );
   }
 }
