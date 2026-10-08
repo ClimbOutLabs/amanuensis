@@ -30,9 +30,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const API = 'http://127.0.0.1:8790';
 const UI = 'http://127.0.0.1:5173';
-const TOKEN_FACTORY_KEY_FILE = '/home/opc/.config/tokenfactory-key';
+const TOKEN_FACTORY_KEY_FILE = process.env.TOKEN_FACTORY_KEY_FILE || '/home/opc/.config/tokenfactory-key';
 const TOKEN_FACTORY_BASE_URL = 'https://api.tokenfactory.nebius.com/v1';
-const TOKEN_FACTORY_MODEL_ID = 'nvidia/Nemotron-3_5-Lightning';
+const TOKEN_FACTORY_MODEL_ID = process.env.TOKEN_FACTORY_MODEL_ID || 'nvidia/Nemotron-3_5-Lightning';
 const TOKEN_FACTORY_MODEL_NAME = 'nemotron-3-5-lightning';
 
 function readTokenFactoryKey() {
@@ -90,16 +90,23 @@ mkdirSync(shotDir, { recursive: true });
 // ------------------------------------------------------------ preflight ----
 function tokenFactoryReachable() {
   const key = readTokenFactoryKey();
-  const r = spawnSync(
-    'curl',
-    ['-sS', '-m', '20', '-H', `Authorization: Bearer ${key}`, `${TOKEN_FACTORY_BASE_URL}/models`],
-    { encoding: 'utf8' },
-  );
-  if (r.status === 0) {
-    log('token factory reachable');
-    return true;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const r = spawnSync(
+      'curl',
+      ['-sS', '-m', '20', '-H', `Authorization: Bearer ${key}`, `${TOKEN_FACTORY_BASE_URL}/models`],
+      { encoding: 'utf8' },
+    );
+    if (r.status === 0) {
+      log('token factory reachable');
+      return true;
+    }
+    log(`token factory preflight failed (attempt ${attempt}/3):`, (r.stderr || r.stdout || '').slice(0, 300));
+    if (attempt < 3) {
+      const delayMs = Math.pow(2, attempt) * 1000;
+      log(`retrying in ${delayMs}ms...`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+    }
   }
-  log('token factory preflight failed:', (r.stderr || r.stdout || '').slice(0, 300));
   return false;
 }
 
@@ -471,17 +478,14 @@ async function runSentinelScenario(pw) {
   );
   log('captured approval request:', approvalReq ? `${approvalReq.method} ${approvalReq.url}` : '(none captured)');
 
-  // --- 7. BREAK: token replay ----------------------------------------------
-  // Re-send the exact captured approval request. Single-use tokens must reject it.
-  let replayBlocked = false;
-  let replayDetail = 'no approval request captured; could not attempt replay';
-  if (approvalReq) {
-    const replay = await page.evaluate(async (req) => {
+  // Helper: replay an approval request via fetch, optionally with mutated body
+  async function replayApprovalRequest(req, body) {
+    return await page.evaluate(async (r, b) => {
       try {
-        const res = await fetch(req.url, {
-          method: req.method,
+        const res = await fetch(r.url, {
+          method: r.method,
           headers: { 'content-type': 'application/json' },
-          body: req.postData || undefined,
+          body: b,
           credentials: 'same-origin',
         });
         const text = await res.text();
@@ -489,7 +493,15 @@ async function runSentinelScenario(pw) {
       } catch (e) {
         return { status: -1, body: String(e).slice(0, 300) };
       }
-    }, approvalReq);
+    }, req, body);
+  }
+
+  // --- 7. BREAK: token replay ----------------------------------------------
+  // Re-send the exact captured approval request. Single-use tokens must reject it.
+  let replayBlocked = false;
+  let replayDetail = 'no approval request captured; could not attempt replay';
+  if (approvalReq) {
+    const replay = await replayApprovalRequest(approvalReq, approvalReq.postData || undefined);
     replayDetail = `replay -> HTTP ${replay.status}: ${replay.body}`;
     log('token replay:', replayDetail);
     // Blocked = 4xx/5xx, or 2xx with an error body. A 2xx "ok" would be a vulnerability.
@@ -508,20 +520,7 @@ async function runSentinelScenario(pw) {
   if (approvalReq && approvalReq.postData) {
     const mutated = approvalReq.postData.replace(/hello-sentinel/g, 'MUTATED-evil');
     const sameLength = mutated !== approvalReq.postData;
-    const res = await page.evaluate(async (req, body) => {
-      try {
-        const r = await fetch(req.url, {
-          method: req.method,
-          headers: { 'content-type': 'application/json' },
-          body,
-          credentials: 'same-origin',
-        });
-        const text = await r.text();
-        return { status: r.status, body: text.slice(0, 300) };
-      } catch (e) {
-        return { status: -1, body: String(e).slice(0, 300) };
-      }
-    }, approvalReq, sameLength ? mutated : approvalReq.postData + ' ');
+    const res = await replayApprovalRequest(approvalReq, sameLength ? mutated : approvalReq.postData + ' ');
     mutationDetail = `mutated replay -> HTTP ${res.status}: ${res.body}`;
     log('command mutation:', mutationDetail);
     mutationBlocked = res.status >= 400 || /error|denied|invalid|expired|already|mismatch/i.test(res.body);
