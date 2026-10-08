@@ -3084,7 +3084,7 @@ describe('Sandbox provider-owned paths', () => {
       return { output: { role: 'assistant', content: 'done' }, usage: getEmptyUsage(), finish_reason: 'stop' };
     }
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     // No `sandbox` is passed to the thread: this exercises the real conditional path in
     // AgentThread's prompt builder (`if (this.sandbox) { this.sandbox.buildInstruction(...) }`)
     // rather than asserting against an untouched, always-empty InstructionBuilder.

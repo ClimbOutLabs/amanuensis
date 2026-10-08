@@ -1,4 +1,6 @@
 import type { VercelAIProviderName } from './VercelAILLM';
+import type { Tiktoken, TiktokenModel } from '@dqbd/tiktoken';
+import modelToEncoding from '@dqbd/tiktoken/model_to_encoding.json';
 
 /**
  * Counts tokens in text using a provider's actual tokenizer.
@@ -44,8 +46,8 @@ export const HEURISTIC_CHARS_PER_TOKEN = 3;
  * when an accurate tokenizer exists.
  */
 export class HeuristicTokenCounter implements TokenCounter {
-  async countTokens(text: string): Promise<number> {
-    return Math.ceil(text.length / HEURISTIC_CHARS_PER_TOKEN);
+  countTokens(text: string): Promise<number> {
+    return Promise.resolve(Math.ceil(text.length / HEURISTIC_CHARS_PER_TOKEN));
   }
 }
 
@@ -86,7 +88,8 @@ export class VLLMHttpTokenCounter implements TokenCounter {
         ...this.headers,
       },
       body: JSON.stringify({ model: this.modelId, prompt: text }),
-      signal: this.signal,
+      // exactOptionalPropertyTypes: omit signal when unset rather than passing undefined.
+      ...(this.signal !== undefined ? { signal: this.signal } : {}),
     });
     if (!response.ok) {
       throw new Error(
@@ -105,23 +108,47 @@ export class VLLMHttpTokenCounter implements TokenCounter {
 }
 
 /**
+ * Model ids tiktoken recognizes, from the registry shipped with the tiktoken
+ * package itself (the same data its WASM consults when it throws "unknown
+ * model"). Sourced from the installed package so it cannot drift from the
+ * library's behavior.
+ */
+const KNOWN_TIKTOKEN_MODELS: ReadonlySet<string> = new Set(Object.keys(modelToEncoding));
+
+/**
+ * Narrows a provider model id to tiktoken's known-model union. Unknown ids
+ * throw an "unknown model" error, which OpenAICompatibleTokenCounter catches
+ * to fall through to the serving model's /tokenize endpoint.
+ */
+function isTiktokenModel(modelId: string): modelId is TiktokenModel {
+  return KNOWN_TIKTOKEN_MODELS.has(modelId);
+}
+
+/**
  * Tiktoken-based counter for OpenAI models. Uses the model's native BPE
  * encoding via the tiktoken library, loaded dynamically so the dependency
  * is only required when an OpenAI provider is actually configured.
  */
 export class TiktokenTokenCounter implements TokenCounter {
   private readonly modelId: string;
-  private encoderPromise: Promise<{ encode(text: string): number[] }> | undefined;
+  private encoderPromise: Promise<Tiktoken> | undefined;
 
   constructor(modelId: string) {
     this.modelId = modelId;
   }
 
-  private async getEncoder(): Promise<{ encode(text: string): number[] }> {
-    if (this.encoderPromise === undefined) {
-      this.encoderPromise = import('@dqbd/tiktoken').then(mod => mod.encoding_for_model(this.modelId));
+  private getEncoder(): Promise<Tiktoken> {
+    let promise = this.encoderPromise;
+    if (promise === undefined) {
+      promise = import('@dqbd/tiktoken').then(mod => {
+        if (!isTiktokenModel(this.modelId)) {
+          throw new Error(`Unknown model '${this.modelId}' for tiktoken`);
+        }
+        return mod.encoding_for_model(this.modelId);
+      });
+      this.encoderPromise = promise;
     }
-    return this.encoderPromise;
+    return promise;
   }
 
   async countTokens(text: string): Promise<number> {
@@ -194,7 +221,8 @@ export class AnthropicTokenCounter implements TokenCounter {
         model: this.modelId,
         messages: [{ role: 'user', content: text }],
       }),
-      signal: this.signal,
+      // exactOptionalPropertyTypes: omit signal when unset rather than passing undefined.
+      ...(this.signal !== undefined ? { signal: this.signal } : {}),
     });
     if (!response.ok) {
       throw new Error(`Anthropic count_tokens returned ${String(response.status)}`);
@@ -229,7 +257,7 @@ export class CachedTokenCounter implements TokenCounter {
     if (text.length < 1000) {
       return this.inner.countTokens(text);
     }
-    const key = `${String(text.length)}:${hashString(text)}`;
+    const key = `${String(text.length)}:${String(hashString(text))}`;
     const cached = this.cache.get(key);
     if (cached !== undefined) {
       return cached;

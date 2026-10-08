@@ -79,6 +79,7 @@ describe('AgentThreadOrchestrator dynamic child cancellation', () => {
         return createSubAgentStream(toolName);
       }),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const capabilities: AgentCapability[] = [
       dynamicSubAgents({ sandboxAvailable: false, tracing: NOOP_AGENT_TRACING }),

@@ -76,7 +76,7 @@ describe('ModelStreamFault retry', () => {
     const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
       create.mock.calls.length === 1 ? faultingStream() : finalStream('Recovered answer.'),
     );
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const compaction = new RecordingCompaction();
     const thread = new AgentThread({
       threadId: 'main',
@@ -110,7 +110,7 @@ describe('ModelStreamFault retry', () => {
     const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
       faultingStream(),
     );
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const compaction = new RecordingCompaction();
     const thread = new AgentThread({
       threadId: 'main',
@@ -159,7 +159,7 @@ describe('ModelStreamFault retry', () => {
       (): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
         repetitionFaultStream(),
     );
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
@@ -208,7 +208,7 @@ describe('ModelStreamFault retry', () => {
         chunkMeta: { id: 'test-id', created: 0, model: 'test-model' },
       }),
     );
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const compaction = new RecordingCompaction();
     const thread = new AgentThread({
       threadId: 'main',

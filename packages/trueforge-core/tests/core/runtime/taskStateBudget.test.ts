@@ -110,7 +110,7 @@ describe('host-owned task state and tool-call budget', () => {
         }),
       )
       .mockImplementation(() => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
 
     const thread = new AgentThread({
       threadId: 'main',
@@ -194,7 +194,7 @@ describe('host-owned task state and tool-call budget', () => {
       .fn()
       .mockImplementationOnce(() => toolCallStream({ id: 'search-1', toolName: 'search', args: { query: 'x' } }))
       .mockImplementation(() => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
 
     const thread = new AgentThread({
       threadId: 'main',

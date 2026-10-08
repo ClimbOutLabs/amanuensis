@@ -122,7 +122,7 @@ describe('policy-block guard', () => {
       if (round === 5) return writeStream('call-5', 3);
       return finalAnswerStream();
     });
-    const thread = makeThread({ create, createNonStream: jest.fn() }, toolSet);
+    const thread = makeThread({ create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) }, toolSet);
 
     const events = await drainExecute(thread);
 
@@ -147,7 +147,7 @@ describe('policy-block guard', () => {
       if (round <= 2) return toolCallStream({ id: `call-${String(round)}`, name: 'write_file', args: { round } });
       return finalAnswerStream();
     });
-    const thread = makeThread({ create, createNonStream: jest.fn() }, toolSet);
+    const thread = makeThread({ create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) }, toolSet);
 
     const events = await drainExecute(thread);
 
@@ -170,7 +170,7 @@ describe('policy-block guard', () => {
       if (round <= 3) return toolCallStream({ id: `call-${String(round)}`, name: 'write_file', args: { round } });
       return finalAnswerStream();
     });
-    const thread = makeThread({ create, createNonStream: jest.fn() }, toolSet);
+    const thread = makeThread({ create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) }, toolSet);
 
     const events = await drainExecute(thread);
 
@@ -195,7 +195,7 @@ describe('policy-block guard', () => {
       }
       return finalAnswerStream();
     });
-    const thread = makeThread({ create, createNonStream: jest.fn() }, toolSet);
+    const thread = makeThread({ create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) }, toolSet);
     const signal = new AbortController().signal;
 
     const events = await drainExecute(thread);
@@ -234,7 +234,7 @@ describe('policy-block guard', () => {
       }
       return finalAnswerStream();
     });
-    const thread = makeThread({ create, createNonStream: jest.fn() }, toolSet);
+    const thread = makeThread({ create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) }, toolSet);
 
     const events = await drainExecute(thread);
 
@@ -257,7 +257,7 @@ describe('policy-block guard', () => {
       if (round === 3) return toolCallStream({ id: 'call-3', name: 'broken_tool', args: { round } });
       return finalAnswerStream();
     });
-    const thread = makeThread({ create, createNonStream: jest.fn() }, toolSet);
+    const thread = makeThread({ create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) }, toolSet);
 
     const events = await drainExecute(thread);
 
@@ -295,7 +295,7 @@ describe('policy-block guard', () => {
       }
       return finalAnswerStream();
     });
-    const thread = makeThread({ create, createNonStream: jest.fn() }, toolSet);
+    const thread = makeThread({ create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) }, toolSet);
 
     const events = await drainExecute(thread);
 
@@ -319,7 +319,7 @@ describe('policy-block guard', () => {
       }
       return finalAnswerStream();
     });
-    const firstThread = makeThread({ create, createNonStream: jest.fn() }, toolSet);
+    const firstThread = makeThread({ create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) }, toolSet);
     const firstEvents = await drainExecute(firstThread);
     expect(firstEvents.at(-1)).toMatchObject({ type: 'internal.agent.done', status: 'done' });
     expect(JSON.stringify(requests.at(-1)?.messages)).toContain(`2 tool calls ${POLICY_NOTE_TEXT}`);
@@ -345,7 +345,7 @@ describe('policy-block guard', () => {
       tracing: NOOP_AGENT_TRACING,
       logger: makeSilentLogger(),
       definition: {
-        modelClient: { create: continuedCreate, createNonStream: jest.fn() },
+        modelClient: { create: continuedCreate, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
         modelId: undefined,
         configuredModels: undefined,
         instruction: 'test',

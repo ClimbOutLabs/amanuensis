@@ -181,7 +181,7 @@ describe('AgentThread context processor cancellation', () => {
       ],
     };
     const create = jest.fn(() => inspectionToolCallStream());
-    const model: ILLM = { create, createNonStream: jest.fn() };
+    const model: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
