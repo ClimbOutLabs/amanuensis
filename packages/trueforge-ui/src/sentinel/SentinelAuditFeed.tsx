@@ -81,6 +81,10 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
   const settings = sentinel?.settings ?? null;
   const [entries, setEntries] = useState<SentinelAuditEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Shared in-flight flag: while any toggle update is in flight, ALL toggles are
+  // disabled. Each toggle used to track only its own busy state, so two rapid
+  // flips read the same stale settings and the last write silently won.
+  const [updating, setUpdating] = useState(false);
 
   const load = useCallback(async () => {
     if (api === null) return;
@@ -109,12 +113,17 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
   const handleToggle = useCallback(
     async (input: { actionType: Tier2ActionKind; escalated: boolean }) => {
       if (sentinel === null) return;
-      const current = sentinel.settings?.tier2_always_ask ?? [];
-      const next: Tier2ActionKind[] = input.escalated
-        ? (current.includes(input.actionType) ? current : [...current, input.actionType])
-        : current.filter(kind => kind !== input.actionType);
-      const patch: Partial<SentinelUserSettings> = { tier2_always_ask: next };
-      await sentinel.updateSettings(patch);
+      setUpdating(true);
+      try {
+        const current = sentinel.settings?.tier2_always_ask ?? [];
+        const next: Tier2ActionKind[] = input.escalated
+          ? (current.includes(input.actionType) ? current : [...current, input.actionType])
+          : current.filter(kind => kind !== input.actionType);
+        const patch: Partial<SentinelUserSettings> = { tier2_always_ask: next };
+        await sentinel.updateSettings(patch);
+      } finally {
+        setUpdating(false);
+      }
     },
     [sentinel],
   );
@@ -137,6 +146,7 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
                 actionType={kind}
                 escalated={settings?.tier2_always_ask.includes(kind) ?? false}
                 onChange={handleToggle}
+                disabled={updating}
               />
             </li>
           ))}
@@ -171,3 +181,4 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
     </div>
   );
 };
+
