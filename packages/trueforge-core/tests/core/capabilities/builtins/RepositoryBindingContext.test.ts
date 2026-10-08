@@ -102,7 +102,11 @@ describe('host request context', () => {
       },
       usage: getEmptyUsage(),
     });
-    const modelClient: ILLM = { create, createNonStream };
+    const modelClient: ILLM = {
+      create,
+      createNonStream,
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
+    };
     const checklistState = new TaskChecklistRequestState(checklist);
     const thread = new AgentThread({
       threadId: 'main',
