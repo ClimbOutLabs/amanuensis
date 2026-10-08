@@ -466,22 +466,30 @@ async function splitContextForCompaction(
 
   const realTailBudget = Math.max(tailTokenBudget, 100);
 
+  // Count every message concurrently: each count is a tokenizer call (an
+  // HTTPS round trip for API-backed tokenizers), so awaiting them one at a
+  // time would take minutes on long histories. The split walk below applies
+  // the same logic over the precomputed counts.
+  const messageTokens = await Promise.all(
+    context.map(async message => (await countTokensForContextMessages([message], counter)).prompt_tokens),
+  );
+
   const tail: ContextMessage[] = [];
   let tailTokens = 0;
   let tailStartIndex = context.length;
 
   for (let i = context.length - 1; i > 0; i--) {
+    const tokens = messageTokens[i];
     const message = context[i];
-    if (message === undefined) {
+    if (tokens === undefined || message === undefined) {
       break;
     }
-    const messageTokens = (await countTokensForContextMessages([message], counter)).prompt_tokens;
-    if (tailTokens + messageTokens > realTailBudget) {
+    if (tailTokens + tokens > realTailBudget) {
       tailStartIndex = i + 1;
       break;
     }
     tail.unshift(message);
-    tailTokens += messageTokens;
+    tailTokens += tokens;
     tailStartIndex = i;
   }
 

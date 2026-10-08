@@ -131,11 +131,48 @@ export class TiktokenTokenCounter implements TokenCounter {
 }
 
 /**
+ * tiktoken throws for model ids outside its registry (for example the model
+ * ids served by vLLM). Only that failure falls through to /tokenize; any
+ * other error propagates so the caller can fall back cleanly.
+ */
+function isUnknownTiktokenModelError(error: unknown): boolean {
+  return error instanceof Error && error.message.toLowerCase().includes('unknown model');
+}
+
+/**
+ * Token counter for OpenAI-compatible endpoints, which are commonly vLLM
+ * servers. tiktoken counts OpenAI's own model ids exactly and locally; when
+ * tiktoken does not recognize the model id, the serving model's /tokenize
+ * endpoint is the accurate source instead of the heuristic fallback.
+ */
+class OpenAICompatibleTokenCounter implements TokenCounter {
+  private readonly tiktoken: TiktokenTokenCounter;
+  private readonly vllm: VLLMHttpTokenCounter;
+
+  constructor(config: { tiktoken: TiktokenTokenCounter; vllm: VLLMHttpTokenCounter }) {
+    this.tiktoken = config.tiktoken;
+    this.vllm = config.vllm;
+  }
+
+  async countTokens(text: string): Promise<number> {
+    try {
+      return await this.tiktoken.countTokens(text);
+    } catch (error) {
+      if (!isUnknownTiktokenModelError(error)) {
+        throw error;
+      }
+      return this.vllm.countTokens(text);
+    }
+  }
+}
+
+/**
  * Anthropic token counting API counter. Uses the official count_tokens
  * endpoint, which accepts the same message shape as the messages API.
  * Text is wrapped in a single user message for counting.
  */
-export class AnthropicTokenCounter implements TokenCounter {  private readonly modelId: string;
+export class AnthropicTokenCounter implements TokenCounter {
+  private readonly modelId: string;
   private readonly apiKey: string;
   private readonly signal: AbortSignal | undefined;
 
@@ -223,11 +260,12 @@ function hashString(s: string): number {
 /**
  * Creates the most accurate available token counter for a provider.
  * Resolution order:
- * 1. When a baseUrl is set, try the vLLM /tokenize endpoint first. This
- *    covers vLLM itself and any OpenAI-compatible server that implements
- *    it, and always matches the serving model's tokenizer exactly.
- * 2. Provider-native tokenizers (Anthropic count_tokens API).
- * 3. Conservative heuristic fallback. Overcounts by design; used only when
+ * 1. Anthropic's count_tokens API for anthropic providers.
+ * 2. tiktoken for OpenAI model ids; on OpenAI-compatible endpoints
+ *    (baseUrl set) an unknown model id falls through to the serving
+ *    model's /tokenize endpoint.
+ * 3. The vLLM /tokenize endpoint when a baseUrl is set.
+ * 4. Conservative heuristic fallback. Overcounts by design; used only when
  *    no accurate tokenizer is reachable.
  *
  * The caller should wrap the result in CachedTokenCounter for repeated counts.
@@ -240,9 +278,19 @@ export function createTokenCounter(config: TokenCounterConfig): TokenCounter {
     return new AnthropicTokenCounter({ modelId, apiKey, signal });
   }
 
-  // OpenAI models use tiktoken locally; exact and no network call.
+  // OpenAI models use tiktoken locally; exact and no network call. A custom
+  // baseUrl means an OpenAI-compatible endpoint (commonly vLLM) rather than
+  // api.openai.com, and tiktoken does not know those model ids; fall through
+  // to the serving model's /tokenize endpoint in that case.
   if (providerType === 'openai') {
-    return new TiktokenTokenCounter(modelId);
+    const tiktoken = new TiktokenTokenCounter(modelId);
+    if (baseUrl !== undefined && baseUrl.length > 0) {
+      return new OpenAICompatibleTokenCounter({
+        tiktoken,
+        vllm: new VLLMHttpTokenCounter({ baseUrl, modelId, apiKey, headers, signal }),
+      });
+    }
+    return tiktoken;
   }
 
   // Any provider with a baseUrl may be vLLM-backed. The /tokenize probe

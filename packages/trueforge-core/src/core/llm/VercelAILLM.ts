@@ -1780,16 +1780,21 @@ export class VercelAILLM implements ILLM {
     if (this.tokenCounter === undefined) {
       const { providerConfig } = this.config;
       const { provider, model } = providerConfig;
-      this.tokenCounter = new CachedTokenCounter(
-        createTokenCounter({
-          providerType: provider.type,
-          modelId: model.id,
-          baseUrl: providerConfig.baseUrl,
-          apiKey: providerConfig.apiKey,
-          headers: providerConfig.headers,
-          signal: this.signal,
-        }),
-      );
+      const selected = createTokenCounter({
+        providerType: provider.type,
+        modelId: model.id,
+        baseUrl: providerConfig.baseUrl,
+        apiKey: providerConfig.apiKey,
+        headers: providerConfig.headers,
+        signal: this.signal,
+      });
+      if (selected instanceof HeuristicTokenCounter) {
+        this.logger.warn('No provider tokenizer available, using heuristic token fallback', {
+          provider: provider.type,
+          model: model.id,
+        });
+      }
+      this.tokenCounter = new CachedTokenCounter(selected);
     }
     if (!this.tokenizerProbed) {
       this.tokenizerProbed = true;
@@ -1798,7 +1803,7 @@ export class VercelAILLM implements ILLM {
         // always reaches the underlying tokenizer.
         await this.tokenCounter.countTokens('probe '.repeat(200));
       } catch (error) {
-        this.logger.debug('Provider tokenizer unreachable, using heuristic fallback', {
+        this.logger.warn('Provider tokenizer unreachable, using heuristic fallback', {
           provider: this.config.providerConfig.provider.type,
           error: describeUnknownError(error),
         });
