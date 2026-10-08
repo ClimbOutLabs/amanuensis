@@ -161,6 +161,7 @@ describe('AgentThread LLM request mapping (end-to-end)', () => {
         return finalAnswerStream();
       }),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
 
     const assistant = makeAssistantWithReplayFields();

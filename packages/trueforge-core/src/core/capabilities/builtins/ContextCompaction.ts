@@ -5,12 +5,14 @@ import type { ILLM, LLMCreateParams } from '../../llm/ILLM';
 import type { AgentDefinition, ModelParams } from '../../runtime/AgentDefinition';
 import { InternalEventType, type ContextMessage } from '../../runtime/AgentThread.types';
 import {
+  countTokensForContextMessages,
   estimateTokensForContextMessages,
   internalSystemMessage,
   isInternalSystemMessage,
   isLLMContextMessage,
   userAuthoredText,
 } from '../../runtime/contextUtils';
+import type { TokenCounter } from '../../llm/tokenizer';
 import {
   boundRepositoryContextFromBinding,
   SANDBOX_APPLY_PATCH_TOOL_NAME,
@@ -25,6 +27,7 @@ import {
 import { awaitWithAbort, throwIfSignalAborted } from '../../util/abort';
 import type { AgentCapability, JsonValue } from '../AgentCapability';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from './tokenBudgetConstants';
+import { ESTIMATE_CHARS_PER_TOKEN } from '../../llm/usage';
 import type {
   AgentContextProcessorCompactionEvent,
   AgentContextProcessorOutput,
@@ -56,16 +59,16 @@ export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
  * overhead on top of the estimated request: the provider-added BOS token,
  * ChatML template overhead, the instruction and task-state messages
  * transformToLLMRequest adds after compaction runs, and general estimator slop
- * (estimateTokensForString is a length/4 heuristic).
+ * (estimateTokensForString uses the conservative ESTIMATE_CHARS_PER_TOKEN bound).
  * Without this margin the request lands exactly at the context limit and the
  * provider rejects it for exceeding it by one token.
  *
- * Known limitation: the margin is not sized for high token-density scripts.
- * CJK text carries roughly 2-4x more tokens per character than the length/4
- * heuristic assumes, which can exceed this margin by tens of thousands of
- * tokens on a 128k model; the estimator is not script-aware and neither the
- * margin nor the pre-flight guard catches that case. Treat the margin as
- * additive-overhead cover, not estimator-accuracy cover.
+ * Known limitation: the margin is not sized for scripts denser than the
+ * estimator bound. CJK text carries roughly 2-4x more tokens per character
+ * than ESTIMATE_CHARS_PER_TOKEN assumes, which can exceed this margin by tens
+ * of thousands of tokens on a 128k model; the estimator is not script-aware
+ * and neither the margin nor the pre-flight guard catches that case. Treat the
+ * margin as additive-overhead cover, not estimator-accuracy cover.
  *
  * Defined in ./tokenBudgetConstants.ts (leaf module) so UI clients can import
  * it without pulling in this module's dependency graph.
@@ -184,7 +187,7 @@ const PROMPT = `Create a concise engineering handoff using this host-owned templ
 ${HOST_COMPACTION_TEMPLATE}
 
 The user message holds the transcript between <transcript> tags and nothing else. Output only the completed <summary> block. Do not include analysis, hidden reasoning, a transcript, full source files, or a fresh greeting. Stay under 2,500 words.`;
-const PROMPT_TOKENS = Math.ceil(PROMPT.length / 4);
+const PROMPT_TOKENS = Math.ceil(PROMPT.length / ESTIMATE_CHARS_PER_TOKEN);
 
 /**
  * Compaction session mode: `coding` when there is evidence of engineering work (a repository is
@@ -263,7 +266,7 @@ const CONVERSATION_PROMPT = `Create a memory aid for yourself using this host-ow
 ${CONVERSATION_COMPACTION_TEMPLATE}
 
 The user message holds the transcript between <transcript> tags and nothing else. Output only the completed <summary> block. Do not include analysis, hidden reasoning, a transcript, full source files, or a fresh greeting. Stay under 2,500 words.`;
-const CONVERSATION_PROMPT_TOKENS = Math.ceil(CONVERSATION_PROMPT.length / 4);
+const CONVERSATION_PROMPT_TOKENS = Math.ceil(CONVERSATION_PROMPT.length / ESTIMATE_CHARS_PER_TOKEN);
 
 /**
  * One sentence that must precede every persisted summary, whichever mode produced it: it tells
@@ -452,10 +455,11 @@ function touchedPathsFromSuccessfulToolResults(context: ContextMessage[]): strin
   return [...paths].sort();
 }
 
-function splitContextForCompaction(
+async function splitContextForCompaction(
   context: readonly ContextMessage[],
   tailTokenBudget: number,
-): { older: ContextMessage[]; tail: ContextMessage[] } {
+  counter: TokenCounter,
+): Promise<{ older: ContextMessage[]; tail: ContextMessage[] }> {
   if (context.length === 0) {
     return { older: [], tail: [] };
   }
@@ -471,7 +475,7 @@ function splitContextForCompaction(
     if (message === undefined) {
       break;
     }
-    const messageTokens = estimateTokensForContextMessages([message]).prompt_tokens;
+    const messageTokens = (await countTokensForContextMessages([message], counter)).prompt_tokens;
     if (tailTokens + messageTokens > realTailBudget) {
       tailStartIndex = i + 1;
       break;
@@ -992,7 +996,11 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     const mode: CompactionSessionMode = boundOrSandboxCoding ? 'coding' : 'conversation';
 
     const tailTokenBudget = Math.floor(this.compactionThresholdTokens * COMPACTION_RETAINED_TAIL_FRACTION);
-    const { older: olderContext, tail: recentTail } = splitContextForCompaction(execution.context, tailTokenBudget);
+    const { older: olderContext, tail: recentTail } = await splitContextForCompaction(
+      execution.context,
+      tailTokenBudget,
+      this.modelClient,
+    );
 
     let messages: LLMCreateParams['messages'];
     let repository: BoundRepositoryContext | undefined;

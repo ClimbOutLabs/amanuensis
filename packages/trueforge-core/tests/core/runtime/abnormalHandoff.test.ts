@@ -903,7 +903,7 @@ describe('abnormal handoffs', () => {
       exec,
       existingSandboxId: 'v1:test:sandbox-handoff',
     });
-    const modelClient: ILLM = { create: jest.fn(), createNonStream: jest.fn() };
+    const modelClient: ILLM = { create: jest.fn(), createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
@@ -1120,7 +1120,7 @@ describe('abnormal handoffs', () => {
         toolResultDumpDir: artifactDir,
         workspaceCwd: repositoryRoot,
       });
-      const modelClient: ILLM = { create: jest.fn(), createNonStream: jest.fn() };
+      const modelClient: ILLM = { create: jest.fn(), createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
       const thread = new AgentThread({
         threadId: 'main',
         title: 'Main',

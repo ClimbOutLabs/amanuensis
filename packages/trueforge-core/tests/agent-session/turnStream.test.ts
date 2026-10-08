@@ -478,6 +478,7 @@ describe('TurnHandle.stream()', () => {
         return createSubAgentStream({ toolName: tool.function.name });
       }),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const turn = await session.createTurn({
       turn_id: mintTestTurnId(),

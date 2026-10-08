@@ -1906,45 +1906,35 @@ export class AgentThread {
   }
 
   /**
-   * Estimates the full request size in tokens: instruction, definition messages,
-   * context, task state block, and tool definitions. Used by the token-based
-   * pre-flight guard to decide whether compaction must run before the request
-   * is assembled. Mirrors the message assembly in transformToLLMRequest without
-   * building the full request body.
+   * Counts the full request size in tokens using the provider's actual
+   * tokenizer: instruction, definition messages, context, task state block,
+   * and tool definitions. Used by the token-based pre-flight guard to decide
+   * whether compaction must run before the request is assembled. Mirrors the
+   * message assembly in transformToLLMRequest without building the full
+   * request body.
    *
-   * Context messages are estimated text-only (see contextMessageTextTokens):
+   * Context messages are counted text-only (see contextMessageText):
    * toOpenAIChatMessage preserves image_url / input_audio / file parts with
-   * their full base64 payloads, which the length/4 heuristic would inflate
-   * wildly (a 1MB image reads as ~340k tokens) while the provider does not
-   * bill those bytes as text tokens.
-   *
-   * Bails out early once the running total already exceeds `limit`: this runs on
-   * every turn, and precision past the guard threshold buys nothing. Pass
-   * Number.POSITIVE_INFINITY when the full estimate is needed (for example for
-   * the fail-fast error message).
+   * their full base64 payloads, which would inflate the count wildly (a 1MB
+   * image reads as ~340k tokens) while the provider does not bill those
+   * bytes as text tokens.
    */
-  private estimateFullRequestTokens(tools: ChatCompletionTool[], limit: number): number {
-    let total = 0;
+  private async estimateFullRequestTokens(tools: ChatCompletionTool[]): Promise<number> {
+    const parts: string[] = [];
     if (this.instruction) {
-      total += estimateTokensForString(this.instruction);
-      if (total > limit) {
-        return total;
-      }
+      parts.push(this.instruction);
     }
     if (this.definition.messages) {
       for (const msg of this.definition.messages) {
         if (isLLMContextMessage(msg)) {
-          total += estimateTokensForString(JSON.stringify(msg));
-          if (total > limit) {
-            return total;
-          }
+          parts.push(JSON.stringify(msg));
         }
       }
     }
     for (const message of this.context) {
-      total += contextMessageTextTokens(message);
-      if (total > limit) {
-        return total;
+      const text = contextMessageText(message);
+      if (text.length > 0) {
+        parts.push(text);
       }
     }
     const taskStateBlock = renderTaskStateBlock({
@@ -1952,13 +1942,10 @@ export class AgentThread {
       budget: this.definition.toolCallBudget,
     });
     if (taskStateBlock !== null) {
-      total += estimateTokensForString(taskStateBlock);
-      if (total > limit) {
-        return total;
-      }
+      parts.push(taskStateBlock);
     }
-    total += estimateTokensForString(JSON.stringify(tools));
-    return total;
+    parts.push(JSON.stringify(tools));
+    return this.definition.modelClient.countTokens(parts.join('\n'));
   }
 
   private transformToLLMRequest(tools: ChatCompletionTool[]): LLMCreateParamsStreaming {
@@ -2585,11 +2572,9 @@ export class AgentThread {
     const modelContextLength = this.definition.modelProperties?.contextLength;
     if (typeof modelContextLength === 'number' && Number.isFinite(modelContextLength) && modelContextLength > 0) {
       const maxOutputTokens = resolveMaxOutputTokens(this.definition.modelParams) ?? 0;
-      const inputTokenBudget = modelContextLength - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN;
       const isOverLimit = (estimatedInputTokens: number): boolean =>
         estimatedInputTokens + maxOutputTokens + TOKEN_BUDGET_SAFETY_MARGIN >= modelContextLength;
-      // The estimate bails out at the budget: precision past it cannot change the guard.
-      const estimatedInputTokens = this.estimateFullRequestTokens(tools, inputTokenBudget);
+      const estimatedInputTokens = await this.estimateFullRequestTokens(tools);
       if (isOverLimit(estimatedInputTokens)) {
         // No double compaction in one turn: when the normal pre-LLM pass above
         // already compacted, skip the forced pass and fail clearly if the
@@ -2602,9 +2587,8 @@ export class AgentThread {
             return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
           }
         }
-        // Full-precision estimate for the error message: the early exit above
-        // reports only a lower bound once past the budget.
-        const postCompactionTokens = this.estimateFullRequestTokens(tools, Number.POSITIVE_INFINITY);
+        // Re-count after compaction for the error message.
+        const postCompactionTokens = await this.estimateFullRequestTokens(tools);
         if (isOverLimit(postCompactionTokens)) {
           throw new Error(
             `Estimated request is ${Math.ceil(postCompactionTokens).toLocaleString('en-US')} input tokens, above the ` +
@@ -4006,20 +3990,31 @@ export class AgentThread {
 /**
  * Text-only character length of one context message: string content as-is, and only
  * `text` parts of multipart content. Binary/base64 payloads in image_url,
- * input_audio, and file parts are deliberately skipped: the length/4 token
- * heuristic would inflate them wildly (a 1MB image reads as ~340k tokens)
- * while the provider does not bill those bytes as text tokens.
+ * input_audio, and file parts are deliberately skipped: the conservative
+ * chars-per-token heuristic would inflate them wildly (a 1MB image reads as
+ * ~340k tokens) while the provider does not bill those bytes as text tokens.
  */
 function contextMessageTextLength(message: ContextMessage): number {
+  return contextMessageText(message).length;
+}
+
+/**
+ * Text-only content of one context message: string content as-is, and only
+ * `text` parts of multipart content. Binary/base64 payloads in image_url,
+ * input_audio, and file parts are deliberately skipped: they would inflate
+ * the token count wildly (a 1MB image reads as ~340k tokens) while the
+ * provider does not bill those bytes as text tokens.
+ */
+function contextMessageText(message: ContextMessage): string {
   if (!isLLMContextMessage(message)) {
-    return 0;
+    return '';
   }
   const content: unknown = message.content;
   if (typeof content === 'string') {
-    return content.length;
+    return content;
   }
   if (Array.isArray(content)) {
-    let total = 0;
+    const parts: string[] = [];
     for (const part of content) {
       if (
         typeof part === 'object' &&
@@ -4027,17 +4022,12 @@ function contextMessageTextLength(message: ContextMessage): number {
         (part as { type?: unknown }).type === 'text' &&
         typeof (part as { text?: unknown }).text === 'string'
       ) {
-        total += (part as { text: string }).text.length;
+        parts.push((part as { text: string }).text);
       }
     }
-    return total;
+    return parts.join('');
   }
-  return 0;
-}
-
-/** Token estimate for one context message counting text only; see contextMessageTextLength. */
-function contextMessageTextTokens(message: ContextMessage): number {
-  return contextMessageTextLength(message) / 4;
+  return '';
 }
 
 function estimateRawContextTextLength(context: readonly ContextMessage[]): number {
