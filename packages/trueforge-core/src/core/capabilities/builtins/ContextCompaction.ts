@@ -6,7 +6,6 @@ import type { AgentDefinition, ModelParams } from '../../runtime/AgentDefinition
 import { InternalEventType, type ContextMessage } from '../../runtime/AgentThread.types';
 import {
   countTokensForContextMessages,
-  estimateTokensForContextMessages,
   internalSystemMessage,
   isInternalSystemMessage,
   isLLMContextMessage,
