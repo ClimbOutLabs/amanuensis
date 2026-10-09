@@ -1,6 +1,6 @@
 import type { VercelAIProviderName } from './VercelAILLM';
 import type { Tiktoken, TiktokenModel } from '@dqbd/tiktoken';
-import modelToEncoding from '@dqbd/tiktoken/model_to_encoding.json';
+import modelToEncoding from '@dqbd/tiktoken/model_to_encoding.json' with { type: 'json' };
 
 /**
  * Counts tokens in text using a provider's actual tokenizer.
