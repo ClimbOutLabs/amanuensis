@@ -163,6 +163,14 @@ async function dumpServerLogTail() {
 async function startServers() {
   killStale();
   await sleep(2000);
+  // Scenario-scoped SQLite DB, reset fresh each run. The shared box DB
+  // accumulates branch-specific migrations; Kysely fails closed at boot
+  // when a recorded migration file is absent from the current branch.
+  const fsMod = await import('node:fs');
+  const dbPath = path.join(outDir, 'harness.db');
+  for (const suffix of ['', '-wal', '-shm']) {
+    try { fsMod.unlinkSync(dbPath + suffix); } catch { /* fresh start */ }
+  }
   log('starting harness (standalone:dev:no-watch) ...');
   const logPath = path.join(outDir, 'server.log');
   const logFd = (await import('node:fs')).openSync(logPath, 'a');
@@ -174,6 +182,7 @@ async function startServers() {
       NODE_ENV: 'development',
       TRUEFORGE_API_KEY: 'trueforge-local-dev',
       PORT: '8790',
+      SQLITE_PATH: dbPath,
       // Bind loopback IPv4 explicitly: the backend default HOST=localhost
       // resolves to ::1 on this host, which the 127.0.0.1 health poll below
       // can never reach. FRONTEND_PORT pins the vite dev server to the URL
