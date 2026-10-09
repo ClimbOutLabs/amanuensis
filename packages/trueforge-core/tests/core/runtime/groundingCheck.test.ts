@@ -84,7 +84,7 @@ describe('grounding check on a final answer to a freshness question', () => {
         ? finalStream('Node.js 22 is the latest LTS, from memory.')
         : finalStream('I could not search. From memory, Node.js 22 is the latest LTS, marked as such.');
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const thread = makeThread({ modelClient, toolSets: [toolSet], userText: FRESHNESS_QUESTION });
 
     const events: AgentThreadAppendContext[] = [];
@@ -115,7 +115,7 @@ describe('grounding check on a final answer to a freshness question', () => {
       }
       return finalStream('Node.js 22 is the latest LTS, per the search results.');
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const thread = makeThread({ modelClient, toolSets: [toolSet], userText: FRESHNESS_QUESTION });
 
     for await (const _event of thread.execute({ signal: new AbortController().signal })) {
@@ -129,7 +129,7 @@ describe('grounding check on a final answer to a freshness question', () => {
 
   it('does not nudge when no retrieval-capable tool is attached', async () => {
     const create = jest.fn(() => finalStream('Node.js 22 is the latest LTS, from memory.'));
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const thread = makeThread({ modelClient, toolSets: [], userText: FRESHNESS_QUESTION });
 
     for await (const _event of thread.execute({ signal: new AbortController().signal })) {
@@ -142,7 +142,7 @@ describe('grounding check on a final answer to a freshness question', () => {
   it('does not nudge for an ordinary question', async () => {
     const toolSet = makeSearchToolSet();
     const create = jest.fn(() => finalStream('Paris.'));
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const thread = makeThread({ modelClient, toolSets: [toolSet], userText: ORDINARY_QUESTION });
 
     for await (const _event of thread.execute({ signal: new AbortController().signal })) {

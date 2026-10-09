@@ -176,7 +176,7 @@ describe('verification receipt durability', () => {
       definition: {
         modelId: undefined,
         configuredModels: undefined,
-        modelClient: { create, createNonStream: jest.fn() },
+        modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
         instruction: 'test',
         toolSets: [],
       },
@@ -264,7 +264,7 @@ describe('verification receipt durability', () => {
       definition: {
         modelId: undefined,
         configuredModels: undefined,
-        modelClient: { create, createNonStream: jest.fn() },
+        modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
         instruction: 'test',
         toolSets: [],
       },
@@ -371,7 +371,7 @@ describe('verification receipt durability', () => {
       definition: {
         modelId: undefined,
         configuredModels: undefined,
-        modelClient: { create, createNonStream: jest.fn() },
+        modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
         instruction: 'test',
         toolSets: [],
       },

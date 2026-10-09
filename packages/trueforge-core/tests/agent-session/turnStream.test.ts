@@ -478,6 +478,7 @@ describe('TurnHandle.stream()', () => {
         return createSubAgentStream({ toolName: tool.function.name });
       }),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const turn = await session.createTurn({
       turn_id: mintTestTurnId(),
@@ -547,6 +548,7 @@ describe('TurnHandle.stream()', () => {
         return createSubAgentStream({ toolName: tool.function.name });
       }),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const turn = await session.createTurn({
       turn_id: mintTestTurnId(),
@@ -646,6 +648,7 @@ describe('TurnHandle.stream()', () => {
             throw new Error('model failed');
           }),
           createNonStream: jest.fn(),
+          countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
         },
       }),
     });
@@ -686,6 +689,7 @@ describe('TurnHandle.stream()', () => {
     const modelClient: ILLM = {
       create: jest.fn(() => neverSettlingStream(modelStarted.resolve)),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const resolver = new TurnResourceResolver({
       llm: () =>
@@ -879,6 +883,7 @@ describe('TurnHandle.stream()', () => {
         })(),
       ),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const capability: AgentCapability = {
       systemToolSets: [toolSet],
@@ -1097,6 +1102,7 @@ describe('TurnHandle.stream()', () => {
     const modelClient: ILLM = {
       create: jest.fn(() => providerStream),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const resolver = new TurnResourceResolver({
       llm: () =>
@@ -1159,6 +1165,7 @@ describe('TurnHandle.stream()', () => {
         return emptyLlmStream();
       }),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const resolver = new TurnResourceResolver({
       llm: () =>
@@ -1276,6 +1283,7 @@ describe('TurnHandle.stream()', () => {
         throw new Error('cancellation cleanup must not invoke the model');
       }),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const turn = await session.createTurn({
       turn_id: mintTestTurnId(),
@@ -1340,6 +1348,7 @@ describe('TurnHandle.stream()', () => {
         return createSubAgentStream({ toolName: toolName.function.name });
       }),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const turn = await session.createTurn({
       turn_id: mintTestTurnId(),
@@ -1406,6 +1415,7 @@ describe('TurnHandle.stream()', () => {
         return createSubAgentStream({ toolName });
       }),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const resolver = new TurnResourceResolver({
       llm: () =>
@@ -1475,6 +1485,7 @@ describe('TurnHandle.stream()', () => {
         return createSubAgentStream({ toolName });
       }),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const resolveModel = jest.fn(() =>
       Promise.resolve({ modelClient, defaultModelParams: {}, modelId: undefined, modelSupportsVision: false }),
@@ -1540,6 +1551,7 @@ describe('TurnHandle.stream()', () => {
         return createSubAgentStream({ toolName });
       }),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     let resolveCount = 0;
     const resolver = new TurnResourceResolver({

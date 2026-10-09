@@ -82,7 +82,7 @@ describe('denied tool result boundary', () => {
       tracing: NOOP_AGENT_TRACING,
     });
     const create = jest.fn().mockImplementationOnce(editStream).mockImplementationOnce(finalStream);
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',

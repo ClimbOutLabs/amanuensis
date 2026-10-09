@@ -286,6 +286,7 @@ function makeApprovalHarness(finalReply: string): {
           .mockImplementationOnce(() => writeNoteToolCallStream())
           .mockImplementation(() => textReplyStream(finalReply)),
         createNonStream: jest.fn(),
+        countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
       },
       instruction: INSTRUCTION,
       messages: undefined,

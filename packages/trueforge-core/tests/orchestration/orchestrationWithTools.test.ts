@@ -139,6 +139,7 @@ describe('orchestration: dynamic sub-agent', () => {
             .mockImplementationOnce(() => createSubAgentStream())
             .mockImplementation(() => textReplyStream(ROOT_FINAL)),
           createNonStream: jest.fn(),
+          countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
         },
         instruction: INSTRUCTION,
         // Undefined
@@ -181,6 +182,7 @@ describe('orchestration: dynamic sub-agent', () => {
       childLLM = {
         create: jest.fn().mockImplementation(() => textReplyStream(CHILD_REPLY)),
         createNonStream: jest.fn().mockImplementation(() => textReplyStream(CHILD_REPLY)),
+        countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
       };
 
       const agentDefinition: AgentDefinition = {

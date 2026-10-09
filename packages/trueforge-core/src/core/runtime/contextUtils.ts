@@ -17,6 +17,7 @@ import type {
   ToolInfo,
 } from '../llm/LLMTypes';
 import { UNKNOWN_TOOL_NAME } from '../llm/LLMTypes';
+import type { TokenCounter } from '../llm/tokenizer';
 import { estimateTokensForString } from '../llm/usage';
 import type { PendingHostNoteKind } from '../mcp/executeToolCalls';
 import type {
@@ -488,4 +489,50 @@ export function estimateTokensForContextMessages(messages: ContextMessage[]): Cu
     prompt_tokens: tokenCount,
     completion_tokens: 0,
   };
+}
+
+/**
+ * Extracts countable text from context messages: string content as-is, text
+ * parts of multipart content, tool call names/arguments, and tool call IDs.
+ * Binary/base64 payloads are excluded (see contextMessageText in AgentThread).
+ */
+export function extractCountableText(messages: ContextMessage[]): string {
+  const parts: string[] = [];
+  for (const b of messages) {
+    if ('content' in b && b.content) {
+      if (typeof b.content === 'string') {
+        parts.push(b.content);
+      } else if (Array.isArray(b.content)) {
+        for (const part of b.content) {
+          if ('text' in part && typeof part.text === 'string') {
+            parts.push(part.text);
+          }
+        }
+      }
+    }
+    if ('tool_calls' in b && b.tool_calls) {
+      for (const toolCall of b.tool_calls) {
+        parts.push(toolCall.function.name);
+        parts.push(toolCall.function.arguments);
+      }
+    }
+    if ('tool_call_id' in b && b.tool_call_id) {
+      parts.push(b.tool_call_id);
+    }
+  }
+  return parts.join('\n');
+}
+
+/**
+ * Counts tokens for context messages using a provider's actual tokenizer.
+ * Prefer over estimateTokensForContextMessages when a TokenCounter is
+ * available; the heuristic version remains for call sites without one.
+ */
+export async function countTokensForContextMessages(
+  messages: ContextMessage[],
+  counter: TokenCounter,
+): Promise<CurrentContextUsage> {
+  const text = extractCountableText(messages);
+  const prompt_tokens = text.length === 0 ? 0 : await counter.countTokens(text);
+  return { prompt_tokens, completion_tokens: 0 };
 }

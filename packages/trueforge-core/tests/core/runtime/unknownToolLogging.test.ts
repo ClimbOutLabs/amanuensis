@@ -21,6 +21,7 @@ describe('AgentThread unknown tool logging', () => {
         .mockImplementationOnce(() => unknownToolStream({ toolName: UNKNOWN_TOOL_NAME, callId: 'call-unknown' }))
         .mockImplementation(() => finalAnswerStream()),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
 
     const thread = new AgentThread({
@@ -67,7 +68,7 @@ describe('AgentThread unknown tool logging', () => {
       .mockImplementationOnce(() => unknownToolStream({ toolName: UNKNOWN_TOOL_NAME, callId: 'call-unknown-2' }))
       .mockImplementationOnce(() => unknownToolStream({ toolName: UNKNOWN_TOOL_NAME, callId: 'call-unknown-3' }))
       .mockImplementation(() => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
 
     const thread = new AgentThread({
       threadId: 'main',

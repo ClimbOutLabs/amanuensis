@@ -1,7 +1,22 @@
 import type { CompletionUsage } from './LLMTypes';
 
+/**
+ * Heuristic fallback token estimate. Used ONLY where no ILLM is available
+ * (usage breakdowns, thresholds, displays). Never use for the pre-flight
+ * context-limit guard or compaction budgets; those must use
+ * ILLM.countTokens(), which runs the provider's actual tokenizer.
+ *
+ * Uses a conservative 3 chars/token divisor: plain prose tokenizes near 4
+ * chars/token, but the strings this estimates are mostly JSON-serialized
+ * chat history plus code, which run denser (production histories measured
+ * 3-3.9 chars/token on the DeepSeek tokenizer). Overcounting only compacts
+ * a little early, while undercounting lets through requests the provider
+ * then rejects. CJK scripts tokenize denser than this bound.
+ */
+export const ESTIMATE_CHARS_PER_TOKEN = 3;
+
 export function estimateTokensForString(s: string): number {
-  return s.length / 4;
+  return s.length / ESTIMATE_CHARS_PER_TOKEN;
 }
 
 function sumOptional(a: number | undefined, b: number | undefined): number | undefined {

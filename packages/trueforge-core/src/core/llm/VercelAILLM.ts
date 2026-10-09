@@ -38,6 +38,12 @@ import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFie
 import { withFailover } from './failoverLanguageModel';
 import type { ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './ILLM';
 import {
+  CachedTokenCounter,
+  HeuristicTokenCounter,
+  createTokenCounter,
+  type TokenCounter,
+} from './tokenizer';
+import {
   type CompletionUsage,
   type ExtendedChatCompletionChunk,
   getEmptyUsage,
@@ -1740,6 +1746,13 @@ export class VercelAILLM implements ILLM {
   private readonly logger: Logger;
   private readonly signal: AbortSignal | undefined;
   private readonly streamTimeout: NonNullable<VercelAILLMConfig['streamTimeout']>;
+  private tokenCounter: TokenCounter | undefined;
+  /**
+   * True once the primary tokenizer has been probed. If the probe failed,
+   * the counter is permanently replaced with the heuristic fallback so
+   * every request does not pay for a failing network call.
+   */
+  private tokenizerProbed = false;
 
   constructor(config: VercelAILLMConfig) {
     this.config = config;
@@ -1754,6 +1767,50 @@ export class VercelAILLM implements ILLM {
         throw new Error('Model stream deadlines must be integer milliseconds between 1 and 2147483647');
       }
     }
+  }
+
+  /**
+   * Counts tokens using the provider's actual tokenizer. On first use the
+   * configured tokenizer is probed; if the endpoint is unreachable (for
+   * example an OpenAI-compatible server without /tokenize), it permanently
+   * falls back to the conservative heuristic so later calls do not retry
+   * a failing endpoint. Results are cached per text.
+   */
+  async countTokens(text: string): Promise<number> {
+    if (this.tokenCounter === undefined) {
+      const { providerConfig } = this.config;
+      const { provider, model } = providerConfig;
+      const selected = createTokenCounter({
+        providerType: provider.type,
+        modelId: model.id,
+        baseUrl: providerConfig.baseUrl,
+        apiKey: providerConfig.apiKey,
+        headers: providerConfig.headers,
+        signal: this.signal,
+      });
+      if (selected instanceof HeuristicTokenCounter) {
+        this.logger.warn('No provider tokenizer available, using heuristic token fallback', {
+          provider: provider.type,
+          model: model.id,
+        });
+      }
+      this.tokenCounter = new CachedTokenCounter(selected);
+    }
+    if (!this.tokenizerProbed) {
+      this.tokenizerProbed = true;
+      try {
+        // Probe with a short string; the cache skips short inputs, so this
+        // always reaches the underlying tokenizer.
+        await this.tokenCounter.countTokens('probe '.repeat(200));
+      } catch (error) {
+        this.logger.warn('Provider tokenizer unreachable, using heuristic fallback', {
+          provider: this.config.providerConfig.provider.type,
+          error: describeUnknownError(error),
+        });
+        this.tokenCounter = new CachedTokenCounter(new HeuristicTokenCounter());
+      }
+    }
+    return this.tokenCounter.countTokens(text);
   }
 
   async *create(

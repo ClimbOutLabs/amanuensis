@@ -280,7 +280,7 @@ describe('abnormal handoffs', () => {
       definition: {
         modelId: undefined,
         configuredModels: undefined,
-        modelClient: { create, createNonStream: jest.fn() },
+        modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
         instruction: 'test',
       },
       sandbox,
@@ -704,7 +704,7 @@ describe('abnormal handoffs', () => {
     const resolver = new TurnResourceResolver({
       llm: () =>
         Promise.resolve({
-          modelClient: { create, createNonStream: jest.fn() },
+          modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
           defaultModelParams: {},
           modelId: undefined,
           modelSupportsVision: false,
@@ -765,7 +765,7 @@ describe('abnormal handoffs', () => {
     const resolver = new TurnResourceResolver({
       llm: () =>
         Promise.resolve({
-          modelClient: { create, createNonStream: jest.fn() },
+          modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
           defaultModelParams: {},
           modelId: undefined,
           modelSupportsVision: false,
@@ -843,7 +843,7 @@ describe('abnormal handoffs', () => {
       definition: {
         modelId: undefined,
         configuredModels: undefined,
-        modelClient: { create, createNonStream: jest.fn() },
+        modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
         instruction: 'test',
         iterationLimit: 0,
       },
@@ -903,7 +903,7 @@ describe('abnormal handoffs', () => {
       exec,
       existingSandboxId: 'v1:test:sandbox-handoff',
     });
-    const modelClient: ILLM = { create: jest.fn(), createNonStream: jest.fn() };
+    const modelClient: ILLM = { create: jest.fn(), createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
@@ -972,7 +972,7 @@ describe('abnormal handoffs', () => {
       definition: {
         modelId: undefined,
         configuredModels: undefined,
-        modelClient: { create: jest.fn(), createNonStream: jest.fn() },
+        modelClient: { create: jest.fn(), createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
         instruction: 'test',
       },
       sandbox,
@@ -1120,7 +1120,7 @@ describe('abnormal handoffs', () => {
         toolResultDumpDir: artifactDir,
         workspaceCwd: repositoryRoot,
       });
-      const modelClient: ILLM = { create: jest.fn(), createNonStream: jest.fn() };
+      const modelClient: ILLM = { create: jest.fn(), createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
       const thread = new AgentThread({
         threadId: 'main',
         title: 'Main',
@@ -1189,7 +1189,7 @@ describe('abnormal handoffs', () => {
     const resolver = new TurnResourceResolver({
       llm: () =>
         Promise.resolve({
-          modelClient: { create, createNonStream: jest.fn() },
+          modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
           defaultModelParams: {},
           modelId: undefined,
           modelSupportsVision: false,
@@ -1265,7 +1265,7 @@ describe('abnormal handoffs', () => {
     const resolver = new TurnResourceResolver({
       llm: () =>
         Promise.resolve({
-          modelClient: { create, createNonStream: jest.fn() },
+          modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
           defaultModelParams: {},
           modelId: undefined,
           modelSupportsVision: false,
@@ -1314,6 +1314,7 @@ describe('abnormal handoffs', () => {
     const modelClient: ILLM = {
       create: jest.fn(() => finalSummaryStream()),
       createNonStream: jest.fn(),
+      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const thread = new AgentThread({
       threadId: 'main',

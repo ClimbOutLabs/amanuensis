@@ -26,7 +26,7 @@ async function* finalAnswerStream(): AsyncGenerator<
 describe('AgentThread ability boundaries instruction', () => {
   it('tells the model it has no image, audio, or video tools unless one is listed', async () => {
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
