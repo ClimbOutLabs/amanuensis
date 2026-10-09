@@ -10,7 +10,7 @@ import {
   StaleApprovalContinuationError,
   TurnAlreadyExistsError,
 } from '@truefoundry/trueforge-core/agent-session';
-import { AgentHarnessError } from '@truefoundry/trueforge-core/core';
+import { AgentHarnessError, DEFAULT_PINNED_PATH, defaultSentinelServices } from '@truefoundry/trueforge-core/core';
 import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { createTurnsRouter } from '../../../src/apis/turns';
@@ -140,6 +140,7 @@ async function buildApp(recordedApproval: { status: 'allow' } | { status: 'deny'
       sessionStore,
       activeTurns: new ActiveTurnRegistry(),
       turnDrains: new TurnDrainRegistry(),
+      sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
       tokenStore,
       resolveModelProviderStore: () => new SqliteModelProviderStore(db),
       resolveMcpServerStore: () =>

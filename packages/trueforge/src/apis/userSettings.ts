@@ -4,11 +4,8 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 
 import type { ResolveRequestContext } from '../auth/identity';
-import type { ISentinelUserSettingsStore } from '../db/sentinelUserSettingsStore';
-import {
-  getSentinelUserSettingsRoute,
-  updateSentinelUserSettingsRoute,
-} from '../routes/userSettingsRoutes';
+import type { ISentinelUserSettingsStore, UpdateSentinelUserSettingsInput } from '../db/sentinelUserSettingsStore';
+import { getSentinelUserSettingsRoute, updateSentinelUserSettingsRoute } from '../routes/userSettingsRoutes';
 
 export interface UserSettingsRouterDeps {
   sentinelUserSettingsStore: ISentinelUserSettingsStore;
@@ -28,12 +25,17 @@ export function createUserSettingsRouter(deps: UserSettingsRouterDeps) {
   const updateSentinelUserSettingsHandler: RouteHandler<typeof updateSentinelUserSettingsRoute> = async c => {
     const body = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
-    const settings = await deps.sentinelUserSettingsStore.upsert({
+    const update: UpdateSentinelUserSettingsInput = {
       tenant_id: requestContext.tenant_id,
       created_by: requestContext.subject.id,
-      tier2_always_ask: body.tier2_always_ask,
-      offline_mode: body.offline_mode,
-    });
+    };
+    if (body.tier2_always_ask !== undefined) {
+      update.tier2_always_ask = body.tier2_always_ask;
+    }
+    if (body.offline_mode !== undefined) {
+      update.offline_mode = body.offline_mode;
+    }
+    const settings = await deps.sentinelUserSettingsStore.upsert(update);
     return c.json(settings, 200);
   };
 

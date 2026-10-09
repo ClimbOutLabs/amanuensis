@@ -8,7 +8,12 @@ import {
   type TurnInputItem,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
-import { EventType, type AgentInputUserMessage } from '@truefoundry/trueforge-core/core';
+import {
+  DEFAULT_PINNED_PATH,
+  EventType,
+  defaultSentinelServices,
+  type AgentInputUserMessage,
+} from '@truefoundry/trueforge-core/core';
 import type { Kysely } from 'kysely';
 import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
@@ -136,6 +141,7 @@ describe('turns', () => {
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
           turnDrains: new TurnDrainRegistry(),
+          sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
           tokenStore,
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),
@@ -221,6 +227,7 @@ describe('turns', () => {
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
           turnDrains: new TurnDrainRegistry(),
+          sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
           tokenStore: new SqliteOAuthTokenStore(db),
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, new SqliteOAuthTokenStore(db)),
@@ -437,6 +444,7 @@ describe('turns', () => {
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
           turnDrains: new TurnDrainRegistry(),
+          sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
           tokenStore,
           resolveModelProviderStore: () => modelProviderStore,
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),
@@ -570,6 +578,7 @@ describe('turns', () => {
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
           turnDrains: new TurnDrainRegistry(),
+          sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
           tokenStore: new SqliteOAuthTokenStore(db),
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, new SqliteOAuthTokenStore(db)),
@@ -680,6 +689,7 @@ describe('turns', () => {
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
           turnDrains: new TurnDrainRegistry(),
+          sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
           tokenStore,
           resolveModelProviderStore: () => modelProviderStore,
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),
@@ -770,6 +780,7 @@ describe('turns', () => {
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
           turnDrains: new TurnDrainRegistry(),
+          sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
           tokenStore,
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),

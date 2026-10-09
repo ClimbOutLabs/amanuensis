@@ -1,7 +1,12 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { AgentSpec } from '@truefoundry/trueforge-core/agent-session';
 import { AgentSpecSchema, SessionHandle, Sessions, TurnHandle } from '@truefoundry/trueforge-core/agent-session';
-import { SandboxNotAvailableError, type SandboxProvider } from '@truefoundry/trueforge-core/core';
+import {
+  DEFAULT_PINNED_PATH,
+  SandboxNotAvailableError,
+  defaultSentinelServices,
+  type SandboxProvider,
+} from '@truefoundry/trueforge-core/core';
 import { createLogger } from 'winston';
 import { createTurnsRouter, toContentDisposition } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer } from '../../../src/auth/authorizer';
@@ -54,6 +59,7 @@ async function buildApp(options?: { sandboxProvider?: SandboxProvider | undefine
       sessionStore,
       activeTurns: new ActiveTurnRegistry(),
       turnDrains: new TurnDrainRegistry(),
+      sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
       resolveModelProviderStore: () => new SqliteModelProviderStore(db),
       resolveMcpServerStore: () =>
         new McpServerWithAuthStore({

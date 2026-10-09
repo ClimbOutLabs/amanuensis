@@ -1,5 +1,6 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { AgentSpecSchema, Sessions } from '@truefoundry/trueforge-core/agent-session';
+import { DEFAULT_PINNED_PATH, defaultSentinelServices } from '@truefoundry/trueforge-core/core';
 import { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import { createClient } from 'redis';
 import { createLogger } from 'winston';
@@ -80,6 +81,7 @@ describe('public CRUD after session deletion', () => {
         sessionStore,
         activeTurns,
         turnDrains: new TurnDrainRegistry(),
+        sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
         resolveModelProviderStore: () => modelProviderStore,
         resolveMcpServerStore: () => mcpServerStore,
         resolveSkillStore: () => skillStore,

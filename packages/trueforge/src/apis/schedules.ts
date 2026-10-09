@@ -8,6 +8,7 @@ import {
   type Sessions,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
+import type { SentinelServices } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
@@ -102,6 +103,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   sandboxProviderResolver?: typeof resolveSandboxProvider | undefined;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Sentinel services for turns a schedule starts in-process. */
+  sentinelServices: SentinelServices;
 }
 
 export interface SchedulesRouterDeps<TTransaction> extends ScheduleTurnExecutionDeps<TTransaction> {
@@ -151,6 +154,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       turnArtifactStore: deps.turnArtifactStore,
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,
+      sentinelServices: deps.sentinelServices,
       logger: deps.logger,
     },
   });

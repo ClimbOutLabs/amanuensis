@@ -4,6 +4,7 @@ import {
   TurnHandle,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
+import { DEFAULT_PINNED_PATH, defaultSentinelServices } from '@truefoundry/trueforge-core/core';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +12,6 @@ import { createLogger } from 'winston';
 
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { beginTurnExecution } from '../../../src/apis/turns';
-import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import type {
@@ -39,6 +39,7 @@ import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscripti
 import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../../../src/runtime/memorySummarizeSettings';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
+import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 
 /** Delegates to a real store while recording every `getSetting` call. */
 class CountingGlobalSettingsStore implements IGlobalSettingsStore {
@@ -135,6 +136,7 @@ describe('beginTurnExecution turn-summarization wiring', () => {
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
           turnDrains: new TurnDrainRegistry(),
+          sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
           tokenStore,
           agentStore: new SqliteAgentStore(db),
           modelProviderStore: new SqliteModelProviderStore(db),

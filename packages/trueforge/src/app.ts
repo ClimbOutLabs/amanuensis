@@ -2,6 +2,7 @@
 import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
+import type { SentinelServices } from '@truefoundry/trueforge-core/core';
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Context, ErrorHandler, MiddlewareHandler } from 'hono';
@@ -29,11 +30,11 @@ import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/sch
 import { createSessionFolderAssignmentsRouter, createSessionFoldersRouter } from './apis/sessionFolders';
 import { createInternalMetricsRouter } from './apis/sessionMetrics';
 import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessions';
-import { createUserSettingsRouter } from './apis/userSettings';
 import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skills';
 import { createSpacesRouter } from './apis/spaces';
 import { createTurnsRouter } from './apis/turns';
+import { createUserSettingsRouter } from './apis/userSettings';
 import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
@@ -59,11 +60,10 @@ import type { IPersonaStore } from './db/personaStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
+import type { ISentinelAuditStore } from './db/sentinelAuditStore';
+import type { ISentinelUserSettingsStore } from './db/sentinelUserSettingsStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
-import type { ISentinelAuditStore } from './db/sentinelAuditStore';
-import type { SentinelServices } from '@truefoundry/trueforge-core/core';
-import type { ISentinelUserSettingsStore } from './db/sentinelUserSettingsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { WithTransaction } from './db/transaction';
@@ -282,6 +282,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     turnArtifactStore: deps.turnArtifactStore,
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
+    sentinelServices: deps.sentinelServices,
   };
 
   if (configuration.ACCESS_LOGS) {

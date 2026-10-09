@@ -4,11 +4,11 @@ import {
   TurnHandle,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
+import { DEFAULT_PINNED_PATH, defaultSentinelServices } from '@truefoundry/trueforge-core/core';
 import { createLogger } from 'winston';
 
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { beginTurnExecution } from '../../../src/apis/turns';
-import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import type {
@@ -33,10 +33,11 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
+import { MEMORY_SUMMARIZE_SETTING_KEY } from '../../../src/runtime/memorySummarizeSettings';
 import { toolOutputScreenCapability, type ToolOutputScreenConfig } from '../../../src/runtime/toolOutputScreen';
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../../../src/runtime/toolOutputScreenSettings';
-import { MEMORY_SUMMARIZE_SETTING_KEY } from '../../../src/runtime/memorySummarizeSettings';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
+import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 
 /**
  * `SpaceTurnResourceResolver` constructor args per `beginTurnExecution` call. The
@@ -165,6 +166,7 @@ describe('beginTurnExecution tool-output screen wiring', () => {
         sessionStore,
         activeTurns: new ActiveTurnRegistry(),
         turnDrains: new TurnDrainRegistry(),
+        sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
         tokenStore,
         agentStore: new SqliteAgentStore(db),
         modelProviderStore: new SqliteModelProviderStore(db),

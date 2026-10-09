@@ -9,7 +9,9 @@
  */
 import type { TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import { Sessions } from '@truefoundry/trueforge-core/agent-session';
+import { DEFAULT_PINNED_PATH, defaultSentinelServices } from '@truefoundry/trueforge-core/core';
 import { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
+import type { Kysely } from 'kysely';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import winston from 'winston';
@@ -22,6 +24,8 @@ import { SandboxCatalog } from '../src/catalog/SandboxCatalog';
 import { SkillCatalog } from '../src/catalog/SkillCatalog';
 import configuration from '../src/config';
 import { McpServerWithAuthStore } from '../src/db/McpServerWithAuthStore';
+import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentinelAuditStore';
+import { SentinelUserSettingsStore, type SentinelUserSettingsDatabase } from '../src/db/sentinelUserSettingsStore';
 import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -33,8 +37,6 @@ import { SqliteRepositoryStore } from '../src/db/sqlite/repository-store/SqliteR
 import { SqliteSandboxProviderStore } from '../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteScheduleStore } from '../src/db/sqlite/schedule-store/SqliteScheduleStore';
 import { SqliteSessionMetricsStore } from '../src/db/sqlite/session-metrics/SqliteSessionMetricsStore';
-import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentinelAuditStore';
-import type { Kysely } from 'kysely';
 import { SqliteSessionStore } from '../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSkillStore } from '../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteSpaceStore } from '../src/db/sqlite/space-store/SqliteSpaceStore';
@@ -106,6 +108,8 @@ const app = createServerApp({
   sessionStore,
   sessionMetricsStore: new SqliteSessionMetricsStore(db),
   sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
+  sentinelUserSettingsStore: new SentinelUserSettingsStore(db as Kysely<SentinelUserSettingsDatabase>),
+  sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
   sessions: new Sessions({ sessionStore }),
   activeTurns: new ActiveTurnRegistry(),
   turnDrains: new TurnDrainRegistry(),

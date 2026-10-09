@@ -5,6 +5,7 @@ import {
   Sessions,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
+import { DEFAULT_PINNED_PATH, defaultSentinelServices } from '@truefoundry/trueforge-core/core';
 import winston from 'winston';
 import { createScheduleExecutionRouter, createSchedulesRouter } from '../../../src/apis/schedules';
 import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authorizer';
@@ -16,7 +17,6 @@ import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgent
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
-import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
@@ -25,6 +25,7 @@ import {
   ListScheduleRunsResponseSchema,
   ListSchedulesResponseSchema,
 } from '../../../src/schemas/schedule';
+import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 
 jest.mock('../../../src/controller/scheduleDispatch', () => {
   const actual = jest.requireActual<typeof import('../../../src/controller/scheduleDispatch')>(
@@ -75,6 +76,7 @@ function stubTurnExecutionDeps(
     agentStore,
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),
+    sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: winston.createLogger({ silent: true }),
     resolveModelProviderStore: () => ({}) as never,

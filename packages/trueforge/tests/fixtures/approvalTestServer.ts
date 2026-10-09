@@ -8,8 +8,14 @@
  */
 import type { OpenAPIHono } from '@hono/zod-openapi';
 import { Sessions, type TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import type { SandboxProvider } from '@truefoundry/trueforge-core/core';
+import {
+  DEFAULT_PINNED_PATH,
+  defaultSentinelServices,
+  type SandboxProvider,
+  type SentinelServices,
+} from '@truefoundry/trueforge-core/core';
 import { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
+import type { Kysely } from 'kysely';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,6 +33,7 @@ import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
+import { SentinelUserSettingsStore, type SentinelUserSettingsDatabase } from '../../src/db/sentinelUserSettingsStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -81,6 +88,12 @@ function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): O
   const sandboxProviderStore = new SqliteSandboxProviderStore(db);
   const skillStore = new SqliteSkillStore(db);
   const globalSettingsStore = new SqliteGlobalSettingsStore(db);
+  const sentinelAuditStore = new SentinelAuditStore(db);
+  const sentinelUserSettingsStore = new SentinelUserSettingsStore(db as Kysely<SentinelUserSettingsDatabase>);
+  const sentinelServices: SentinelServices = {
+    ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
+    audit: sentinelAuditStore,
+  };
   return createServerApp({
     modelCatalog: ModelCatalog.load(),
     mcpCatalog: McpCatalog.load(),
@@ -101,7 +114,9 @@ function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): O
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore,
     sessionStore,
-    sentinelAuditStore: new SentinelAuditStore(db),
+    sentinelAuditStore,
+    sentinelUserSettingsStore,
+    sentinelServices,
     sessions: new Sessions({ sessionStore }),
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),

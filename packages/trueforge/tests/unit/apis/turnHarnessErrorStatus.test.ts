@@ -1,6 +1,6 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { Sessions } from '@truefoundry/trueforge-core/agent-session';
-import { AgentHarnessError } from '@truefoundry/trueforge-core/core';
+import { AgentHarnessError, DEFAULT_PINNED_PATH, defaultSentinelServices } from '@truefoundry/trueforge-core/core';
 import { createLogger } from 'winston';
 import { createTurnsRouter } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer } from '../../../src/auth/authorizer';
@@ -82,6 +82,7 @@ async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response
       sessionStore,
       activeTurns: new ActiveTurnRegistry(),
       turnDrains: new TurnDrainRegistry(),
+      sentinelServices: defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
       tokenStore,
       resolveModelProviderStore: () => modelProviderStore,
       resolveMcpServerStore: () =>
