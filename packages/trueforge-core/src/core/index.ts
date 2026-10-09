@@ -373,7 +373,7 @@ export {
 export type { AuditOutcome, AuditRecordInput, AuditLogWriter } from './permissions/audit';
 export { recordClassificationAudit } from './permissions/audit';
 export type { SentinelServices, SentinelCallIdentity, SentinelHostContext } from './permissions/context';
-export { defaultSentinelServices, classifyContextFor, createSentinelHostContext, toDispatchSentinelContext, DEFAULT_PINNED_PATH } from './permissions/context';
+export { defaultSentinelServices, getSharedSentinelServices, resetSharedSentinelServicesForTests, classifyContextFor, createSentinelHostContext, toDispatchSentinelContext, DEFAULT_PINNED_PATH } from './permissions/context';
 export type { SentinelAction, ClassifyContext } from './permissions/classifier';
 export { classifyTier, classifyHostToolCall, canonicalShellForm, shellBindingFromForm } from './permissions/classifier';
 export type { VerifiableCall, DispatchCheckContext } from './permissions/dispatch';

@@ -32,9 +32,8 @@ import {
 } from '@truefoundry/trueforge-core/core';
 import {
   createSentinelHostContext,
-  defaultSentinelServices,
+  getSharedSentinelServices,
   DEFAULT_PINNED_PATH,
-  type SentinelServices,
 } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -114,27 +113,6 @@ import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
-
-/**
- * Session-scoped Sentinel services. Approval tokens are minted at classify
- * time and redeemed at dispatch time, which happen on different turns (the
- * user approves between them). A per-turn service container would mint into
- * one in-memory token store and redeem from another, so every Tier 3 approval
- * would fail with "token invalid or already used". Sharing the services per
- * session keeps the token store (and tracked-execution grants) visible across
- * turns of the same conversation.
- */
-const sentinelServicesBySession = new Map<string, SentinelServices>();
-
-function getSentinelServices(input: { session_id: string }): SentinelServices {
-  const existing = sentinelServicesBySession.get(input.session_id);
-  if (existing !== undefined) {
-    return existing;
-  }
-  const services = defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH });
-  sentinelServicesBySession.set(input.session_id, services);
-  return services;
-}
 
 export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnapshot<TCustom>): Turn {
   return {
@@ -480,7 +458,7 @@ function createTurnResolver(deps: {
             created_by: userRef,
             conversation_id: sessionId,
             workspace_cwd: sentinelSession?.workspace_cwd ?? null,
-            services: getSentinelServices({ session_id: sessionId }),
+            services: getSharedSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
           }),
           loadBoundRepository:
             boundRepository === undefined

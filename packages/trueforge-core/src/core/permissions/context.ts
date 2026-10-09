@@ -51,6 +51,42 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
 }
 
 /**
+ * Process-wide shared Sentinel services for single-user deployments.
+ *
+ * Approval tokens are minted at classify time and redeemed at dispatch time,
+ * which happen on different turns (the user approves between them). If each
+ * turn built its own service container, the token minted in Turn N would be
+ * invisible to the dispatch in Turn N+1, and every Tier 3 approval would fail
+ * with "token invalid or already used". This accessor returns one shared
+ * instance so the token store (and tracked-execution grants) stay visible
+ * across turns.
+ *
+ * Single-user only: one person, one instance. Two people in the same
+ * household run two instances. For a multi-tenant server, replace this
+ * in-memory singleton with a persistent per-tenant store.
+ *
+ * The pinned_path from the first call wins; all current call sites pass
+ * DEFAULT_PINNED_PATH.
+ */
+let sharedSentinelServices: SentinelServices | null = null;
+
+export function getSharedSentinelServices(input: { pinned_path: string }): SentinelServices {
+  if (sharedSentinelServices === null) {
+    sharedSentinelServices = defaultSentinelServices(input);
+  }
+  return sharedSentinelServices;
+}
+
+/**
+ * Test-only helper: drops the shared Sentinel services so the next call to
+ * getSharedSentinelServices builds a fresh instance. Never call this in
+ * production code.
+ */
+export function resetSharedSentinelServicesForTests(): void {
+  sharedSentinelServices = null;
+}
+
+/**
  * Server-owned Sentinel context carried by hosts (ToolSet, Sandbox): shared
  * services plus the per-turn identity the classifier and audit log need.
  */
@@ -68,9 +104,9 @@ export interface SentinelHostContext {
  * Canonical factory for SentinelHostContext. Use this instead of building
  * the object literal inline, so all call sites share one construction path.
  *
- * When services are omitted, defaults are used (same as classifyContextFor).
- * For session-scoped sharing (tracked grants, approval tokens visible across
- * threads), pass the session's services explicitly.
+ * When services are omitted, the process-wide shared services are used
+ * (same as classifyContextFor), so approval tokens minted at classify time
+ * stay visible at dispatch time across turns.
  */
 export function createSentinelHostContext(input: {
   tenant_id: string;
@@ -80,7 +116,7 @@ export function createSentinelHostContext(input: {
   services?: SentinelServices | undefined;
 }): SentinelHostContext {
   return {
-    services: input.services ?? defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
+    services: input.services ?? getSharedSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     tenant_id: input.tenant_id,
     created_by: input.created_by,
     conversation_id: input.conversation_id,
@@ -129,7 +165,7 @@ export function classifyContextFor(input: {
 } {
   const host = input.host;
   return {
-    services: host?.services ?? defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
+    services: host?.services ?? getSharedSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     tenant_id: host?.tenant_id ?? '',
     created_by: host?.created_by ?? '',
     conversation_id: host?.conversation_id ?? '',
