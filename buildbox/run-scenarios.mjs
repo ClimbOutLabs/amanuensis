@@ -118,7 +118,7 @@ function killStale() {
   }
 }
 
-async function waitFor(url, label, timeoutMs) {
+async function waitFor(url, label, timeoutMs, onTimeout) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     try {
@@ -130,8 +130,33 @@ async function waitFor(url, label, timeoutMs) {
     } catch {
       /* not yet */
     }
-    if (Date.now() > deadline) fail(`${label} did not come up at ${url} within ${timeoutMs / 1000}s`);
+    if (Date.now() > deadline) {
+      if (onTimeout) await onTimeout();
+      fail(`${label} did not come up at ${url} within ${timeoutMs / 1000}s`);
+    }
     await sleep(5000);
+  }
+}
+
+/**
+ * Diagnostic: print the tail of the backend server log. Called when the
+ * backend boot probe times out so the failure output shows the actual
+ * startup error instead of just "did not come up".
+ */
+async function dumpServerLogTail() {
+  try {
+    const fs = await import('node:fs');
+    const logPath = path.join(outDir, 'server.log');
+    if (!fs.existsSync(logPath)) {
+      console.error('diagnostic: server.log not found at ' + logPath);
+      return;
+    }
+    const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n');
+    const tail = lines.slice(-80);
+    console.error(`diagnostic: server.log tail (last ${tail.length} of ${lines.length} lines):`);
+    for (const line of tail) console.error('  | ' + line.slice(0, 500));
+  } catch (e) {
+    console.error('diagnostic: failed to read server.log: ' + (e?.message ?? e));
   }
 }
 
@@ -162,7 +187,7 @@ async function startServers() {
   });
   serverProc.unref();
   log('server log:', logPath);
-  await waitFor(`${API}/healthz`, 'backend', 420000);
+  await waitFor(`${API}/healthz`, 'backend', 420000, dumpServerLogTail);
   await waitFor(`${UI}/`, 'frontend', 240000);
 }
 
