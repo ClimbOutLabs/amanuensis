@@ -357,7 +357,7 @@ async function runSentinelScenario(pw) {
   await shot('03-toggle-persisted.png');
 
   // --- 5. trigger a shell action -> approval card -------------------------
-  await sendChatMessage('Run `echo hello-sentinel` in the shell');
+  await sendChatMessage('Use the exec tool to run the shell command: echo hello-sentinel');
   const cardAppeared = await waitForText('Permission needed', 180000, 'approval card');
   check('Tier 3 approval card appears for shell (always-ask on)', cardAppeared);
   await sleep(1500);
