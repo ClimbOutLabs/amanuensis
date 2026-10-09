@@ -343,6 +343,12 @@ function loadPlaywright() {
   return req('playwright-core');
 }
 
+function playwrightVersion() {
+  const req = createRequire(path.join(ROOT, 'packages/frontend/package.json'));
+  const pkgPath = req.resolve('playwright-core/package.json');
+  return JSON.parse(readFileSync(pkgPath, 'utf8')).version;
+}
+
 async function ensureChromium(pw) {
   try {
     const b = await pw.chromium.launch({ headless: true });
@@ -352,13 +358,25 @@ async function ensureChromium(pw) {
   } catch (e) {
     log('chromium not launchable, installing ...', String(e && e.message ? e.message : e).slice(0, 200));
   }
-  const r = spawnSync('npx', ['-y', 'playwright-core', 'install', 'chromium'], {
+  // Pin the install to the repo's playwright-core version. A bare
+  // `npx playwright-core` fetches the latest CLI, whose browser builds do
+  // not match the playwright-core the harness loads, so the launch keeps
+  // failing after a "successful" install.
+  const version = playwrightVersion();
+  log('installing chromium for playwright-core', version);
+  const r = spawnSync('npx', ['-y', `playwright-core@${version}`, 'install', 'chromium'], {
     cwd: ROOT,
     encoding: 'utf8',
     timeout: 900000,
   });
   if (r.status !== 0) fail('chromium install failed: ' + (r.stderr || r.stdout || '').slice(0, 600));
-  log('chromium installed');
+  try {
+    const b = await pw.chromium.launch({ headless: true });
+    await b.close();
+    log('chromium installed and launchable');
+  } catch (e) {
+    fail('chromium installed but still not launchable: ' + String(e && e.message ? e.message : e).slice(0, 400));
+  }
 }
 
 async function takeScreenshots(sessionId, lastText) {
