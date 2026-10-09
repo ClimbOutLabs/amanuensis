@@ -93,6 +93,7 @@ function withAdminAuth(router: OpenAPIHono, middleware: MiddlewareHandler): Open
 }
 
 /** One line per request: method, path, status, duration. Skips `/healthz`. */
+/** Successful read-only requests log at debug; mutations and errors stay at info. */
 export function createAccessLogMiddleware(logger: Logger): MiddlewareHandler {
   return async (c, next) => {
     const started = performance.now();
@@ -100,12 +101,17 @@ export function createAccessLogMiddleware(logger: Logger): MiddlewareHandler {
     if (c.req.path === '/healthz') {
       return;
     }
-    logger.info('request', {
+    const fields = {
       method: c.req.method,
       path: c.req.path,
       status: c.res.status,
       duration_ms: Math.round(performance.now() - started),
-    });
+    };
+    if (c.req.method === 'GET' && c.res.status < 400) {
+      logger.debug('request', fields);
+    } else {
+      logger.info('request', fields);
+    }
   };
 }
 
