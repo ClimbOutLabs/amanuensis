@@ -163,6 +163,42 @@ describe('RunCodeService', () => {
     }
   });
 
+  it('maps docker_unavailable readiness onto docker_unavailable with the exact message', async () => {
+    const message =
+      "I can't run code on this machine because Docker isn't available. To enable code execution, install Docker from https://docs.docker.com/engine/install/ and restart Aman.";
+    driver.readiness = { ready: false, error_code: 'docker_unavailable', error: message };
+    const result = await service.runCode(VALID_INPUT);
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error_code).toBe('docker_unavailable');
+      expect(result.error).toBe(message);
+    } else {
+      throw new Error('expected failure');
+    }
+    expect(driver.runs).toHaveLength(0);
+  });
+
+  it('maps the isolation-refused marker onto isolation_refused with the exact message', async () => {
+    const message = "I can't run this safely — the sandbox couldn't apply all isolation guarantees.";
+    driver.runBehavior = () =>
+      Promise.resolve({
+        exitCode: -1,
+        stdout: '',
+        stderr: '',
+        terminatedBy: 'internal' as const,
+        internalError: `isolation_refused:${message}`,
+        harvestWarnings: [],
+      });
+    const result = await service.runCode(VALID_INPUT);
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error_code).toBe('isolation_refused');
+      expect(result.error).toBe(message);
+    } else {
+      throw new Error('expected failure');
+    }
+  });
+
   it('rejects with concurrency_exceeded when all slots are busy', async () => {
     const single = new RunCodeService({
       driver,

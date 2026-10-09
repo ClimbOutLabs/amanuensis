@@ -51,3 +51,21 @@ describe('scrubHostPaths', () => {
     expect(out).toContain('/egress/report.pdf');
   });
 });
+
+describe('docker_unavailable / isolation_refused', () => {
+  it('surfaces the docker_unavailable detail verbatim', () => {
+    const message =
+      "I can't run code on this machine because Docker isn't available. To enable code execution, install Docker from https://docs.docker.com/engine/install/ and restart Aman.";
+    expect(errorTextForCode({ error_code: 'docker_unavailable', detail: message })).toBe(message);
+  });
+
+  it('surfaces the isolation_refused detail verbatim', () => {
+    const message = "I can't run this safely — the sandbox couldn't apply all isolation guarantees.";
+    expect(errorTextForCode({ error_code: 'isolation_refused', detail: message })).toBe(message);
+  });
+
+  it('falls back without detail', () => {
+    expect(errorTextForCode({ error_code: 'docker_unavailable', detail: undefined })).toContain('Docker');
+    expect(errorTextForCode({ error_code: 'isolation_refused', detail: undefined })).toContain('isolation');
+  });
+});

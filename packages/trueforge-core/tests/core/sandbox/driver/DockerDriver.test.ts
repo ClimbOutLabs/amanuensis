@@ -2,10 +2,17 @@
  * Unit tests for the Docker isolation driver. No daemon: every docker/cosign
  * interaction is scripted through a fake DockerCommandRunner.
  */
-import { writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  DOCKER_UNAVAILABLE_MESSAGE,
   DockerDriver,
+  ISOLATION_REFUSED_MARKER,
+  ISOLATION_REFUSED_MESSAGE,
+  checkContainerIsolation,
+  detectDocker,
+  resetDockerDetectionForTests,
   type DockerCommandResult,
   type DockerCommandRunner,
   type DockerDriverOptions,
@@ -78,10 +85,26 @@ function driverOptions(): DockerDriverOptions {
     cosignPublicKeyPath: KEY_PATH,
     dockerBinary: undefined,
     cosignBinary: undefined,
+    dockerSocketPath: fakeSocketPath,
     commandTimeoutMs: undefined,
     createTimeoutMs: undefined,
   };
 }
+
+/**
+ * Unit tests must not depend on the host's real Docker socket: detectDocker()
+ * is memoized per path, so every test gets a fake socket file. Reset between
+ * tests so each test's detection is independent.
+ */
+let fakeSocketPath: string | undefined;
+beforeAll(async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tf-docker-socket-'));
+  fakeSocketPath = join(dir, 'docker.sock');
+  await writeFile(fakeSocketPath, '');
+});
+beforeEach(() => {
+  resetDockerDetectionForTests();
+});
 
 function runParams(overrides: { signal?: AbortSignal | undefined } = {}): DriverRunParams {
   return {
@@ -136,6 +159,35 @@ function scriptReadyPath(runner: FakeRunner, digest = DIGEST): void {
   };
 }
 
+/** A `docker inspect` entry carrying every mandatory isolation flag. */
+function goodInspectEntry(): Record<string, unknown> {
+  return {
+    Config: { User: '65532:65532' },
+    HostConfig: {
+      NetworkMode: 'none',
+      ReadonlyRootfs: true,
+      CapDrop: ['ALL'],
+      CapAdd: [],
+      SecurityOpt: ['no-new-privileges:true', 'seccomp=default'],
+    },
+  };
+}
+
+/**
+ * Isolation-verification inspect: the driver's post-create `docker inspect
+ * <id>` (2 args) gets a hardened container. The OOM `--format` inspect
+ * (4 args) is left to the test's own handler.
+ */
+function scriptIsolationInspect(runner: FakeRunner): void {
+  const prev = runner.runHandler;
+  runner.runHandler = (binary, args) => {
+    if (binary === 'docker' && args[0] === 'inspect' && args.length === 2) {
+      return { ...okResult, stdout: JSON.stringify([goodInspectEntry()]) };
+    }
+    return prev(binary, args);
+  };
+}
+
 describe('DockerDriver.create', () => {
   test('emits the exact hardened flag set from the plan', async () => {
     const runner = new FakeRunner();
@@ -145,6 +197,7 @@ describe('DockerDriver.create', () => {
       }
       return okResult;
     };
+    scriptIsolationInspect(runner);
     const driver = new DockerDriver(driverOptions(), runner);
     const result = await driver.run(runParams());
     expect(result.terminatedBy).toBe('completed');
@@ -160,6 +213,7 @@ describe('DockerDriver.create', () => {
       '--user', '65532:65532',
       '--cap-drop=ALL',
       '--security-opt', 'no-new-privileges:true',
+      '--security-opt', 'seccomp=default',
       '--pids-limit', '256',
       '--memory', '2048m',
       '--memory-swap', '2048m',
@@ -190,6 +244,7 @@ describe('DockerDriver.create', () => {
       }
       return okResult;
     };
+    scriptIsolationInspect(runner);
     const driver = new DockerDriver(driverOptions(), runner);
     const params = runParams();
     await driver.run({ ...params, language: 'node' });
@@ -234,6 +289,7 @@ describe('DockerDriver.create', () => {
       }
       return result;
     };
+    scriptIsolationInspect(runner);
     const driver = new DockerDriver(driverOptions(), runner);
     const controller = new AbortController();
     const runPromise = driver.run(runParams({ signal: controller.signal }));
@@ -256,6 +312,7 @@ describe('DockerDriver.create', () => {
       input.onStdout(Buffer.alloc(5 * 1024 * 1024, 'x'));
       return Promise.resolve(0);
     };
+    scriptIsolationInspect(runner);
     const driver = new DockerDriver(driverOptions(), runner);
     const result = await driver.run(runParams());
     expect(result.terminatedBy).toBe('killed');
@@ -276,6 +333,7 @@ describe('DockerDriver.create', () => {
       input.onStderr(Buffer.from('traceback\n'));
       return Promise.resolve(3);
     };
+    scriptIsolationInspect(runner);
     const driver = new DockerDriver(driverOptions(), runner);
     const result = await driver.run(runParams());
     expect(result.terminatedBy).toBe('completed');
@@ -288,6 +346,9 @@ describe('DockerDriver.create', () => {
     runner.runHandler = (_binary, args) => {
       if (args[0] === 'create') {
         return { ...okResult, stdout: 'cid-oom\n' };
+      }
+      if (args[0] === 'inspect' && args.length === 2) {
+        return { ...okResult, stdout: JSON.stringify([goodInspectEntry()]) };
       }
       if (args[0] === 'inspect') {
         return { ...okResult, stdout: 'true\n' };
@@ -313,6 +374,9 @@ describe('DockerDriver.create', () => {
       if (args[0] === 'create') {
         return { ...okResult, stdout: 'cid-137\n' };
       }
+      if (args[0] === 'inspect' && args.length === 2) {
+        return { ...okResult, stdout: JSON.stringify([goodInspectEntry()]) };
+      }
       if (args[0] === 'inspect') {
         return { ...okResult, stdout: 'false\n' };
       }
@@ -330,6 +394,9 @@ describe('DockerDriver.create', () => {
     runner.runHandler = (_binary, args) => {
       if (args[0] === 'create') {
         return { ...okResult, stdout: 'cid-oom2\n' };
+      }
+      if (args[0] === 'inspect' && args.length === 2) {
+        return { ...okResult, stdout: JSON.stringify([goodInspectEntry()]) };
       }
       if (args[0] === 'inspect') {
         return { ...okResult, exitCode: 1, stderr: 'no such container' };
@@ -662,5 +729,162 @@ describe('DockerDriver.dispose', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+describe('detectDocker', () => {
+  test('returns false for a missing socket path', async () => {
+    await expect(detectDocker(join(tmpdir(), 'tf-no-such-socket-xyz.sock'))).resolves.toBe(false);
+  });
+
+  test('returns true for an existing socket path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tf-socket-'));
+    const socketPath = join(dir, 'docker.sock');
+    await writeFile(socketPath, '');
+    await expect(detectDocker(socketPath)).resolves.toBe(true);
+  });
+
+  test('memoizes the result per socket path', async () => {
+    const socketPath = join(tmpdir(), 'tf-memo-socket-xyz.sock');
+    const first = detectDocker(socketPath);
+    const second = detectDocker(socketPath);
+    expect(second).toBe(first);
+    await expect(first).resolves.toBe(false);
+  });
+});
+
+describe('DockerDriver.ensureReady docker detection', () => {
+  test('missing socket is docker_unavailable with the exact recovery message', async () => {
+    const runner = new FakeRunner();
+    const driver = new DockerDriver(
+      { ...driverOptions(), dockerSocketPath: join(tmpdir(), 'tf-no-such-socket-abc.sock') },
+      runner,
+    );
+    const readiness = await driver.ensureReady();
+    expect(readiness).toEqual({
+      ready: false,
+      error_code: 'docker_unavailable',
+      error: DOCKER_UNAVAILABLE_MESSAGE,
+    });
+    // The daemon is never touched: no docker CLI invocation at all.
+    expect(runner.calls).toHaveLength(0);
+  });
+
+  test('present socket proceeds to the normal readiness path', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const driver = new DockerDriver(driverOptions(), runner);
+    await expect(driver.ensureReady()).resolves.toEqual({ ready: true });
+  });
+});
+
+describe('checkContainerIsolation', () => {
+  test('accepts a fully hardened container', () => {
+    expect(checkContainerIsolation({ inspectJson: JSON.stringify([goodInspectEntry()]) })).toEqual({ ok: true });
+  });
+
+  test('rejects malformed inspect output', () => {
+    expect(checkContainerIsolation({ inspectJson: 'not json' }).ok).toBe(false);
+    expect(checkContainerIsolation({ inspectJson: '[]' }).ok).toBe(false);
+    expect(checkContainerIsolation({ inspectJson: '{}' }).ok).toBe(false);
+  });
+
+  test('rejects a container with network access', () => {
+    const entry = goodInspectEntry();
+    (entry.HostConfig as Record<string, unknown>).NetworkMode = 'bridge';
+    const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toMatch(/NetworkMode/);
+    }
+  });
+
+  test('rejects a writable root filesystem', () => {
+    const entry = goodInspectEntry();
+    (entry.HostConfig as Record<string, unknown>).ReadonlyRootfs = false;
+    const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toMatch(/read-only/);
+    }
+  });
+
+  test.each(['0', 'root', '0:0', ''])('rejects root user %p', (user) => {
+    const entry = goodInspectEntry();
+    (entry.Config as Record<string, unknown>).User = user;
+    expect(checkContainerIsolation({ inspectJson: JSON.stringify([entry]) }).ok).toBe(false);
+  });
+
+  test('rejects missing capability drop', () => {
+    const entry = goodInspectEntry();
+    (entry.HostConfig as Record<string, unknown>).CapDrop = [];
+    expect(checkContainerIsolation({ inspectJson: JSON.stringify([entry]) }).ok).toBe(false);
+  });
+
+  test('rejects missing no-new-privileges', () => {
+    const entry = goodInspectEntry();
+    (entry.HostConfig as Record<string, unknown>).SecurityOpt = ['seccomp=default'];
+    const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toMatch(/no-new-privileges/);
+    }
+  });
+
+  test('rejects missing seccomp profile', () => {
+    const entry = goodInspectEntry();
+    (entry.HostConfig as Record<string, unknown>).SecurityOpt = ['no-new-privileges:true'];
+    const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toMatch(/seccomp/);
+    }
+  });
+});
+
+describe('DockerDriver.run isolation refusal', () => {
+  test('refuses the run when the created container lacks network isolation', async () => {
+    const runner = new FakeRunner();
+    let attached = false;
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-badnet\n' };
+      }
+      if (args[0] === 'inspect' && args.length === 2) {
+        const entry = goodInspectEntry();
+        (entry.HostConfig as Record<string, unknown>).NetworkMode = 'bridge';
+        return { ...okResult, stdout: JSON.stringify([entry]) };
+      }
+      return okResult;
+    };
+    runner.attachHandler = () => {
+      attached = true;
+      return Promise.resolve(0);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const result = await driver.run(runParams());
+    expect(result.terminatedBy).toBe('internal');
+    expect(result.internalError).toBe(`${ISOLATION_REFUSED_MARKER}${ISOLATION_REFUSED_MESSAGE}`);
+    // The program never started: attach was never called.
+    expect(attached).toBe(false);
+    // The offending container was removed.
+    expect(runner.callsFor('rm').length).toBeGreaterThan(0);
+  });
+
+  test('refuses the run when the verification inspect itself fails', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-noinspect\n' };
+      }
+      if (args[0] === 'inspect' && args.length === 2) {
+        return { ...okResult, exitCode: 1, stderr: 'no such container' };
+      }
+      return okResult;
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const result = await driver.run(runParams());
+    expect(result.terminatedBy).toBe('internal');
+    expect(result.internalError).toBe(`${ISOLATION_REFUSED_MARKER}${ISOLATION_REFUSED_MESSAGE}`);
   });
 });
