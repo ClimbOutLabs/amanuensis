@@ -2,10 +2,14 @@ import { stat } from 'node:fs/promises';
 
 import { withTimeout } from '@truefoundry/trueforge-core/core';
 
-import { EMBEDDING_DIMENSIONS, getSharedEmbeddingModel, isEmbeddingModelCached } from '../runtime/memory/embeddingModel';
+import {
+  EMBEDDING_DIMENSIONS,
+  getSharedEmbeddingModel,
+  isEmbeddingModelCached,
+} from '../runtime/memory/embeddingModel';
+import { formatSourceEntry, knowledgeCitationMarker, neutralizeSpoofedCitationMarkers } from './knowledgeAttribution';
 import { personaKnowledgeLocation } from './knowledgePaths';
 import type { KnowledgeRelevanceJudge } from './knowledgeRelevanceJudge';
-import { formatSourceEntry, knowledgeCitationMarker, neutralizeSpoofedCitationMarkers } from './knowledgeAttribution';
 import { openPersonaKnowledgeRepository } from './sqliteKnowledgeRepository';
 
 export interface PersonaKnowledgeHit {
@@ -190,11 +194,7 @@ export async function retrievePersonaKnowledge(input: {
     if (repo.countReadyChunks() === 0) {
       return undefined;
     }
-    const vectors = await withTimeout(
-      model.embedQueries([question]),
-      timeoutMs,
-      'persona knowledge query embedding',
-    );
+    const vectors = await withTimeout(model.embedQueries([question]), timeoutMs, 'persona knowledge query embedding');
     const first = vectors[0];
     if (first?.length !== EMBEDDING_DIMENSIONS) {
       return undefined;
@@ -220,9 +220,7 @@ export async function retrievePersonaKnowledge(input: {
     if (input.judge !== undefined) {
       try {
         const keep = await input.judge(question, hits);
-        const keepSet = new Set(
-          keep.filter(index => Number.isInteger(index) && index >= 0 && index < hits.length),
-        );
+        const keepSet = new Set(keep.filter(index => Number.isInteger(index) && index >= 0 && index < hits.length));
         keptHits = hits.filter((_, index) => keepSet.has(index));
       } catch (error) {
         // Fail open: the floor already ran, so keeping its candidates is

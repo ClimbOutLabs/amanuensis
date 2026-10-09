@@ -116,7 +116,10 @@ describe('verifyApprovalToken', () => {
   test('accepts byte-identical params', () => {
     const store = new InMemoryApprovalTokenStore();
     const params = { command: 'ls -la', cwd: '/tmp' };
-    const token = store.mint({ action_id: actionIdFor({ tool_name: 'exec', canonical_params: params }), canonical_params: params });
+    const token = store.mint({
+      action_id: actionIdFor({ tool_name: 'exec', canonical_params: params }),
+      canonical_params: params,
+    });
     const redeemed = store.redeem({ token_id: token.token_id });
     expect(redeemed).toBeDefined();
     if (redeemed === undefined) {
@@ -133,7 +136,10 @@ describe('verifyApprovalToken', () => {
   test('rejects changed params and changed action identity', () => {
     const store = new InMemoryApprovalTokenStore();
     const params = { command: 'ls -la' };
-    const token = store.mint({ action_id: actionIdFor({ tool_name: 'exec', canonical_params: params }), canonical_params: params });
+    const token = store.mint({
+      action_id: actionIdFor({ tool_name: 'exec', canonical_params: params }),
+      canonical_params: params,
+    });
     const redeemed = store.redeem({ token_id: token.token_id });
     expect(redeemed).toBeDefined();
     if (redeemed === undefined) {

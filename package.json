@@ -66,7 +66,7 @@
     "test:trueforge-ui": "pnpm --filter @truefoundry/trueforge-ui test",
     "test": "pnpm test:trueforge-core && pnpm test:trueforge-sdk && pnpm test:trueforge-ui && pnpm test:trueforge && pnpm test:frontend",
     "verify": "pnpm run test:private-data && pnpm run format:check && pnpm run typecheck && pnpm run lint:ci && pnpm run build && pnpm run test",
-    "typecheck": "pnpm --filter @truefoundry/trueforge-core --filter @truefoundry/trueforge-ui --filter @truefoundry/trueforge --filter frontend --filter amanuensis --parallel typecheck",
+    "typecheck": "pnpm --filter @truefoundry/trueforge-sdk build && pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter @truefoundry/trueforge-ui --filter @truefoundry/trueforge --filter frontend --parallel typecheck:only && pnpm --filter @truefoundry/trueforge-core --filter amanuensis --parallel typecheck",
     "version": "node scripts/version.mjs"
   },
   "devDependencies": {

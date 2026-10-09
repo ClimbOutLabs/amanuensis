@@ -1782,9 +1782,7 @@ export class VercelAILLM implements ILLM {
       this.logger.isDebugEnabled() &&
       body.tools !== undefined &&
       body.messages.some(
-        m =>
-          Array.isArray(m.content) &&
-          m.content.some(p => p.type === 'image_url' || p.type === 'file'),
+        m => Array.isArray(m.content) && m.content.some(p => p.type === 'image_url' || p.type === 'file'),
       )
     ) {
       this.logger.debug('Multimodal chat completion request payload', {
@@ -1792,9 +1790,7 @@ export class VercelAILLM implements ILLM {
         tools: body.tools,
         messages: body.messages.map(m => ({
           role: m.role,
-          partTypes: Array.isArray(m.content)
-            ? m.content.map(p => p.type)
-            : typeof m.content,
+          partTypes: Array.isArray(m.content) ? m.content.map(p => p.type) : typeof m.content,
         })),
       });
     }

@@ -29,7 +29,10 @@ export function chunkText(text: string, options?: ChunkingOptions): ChunkedDocum
   const maxChunks = options?.maxChunks ?? 2000;
   const maxChars = options?.maxChars ?? 500_000;
 
-  const normalized = text.replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').trim();
+  const normalized = text
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
   if (normalized.length === 0) {
     return { chunks: [], truncated: false };
   }

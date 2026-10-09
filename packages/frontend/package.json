@@ -18,7 +18,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "pretypecheck": "pnpm run ui:build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm run typecheck:only",
+    "typecheck:only": "tsc --noEmit",
     "pretest": "pnpm run ui:build",
     "test": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --test \"tests/**/*.test.ts\""
   },

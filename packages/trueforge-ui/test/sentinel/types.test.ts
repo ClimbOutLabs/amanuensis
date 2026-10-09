@@ -263,8 +263,9 @@ describe('parseUserSettings', () => {
   });
 
   it('keeps explicit values and drops unknown kinds', () => {
-    expect(
-      parseUserSettings({ offline_mode: true, tier2_always_ask: ['shell', 'file_write', 'nope'] }),
-    ).toEqual({ offline_mode: true, tier2_always_ask: ['shell', 'file_write'] });
+    expect(parseUserSettings({ offline_mode: true, tier2_always_ask: ['shell', 'file_write', 'nope'] })).toEqual({
+      offline_mode: true,
+      tier2_always_ask: ['shell', 'file_write'],
+    });
   });
 });

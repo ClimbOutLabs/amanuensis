@@ -3,13 +3,13 @@
  * timeout, 429, 5xx) retry once on the secondary before any output exists; client
  * errors (400/401/403/404) and caller cancellation propagate unchanged.
  */
-import { APICallError } from 'ai';
 import type {
   LanguageModelV4,
   LanguageModelV4CallOptions,
   LanguageModelV4GenerateResult,
   LanguageModelV4StreamResult,
 } from '@ai-sdk/provider';
+import { APICallError } from 'ai';
 import { isFailoverRetryable, withFailover } from '../../../src/core/llm/failoverLanguageModel';
 import { makeSilentLogger } from '../harnessMocks';
 

@@ -27,12 +27,10 @@ describe('createMemoryVaultCatalog', () => {
         if (path === '/api/v1/memory/vault' && method === 'GET') return [ENTRY];
         if (path === '/api/v1/memory/vault?namespace=persona%3Aplanner' && method === 'GET') return [];
         if (path === '/api/v1/memory/vault/sharing' && method === 'GET') return { shares: {} };
-        if (path === '/api/v1/memory/vault/sharing' && method === 'PUT')
-          return { shares: { planner: ['work'] } };
+        if (path === '/api/v1/memory/vault/sharing' && method === 'PUT') return { shares: { planner: ['work'] } };
         if (path === '/api/v1/memory/vault/export' && method === 'GET')
           return { namespace: 'default', exported_at: '2026-09-27T12:00:00.000Z', entries: [ENTRY] };
-        if (path === '/api/v1/memory/vault/import' && method === 'POST')
-          return { namespace: 'default', imported: 1 };
+        if (path === '/api/v1/memory/vault/import' && method === 'POST') return { namespace: 'default', imported: 1 };
         if (path.startsWith('/api/v1/memory/vault/') && method === 'PUT') return ENTRY;
         if (path.startsWith('/api/v1/memory/vault/') && method === 'DELETE') return {};
         throw new Error(`unexpected request ${method} ${path}`);
@@ -70,9 +68,7 @@ describe('createMemoryVaultCatalog', () => {
 
   it('throws a readable error when the server rejects a request', async () => {
     const catalog = createMemoryVaultCatalog({
-      fetch: vi.fn(async () =>
-        Response.json({ error: { message: 'Entry not found' } }, { status: 404 }),
-      ),
+      fetch: vi.fn(async () => Response.json({ error: { message: 'Entry not found' } }, { status: 404 })),
     });
     await assert.rejects(() => catalog.listEntries(), /Entry not found/);
   });

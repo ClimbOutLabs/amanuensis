@@ -50,7 +50,6 @@
     "pack:dry": "pnpm pack --dry-run",
     "predev:no-watch": "pnpm --filter @truefoundry/trueforge-core build:gen && pnpm run build:gen",
     "predev": "pnpm --filter @truefoundry/trueforge-core build:gen && pnpm run build:gen",
-    "pretypecheck": "pnpm -w run sdk:types",
     "test:eventsub": "jest --config jest.eventsub.config.cjs",
     "test:store:postgres": "jest --config jest.store.postgres.config.cjs",
     "test:store:sqlite": "jest --config jest.store.sqlite.config.cjs",
@@ -59,7 +58,9 @@
     "smoke:local-sandbox": "pnpm run build:gen && cross-env NODE_OPTIONS=--conditions=trueforge-dev jest --config jest.local-sandbox.smoke.config.cjs --runInBand --forceExit tests/sandbox/local/smoke.test.ts",
     "smoke:local-sandbox:lima": "bash scripts/local-sandbox/smoke-lima.sh",
     "probe:loopback": "pnpm exec tsx scripts/local-sandbox/probe-loopback.ts",
-    "typecheck": "pnpm run build:gen && tsc --noEmit && tsc --noEmit -p tests/db/tsconfig.json && tsc --noEmit -p tests/unit/tsconfig.json"
+    "pretypecheck": "pnpm -w run sdk:types",
+    "typecheck": "pnpm run typecheck:only",
+    "typecheck:only": "pnpm run build:gen && tsc --noEmit && tsc --noEmit -p tests/db/tsconfig.json && tsc --noEmit -p tests/unit/tsconfig.json"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.76",

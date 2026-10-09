@@ -76,7 +76,12 @@ function makeOrphanToolSet(): IToolSet {
     preload: true,
     tools: [
       { name: 'lookup', description: 'Look something up', inputSchema: OBJECT_INPUT_SCHEMA, preload: true },
-      { name: 'ghost', description: 'A tool whose server never returns a result', inputSchema: OBJECT_INPUT_SCHEMA, preload: true },
+      {
+        name: 'ghost',
+        description: 'A tool whose server never returns a result',
+        inputSchema: OBJECT_INPUT_SCHEMA,
+        preload: true,
+      },
       { name: 'write', description: 'Write a file', inputSchema: OBJECT_INPUT_SCHEMA, preload: true },
       { name: 'danger', description: 'Approval-required edit', inputSchema: OBJECT_INPUT_SCHEMA, preload: true },
     ],
@@ -278,7 +283,9 @@ describe('orphaned tool call recovery', () => {
     expect(fatalErrors(firstEvents)).toHaveLength(0);
     const approvalCards = firstEvents.filter(
       event =>
-        typeof event === 'object' && event !== null && (event as { type?: unknown }).type === EventType.TOOL_APPROVAL_REQUIRED,
+        typeof event === 'object' &&
+        event !== null &&
+        (event as { type?: unknown }).type === EventType.TOOL_APPROVAL_REQUIRED,
     );
     expect(approvalCards).toHaveLength(1);
     expect(toolResponses(firstEvents)).toHaveLength(0);

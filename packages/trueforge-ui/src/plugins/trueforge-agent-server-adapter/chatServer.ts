@@ -14,10 +14,10 @@
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { readSessionAgentDetails, type AgentDetailsVisibility } from '../../atoms/lib/sessionAgentDetails.js';
 import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js';
-import { awaitPendingPersonaMutation } from '../../personaMutationGate.js';
-import { extractSentinelFromEvent } from '../../sentinel/types.js';
-import { publishSentinelEvent } from '../../sentinel/sentinelEvents.js';
 import type { MemoryTurnContext } from '../../components/MemoryRecallContext.js';
+import { awaitPendingPersonaMutation } from '../../personaMutationGate.js';
+import { publishSentinelEvent } from '../../sentinel/sentinelEvents.js';
+import { extractSentinelFromEvent } from '../../sentinel/types.js';
 import type {
   AgentChatServer,
   CreateSessionRequest,
@@ -33,17 +33,14 @@ import type {
   UserMessageContent,
 } from '../../server/types.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
-import {
-  createSessionResyncExtensions,
-  type HarnessChatServerExtensions,
-} from './sessionResync.js';
+import { createSessionResyncExtensions, type HarnessChatServerExtensions } from './sessionResync.js';
 import type { WireRuntimeConfig } from './taskStateTypes.js';
 import {
+  isCompatibleSessionEvent,
+  isCompatibleStreamingEvent,
   toUiSessionEvent,
   toUiTurnState,
   toUiStreamingEvent as toUiVendorStreamingEvent,
-  isCompatibleSessionEvent,
-  isCompatibleStreamingEvent,
 } from './toUiTurnState.js';
 import type { HarnessAgentSpec, HarnessMcpServerMount, HarnessSkillMount } from './types.js';
 
@@ -662,8 +659,7 @@ function toHarnessInput(input: TurnInputItem[]): TrueForgeApi.TurnInputItem[] {
 
 export function createHarnessChatServer(
   options: CreateHarnessChatServerOptions = {},
-): AgentChatServer<HarnessAgentSpec, HarnessUiSession, HarnessCreateSessionRequest> &
-  HarnessChatServerExtensions {
+): AgentChatServer<HarnessAgentSpec, HarnessUiSession, HarnessCreateSessionRequest> & HarnessChatServerExtensions {
   const client = options.client ?? createTrueForgeClient(options);
   return {
     // Foreground delta probe + pending-approval escape hatch (see sessionResync.ts).

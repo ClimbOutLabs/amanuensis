@@ -4259,8 +4259,7 @@ export class Sandbox extends LocalToolMCP {
       workspace_cwd: ctx.workspace_cwd,
     };
     for (const p of input.paths) {
-      const identity =
-        canonicalFileIdentity({ p, cwd: input.cwd }) ?? canonicalWriteTarget({ p, cwd: input.cwd });
+      const identity = canonicalFileIdentity({ p, cwd: input.cwd }) ?? canonicalWriteTarget({ p, cwd: input.cwd });
       if (identity === null) {
         continue;
       }

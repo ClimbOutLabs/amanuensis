@@ -362,10 +362,7 @@ describe('AssistantMessageContainer', () => {
   });
 
   it('auto-expands the internals of a running turn when a tool errored', () => {
-    renderAssistantMessage(
-      [{ ...erroredToolCallMessage(), status: { type: 'running' } }],
-      { isRunning: true },
-    );
+    renderAssistantMessage([{ ...erroredToolCallMessage(), status: { type: 'running' } }], { isRunning: true });
 
     const internals = getAgentInternals();
     expect(internals.querySelector('[hidden]')).toBeNull();

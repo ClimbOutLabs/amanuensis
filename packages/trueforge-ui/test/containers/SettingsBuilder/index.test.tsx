@@ -5,12 +5,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { PersonaProvider, type PersonaApi } from '@/components/PersonaContext.js';
-import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import TruefoundrySettingsBuilder from '@/containers/SettingsBuilder/index.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
 import type { AgentUIServer, SandboxCatalogServer, SkillCatalogServer } from '@/server/types.js';
+import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
 vi.mock('@/containers/SettingsBuilder/ModelSettings.js', () => ({

@@ -75,8 +75,5 @@ export interface ITurnArtifactStore<TTransaction = never> {
    * across all tenants, then deletes blobs no remaining row references.
    * Blobs shared with a surviving row are kept. Returns the deleted row count.
    */
-  deleteArtifactsOlderThan(
-    input: { older_than: string },
-    transaction?: TTransaction,
-  ): Promise<number>;
+  deleteArtifactsOlderThan(input: { older_than: string }, transaction?: TTransaction): Promise<number>;
 }

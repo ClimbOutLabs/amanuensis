@@ -68,9 +68,7 @@ function renderMemory(serverOverrides: Partial<AgentUIServer> = {}) {
 describe('MemorySettings (backend honesty)', () => {
   it('says it is checking while capabilities are unsettled — never claiming on', async () => {
     // A capabilities promise that never resolves: the page must not name a backend.
-    const getCapabilities = vi.fn(
-      (): Promise<AgentBuilderCapabilitiesResponse> => new Promise(() => {}),
-    );
+    const getCapabilities = vi.fn((): Promise<AgentBuilderCapabilitiesResponse> => new Promise(() => {}));
     renderMemory({ getCapabilities });
 
     expect(await screen.findByText('Checking memory status…')).toBeInTheDocument();
@@ -153,7 +151,9 @@ describe('MemorySettings (backend honesty)', () => {
     expect(await screen.findByText('Memory is on')).toBeInTheDocument();
     expect(screen.getByText('Hindsight (experimental)')).toBeInTheDocument();
     expect(screen.getByText(/Markdown file memory.*does not apply here/)).toBeInTheDocument();
-    expect(screen.getByText(/runs the experimental Hindsight memory backend instead of Markdown files/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/runs the experimental Hindsight memory backend instead of Markdown files/),
+    ).toBeInTheDocument();
     expect(screen.queryByText('Markdown (local files)')).not.toBeInTheDocument();
     expect(screen.queryByText('How memory works')).not.toBeInTheDocument();
     expect(screen.queryByText(/Memories live in/)).not.toBeInTheDocument();

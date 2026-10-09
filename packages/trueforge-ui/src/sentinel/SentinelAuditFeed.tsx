@@ -46,13 +46,8 @@ function outcomeTone(outcome: SentinelAuditOutcome): string {
 const AuditEntryRow: FC<{ entry: SentinelAuditEntry }> = ({ entry }) => (
   <li className="border-b border-border/60 px-3 py-2 last:border-b-0">
     <div className="flex items-baseline justify-between gap-2">
-      <span className="min-w-0 truncate font-mono text-[0.6875rem] text-text-secondary">
-        {entry.action_type}
-      </span>
-      <MessageTimestamp
-        createdAt={entry.created_at}
-        className="text-[0.6875rem] font-normal"
-      />
+      <span className="min-w-0 truncate font-mono text-[0.6875rem] text-text-secondary">{entry.action_type}</span>
+      <MessageTimestamp createdAt={entry.created_at} className="text-[0.6875rem] font-normal" />
     </div>
     <p className="mt-0.5 text-xs text-text-primary">{entry.description}</p>
     <p className={`mt-0.5 text-[0.6875rem] font-medium ${outcomeTone(entry.outcome)}`}>
@@ -111,7 +106,9 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
       if (sentinel === null) return;
       const current = sentinel.settings?.tier2_always_ask ?? [];
       const next: Tier2ActionKind[] = input.escalated
-        ? (current.includes(input.actionType) ? current : [...current, input.actionType])
+        ? current.includes(input.actionType)
+          ? current
+          : [...current, input.actionType]
         : current.filter(kind => kind !== input.actionType);
       const patch: Partial<SentinelUserSettings> = { tier2_always_ask: next };
       await sentinel.updateSettings(patch);
@@ -130,9 +127,7 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
         <ul className="space-y-1.5">
           {tier2ActionKinds.map(kind => (
             <li key={kind} className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate text-[0.6875rem] text-text-secondary">
-                {TIER2_ACTION_LABELS[kind]}
-              </span>
+              <span className="min-w-0 truncate text-[0.6875rem] text-text-secondary">{TIER2_ACTION_LABELS[kind]}</span>
               <Tier2EscalationToggle
                 actionType={kind}
                 escalated={settings?.tier2_always_ask.includes(kind) ?? false}
@@ -147,20 +142,14 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
         <p className="flex items-center gap-1.5 px-3 py-2 text-xs text-failure-bg" role="alert">
           <Icon name="circle-exclamation" className="shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1 break-words">Could not load the audit feed: {error}</span>
-          <button
-            type="button"
-            className="shrink-0 underline"
-            onClick={() => void load()}
-          >
+          <button type="button" className="shrink-0 underline" onClick={() => void load()}>
             Retry
           </button>
         </p>
       )}
 
       {entries.length === 0 && error === null ? (
-        <p className="px-3 py-4 text-center text-xs text-text-secondary">
-          No permission activity in this session yet.
-        </p>
+        <p className="px-3 py-4 text-center text-xs text-text-secondary">No permission activity in this session yet.</p>
       ) : (
         <ul className="min-h-0 overflow-y-auto">
           {entries.map(entry => (

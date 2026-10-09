@@ -23,6 +23,7 @@ import type {
 } from '@truefoundry/trueforge-core/core';
 import { HOST_SUMMARY_PREFACE, InternalEventType, newEventId } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
+import { noteRecallContent, type InternalSourceState } from '../internalSourceGuard';
 import type {
   BankProfile,
   EntitySummary,
@@ -46,7 +47,6 @@ import type {
 import { MEMORY_ORIGIN_METADATA_KEY, retainOperationId, submitRetain, USER_STATED_ORIGIN } from './memoryRetain';
 import { decideMemoryRoute } from './memoryRouting';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
-import { noteRecallContent, type InternalSourceState } from '../internalSourceGuard';
 
 const MEMORY_STATE_KEY = 'aman.memory';
 const INTERNAL_TAG_PREFIX = '<tfy-internal>';

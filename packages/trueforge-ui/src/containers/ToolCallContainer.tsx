@@ -12,6 +12,9 @@ import {
 import { useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useState } from 'react';
 
+import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
+import { Tier2Indicator } from '../sentinel/Tier2Indicator.js';
+import { Tier3ApprovalCard } from '../sentinel/Tier3ApprovalCard.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import {
   ASK_USER_TOOL_NAME,
@@ -43,9 +46,6 @@ import { NestedApprovalBridgeContext, useNestedApprovalBridge } from './nestedAp
 import { SandboxToolCallContainer } from './SandboxToolCallContainer.js';
 import { ToolApprovalContainer } from './ToolApprovalContainer.js';
 import { ToolCallContentBlockContainer } from './ToolCallContentBlockContainer.js';
-import { Tier2Indicator } from '../sentinel/Tier2Indicator.js';
-import { Tier3ApprovalCard } from '../sentinel/Tier3ApprovalCard.js';
-import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 
 function NestedReasoningContainer() {
   const isRunning = useAuiState(s => s.part.status?.type === 'running');

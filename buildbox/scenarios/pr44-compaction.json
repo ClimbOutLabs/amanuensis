@@ -1,1 +1,11 @@
-{"shots":2,"title":"PR #44 - Token safety margin in compaction","turns":["I need you to help me write a very long and detailed document. Start by writing a comprehensive 2000-word essay about the history of software engineering, covering from the 1940s to today. Be thorough and detailed.","Now expand on that by adding another 2000 words about modern software architecture patterns, including microservices, event-driven architecture, and domain-driven design. Go into depth on each.","Continue by adding 2000 more words about testing strategies, covering unit testing, integration testing, end-to-end testing, and the testing pyramid. Include specific examples and best practices.","Add another 2000 words about DevOps practices, CI/CD pipelines, infrastructure as code, and observability. Be specific about tools and workflows.","Now write 2000 words about the future of software engineering, including AI-assisted coding, formal methods, and the evolution of programming paradigms."]}
+{
+  "shots": 2,
+  "title": "PR #44 - Token safety margin in compaction",
+  "turns": [
+    "I need you to help me write a very long and detailed document. Start by writing a comprehensive 2000-word essay about the history of software engineering, covering from the 1940s to today. Be thorough and detailed.",
+    "Now expand on that by adding another 2000 words about modern software architecture patterns, including microservices, event-driven architecture, and domain-driven design. Go into depth on each.",
+    "Continue by adding 2000 more words about testing strategies, covering unit testing, integration testing, end-to-end testing, and the testing pyramid. Include specific examples and best practices.",
+    "Add another 2000 words about DevOps practices, CI/CD pipelines, infrastructure as code, and observability. Be specific about tools and workflows.",
+    "Now write 2000 words about the future of software engineering, including AI-assisted coding, formal methods, and the evolution of programming paradigms."
+  ]
+}

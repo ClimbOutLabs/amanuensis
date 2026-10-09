@@ -8,9 +8,9 @@ import type { ResolveRequestContext } from '../auth/identity';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import { PersonaNameConflictError, type IPersonaStore } from '../db/personaStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
-import { buildPersonaContext, type Persona, type PersonaActivation } from '../personas/persona';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { closePersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
+import { buildPersonaContext, type Persona, type PersonaActivation } from '../personas/persona';
 import {
   createPersonaRoute,
   deletePersonaRoute,

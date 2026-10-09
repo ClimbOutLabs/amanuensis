@@ -328,9 +328,7 @@ function classifySegment(input: { argv: string[]; hasHeredoc: boolean; host: Exe
     // stay allowed.
     const codeFlag = codeFlagPattern(base);
     const isNode = base === 'node' || base === 'nodejs';
-    const runsCode = operands.some(
-      op => codeFlag?.test(op) === true || (isNode && /^--(eval|print)(=|$)/.test(op)),
-    );
+    const runsCode = operands.some(op => codeFlag?.test(op) === true || (isNode && /^--(eval|print)(=|$)/.test(op)));
     if (runsCode) {
       return {
         verdict: 'reject',

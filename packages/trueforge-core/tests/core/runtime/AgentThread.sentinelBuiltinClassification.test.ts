@@ -11,20 +11,17 @@
  * untouched.
  */
 import { z } from 'zod';
+import { emptyTaskChecklist } from '../../../src/agent-session/schemas/taskChecklist';
+import { REPLACE_TASK_CHECKLIST_TOOL_NAME, taskChecklist } from '../../../src/core/capabilities/builtins/TaskChecklist';
+import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
+import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
+import { defineTool, LocalToolMCP, type ToolDefinition } from '../../../src/core/mcp/LocalToolMCP';
 import { createSentinelHostContext, type SentinelHostContext } from '../../../src/core/permissions/context';
 import { classifyUnstampedToolCall } from '../../../src/core/runtime/AgentThread';
-import { defineTool, LocalToolMCP, type ToolDefinition } from '../../../src/core/mcp/LocalToolMCP';
-import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
-import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
-import type { AgentTracing } from '../../../src/core/tracing/AgentTracing';
-import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
-import {
-  taskChecklist,
-  REPLACE_TASK_CHECKLIST_TOOL_NAME,
-} from '../../../src/core/capabilities/builtins/TaskChecklist';
-import { emptyTaskChecklist } from '../../../src/agent-session/schemas/taskChecklist';
 import { TaskStateToolSet } from '../../../src/core/runtime/TaskStateToolSet';
 import { TASK_STATE_TOOL_NAME } from '../../../src/core/runtime/taskState';
+import type { AgentTracing } from '../../../src/core/tracing/AgentTracing';
+import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
 class SyntheticTools extends LocalToolMCP {
   readonly name = 'synthetic';
