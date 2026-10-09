@@ -71,9 +71,7 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
 let sharedSentinelServices: SentinelServices | null = null;
 
 export function getSharedSentinelServices(input: { pinned_path: string }): SentinelServices {
-  if (sharedSentinelServices === null) {
-    sharedSentinelServices = defaultSentinelServices(input);
-  }
+  sharedSentinelServices ??= defaultSentinelServices(input);
   return sharedSentinelServices;
 }
 
