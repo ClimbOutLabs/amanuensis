@@ -80,7 +80,7 @@ describe('AgentThread ambient current date', () => {
 
   it("puts today's UTC date in the system prompt, date only so daily prefix caching survives", async () => {
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
     const thread = makeThread(modelClient);
     for await (const _event of thread.execute({ signal: new AbortController().signal })) {
@@ -99,7 +99,7 @@ describe('AgentThread ambient current date', () => {
 
   it("adds the user's local date and zone when clientTimezone is set", async () => {
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
     // 2026-03-14T18:00:00Z is 2026-03-14 11:00 in Los Angeles (UTC-7, PDT).
     const thread = makeThread(modelClient, undefined, 'America/Los_Angeles');
@@ -116,7 +116,7 @@ describe('AgentThread ambient current date', () => {
 
   it('falls back to UTC-only wording for an unrecognized clientTimezone', async () => {
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
     const thread = makeThread(modelClient, undefined, 'Not/A_Zone');
     for await (const _event of thread.execute({ signal: new AbortController().signal })) {
@@ -132,7 +132,7 @@ describe('AgentThread ambient current date', () => {
 
   it('refreshes the date at request time when the thread crosses UTC midnight', async () => {
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
     // Construct just before midnight, so the instruction is first built with
     // the old date, then step the clock past the rollover before any request.
@@ -155,7 +155,7 @@ describe('AgentThread ambient current date', () => {
 describe('AgentThread model self-identity', () => {
   it('tells the model its own resolved upstream id verbatim, slash and all', async () => {
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
     // A Hugging Face style "org/model" id served by vLLM is a valid upstream
     // identifier in its own right, and the slash is not a catalog separator
@@ -174,7 +174,7 @@ describe('AgentThread model self-identity', () => {
 
   it('tells the model the catalog FQN provider prefix already stripped by the fallback resolver', async () => {
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
     // TurnResourceResolver strips the provider prefix off its fallback catalog
     // FQN (provider/name) before it ever reaches definition.modelId, so
@@ -195,7 +195,7 @@ describe('AgentThread model self-identity', () => {
 
   it('omits the model-identity section when no model id is configured', async () => {
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
     const thread = makeThread(modelClient);
     for await (const _event of thread.execute({ signal: new AbortController().signal })) {

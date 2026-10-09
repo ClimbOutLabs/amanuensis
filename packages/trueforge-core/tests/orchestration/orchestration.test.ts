@@ -44,7 +44,6 @@ describe('orchestration: mocked LLM and no tools', () => {
         modelClient: {
           create: jest.fn().mockImplementation(() => textReplyStream(REPLY)),
           createNonStream: jest.fn().mockImplementation(() => textReplyStream(REPLY)),
-          countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
         },
         instruction: INSTRUCTION,
         messages: undefined,

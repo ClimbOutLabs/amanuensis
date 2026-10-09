@@ -154,7 +154,7 @@ describe('AgentThread implementation-plan revocation admission boundary', () => 
       .mockImplementationOnce(() => finalStream('First turn complete.'))
       .mockImplementationOnce(() => editStream('second-turn-edit'));
     const thread = makeThread({
-      modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
+      modelClient: { create, createNonStream: jest.fn() },
       toolSet,
       loadImplementationPlanGrants: () => Promise.resolve(active ? new Set([serialized]) : new Set()),
     });
@@ -191,7 +191,7 @@ describe('AgentThread implementation-plan revocation admission boundary', () => 
       .mockImplementationOnce(() => editStream('running-first-edit'))
       .mockImplementationOnce(() => editStream('running-second-edit'));
     const thread = makeThread({
-      modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
+      modelClient: { create, createNonStream: jest.fn() },
       toolSet,
       loadImplementationPlanGrants: () => Promise.resolve(active ? new Set([serialized]) : new Set()),
     });

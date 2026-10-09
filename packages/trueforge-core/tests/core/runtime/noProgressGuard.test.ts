@@ -87,7 +87,7 @@ describe('no-progress guard', () => {
       .mockImplementationOnce(() => unknownToolStream({ toolName: 'tool_variant_4', callId: 'call-4' }))
       .mockImplementationOnce(() => unknownToolStream({ toolName: 'tool_variant_5', callId: 'call-5' }))
       .mockImplementation(() => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
     const thread = new AgentThread({
       threadId: 'main',
@@ -118,7 +118,7 @@ describe('no-progress guard', () => {
       .mockImplementationOnce(() => unknownToolStream({ toolName: 'tool_variant_1', callId: 'call-1' }))
       .mockImplementationOnce(() => unknownToolStream({ toolName: 'tool_variant_2', callId: 'call-2' }))
       .mockImplementation(() => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
     const thread = new AgentThread({
       threadId: 'main',
@@ -161,7 +161,7 @@ describe('no-progress nudge', () => {
       round += 1;
       return round <= 5 ? variantStream(round) : finalAnswerStream();
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
@@ -218,7 +218,7 @@ describe('no-progress nudge', () => {
       if (round <= 7) return variantStream(round);
       return finalAnswerStream();
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
@@ -256,7 +256,7 @@ describe('no-progress nudge', () => {
       round += 1;
       return round <= 5 ? variantStream(round) : finalAnswerStream();
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     // Compacts away right after the third blocked call's nudge landed in context, and before
     // the fourth blocked call's request is built.
     const compaction = new CompactAwayOnNthCall(4);

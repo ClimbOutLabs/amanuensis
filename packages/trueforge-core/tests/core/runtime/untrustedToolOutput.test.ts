@@ -31,7 +31,7 @@ async function* finalAnswerStream(): AsyncGenerator<
 describe('AgentThread untrusted tool output instruction', () => {
   it('includes the data-not-instructions warning in the system prompt sent to the model', async () => {
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
     const thread = new AgentThread({
       threadId: 'main',

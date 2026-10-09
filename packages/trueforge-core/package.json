@@ -109,7 +109,6 @@
     "@ai-sdk/provider": "^4.0.8",
     "@ai-sdk/provider-utils": "^5.0.32",
     "@daytona/sdk": "^0.211.2",
-    "@dqbd/tiktoken": "^1.0.22",
     "@hono/zod-openapi": "^1.6.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@nats-io/nats-core": "3.4.0",

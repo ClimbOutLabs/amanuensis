@@ -84,7 +84,7 @@ describe('AgentThread live tool-output screen boundary', () => {
       requests.push(request);
       return requests.length === 1 ? toolCallStream() : finalStream();
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const classify = jest.fn().mockResolvedValue({ ok: true, flagged: true, score: 0.99, reasonCode: null });
     const thread = new AgentThread({
       threadId: 'main',

@@ -115,7 +115,7 @@ function makeOrphanToolSet(): IToolSet {
 }
 
 async function runThread(toolSet: IToolSet, create: jest.Mock): Promise<unknown[]> {
-  const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+  const modelClient: ILLM = { create, createNonStream: jest.fn() };
   const thread = new AgentThread({
     threadId: 'main',
     title: 'Main',
@@ -246,7 +246,7 @@ describe('orphaned tool call recovery', () => {
         ]),
       )
       .mockImplementation(() => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',

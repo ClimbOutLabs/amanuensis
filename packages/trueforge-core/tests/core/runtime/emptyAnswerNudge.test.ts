@@ -126,7 +126,7 @@ describe('empty-answer nudge durability', () => {
     const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
       create.mock.calls.length === 1 ? reasoningOnlyStream() : finalStream('Real answer.'),
     );
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
@@ -174,7 +174,7 @@ describe('empty-answer nudge durability', () => {
     const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
       create.mock.calls.length === 1 ? reasoningOnlyStream() : finalStream('Delegated answer.'),
     );
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const parent = { thread_id: 'root', tool_call_id: 'call-1' };
     const thread = new AgentThread({
       threadId: 'child',
@@ -216,7 +216,7 @@ describe('empty-answer nudge durability', () => {
       .slice(0, appends.findIndex(append => append.completion !== undefined) + 1 || appends.length)
       .flatMap(append => append.context);
     const restartCreate = jest.fn(() => finalStream('Delegated answer after restart.'));
-    const restartModelClient: ILLM = { create: restartCreate, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const restartModelClient: ILLM = { create: restartCreate, createNonStream: jest.fn() };
     const restarted = new AgentThread({
       threadId: 'child',
       title: 'Child',
@@ -257,7 +257,7 @@ describe('empty-answer nudge durability', () => {
     const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
       reasoningOnlyStream(),
     );
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const initialContext = [{ role: 'user' as const, content: 'A question.' }];
     const thread = new AgentThread({
       threadId: 'main',
@@ -298,7 +298,7 @@ describe('empty-answer nudge durability', () => {
     const restartCreate = jest.fn(
       (): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> => reasoningOnlyStream(),
     );
-    const restartModelClient: ILLM = { create: restartCreate, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const restartModelClient: ILLM = { create: restartCreate, createNonStream: jest.fn() };
     const restarted = new AgentThread({
       threadId: 'main',
       title: 'Main',
@@ -357,7 +357,7 @@ describe('empty-answer nudge durability', () => {
       .fn()
       .mockImplementationOnce(() => reasoningOnlyStreamWithUsage(firstUsage))
       .mockImplementationOnce(() => finalStreamWithUsage('Real answer.', secondUsage));
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
@@ -392,7 +392,7 @@ describe('empty-answer nudge durability', () => {
     const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
       reasoningOnlyStream(),
     );
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const compaction = new CompactAwayNudgeOnSecondCall();
     const thread = new AgentThread({
       threadId: 'main',

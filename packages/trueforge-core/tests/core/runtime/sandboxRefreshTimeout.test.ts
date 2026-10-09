@@ -53,7 +53,7 @@ function makeThread(input: {
   sandboxRefreshTimeoutMs?: number | undefined;
 }): { thread: AgentThread; create: jest.Mock } {
   const create = jest.fn(promptStream);
-  const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+  const modelClient: ILLM = { create, createNonStream: jest.fn() };
   const thread = new AgentThread({
     threadId: 'main',
     title: 'Main',

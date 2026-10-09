@@ -16,10 +16,4 @@ export interface ILLM {
     body: LLMCreateParamsStreaming,
   ): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown>;
   createNonStream(body: LLMCreateParams): Promise<RawAssistantMessageWithUsage>;
-  /**
-   * Counts tokens in text using the provider's actual tokenizer.
-   * Used by the pre-flight context-limit guard and compaction budgets
-   * so the estimate matches what the provider will charge. Never a heuristic.
-   */
-  countTokens(text: string): Promise<number>;
 }

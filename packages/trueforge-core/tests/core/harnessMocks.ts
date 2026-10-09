@@ -16,8 +16,6 @@ export function makeMockILLM(overrides: Partial<ILLM> = {}): ILLM {
   return {
     create: jest.fn(),
     createNonStream: jest.fn(),
-    // Mock tokenizer: heuristic is fine for tests; specific tests can override.
-    countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     ...overrides,
   };
 }
