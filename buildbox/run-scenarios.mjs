@@ -221,7 +221,7 @@ async function ensureProvider() {
 async function ensurePersona() {
   if (!scenario.persona) return null;
   const wanted = scenario.persona.display_name;
-  const list = await api('GET', '/api/v1/personas/');
+  const list = await api('GET', '/api/v1/personas');
   const rows = list?.personas ?? list ?? [];
   const found = Array.isArray(rows) ? rows.find((p) => p?.display_name === wanted || p?.persona?.display_name === wanted) : null;
   if (found) {
@@ -230,7 +230,7 @@ async function ensurePersona() {
     return id;
   }
   log(`creating persona "${wanted}" ...`);
-  const created = await api('POST', '/api/v1/personas/', { persona: scenario.persona }, { timeoutMs: 60000 });
+  const created = await api('POST', '/api/v1/personas', { persona: scenario.persona }, { timeoutMs: 60000 });
   const id = created?.persona?.id ?? created?.id;
   if (!id) fail('persona create returned no id: ' + JSON.stringify(created).slice(0, 300));
   log(`persona created (${id})`);
@@ -240,7 +240,7 @@ async function ensurePersona() {
 async function createSession() {
   const created = await api(
     'POST',
-    '/api/v1/sessions/',
+    '/api/v1/sessions',
     { agent: { spec: { model: { name: MODEL_FQN } } } },
     { timeoutMs: 60000 },
   );
