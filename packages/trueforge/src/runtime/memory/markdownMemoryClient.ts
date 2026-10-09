@@ -567,11 +567,6 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  /** Plain-English embedding status of the shared vault for logs or settings UI; undefined when disabled. */
-  embeddingStatus(): { state: string; detail: string; indexedEntries: number } | undefined {
-    return this.embeddings?.(this.namespace).getStatus();
-  }
-
   private dayOf(timestamp: string): string {
     const parsed = new Date(timestamp);
     if (Number.isNaN(parsed.getTime())) {
