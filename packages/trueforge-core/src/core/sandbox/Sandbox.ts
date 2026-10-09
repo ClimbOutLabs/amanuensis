@@ -1272,7 +1272,7 @@ export const SANDBOX_RUN_CODE_DESCRIPTION = `Run Python or Node.js code in an is
 language is 'python' (3.13) or 'node' (22). Code runs with cwd=/scratch; read inputs from /ingress/<name>; write result files under /egress (files left in /scratch are collected too). Returns separate stdout/stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name/size/sha256 — bytes never inline into context; download from the UI). Reference files_out in your response as run_code/<name> (e.g. [chart](run_code/chart.png)) — that is the path the UI uses for download. A non-zero exit is the program's own result, not an infra failure.
 Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. No network and no installs at runtime: if a package is missing, say so instead of installing it.
 files_in is for content you compose yourself (a small CSV or JSON you write). Never re-upload an /ingress file via files_in.
-If run_code fails, do NOT fall back to exec (or any shell tool) to run the code — interpreter invocations in exec are rejected by a harness guard. Fix the code, reduce the input, or report the failure.
+If run_code fails, do NOT fall back to exec (or any shell tool) to run the code — interpreter invocations in exec are rejected by a harness guard. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned; do not paraphrase or reword it.
 `;
 
 export const SANDBOX_APPLY_PATCH_DESCRIPTION =

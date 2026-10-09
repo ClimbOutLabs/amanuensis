@@ -777,6 +777,14 @@ describe('DockerDriver.ensureReady docker detection', () => {
     expect(runner.calls).toHaveLength(0);
   });
 
+  test('docker_unavailable recovery message pins the exact user-facing copy', () => {
+    // Pinned literal, not the imported constant: the acceptance copy must not
+    // drift without this test failing.
+    expect(DOCKER_UNAVAILABLE_MESSAGE).toBe(
+      "I can't run code on this machine because Docker isn't available. To enable code execution, install Docker from https://docs.docker.com/engine/install/ and restart Aman.",
+    );
+  });
+
   test('present socket proceeds to the normal readiness path', async () => {
     const runner = new FakeRunner();
     scriptReadyPath(runner);
