@@ -36,9 +36,10 @@ recompute the voice capability flag. Docker also uses it as the container
 health check; the check asserts `model_loaded` so orchestrators wait for the
 warm model before routing.
 
-No auth on v1: the service is reachable only inside the compose network (no
-host port is published). If the port is ever published beyond the bridge
-network, add a shared-secret header before doing so.
+No auth on v1: the service is reachable only inside the compose network (the
+full stack publishes no host port; `docker-compose.dev.yml` binds
+`127.0.0.1:8001` for host development). If the port is ever published beyond
+loopback, add a shared-secret header before doing so.
 
 ## Lifecycle
 
