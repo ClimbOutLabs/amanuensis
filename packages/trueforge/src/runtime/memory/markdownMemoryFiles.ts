@@ -203,6 +203,11 @@ export function personaForVaultNamespace(wireNamespace: string | undefined): str
   return name === '' ? null : name;
 }
 
+/** Wire namespace of a persona's vault (`persona:<name>`). */
+export function personaVaultNamespace(personaName: string): string {
+  return `${VAULT_PERSONA_PREFIX}${personaName}`;
+}
+
 /** Owning persona derived from a filesystem namespace, else null. Best effort: sanitized. */
 export function personaForVaultFilesystemNamespace(
   tenantNamespace: string,
@@ -480,4 +485,53 @@ export async function writeVaultSharing(options: {
     }
     throw error;
   }
+}
+
+/** The vault a memory client belongs to. No scope means the shared vault only. */
+export interface VaultScope {
+  /** Display name of the active persona; selects its `persona:<name>` vault. */
+  personaName: string;
+  /** Persona id; sharing grants may be keyed by either the id or the name. */
+  personaId: string;
+}
+
+/** The one vault a scope writes into: its persona vault, else the shared vault. */
+export function vaultWriteNamespace(options: { tenantNamespace: string; scope: VaultScope | undefined }): string {
+  if (options.scope === undefined) {
+    return options.tenantNamespace;
+  }
+  return vaultFilesystemNamespace(options.tenantNamespace, personaVaultNamespace(options.scope.personaName));
+}
+
+/**
+ * Every vault a scope may recall from, in priority order: its own persona vault,
+ * the shared vault, then vaults the sharing config grants to it. Without a scope
+ * only the shared vault is readable. Grants are read-only and never add a write target.
+ */
+export async function vaultReadNamespaces(options: {
+  baseDir: string;
+  tenantNamespace: string;
+  scope: VaultScope | undefined;
+}): Promise<string[]> {
+  const { baseDir, tenantNamespace, scope } = options;
+  const namespaces = [vaultWriteNamespace({ tenantNamespace, scope }), tenantNamespace];
+  if (scope !== undefined) {
+    const { shares } = await readVaultSharing({ baseDir, tenantNamespace });
+    for (const key of [scope.personaName, scope.personaId]) {
+      // Own-property check: a persona named like an Object.prototype member must not match.
+      const granted = Object.hasOwn(shares, key) ? shares[key] : undefined;
+      for (const wireNamespace of granted ?? []) {
+        namespaces.push(vaultFilesystemNamespace(tenantNamespace, wireNamespace));
+      }
+    }
+  }
+  const seen = new Set<string>();
+  return namespaces.filter(namespace => {
+    const directory = sanitizeNamespace(namespace);
+    if (seen.has(directory)) {
+      return false;
+    }
+    seen.add(directory);
+    return true;
+  });
 }

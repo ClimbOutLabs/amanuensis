@@ -51,13 +51,14 @@ function vaultClient(deps: MemoryVaultRouterDeps, tenantId: string): MarkdownMem
     baseDir: configuration.MEMORY_MARKDOWN_DIR,
     namespace: tenantId,
     embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED
-      ? getEmbeddingSubsystem({
-          baseDir: configuration.MEMORY_MARKDOWN_DIR,
-          namespace: sanitizeNamespace(tenantId),
-          modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
-          batchSize: configuration.MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE,
-          log: (message: string) => deps.logger.info(message),
-        })
+      ? namespace =>
+          getEmbeddingSubsystem({
+            baseDir: configuration.MEMORY_MARKDOWN_DIR,
+            namespace,
+            modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+            batchSize: configuration.MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE,
+            log: (message: string) => deps.logger.info(message),
+          })
       : undefined,
   });
 }

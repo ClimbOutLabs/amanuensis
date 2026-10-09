@@ -1572,6 +1572,10 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       backend: configuration.MEMORY_BACKEND,
       markdownDir: configuration.MEMORY_MARKDOWN_DIR,
       namespace: requestContext.tenant_id,
+      vaultScope:
+        persona?.kind === 'persona'
+          ? { personaName: persona.persona.display_name, personaId: persona.persona.id }
+          : undefined,
       hindsight:
         memoryProvider === undefined
           ? undefined
