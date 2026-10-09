@@ -305,7 +305,7 @@ describe('repository inspection budget', () => {
       callIndex += 1;
       return inspectionStream(callIndex);
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
@@ -402,7 +402,7 @@ describe('repository inspection budget', () => {
       definition: {
         modelId: undefined,
         configuredModels: undefined,
-        modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
+        modelClient: { create, createNonStream: jest.fn() },
         instruction: 'test',
         toolSets: [],
       },
@@ -471,7 +471,7 @@ describe('repository inspection budget', () => {
       definition: {
         modelId: undefined,
         configuredModels: undefined,
-        modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
+        modelClient: { create, createNonStream: jest.fn() },
         instruction: 'test',
         toolSets: [],
       },
@@ -530,7 +530,7 @@ describe('empty-inspection nudge', () => {
       definition: {
         modelId: undefined,
         configuredModels: undefined,
-        modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
+        modelClient: { create, createNonStream: jest.fn() },
         instruction: 'test',
         toolSets: [],
       },
@@ -579,7 +579,7 @@ describe('empty-inspection nudge', () => {
       definition: {
         modelId: undefined,
         configuredModels: undefined,
-        modelClient: { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
+        modelClient: { create, createNonStream: jest.fn() },
         instruction: 'test',
         toolSets: [],
       },
@@ -607,7 +607,7 @@ describe('empty-inspection nudge', () => {
       round += 1;
       return round <= 5 ? inspectionStream(round) : finalStream('done');
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     // Compacts away right after the third empty inspection's nudge landed in context, and before
     // the fourth empty inspection's request is built.
     const compaction = new CompactAwayOnNthCall(4);
@@ -672,7 +672,7 @@ describe('empty-inspection nudge', () => {
       }
       return finalStream('done');
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',

@@ -22,7 +22,6 @@ function fakeSummarizer(content: string | { type: 'text'; text: string }[]): ILL
       throw new Error('streaming is not used by memory summarization');
     },
     createNonStream: async () => result,
-    countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
   };
 }
 
@@ -183,7 +182,6 @@ describe('summarizeTurnContent', () => {
         };
         return result;
       },
-    countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     });
     await Promise.all(
       Array.from({ length: 6 }, () => summarizeTurnContent({ ...base, resolveLlm: async () => blockingLlm() })),

@@ -67,7 +67,6 @@ function gatedLlm(gate: Promise<void>): {
       throw new Error('streaming is not used by the distillation pass');
     },
     createNonStream,
-    countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
   };
   return { llm, createNonStream };
 }

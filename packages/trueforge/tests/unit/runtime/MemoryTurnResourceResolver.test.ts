@@ -81,7 +81,6 @@ function stubModelClient(): ILLM {
       throw new Error('unused test model stream');
     },
     createNonStream: () => Promise.reject(new Error('unused test model completion')),
-    countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
   };
 }
 

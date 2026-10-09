@@ -386,7 +386,7 @@ describe('LargeToolResponseProcessor', () => {
       // them total 2250 tokens, over the 2000-token batch bar. Binary blobs
       // take the panic path (bounded preview), which actually shrinks, so the
       // guard trims the largest one back under the bar.
-      const contents = ['\x00\x01'.repeat(1125), '\x00\x02'.repeat(1125), '\x00\x03'.repeat(1125)];
+      const contents = ['\x00\x01'.repeat(1500), '\x00\x02'.repeat(1500), '\x00\x03'.repeat(1500)];
       const results = contents.map(content =>
         makeMcpResult({ content, originalToolName: 'list_items', toolSet: makeStubPublicSandbox() }),
       );
@@ -406,7 +406,7 @@ describe('LargeToolResponseProcessor', () => {
       // framed excerpt (~950 tokens) is larger than the original, so replacing
       // would inflate the batch total the guard exists to shrink. The guard
       // must leave these alone rather than "reduce" by growing.
-      const contents = ['a'.repeat(2250), 'b'.repeat(2250), 'c'.repeat(2250)];
+      const contents = ['a'.repeat(3000), 'b'.repeat(3000), 'c'.repeat(3000)];
       const results = contents.map(content =>
         makeMcpResult({ content, originalToolName: 'list_items', toolSet: makeStubPublicSandbox() }),
       );

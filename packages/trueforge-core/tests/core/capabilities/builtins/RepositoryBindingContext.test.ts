@@ -102,11 +102,7 @@ describe('host request context', () => {
       },
       usage: getEmptyUsage(),
     });
-    const modelClient: ILLM = {
-      create,
-      createNonStream,
-      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
-    };
+    const modelClient: ILLM = { create, createNonStream };
     const checklistState = new TaskChecklistRequestState(checklist);
     const thread = new AgentThread({
       threadId: 'main',
@@ -160,7 +156,7 @@ describe('host request context', () => {
       void body;
       return finalAnswerStream();
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
@@ -268,7 +264,7 @@ describe('host request context', () => {
       tracing: NOOP_AGENT_TRACING,
     });
     const create = jest.fn((_body: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',

@@ -26,7 +26,7 @@ async function* finalAnswerStream(): AsyncGenerator<
 describe('AgentThread no-task-no-tools instruction', () => {
   it('tells the model a greeting or announcement of intent is not a task', async () => {
     const create = jest.fn((_request: LLMCreateParamsStreaming) => finalAnswerStream());
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',

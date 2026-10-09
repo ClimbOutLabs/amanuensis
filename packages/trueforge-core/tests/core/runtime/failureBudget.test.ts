@@ -130,7 +130,7 @@ async function runThreadInstance(
   toolCallMemo?: ReturnType<AgentThread['toSnapshot']>['tool_call_memo'],
   isRequestContinuation?: boolean,
 ): Promise<{ events: unknown[]; thread: AgentThread }> {
-  const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+  const modelClient: ILLM = { create, createNonStream: jest.fn() };
   const thread = new AgentThread({
     threadId: 'main',
     title: 'Main',
@@ -310,7 +310,7 @@ describe('failed-batch nudge', () => {
       round += 1;
       return round <= 5 ? runCall(round) : finalAnswerStream();
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     // Compacts away on the preLLM pass right after the third failure's nudge landed in context,
     // and before the fourth failure's request is built.
     const compaction = new CompactAwayOnNthCall(4);
@@ -399,7 +399,7 @@ describe('failed-batch nudge', () => {
       }
       return finalAnswerStream();
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
 
     const thread = new AgentThread({
       threadId: 'main',
@@ -784,7 +784,6 @@ describe('repeat budget', () => {
         return round > 6 ? finalAnswerStream() : spawnStream(tool.function.name, round);
       }),
       createNonStream: jest.fn(),
-      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const capabilities: AgentCapability[] = [
       dynamicSubAgents({ sandboxAvailable: false, tracing: NOOP_AGENT_TRACING }),
@@ -810,7 +809,7 @@ describe('repeat budget', () => {
           definition: {
             modelId: undefined,
             configuredModels: undefined,
-            modelClient: { create: jest.fn(() => finalAnswerStream()), createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
+            modelClient: { create: jest.fn(() => finalAnswerStream()), createNonStream: jest.fn() },
           },
           parent: input.parent,
           agentInfo: input.request,
@@ -873,7 +872,7 @@ describe('repeat budget', () => {
       }
       return finalAnswerStream();
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const definition = {
       modelClient,
       modelId: undefined,
@@ -990,7 +989,6 @@ describe('repeat budget', () => {
         return finalAnswerStream();
       }),
       createNonStream: jest.fn(),
-      countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))),
     };
     const capabilities: AgentCapability[] = [
       dynamicSubAgents({ sandboxAvailable: false, tracing: NOOP_AGENT_TRACING }),
@@ -1022,7 +1020,7 @@ describe('repeat budget', () => {
           definition: {
             modelId: undefined,
             configuredModels: undefined,
-            modelClient: { create: jest.fn(() => finalAnswerStream()), createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) },
+            modelClient: { create: jest.fn(() => finalAnswerStream()), createNonStream: jest.fn() },
           },
           parent: input.parent,
           agentInfo: input.request,
@@ -1083,7 +1081,7 @@ describe('repeat budget', () => {
       round += 1;
       return toolCallStream({ id: `run-${String(round)}`, name: 'run', args: runArgs });
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     // Compacts away on the preLLM pass before the third `run` call's request is built — right
     // after the second call's nudge landed in context, and before the third call can see it.
     const compaction = new CompactAwayOnNthCall(3);
@@ -1407,7 +1405,7 @@ describe('pre-edit discovery hard cap', () => {
    * below the 30-call inspection cap under test here, so these tests would otherwise hit that
    * unrelated ceiling first. */
   async function runThreadWithRoom(toolSet: IToolSet, create: jest.Mock): Promise<unknown[]> {
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',

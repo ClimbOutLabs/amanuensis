@@ -71,7 +71,7 @@ describe('repeated side effect with a genuinely unknown outcome', () => {
       if (round === 2) return writeCallStream('write-2');
       return finalAnswerStream();
     });
-    const modelClient: ILLM = { create, createNonStream: jest.fn(), countTokens: jest.fn().mockImplementation((text: string) => Promise.resolve(Math.ceil(text.length / 4))) };
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
       threadId: 'main',
       title: 'Main',
