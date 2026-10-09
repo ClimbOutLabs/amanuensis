@@ -1,5 +1,7 @@
 # Spec: Persona Knowledge Library
 
+**Status:** implemented
+
 ## Problem
 
 Personas have personalities but no expertise. A relocation-advisor persona should know the visa requirements PDF, the tax notes, and the budget sheet. Today it gives generic advice because it has no access to the user's documents.

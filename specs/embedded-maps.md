@@ -1,5 +1,7 @@
 # Spec: Embedded Maps
 
+**Status:** draft
+
 ## Problem
 
 Location-related queries return text-only responses. Users cannot see spatial context (where a place is, what is around it) without doing the mental mapping themselves.

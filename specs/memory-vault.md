@@ -1,5 +1,7 @@
 # Spec: Memory Vault
 
+**Status:** draft
+
 ## Problem
 
 Aman already persists memories as Markdown files, but there is no way to inspect, correct, or manage them. Stale or wrong facts linger silently. Memories are global, with no per-persona views. Export and import do not exist, so the user cannot back up or move their memory.

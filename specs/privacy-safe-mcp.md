@@ -1,5 +1,7 @@
 # Spec: Privacy-Safe MCP Integrations
 
+**Status:** draft
+
 ## Problem
 
 Aman has a Gmail MCP, but every new integration (calendar, to-dos, notes) is a new place where secrets can leak and permissions can be over-broad. There is no consistent pattern for adding integrations safely.

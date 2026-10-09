@@ -1,5 +1,7 @@
 # Spec: Calendar MCP Integrations (Google, Outlook, iCal)
 
+**Status:** draft
+
 ## Problem
 
 Aman currently has Gmail MCP for email. But for a personal AI assistant to be useful with appointments, schedules, and smart departure times, it needs calendar access. Google Calendar is the most widely used. Outlook and iCal cover other users.

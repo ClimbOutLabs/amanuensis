@@ -1,5 +1,7 @@
 # Spec: Private by Architecture
 
+**Status:** draft
+
 ## Problem
 
 "Private" is currently a claim, not a product surface. Users cannot see what data Aman holds, where it flows, or prove that nothing leaks. Privacy needs to be visible, verifiable, and toggleable.

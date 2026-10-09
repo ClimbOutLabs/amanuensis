@@ -1,5 +1,7 @@
 # Spec: Local-First Voice Loop
 
+**Status:** implemented
+
 ## Problem
 
 Aman is text-only. A personal AI assistant on the user's own hardware should support voice: push-to-talk for quick queries, hands-free conversation mode, and local speech synthesis so no audio ever leaves the device.

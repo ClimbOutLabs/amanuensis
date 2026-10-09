@@ -1,6 +1,6 @@
 # Sandbox Rethink: Cheap, Fast, Fully Local
 
-**Status:** Draft for Sidd's review (local only, not yet a PR)
+**Status:** draft
 **Date:** 2026-09-28
 
 ## Problem

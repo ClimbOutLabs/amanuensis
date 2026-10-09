@@ -1,5 +1,7 @@
 # Spec: Scheduled Tasks and Proactive Briefings
 
+**Status:** draft
+
 ## Problem
 
 Aman is reactive: it answers when asked and is silent otherwise. A personal AI assistant should handle reminders, run recurring research, and deliver a morning briefing that pulls together the calendar and memory without being asked.
