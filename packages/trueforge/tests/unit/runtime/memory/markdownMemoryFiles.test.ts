@@ -7,6 +7,10 @@ import {
   sanitizeNamespace,
   scanNamespaceEntries,
   splitEntries,
+  vaultReadNamespaces,
+  vaultWriteNamespace,
+  writeVaultSharing,
+  type VaultScope,
 } from '../../../../src/runtime/memory/markdownMemoryFiles';
 
 async function makeDir(): Promise<string> {
@@ -105,6 +109,76 @@ describe('markdownMemoryFiles', () => {
         const scan = await scanNamespaceEntries({ baseDir: dir, namespace: 'new', maxDailyFiles: 14 });
         expect(scan.curated).toBeUndefined();
         expect(scan.entries).toEqual([]);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('vault scope namespaces', () => {
+    const alpha: VaultScope = { personaName: 'Alpha', personaId: 'persona-alpha-id' };
+
+    it('writes to the shared vault without a scope and to the persona vault with one', () => {
+      expect(vaultWriteNamespace({ tenantNamespace: 'tenant-1', scope: undefined })).toBe('tenant-1');
+      expect(vaultWriteNamespace({ tenantNamespace: 'tenant-1', scope: alpha })).toBe('tenant-1__persona_Alpha');
+    });
+
+    it('reads only the shared vault without a scope', async () => {
+      const dir = await makeDir();
+      try {
+        await writeVaultSharing({
+          baseDir: dir,
+          tenantNamespace: 'tenant-1',
+          sharing: { version: 1, shares: { Alpha: ['finance'] } },
+        });
+        expect(await vaultReadNamespaces({ baseDir: dir, tenantNamespace: 'tenant-1', scope: undefined })).toEqual([
+          'tenant-1',
+        ]);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('reads own vault, then shared vault, then granted vaults, without duplicates', async () => {
+      const dir = await makeDir();
+      try {
+        await writeVaultSharing({
+          baseDir: dir,
+          tenantNamespace: 'tenant-1',
+          sharing: {
+            version: 1,
+            shares: { Alpha: ['finance', 'default', 'persona:Beta', 'finance'], 'persona-alpha-id': ['travel'] },
+          },
+        });
+        expect(await vaultReadNamespaces({ baseDir: dir, tenantNamespace: 'tenant-1', scope: alpha })).toEqual([
+          'tenant-1__persona_Alpha',
+          'tenant-1',
+          'tenant-1__finance',
+          'tenant-1__persona_Beta',
+          'tenant-1__travel',
+        ]);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not apply another persona grants or inherited object keys', async () => {
+      const dir = await makeDir();
+      try {
+        await writeVaultSharing({
+          baseDir: dir,
+          tenantNamespace: 'tenant-1',
+          sharing: { version: 1, shares: { Beta: ['finance'] } },
+        });
+        const inherited: VaultScope = { personaName: 'constructor', personaId: '__proto__' };
+        expect(await vaultReadNamespaces({ baseDir: dir, tenantNamespace: 'tenant-1', scope: alpha })).toEqual([
+          'tenant-1__persona_Alpha',
+          'tenant-1',
+        ]);
+        expect(await vaultReadNamespaces({ baseDir: dir, tenantNamespace: 'tenant-1', scope: inherited })).toEqual([
+          'tenant-1__persona_constructor',
+          'tenant-1',
+        ]);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
