@@ -29,7 +29,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const API = 'http://127.0.0.1:8790';
 const UI = 'http://127.0.0.1:5173';
-const MODEL_FQN = 'spark/gpt-oss-120b-derestricted';
+let MODEL_FQN = ''; // resolved from the Spark /v1/models at startup (see resolveSparkModelId)
 const PROVIDER_MANIFEST = {
   type: 'custom',
   name: 'spark',
@@ -103,6 +103,25 @@ function sparkReachable() {
     }
   }
   return false;
+}
+
+// The Spark serves exactly one vLLM model; resolve its id at runtime instead of
+// hardcoding it. The hardcoded name goes stale whenever the brain is swapped
+// (the 404 on gpt-oss-120b-derestricted after the DeepSeek cutover), so the
+// harness asks the endpoint what it actually serves.
+function resolveSparkModelId() {
+  const url = `${PROVIDER_MANIFEST.base_url}/models`;
+  for (const extra of [[], ['-k']]) {
+    const r = spawnSync('curl', ['-sS', '-m', '20', ...extra, url], { encoding: 'utf8' });
+    if (r.status !== 0) continue;
+    try {
+      const id = JSON.parse(r.stdout)?.data?.[0]?.id;
+      if (typeof id === 'string' && id.length > 0) return id;
+    } catch {
+      /* unparseable body; try the next TLS mode */
+    }
+  }
+  fail('could not resolve the served model id from the Spark /v1/models endpoint');
 }
 
 // --------------------------------------------------------------- servers ---
@@ -364,6 +383,11 @@ let lastText = '';
 try {
   log(`scenario: ${scenarioName} (${scenario.turns.length} turns)`);
   if (!sparkReachable()) fail('spark model endpoint unreachable (strict and insecure TLS both failed)');
+  const servedModelId = resolveSparkModelId();
+  MODEL_FQN = `spark/${servedModelId}`;
+  PROVIDER_MANIFEST.models[0].model_id = servedModelId;
+  PROVIDER_MANIFEST.models[0].name = servedModelId;
+  log('using spark model:', servedModelId);
   await startServers();
   await ensureProvider();
   const personaId = await ensurePersona();
