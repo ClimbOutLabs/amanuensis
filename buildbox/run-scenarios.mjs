@@ -112,13 +112,19 @@ function sparkReachable() {
 function resolveSparkModelId() {
   const url = `${PROVIDER_MANIFEST.base_url}/models`;
   for (const extra of [[], ['-k']]) {
+    const mode = extra.includes('-k') ? 'insecure' : 'strict';
     const r = spawnSync('curl', ['-sS', '-m', '20', ...extra, url], { encoding: 'utf8' });
-    if (r.status !== 0) continue;
+    const out = (r.stdout || '').trim();
+    if (r.status !== 0) {
+      log(`WARN: ${url} curl exit ${r.status} (${mode}): ${(r.stderr || '').trim().slice(0, 200)}`);
+      continue;
+    }
     try {
-      const id = JSON.parse(r.stdout)?.data?.[0]?.id;
+      const id = JSON.parse(out)?.data?.[0]?.id;
       if (typeof id === 'string' && id.length > 0) return id;
-    } catch {
-      /* unparseable body; try the next TLS mode */
+      log(`WARN: ${url} (${mode}) returned no usable model id; body head: ${out.slice(0, 300)}`);
+    } catch (e) {
+      log(`WARN: ${url} (${mode}) returned unparseable body (${e.message}); body head: ${out.slice(0, 300)}`);
     }
   }
   fail('could not resolve the served model id from the Spark /v1/models endpoint');
