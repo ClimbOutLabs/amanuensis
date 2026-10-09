@@ -969,7 +969,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     // Use provider-accurate token count for the trigger decision, not the heuristic-based
     // currentContextUsage which may undercount. This ensures compaction fires correctly.
     // Falls back to heuristic if provider tokenizer is unreachable.
-    let providerCountedUsage;
+    let providerCountedUsage: CurrentContextUsage;
     try {
       providerCountedUsage = await countTokensForContextMessages(execution.context, this.modelClient);
     } catch (err) {
