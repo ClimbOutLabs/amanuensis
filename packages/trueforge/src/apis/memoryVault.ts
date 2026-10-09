@@ -82,7 +82,8 @@ function vaultNamespaceLabel(namespace: string | undefined): string {
 
 /**
  * Validates and normalizes a sharing payload. Returns the error message, or the
- * normalized shares when valid.
+ * normalized shares when valid. Keys are persona ids (what the vault UI saves) or
+ * persona names; turn-time recall honors both.
  */
 function normalizeSharing(shares: Record<string, string[]>): { shares: Record<string, string[]> } | { error: string } {
   const entries = Object.entries(shares);
@@ -93,7 +94,7 @@ function normalizeSharing(shares: Record<string, string[]>): { shares: Record<st
   for (const [persona, namespaces] of entries) {
     const name = persona.trim();
     if (name === '' || name.length > 64) {
-      return { error: 'Persona names must be 1 to 64 characters.' };
+      return { error: 'Persona ids or names must be 1 to 64 characters.' };
     }
     if (!Array.isArray(namespaces) || namespaces.length > MAX_SHARING_NAMESPACES) {
       return { error: `Persona "${name}" can read at most ${String(MAX_SHARING_NAMESPACES)} namespaces.` };
