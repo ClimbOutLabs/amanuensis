@@ -271,7 +271,8 @@ function extractAssistantText(turn) {
   return texts.join('\n\n');
 }
 
-async function runTurn(sessionId, content, index) {
+async function runTurn(sessionId, turn, index) {
+  const content = typeof turn === 'string' ? turn : (turn.user ?? turn.content ?? JSON.stringify(turn));
   log(`--- turn ${index + 1}/${scenario.turns.length} ---`);
   log('user:', content.slice(0, 160).replace(/\n/g, ' '));
   const created = await api(
