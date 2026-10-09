@@ -856,6 +856,11 @@ describe('TurnHandle.stream()', () => {
       mcp_server_name: toolSet.name,
       original_tool_name: 'tool_a',
       is_approval_required: false,
+      // The turn classifies unstamped tool calls through Sentinel, which fails
+      // closed to Tier 3: without this stamp the tool parks behind an approval
+      // card and the postToolCall processor never starts. Stamp the fixture as
+      // already classified so the test exercises cancellation, not admission.
+      tier: 1,
     });
     jest.mocked(toolSet.callTool).mockResolvedValue(toolResultResponse({ text: 'tool complete' }));
     const toolCall = {
