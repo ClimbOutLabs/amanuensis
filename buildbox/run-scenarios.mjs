@@ -149,6 +149,13 @@ async function startServers() {
       NODE_ENV: 'development',
       TRUEFORGE_API_KEY: 'trueforge-local-dev',
       PORT: '8790',
+      // Bind loopback IPv4 explicitly: the backend default HOST=localhost
+      // resolves to ::1 on this host, which the 127.0.0.1 health poll below
+      // can never reach. FRONTEND_PORT pins the vite dev server to the URL
+      // the harness waits on.
+      HOST: '127.0.0.1',
+      FRONTEND_PORT: '5173',
+      VITE_HOST: '127.0.0.1',
     },
     detached: true,
     stdio: ['ignore', logFd, logFd],
