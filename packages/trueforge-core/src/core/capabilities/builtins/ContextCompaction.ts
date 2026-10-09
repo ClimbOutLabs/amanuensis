@@ -1145,7 +1145,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
           'Continue with the remaining context.',
       );
       const truncatedContext: ContextMessage[] = [...systemMessages, truncationNotice, ...recentTail];
-      const tokensAfterTruncation = estimateTokensForContextMessages(truncatedContext).prompt_tokens;
+      const tokensAfterTruncation = (await countTokensForContextMessages(truncatedContext, this.modelClient)).prompt_tokens;
 
       yield { type: InternalEventType.MODEL_USAGE, usage: response.usage };
       yield {
@@ -1179,7 +1179,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     const continuationMessage = mode === 'coding' ? CONTINUATION_MESSAGE : CONVERSATION_CONTINUATION_MESSAGE;
     const context: ContextMessage[] = [hostFramedSummary, continuationMessage, ...recentTail];
     // Calculate tokens from the actual persisted messages, not the summarization request.
-    const tokensAfter = estimateTokensForContextMessages(context).prompt_tokens;
+    const tokensAfter = (await countTokensForContextMessages(context, this.modelClient)).prompt_tokens;
 
     yield {
       type: EventType.AGENT_CONTEXT_OVERWRITE,
