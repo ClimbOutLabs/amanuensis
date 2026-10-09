@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { chmod, mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -38,19 +38,15 @@ describe('server boot storage check', () => {
       const entry = join(packageDir, 'src', 'main.ts');
       const envFile = join(packageDir, '.env.test');
 
-      const child = spawn(
-        process.execPath,
-        ['--env-file', envFile, tsxCli, entry],
-        {
-          cwd: root,
-          env: {
-            ...process.env,
-            NODE_OPTIONS: '--conditions=trueforge-dev',
-            PERSONA_KNOWLEDGE_DIR: locked,
-          },
-          stdio: ['ignore', 'pipe', 'pipe'],
+      const child = spawn(process.execPath, ['--env-file', envFile, tsxCli, entry], {
+        cwd: root,
+        env: {
+          ...process.env,
+          NODE_OPTIONS: '--conditions=trueforge-dev',
+          PERSONA_KNOWLEDGE_DIR: locked,
         },
-      );
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
       let stdout = '';
       let stderr = '';
       child.stdout.on('data', chunk => {

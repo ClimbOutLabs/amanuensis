@@ -11,13 +11,13 @@ import { useCallback, useMemo, type ReactNode } from 'react';
 import { withImageDownscaling } from '../server/imageAttachmentAdapter.js';
 
 import { sessionIsCreateAgent } from '../atoms/lib/sessionCreateAgent.js';
+import { AvatarActivityProvider, useAvatarActivitySink, type AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import {
   ComposerBusyScopeProvider,
   getActiveComposerSendId,
   notifyComposerBusyFailure,
   useComposerBusyScope,
 } from '../hooks/useComposerBusyState.js';
-import { AvatarActivityProvider, useAvatarActivitySink, type AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { ForegroundEventSync } from '../hooks/useForegroundEventSync.js';
 import { ActiveSessionPermissionsProvider } from '../hooks/useResourcePermissions.js';
 import {
@@ -177,8 +177,17 @@ function ChatRuntimeScope({
  * assistant-ui + error toasts.
  */
 export function TrueFoundryChatProvider(props: TrueFoundryChatProviderProps) {
-  const { server, initialSessionId, adapters, onError, onAgentActivity, children, agent, agentName, listSessionsAgentId } =
-    props;
+  const {
+    server,
+    initialSessionId,
+    adapters,
+    onError,
+    onAgentActivity,
+    children,
+    agent,
+    agentName,
+    listSessionsAgentId,
+  } = props;
 
   const stableServer = useMemo(() => server, [server]);
 

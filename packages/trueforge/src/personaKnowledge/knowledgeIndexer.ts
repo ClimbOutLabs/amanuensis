@@ -1,19 +1,13 @@
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import {
-  EMBEDDING_DIMENSIONS,
-  getSharedEmbeddingModel,
-} from '../runtime/memory/embeddingModel';
-import {
-  isDataDirConfigurationError,
-  USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
-} from '../utils/dataDir';
+import { EMBEDDING_DIMENSIONS, getSharedEmbeddingModel } from '../runtime/memory/embeddingModel';
+import type { KnowledgeDocumentStatus, KnowledgeSourceKind } from '../schemas/personaKnowledge';
+import { isDataDirConfigurationError, USER_FACING_STORAGE_UNAVAILABLE_MESSAGE } from '../utils/dataDir';
 import { chunkText } from './documentChunking';
 import { extractTextFromUpload, fetchUrlSnapshot, type FetchSnapshotOptions } from './documentIngest';
 import { ensurePersonaKnowledgeRoot, personaKnowledgeLocation } from './knowledgePaths';
 import type { PersonaKnowledgeRepository } from './knowledgeRepository';
-import type { KnowledgeDocumentStatus, KnowledgeSourceKind } from '../schemas/personaKnowledge';
 import { openPersonaKnowledgeRepository } from './sqliteKnowledgeRepository';
 
 export interface PersonaKnowledgeIndexerOptions {
@@ -72,16 +66,16 @@ function assertSafeSegment(name: string, value: string): void {
  * the API layer's delete path validates through the same gate as the write
  * and indexer paths.
  */
-export function blobPath(input: { knowledgeDir: string; tenantId: string; personaId: string; documentId: string }): string {
+export function blobPath(input: {
+  knowledgeDir: string;
+  tenantId: string;
+  personaId: string;
+  documentId: string;
+}): string {
   assertSafeSegment('tenantId', input.tenantId);
   assertSafeSegment('personaId', input.personaId);
   assertSafeSegment('documentId', input.documentId);
-  return path.resolve(
-    input.knowledgeDir,
-    input.tenantId,
-    `${input.personaId}.blobs`,
-    `${input.documentId}.bin`,
-  );
+  return path.resolve(input.knowledgeDir, input.tenantId, `${input.personaId}.blobs`, `${input.documentId}.bin`);
 }
 
 function describeFailure(error: unknown): string {
@@ -98,9 +92,7 @@ function describeFailure(error: unknown): string {
  * error. The log line below keeps the full detail. Exported for unit tests.
  */
 export function describeUserFacingFailure(error: unknown): string {
-  return isDataDirConfigurationError(error)
-    ? USER_FACING_STORAGE_UNAVAILABLE_MESSAGE
-    : describeFailure(error);
+  return isDataDirConfigurationError(error) ? USER_FACING_STORAGE_UNAVAILABLE_MESSAGE : describeFailure(error);
 }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -364,11 +356,7 @@ export class PersonaKnowledgeIndexer {
    * mark the document failed (the blob is then cleaned up as terminal);
    * otherwise schedules a retry and returns false (the blob is preserved).
    */
-  #handleModelUnavailable(
-    repo: PersonaKnowledgeRepository,
-    queued: QueuedDocument,
-    key: string,
-  ): boolean {
+  #handleModelUnavailable(repo: PersonaKnowledgeRepository, queued: QueuedDocument, key: string): boolean {
     const attempts = (this.#modelRetries.get(key) ?? 0) + 1;
     this.#modelRetries.set(key, attempts);
     if (attempts > MAX_MODEL_RETRIES) {
@@ -440,9 +428,7 @@ export class PersonaKnowledgeIndexer {
 const indexers = new Map<string, PersonaKnowledgeIndexer>();
 
 /** Process-wide indexer per knowledge directory. The first caller's logger wins. */
-export function getPersonaKnowledgeIndexer(
-  options: PersonaKnowledgeIndexerOptions,
-): PersonaKnowledgeIndexer {
+export function getPersonaKnowledgeIndexer(options: PersonaKnowledgeIndexerOptions): PersonaKnowledgeIndexer {
   const existing = indexers.get(options.knowledgeDir);
   if (existing !== undefined) {
     return existing;

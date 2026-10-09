@@ -2,13 +2,13 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { StateSprite } from '@/atoms/StateSprite.js';
 import type { StateSpriteState } from '@/atoms/StateSprite.js';
+import { StateSprite } from '@/atoms/StateSprite.js';
 
 const STATES: StateSpriteState[] = ['listening', 'remembering', 'doing', 'writing'];
 
 describe('StateSprite', () => {
-  it.each(STATES)('renders the %s sprite with body and effect bits', (state) => {
+  it.each(STATES)('renders the %s sprite with body and effect bits', state => {
     const { container } = render(<StateSprite state={state} />);
 
     const sprite = container.querySelector('.aui-state-sprite');

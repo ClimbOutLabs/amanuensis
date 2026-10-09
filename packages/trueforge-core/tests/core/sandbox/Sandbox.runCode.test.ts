@@ -1,17 +1,9 @@
 import type { InternalEnrichedAssistantMessage } from '../../../src/core/llm/LLMTypes';
-import {
-  createToolCallMemoState,
-  executeToolCalls,
-  type ToolCallResult,
-} from '../../../src/core/mcp/executeToolCalls';
-import type { RunCodeBackend, RunCodeCallOptions } from '../../../src/core/sandbox/driver/RunCodeService';
+import { createToolCallMemoState, executeToolCalls, type ToolCallResult } from '../../../src/core/mcp/executeToolCalls';
 import type { RunCodeResult } from '../../../src/core/sandbox/driver/RunCodeSchemas';
+import type { RunCodeBackend, RunCodeCallOptions } from '../../../src/core/sandbox/driver/RunCodeService';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
-import {
-  Sandbox,
-  SANDBOX_EXEC_TOOL_NAME,
-  SANDBOX_RUN_CODE_TOOL_NAME,
-} from '../../../src/core/sandbox/Sandbox';
+import { Sandbox, SANDBOX_EXEC_TOOL_NAME, SANDBOX_RUN_CODE_TOOL_NAME } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 
@@ -53,7 +45,9 @@ function makeProvider(overrides: Partial<SandboxProvider> = {}): SandboxProvider
   };
 }
 
-function makeRunCodeService(runCodeImpl?: (rawInput: unknown, options?: RunCodeCallOptions) => Promise<RunCodeResult>): {
+function makeRunCodeService(
+  runCodeImpl?: (rawInput: unknown, options?: RunCodeCallOptions) => Promise<RunCodeResult>,
+): {
   service: RunCodeBackend;
   runCode: jest.Mock;
 } {
@@ -247,7 +241,11 @@ describe('Sandbox run_code tool', () => {
     const exec = jest.fn(execImpl);
     const sandbox = makeSandbox(makeProvider({ exec }), service);
 
-    const stored = await sandbox.uploadUserFile({ fileName: 'notes.txt', content: Buffer.from('hello'), mime: 'text/plain' });
+    const stored = await sandbox.uploadUserFile({
+      fileName: 'notes.txt',
+      content: Buffer.from('hello'),
+      mime: 'text/plain',
+    });
     await sandbox.deleteUserFile({ filePath: stored.filePath });
 
     const runCodeTool = sandbox.listToolsForTest().find(tool => tool.name === SANDBOX_RUN_CODE_TOOL_NAME);

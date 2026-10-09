@@ -6,10 +6,7 @@ import type { PersonaApi } from '@/components/PersonaContext.js';
  */
 export const personaKnowledgeApiStubs: Pick<
   PersonaApi,
-  | 'listPersonaKnowledge'
-  | 'createPersonaKnowledge'
-  | 'deletePersonaKnowledge'
-  | 'getPersonaKnowledgeEmbeddingModel'
+  'listPersonaKnowledge' | 'createPersonaKnowledge' | 'deletePersonaKnowledge' | 'getPersonaKnowledgeEmbeddingModel'
 > = {
   listPersonaKnowledge: async () => [],
   createPersonaKnowledge: async () => {

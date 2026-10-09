@@ -11,14 +11,14 @@
 import { copyFileSync, linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
-import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
-import { verifyPreDispatch, type VerifiableCall } from '../../../src/core/permissions/dispatch';
 import {
   actionIdFor,
   InMemoryApprovalTokenStore,
   type ShellApprovalBinding,
 } from '../../../src/core/permissions/approvalTokens';
+import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
+import { verifyPreDispatch, type VerifiableCall } from '../../../src/core/permissions/dispatch';
 import type { ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 import type { Tier, TrackedExecutionBinding } from '../../../src/core/permissions/tier';
 
@@ -505,10 +505,7 @@ describe('Suite C - trust boundary', () => {
   });
 
   test('C4 GUARD: system read_file with read_only_hint is Tier 1', async () => {
-    const decision = await classifyTier(
-      action('read_file', { path: 'a.txt' }, { read_only_hint: true }),
-      makeCtx(),
-    );
+    const decision = await classifyTier(action('read_file', { path: 'a.txt' }, { read_only_hint: true }), makeCtx());
     expect(decision.tier).toBe(1);
     expect(decision.reason).toBe('local_read_only');
   });
@@ -702,7 +699,10 @@ describe('Suite D - approval token integrity', () => {
 
   test('D8 GAP: the oldest token is evicted at the 5000-token cap', async () => {
     const store = new InMemoryApprovalTokenStore();
-    const first = store.mint({ action_id: actionIdFor({ tool_name: 'exec', canonical_params: {} }), canonical_params: {} });
+    const first = store.mint({
+      action_id: actionIdFor({ tool_name: 'exec', canonical_params: {} }),
+      canonical_params: {},
+    });
     for (let i = 0; i < 5000; i += 1) {
       store.mint({ action_id: actionIdFor({ tool_name: 'exec', canonical_params: { i } }), canonical_params: { i } });
     }

@@ -32,7 +32,10 @@ const auditEntry = {
 type SeenRequest = { url: string; method: string; body: unknown };
 
 /** Records every request the API makes and answers GETs with scripted bodies. */
-function recordingApi(getBody: (url: string) => unknown): { api: ReturnType<typeof createSentinelApi>; seen: SeenRequest[] } {
+function recordingApi(getBody: (url: string) => unknown): {
+  api: ReturnType<typeof createSentinelApi>;
+  seen: SeenRequest[];
+} {
   const seen: SeenRequest[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     const url = String(input);

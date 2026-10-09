@@ -9,15 +9,13 @@ import { VercelAILLM } from '../../../src/core/llm/VercelAILLM';
 import { makeSilentLogger } from '../harnessMocks';
 
 function sseChunk(content: string, finishReason: string | null): string {
-  return (
-    `data: ${JSON.stringify({
-      id: 'chatcmpl-stub',
-      object: 'chat.completion.chunk',
-      created: 1,
-      model: 'stub-model',
-      choices: [{ index: 0, delta: content === '' ? {} : { role: 'assistant', content }, finish_reason: finishReason }],
-    })}\n\n`
-  );
+  return `data: ${JSON.stringify({
+    id: 'chatcmpl-stub',
+    object: 'chat.completion.chunk',
+    created: 1,
+    model: 'stub-model',
+    choices: [{ index: 0, delta: content === '' ? {} : { role: 'assistant', content }, finish_reason: finishReason }],
+  })}\n\n`;
 }
 
 async function startStubServer(): Promise<{ server: Server; baseUrl: string }> {

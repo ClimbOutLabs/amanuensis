@@ -53,18 +53,13 @@ import {
   type ISessionStore,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
-import {
-  DEFAULT_PINNED_PATH,
-  defaultSentinelServices,
-  type SentinelServices,
-} from '@truefoundry/trueforge-core/core';
+import { DEFAULT_PINNED_PATH, defaultSentinelServices, type SentinelServices } from '@truefoundry/trueforge-core/core';
 import { heartbeatKey, RequestReplyExecutor, RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Kysely, Transaction } from 'kysely';
 import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 
 import { createServerApp } from './app';
-import { TENANT_ID } from './tenancy';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
 import { resolveRequestContext, type RequestContext } from './auth/identity';
@@ -106,8 +101,8 @@ import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRec
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { TurnDrainRegistry } from './runtime/turnDrains';
-import { startSttAvailabilityWatcher } from './voice/sttAvailability';
 import { printStandaloneStartupBanner } from './startupBanner';
+import { TENANT_ID } from './tenancy';
 import {
   parsePerServerMcpHeaders,
   X_TFG_MCP_HEADERS,
@@ -120,6 +115,7 @@ import { TrueFoundryModelProviderStore } from './truefoundry/TrueFoundryModelPro
 import { TrueFoundrySandboxProviderStore } from './truefoundry/TrueFoundrySandboxProviderStore';
 import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundryServiceFoundryServerClient';
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
+import { startSttAvailabilityWatcher } from './voice/sttAvailability';
 
 /** Persistence + optional Redis wired for the selected topology. */
 interface ServerPersistence<TTransaction> {
@@ -677,7 +673,17 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     authorizer,
   });
 
-  return { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnArtifactStore, turnDrains };
+  return {
+    activeTurns,
+    app,
+    controller,
+    destroyDb,
+    redis,
+    requestReplyRouter,
+    sessionStore,
+    turnArtifactStore,
+    turnDrains,
+  };
 }
 
 try {
@@ -713,13 +719,22 @@ try {
     logger.info('TrueForge starting', { mode: 'distributed' });
   }
 
-  const { activeTurns, app, controller, destroyDb, redis, requestReplyRouter, sessionStore, turnArtifactStore, turnDrains } =
-    configuration.STANDALONE
-      ? await createServerRuntime(
-          await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
-          logger,
-        )
-      : await createServerRuntime(await createDistributedPersistence({ configuration, logger }), logger);
+  const {
+    activeTurns,
+    app,
+    controller,
+    destroyDb,
+    redis,
+    requestReplyRouter,
+    sessionStore,
+    turnArtifactStore,
+    turnDrains,
+  } = configuration.STANDALONE
+    ? await createServerRuntime(
+        await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
+        logger,
+      )
+    : await createServerRuntime(await createDistributedPersistence({ configuration, logger }), logger);
 
   // Turn artifact retention: persisted run_code/sandbox result files are
   // downloads, not a permanent archive. One startup-anchored sweep a day

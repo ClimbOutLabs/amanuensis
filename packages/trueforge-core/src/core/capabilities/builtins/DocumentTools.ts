@@ -59,12 +59,7 @@ const filePathListSchema = z
 const extractDocumentTextSchema = z
   .object({
     file_paths: filePathListSchema,
-    page_start: z
-      .number()
-      .int()
-      .positive()
-      .optional()
-      .describe('First PDF page to read (1-based). Defaults to 1.'),
+    page_start: z.number().int().positive().optional().describe('First PDF page to read (1-based). Defaults to 1.'),
     page_end: z
       .number()
       .int()

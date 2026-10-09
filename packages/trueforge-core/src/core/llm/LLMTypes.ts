@@ -12,14 +12,9 @@ import {
   ImplementationPlanGrantSchema,
   ImplementationPlanGrantScopeSchema,
 } from '../mcp/implementationPlanGrant';
-import { StructuredEditPreconditionSchema } from '../sandbox/structuredEditPrecondition';
-import {
-  Tier3CardSchema,
-  TierSchema,
-  TIER2_ACTION_KINDS,
-  TrackedExecutionBindingSchema,
-} from '../permissions/tier';
 import { ShellApprovalBindingSchema } from '../permissions/approvalTokens';
+import { TIER2_ACTION_KINDS, Tier3CardSchema, TierSchema, TrackedExecutionBindingSchema } from '../permissions/tier';
+import { StructuredEditPreconditionSchema } from '../sandbox/structuredEditPrecondition';
 import {
   ChatCompletionAssistantMessageParamSchema,
   ChatCompletionChunkDeltaSchema,
@@ -92,12 +87,18 @@ export const InternalToolCallInfoSchema = z.object({
   original_tool_name: z.string().describe('Original tool name before any remapping.'),
   is_approval_required: z.boolean().optional().describe('Whether this tool call requires human approval.'),
   is_deferred: z.boolean().optional().describe('Whether the tool was loaded via deferred discovery.'),
-  mint_tool_name: z.string().optional().describe(
-    'Tool name the approval token was minted over, when it differs from original_tool_name (sandbox remaps for display). Never model-authored.',
-  ),
-  mint_canonical_params: z.record(z.string(), z.unknown()).optional().describe(
-    'Canonical params the approval token was minted over, when they differ from the raw arguments (sandbox normalizes structured-edit args before minting). Never model-authored.',
-  ),
+  mint_tool_name: z
+    .string()
+    .optional()
+    .describe(
+      'Tool name the approval token was minted over, when it differs from original_tool_name (sandbox remaps for display). Never model-authored.',
+    ),
+  mint_canonical_params: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe(
+      'Canonical params the approval token was minted over, when they differ from the raw arguments (sandbox normalizes structured-edit args before minting). Never model-authored.',
+    ),
   is_client_side: z.boolean().optional().describe('Whether the client must supply the tool result.'),
   // Runtime + wire: deviation from origin/main OpenAPI (which omitted this field) is accepted.
   is_thread_creation: z.boolean().optional().describe('Whether this tool call creates a subagent thread.'),

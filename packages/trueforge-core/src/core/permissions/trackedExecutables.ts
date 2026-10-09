@@ -249,7 +249,10 @@ export function skipWrapperPrefix(argv: readonly string[]): readonly string[] {
       let index = 1;
       while (index < rest.length) {
         const token = rest[index];
-        if (token === undefined || (token !== '--' && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(token) && !token.startsWith('-'))) {
+        if (
+          token === undefined ||
+          (token !== '--' && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(token) && !token.startsWith('-'))
+        ) {
           break;
         }
         index += 1;

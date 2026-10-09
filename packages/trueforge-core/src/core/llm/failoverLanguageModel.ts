@@ -1,10 +1,10 @@
-import { APICallError } from 'ai';
 import type {
   LanguageModelV4,
   LanguageModelV4CallOptions,
   LanguageModelV4GenerateResult,
   LanguageModelV4StreamResult,
 } from '@ai-sdk/provider';
+import { APICallError } from 'ai';
 import type { Logger } from 'winston';
 import { extractErrorLogFields } from '../util/errorLogFields';
 

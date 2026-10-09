@@ -1,9 +1,11 @@
 # Spec: Memory Vault
 
 ## Problem
+
 Aman already persists memories as Markdown files, but there is no way to inspect, correct, or manage them. Stale or wrong facts linger silently. Memories are global, with no per-persona views. Export and import do not exist, so the user cannot back up or move their memory.
 
 ## Solution
+
 A Memory Vault UI and API layer on top of the existing Markdown memory backend. Per-persona views, fact-level view/edit/delete, selective sharing across personas, and export/import.
 
 ## Design Decisions
@@ -17,6 +19,7 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 **Selective sharing.** Facts can be tagged as shared across specific personas or kept private to one. Sharing is explicit: a fact is private to its persona unless the user shares it.
 
 ## Scope
+
 - Fact list per persona with source attribution (which file, when recorded)
 - Edit a fact (rewrites the underlying Markdown)
 - Delete a fact
@@ -26,10 +29,12 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 - Search across facts
 
 ## Privacy
+
 - Vault contents never leave the device except via explicit user-initiated export
 - Encrypted per-persona vaults are a separate feature (see private-by-architecture spec)
 
 ## Testing
+
 - Synthetic facts only, never the user's real memories
 - Verify: create fact in chat, see it in vault, edit it, confirm the edit is reflected in a new chat
 - Verify: delete a fact, confirm the persona no longer recalls it
@@ -37,6 +42,7 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 - Verify: export and re-import round-trips without loss
 
 ## Out of Scope
+
 - Encryption at rest (see private-by-architecture)
 - Automatic fact deduplication or merging
 - Memory backend migration (Hindsight stays cold-archived)

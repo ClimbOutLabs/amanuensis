@@ -5,6 +5,7 @@ import type {
 } from '@truefoundry/trueforge-core/core';
 import { HOST_SUMMARY_PREFACE, InstructionBuilder, InternalEventType } from '@truefoundry/trueforge-core/core';
 import winston from 'winston';
+import { buildInternalSourceToolPolicy, createInternalSourceState } from '../../../../src/runtime/internalSourceGuard';
 import type {
   EntitySummary,
   GetOperationOutcome,
@@ -23,10 +24,6 @@ import {
   weightedRecallQuery,
   WRAPPER_OVERHEAD_TOKENS,
 } from '../../../../src/runtime/memory/memoryCapability';
-import {
-  buildInternalSourceToolPolicy,
-  createInternalSourceState,
-} from '../../../../src/runtime/internalSourceGuard';
 import type { ScreenClassifyResult, ScreenClient } from '../../../../src/runtime/memory/screenClient';
 
 const DEFAULT_CONFIG: MemoryConfig = {
@@ -743,9 +740,7 @@ describe('HindsightMemoryProcessor internal-source state', () => {
     const internalSourceState = createInternalSourceState();
     const { processor } = processorWithState(recall, internalSourceState);
 
-    await collect(
-      processor.processPreLLM(makeExecution([{ role: 'user', content: 'what do you know about Lexie' }])),
-    );
+    await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'what do you know about Lexie' }])));
 
     // The recall call site (not just noteRecallContent in isolation) feeds
     // the turn's tool policy: the recorded tokens arm the recall rule.

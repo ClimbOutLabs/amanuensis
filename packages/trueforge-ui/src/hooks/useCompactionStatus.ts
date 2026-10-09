@@ -30,8 +30,7 @@ function useModelProperties(): { contextLength: number | null; maxOutputTokens: 
   const model: unknown = agentSpec?.model;
   if (typeof model !== 'object' || model === null) return { contextLength: null, maxOutputTokens: null };
   const properties: unknown = (model as { properties?: unknown }).properties;
-  if (typeof properties !== 'object' || properties === null)
-    return { contextLength: null, maxOutputTokens: null };
+  if (typeof properties !== 'object' || properties === null) return { contextLength: null, maxOutputTokens: null };
   const props = properties as Record<string, unknown>;
   const read = (key: string): number | null => {
     const value: unknown = props[key];

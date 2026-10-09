@@ -10,10 +10,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { PersonaProvider, type Persona, type PersonaApi } from '@/components/PersonaContext.js';
-import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
 import TruefoundrySettingsBuilder from '@/containers/SettingsBuilder/index.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
+import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
 vi.mock('@truefoundry/assistant-ui-runtime', () => ({

@@ -1,14 +1,6 @@
 'use client';
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-  type FC,
-  type ReactNode,
-} from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type FC, type ReactNode } from 'react';
 
 import { parseUserSettings, type SentinelApi, type SentinelUserSettings } from './types.js';
 
@@ -38,10 +30,7 @@ function readErrorMessage(error: unknown): string {
  * updates the indicator immediately. Absent the provider, every Sentinel hook returns
  * `null` and all Sentinel UI stays hidden.
  */
-export const SentinelApiProvider: FC<{ api: SentinelApi; children: ReactNode }> = ({
-  api,
-  children,
-}) => {
+export const SentinelApiProvider: FC<{ api: SentinelApi; children: ReactNode }> = ({ api, children }) => {
   const [settings, setSettings] = useState<SentinelUserSettings | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
 

@@ -1,9 +1,11 @@
 # Spec: Privacy-Safe MCP Integrations
 
 ## Problem
+
 Aman has a Gmail MCP, but every new integration (calendar, to-dos, notes) is a new place where secrets can leak and permissions can be over-broad. There is no consistent pattern for adding integrations safely.
 
 ## Solution
+
 A standard integration framework for MCP servers with three guarantees: secrets are masked everywhere, permissions are scoped per integration, and each integration can be independently enabled, audited, and revoked.
 
 ## Design Decisions
@@ -17,16 +19,19 @@ A standard integration framework for MCP servers with three guarantees: secrets 
 **Consistent UX.** All integrations live in Settings → Integrations with the same card layout: name, status, scopes granted, last sync, disconnect button.
 
 ## Scope
+
 - Integration framework: secret storage, scope enforcement, audit logging
 - Reference integrations: calendar (see calendar-mcp-integrations spec), email (Gmail MCP migrated to the framework), to-dos, notes
 - Settings UI: integration cards with scope display and revoke
 - Audit log: which integration accessed what, when
 
 ## Privacy
+
 - This spec IS the privacy story for integrations: masked secrets, minimal scopes, full auditability
 - Data-flow documentation per integration (what data flows where)
 
 ## Testing
+
 - Synthetic accounts only, never the user's real credentials
 - Verify: connecting shows only the requested scopes
 - Verify: secret values never appear in UI, logs, or API responses
@@ -34,5 +39,6 @@ A standard integration framework for MCP servers with three guarantees: secrets 
 - Verify: audit log records every access
 
 ## Out of Scope
+
 - The calendar integrations themselves (see calendar-mcp-integrations spec)
 - Fine-grained per-folder or per-label scopes (v1 is per-integration)

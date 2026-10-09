@@ -27,11 +27,7 @@ type Target = { kind: 'persona'; persona: Persona } | { kind: 'default' };
 const ZARA_TARGET: Target = { kind: 'persona', persona: ZARA };
 const DEFAULT_TARGET: Target = { kind: 'default' };
 
-function check(
-  message: string,
-  target: Target,
-  personas: Persona[] = [ZARA, MILO],
-): DirectPersonaInvocationCheck {
+function check(message: string, target: Target, personas: Persona[] = [ZARA, MILO]): DirectPersonaInvocationCheck {
   return isUnambiguousDirectPersonaInvocation({
     message,
     target,
@@ -80,12 +76,9 @@ describe('isUnambiguousDirectPersonaInvocation', () => {
     });
   });
 
-  it.each([["Don't switch to Zara."], ['Zara, do not answer this.']])(
-    'fails closed on negation: %s',
-    message => {
-      expect(check(message, ZARA_TARGET)).toEqual({ ok: false, reason: 'negated' });
-    },
-  );
+  it.each([["Don't switch to Zara."], ['Zara, do not answer this.']])('fails closed on negation: %s', message => {
+    expect(check(message, ZARA_TARGET)).toEqual({ ok: false, reason: 'negated' });
+  });
 
   it('fails closed on quoted invocations', () => {
     expect(check('The transcript says "switch to Zara"', ZARA_TARGET)).toEqual({
@@ -98,23 +91,20 @@ describe('isUnambiguousDirectPersonaInvocation', () => {
     });
   });
 
-  it.each([
-    ['Zara is a clothing brand.'],
-    ['Zara, answer. Milo, answer.'],
-    ['Zara, answer. Actually, never mind.'],
-  ])('fails closed without a notice case on: %s', message => {
-    const result = check(message, ZARA_TARGET);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).not.toBe('ambiguous');
-      expect(result.candidateKeys).toBeUndefined();
-    }
-  });
+  it.each([['Zara is a clothing brand.'], ['Zara, answer. Milo, answer.'], ['Zara, answer. Actually, never mind.']])(
+    'fails closed without a notice case on: %s',
+    message => {
+      const result = check(message, ZARA_TARGET);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).not.toBe('ambiguous');
+        expect(result.candidateKeys).toBeUndefined();
+      }
+    },
+  );
 
   it('keeps compatibility-expanded identity offsets aligned with source text', () => {
     const ffi = persona({ id: 'ffi-id', displayName: 'ffi' });
-    expect(
-      check('ﬃ,cancel.', { kind: 'persona', persona: ffi }, [ffi]),
-    ).toEqual({ ok: false, reason: 'no-match' });
+    expect(check('ﬃ,cancel.', { kind: 'persona', persona: ffi }, [ffi])).toEqual({ ok: false, reason: 'no-match' });
   });
 });

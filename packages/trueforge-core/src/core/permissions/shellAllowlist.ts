@@ -223,10 +223,7 @@ export interface AllowlistMatch {
  * `--flag value` are distinct and must each be listed. Non-flag tokens are
  * allowed only when the entry permits workspace-relative operands.
  */
-export function matchAllowlist(
-  parsed: ParsedSimpleCommand,
-  config: ShellAllowlistConfig,
-): AllowlistMatch | undefined {
+export function matchAllowlist(parsed: ParsedSimpleCommand, config: ShellAllowlistConfig): AllowlistMatch | undefined {
   const argv0 = parsed.argv[0];
   if (argv0 === undefined) {
     return undefined;

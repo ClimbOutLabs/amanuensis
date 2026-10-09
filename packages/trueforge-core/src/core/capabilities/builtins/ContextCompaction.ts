@@ -1,5 +1,6 @@
 import type { Logger } from 'winston';
 import { AgentHarnessError } from '../../errors';
+import type { ContextCompactionEvent } from '../../events/schema';
 import { EventType, newEventId } from '../../events/schema';
 import type { ILLM, LLMCreateParams } from '../../llm/ILLM';
 import type { AgentDefinition, ModelParams } from '../../runtime/AgentDefinition';
@@ -24,16 +25,15 @@ import {
 } from '../../sandbox/Sandbox';
 import { awaitWithAbort, throwIfSignalAborted } from '../../util/abort';
 import type { AgentCapability, JsonValue } from '../AgentCapability';
-import { TOKEN_BUDGET_SAFETY_MARGIN } from './tokenBudgetConstants';
 import type {
   AgentContextProcessorCompactionEvent,
   AgentContextProcessorOutput,
   AgentThreadExecutionContext,
   PreLLMAgentContextProcessor,
 } from '../AgentContextProcessor';
-import type { ContextCompactionEvent } from '../../events/schema';
 import { formatBoundRepositoryContext } from './RepositoryBindingContext';
 import { TaskChecklistRequestState, type TaskChecklistAccess } from './TaskChecklist';
+import { TOKEN_BUDGET_SAFETY_MARGIN } from './tokenBudgetConstants';
 
 export const DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS = 50 * 1000;
 export const MAX_COMPACTION_TOUCHED_PATHS = 200;
@@ -78,10 +78,7 @@ export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
  * Includes output length, a hash prefix (shape probe), and per-section presence counts
  * (0=missing, 1=present, 2+=duplicated) to diagnose which sections failed.
  */
-export function compactionValidationFingerprint(
-  modelOutput: string,
-  requiredSections: readonly string[],
-): string {
+export function compactionValidationFingerprint(modelOutput: string, requiredSections: readonly string[]): string {
   // FNV-1a hash of a short prefix (shape probe, not content).
   const prefix = modelOutput.slice(0, 64);
   let hash = 0x811c9dc5;

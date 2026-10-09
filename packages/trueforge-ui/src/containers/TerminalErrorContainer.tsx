@@ -56,10 +56,7 @@ export function TerminalErrorContainer() {
 
   return (
     <div data-role="host-terminal-error">
-      <MessageErrorBanner
-        message={terminalError.message}
-        action={{ label: 'Retry', onClick: () => reload() }}
-      />
+      <MessageErrorBanner message={terminalError.message} action={{ label: 'Retry', onClick: () => reload() }} />
     </div>
   );
 }

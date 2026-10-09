@@ -186,9 +186,7 @@ function AmanShell({
         buildRef={buildRef}
         memoryBank={memoryBank}
         settingsHref="/settings"
-        auditFeed={
-          activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />
-        }
+        auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
       />
     </div>
   );

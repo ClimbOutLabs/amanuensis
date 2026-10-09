@@ -19,16 +19,18 @@ import { fileURLToPath } from 'node:url';
 
 import envPaths from 'env-paths';
 
-import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS } from '@truefoundry/trueforge-core/core';
-import { TOKEN_FACTORY_DEFAULT_BASE_URL } from '@truefoundry/trueforge-core/core';
-import { validateRunCodeStartupConfig } from '@truefoundry/trueforge-core/core';
+import {
+  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
+  TOKEN_FACTORY_DEFAULT_BASE_URL,
+  validateRunCodeStartupConfig,
+} from '@truefoundry/trueforge-core/core';
 import {
   MEMORY_PROVIDER_MAX_TIMEOUT_MS,
   MEMORY_SETTINGS_LIMITS,
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
-import type { ReflectBudget } from './runtime/memory/hindsightClient';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
+import type { ReflectBudget } from './runtime/memory/hindsightClient';
 
 const DEFAULT_PORT = 8790;
 /** Loopback default; container images set HOST=0.0.0.0 so probes and Service traffic reach the process. */
@@ -1549,9 +1551,11 @@ const shared: SharedServerConfiguration = {
     defaultValue: true,
   }),
   NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
-  TOKEN_FACTORY_MODEL: getEnv('TOKEN_FACTORY_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_MODEL }) ?? DEFAULT_TOKEN_FACTORY_MODEL,
+  TOKEN_FACTORY_MODEL:
+    getEnv('TOKEN_FACTORY_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_MODEL }) ?? DEFAULT_TOKEN_FACTORY_MODEL,
   TOKEN_FACTORY_BASE_URL:
-    getEnv('TOKEN_FACTORY_BASE_URL', { defaultValue: TOKEN_FACTORY_DEFAULT_BASE_URL }) ?? TOKEN_FACTORY_DEFAULT_BASE_URL,
+    getEnv('TOKEN_FACTORY_BASE_URL', { defaultValue: TOKEN_FACTORY_DEFAULT_BASE_URL }) ??
+    TOKEN_FACTORY_DEFAULT_BASE_URL,
   TOKEN_FACTORY_MODE: parseTokenFactoryMode({
     envKey: 'TOKEN_FACTORY_MODE',
     raw: getEnv('TOKEN_FACTORY_MODE'),
@@ -1564,9 +1568,7 @@ const shared: SharedServerConfiguration = {
   }),
   MEMORY_EMBEDDINGS_MODEL_DIR:
     getEnv('MEMORY_EMBEDDINGS_MODEL_DIR') ??
-    defaultEmbeddingModelDir(
-      getEnv('MEMORY_MARKDOWN_DIR', { defaultValue: './data/memory' }) ?? './data/memory',
-    ),
+    defaultEmbeddingModelDir(getEnv('MEMORY_MARKDOWN_DIR', { defaultValue: './data/memory' }) ?? './data/memory'),
   MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE: parsePositiveInt({
     envKey: 'MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE',
     raw: getEnv('MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE'),
@@ -1933,7 +1935,11 @@ validateRunCodeStartupConfig({
 });
 // The cosign key is only needed once an image is configured; a dormant
 // install must not fail boot for a key it will never use.
-if (runCodeConfigured && configuration.SANDBOX_ISOLATION_DRIVER === 'docker' && configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() === '') {
+if (
+  runCodeConfigured &&
+  configuration.SANDBOX_ISOLATION_DRIVER === 'docker' &&
+  configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() === ''
+) {
   throw new Error(
     'SANDBOX_COSIGN_PUBLIC_KEY_PATH is required when SANDBOX_ISOLATION_DRIVER=docker and SANDBOX_IMAGE is set: ' +
       'the sandbox image signature is verified fail-closed. Point it at the release cosign public-key PEM.',

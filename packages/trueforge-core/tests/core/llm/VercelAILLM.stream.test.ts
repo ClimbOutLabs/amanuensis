@@ -361,9 +361,9 @@ describe('mapStreamToChunks', () => {
       { type: 'reasoning-delta', id: 'r1', text: repeated },
     ];
 
-    await expect(
-      drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META })),
-    ).rejects.toEqual(new ModelOutputRepetitionError('reasoning'));
+    await expect(drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }))).rejects.toEqual(
+      new ModelOutputRepetitionError('reasoning'),
+    );
   });
 
   it('does not stop a ~200-row methodical build streaming row arguments', async () => {
@@ -408,9 +408,9 @@ describe('mapStreamToChunks', () => {
       { type: 'reasoning-delta', id: 'r1', text: repeated },
     ];
 
-    await expect(
-      drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META })),
-    ).rejects.toEqual(new ModelOutputRepetitionError('reasoning'));
+    await expect(drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }))).rejects.toEqual(
+      new ModelOutputRepetitionError('reasoning'),
+    );
   });
 
   it('allows a long reasoning stream that continues to introduce new information', async () => {

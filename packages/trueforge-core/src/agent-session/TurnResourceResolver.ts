@@ -283,7 +283,18 @@ export class TurnResourceResolver<
     sentinel_services?: SentinelServices | undefined;
     workspace_cwd?: string | null | undefined;
   }): Promise<ResolvedAgentDefinition> {
-    const { spec, agent_info: agentInfo, previousTurn, signal, tracing, tenant_id, created_by, session_id, sentinel_services, workspace_cwd } = input;
+    const {
+      spec,
+      agent_info: agentInfo,
+      previousTurn,
+      signal,
+      tracing,
+      tenant_id,
+      created_by,
+      session_id,
+      sentinel_services,
+      workspace_cwd,
+    } = input;
     const sentinel: SentinelHostContext = createSentinelHostContext({
       services: sentinel_services,
       tenant_id,
