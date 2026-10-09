@@ -319,6 +319,9 @@ async function runTurn(sessionId, turn, index) {
       return text;
     }
     if (st === 'failed' || st === 'error' || st === 'cancelled') {
+      // The turn-facing message is often empty/generic; the backend stack
+      // trace in server.log carries the real mechanism.
+      await dumpServerLogTail();
       fail(`turn ended with status ${st}: ` + JSON.stringify(t).slice(0, 600));
     }
     if (Date.now() > deadline) fail('turn timed out after 600s');
