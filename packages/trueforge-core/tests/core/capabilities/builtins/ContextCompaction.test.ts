@@ -2088,10 +2088,7 @@ describe('salvageCompactionSummary (spec 002)', () => {
   });
 
   it('ignores preamble text around the sections', () => {
-    const salvaged = salvageCompactionSummary(
-      `Here is your summary:\n\n${sectionsOnly()}`,
-      sections,
-    );
+    const salvaged = salvageCompactionSummary(`Here is your summary:\n\n${sectionsOnly()}`, sections);
     if (salvaged === undefined) throw new Error('expected salvage to succeed');
     expect(validateCompactionSummary(salvaged, sections).reason).toBeUndefined();
     expect(salvaged).not.toContain('Here is your summary');
@@ -2160,9 +2157,7 @@ describe('compaction reliability journey (spec 002)', () => {
 
   // AC-1: sections without the wrapper are salvaged and the context is compacted.
   it('applies compaction when the model omits the <summary> wrapper', async () => {
-    const content = CONVERSATION_REQUIRED_SUMMARY_SECTIONS.map(
-      name => `## ${name}\nBody of ${name}.`,
-    ).join('\n\n');
+    const content = CONVERSATION_REQUIRED_SUMMARY_SECTIONS.map(name => `## ${name}\nBody of ${name}.`).join('\n\n');
     const model = stubModel(content);
     const events = await collectProcessPreLLM(makeCapability(model));
     const overwrite = events.find(e => (e as { type?: string }).type === 'agent.context.overwrite');
@@ -2184,9 +2179,7 @@ describe('compaction reliability journey (spec 002)', () => {
   // AC-3: duplicated sections are not salvageable; the warn log carries a content-free diagnostic.
   it('truncates on duplicated sections and logs a content-free fingerprint', async () => {
     const longBody = 'x'.repeat(2500);
-    const duplicated = CONVERSATION_REQUIRED_SUMMARY_SECTIONS.map(
-      name => `## ${name}\n${longBody}`,
-    ).join('\n\n');
+    const duplicated = CONVERSATION_REQUIRED_SUMMARY_SECTIONS.map(name => `## ${name}\n${longBody}`).join('\n\n');
     const withDuplicate = `<summary>\n${duplicated}\n\n## user_goal\nAnother goal.\n</summary>`;
     const model = stubModel(withDuplicate);
     const logger = makeSilentLogger();

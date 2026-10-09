@@ -70,6 +70,7 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
+import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
@@ -1593,7 +1594,15 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           }
         : undefined,
     });
-    const sessionTitleForMemory = session.record.title ?? deriveSessionTitle(body.input);
+    const sessionTitleForMemory = chatTitleContext({
+      title: session.record.title ?? deriveSessionTitle(body.input),
+      assistantNames: [
+        profile?.assistant_name,
+        ...(await deps.personaStore.listPersonas({ tenant_id: requestContext.tenant_id, created_by: userRef })).flatMap(
+          candidate => [candidate.display_name, ...candidate.aliases],
+        ),
+      ],
+    });
 
     // Resolved before the turn exists, like the memory provider above: the pass itself runs
     // after TURN_DONE (awaited by the tracked drain) and every failure inside it silently

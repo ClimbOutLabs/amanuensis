@@ -9,11 +9,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import {
-  EMBEDDING_DIMENSIONS,
-  EMBEDDING_MODEL_ID,
-  EMBEDDING_MODEL_REVISION,
-} from './embeddingModel';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION } from './embeddingModel';
 
 const STORE_FILENAME = '.embeddings.json';
 const STORE_TMP_SUFFIX = '.tmp';

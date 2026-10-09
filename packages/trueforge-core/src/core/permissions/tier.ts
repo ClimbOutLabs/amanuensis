@@ -28,7 +28,10 @@ export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
 export const Tier3CardSchema = z
   .object({
     plain_what: z.string().describe('One plain-language sentence describing what will happen. No jargon.'),
-    plain_why: z.string().nullable().describe('One sentence on why the agent wants this, from agent intent when available.'),
+    plain_why: z
+      .string()
+      .nullable()
+      .describe('One sentence on why the agent wants this, from agent intent when available.'),
     cannot_be_undone: z.string().nullable().describe('What cannot be undone, or null when fully reversible.'),
     why_asked_again: z.string().nullable().describe('Actual cause of re-escalation, or null on first ask.'),
     destination: z.string().nullable().describe('Verifiable destination (URL, service name), or null.'),

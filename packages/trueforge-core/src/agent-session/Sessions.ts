@@ -3,8 +3,8 @@
  * the resolver on {@link SessionHandle.createTurn}.
  */
 import { ulid } from 'ulid';
-import { SessionHandle } from './SessionHandle';
 import type { SentinelServices } from '../core/permissions';
+import { SessionHandle } from './SessionHandle';
 import type {
   CreateSessionInput,
   GetSessionByExternalIdInput,
@@ -32,7 +32,10 @@ export class Sessions<
   private readonly store: ISessionStore<TSessionCustom, TTurnCustom>;
   private readonly sentinelServices: SentinelServices | undefined;
 
-  constructor(deps: { sessionStore: ISessionStore<TSessionCustom, TTurnCustom>; sentinelServices?: SentinelServices | undefined }) {
+  constructor(deps: {
+    sessionStore: ISessionStore<TSessionCustom, TTurnCustom>;
+    sentinelServices?: SentinelServices | undefined;
+  }) {
     this.store = deps.sessionStore;
     this.sentinelServices = deps.sentinelServices;
   }

@@ -8,14 +8,7 @@ import type { SentinelCallIdentity, SentinelServices } from './context';
 import type { AutoDenyReason, Tier, TierDecision } from './tier';
 
 /** Recorded outcome, per tier. */
-export type AuditOutcome =
-  | 'logged'
-  | 'ran'
-  | 'stopped_by_user'
-  | 'undone'
-  | 'approved'
-  | 'denied'
-  | 'auto_denied';
+export type AuditOutcome = 'logged' | 'ran' | 'stopped_by_user' | 'undone' | 'approved' | 'denied' | 'auto_denied';
 
 export interface AuditRecordInput {
   tenant_id: string;

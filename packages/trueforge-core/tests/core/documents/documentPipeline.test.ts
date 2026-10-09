@@ -220,8 +220,14 @@ describe('local document pipeline', () => {
     const filePaths = (range: { start: number; count: number }): string[] =>
       Array.from({ length: range.count }, (_, index) => `/tmp/uploads/document-${String(range.start + index)}.txt`);
 
-    await tools.callTool({ name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME, arguments: { file_paths: filePaths({ start: 0, count: 32 }) } });
-    await tools.callTool({ name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME, arguments: { file_paths: filePaths({ start: 32, count: 8 }) } });
+    await tools.callTool({
+      name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
+      arguments: { file_paths: filePaths({ start: 0, count: 32 }) },
+    });
+    await tools.callTool({
+      name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
+      arguments: { file_paths: filePaths({ start: 32, count: 8 }) },
+    });
     const refused = await tools.callTool({
       name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
       arguments: { file_paths: filePaths({ start: 40, count: 1 }) },
@@ -393,10 +399,7 @@ describe('local document pipeline', () => {
 
     // The same report in default compact mode fails with a structured,
     // actionable error instead of a text blob.
-    const compactResult = await tools.callTool(
-      { name: CREATE_DOCUMENT_REPORT_TOOL_NAME, arguments: report },
-      approval,
-    );
+    const compactResult = await tools.callTool({ name: CREATE_DOCUMENT_REPORT_TOOL_NAME, arguments: report }, approval);
     expect(compactResult).toMatchObject({ result: { isError: true } });
     const text =
       'result' in compactResult && Array.isArray(compactResult.result.content)

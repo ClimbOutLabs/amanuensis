@@ -9,8 +9,7 @@ import type { SentinelApprovalInfo, Tier2Notice } from './types.js';
  * same state from persisted events after a reload.
  */
 export type SentinelLiveEvent =
-  | { kind: 'approval'; info: SentinelApprovalInfo }
-  | { kind: 'notice'; notice: Tier2Notice };
+  { kind: 'approval'; info: SentinelApprovalInfo } | { kind: 'notice'; notice: Tier2Notice };
 
 export type SentinelListener = (event: SentinelLiveEvent) => void;
 

@@ -232,12 +232,14 @@ describe('resolveTurnSummarizeContext', () => {
     configuration.MEMORY_BACKEND = originalBackend;
   });
 
-  function baseParams(overrides: {
-    logger?: Logger;
-    sessionAgent?: SessionAgent;
-    agentStore?: IAgentStore;
-    memoryClientPresent?: boolean;
-  } = {}) {
+  function baseParams(
+    overrides: {
+      logger?: Logger;
+      sessionAgent?: SessionAgent;
+      agentStore?: IAgentStore;
+      memoryClientPresent?: boolean;
+    } = {},
+  ) {
     return {
       globalSettingsStore: emptyStore(),
       logger: overrides.logger ?? silentLogger,

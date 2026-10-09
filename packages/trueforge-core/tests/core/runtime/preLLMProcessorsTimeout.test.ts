@@ -1,3 +1,8 @@
+import type { AgentCapability } from '../../../src/core/capabilities/AgentCapability';
+import type {
+  AgentContextProcessorOutput,
+  PreLLMAgentContextProcessor,
+} from '../../../src/core/capabilities/AgentContextProcessor';
 import type { ILLM } from '../../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
@@ -8,9 +13,6 @@ import {
 } from '../../../src/core/runtime/AgentThread';
 import type { AgentThreadEvent, InternalThreadDoneEvent } from '../../../src/core/runtime/AgentThread.types';
 import { InternalEventType } from '../../../src/core/runtime/AgentThread.types';
-import type { AgentContextProcessorOutput } from '../../../src/core/capabilities/AgentContextProcessor';
-import type { PreLLMAgentContextProcessor } from '../../../src/core/capabilities/AgentContextProcessor';
-import type { AgentCapability } from '../../../src/core/capabilities/AgentCapability';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 

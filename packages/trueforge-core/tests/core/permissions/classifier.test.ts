@@ -1,10 +1,10 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { actionIdFor } from '../../../src/core/permissions/approvalTokens';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
-import { actionIdFor } from '../../../src/core/permissions/approvalTokens';
 import type { ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 
 /**
@@ -132,7 +132,10 @@ describe('classifyTier tracked executables', () => {
 
   test('unresolvable executed operand fails closed', async () => {
     const ctx = makeCtx({ workspace_cwd: '/nonexistent-dir-xyz' });
-    const decision = await classifyTier(action('exec', { command: 'node /nonexistent-dir-xyz/tool.js', cwd: '/nonexistent-dir-xyz' }), ctx);
+    const decision = await classifyTier(
+      action('exec', { command: 'node /nonexistent-dir-xyz/tool.js', cwd: '/nonexistent-dir-xyz' }),
+      ctx,
+    );
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('tracked_check_unresolvable');
   });

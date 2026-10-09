@@ -191,8 +191,7 @@ export function extractCardFields(input: {
   const externalService =
     entry?.external_service ?? EXTERNAL_SERVICE_FRAGMENTS.some(f => input.tool_name.toLowerCase().includes(f));
   const fields = entry !== undefined ? entry.extract(input.canonical_params) : genericExtractor(input.canonical_params);
-  const destinationUnverifiable =
-    externalService && fields.destination === null && fields.recipient === null;
+  const destinationUnverifiable = externalService && fields.destination === null && fields.recipient === null;
   return { fields, destination_unverifiable: destinationUnverifiable, external_service: externalService };
 }
 

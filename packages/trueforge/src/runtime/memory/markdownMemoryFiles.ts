@@ -10,9 +10,9 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
   ensureWritableDataDir,
   isDataDirConfigurationError,
+  USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
 } from '../../utils/dataDir';
 import type { RetainItem } from './hindsightClient';
 
@@ -185,10 +185,7 @@ export interface VaultTombstone {
 }
 
 /** Tenant-scoped filesystem namespace for a vault wire namespace. */
-export function vaultFilesystemNamespace(
-  tenantNamespace: string,
-  wireNamespace: string | undefined,
-): string {
+export function vaultFilesystemNamespace(tenantNamespace: string, wireNamespace: string | undefined): string {
   const wire = (wireNamespace ?? '').trim();
   if (wire === '' || wire === VAULT_DEFAULT_NAMESPACE) {
     return tenantNamespace;
@@ -273,10 +270,7 @@ function formatVaultTombstone(tombstone: VaultTombstone): string {
  * Each marker is two lines (a `## ` heading and the `> vault-entry` marker line),
  * parsed with a small line scanner so replacement text is never mistaken for structure.
  */
-export async function readVaultTombstones(options: {
-  baseDir: string;
-  namespace: string;
-}): Promise<VaultTombstone[]> {
+export async function readVaultTombstones(options: { baseDir: string; namespace: string }): Promise<VaultTombstone[]> {
   let content: string;
   try {
     content = await readFile(vaultTombstonesFileFor(options.baseDir, options.namespace), 'utf8');
@@ -320,10 +314,14 @@ export async function appendVaultTombstone(options: {
   try {
     const dir = namespaceDirFor(options.baseDir, options.namespace);
     await ensureWritableDataDir({ dir, envVar: 'MEMORY_MARKDOWN_DIR' });
-    await writeFile(vaultTombstonesFileFor(options.baseDir, options.namespace), `${formatVaultTombstone(options.tombstone)}\n\n`, {
-      flag: 'a',
-      encoding: 'utf8',
-    });
+    await writeFile(
+      vaultTombstonesFileFor(options.baseDir, options.namespace),
+      `${formatVaultTombstone(options.tombstone)}\n\n`,
+      {
+        flag: 'a',
+        encoding: 'utf8',
+      },
+    );
   } catch (error) {
     if (isDataDirConfigurationError(error)) {
       throw new Error(USER_FACING_STORAGE_UNAVAILABLE_MESSAGE, { cause: error });
@@ -394,10 +392,7 @@ export function vaultEntryTimestamp(entry: Pick<ScannedMemoryEntry, 'file' | 'te
  * Tombstone-resolved vault listing for one filesystem namespace: daily entries,
  * newest file first, with deletes dropped and edits applied with their marker time.
  */
-export async function scanVaultEntries(options: {
-  baseDir: string;
-  namespace: string;
-}): Promise<VaultScannedEntry[]> {
+export async function scanVaultEntries(options: { baseDir: string; namespace: string }): Promise<VaultScannedEntry[]> {
   const scan = await scanNamespaceEntries({
     baseDir: options.baseDir,
     namespace: options.namespace,
@@ -452,10 +447,7 @@ function isVaultSharing(value: unknown): value is VaultSharing {
 }
 
 /** Reads the tenant's vault sharing config; a missing or corrupt file reads as empty. */
-export async function readVaultSharing(options: {
-  baseDir: string;
-  tenantNamespace: string;
-}): Promise<VaultSharing> {
+export async function readVaultSharing(options: { baseDir: string; tenantNamespace: string }): Promise<VaultSharing> {
   try {
     const raw = await readFile(vaultSharingFileFor(options.baseDir, options.tenantNamespace), 'utf8');
     const parsed: unknown = JSON.parse(raw);

@@ -61,10 +61,7 @@ function formatDate(iso: string): string {
  * answering. Each persona's library is separate; only the active persona's
  * library is ever searched.
  */
-export const PersonaKnowledgeSection: FC<{ personaId: string; personaName: string }> = ({
-  personaId,
-  personaName,
-}) => {
+export const PersonaKnowledgeSection: FC<{ personaId: string; personaName: string }> = ({ personaId, personaName }) => {
   const { listPersonaKnowledge, createPersonaKnowledge, deletePersonaKnowledge, getPersonaKnowledgeEmbeddingModel } =
     usePersonas();
   const [documents, setDocuments] = useState<PersonaKnowledgeDocument[]>([]);
@@ -216,7 +213,10 @@ export const PersonaKnowledgeSection: FC<{ personaId: string; personaName: strin
       ) : null}
 
       {error !== null ? (
-        <p className="mt-2 rounded-md border border-failure-bg/30 bg-failure-bg/10 px-3 py-2 text-sm text-failure-bg" role="alert">
+        <p
+          className="mt-2 rounded-md border border-failure-bg/30 bg-failure-bg/10 px-3 py-2 text-sm text-failure-bg"
+          role="alert"
+        >
           {error}
         </p>
       ) : null}
@@ -336,8 +336,8 @@ export const PersonaKnowledgeSection: FC<{ personaId: string; personaName: strin
               className="rounded-md border border-border bg-card-bg px-3 py-2 text-sm text-text-primary"
             />
             <p className="text-xs text-text-secondary">
-              The page’s text is snapshotted when you save it — later edits to the page won’t change what{' '}
-              {personaName} knows.
+              The page’s text is snapshotted when you save it — later edits to the page won’t change what {personaName}{' '}
+              knows.
             </p>
           </div>
         ) : null}
@@ -362,7 +362,10 @@ export const PersonaKnowledgeSection: FC<{ personaId: string; personaName: strin
         ) : null}
 
         {formError !== null ? (
-          <p className="mt-2 rounded-md border border-failure-bg/30 bg-failure-bg/10 px-3 py-2 text-sm text-failure-bg" role="alert">
+          <p
+            className="mt-2 rounded-md border border-failure-bg/30 bg-failure-bg/10 px-3 py-2 text-sm text-failure-bg"
+            role="alert"
+          >
             {formError}
           </p>
         ) : null}

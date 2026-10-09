@@ -27,9 +27,7 @@ export function MemorySharing(props: {
     setSaved(false);
     setDraft(previous => {
       const current = previous[personaId] ?? [];
-      const next = enabled
-        ? Array.from(new Set([...current, namespace]))
-        : current.filter(item => item !== namespace);
+      const next = enabled ? Array.from(new Set([...current, namespace])) : current.filter(item => item !== namespace);
       const copy = { ...previous };
       if (next.length === 0) {
         delete copy[personaId];
@@ -56,17 +54,15 @@ export function MemorySharing(props: {
 
   if (props.personas.length === 0) {
     return (
-      <p className="text-sm text-text-secondary">
-        No personas are configured yet, so there is nothing to share with.
-      </p>
+      <p className="text-sm text-text-secondary">No personas are configured yet, so there is nothing to share with.</p>
     );
   }
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-text-secondary">
-        Choose which vaults each persona can read. A persona always reads the shared vault; these
-        toggles grant access to additional vaults.
+        Choose which vaults each persona can read. A persona always reads the shared vault; these toggles grant access
+        to additional vaults.
       </p>
       {props.personas.map(persona => (
         <fieldset key={persona.id} className="rounded-xl border border-border bg-card-bg p-4">
@@ -76,9 +72,7 @@ export function MemorySharing(props: {
               const enabled = (draft[persona.id] ?? []).includes(namespace.value);
               return (
                 <label key={namespace.value} className="flex items-center justify-between gap-3">
-                  <span className="text-sm text-text-primary">
-                    Can read the {namespace.label} vault
-                  </span>
+                  <span className="text-sm text-text-primary">Can read the {namespace.label} vault</span>
                   <Switch
                     checked={enabled}
                     onCheckedChange={checked => toggle(persona.id, namespace.value, checked)}

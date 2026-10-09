@@ -156,7 +156,9 @@ describe('retrievePersonaKnowledge', () => {
 
   it('kicks a nonblocking model warm when idle with a warm disk cache', async () => {
     const knowledgeDir = mkdtempSync(path.join(tmpdir(), 'pk-retrieval-'));
-    seedLibrary(knowledgeDir, 'zara', [{ text: 'The solo project sold for twenty million dollars.', title: 'Exit story' }]);
+    seedLibrary(knowledgeDir, 'zara', [
+      { text: 'The solo project sold for twenty million dollars.', title: 'Exit story' },
+    ]);
 
     mockModel.currentPhase = 'idle';
     mockModelState.cacheWarm = true;
@@ -175,7 +177,9 @@ describe('retrievePersonaKnowledge', () => {
 
   it('never triggers the one-time download from the chat path', async () => {
     const knowledgeDir = mkdtempSync(path.join(tmpdir(), 'pk-retrieval-'));
-    seedLibrary(knowledgeDir, 'zara', [{ text: 'The solo project sold for twenty million dollars.', title: 'Exit story' }]);
+    seedLibrary(knowledgeDir, 'zara', [
+      { text: 'The solo project sold for twenty million dollars.', title: 'Exit story' },
+    ]);
 
     mockModel.currentPhase = 'idle';
     mockModelState.cacheWarm = false;

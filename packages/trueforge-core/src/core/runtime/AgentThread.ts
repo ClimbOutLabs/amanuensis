@@ -12,10 +12,10 @@ import type {
   PreSendContextProcessor,
 } from '../capabilities/AgentContextProcessor';
 import { ASK_USER_QUESTION_TOOL_NAME } from '../capabilities/builtins/AskUserQuestion';
-import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import { resolveMaxOutputTokens } from '../capabilities/builtins/ContextCompaction';
 import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTools';
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
+import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
 import {
   AgentHarnessError,
@@ -234,7 +234,6 @@ export const DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS = 300_000;
  */
 export const DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS = 30_000;
 
-
 /**
  * Last-resort ceiling on the assembled model request's text. Input-time guards bound each user
  * message; this is the backstop for the whole assembly. 4M characters (~1M tokens) sits well
@@ -264,7 +263,9 @@ const OPERATION_TIMEOUT = Symbol('operation-timeout');
  */
 function awaitWithTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T | typeof OPERATION_TIMEOUT> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { resolve(OPERATION_TIMEOUT); }, timeoutMs);
+    const timer = setTimeout(() => {
+      resolve(OPERATION_TIMEOUT);
+    }, timeoutMs);
     operation.then(
       value => {
         clearTimeout(timer);
@@ -309,7 +310,9 @@ async function* drainWithNoProgressTimeout<T>(
         result = await Promise.race([
           iterator.next(),
           new Promise<never>((_, reject) => {
-            timer = setTimeout(() => { reject(new NoProgressTimeoutError(timeoutMessage)); }, timeoutMs);
+            timer = setTimeout(() => {
+              reject(new NoProgressTimeoutError(timeoutMessage));
+            }, timeoutMs);
           }),
         ]);
       } finally {
@@ -2452,8 +2455,7 @@ export class AgentThread {
     unknown
   > {
     const timeoutMessage =
-      `Pre-LLM context processors produced no output within ` +
-      describeTimeout(this.preLLMProcessorsTimeoutMs);
+      `Pre-LLM context processors produced no output within ` + describeTimeout(this.preLLMProcessorsTimeoutMs);
     yield* drainWithNoProgressTimeout(
       this.executeContextProcessors('preLLM', signal, options),
       this.preLLMProcessorsTimeoutMs,
@@ -3194,9 +3196,7 @@ export class AgentThread {
     // arrives later via send(), and a synthetic one would duplicate it.
     const resolvedCallIds = new Set(toolCallResults.map(result => result.message.tool_call_id));
     const launchedCallIds = new Set(createThreadEvents.map(event => event.tool_call_id));
-    const orphanedCalls = openCalls.filter(
-      call => !resolvedCallIds.has(call.id) && !launchedCallIds.has(call.id),
-    );
+    const orphanedCalls = openCalls.filter(call => !resolvedCallIds.has(call.id) && !launchedCallIds.has(call.id));
     if (orphanedCalls.length > 0) {
       this.logger.warn('Tool step left tool calls without a result; synthesizing terminal error results', {
         threadId: this.threadId,
@@ -3209,8 +3209,7 @@ export class AgentThread {
         // The canonical closer refuses to classify a batch containing a
         // client-side call; fall back to the conservative unknown outcome so
         // the model inspects state instead of repeating a possible side effect.
-        const closeout: ClosableToolOutcome =
-          closeouts.get(call.id) ?? unknownOutcomeCloseout({ source: 'automatic' });
+        const closeout: ClosableToolOutcome = closeouts.get(call.id) ?? unknownOutcomeCloseout({ source: 'automatic' });
         toolCallResults.push({
           message: { role: 'tool', tool_call_id: call.id, content: closeout.rawContent },
           rawContent: closeout.rawContent,

@@ -8,13 +8,13 @@
  * is wiped before downloading, and every failure degrades to keyword-only. A
  * unit-norm canary guards against a corrupt-but-present cache.
  */
+import { withTimeout } from '@truefoundry/trueforge-core/core';
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ensureWritableDataDir } from '../../utils/dataDir';
-import { withTimeout } from '@truefoundry/trueforge-core/core';
 
 /** Pinned by the retrieval eval; do not change without re-running the eval. */
 export const EMBEDDING_MODEL_ID = 'Xenova/multilingual-e5-small';
@@ -230,15 +230,13 @@ export class EmbeddingModel {
       this.loadPromise = undefined;
       this.unavailableReason = '';
     }
-    this.loadPromise ??= withTimeout(this.load(), LOAD_TIMEOUT_MS, 'embedding model load').catch(
-      (error: unknown) => {
-        this.markUnavailable(describeError(error));
-        this.options.log?.(
-          `Smart search isn't available (${this.unavailableReason}). Memories will be found with keywords.`,
-        );
-        return false;
-      },
-    );
+    this.loadPromise ??= withTimeout(this.load(), LOAD_TIMEOUT_MS, 'embedding model load').catch((error: unknown) => {
+      this.markUnavailable(describeError(error));
+      this.options.log?.(
+        `Smart search isn't available (${this.unavailableReason}). Memories will be found with keywords.`,
+      );
+      return false;
+    });
     return this.loadPromise;
   }
 
@@ -282,11 +280,7 @@ export class EmbeddingModel {
     const createPipeline =
       this.options.createPipeline ?? (input => defaultCreatePipeline(this.options.modelDir, input));
     const expectedFiles = this.options.expectedFiles ?? EMBEDDING_MODEL_FILES;
-    const offlineModelRef = path.join(
-      this.options.modelDir,
-      EMBEDDING_MODEL_ID,
-      EMBEDDING_MODEL_REVISION,
-    );
+    const offlineModelRef = path.join(this.options.modelDir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION);
 
     // Names MEMORY_EMBEDDINGS_MODEL_DIR in the error instead of a bare EACCES.
     await ensureWritableDataDir({
@@ -435,10 +429,7 @@ function trustedFileSet(expectedFiles: Record<string, string>): {
  * Anything else — extra files, missing files, mismatched hashes, symlinks,
  * or special files anywhere under the cache — fails the check.
  */
-export async function verifyModelFiles(
-  modelDir: string,
-  expectedFiles: Record<string, string>,
-): Promise<boolean> {
+export async function verifyModelFiles(modelDir: string, expectedFiles: Record<string, string>): Promise<boolean> {
   const seen = await listPlainFiles(modelDir);
   if (seen === undefined) {
     return false;
@@ -474,10 +465,7 @@ export async function verifyModelFiles(
  * symlinks, special files). Hash mismatches on pinned paths are NOT
  * structural — a fresh download can repair them.
  */
-async function hasStructuralMismatch(
-  modelDir: string,
-  expectedFiles: Record<string, string>,
-): Promise<boolean> {
+async function hasStructuralMismatch(modelDir: string, expectedFiles: Record<string, string>): Promise<boolean> {
   const seen = await listPlainFiles(modelDir);
   if (seen === undefined) {
     return true;
@@ -515,9 +503,7 @@ export interface DownloadPinnedModelFilesOptions {
  * hostile server cannot blow up process memory. The caller must run
  * verifyModelFiles before the bytes are used.
  */
-export async function downloadPinnedModelFiles(
-  options: DownloadPinnedModelFilesOptions,
-): Promise<void> {
+export async function downloadPinnedModelFiles(options: DownloadPinnedModelFilesOptions): Promise<void> {
   const revisionDir = path.join(options.modelDir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION);
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxBytes = options.maxBytes ?? MAX_DOWNLOAD_FILE_BYTES;
@@ -581,10 +567,7 @@ async function readBoundedBody(response: Response, maxBytes: number, url: string
 }
 
 /** Production pipeline builder: offline only, from the verified revision directory. */
-async function defaultCreatePipeline(
-  modelDir: string,
-  input: { modelRef: string },
-): Promise<EmbeddingPipeline> {
+async function defaultCreatePipeline(modelDir: string, input: { modelRef: string }): Promise<EmbeddingPipeline> {
   // Imported lazily: transformers.js pulls in sharp and the onnxruntime native
   // binding at module load, which would tax every server boot (and every unit
   // test run) even when embeddings are disabled. The module is only needed

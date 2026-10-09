@@ -1,9 +1,9 @@
+import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import {
   applyHostToolCallPolicy,
   type HostToolCallPolicy,
   type HostToolCallPolicyCall,
 } from '../../../src/core/runtime/HostToolCallPolicy';
-import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 
 function webSearchToolInfo(): InternalToolCallInfo {
   return {

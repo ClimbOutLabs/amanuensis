@@ -7,8 +7,8 @@ import { createHarnessAgentMetricsServer } from './agentMetricsServer.js';
 import { createHarnessAgentSessionsServer } from './agentSessionsServer.js';
 import { createHarnessBuilderServer } from './builderServer.js';
 import { createConnectorCatalog } from './catalogs/connectorCatalog.js';
-import { createMemorySummarizeCatalog } from './catalogs/memorySummarizeCatalog.js';
 import { createMemoryScreenCatalog } from './catalogs/memoryScreenCatalog.js';
+import { createMemorySummarizeCatalog } from './catalogs/memorySummarizeCatalog.js';
 import { createMemoryVaultCatalog } from './catalogs/memoryVaultCatalog.js';
 import { createModelProviderCatalog } from './catalogs/modelProviderCatalog.js';
 import { createSandboxProviderCatalog } from './catalogs/sandboxProviderCatalog.js';
@@ -68,6 +68,19 @@ export {
   type DocumentIngestionTurnContext,
   type MemoryTurnContext,
 } from './chatServer.js';
+export { createTrueForgeClient } from './client.js';
+export type { CreateTrueForgeClientOptions } from './client.js';
+export {
+  getCapabilities,
+  getMemoryBankStatus,
+  listConfiguredMcpServers,
+  listModels,
+  listSkills,
+  readMemoryBackend,
+} from './lists.js';
+export type { BuildIdentity } from './lists.js';
+export { createHarnessPermissionsServer, type CreateHarnessPermissionsServerOptions } from './permissionsServer.js';
+export { createScheduleServer } from './schedules/scheduleServer.js';
 export {
   APPROVAL_AUTO_DENY_MINUTES,
   approvalAutoDenyReason,
@@ -78,12 +91,6 @@ export {
   type PendingApprovalInfo,
   type SessionTipInfo,
 } from './sessionResync.js';
-export { createTrueForgeClient } from './client.js';
-export type { CreateTrueForgeClientOptions } from './client.js';
-export { getCapabilities, getMemoryBankStatus, listConfiguredMcpServers, listModels, listSkills, readMemoryBackend } from './lists.js';
-export type { BuildIdentity } from './lists.js';
-export { createHarnessPermissionsServer, type CreateHarnessPermissionsServerOptions } from './permissionsServer.js';
-export { createScheduleServer } from './schedules/scheduleServer.js';
 export type { HarnessAgentSpec, HarnessAuxiliaryModels, HarnessMcpServerMount, HarnessSkillMount } from './types.js';
 
 export type CreateTrueForgeAgentUIServerOptions = CreateTrueForgeClientOptions & {

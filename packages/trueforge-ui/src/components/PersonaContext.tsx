@@ -33,10 +33,7 @@ export type PersonaApi = {
   getSessionPersona: (sessionId: string) => Promise<SessionPersona | null>;
   setSessionPersona: (sessionId: string, personaId: string | null) => Promise<SessionPersona | null>;
   listPersonaKnowledge: (personaId: string) => Promise<PersonaKnowledgeDocument[]>;
-  createPersonaKnowledge: (
-    personaId: string,
-    input: NewPersonaKnowledgeDocument,
-  ) => Promise<PersonaKnowledgeDocument>;
+  createPersonaKnowledge: (personaId: string, input: NewPersonaKnowledgeDocument) => Promise<PersonaKnowledgeDocument>;
   deletePersonaKnowledge: (personaId: string, documentId: string) => Promise<void>;
   getPersonaKnowledgeEmbeddingModel: (personaId: string) => Promise<PersonaKnowledgeEmbeddingModel>;
 };
@@ -81,10 +78,7 @@ export type NewPersonaKnowledgeText = {
   text: string;
 };
 
-export type NewPersonaKnowledgeDocument =
-  | NewPersonaKnowledgeUpload
-  | NewPersonaKnowledgeUrl
-  | NewPersonaKnowledgeText;
+export type NewPersonaKnowledgeDocument = NewPersonaKnowledgeUpload | NewPersonaKnowledgeUrl | NewPersonaKnowledgeText;
 
 /** One-time search model state, described in plain English for the UI. */
 export type PersonaKnowledgeEmbeddingModel = {
@@ -109,10 +103,7 @@ type PersonaContextValue = {
   getSessionPersona: (sessionId: string) => Promise<SessionPersona | null>;
   setSessionPersona: (sessionId: string, personaId: string | null) => Promise<SessionPersona | null>;
   listPersonaKnowledge: (personaId: string) => Promise<PersonaKnowledgeDocument[]>;
-  createPersonaKnowledge: (
-    personaId: string,
-    input: NewPersonaKnowledgeDocument,
-  ) => Promise<PersonaKnowledgeDocument>;
+  createPersonaKnowledge: (personaId: string, input: NewPersonaKnowledgeDocument) => Promise<PersonaKnowledgeDocument>;
   deletePersonaKnowledge: (personaId: string, documentId: string) => Promise<void>;
   getPersonaKnowledgeEmbeddingModel: (personaId: string) => Promise<PersonaKnowledgeEmbeddingModel>;
   reload: () => Promise<void>;
@@ -173,13 +164,9 @@ export const PersonaProvider: FC<{ api: PersonaApi; children: ReactNode }> = ({ 
 
   const { getSessionPersona, setSessionPersona } = api;
 
-  const listPersonaKnowledge = useCallback(
-    (personaId: string) => api.listPersonaKnowledge(personaId),
-    [api],
-  );
+  const listPersonaKnowledge = useCallback((personaId: string) => api.listPersonaKnowledge(personaId), [api]);
   const createPersonaKnowledge = useCallback(
-    (personaId: string, input: NewPersonaKnowledgeDocument) =>
-      api.createPersonaKnowledge(personaId, input),
+    (personaId: string, input: NewPersonaKnowledgeDocument) => api.createPersonaKnowledge(personaId, input),
     [api],
   );
   const deletePersonaKnowledge = useCallback(

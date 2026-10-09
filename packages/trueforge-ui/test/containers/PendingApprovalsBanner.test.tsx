@@ -6,8 +6,7 @@ vi.mock('@assistant-ui/react', async importOriginal => {
   const actual = await importOriginal<typeof import('@assistant-ui/react')>();
   return {
     ...actual,
-    useAuiState: (selector: (state: unknown) => unknown) =>
-      selector({ threadListItem: { remoteId: 'ses_1' } }),
+    useAuiState: (selector: (state: unknown) => unknown) => selector({ threadListItem: { remoteId: 'ses_1' } }),
   };
 });
 
@@ -24,9 +23,9 @@ vi.mock('@/containers/ToasterContainer.js', () => ({
   useToasterOptional: () => ({ showSuccess, showError }),
 }));
 
-import { ServerProvider } from '@/server/ServerContext.js';
 import { PendingApprovalsBanner } from '@/containers/PendingApprovalsBanner.js';
 import { publishBlockedSend } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
+import { ServerProvider } from '@/server/ServerContext.js';
 
 describe('PendingApprovalsBanner journeys', () => {
   let dismissPendingApprovals: ReturnType<typeof vi.fn>;

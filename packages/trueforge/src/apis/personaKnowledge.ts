@@ -3,29 +3,19 @@ import { rm } from 'node:fs/promises';
 
 import type { ResolveRequestContext } from '../auth/identity';
 import type { IPersonaStore } from '../db/personaStore';
-import { EMBEDDING_DIMENSIONS, getSharedEmbeddingModel } from '../runtime/memory/embeddingModel';
+import { MAX_UPLOAD_BYTES, type FetchSnapshotOptions } from '../personaKnowledge/documentIngest';
+import { blobPath, getPersonaKnowledgeIndexer, writeKnowledgeBlob } from '../personaKnowledge/knowledgeIndexer';
+import { ensurePersonaKnowledgeRoot, personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
+import type { KnowledgeDocumentRecord } from '../personaKnowledge/knowledgeRepository';
+import { openPersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
 import {
   createPersonaKnowledgeRoute,
   deletePersonaKnowledgeRoute,
   getPersonaKnowledgeEmbeddingModelRoute,
   listPersonaKnowledgeRoute,
 } from '../routes/personaKnowledgeRoutes';
-import type {
-  CreateKnowledgeDocumentRequest,
-  PersonaKnowledgeDocument,
-} from '../schemas/personaKnowledge';
-import { MAX_UPLOAD_BYTES, type FetchSnapshotOptions } from '../personaKnowledge/documentIngest';
-import {
-  ensurePersonaKnowledgeRoot,
-  personaKnowledgeLocation,
-} from '../personaKnowledge/knowledgePaths';
-import {
-  blobPath,
-  getPersonaKnowledgeIndexer,
-  writeKnowledgeBlob,
-} from '../personaKnowledge/knowledgeIndexer';
-import type { KnowledgeDocumentRecord } from '../personaKnowledge/knowledgeRepository';
-import { openPersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
+import { EMBEDDING_DIMENSIONS, getSharedEmbeddingModel } from '../runtime/memory/embeddingModel';
+import type { CreateKnowledgeDocumentRequest, PersonaKnowledgeDocument } from '../schemas/personaKnowledge';
 import { TENANT_ID } from './sessions';
 
 export interface PersonaKnowledgeRouterDeps {
@@ -87,9 +77,7 @@ export function createPersonaKnowledgeRouter(deps: PersonaKnowledgeRouterDeps) {
   });
   // Re-queue documents orphaned by a crash or restart. Runs once per process.
   void indexer.recover().catch((error: unknown) => {
-    deps.logger.warn(
-      `Persona knowledge recovery failed: ${error instanceof Error ? error.message : 'unknown error'}`,
-    );
+    deps.logger.warn(`Persona knowledge recovery failed: ${error instanceof Error ? error.message : 'unknown error'}`);
   });
   // The knowledge library needs the embedding model whether or not memory
   // embeddings are enabled: warm it at boot so a fresh process with ready
@@ -97,10 +85,7 @@ export function createPersonaKnowledgeRouter(deps: PersonaKnowledgeRouterDeps) {
   // Fire-and-forget — startup never waits, and a failure degrades silently.
   void getSharedEmbeddingModel({ modelDir: deps.modelDir }).ensureReady();
 
-  const withPersona = async (
-    c: Parameters<RouteHandler<typeof listPersonaKnowledgeRoute>>[0],
-    personaId: string,
-  ) => {
+  const withPersona = async (c: Parameters<RouteHandler<typeof listPersonaKnowledgeRoute>>[0], personaId: string) => {
     const requestContext = deps.resolveRequestContext(c);
     const persona = await deps.personaStore.getPersona({
       tenant_id: TENANT_ID,
@@ -202,10 +187,7 @@ export function createPersonaKnowledgeRouter(deps: PersonaKnowledgeRouterDeps) {
           try {
             bytes = decodeUploadPayload(body.content_base64, body.filename);
           } catch (error) {
-            return c.json(
-              { error: { message: error instanceof Error ? error.message : 'Invalid upload.' } },
-              400,
-            );
+            return c.json({ error: { message: error instanceof Error ? error.message : 'Invalid upload.' } }, 400);
           }
           document = repo.createDocument({
             title: body.title ?? body.filename,

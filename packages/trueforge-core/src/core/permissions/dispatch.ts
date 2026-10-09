@@ -14,13 +14,16 @@
  * classification and dispatch, network-required and external-service Tier 3
  * actions auto-deny even with an approval.
  */
-import {
-  actionIdFor,
-  verifyApprovalToken,
-  type ApprovalToken,
-} from './approvalTokens';
+import { realpathSync } from 'node:fs';
+import path from 'node:path';
+import type { ShellApprovalBinding } from './approvalTokens';
+import { actionIdFor, verifyApprovalToken, type ApprovalToken } from './approvalTokens';
+import { canonicalShellForm } from './classifier';
+import type { SentinelCallIdentity, SentinelServices } from './context';
 import { extractCardFields } from './extractorRegistry';
+import { provenanceForToolType, requiresNetwork } from './networkRequirements';
 import { hashArgv, matchAllowlist, OFFLINE_SHELL_COMMANDS, parseSimpleCommand } from './shellAllowlist';
+import type { Tier, TrackedExecutionBinding } from './tier';
 import {
   canonicalFileIdentity,
   canonicalWriteTarget,
@@ -28,13 +31,6 @@ import {
   sha256FileContent,
   splitWordsLenient,
 } from './trackedExecutables';
-import { realpathSync } from 'node:fs';
-import path from 'node:path';
-import { requiresNetwork, provenanceForToolType } from './networkRequirements';
-import { canonicalShellForm } from './classifier';
-import type { Tier, TrackedExecutionBinding } from './tier';
-import type { ShellApprovalBinding } from './approvalTokens';
-import type { SentinelCallIdentity, SentinelServices } from './context';
 
 export interface VerifiableCall {
   tool_name: string;
@@ -83,9 +79,7 @@ function offlineViolation(call: VerifiableCall, ctx: DispatchCheckContext): stri
     }
     return undefined;
   }
-  if (
-    requiresNetwork({ tool_name: call.tool_name, provenance: provenanceForToolType(call.tool_type) })
-  ) {
+  if (requiresNetwork({ tool_name: call.tool_name, provenance: provenanceForToolType(call.tool_type) })) {
     return 'Auto-denied: offline mode is on and this tool needs network access.';
   }
   if (extractCardFields({ tool_name: call.tool_name, canonical_params: call.canonical_params }).external_service) {
@@ -101,10 +95,7 @@ function offlineViolation(call: VerifiableCall, ctx: DispatchCheckContext): stri
  * symlinked parent repointed between classification and dispatch could
  * otherwise turn an in-workspace operation into an out-of-workspace one.
  */
-function verifyTier2Containment(input: {
-  call: VerifiableCall;
-  workspace_root: string;
-}): string | undefined {
+function verifyTier2Containment(input: { call: VerifiableCall; workspace_root: string }): string | undefined {
   const { call, workspace_root } = input;
   let root: string;
   try {
@@ -112,8 +103,7 @@ function verifyTier2Containment(input: {
   } catch {
     return 'Tier 2 workspace check failed at dispatch; request approval again.';
   }
-  const insideRoot = (identity: string): boolean =>
-    identity === root || identity.startsWith(`${root}${path.sep}`);
+  const insideRoot = (identity: string): boolean => identity === root || identity.startsWith(`${root}${path.sep}`);
 
   if (call.tool_name === 'write_file' || call.tool_name === 'apply_patch' || call.tool_name === 'replace_text') {
     const target = stringParam(call.canonical_params, 'path') ?? stringParam(call.canonical_params, 'target');
@@ -143,8 +133,7 @@ function verifyTier2Containment(input: {
       if (token.startsWith('-')) {
         continue;
       }
-      const identity =
-        canonicalFileIdentity({ p: token, cwd }) ?? canonicalWriteTarget({ p: token, cwd });
+      const identity = canonicalFileIdentity({ p: token, cwd }) ?? canonicalWriteTarget({ p: token, cwd });
       // Unresolvable operands were not bound at classify time; only a
       // resolved-outside operand invalidates the Tier 2 grant.
       if (identity !== null && !insideRoot(identity)) {
@@ -163,10 +152,7 @@ function verifyTier2Containment(input: {
  * token; Tier 2 calls get a workspace-containment re-check; Tier 1 passes
  * through.
  */
-export function verifyPreDispatch(input: {
-  call: VerifiableCall;
-  ctx: DispatchCheckContext;
-}): string | undefined {
+export function verifyPreDispatch(input: { call: VerifiableCall; ctx: DispatchCheckContext }): string | undefined {
   const { call, ctx } = input;
   const { services } = ctx;
 

@@ -48,7 +48,9 @@ const ThemeSettings = () => {
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-base font-semibold text-text-primary">Appearance</h2>
-        <p className="mt-1 text-sm text-text-secondary">Choose a color theme. Light and dark modes apply on top of the selected theme.</p>
+        <p className="mt-1 text-sm text-text-secondary">
+          Choose a color theme. Light and dark modes apply on top of the selected theme.
+        </p>
       </div>
 
       <div>

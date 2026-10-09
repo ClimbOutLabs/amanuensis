@@ -216,9 +216,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
 
 function toolCallIdFrom(record: Record<string, unknown>): string | undefined {
   return (
-    optionalString(record, 'tool_call_id') ??
-    optionalString(record, 'id') ??
-    optionalString(record, 'approval_id')
+    optionalString(record, 'tool_call_id') ?? optionalString(record, 'id') ?? optionalString(record, 'approval_id')
   );
 }
 

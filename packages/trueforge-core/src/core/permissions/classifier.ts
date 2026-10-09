@@ -8,14 +8,27 @@
  * stable reason codes, the Tier 3 card when required, Tier 2 matched
  * files/kind, and the tracked-execution approval binding.
  */
-import path from 'path';
 import { realpathSync } from 'fs';
+import path from 'path';
+import { actionIdFor, normalizeCwd, toJsonSafeParams, type ShellApprovalBinding } from './approvalTokens';
+import { recordClassificationAudit } from './audit';
 import {
-  actionIdFor,
-  normalizeCwd,
-  toJsonSafeParams,
-  type ShellApprovalBinding,
-} from './approvalTokens';
+  classifyContextFor,
+  type SentinelCallIdentity,
+  type SentinelHostContext,
+  type SentinelServices,
+} from './context';
+import { extractCardFields } from './extractorRegistry';
+import { provenanceForToolType, requiresNetwork } from './networkRequirements';
+import { isRunnerWorkflow } from './runner';
+import {
+  hashArgv,
+  matchAllowlist,
+  OFFLINE_SHELL_COMMANDS,
+  parseSimpleCommand,
+  type ParsedSimpleCommand,
+  type ShellAllowlistConfig,
+} from './shellAllowlist';
 import {
   autoDenyDecision,
   tier1Decision,
@@ -25,15 +38,6 @@ import {
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
-import { extractCardFields } from './extractorRegistry';
-import {
-  hashArgv,
-  matchAllowlist,
-  OFFLINE_SHELL_COMMANDS,
-  parseSimpleCommand,
-  type ParsedSimpleCommand,
-  type ShellAllowlistConfig,
-} from './shellAllowlist';
 import {
   canonicalFileIdentity,
   canonicalWriteTarget,
@@ -44,10 +48,6 @@ import {
   splitWordsLenient,
   type TrackedExecutableScope,
 } from './trackedExecutables';
-import { requiresNetwork, provenanceForToolType } from './networkRequirements';
-import { isRunnerWorkflow } from './runner';
-import { classifyContextFor, type SentinelCallIdentity, type SentinelHostContext, type SentinelServices } from './context';
-import { recordClassificationAudit } from './audit';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
@@ -393,11 +393,10 @@ export function shellBindingFromForm(form: CanonicalShellForm): ShellApprovalBin
   };
 }
 
-function mintShellToken(input: {
-  services: SentinelServices;
-  tool_name: string;
-  form: CanonicalShellForm;
-}): { token_id: string; binding: ShellApprovalBinding } {
+function mintShellToken(input: { services: SentinelServices; tool_name: string; form: CanonicalShellForm }): {
+  token_id: string;
+  binding: ShellApprovalBinding;
+} {
   const binding = shellBindingFromForm(input.form);
   const token = input.services.token_store.mint({
     action_id: actionIdFor({ tool_name: input.tool_name, canonical_params: input.form }),
@@ -641,11 +640,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   });
 }
 
-function mintPlainToken(input: {
-  services: SentinelServices;
-  tool_name: string;
-  params: unknown;
-}): string {
+function mintPlainToken(input: { services: SentinelServices; tool_name: string; params: unknown }): string {
   return input.services.token_store.mint({
     action_id: actionIdFor({ tool_name: input.tool_name, canonical_params: input.params }),
     canonical_params: input.params,
@@ -683,7 +678,9 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   // write as outside the workspace.
   const inside = (() => {
     const identity = canonicalWriteTarget({ p: target, cwd: identityCwd });
-    if (identity === null) { return false; }
+    if (identity === null) {
+      return false;
+    }
     try {
       const root = realpathSync(ctx.workspace_cwd);
       return identity === root || identity.startsWith(`${root}${path.sep}`);
@@ -781,7 +778,11 @@ async function applyAlwaysAsk(input: {
     escalated: true,
     tier2_kind: kind,
     tier2_files: decision.tier2_files,
-    approval_token_id: mintPlainToken({ services: ctx.services, tool_name: action.tool_name, params: action.canonical_params }),
+    approval_token_id: mintPlainToken({
+      services: ctx.services,
+      tool_name: action.tool_name,
+      params: action.canonical_params,
+    }),
   });
 }
 
@@ -836,9 +837,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         sensitive_read: false,
       });
     }
-    if (
-      requiresNetwork({ tool_name: action.tool_name, provenance: provenanceForToolType(action.tool_type) })
-    ) {
+    if (requiresNetwork({ tool_name: action.tool_name, provenance: provenanceForToolType(action.tool_type) })) {
       return autoDenyDecision({
         reason: 'offline_mode',
         reason_detail: 'This tool needs network access, which is disabled while offline.',
@@ -909,7 +908,9 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       card: {
         plain_what: what,
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: isDestructive ? 'Deleted data cannot be recovered.' : 'Once this runs it cannot be taken back.',
+        cannot_be_undone: isDestructive
+          ? 'Deleted data cannot be recovered.'
+          : 'Once this runs it cannot be taken back.',
         why_asked_again: null,
         destination: fields.destination,
         recipient: fields.recipient,
@@ -978,7 +979,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       return tier3Decision({
         card: {
           plain_what:
-            name === 'run_code' ? 'Run code the agent wrote in the sandbox.' : 'Submit an implementation plan for review.',
+            name === 'run_code'
+              ? 'Run code the agent wrote in the sandbox.'
+              : 'Submit an implementation plan for review.',
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: 'Execution cannot be taken back once it runs.',
           why_asked_again: null,

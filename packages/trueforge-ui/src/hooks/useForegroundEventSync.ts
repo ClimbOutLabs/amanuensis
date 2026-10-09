@@ -4,6 +4,7 @@ import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useEffect, useRef } from 'react';
 
+import { useToasterOptional } from '../containers/ToasterContainer.js';
 import {
   APPROVAL_AUTO_DENY_MINUTES,
   approvalAutoDenyReason,
@@ -11,7 +12,6 @@ import {
   type HarnessChatServerExtensions,
   type SessionTipInfo,
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
-import { useToasterOptional } from '../containers/ToasterContainer.js';
 import { useOptionalServer } from '../server/ServerContext.js';
 
 /**
@@ -86,8 +86,12 @@ export function useSessionEventSync(): {
   const lastTipRef = useRef<string | undefined>(undefined);
 
   const syncNow = useCallback((_reason: SessionEventSyncReason) => {
-    const { server: currentServer, reload: currentReload, toaster: currentToaster, sessionId: currentSessionId } =
-      liveRef.current;
+    const {
+      server: currentServer,
+      reload: currentReload,
+      toaster: currentToaster,
+      sessionId: currentSessionId,
+    } = liveRef.current;
     if (syncInFlightRef.current) return;
     if (currentServer == null || !hasSessionResync(currentServer) || currentSessionId == null) return;
     if (typeof document !== 'undefined' && document.hidden) return;
@@ -122,9 +126,7 @@ export function useSessionEventSync(): {
         }
         lastTipRef.current = tip.turnId;
       } catch (error) {
-        currentToaster?.showError(
-          error instanceof Error ? error : new Error('Could not reach the chat server.'),
-        );
+        currentToaster?.showError(error instanceof Error ? error : new Error('Could not reach the chat server.'));
       } finally {
         syncInFlightRef.current = false;
       }

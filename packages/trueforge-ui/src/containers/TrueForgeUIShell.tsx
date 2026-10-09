@@ -11,6 +11,7 @@ import { cn } from '../atoms/lib/cn.js';
 import { IS_CREATE_AGENT_METADATA_KEY, isCreateAgentMetadataValue } from '../atoms/lib/sessionCreateAgent.js';
 import { SandboxRuntimeUpgradeProvider } from '../components/SandboxRuntimeUpgradeContext.js';
 import { CurrentUserProvider, type CurrentUser } from '../contexts/CurrentUserContext.js';
+import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { WidgetVisibilityProvider } from '../layouts/WidgetVisibilityContext.js';
 import { HistorySessionSwitchBridge } from '../routing/HistorySessionSwitchBridge.js';
 import { LibrarySessionShareBoot } from '../routing/LibrarySessionShareBoot.js';
@@ -29,7 +30,6 @@ import type { AgentUIServer, CreateSessionRequest } from '../server/types.js';
 import { SlotsProvider, useThemeMode, type SlotOverrides } from '../theme/SlotsProvider.js';
 import type { LayoutProp, ThemeConfig } from '../theme/types.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
-import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { TrueFoundryChatProvider, type TrueFoundryChatProviderProps } from './TrueFoundryChatProvider.js';
 import { useResolvedServer } from './useResolvedServer.js';
 

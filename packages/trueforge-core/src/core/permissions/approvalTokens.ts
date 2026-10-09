@@ -22,10 +22,10 @@
  * cwd falls back to the workspace root); a normalization mismatch fails
  * closed.
  */
+import { z } from '@hono/zod-openapi';
 import { createHash, randomBytes } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
-import { z } from '@hono/zod-openapi';
 
 /** Deterministic JSON serialization: object keys sorted recursively. */
 export function stableStringify(value: unknown): string {
@@ -179,9 +179,7 @@ export class InMemoryApprovalTokenStore implements ApprovalTokenStore {
   }
 }
 
-export type TokenVerification =
-  | { valid: true }
-  | { valid: false; reason: string };
+export type TokenVerification = { valid: true } | { valid: false; reason: string };
 
 /**
  * Pre-invocation byte-for-byte re-verification. The caller rebuilds the
