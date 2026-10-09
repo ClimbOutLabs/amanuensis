@@ -1,5 +1,7 @@
 # Spec: Stream Error Classification (v1)
 
+**Status:** implemented
+
 ## Problem
 
 Stream error parts carrying a definite provider HTTP status were wrapped as `ModelStreamFault` unless they were `APICallError` instances. The AI SDK provider error shape (`data.code`) fell through the classification, so a provider-side 500 (for example from a request the provider rejects during structured-output processing) triggered the compact-and-retry recovery and surfaced a misleading "context too long" message for failures compaction cannot fix.
