@@ -8,6 +8,10 @@ export const RUN_CODE_ERROR_CODES = [
   'output_exceeded',
   'image_unavailable',
   'daemon_unavailable',
+  /** Docker socket not detected: user-actionable install message, surfaced verbatim. */
+  'docker_unavailable',
+  /** Created container failed isolation verification: refused, surfaced verbatim. */
+  'isolation_refused',
   'concurrency_exceeded',
   'invalid_input',
   'internal',

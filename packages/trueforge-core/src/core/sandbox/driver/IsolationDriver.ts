@@ -16,6 +16,14 @@ export type RunCodeLanguage = 'python' | 'node';
 export const OUTPUT_EXCEEDED_MARKER = 'output_exceeded:';
 
 /**
+ * Prefix a driver sets on DriverRunResult.internalError when a created
+ * container fails post-create isolation verification. The wrapper maps it
+ * onto `isolation_refused` and surfaces the spec's exact refusal message.
+ * Mirrors the OUTPUT_EXCEEDED_MARKER pattern.
+ */
+export const ISOLATION_REFUSED_MARKER = 'isolation_refused:';
+
+/**
  * Reserved ingress prefix for wrapper-staged files (the program itself).
  * Harvesting skips these; the driver executes the program from this path.
  */
@@ -38,7 +46,7 @@ export type DriverReadiness =
        * explicit bounded provisioning step. Every other code is terminal
        * for the call.
        */
-      error_code: 'daemon_unavailable' | 'image_unavailable' | 'image_missing' | 'kvm_unavailable' | 'unsupported_platform';
+      error_code: 'daemon_unavailable' | 'docker_unavailable' | 'image_unavailable' | 'image_missing' | 'kvm_unavailable' | 'unsupported_platform';
       /** Human-actionable remediation text, shown to the user. */
       error: string;
     };

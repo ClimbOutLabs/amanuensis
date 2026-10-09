@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import {
+  ISOLATION_REFUSED_MARKER,
   OUTPUT_EXCEEDED_MARKER,
   runCodeProgramPath,
   type DriverReadiness,
@@ -27,6 +28,50 @@ const TRANSPORT_STREAM_CAP_BYTES = 4 * 1024 * 1024;
 const STALE_CONTAINER_MS = 30 * 60 * 1000;
 /** dispose() drains in-flight runs up to this long, then kills the remainder. */
 const DISPOSE_DRAIN_MS = 30 * 1000;
+
+/** Default Docker socket path probed by detectDocker(). */
+export const DOCKER_SOCKET_PATH = '/var/run/docker.sock';
+
+/**
+ * Exact user-facing message when Docker is not available (spec acceptance #5).
+ * Returned as the readiness error; the wrapper surfaces it verbatim.
+ */
+export const DOCKER_UNAVAILABLE_MESSAGE =
+  "I can't run code on this machine because Docker isn't available. To enable code execution, install Docker from https://docs.docker.com/engine/install/ and restart Aman.";
+
+/**
+ * Exact user-facing message when mandatory isolation guarantees cannot be
+ * applied (spec acceptance #6). Quoted verbatim from the spec.
+ */
+export const ISOLATION_REFUSED_MESSAGE =
+  "I can't run this safely — the sandbox couldn't apply all isolation guarantees.";
+
+const dockerDetectionCache = new Map<string, Promise<boolean>>();
+
+/**
+ * Probe Docker socket accessibility. The result is memoized per socket path
+ * for the process lifetime: detection happens once at startup, not per tool
+ * call. A missing socket means Docker is not installed or not running for
+ * this user; the driver reports docker_unavailable and the wrapper shows the
+ * recovery message. (Restarting Aman re-probes, per the message.)
+ */
+export function detectDocker(socketPath: string = DOCKER_SOCKET_PATH): Promise<boolean> {
+  const cached = dockerDetectionCache.get(socketPath);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const probe = stat(socketPath).then(
+    () => true,
+    () => false,
+  );
+  dockerDetectionCache.set(socketPath, probe);
+  return probe;
+}
+
+/** Test seam: clear the memoized detection so tests can re-probe. */
+export function resetDockerDetectionForTests(): void {
+  dockerDetectionCache.clear();
+}
 
 /** Outcome of one docker/cosign CLI invocation. */
 export interface DockerCommandResult {
@@ -73,6 +118,8 @@ export interface DockerDriverOptions {
   cosignPublicKeyPath: string;
   dockerBinary: string | undefined;
   cosignBinary: string | undefined;
+  /** Override for the Docker socket path probed by detectDocker(). Defaults to /var/run/docker.sock. */
+  dockerSocketPath: string | undefined;
   /** Bound for docker info / image inspect / cosign verify. Default 5000. */
   commandTimeoutMs: number | undefined;
   /** Bound for the wedged-daemon docker create probe. Default 30000. */
@@ -227,8 +274,7 @@ export function createDefaultDockerCommandRunner(options: { dockerBinary: string
 function checkRepoDigest(input: {
   inspectJson: string;
   expectedDigest: string;
-}): { ok: true } | { ok: false; error: string } {
-  let parsed: unknown;
+}): { ok: true } | { ok: false; error: string } {  let parsed: unknown;
   try {
     parsed = JSON.parse(input.inspectJson);
   } catch {
@@ -268,6 +314,64 @@ function checkRepoDigest(input: {
   return { ok: true };
 }
 
+/**
+ * Verify a created container actually carries the mandatory isolation flags.
+ * Fail-closed (spec): any missing guarantee refuses the run. A partial
+ * sandbox is never silently downgraded. Defensive unknown-typed navigation in
+ * the checkRepoDigest style; exported for unit tests.
+ */
+export function checkContainerIsolation(input: {
+  inspectJson: string;
+}): { ok: true } | { ok: false; reason: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input.inspectJson);
+  } catch {
+    return { ok: false, reason: 'could not parse `docker inspect` output' };
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    return { ok: false, reason: '`docker inspect` returned no container data' };
+  }
+  const entry: unknown = parsed[0];
+  if (typeof entry !== 'object' || entry === null) {
+    return { ok: false, reason: '`docker inspect` returned a non-object container entry' };
+  }
+  const record = entry as Record<string, unknown>;
+  const hostConfig: unknown = record.HostConfig;
+  const config: unknown = record.Config;
+  if (typeof hostConfig !== 'object' || hostConfig === null || typeof config !== 'object' || config === null) {
+    return { ok: false, reason: '`docker inspect` entry is missing HostConfig or Config' };
+  }
+  const hc = hostConfig as Record<string, unknown>;
+  const cc = config as Record<string, unknown>;
+
+  if (hc.NetworkMode !== 'none') {
+    const actual = typeof hc.NetworkMode === 'string' ? hc.NetworkMode : 'missing';
+    return { ok: false, reason: `container NetworkMode is '${actual}', expected 'none'` };
+  }
+  if (hc.ReadonlyRootfs !== true) {
+    return { ok: false, reason: 'container root filesystem is not read-only' };
+  }
+  const user: unknown = cc.User;
+  if (typeof user !== 'string' || user === '' || user === '0' || user === 'root' || user === '0:0') {
+    const actual = typeof user === 'string' && user !== '' ? user : 'missing';
+    return { ok: false, reason: `container user is '${actual}', expected a non-root user` };
+  }
+  const capDrop: unknown = hc.CapDrop;
+  if (!Array.isArray(capDrop) || !capDrop.includes('ALL')) {
+    return { ok: false, reason: 'container capabilities were not fully dropped (CapDrop does not include ALL)' };
+  }
+  const securityOpt: unknown = hc.SecurityOpt;
+  const opts = Array.isArray(securityOpt) ? securityOpt.filter((o): o is string => typeof o === 'string') : [];
+  if (!opts.includes('no-new-privileges:true')) {
+    return { ok: false, reason: 'container is missing no-new-privileges' };
+  }
+  if (!opts.some((o) => o === 'seccomp=default' || o.startsWith('seccomp='))) {
+    return { ok: false, reason: 'container is missing an explicit seccomp profile' };
+  }
+  return { ok: true };
+}
+
 export class DockerDriver implements IsolationDriver {
   readonly kind = 'docker';
 
@@ -275,6 +379,7 @@ export class DockerDriver implements IsolationDriver {
   private readonly cosignPublicKeyPath: string;
   private readonly dockerBinary: string;
   private readonly cosignBinary: string;
+  private readonly dockerSocketPath: string;
   private readonly commandTimeoutMs: number;
   private readonly createTimeoutMs: number;
   private readonly runner: DockerCommandRunner;
@@ -288,6 +393,7 @@ export class DockerDriver implements IsolationDriver {
     this.cosignPublicKeyPath = options.cosignPublicKeyPath;
     this.dockerBinary = options.dockerBinary ?? 'docker';
     this.cosignBinary = options.cosignBinary ?? 'cosign';
+    this.dockerSocketPath = options.dockerSocketPath ?? DOCKER_SOCKET_PATH;
     this.commandTimeoutMs = options.commandTimeoutMs ?? 5000;
     this.createTimeoutMs = options.createTimeoutMs ?? 30000;
     this.runner = commandRunner ?? createDefaultDockerCommandRunner({ dockerBinary: this.dockerBinary });
@@ -314,6 +420,16 @@ export class DockerDriver implements IsolationDriver {
         ready: false,
         error_code: 'unsupported_platform',
         error: 'run_code is not supported on Windows in v1: the Docker driver needs a Linux container host.',
+      };
+    }
+    // Docker detection (spec): a missing socket is a distinct, user-actionable
+    // state from a wedged daemon. The wrapper surfaces the exact recovery
+    // message; detection is memoized per process (see detectDocker).
+    if ((await detectDocker(this.dockerSocketPath)) !== true) {
+      return {
+        ready: false,
+        error_code: 'docker_unavailable',
+        error: DOCKER_UNAVAILABLE_MESSAGE,
       };
     }
     const expectedDigest = this.expectedDigest();
@@ -444,6 +560,11 @@ export class DockerDriver implements IsolationDriver {
     let result: DriverRunResult;
     try {
       containerId = await this.createContainer(params);
+      // Fail-closed isolation verification (spec): the flags passed to
+      // `docker create` must be reflected in the created container. A
+      // container missing any mandatory guarantee is removed and the run is
+      // refused — never executed with reduced isolation.
+      await this.verifyContainerIsolation(containerId);
       const task = this.attachAndRun(containerId, params);
       this.inFlight.set(containerId, task);
       try {
@@ -624,6 +745,8 @@ export class DockerDriver implements IsolationDriver {
       '--cap-drop=ALL',
       '--security-opt',
       'no-new-privileges:true',
+      '--security-opt',
+      'seccomp=default',
       '--pids-limit',
       '256',
       '--memory',
@@ -671,6 +794,29 @@ export class DockerDriver implements IsolationDriver {
       throw new Error(`docker create failed: ${truncateSingleLine(result.stderr, 500)}`);
     }
     return containerId;
+  }
+
+  /**
+   * Fail-closed post-create verification: inspect the created container and
+   * confirm every mandatory isolation flag took effect. On any failure the
+   * container is removed (best-effort; the labeled reaper owns leftovers) and
+   * the run is refused with the spec's exact message, marked with
+   * ISOLATION_REFUSED_MARKER for the wrapper.
+   */
+  private async verifyContainerIsolation(containerId: string): Promise<void> {
+    const inspect = await this.runner.run(
+      this.dockerBinary,
+      ['inspect', containerId],
+      { timeoutMs: this.commandTimeoutMs, signal: undefined },
+    );
+    const check: { ok: true } | { ok: false; reason: string } =
+      inspect.timedOut || inspect.exitCode !== 0
+        ? { ok: false, reason: '`docker inspect` failed on the created container' }
+        : checkContainerIsolation({ inspectJson: inspect.stdout });
+    if (!check.ok) {
+      await this.removeContainer(containerId);
+      throw new Error(`${ISOLATION_REFUSED_MARKER}${ISOLATION_REFUSED_MESSAGE}`);
+    }
   }
 
   private async attachAndRun(containerId: string, params: DriverRunParams): Promise<DriverRunResult> {

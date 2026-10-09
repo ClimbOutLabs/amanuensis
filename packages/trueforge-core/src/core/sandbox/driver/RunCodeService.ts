@@ -6,7 +6,7 @@ import type { Logger } from 'winston';
 import { onSignalAbort, signalAbortError } from '../../util/abort';
 import { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './errors';
 import type { DriverReadiness, DriverRunParams, DriverRunResult, IsolationDriver } from './IsolationDriver';
-import { OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX } from './IsolationDriver';
+import { OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX, ISOLATION_REFUSED_MARKER } from './IsolationDriver';
 import {
   FILE_BASENAME_PATTERN,
   RunCodeInputSchema,
@@ -363,10 +363,14 @@ export class RunCodeService implements RunCodeBackend {
     if (!readiness.ready) {
       // The model-visible taxonomy has no kvm/platform codes: a backend that
       // cannot isolate is daemon_unavailable with actionable detail text.
+      // docker_unavailable keeps its own code so the exact install message
+      // surfaces verbatim instead of being prefixed.
       const code: RunCodeErrorCode =
         readiness.error_code === 'image_unavailable' || readiness.error_code === 'image_missing'
           ? 'image_unavailable'
-          : 'daemon_unavailable';
+          : readiness.error_code === 'docker_unavailable'
+            ? 'docker_unavailable'
+            : 'daemon_unavailable';
       return this.failedResult({
         error_code: code,
         error: errorTextForCode({ error_code: code, detail: readiness.error }),
@@ -665,6 +669,23 @@ export class RunCodeService implements RunCodeBackend {
         error: errorTextForCode({
           error_code: 'output_exceeded',
           detail: 'the program wrote more than the 4 MiB transport bound per stream',
+        }),
+        runRoot,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        filesOut,
+        harvestWarnings,
+      });
+    }
+    // Fail-closed isolation refusal (spec): the driver verified the created
+    // container and a mandatory guarantee was missing. The detail is the
+    // spec's exact message; errorTextForCode surfaces it verbatim.
+    if (result.internalError?.startsWith(ISOLATION_REFUSED_MARKER) === true) {
+      return this.failedResult({
+        error_code: 'isolation_refused',
+        error: errorTextForCode({
+          error_code: 'isolation_refused',
+          detail: result.internalError.slice(ISOLATION_REFUSED_MARKER.length),
         }),
         runRoot,
         stdout: result.stdout,
