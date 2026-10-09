@@ -300,6 +300,40 @@ describe('MarkdownMemoryClient persona vault scope', () => {
     });
   });
 
+  describe('look-alike persona names', () => {
+    it.each([
+      ['Zoë', 'Zoé'],
+      ['Ana_Lou', 'Ana Lou'],
+      ['名前一', '名前二'],
+    ])('keeps %s and %s in separate vaults', async (first, second) => {
+      const one: VaultScope = { personaName: first, personaId: 'persona-one-id' };
+      const two: VaultScope = { personaName: second, personaId: 'persona-two-id' };
+      await retain(clientFor(one), 'The first persona keeps quince jam in the pantry');
+
+      expect(mentions(await recall(clientFor(one), 'quince jam'), 'quince')).toBe(true);
+      expect(await recall(clientFor(two), 'quince jam')).toEqual([]);
+      await retain(clientFor(two), 'The second persona prefers oolong tea');
+      expect(mentions(await recall(clientFor(one), 'oolong tea'), 'oolong')).toBe(false);
+      expect(await listedIds(clientFor(undefined), `persona:${first}`)).toHaveLength(1);
+      expect(await listedIds(clientFor(undefined), `persona:${second}`)).toHaveLength(1);
+    });
+
+    it('keeps long names under a UUID tenant apart', async () => {
+      const tenant = '3f2b8c1e-5a47-4d90-9be1-0c6d7e8f9a12';
+      const stem = 'Dr Penelope Featherstonehaugh-Cholmondeley the ';
+      const make = (suffix: string) =>
+        new MarkdownMemoryClient({
+          baseDir,
+          namespace: tenant,
+          vaultScope: { personaName: `${stem}${suffix}`, personaId: `persona-${suffix}` },
+        });
+      await retain(make('First'), 'The first one keeps quince jam in the pantry');
+
+      expect(mentions(await recall(make('First'), 'quince jam'), 'quince')).toBe(true);
+      expect(await recall(make('Second'), 'quince jam')).toEqual([]);
+    });
+  });
+
   describe('rename and delete', () => {
     it('leaves the old vault intact and gives a renamed persona an empty vault', async () => {
       await retain(clientFor(ALPHA), 'Alpha keeps quince jam in the pantry');

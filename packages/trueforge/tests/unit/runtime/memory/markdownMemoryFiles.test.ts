@@ -1,12 +1,15 @@
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   formatRetainEntry,
   namespaceDirFor,
+  personaForVaultFilesystemNamespace,
   sanitizeNamespace,
   scanNamespaceEntries,
   splitEntries,
+  vaultFilesystemNamespace,
   vaultReadNamespaces,
   vaultWriteNamespace,
   writeVaultSharing,
@@ -182,6 +185,60 @@ describe('markdownMemoryFiles', () => {
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
+    });
+  });
+
+  describe('persona vault directory names', () => {
+    const UUID_TENANT = '3f2b8c1e-5a47-4d90-9be1-0c6d7e8f9a12';
+    const directoryOf = (tenant: string, name: string): string =>
+      sanitizeNamespace(vaultFilesystemNamespace(tenant, `persona:${name}`));
+
+    it('keeps clean short names on their plain directory', () => {
+      expect(vaultFilesystemNamespace('tenant-1', 'persona:planner')).toBe('tenant-1__persona_planner');
+      expect(vaultFilesystemNamespace('tenant-1', 'persona:Ana_Lou-2')).toBe('tenant-1__persona_Ana_Lou-2');
+    });
+
+    it.each([
+      ['accented letters', ['Zoë', 'Zoé', 'Zoe']],
+      ['underscore versus space', ['Ana_Lou', 'Ana Lou', 'Ana-Lou', 'Ana.Lou']],
+      ['same-length CJK names', ['名前一', '名前二', '名前三']],
+      ['case-only differences from unsafe characters', ['Sam!', 'Sam?', 'Sam']],
+    ])('gives distinct directories for %s', (_label, names) => {
+      const directories = names.map(name => directoryOf('tenant-1', name));
+      expect(new Set(directories).size).toBe(names.length);
+    });
+
+    it('gives distinct directories to long names that share a prefix under a UUID tenant', () => {
+      const stem = 'Dr Penelope Featherstonehaugh-Cholmondeley the ';
+      const names = [`${stem}First`, `${stem}Second`, `${stem}Third`];
+      const directories = names.map(name => vaultFilesystemNamespace(UUID_TENANT, `persona:${name}`));
+      expect(new Set(directories.map(sanitizeNamespace)).size).toBe(names.length);
+      for (const directory of directories) {
+        expect(directory.startsWith(`${UUID_TENANT}__persona_`)).toBe(true);
+        expect(sanitizeNamespace(directory)).toBe(directory);
+        expect(directory.length).toBeLessThanOrEqual(64);
+      }
+    });
+
+    it('does not let a plain name imitate the hashed directory of another name', () => {
+      const hash = createHash('sha256').update('persona:Team Zeta', 'utf8').digest('hex').slice(0, 8);
+      const hashed = directoryOf('tenant-1', 'Team Zeta');
+      const imitation = directoryOf('tenant-1', `Team_Zeta_${hash}`);
+      expect(hashed).toContain(hash);
+      expect(imitation).not.toBe(hashed);
+    });
+
+    it('leaves topic and shared vault names as they were', () => {
+      expect(vaultFilesystemNamespace('tenant-1', 'finance')).toBe('tenant-1__finance');
+      expect(vaultFilesystemNamespace('tenant-1', 'Home Budget')).toBe('tenant-1__Home_Budget');
+      expect(vaultFilesystemNamespace('tenant-1', 'default')).toBe('tenant-1');
+    });
+
+    it('recovers a readable persona name from a hashed directory', () => {
+      const clean = vaultFilesystemNamespace('tenant-1', 'persona:planner');
+      const hashed = vaultFilesystemNamespace('tenant-1', 'persona:Ana Lou');
+      expect(personaForVaultFilesystemNamespace('tenant-1', clean)).toBe('planner');
+      expect(personaForVaultFilesystemNamespace('tenant-1', hashed)).toBe('Ana_Lou');
     });
   });
 });

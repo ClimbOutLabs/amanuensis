@@ -16,7 +16,7 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 
 **Facts are the unit of management.** A fact is a single atomic claim extracted from the memory files (e.g. "the user prefers oat milk"). The vault lists facts with their source file and timestamp.
 
-**Vault scopes.** Memory is stored in vaults. The shared vault belongs to the user and is a scope readable by every persona and by the default assistant. Each persona has its own vault (`persona:<name>`) that only chats with that persona write to. The vault is the unit of scoping for both writing and recall.
+**Vault scopes.** Memory is stored in vaults. The shared vault belongs to the user and is a scope readable by every persona and by the default assistant. Each persona has its own vault (`persona:<name>`) that only chats with that persona write to. The vault is the unit of scoping for both writing and recall. Distinct persona names always map to distinct vaults, even when they differ only in punctuation, accents, or script.
 
 **Write rule.** A fact learned in a chat is retained into exactly one vault. With a persona active it goes to that persona's vault. With no persona active it goes to the shared vault. Facts are never copied between vaults.
 
