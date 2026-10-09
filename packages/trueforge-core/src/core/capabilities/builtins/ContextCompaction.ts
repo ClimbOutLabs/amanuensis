@@ -12,6 +12,7 @@ import {
   isLLMContextMessage,
   userAuthoredText,
 } from '../../runtime/contextUtils';
+import type { CurrentContextUsage } from '../../runtime/contextUsage';
 import type { TokenCounter } from '../../llm/tokenizer';
 import {
   boundRepositoryContextFromBinding,
@@ -966,7 +967,17 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
         state: { paths: this.touchedPaths, overflowed: this.touchedPathsOverflowed },
       };
     }
-    const contextTokens = execution.currentContextUsage.prompt_tokens + execution.currentContextUsage.completion_tokens;
+    // Use provider-accurate token count for the trigger decision, not the heuristic-based
+    // currentContextUsage which may undercount. This ensures compaction fires correctly.
+    // Falls back to heuristic if provider tokenizer is unreachable.
+    let providerCountedUsage: CurrentContextUsage;
+    try {
+      providerCountedUsage = await countTokensForContextMessages(execution.context, this.modelClient);
+    } catch (err) {
+      this.logger?.warn(`Provider token counting failed, falling back to heuristic: ${err instanceof Error ? err.message : String(err)}`);
+      providerCountedUsage = estimateTokensForContextMessages(execution.context);
+    }
+    const contextTokens = providerCountedUsage.prompt_tokens + execution.currentContextUsage.completion_tokens;
     // Conservative sizing only: a checklist being configured (whether or not it turns out to
     // hold items once fetched below) still counts toward the larger coding-prompt estimate here,
     // so the threshold check never undercounts while the checklist's contents are unknown.
@@ -1145,7 +1156,12 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
           'Continue with the remaining context.',
       );
       const truncatedContext: ContextMessage[] = [...systemMessages, truncationNotice, ...recentTail];
-      const tokensAfterTruncation = estimateTokensForContextMessages(truncatedContext).prompt_tokens;
+      let tokensAfterTruncation: number;
+      try {
+        tokensAfterTruncation = (await countTokensForContextMessages(truncatedContext, this.modelClient)).prompt_tokens;
+      } catch {
+        tokensAfterTruncation = estimateTokensForContextMessages(truncatedContext).prompt_tokens;
+      }
 
       yield { type: InternalEventType.MODEL_USAGE, usage: response.usage };
       yield {
@@ -1179,7 +1195,12 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     const continuationMessage = mode === 'coding' ? CONTINUATION_MESSAGE : CONVERSATION_CONTINUATION_MESSAGE;
     const context: ContextMessage[] = [hostFramedSummary, continuationMessage, ...recentTail];
     // Calculate tokens from the actual persisted messages, not the summarization request.
-    const tokensAfter = estimateTokensForContextMessages(context).prompt_tokens;
+    let tokensAfter: number;
+    try {
+      tokensAfter = (await countTokensForContextMessages(context, this.modelClient)).prompt_tokens;
+    } catch {
+      tokensAfter = estimateTokensForContextMessages(context).prompt_tokens;
+    }
 
     yield {
       type: EventType.AGENT_CONTEXT_OVERWRITE,
