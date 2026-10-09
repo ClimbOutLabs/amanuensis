@@ -46,7 +46,13 @@ export type DriverReadiness =
        * explicit bounded provisioning step. Every other code is terminal
        * for the call.
        */
-      error_code: 'daemon_unavailable' | 'docker_unavailable' | 'image_unavailable' | 'image_missing' | 'kvm_unavailable' | 'unsupported_platform';
+      error_code:
+        | 'daemon_unavailable'
+        | 'docker_unavailable'
+        | 'image_unavailable'
+        | 'image_missing'
+        | 'kvm_unavailable'
+        | 'unsupported_platform';
       /** Human-actionable remediation text, shown to the user. */
       error: string;
     };

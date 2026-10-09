@@ -1,10 +1,10 @@
 import { classifyHostToolCall, type SentinelAction } from '../../../src/core/permissions/classifier';
 import {
   createSentinelHostContext,
+  DEFAULT_PINNED_PATH,
   getSharedSentinelServices,
   resetSharedSentinelServicesForTests,
   toDispatchSentinelContext,
-  DEFAULT_PINNED_PATH,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 

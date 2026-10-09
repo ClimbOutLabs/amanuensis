@@ -16,10 +16,7 @@ import {
   type DockerCommandRunner,
   type DockerDriverOptions,
 } from '../../../../src/core/sandbox/driver/DockerDriver';
-import {
-  ISOLATION_REFUSED_MARKER,
-  type DriverRunParams,
-} from '../../../../src/core/sandbox/driver/IsolationDriver';
+import { ISOLATION_REFUSED_MARKER, type DriverRunParams } from '../../../../src/core/sandbox/driver/IsolationDriver';
 
 const DIGEST = 'sha256:' + 'a'.repeat(64);
 const IMAGE = `ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0@${DIGEST}`;
@@ -37,8 +34,7 @@ class FakeRunner implements DockerCommandRunner {
   calls: RecordedCall[] = [];
   killed: string[] = [];
   progressLines: string[] = [];
-  runHandler: (binary: string, args: string[]) => DockerCommandResult | Promise<DockerCommandResult> =
-    () => okResult;
+  runHandler: (binary: string, args: string[]) => DockerCommandResult | Promise<DockerCommandResult> = () => okResult;
   attachHandler: (input: {
     containerId: string;
     signal: AbortSignal | undefined;
@@ -77,7 +73,7 @@ class FakeRunner implements DockerCommandRunner {
   }
 
   callsFor(firstArg: string): RecordedCall[] {
-    return this.calls.filter((call) => call.args[0] === firstArg);
+    return this.calls.filter(call => call.args[0] === firstArg);
   }
 }
 
@@ -147,7 +143,7 @@ function scriptReadyPath(runner: FakeRunner, digest = DIGEST): void {
     if (binary === 'docker' && args[0] === 'run') {
       // Simulate the daemon's bind-mount write as the sandbox uid: the probe
       // container touches /probe/write-test, which must appear on the host.
-      const volume = args.find((arg) => arg.endsWith(':/probe:rw'));
+      const volume = args.find(arg => arg.endsWith(':/probe:rw'));
       const hostDir = volume?.split(':')[0];
       if (hostDir !== undefined) {
         await writeFile(join(hostDir, 'write-test'), 'probe');
@@ -208,33 +204,56 @@ describe('DockerDriver.create', () => {
     expect(creates).toHaveLength(1);
     expect(creates[0]?.args).toEqual([
       'create',
-      '--network', 'none',
+      '--network',
+      'none',
       '--init',
       '--read-only',
-      '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m',
-      '--user', '65532:65532',
+      '--tmpfs',
+      '/tmp:rw,noexec,nosuid,size=64m',
+      '--user',
+      '65532:65532',
       '--cap-drop=ALL',
-      '--security-opt', 'no-new-privileges:true',
-      '--security-opt', 'seccomp=default',
-      '--pids-limit', '256',
-      '--memory', '2048m',
-      '--memory-swap', '2048m',
-      '--oom-kill-disable', 'false',
-      '--cpus', '2',
-      '--shm-size', '64m',
-      '--log-driver', 'local',
-      '--log-opt', 'max-size=1m',
-      '--log-opt', 'max-file=2',
-      '--label', 'tf.sandbox.run=run-123',
-      '-v', '/data/runs/r1/ingress:/ingress:ro',
-      '-v', '/data/runs/r1/scratch:/scratch:rw',
-      '-v', '/data/runs/r1/egress:/egress:rw',
-      '--workdir', '/scratch',
-      '-e', 'PATH=/usr/local/bin:/usr/bin:/bin',
-      '-e', 'LANG=C.UTF-8',
-      '-e', 'HOME=/scratch',
+      '--security-opt',
+      'no-new-privileges:true',
+      '--security-opt',
+      'seccomp=default',
+      '--pids-limit',
+      '256',
+      '--memory',
+      '2048m',
+      '--memory-swap',
+      '2048m',
+      '--oom-kill-disable',
+      'false',
+      '--cpus',
+      '2',
+      '--shm-size',
+      '64m',
+      '--log-driver',
+      'local',
+      '--log-opt',
+      'max-size=1m',
+      '--log-opt',
+      'max-file=2',
+      '--label',
+      'tf.sandbox.run=run-123',
+      '-v',
+      '/data/runs/r1/ingress:/ingress:ro',
+      '-v',
+      '/data/runs/r1/scratch:/scratch:rw',
+      '-v',
+      '/data/runs/r1/egress:/egress:rw',
+      '--workdir',
+      '/scratch',
+      '-e',
+      'PATH=/usr/local/bin:/usr/bin:/bin',
+      '-e',
+      'LANG=C.UTF-8',
+      '-e',
+      'HOME=/scratch',
       IMAGE,
-      'python3', '/ingress/__runcode_main.py',
+      'python3',
+      '/ingress/__runcode_main.py',
     ]);
   });
 
@@ -280,7 +299,7 @@ describe('DockerDriver.create', () => {
     // The fake attach only resolves once the driver kills the container.
     let resolveAttach: ((code: number) => void) | undefined;
     runner.attachHandler = () =>
-      new Promise<number>((resolve) => {
+      new Promise<number>(resolve => {
         resolveAttach = resolve;
       });
     const originalRun: DockerCommandRunner['run'] = runner.run.bind(runner);
@@ -295,7 +314,7 @@ describe('DockerDriver.create', () => {
     const driver = new DockerDriver(driverOptions(), runner);
     const controller = new AbortController();
     const runPromise = driver.run(runParams({ signal: controller.signal }));
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise(resolve => setTimeout(resolve, 10));
     controller.abort();
     const result = await runPromise;
     expect(result.terminatedBy).toBe('killed');
@@ -310,7 +329,7 @@ describe('DockerDriver.create', () => {
       }
       return okResult;
     };
-    runner.attachHandler = (input) => {
+    runner.attachHandler = input => {
       input.onStdout(Buffer.alloc(5 * 1024 * 1024, 'x'));
       return Promise.resolve(0);
     };
@@ -331,7 +350,7 @@ describe('DockerDriver.create', () => {
       }
       return okResult;
     };
-    runner.attachHandler = (input) => {
+    runner.attachHandler = input => {
       input.onStderr(Buffer.from('traceback\n'));
       return Promise.resolve(3);
     };
@@ -369,7 +388,7 @@ describe('DockerDriver.create', () => {
     expect(inspects[0]?.args).toEqual(['inspect', 'cid-oom']);
     expect(inspects[1]?.args).toEqual(['inspect', '--format', '{{.State.OOMKilled}}', 'cid-oom']);
     const rms = runner.callsFor('rm');
-    expect(rms.map((call) => call.args[2])).toContain('cid-oom');
+    expect(rms.map(call => call.args[2])).toContain('cid-oom');
   });
 
   test('exit 137 without OOMKilled stays a completed program exit', async () => {
@@ -518,7 +537,10 @@ describe('DockerDriver.ensureReady', () => {
 
   test('unpinned image reference is refused before touching the daemon', async () => {
     const runner = new FakeRunner();
-    const driver = new DockerDriver({ ...driverOptions(), image: 'ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0' }, runner);
+    const driver = new DockerDriver(
+      { ...driverOptions(), image: 'ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0' },
+      runner,
+    );
     const readiness = await driver.ensureReady();
     expect(readiness.ready).toBe(false);
     if (!readiness.ready) {
@@ -618,13 +640,17 @@ describe('DockerDriver.provision', () => {
     const runner = new FakeRunner();
     scriptReadyPath(runner);
     const seen: string[] = [];
-    runner.pullHandler = (input) => {
+    runner.pullHandler = input => {
       input.onProgress('pulling layer 1/3');
       input.onProgress('pull complete');
       return Promise.resolve();
     };
     const driver = new DockerDriver(driverOptions(), runner);
-    await driver.provision({ signal: undefined, onProgress: (message: string) => seen.push(message), timeoutSeconds: 600 });
+    await driver.provision({
+      signal: undefined,
+      onProgress: (message: string) => seen.push(message),
+      timeoutSeconds: 600,
+    });
     expect(seen).toEqual(['pulling layer 1/3', 'pull complete']);
   });
 
@@ -634,7 +660,7 @@ describe('DockerDriver.provision', () => {
     let pulls = 0;
     runner.pullHandler = async () => {
       pulls += 1;
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise(resolve => setTimeout(resolve, 20));
     };
     const driver = new DockerDriver(driverOptions(), runner);
     const noop = (): void => undefined;
@@ -647,17 +673,21 @@ describe('DockerDriver.provision', () => {
 
   test('a pull that never finishes hits the timeout bound', async () => {
     const runner = new FakeRunner();
-    runner.pullHandler = (input) =>
+    runner.pullHandler = input =>
       new Promise<void>((_resolve, reject) => {
-        input.signal?.addEventListener('abort', () => {
-          reject(new Error('aborted'));
-        }, { once: true });
+        input.signal?.addEventListener(
+          'abort',
+          () => {
+            reject(new Error('aborted'));
+          },
+          { once: true },
+        );
       });
     const driver = new DockerDriver(driverOptions(), runner);
     const noop = (): void => undefined;
-    await expect(
-      driver.provision({ signal: undefined, onProgress: noop, timeoutSeconds: 0 }),
-    ).rejects.toThrow('did not complete within 0s');
+    await expect(driver.provision({ signal: undefined, onProgress: noop, timeoutSeconds: 0 })).rejects.toThrow(
+      'did not complete within 0s',
+    );
   });
 });
 
@@ -712,7 +742,7 @@ describe('DockerDriver.dispose', () => {
       // Attach hangs until the driver kills the container (dispose path).
       let resolveAttach: ((code: number) => void) | undefined;
       runner.attachHandler = () =>
-        new Promise<number>((resolve) => {
+        new Promise<number>(resolve => {
           resolveAttach = resolve;
         });
       const originalRun: DockerCommandRunner['run'] = runner.run.bind(runner);
@@ -824,7 +854,7 @@ describe('checkContainerIsolation', () => {
     }
   });
 
-  test.each(['0', 'root', '0:0', ''])('rejects root user %p', (user) => {
+  test.each(['0', 'root', '0:0', ''])('rejects root user %p', user => {
     const entry = goodInspectEntry();
     (entry['Config'] as Record<string, unknown>)['User'] = user;
     expect(checkContainerIsolation({ inspectJson: JSON.stringify([entry]) }).ok).toBe(false);

@@ -18,8 +18,11 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentHarnessError,
+  createSentinelHostContext,
+  DEFAULT_PINNED_PATH,
   existingSandboxIdForProvider,
   extractErrorLogFields,
+  getSharedSentinelServices,
   isAgentInputUserMessage,
   isFileContentPart,
   McpConnectionError,
@@ -29,11 +32,6 @@ import {
   SandboxNotAvailableError,
   VercelAILLM,
   type BoundRepository,
-} from '@truefoundry/trueforge-core/core';
-import {
-  createSentinelHostContext,
-  getSharedSentinelServices,
-  DEFAULT_PINNED_PATH,
 } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -57,6 +55,7 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
 import {
@@ -76,7 +75,10 @@ import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import { submitRetainWithVerification, type SummarizeTurnContext } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
+import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
+import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
 import { mintPeeredTurnId } from '../runtime/peeringIds';
+import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import {
   profileLearningPassConfig,
   resolveTurnModelFqn,
@@ -102,14 +104,10 @@ import {
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
 import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
-import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
-import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
-import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
-import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';

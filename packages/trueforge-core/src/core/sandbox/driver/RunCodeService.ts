@@ -6,7 +6,7 @@ import type { Logger } from 'winston';
 import { onSignalAbort, signalAbortError } from '../../util/abort';
 import { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './errors';
 import type { DriverReadiness, DriverRunParams, DriverRunResult, IsolationDriver } from './IsolationDriver';
-import { OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX, ISOLATION_REFUSED_MARKER } from './IsolationDriver';
+import { ISOLATION_REFUSED_MARKER, OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX } from './IsolationDriver';
 import {
   FILE_BASENAME_PATTERN,
   RunCodeInputSchema,

@@ -44,7 +44,7 @@ const PROVIDER_MANIFEST = {
 };
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function fail(msg) {
   console.error('FATAL:', msg);
@@ -109,11 +109,7 @@ function sparkReachable() {
 // hardcoding it. The hardcoded name goes stale whenever the brain is swapped
 // (the 404 on gpt-oss-120b-derestricted after the DeepSeek cutover), so the
 // harness asks the endpoint what it actually serves.
-const SPARK_MODEL_ID_CACHE = path.join(
-  process.env.HOME || '/tmp',
-  '.buildbox-runner',
-  'spark-model-id',
-);
+const SPARK_MODEL_ID_CACHE = path.join(process.env.HOME || '/tmp', '.buildbox-runner', 'spark-model-id');
 
 function resolveSparkModelId() {
   const url = `${PROVIDER_MANIFEST.base_url}/models`;
@@ -230,7 +226,11 @@ async function startServers() {
   const fsMod = await import('node:fs');
   const dbPath = path.join(outDir, 'harness.db');
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fsMod.unlinkSync(dbPath + suffix); } catch { /* fresh start */ }
+    try {
+      fsMod.unlinkSync(dbPath + suffix);
+    } catch {
+      /* fresh start */
+    }
   }
   log('starting harness (standalone:dev:no-watch) ...');
   const logPath = path.join(outDir, 'server.log');
@@ -284,7 +284,9 @@ async function ensurePersona() {
   const wanted = scenario.persona.display_name;
   const list = await api('GET', '/api/v1/personas');
   const rows = list?.data ?? list?.personas ?? list ?? [];
-  const found = Array.isArray(rows) ? rows.find((p) => p?.display_name === wanted || p?.persona?.display_name === wanted) : null;
+  const found = Array.isArray(rows)
+    ? rows.find(p => p?.display_name === wanted || p?.persona?.display_name === wanted)
+    : null;
   if (found) {
     const id = found?.data?.id ?? found?.id ?? found?.persona?.id;
     log(`persona "${wanted}" already exists (${id})`);
@@ -407,7 +409,7 @@ async function takeScreenshots(sessionId, lastText) {
   const needle = (lastText || '').slice(0, 60).trim();
   if (needle) {
     await page
-      .waitForFunction((n) => document.body.innerText.includes(n), needle, { timeout: 90000 })
+      .waitForFunction(n => document.body.innerText.includes(n), needle, { timeout: 90000 })
       .catch(() => log('WARN: expected reply text not found in page; screenshotting anyway'));
   } else {
     await sleep(8000);
@@ -441,7 +443,12 @@ let lastText = '';
  * exact upstream id the provider API needs.
  */
 function slugifyModelName(id) {
-  let slug = id.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/, '');
+  let slug = id
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/, '');
   if (!/^[a-z]/.test(slug)) slug = `m-${slug}`.replace(/-+$/, '');
   if (slug.length < 2) slug = 'model';
   return slug;
