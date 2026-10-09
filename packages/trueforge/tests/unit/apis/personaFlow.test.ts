@@ -170,14 +170,9 @@ async function activePersona(server: ApprovalTestServer, sessionId: string) {
  * the off override through the real settings surface (same DB the turn path reads).
  */
 async function disableTurnSummarization(server: ApprovalTestServer): Promise<void> {
-  const response = await server.request(
-    '/api/v1/settings/memory-summarize',
-    jsonInit({ enabled: false }, 'PUT'),
-  );
+  const response = await server.request('/api/v1/settings/memory-summarize', jsonInit({ enabled: false }, 'PUT'));
   if (response.status !== 200) {
-    throw new Error(
-      `disabling turn summarization failed (${String(response.status)}): ${await response.text()}`,
-    );
+    throw new Error(`disabling turn summarization failed (${String(response.status)}): ${await response.text()}`);
   }
 }
 
@@ -351,7 +346,6 @@ describe('persona switching inside one conversation', () => {
     },
     TURN_TIMEOUT_MS,
   );
-
 
   it(
     'does not let deterministic direct address bypass negation, and fails closed on ambiguity with a notice',

@@ -92,8 +92,7 @@ export class SpaceBlockAnchorError extends Error {
     // The anchor is model-controlled: truncate it in the message the way search text is
     // truncated in SpaceEditNotFoundError, so a pathological anchor can't bloat the error
     // (and the context) unboundedly. The full value stays on the `anchor` field.
-    const anchorPreview =
-      input.anchor.length > 120 ? `${input.anchor.slice(0, 120)}…` : input.anchor;
+    const anchorPreview = input.anchor.length > 120 ? `${input.anchor.slice(0, 120)}…` : input.anchor;
     super(
       `${input.anchor === '' ? 'Empty' : `Unknown`} block anchor "${anchorPreview}" ` +
         `in block_edits entry #${String(input.index + 1)} for space "${input.space_id}". ` +
@@ -125,13 +124,7 @@ export class SpaceBlockAnchorNotFoundError extends SpaceBlockAnchorError {
 export class SpaceBlockAnchorDuplicateError extends SpaceBlockAnchorError {
   readonly occurrences: number;
 
-  constructor(input: {
-    space_id: string;
-    anchor: string;
-    index: number;
-    occurrences: number;
-    validAnchors: string[];
-  }) {
+  constructor(input: { space_id: string; anchor: string; index: number; occurrences: number; validAnchors: string[] }) {
     super(input);
     this.name = 'SpaceBlockAnchorDuplicateError';
     this.occurrences = input.occurrences;
@@ -139,9 +132,7 @@ export class SpaceBlockAnchorDuplicateError extends SpaceBlockAnchorError {
     // model back to the anchor that just failed.
     const unique = input.validAnchors.filter(a => a !== input.anchor);
     const uniqueList =
-      unique.length > 0
-        ? unique.map(a => `"${a}"`).join(', ')
-        : '(none — every anchor in this space is duplicated)';
+      unique.length > 0 ? unique.map(a => `"${a}"`).join(', ') : '(none — every anchor in this space is duplicated)';
     this.message =
       `Block anchor "${input.anchor}" appears ${String(input.occurrences)} times in the body of ` +
       `space "${input.space_id}" (block_edits entry #${String(input.index + 1)}): block_edits needs ` +
@@ -281,12 +272,12 @@ const UPDATE_SPACE_INPUT_SCHEMA = SpaceContentSchema.partial()
   })
   .strict()
   .refine(data => [data.body, data.edits, data.block_edits].filter(value => value !== undefined).length === 1, {
-    message: 'Provide exactly one of body (full replacement), edits (search/replace delta updates), or block_edits (anchor-addressed delta updates)',
+    message:
+      'Provide exactly one of body (full replacement), edits (search/replace delta updates), or block_edits (anchor-addressed delta updates)',
   })
   .refine(
     data =>
-      data.body === undefined ||
-      (data.name !== undefined && data.purpose !== undefined && data.status !== undefined),
+      data.body === undefined || (data.name !== undefined && data.purpose !== undefined && data.status !== undefined),
     {
       message:
         'Full-body updates replace the whole space: name, purpose, and status are all required with body ' +
@@ -453,11 +444,7 @@ let deltaBreakerInstanceCounter = 0;
 
 /** Separator for breaker key segments: none of tenant id, user ref, session key, or space id can contain NUL. */
 const BREAKER_KEY_SEPARATOR = '\u0000';
-function deltaBreakerKey(parts: {
-  authority: SpaceTurnAuthority;
-  sessionKey: string;
-  spaceId: string;
-}): string {
+function deltaBreakerKey(parts: { authority: SpaceTurnAuthority; sessionKey: string; spaceId: string }): string {
   return [parts.authority.tenantId, parts.authority.userRef, parts.sessionKey, parts.spaceId].join(
     BREAKER_KEY_SEPARATOR,
   );
@@ -676,7 +663,7 @@ class SpaceTool extends LocalToolMCP {
       name: UPDATE_SPACE_TOOL_NAME,
       description:
         'Update one persistent space. Provide exactly one of body, edits, or block_edits. ' +
-        'For body (full replacement): replaces name, purpose, status, format, and body wholesale \u2014 name, purpose, and status are required (format defaults to \'markdown\' if omitted). Call get_space first to read the current values if you are changing only one field, then resend the full current body with your changes folded in. ' +
+        "For body (full replacement): replaces name, purpose, status, format, and body wholesale \u2014 name, purpose, and status are required (format defaults to 'markdown' if omitted). Call get_space first to read the current values if you are changing only one field, then resend the full current body with your changes folded in. " +
         'For edits (delta updates): a list of up to 50 search/replace pairs applied to the current body in order; use this for small changes to a large space to avoid resending the full HTML. name, purpose, status, and format are optional with edits \u2014 omit them to leave metadata unchanged, provide them to change specific fields. ' +
         'Each search is an exact, case-sensitive, whitespace-sensitive substring match against the current body (lines joined by a single newline character). Copy search text verbatim from the most recent get_space body \u2014 do not retype, reformat, or normalize it, and never compose search strings from memory or from a metadata-only read: use edits only when you have the current body from a recent get_space in this conversation. ' +
         'Each search replaces every occurrence in the body, so use long, unique search strings anchored with surrounding context \u2014 never a single common word like a status label. The result reports how many occurrences each edit replaced, so check the counts match what you intended; if they do not, call revert_space to undo. ' +
@@ -857,8 +844,7 @@ class SpaceTool extends LocalToolMCP {
       // replace string could otherwise OOM the process building the joined
       // string before the length check ever runs. Exact under the
       // <= SPACE_BODY_MAX_LENGTH invariant every writer enforces.
-      const new_length =
-        edited.length + (parts.length - 1) * (edit.replace.length - edit.search.length);
+      const new_length = edited.length + (parts.length - 1) * (edit.replace.length - edit.search.length);
       if (new_length > SPACE_BODY_MAX_LENGTH) {
         throw new SpaceBodyTooLongError({ space_id, new_length });
       }
@@ -933,8 +919,7 @@ class SpaceTool extends LocalToolMCP {
           deleted = true;
         } else {
           // Arithmetic length check before materializing, mirroring the edits path.
-          const new_length =
-            body.length - (target.contentEnd - target.contentStart) + edit.new_content.length;
+          const new_length = body.length - (target.contentEnd - target.contentStart) + edit.new_content.length;
           if (new_length > SPACE_BODY_MAX_LENGTH) {
             throw new SpaceBodyTooLongError({ space_id, new_length });
           }
@@ -946,11 +931,7 @@ class SpaceTool extends LocalToolMCP {
           } else if (body.charAt(target.contentStart) === '\n') {
             separator = '\n';
           }
-          newBody =
-            body.slice(0, target.contentStart) +
-            separator +
-            edit.new_content +
-            body.slice(target.contentEnd);
+          newBody = body.slice(0, target.contentStart) + separator + edit.new_content + body.slice(target.contentEnd);
           // The preserved separator is part of the stored block content.
           resultLength = separator.length + edit.new_content.length;
           deleted = false;
@@ -1263,8 +1244,17 @@ export interface SpaceTurnContext {
  */
 export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
   constructor(...args: [...ConstructorParameters<typeof MemoryTurnResourceResolver>, space: SpaceTurnContext]) {
-    const [deps, profile, persona, memory, toolOutputScreen, personaKnowledgeBlock, personaKnowledgeHits, switchNotice, space] =
-      args;
+    const [
+      deps,
+      profile,
+      persona,
+      memory,
+      toolOutputScreen,
+      personaKnowledgeBlock,
+      personaKnowledgeHits,
+      switchNotice,
+      space,
+    ] = args;
     super(deps, profile, persona, memory, toolOutputScreen, personaKnowledgeBlock, personaKnowledgeHits, switchNotice);
     this.#space = space;
   }

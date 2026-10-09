@@ -21,9 +21,10 @@ export interface MemoryVaultCatalog {
   updateEntry(options: { entryId: string; text: string }): Promise<MemoryVaultEntry>;
   deleteEntry(entryId: string): Promise<void>;
   exportEntries(namespace?: string): Promise<{ namespace: string; exportedAt: string; entries: MemoryVaultEntry[] }>;
-  importEntries(
-    options: { namespace?: string; entries: Array<{ text: string; timestamp?: string }> },
-  ): Promise<{ namespace: string; imported: number }>;
+  importEntries(options: {
+    namespace?: string;
+    entries: Array<{ text: string; timestamp?: string }>;
+  }): Promise<{ namespace: string; imported: number }>;
   getSharing(): Promise<MemoryVaultSharing>;
   updateSharing(sharing: MemoryVaultSharing): Promise<MemoryVaultSharing>;
 }
@@ -94,7 +95,9 @@ export function createMemoryVaultCatalog(options: CreateTrueForgeClientOptions =
     if (!response.ok) {
       const failure = ErrorSchema.safeParse(responseBody);
       throw new Error(
-        failure.success ? failure.data.error.message : `Memory vault request failed with HTTP ${String(response.status)}`,
+        failure.success
+          ? failure.data.error.message
+          : `Memory vault request failed with HTTP ${String(response.status)}`,
       );
     }
     return parse(responseBody);
@@ -106,7 +109,8 @@ export function createMemoryVaultCatalog(options: CreateTrueForgeClientOptions =
   };
 
   return {
-    listEntries: namespace => request('GET', `/api/v1/memory/vault${namespaceQuery(namespace)}`, undefined, parseEntries),
+    listEntries: namespace =>
+      request('GET', `/api/v1/memory/vault${namespaceQuery(namespace)}`, undefined, parseEntries),
     updateEntry: ({ entryId, text }) =>
       request('PUT', `/api/v1/memory/vault/${encodeURIComponent(entryId)}`, { text }, parseEntry),
     deleteEntry: entryId =>

@@ -46,16 +46,15 @@ function IsolationRow({
   return (
     <div className="flex flex-col gap-1 px-4 py-2.5 sm:flex-row sm:items-baseline sm:justify-between">
       <dt className="text-text-secondary">{label}</dt>
-      <dd
-        className={`text-text-primary ${mono ? 'font-mono text-[0.8125rem]' : ''} ${breakAll ? 'break-all' : ''}`}
-      >
+      <dd className={`text-text-primary ${mono ? 'font-mono text-[0.8125rem]' : ''} ${breakAll ? 'break-all' : ''}`}>
         {value}
       </dd>
     </div>
   );
 }
 
-const statusPresentation = (status: SandboxSnapshotSyncStatus['status']): { label: string; className: string } => {  switch (status) {
+const statusPresentation = (status: SandboxSnapshotSyncStatus['status']): { label: string; className: string } => {
+  switch (status) {
     case 'pending':
       return {
         label: 'Syncing image...',
@@ -270,8 +269,8 @@ const SandboxSettings = () => {
       <section className="mb-6">
         <h3 className="text-xl font-semibold tracking-tight text-text-primary">Code execution</h3>
         <p className="mt-1 text-sm text-text-secondary">
-          The <span className="font-mono">run_code</span> tool runs Python and Node.js in an isolated, offline
-          sandbox. These values come from the server configuration and take a restart to change.
+          The <span className="font-mono">run_code</span> tool runs Python and Node.js in an isolated, offline sandbox.
+          These values come from the server configuration and take a restart to change.
         </p>
         <div className="mt-3 overflow-hidden rounded-xl border border-border bg-card-bg">
           {isolationStatus == null ? (
@@ -288,14 +287,8 @@ const SandboxSettings = () => {
                 label="Limits"
                 value={`${String(isolationStatus.memoryMb)} MiB memory · ${String(isolationStatus.diskMb)} MiB disk · ${String(isolationStatus.stdoutStderrCapKb)} KiB output cap`}
               />
-              <IsolationRow
-                label="Image pull bound"
-                value={`${String(isolationStatus.imagePullTimeoutSeconds)}s`}
-              />
-              <IsolationRow
-                label="Network egress"
-                value={isolationStatus.networkEgress ? 'enabled' : 'disabled'}
-              />
+              <IsolationRow label="Image pull bound" value={`${String(isolationStatus.imagePullTimeoutSeconds)}s`} />
+              <IsolationRow label="Network egress" value={isolationStatus.networkEgress ? 'enabled' : 'disabled'} />
               <IsolationRow
                 label="Image signature check"
                 value={isolationStatus.cosignKeyConfigured ? 'cosign key configured' : 'no cosign key configured'}

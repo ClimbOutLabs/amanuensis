@@ -1,13 +1,13 @@
 import type { Logger } from 'winston';
 import type { AgentCapability } from '../core/capabilities/AgentCapability';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
+import type { ModelMessageEvent } from '../core/events/schema';
 import type { ILLM } from '../core/llm/ILLM';
 import type { AgentDefinition, ModelParams } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
+import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
-import type { ModelMessageEvent } from '../core/events/schema';
-import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { TurnRecord } from './models/TurnRecord';
 import type { AgentSpec } from './schemas/agentSpec';
 
@@ -174,7 +174,5 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
    * are non-durable transport; the repaired terminal event is what live
    * clients settle on.
    */
-  readonly finalizeAssistantOutput?:
-    | ((output: ModelMessageEvent) => ModelMessageEvent | undefined)
-    | undefined;
+  readonly finalizeAssistantOutput?: ((output: ModelMessageEvent) => ModelMessageEvent | undefined) | undefined;
 }

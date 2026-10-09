@@ -450,69 +450,69 @@ export async function extractDocumentText(input: {
             // No continue: falls through to pendingRangeInfo.push below.
           } else {
             rangeInfo = { start: rangeStart, total: nativeResult.total_pages };
-        const lastPageInRange = Math.min(rangeStart + adapterMaxPages - 1, rangeEnd, nativeResult.total_pages);
-        const pagesInRange = Math.max(0, lastPageInRange - rangeStart + 1);
-        const pagesAllowed = reservePages(pagesInRange);
-        const nativeByPage = new Map(nativeResult.pages.map(page => [page.page_number, page]));
-        // Page numbers are absolute: a range read never re-processes the
-        // pages before it.
-        const nativePages = Array.from({ length: pagesAllowed }, (_, index): ExtractedDocumentPage => {
-          const page_number = rangeStart + index;
-          const nativePage = nativeByPage.get(page_number);
-          return {
-            page_number,
-            extraction_mode: 'text',
-            lines: nativePage ? linesFromText(nativePage.text) : [],
-          };
-        });
-        if (nativePages.every(page => page.lines.length > 0)) {
-          const pages = nativePages;
-          pushDocument(
-            {
-              ...file,
-              sha256,
-              extraction_mode: 'text',
-              pages,
-              issue: null,
-            },
-            fileStartedAt,
-          );
-        } else {
-          const emptyPages = nativePages
-            .filter(page => page.lines.length === 0)
-            .map(page => page.page_number)
-            .slice(0, MAX_PAGES_PER_DOCUMENT);
-          const ocrPages =
-            emptyPages.length > 0
-              ? await input.runOcr({
-                  filename: file.filename,
-                  filePath: file.path,
-                  kind: 'pdf',
-                  pages: emptyPages,
-                  maxPages: pagesAllowed,
-                })
-              : [];
-          const ocrByPage = new Map(ocrPages.map(page => [page.page_number, page]));
-          const pages = nativePages.map((page): ExtractedDocumentPage => {
-            if (page.lines.length > 0) {
-              return page;
-            }
-            const ocrPage = ocrByPage.get(page.page_number);
-            return ocrPage
-              ? { page_number: page.page_number, extraction_mode: 'ocr', lines: linesFromText(ocrPage.text) }
-              : page;
-          });
-          const unresolved = pages.filter(page => page.lines.length === 0).map(page => page.page_number);
-          pushDocument(
-            {
-              ...file,
-              sha256,
-              extraction_mode: 'mixed',
-              pages,
-              issue: unresolved.length > 0 ? `OCR did not resolve page(s): ${unresolved.join(', ')}.` : null,
-            },
-            fileStartedAt,
-          );
+            const lastPageInRange = Math.min(rangeStart + adapterMaxPages - 1, rangeEnd, nativeResult.total_pages);
+            const pagesInRange = Math.max(0, lastPageInRange - rangeStart + 1);
+            const pagesAllowed = reservePages(pagesInRange);
+            const nativeByPage = new Map(nativeResult.pages.map(page => [page.page_number, page]));
+            // Page numbers are absolute: a range read never re-processes the
+            // pages before it.
+            const nativePages = Array.from({ length: pagesAllowed }, (_, index): ExtractedDocumentPage => {
+              const page_number = rangeStart + index;
+              const nativePage = nativeByPage.get(page_number);
+              return {
+                page_number,
+                extraction_mode: 'text',
+                lines: nativePage ? linesFromText(nativePage.text) : [],
+              };
+            });
+            if (nativePages.every(page => page.lines.length > 0)) {
+              const pages = nativePages;
+              pushDocument(
+                {
+                  ...file,
+                  sha256,
+                  extraction_mode: 'text',
+                  pages,
+                  issue: null,
+                },
+                fileStartedAt,
+              );
+            } else {
+              const emptyPages = nativePages
+                .filter(page => page.lines.length === 0)
+                .map(page => page.page_number)
+                .slice(0, MAX_PAGES_PER_DOCUMENT);
+              const ocrPages =
+                emptyPages.length > 0
+                  ? await input.runOcr({
+                      filename: file.filename,
+                      filePath: file.path,
+                      kind: 'pdf',
+                      pages: emptyPages,
+                      maxPages: pagesAllowed,
+                    })
+                  : [];
+              const ocrByPage = new Map(ocrPages.map(page => [page.page_number, page]));
+              const pages = nativePages.map((page): ExtractedDocumentPage => {
+                if (page.lines.length > 0) {
+                  return page;
+                }
+                const ocrPage = ocrByPage.get(page.page_number);
+                return ocrPage
+                  ? { page_number: page.page_number, extraction_mode: 'ocr', lines: linesFromText(ocrPage.text) }
+                  : page;
+              });
+              const unresolved = pages.filter(page => page.lines.length === 0).map(page => page.page_number);
+              pushDocument(
+                {
+                  ...file,
+                  sha256,
+                  extraction_mode: 'mixed',
+                  pages,
+                  issue: unresolved.length > 0 ? `OCR did not resolve page(s): ${unresolved.join(', ')}.` : null,
+                },
+                fileStartedAt,
+              );
             }
           }
         }
@@ -611,7 +611,7 @@ export async function extractDocumentText(input: {
             aggregateDeadEnd
               ? 'The aggregate page/character budget is exhausted; re-running cannot show more of this document.'
               : `No pages could be shown within this call's remaining budget. ` +
-                `Call extract_document_text again with page_start=${String(info.start)}.`,
+                  `Call extract_document_text again with page_start=${String(info.start)}.`,
           );
         }
       } else if (hasMore) {

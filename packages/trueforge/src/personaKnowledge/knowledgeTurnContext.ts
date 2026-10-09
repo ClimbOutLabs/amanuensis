@@ -2,9 +2,9 @@ import type { TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
 import { isAgentInputUserMessage, isFileContentPart } from '@truefoundry/trueforge-core/core';
 
 import { noteLibraryLookup, type InternalSourceState } from '../runtime/internalSourceGuard';
-import { retrievePersonaKnowledge } from './knowledgeRetrieval';
 import type { KnowledgeRelevanceJudge } from './knowledgeRelevanceJudge';
 import type { PersonaKnowledgeHit } from './knowledgeRetrieval';
+import { retrievePersonaKnowledge } from './knowledgeRetrieval';
 
 /**
  * The user-authored text of the turn, with file parts dropped: the knowledge
@@ -32,9 +32,7 @@ export function extractKnowledgeQuery(input: TurnInputItem[] | undefined): strin
  * Only the policy question is re-derived from history — retrieval itself is
  * never re-run on history input.
  */
-export function extractHistoryKnowledgeQuery(
-  historyInputs: TurnInputItem[][] | undefined,
-): string | undefined {
+export function extractHistoryKnowledgeQuery(historyInputs: TurnInputItem[][] | undefined): string | undefined {
   if (historyInputs === undefined) {
     return undefined;
   }

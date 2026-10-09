@@ -9,8 +9,8 @@ import { useCompactLayout } from '@/atoms/lib/CompactLayoutContext.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
 import { Icon } from '@/icons/Icon.js';
-import { useOptionalCatalogServer, useOptionalRefreshServerCapabilities } from '@/server/ServerContext.js';
 import { useOptionalSentinelApiState } from '@/sentinel/SentinelApiContext.js';
+import { useOptionalCatalogServer, useOptionalRefreshServerCapabilities } from '@/server/ServerContext.js';
 import { useShellMode, type SettingsSection } from '@/server/ShellModeContext.js';
 
 // Section modules (and their list/catalog APIs) load only when that tab mounts.
@@ -98,33 +98,13 @@ const TruefoundrySettingsBuilder = () => {
     Array<{
       id: SettingsSection;
       label: string;
-      icon:
-        | 'cpu'
-        | 'brain'
-        | 'plug'
-        | 'box-archive'
-        | 'lightbulb'
-        | 'cube'
-        | 'robot'
-        | 'palette'
-        | 'save'
-        | 'lock';
+      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'save' | 'lock';
     }>
   >(() => {
     const baseSections: Array<{
       id: SettingsSection;
       label: string;
-      icon:
-        | 'cpu'
-        | 'brain'
-        | 'plug'
-        | 'box-archive'
-        | 'lightbulb'
-        | 'cube'
-        | 'robot'
-        | 'palette'
-        | 'save'
-        | 'lock';
+      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'save' | 'lock';
     }> = [
       { id: 'models', label: 'Models', icon: 'cpu' },
       { id: 'model-roles', label: 'Model roles', icon: 'brain' },

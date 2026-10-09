@@ -25,6 +25,7 @@ import {
   ensureWritableDataDir,
   isDataDirConfigurationError,
 } from '../../utils/dataDir';
+import type { EmbeddingSubsystem } from './embeddingRetrieval';
 import {
   timeoutFailure,
   type GetOperationOutcome,
@@ -38,7 +39,6 @@ import {
   type RetainOutcome,
   type RetryOperationOutcome,
 } from './hindsightClient';
-import type { EmbeddingSubsystem } from './embeddingRetrieval';
 import {
   appendVaultTombstone,
   estimateTokens,
@@ -217,9 +217,7 @@ export class MarkdownMemoryClient implements MemoryClient {
           ordered = fused;
         }
       }
-      const ranked =
-        ordered ??
-        scored.map(candidate => ({ id: candidate.entry.id, text: candidate.entry.text }));
+      const ranked = ordered ?? scored.map(candidate => ({ id: candidate.entry.id, text: candidate.entry.text }));
       for (const item of ranked) {
         const ok = take({ id: item.id, text: item.text, type: 'markdown' });
         if (!ok) {
@@ -350,9 +348,7 @@ export class MarkdownMemoryClient implements MemoryClient {
   private static readonly VAULT_ENTRY_ID_PATTERN = /^md:([^:]+):([^#]+)#(\d+)$/;
 
   private vaultTenantScope(filesystemNamespace: string): boolean {
-    return (
-      filesystemNamespace === this.namespace || filesystemNamespace.startsWith(`${this.namespace}__`)
-    );
+    return filesystemNamespace === this.namespace || filesystemNamespace.startsWith(`${this.namespace}__`);
   }
 
   private async lookupVaultEntry(
@@ -387,10 +383,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     );
   }
 
-  async listEntries(params: {
-    namespace: string;
-    timeoutMs: number;
-  }): Promise<ListMemoryVaultEntriesOutcome> {
+  async listEntries(params: { namespace: string; timeoutMs: number }): Promise<ListMemoryVaultEntriesOutcome> {
     try {
       const filesystemNamespace = vaultFilesystemNamespace(this.namespace, params.namespace);
       const scanned = await withTimeout(
@@ -468,10 +461,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  async deleteEntry(params: {
-    entryId: string;
-    timeoutMs: number;
-  }): Promise<DeleteMemoryVaultEntryOutcome> {
+  async deleteEntry(params: { entryId: string; timeoutMs: number }): Promise<DeleteMemoryVaultEntryOutcome> {
     try {
       const target = await this.lookupVaultEntry(params.entryId, params.timeoutMs);
       if (target === undefined) {

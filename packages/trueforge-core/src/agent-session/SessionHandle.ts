@@ -11,6 +11,13 @@ import {
   type ImplementationPlanGrant,
 } from '../core/mcp/implementationPlanGrant';
 import {
+  createSentinelHostContext,
+  DEFAULT_PINNED_PATH,
+  defaultSentinelServices,
+  type SentinelHostContext,
+  type SentinelServices,
+} from '../core/permissions';
+import {
   mechanicalAbnormalHandoff,
   type AbnormalHandoff,
   type AbnormalHandoffCause,
@@ -18,7 +25,6 @@ import {
 } from '../core/runtime/AbnormalHandoff';
 import type { AgentDefinition } from '../core/runtime/AgentDefinition';
 import { AgentThread } from '../core/runtime/AgentThread';
-import { defaultSentinelServices, createSentinelHostContext, DEFAULT_PINNED_PATH, type SentinelHostContext, type SentinelServices } from '../core/permissions';
 import type {
   AgentThreadAppendContext,
   AgentThreadSendBatch,

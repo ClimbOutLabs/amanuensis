@@ -38,11 +38,37 @@ function stubApi(entries: SentinelAuditEntry[]): { api: SentinelApi; updateUserS
 describe('SentinelAuditFeed', () => {
   it('renders entries with descriptions, outcomes, and denial reasons', async () => {
     const { api } = stubApi([
-      makeEntry({ id: 'entry-1', outcome: 'approved', description: 'Sent $250 to Acme Corp', tier: 3, action_type: 'payment_send' }),
-      makeEntry({ id: 'entry-2', outcome: 'denied', description: 'Published the release', reason: 'User declined.', tier: 3, action_type: 'deploy_publish' }),
-      makeEntry({ id: 'entry-3', outcome: 'auto_denied', description: 'Refreshed the database', reason: 'Offline mode was on.', tier: 3, action_type: 'db_refresh' }),
+      makeEntry({
+        id: 'entry-1',
+        outcome: 'approved',
+        description: 'Sent $250 to Acme Corp',
+        tier: 3,
+        action_type: 'payment_send',
+      }),
+      makeEntry({
+        id: 'entry-2',
+        outcome: 'denied',
+        description: 'Published the release',
+        reason: 'User declined.',
+        tier: 3,
+        action_type: 'deploy_publish',
+      }),
+      makeEntry({
+        id: 'entry-3',
+        outcome: 'auto_denied',
+        description: 'Refreshed the database',
+        reason: 'Offline mode was on.',
+        tier: 3,
+        action_type: 'db_refresh',
+      }),
       makeEntry({ id: 'entry-4', outcome: 'undone', description: 'Wrote a file', tier: 2, action_type: 'exec' }),
-      makeEntry({ id: 'entry-5', outcome: 'logged', description: 'Read the credentials file', tier: 1, action_type: 'file_read' }),
+      makeEntry({
+        id: 'entry-5',
+        outcome: 'logged',
+        description: 'Read the credentials file',
+        tier: 1,
+        action_type: 'file_read',
+      }),
     ]);
     render(
       <SentinelApiProvider api={api}>
@@ -54,9 +80,7 @@ describe('SentinelAuditFeed', () => {
     expect(screen.getByText('Denied')).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === ' · User declined.')).toBeInTheDocument();
     expect(screen.getByText('Auto-denied')).toBeInTheDocument();
-    expect(
-      screen.getByText((_, element) => element?.textContent === ' · Offline mode was on.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === ' · Offline mode was on.')).toBeInTheDocument();
     expect(screen.getByText('Undone')).toBeInTheDocument();
     expect(screen.getByText('Logged')).toBeInTheDocument();
   });

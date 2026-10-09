@@ -10,21 +10,18 @@ import {
   useServerCapabilities,
   useServerCapabilitiesSettled,
 } from '@/server/ServerContext.js';
-import {
-  readMemoryEmbeddingsStatus,
-  type MemoryEmbeddingsStatus,
-} from './memoryEmbeddingsCapability.js';
+import { useToasterOptional } from '../ToasterContainer.js';
+import { readMemoryEmbeddingsStatus, type MemoryEmbeddingsStatus } from './memoryEmbeddingsCapability.js';
 import {
   readMemoryScreenStatus,
   readToolOutputScreenStatus,
   type MemoryScreenStatus,
   type ToolOutputScreenStatus,
 } from './memoryScreenCapability.js';
-import { readMemoryStorageDir } from './memoryStorageCapability.js';
 import { useMemoryScreenSetting } from './memoryScreenSetting.js';
+import { readMemoryStorageDir } from './memoryStorageCapability.js';
 import { useMemorySummarizeSetting, type MemorySummarizeSettingState } from './memorySummarizeSetting.js';
 import { useToolOutputScreenSetting } from './toolOutputScreenSetting.js';
-import { useToasterOptional } from '../ToasterContainer.js';
 
 type ScreenStatus = { enabled: boolean; threshold?: number; timeoutMs?: number } | null;
 type ScreenState = 'on' | 'off' | 'unavailable';
@@ -308,8 +305,8 @@ function MemorySummarizeToggle({ setting }: { setting: MemorySummarizeSettingSta
         </label>
         {blocked ? (
           <p className="mt-0.5 text-xs text-text-secondary">
-            Turn summaries need Markdown memory. This server&rsquo;s memory setup saves the full
-            transcript, so the switch stays off.
+            Turn summaries need Markdown memory. This server&rsquo;s memory setup saves the full transcript, so the
+            switch stays off.
           </p>
         ) : (
           <p className="mt-0.5 text-xs text-text-secondary">{stateCopy}</p>
@@ -358,19 +355,15 @@ function MemorySummarizeCard() {
   // no empty bordered box, nothing to confuse the eye.
   if (!setting.supported) return null;
   return (
-    <section
-      aria-labelledby="memory-summarize-heading"
-      className="rounded-xl border border-border bg-card-bg p-4"
-    >
+    <section aria-labelledby="memory-summarize-heading" className="rounded-xl border border-border bg-card-bg p-4">
       <h4 id="memory-summarize-heading" className="text-sm font-medium text-text-primary">
         Turn summaries
       </h4>
       <p className="mt-1 text-sm text-text-secondary">
-        When this is on, Aman condenses each finished chat into a short summary before saving it
-        to the memory log, instead of keeping the full word-for-word transcript. Summaries keep
-        the important details and skip the small talk, so the log stays compact and quick to
-        search. If a summary can&rsquo;t be made for a turn, Aman keeps the full transcript
-        &mdash; a memory is never lost.
+        When this is on, Aman condenses each finished chat into a short summary before saving it to the memory log,
+        instead of keeping the full word-for-word transcript. Summaries keep the important details and skip the small
+        talk, so the log stays compact and quick to search. If a summary can&rsquo;t be made for a turn, Aman keeps the
+        full transcript &mdash; a memory is never lost.
       </p>
       <div className="mt-4 border-t border-border pt-4">
         <MemorySummarizeToggle setting={setting} />
@@ -448,17 +441,11 @@ function MemoryStatusCard() {
         : 'The server did not report which memory backend is running — on or off cannot be confirmed here.';
 
   return (
-    <section
-      aria-labelledby="memory-status-heading"
-      className="rounded-xl border border-border bg-card-bg p-4"
-    >
+    <section aria-labelledby="memory-status-heading" className="rounded-xl border border-border bg-card-bg p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">{pill}</div>
-          <h4
-            id="memory-status-heading"
-            className="mt-2 truncate text-sm font-medium text-text-primary"
-          >
+          <h4 id="memory-status-heading" className="mt-2 truncate text-sm font-medium text-text-primary">
             {heading}
           </h4>
           <p className="mt-0.5 text-sm text-text-secondary">{body}</p>
@@ -507,7 +494,12 @@ const MemorySettings = () => {
           enabledText="Recall screening is on"
           disabledText="Recall screening is off"
           unavailableText="Recall screening status unavailable"
-          envNames={['MEMORY_SCREEN_ENABLED', 'MEMORY_SCREEN_URL', 'MEMORY_SCREEN_AUTH_TOKEN', 'MEMORY_SCREEN_THRESHOLD']}
+          envNames={[
+            'MEMORY_SCREEN_ENABLED',
+            'MEMORY_SCREEN_URL',
+            'MEMORY_SCREEN_AUTH_TOKEN',
+            'MEMORY_SCREEN_THRESHOLD',
+          ]}
           action={<MemoryScreenToggle status={memoryScreen} />}
         />
         <ScreenStatusCard
@@ -530,10 +522,7 @@ const MemorySettings = () => {
       </div>
 
       {confirmedMarkdown ? (
-        <section
-          aria-labelledby="memory-notes-heading"
-          className="rounded-xl border border-border bg-card-bg p-4"
-        >
+        <section aria-labelledby="memory-notes-heading" className="rounded-xl border border-border bg-card-bg p-4">
           <h5 id="memory-notes-heading" className="text-sm font-medium text-text-primary">
             How memory works
           </h5>
@@ -604,10 +593,7 @@ function MemoryEmbeddingsCard() {
     return () => clearInterval(timer);
   }, [transitional, refreshCapabilities]);
   return (
-    <section
-      aria-labelledby="memory-search-heading"
-      className="rounded-xl border border-border bg-card-bg p-4"
-    >
+    <section aria-labelledby="memory-search-heading" className="rounded-xl border border-border bg-card-bg p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h4 id="memory-search-heading" className="text-sm font-medium text-text-primary">
           How Aman finds memories
@@ -615,16 +601,12 @@ function MemoryEmbeddingsCard() {
         <EmbeddingsBadge status={status} />
       </div>
       {failed && !noticeDismissed ? (
-        <div
-          role="alert"
-          className="mt-3 rounded-lg border border-warning-bg/40 bg-warning-bg/10 p-3"
-        >
+        <div role="alert" className="mt-3 rounded-lg border border-warning-bg/40 bg-warning-bg/10 p-3">
           <div className="flex items-start justify-between gap-3">
             <p className="text-sm text-text-primary">
-              <span className="font-medium">Smart search isn&rsquo;t available right now.</span>{' '}
-              Aman couldn&rsquo;t load its meaning-based search helper, so memories are found
-              with keywords for now. It&rsquo;s trying again automatically — there&rsquo;s
-              nothing you need to do.
+              <span className="font-medium">Smart search isn&rsquo;t available right now.</span> Aman couldn&rsquo;t
+              load its meaning-based search helper, so memories are found with keywords for now. It&rsquo;s trying again
+              automatically — there&rsquo;s nothing you need to do.
             </p>
             <button
               type="button"
@@ -641,12 +623,11 @@ function MemoryEmbeddingsCard() {
           'The server did not report meaning-based recall status — it may be an older build, or the capabilities request has not finished.'}
       </p>
       <p className="mt-2 text-sm text-text-secondary">
-        Aman finds memories by meaning, not just matching words — so &ldquo;where did we stay
-        on that trip&rdquo; finds the hotel note even when it only names the hotel. To do
-        that, the first time Aman runs it downloads a small helper model once (about 120&nbsp;MB),
-        automatically in the background. There is nothing to install and nothing to click. After
-        that one download, memory search works fully offline, and everything stays on this server.
-        If the download can&rsquo;t finish, Aman just keeps finding memories with keywords.
+        Aman finds memories by meaning, not just matching words — so &ldquo;where did we stay on that trip&rdquo; finds
+        the hotel note even when it only names the hotel. To do that, the first time Aman runs it downloads a small
+        helper model once (about 120&nbsp;MB), automatically in the background. There is nothing to install and nothing
+        to click. After that one download, memory search works fully offline, and everything stays on this server. If
+        the download can&rsquo;t finish, Aman just keeps finding memories with keywords.
       </p>
     </section>
   );

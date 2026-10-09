@@ -50,7 +50,9 @@ export function readSandboxIsolationStatus(capabilities: unknown): SandboxIsolat
   if (!isObject(raw)) return null;
   const driver = isolationDriver(read({ raw, camel: 'isolationDriver', snake: 'isolation_driver' }));
   const image = read({ raw, camel: 'image', snake: 'image' });
-  const defaultTimeoutSeconds = nonNegativeInt(read({ raw, camel: 'defaultTimeoutSeconds', snake: 'default_timeout_seconds' }));
+  const defaultTimeoutSeconds = nonNegativeInt(
+    read({ raw, camel: 'defaultTimeoutSeconds', snake: 'default_timeout_seconds' }),
+  );
   const maxTimeoutSeconds = nonNegativeInt(read({ raw, camel: 'maxTimeoutSeconds', snake: 'max_timeout_seconds' }));
   const memoryMb = nonNegativeInt(read({ raw, camel: 'memoryMb', snake: 'memory_mb' }));
   const diskMb = nonNegativeInt(read({ raw, camel: 'diskMb', snake: 'disk_mb' }));

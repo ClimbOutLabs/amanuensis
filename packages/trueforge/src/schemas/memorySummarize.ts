@@ -11,13 +11,9 @@ export const MemorySummarizeSchema = z
   .object({
     enabled: z
       .boolean()
-      .describe(
-        'The stored setting: the persisted override when set, else the `MEMORY_SUMMARIZE` env default.',
-      ),
+      .describe('The stored setting: the persisted override when set, else the `MEMORY_SUMMARIZE` env default.'),
     overridden: z.boolean().describe('Whether a persisted override is currently stored.'),
-    default_enabled: z
-      .boolean()
-      .describe('The `MEMORY_SUMMARIZE` env default used when no override is stored.'),
+    default_enabled: z.boolean().describe('The `MEMORY_SUMMARIZE` env default used when no override is stored.'),
     effective_enabled: z
       .boolean()
       .describe(

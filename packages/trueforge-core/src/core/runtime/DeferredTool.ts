@@ -90,9 +90,7 @@ const callToolSchema = z.object({
  * wrapper does not parse: mint then classified the wrapper itself, and the
  * verifier must hash the wrapper too.
  */
-export function tryUnwrapCallToolInput(
-  wrapperArgs: Record<string, unknown>,
-): Record<string, unknown> | undefined {
+export function tryUnwrapCallToolInput(wrapperArgs: Record<string, unknown>): Record<string, unknown> | undefined {
   const parsed = callToolSchema.safeParse(wrapperArgs);
   if (!parsed.success) {
     return undefined;

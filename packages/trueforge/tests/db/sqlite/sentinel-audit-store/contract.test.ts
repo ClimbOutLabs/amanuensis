@@ -68,7 +68,13 @@ describe('SentinelAuditStore', () => {
     expect(s1).toHaveLength(1);
     expect(s1[0]!.tool_name).toBe('read');
 
-    const otherTenant = await store.list({ tenant_id: 't2', created_by: 'u1', conversation_id: 's1', limit: 50, offset: 0 });
+    const otherTenant = await store.list({
+      tenant_id: 't2',
+      created_by: 'u1',
+      conversation_id: 's1',
+      limit: 50,
+      offset: 0,
+    });
     expect(otherTenant).toHaveLength(0);
   });
 
@@ -87,7 +93,13 @@ describe('SentinelAuditStore', () => {
 
     await store.updateOutcome({ entry_id: row!.id, outcome: 'stopped_by_user' });
 
-    const [updated] = await store.list({ tenant_id: 't1', created_by: 'u1', conversation_id: 's1', limit: 50, offset: 0 });
+    const [updated] = await store.list({
+      tenant_id: 't1',
+      created_by: 'u1',
+      conversation_id: 's1',
+      limit: 50,
+      offset: 0,
+    });
     expect(updated!.outcome).toBe('stopped_by_user');
   });
 

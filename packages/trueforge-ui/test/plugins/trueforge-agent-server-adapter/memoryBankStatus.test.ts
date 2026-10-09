@@ -1,11 +1,8 @@
+import type { TrueForge } from '@truefoundry/trueforge-sdk';
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import type { TrueForge } from '@truefoundry/trueforge-sdk';
 
-import {
-  getMemoryBankStatus,
-  readMemoryBackend,
-} from '@/plugins/trueforge-agent-server-adapter/lists.js';
+import { getMemoryBankStatus, readMemoryBackend } from '@/plugins/trueforge-agent-server-adapter/lists.js';
 
 /** Only `server.getCapabilities` is exercised; the rest of the client stays unimplemented. */
 function fakeClient(capabilitiesData: unknown): TrueForge {
@@ -29,10 +26,7 @@ describe('getMemoryBankStatus', () => {
 
   it('reports null when the server does not name a memory backend', async () => {
     assert.equal(await getMemoryBankStatus(fakeClient({})), null);
-    assert.equal(
-      await getMemoryBankStatus(fakeClient({ memoryDefaults: { backend: 'something-new' } })),
-      null,
-    );
+    assert.equal(await getMemoryBankStatus(fakeClient({ memoryDefaults: { backend: 'something-new' } })), null);
   });
 });
 

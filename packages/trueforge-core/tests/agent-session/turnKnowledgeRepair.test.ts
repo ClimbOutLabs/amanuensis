@@ -1,20 +1,12 @@
+import type { ITurnResourceResolver } from '../../src/agent-session/ITurnResourceResolver';
+import { MAIN_THREAD_ID } from '../../src/agent-session/models/TurnRecord';
 import { EventType } from '../../src/agent-session/schemas/events';
 import { Sessions } from '../../src/agent-session/Sessions';
 import { InMemorySessionStore } from '../../src/agent-session/store/InMemorySessionStore';
-import { MAIN_THREAD_ID } from '../../src/agent-session/models/TurnRecord';
-import type { ITurnResourceResolver } from '../../src/agent-session/ITurnResourceResolver';
 import type { TurnStreamingEvent } from '../../src/agent-session/TurnHandle';
-import type {
-  ExtendedChatCompletionChunk,
-  RawAssistantMessageWithUsage,
-} from '../../src/core/llm/LLMTypes';
+import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../src/core/llm/LLMTypes';
-import {
-  makeAgentSpec,
-  makeMockILLM,
-  makeTestResolver,
-  mintTestTurnId,
-} from './testHelpers';
+import { makeAgentSpec, makeMockILLM, makeTestResolver, mintTestTurnId } from './testHelpers';
 
 /**
  * TurnHandle's knowledge-attribution repair surface:
@@ -85,16 +77,11 @@ function scriptedResolver(options?: {
   });
 }
 
-async function persistedAssistantTexts(
-  store: InMemorySessionStore,
-  turnId: string,
-): Promise<string[]> {
+async function persistedAssistantTexts(store: InMemorySessionStore, turnId: string): Promise<string[]> {
   const stored = await store.getTurn({ session_id: 's1', turn_id: turnId });
   const context = stored?.snapshot.threads[MAIN_THREAD_ID]?.context ?? [];
   return context.flatMap(message =>
-    'role' in message && message.role === 'assistant' && typeof message.content === 'string'
-      ? [message.content]
-      : [],
+    'role' in message && message.role === 'assistant' && typeof message.content === 'string' ? [message.content] : [],
   );
 }
 

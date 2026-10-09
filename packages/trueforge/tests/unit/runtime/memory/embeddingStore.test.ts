@@ -1,10 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import {
-  EMBEDDING_DIMENSIONS,
-  EMBEDDING_MODEL_REVISION,
-} from '../../../../src/runtime/memory/embeddingModel';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_REVISION } from '../../../../src/runtime/memory/embeddingModel';
 import { EmbeddingStore, hashEntryText } from '../../../../src/runtime/memory/embeddingStore';
 
 function vector(seed: number): number[] {
@@ -41,9 +38,9 @@ describe('EmbeddingStore', () => {
       expect(entry?.hash).toBe(hashEntryText('hello world'));
       expect(entry?.vector.length).toBe(EMBEDDING_DIMENSIONS);
       // The cache must never persist memory text: only id, hash, and vector.
-      const persisted = JSON.parse(
-        await readFile(path.join(nsDir, '.embeddings.json'), 'utf8'),
-      ) as { entries: Record<string, Record<string, unknown>> };
+      const persisted = JSON.parse(await readFile(path.join(nsDir, '.embeddings.json'), 'utf8')) as {
+        entries: Record<string, Record<string, unknown>>;
+      };
       expect(persisted.entries['id-1']).not.toHaveProperty('text');
       expect(JSON.stringify(persisted)).not.toContain('hello world');
       // Owner-only permissions, like the Markdown files it indexes.

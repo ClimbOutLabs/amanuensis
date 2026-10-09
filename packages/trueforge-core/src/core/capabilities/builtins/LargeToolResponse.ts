@@ -10,7 +10,12 @@ import type { AgentCapability } from '../AgentCapability';
 import type { AgentThreadExecutionContext } from '../AgentContextProcessor';
 import type { ToolResponseProcessor, ToolResponseProcessorResult } from '../ToolResponseProcessor';
 import { createDynamicSubAgentLargeToolResponseGuidance } from './DynamicSubAgents';
-import { emailFetchGuidance, emailFetchSemanticsFor, summarizeEmailResult, summarizeEmailTextResult } from './EmailFetchSemantics';
+import {
+  emailFetchGuidance,
+  emailFetchSemanticsFor,
+  summarizeEmailResult,
+  summarizeEmailTextResult,
+} from './EmailFetchSemantics';
 import {
   looksLikeJsonObjectOrArray,
   OVERSIZED_RESULT_PARSE_MAX_BYTES,
@@ -169,10 +174,7 @@ function sandboxRawOutputStorageGuidance(content: string): string {
   // content looking for a storage_status field.
   let parsed: unknown;
   try {
-    parsed =
-      Buffer.byteLength(content, 'utf8') > OVERSIZED_RESULT_PARSE_MAX_BYTES
-        ? undefined
-        : JSON.parse(content);
+    parsed = Buffer.byteLength(content, 'utf8') > OVERSIZED_RESULT_PARSE_MAX_BYTES ? undefined : JSON.parse(content);
   } catch {
     parsed = undefined;
   }

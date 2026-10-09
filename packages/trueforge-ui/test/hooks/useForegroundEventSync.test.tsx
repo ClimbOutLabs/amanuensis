@@ -6,8 +6,7 @@ vi.mock('@assistant-ui/react', async importOriginal => {
   const actual = await importOriginal<typeof import('@assistant-ui/react')>();
   return {
     ...actual,
-    useAuiState: (selector: (state: unknown) => unknown) =>
-      selector({ threadListItem: { remoteId: 'ses_1' } }),
+    useAuiState: (selector: (state: unknown) => unknown) => selector({ threadListItem: { remoteId: 'ses_1' } }),
   };
 });
 
@@ -22,10 +21,10 @@ vi.mock('@/containers/ToasterContainer.js', () => ({
   useToasterOptional: () => ({ showSuccess, showError }),
 }));
 
-import { ServerProvider } from '@/server/ServerContext.js';
 import { ForegroundEventSync } from '@/hooks/useForegroundEventSync.js';
-import { publishBlockedSend } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
 import type { SessionTipInfo } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
+import { publishBlockedSend } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
+import { ServerProvider } from '@/server/ServerContext.js';
 
 let hidden = false;
 Object.defineProperty(document, 'hidden', {

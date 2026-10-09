@@ -16,7 +16,6 @@ import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgent
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
-import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
@@ -25,6 +24,7 @@ import {
   ListScheduleRunsResponseSchema,
   ListSchedulesResponseSchema,
 } from '../../../src/schemas/schedule';
+import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 
 jest.mock('../../../src/controller/scheduleDispatch', () => {
   const actual = jest.requireActual<typeof import('../../../src/controller/scheduleDispatch')>(

@@ -7,21 +7,12 @@
  * append-only; edits and deletes are recorded as markers, never rewrites.
  * Only the markdown backend serves the vault; anything else answers 501.
  */
-import { randomUUID } from 'node:crypto';
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import type { Context } from 'hono';
+import { randomUUID } from 'node:crypto';
 import type { Logger } from 'winston';
-import configuration from '../config';
 import type { ResolveRequestContext } from '../auth/identity';
-import { getEmbeddingSubsystem } from '../runtime/memory/embeddingRetrieval';
-import { MarkdownMemoryClient } from '../runtime/memory/markdownMemoryClient';
-import {
-  readVaultSharing,
-  sanitizeNamespace,
-  vaultFilesystemNamespace,
-  writeVaultSharing,
-  type VaultSharing,
-} from '../runtime/memory/markdownMemoryFiles';
+import configuration from '../config';
 import {
   deleteMemoryVaultEntryRoute,
   exportMemoryVaultRoute,
@@ -31,6 +22,15 @@ import {
   putMemoryVaultSharingRoute,
   updateMemoryVaultEntryRoute,
 } from '../routes/memoryVaultRoutes';
+import { getEmbeddingSubsystem } from '../runtime/memory/embeddingRetrieval';
+import { MarkdownMemoryClient } from '../runtime/memory/markdownMemoryClient';
+import {
+  readVaultSharing,
+  sanitizeNamespace,
+  vaultFilesystemNamespace,
+  writeVaultSharing,
+  type VaultSharing,
+} from '../runtime/memory/markdownMemoryFiles';
 
 export interface MemoryVaultRouterDeps {
   resolveRequestContext: ResolveRequestContext;

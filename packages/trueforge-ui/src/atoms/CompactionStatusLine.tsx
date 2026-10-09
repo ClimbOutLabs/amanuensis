@@ -54,10 +54,7 @@ export function CompactionStatusLine({ className }: { className?: string }) {
           limit: contextLimit,
           input: liveTokens,
           output: maxOutputTokens,
-          free: Math.max(
-            0,
-            contextLimit - liveTokens - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN,
-          ),
+          free: Math.max(0, contextLimit - liveTokens - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN),
         }
       : null;
 
@@ -106,7 +103,10 @@ export function CompactionStatusLine({ className }: { className?: string }) {
           }
         >
           <div className="flex h-full">
-            <div className="h-full shrink-0 bg-primary-button-bg" style={{ width: `${(budget.input / budget.limit) * 100}%` }} />
+            <div
+              className="h-full shrink-0 bg-primary-button-bg"
+              style={{ width: `${(budget.input / budget.limit) * 100}%` }}
+            />
             <div
               className="h-full shrink-0 bg-text-secondary/40"
               style={{ width: `${(budget.output / budget.limit) * 100}%` }}

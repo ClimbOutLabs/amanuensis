@@ -4,6 +4,7 @@ import { ComposerPrimitive, useAui, useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryAgentSpec, useTrueFoundryCancel } from '@truefoundry/assistant-ui-runtime';
 import { useRef } from 'react';
 
+import { CompactionStatusLine } from '../atoms/CompactionStatusLine.js';
 import { DraftCatalogProvider } from '../atoms/draft/DraftCatalogProvider.js';
 import { useComposerBusyState } from '../hooks/useComposerBusyState.js';
 import { useComposerDraft } from '../hooks/useComposerDraft.js';
@@ -17,7 +18,6 @@ import { ComposerAttachmentsContainer } from './AttachmentsContainer.js';
 import { CustomActionContainer } from './CustomActionContainer.js';
 import { McpAuthContainer } from './McpAuthContainer.js';
 import { useToasterOptional } from './ToasterContainer.js';
-import { CompactionStatusLine } from '../atoms/CompactionStatusLine.js';
 
 export type ComposerContainerProps = {
   placeholder?: string;
@@ -183,9 +183,7 @@ function ComposerWithOptionalDraft({
   return <ComposerBody placeholder={placeholder} forceDisabled={forceDisabled} connectedToBanner={connectedToBanner} />;
 }
 
-export function ComposerContainer({
-  placeholder = 'Ask anything...',
-}: ComposerContainerProps) {
+export function ComposerContainer({ placeholder = 'Ask anything...' }: ComposerContainerProps) {
   const pauseView = useComposerPauseView();
   const canManageSession = useActiveSessionCanManage();
 

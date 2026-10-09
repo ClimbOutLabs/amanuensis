@@ -11,8 +11,7 @@ import {
 // against the backend contracts in trueforge-core; the routes themselves are still
 // being finalized server-side, so confirm before release. All response bodies are
 // parsed defensively: unknown shapes are dropped, never asserted.
-const AUDIT_LOG_URL = (sessionId: string) =>
-  `/api/v1/sessions/${encodeURIComponent(sessionId)}/audit-log`;
+const AUDIT_LOG_URL = (sessionId: string) => `/api/v1/sessions/${encodeURIComponent(sessionId)}/audit-log`;
 const SETTINGS_URL = '/api/v1/user/settings/sentinel';
 const NOTICE_ACTION_URL = (sessionId: string, noticeId: string, action: 'undo' | 'stop') =>
   `/api/v1/sessions/${encodeURIComponent(sessionId)}/sentinel/notices/${encodeURIComponent(noticeId)}/${action}`;

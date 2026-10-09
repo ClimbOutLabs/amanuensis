@@ -7,11 +7,11 @@
  * and Tier 2 "always ask" toggles. Defaults are in-memory and permissive
  * (offline off, no toggles) so core works without server wiring.
  */
-import type { Tier2ActionKind } from './tier';
+import { InMemoryApprovalTokenStore, type ApprovalTokenStore } from './approvalTokens';
 import type { AuditLogWriter } from './audit';
 import { seedShellAllowlist, type ShellAllowlistConfig } from './shellAllowlist';
+import type { Tier2ActionKind } from './tier';
 import { InMemoryTrackedExecutableStore, type TrackedExecutableStore } from './trackedExecutables';
-import { InMemoryApprovalTokenStore, type ApprovalTokenStore } from './approvalTokens';
 
 export interface SentinelServices {
   tracked_store: TrackedExecutableStore;

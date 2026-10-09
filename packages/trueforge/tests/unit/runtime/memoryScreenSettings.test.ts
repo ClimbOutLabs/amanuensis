@@ -120,12 +120,10 @@ describe('readMemoryScreenSetting', () => {
 
   it('resolveMemoryScreenEnabled returns the effective on/off when the service is configured', async () => {
     const store = storeWith(new Map([[MEMORY_SCREEN_ENABLED_SETTING_KEY, record('false')]]));
-    await expect(resolveMemoryScreenEnabled({ globalSettingsStore: store, logger: silentLogger })).resolves.toBe(
-      false,
+    await expect(resolveMemoryScreenEnabled({ globalSettingsStore: store, logger: silentLogger })).resolves.toBe(false);
+    await expect(resolveMemoryScreenEnabled({ globalSettingsStore: emptyStore(), logger: silentLogger })).resolves.toBe(
+      configuration.MEMORY_SCREEN_ENABLED,
     );
-    await expect(
-      resolveMemoryScreenEnabled({ globalSettingsStore: emptyStore(), logger: silentLogger }),
-    ).resolves.toBe(configuration.MEMORY_SCREEN_ENABLED);
   });
 
   it('resolveMemoryScreenEnabled is effectively off when no screening service is configured', async () => {
@@ -133,9 +131,7 @@ describe('readMemoryScreenSetting', () => {
     // A stored ON override with no classifier to call must never enable screening:
     // there is nothing to screen with, so the effective state stays off.
     const store = storeWith(new Map([[MEMORY_SCREEN_ENABLED_SETTING_KEY, record('true')]]));
-    await expect(resolveMemoryScreenEnabled({ globalSettingsStore: store, logger: silentLogger })).resolves.toBe(
-      false,
-    );
+    await expect(resolveMemoryScreenEnabled({ globalSettingsStore: store, logger: silentLogger })).resolves.toBe(false);
     // The env default is equally neutered: nothing can be screened with no service.
     const originalDefault = configuration.MEMORY_SCREEN_ENABLED;
     configuration.MEMORY_SCREEN_ENABLED = true;

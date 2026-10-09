@@ -1,8 +1,8 @@
 'use client';
 
 import { act, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useCallback, useEffect, useState } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanAvatarMotion, type AmanAvatarMotionSources } from '@/components/AmanAvatarMotion.js';
 import {

@@ -48,11 +48,7 @@ export interface DockerCommandRunner {
     args: string[],
     options: { timeoutMs: number; signal: AbortSignal | undefined },
   ): Promise<DockerCommandResult>;
-  pull(input: {
-    image: string;
-    signal: AbortSignal | undefined;
-    onProgress: (line: string) => void;
-  }): Promise<void>;
+  pull(input: { image: string; signal: AbortSignal | undefined; onProgress: (line: string) => void }): Promise<void>;
   /**
    * Starts the created container attached and streams stdout/stderr through
    * the callbacks. Resolves with the container's exit code, or undefined when
@@ -183,7 +179,7 @@ export function createDefaultDockerCommandRunner(options: { dockerBinary: string
     },
 
     startAttach(input): Promise<number | undefined> {
-      return new Promise<number | undefined>((resolve) => {
+      return new Promise<number | undefined>(resolve => {
         const child = spawn(dockerBinary, ['start', '--attach', '--interactive', input.containerId], {
           stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -258,7 +254,7 @@ function checkRepoDigest(input: {
         'sandbox image has no RepoDigest (locally built or retagged?) — refusing to run an image that cannot be pinned to its digest',
     };
   }
-  const pinned = digests.some((digest) => digest.slice(digest.lastIndexOf('@') + 1) === input.expectedDigest);
+  const pinned = digests.some(digest => digest.slice(digest.lastIndexOf('@') + 1) === input.expectedDigest);
   if (!pinned) {
     return {
       ok: false,
@@ -324,11 +320,7 @@ export class DockerDriver implements IsolationDriver {
         error: `sandbox image '${this.image}' is not pinned as tag@sha256:<digest> — refusing to run an unpinned image`,
       };
     }
-    const info = await this.runner.run(
-      this.dockerBinary,
-      ['info'],
-      { timeoutMs: this.commandTimeoutMs, signal },
-    );
+    const info = await this.runner.run(this.dockerBinary, ['info'], { timeoutMs: this.commandTimeoutMs, signal });
     if (info.timedOut || info.exitCode !== 0) {
       return {
         ready: false,
@@ -337,11 +329,10 @@ export class DockerDriver implements IsolationDriver {
           'Docker daemon not reachable (`docker info` failed). Is dockerd running, and is the service user in the docker group?',
       };
     }
-    const inspect = await this.runner.run(
-      this.dockerBinary,
-      ['image', 'inspect', this.image],
-      { timeoutMs: this.commandTimeoutMs, signal },
-    );
+    const inspect = await this.runner.run(this.dockerBinary, ['image', 'inspect', this.image], {
+      timeoutMs: this.commandTimeoutMs,
+      signal,
+    });
     if (inspect.timedOut || inspect.exitCode !== 0) {
       return {
         ready: false,
@@ -355,11 +346,10 @@ export class DockerDriver implements IsolationDriver {
     if (!digestCheck.ok) {
       return { ready: false, error_code: 'image_unavailable', error: digestCheck.error };
     }
-    const cosign = await this.runner.run(
-      this.cosignBinary,
-      ['verify', '--key', this.cosignPublicKeyPath, this.image],
-      { timeoutMs: this.commandTimeoutMs, signal },
-    );
+    const cosign = await this.runner.run(this.cosignBinary, ['verify', '--key', this.cosignPublicKeyPath, this.image], {
+      timeoutMs: this.commandTimeoutMs,
+      signal,
+    });
     if (cosign.timedOut || cosign.exitCode !== 0) {
       return {
         ready: false,
@@ -394,11 +384,10 @@ export class DockerDriver implements IsolationDriver {
         error: `dockerd cannot create containers: ${truncateSingleLine(probe.stderr, 300)}`,
       };
     }
-    await this.runner.run(
-      this.dockerBinary,
-      ['rm', '-f', probeId],
-      { timeoutMs: this.commandTimeoutMs, signal: undefined },
-    );
+    await this.runner.run(this.dockerBinary, ['rm', '-f', probeId], {
+      timeoutMs: this.commandTimeoutMs,
+      signal: undefined,
+    });
     // Bind-mount ownership probe (plan E-B1): Docker Desktop/macOS virtiofs may
     // squash or silently ignore the chown the wrapper best-effort applies. A
     // failed probe is a clear capability error here, not a silent permission
@@ -491,16 +480,15 @@ export class DockerDriver implements IsolationDriver {
     }
     const ids = ps.stdout
       .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
     if (ids.length === 0) {
       return;
     }
-    const inspect = await this.runner.run(
-      this.dockerBinary,
-      ['inspect', '--format', '{{.Id}} {{.Created}}', ...ids],
-      { timeoutMs: this.commandTimeoutMs, signal: undefined },
-    );
+    const inspect = await this.runner.run(this.dockerBinary, ['inspect', '--format', '{{.Id}} {{.Created}}', ...ids], {
+      timeoutMs: this.commandTimeoutMs,
+      signal: undefined,
+    });
     if (inspect.exitCode !== 0) {
       return;
     }
@@ -526,11 +514,10 @@ export class DockerDriver implements IsolationDriver {
     if (stale.length === 0) {
       return;
     }
-    await this.runner.run(
-      this.dockerBinary,
-      ['rm', '-f', ...stale],
-      { timeoutMs: this.commandTimeoutMs, signal: undefined },
-    );
+    await this.runner.run(this.dockerBinary, ['rm', '-f', ...stale], {
+      timeoutMs: this.commandTimeoutMs,
+      signal: undefined,
+    });
   }
 
   async dispose(): Promise<void> {
@@ -539,13 +526,13 @@ export class DockerDriver implements IsolationDriver {
     }
     await Promise.race([
       Promise.allSettled([...this.inFlight.values()]),
-      new Promise<void>((resolve) => {
+      new Promise<void>(resolve => {
         const timer = setTimeout(resolve, DISPOSE_DRAIN_MS);
         timer.unref();
       }),
     ]);
     // Kill whatever remains; labeled containers are known to the reaper regardless.
-    await Promise.allSettled([...this.inFlight.keys()].map((id) => this.killContainer(id)));
+    await Promise.allSettled([...this.inFlight.keys()].map(id => this.killContainer(id)));
   }
 
   /** tag@sha256:<64 hex> pin, or undefined when the configured image is unpinned. */
@@ -656,11 +643,10 @@ export class DockerDriver implements IsolationDriver {
       this.image,
       ...this.interpreterArgv(params.language),
     ];
-    const result = await this.runner.run(
-      this.dockerBinary,
-      args,
-      { timeoutMs: this.createTimeoutMs, signal: undefined },
-    );
+    const result = await this.runner.run(this.dockerBinary, args, {
+      timeoutMs: this.createTimeoutMs,
+      signal: undefined,
+    });
     if (result.timedOut) {
       throw new Error(
         `docker create did not return within ${String(this.createTimeoutMs)}ms — the daemon may be wedged`,
@@ -737,7 +723,14 @@ export class DockerDriver implements IsolationDriver {
         };
       }
       if (params.signal?.aborted === true) {
-        return { exitCode: exitCode ?? -1, stdout, stderr, terminatedBy: 'killed', internalError: undefined, harvestWarnings: [] };
+        return {
+          exitCode: exitCode ?? -1,
+          stdout,
+          stderr,
+          terminatedBy: 'killed',
+          internalError: undefined,
+          harvestWarnings: [],
+        };
       }
       if (exitCode === undefined) {
         return {
@@ -802,7 +795,7 @@ export class DockerDriver implements IsolationDriver {
           ok: false,
           error:
             'sandbox bind-mount ownership probe failed: a container running as the sandbox uid (65532) could not write through a host bind mount. ' +
-            'On Docker Desktop/macOS this is the virtiofs uid-mapping quirk — the wrapper\'s chown is silently ignored and runs would fail on permissions. ' +
+            "On Docker Desktop/macOS this is the virtiofs uid-mapping quirk — the wrapper's chown is silently ignored and runs would fail on permissions. " +
             `Probe output: ${truncateSingleLine(result.stderr, 300)}`,
         };
       }
@@ -829,11 +822,10 @@ export class DockerDriver implements IsolationDriver {
   /** Best-effort: never throws; the labeled reaper owns leftovers. */
   private async killContainer(containerId: string): Promise<void> {
     try {
-      await this.runner.run(
-        this.dockerBinary,
-        ['kill', containerId],
-        { timeoutMs: this.commandTimeoutMs, signal: undefined },
-      );
+      await this.runner.run(this.dockerBinary, ['kill', containerId], {
+        timeoutMs: this.commandTimeoutMs,
+        signal: undefined,
+      });
     } catch {
       // best-effort
     }
@@ -842,11 +834,10 @@ export class DockerDriver implements IsolationDriver {
   /** Best-effort: never throws; the labeled reaper owns leftovers. */
   private async removeContainer(containerId: string): Promise<void> {
     try {
-      await this.runner.run(
-        this.dockerBinary,
-        ['rm', '-f', containerId],
-        { timeoutMs: this.commandTimeoutMs, signal: undefined },
-      );
+      await this.runner.run(this.dockerBinary, ['rm', '-f', containerId], {
+        timeoutMs: this.commandTimeoutMs,
+        signal: undefined,
+      });
     } catch {
       // best-effort
     }

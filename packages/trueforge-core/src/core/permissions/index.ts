@@ -4,44 +4,50 @@
  * (approval card), with single-use approval tokens and tracked-executable
  * grants.
  */
-export type { Tier, Tier2ActionKind, AutoDenyReason, Tier3Card, TierDecision, TrackedExecutionBinding } from './tier';
+export { InMemoryApprovalTokenStore } from './approvalTokens';
+export type { ApprovalTokenStore } from './approvalTokens';
+export { recordClassificationAudit } from './audit';
+export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './audit';
+export { canonicalShellForm, classifyHostToolCall, classifyTier, shellBindingFromForm } from './classifier';
+export type { ClassifyContext, SentinelAction } from './classifier';
 export {
-  TierSchema,
-  TIER2_ACTION_KINDS,
+  DEFAULT_PINNED_PATH,
+  classifyContextFor,
+  createSentinelHostContext,
+  defaultSentinelServices,
+  toDispatchSentinelContext,
+} from './context';
+export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './context';
+export { verifyPreDispatch } from './dispatch';
+export type { DispatchCheckContext, VerifiableCall } from './dispatch';
+export { extractCardFields, genericExtractor, isExternalServiceAction } from './extractorRegistry';
+export type { CardFieldExtractor, ExtractedCardFields, ExtractionResult } from './extractorRegistry';
+export { provenanceForToolType, requiresNetwork } from './networkRequirements';
+export type { ToolProvenance } from './networkRequirements';
+export { RUNNER_WORKFLOWS, isRunnerWorkflow } from './runner';
+export type { RunnerWorkflow } from './runner';
+export {
   AUTO_DENY_REASONS,
+  TIER2_ACTION_KINDS,
   Tier3CardSchema,
+  TierSchema,
+  autoDenyDecision,
   failClosedDecision,
   tier1Decision,
   tier2Decision,
   tier3Decision,
-  autoDenyDecision,
 } from './tier';
-export type { AuditOutcome, AuditRecordInput, AuditLogWriter } from './audit';
-export { recordClassificationAudit } from './audit';
-export type { SentinelServices, SentinelCallIdentity, SentinelHostContext } from './context';
-export { defaultSentinelServices, classifyContextFor, createSentinelHostContext, toDispatchSentinelContext, DEFAULT_PINNED_PATH } from './context';
-export type { ExtractedCardFields, CardFieldExtractor, ExtractionResult } from './extractorRegistry';
-export { genericExtractor, extractCardFields, isExternalServiceAction } from './extractorRegistry';
-export type { ToolProvenance } from './networkRequirements';
-export { requiresNetwork, provenanceForToolType } from './networkRequirements';
-export type { RunnerWorkflow } from './runner';
-export { RUNNER_WORKFLOWS, isRunnerWorkflow } from './runner';
-export type { SentinelAction, ClassifyContext } from './classifier';
-export { classifyTier, classifyHostToolCall, canonicalShellForm, shellBindingFromForm } from './classifier';
-export type { VerifiableCall, DispatchCheckContext } from './dispatch';
-export { verifyPreDispatch } from './dispatch';
-export type { TrackedExecutableScope, TrackedExecutableStore, TrackApprovalGrantInput } from './trackedExecutables';
+export type { AutoDenyReason, Tier, Tier2ActionKind, Tier3Card, TierDecision, TrackedExecutionBinding } from './tier';
 export {
-  workspaceKey,
+  InMemoryTrackedExecutableStore,
   canonicalFileIdentity,
   canonicalWriteTarget,
-  sha256FileContent,
-  isInsideWorkspace,
   extractExecutedFileOperand,
+  isInsideWorkspace,
+  observeShellCreatedFiles,
+  sha256FileContent,
   skipWrapperPrefix,
   splitWordsLenient,
-  observeShellCreatedFiles,
-  InMemoryTrackedExecutableStore,
+  workspaceKey,
 } from './trackedExecutables';
-export type { ApprovalTokenStore } from './approvalTokens';
-export { InMemoryApprovalTokenStore } from './approvalTokens';
+export type { TrackApprovalGrantInput, TrackedExecutableScope, TrackedExecutableStore } from './trackedExecutables';

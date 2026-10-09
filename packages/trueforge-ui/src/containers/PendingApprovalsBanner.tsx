@@ -9,8 +9,8 @@ import {
   subscribeToBlockedSend,
   type HarnessChatServerExtensions,
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
-import { useToasterOptional } from './ToasterContainer.js';
 import { useOptionalServer } from '../server/ServerContext.js';
+import { useToasterOptional } from './ToasterContainer.js';
 
 /** Structural check: the trueforge adapter's pending-approval escape hatch. */
 function hasDismissPort(server: object): server is Pick<HarnessChatServerExtensions, 'dismissPendingApprovals'> {

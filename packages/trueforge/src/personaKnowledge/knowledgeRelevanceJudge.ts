@@ -23,15 +23,9 @@ const RELEVANCE_JUDGE_MAX_TOKENS = 256;
  * the user's own life. The judge is the precision half; the floor is the
  * recall half.
  */
-export type KnowledgeRelevanceJudge = (
-  question: string,
-  candidates: PersonaKnowledgeHit[],
-) => Promise<number[]>;
+export type KnowledgeRelevanceJudge = (question: string, candidates: PersonaKnowledgeHit[]) => Promise<number[]>;
 
-const RelevanceJudgeResponseSchema = z.union([
-  z.object({ helpful: z.array(z.number()) }),
-  z.array(z.number()),
-]);
+const RelevanceJudgeResponseSchema = z.union([z.object({ helpful: z.array(z.number()) }), z.array(z.number())]);
 
 export function buildRelevanceJudgeMessages(
   question: string,
@@ -140,10 +134,7 @@ export function createKnowledgeRelevanceJudge(input: {
       streamTimeout,
     });
     const result = await llm.createNonStream(request);
-    const verdict = parseRelevanceJudgeResponse(
-      assistantContentText(result.output.content ?? null),
-      candidates.length,
-    );
+    const verdict = parseRelevanceJudgeResponse(assistantContentText(result.output.content ?? null), candidates.length);
     if (verdict === undefined) {
       throw new Error('knowledge relevance judge returned an unusable verdict');
     }

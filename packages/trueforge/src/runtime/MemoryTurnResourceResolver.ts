@@ -1,12 +1,12 @@
 import type { AgentSpec, ResolvedAgentDefinition } from '@truefoundry/trueforge-core/agent-session';
 import type { AgentCapability } from '@truefoundry/trueforge-core/core';
 import { TOOL_TAG_READ_ONLY } from '@truefoundry/trueforge-core/core';
+import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
-import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { InternalSourceState } from './internalSourceGuard';
-import type { MemoryClient } from './memory/memoryClient';
 import { hindsightMemoryCapability, type MemoryConfig } from './memory/memoryCapability';
+import type { MemoryClient } from './memory/memoryClient';
 import { PersonaTurnResourceResolver, type PersonaSwitchNotice } from './PersonaTurnResourceResolver';
 import { toolOutputScreenCapability, type ToolOutputScreenConfig } from './toolOutputScreen';
 

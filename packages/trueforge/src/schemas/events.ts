@@ -140,8 +140,5 @@ export const ListSessionEventsResponseSchema = z
  * (see db/completedTurnEvents.ts).
  */
 export type PersistedPassthroughEvent =
-  | MemoryRecallPersistedEvent
-  | ProfileLearnedPersistedEvent
-  | SkillUsedPersistedEvent
-  | ProvisioningPersistedEvent;
+  MemoryRecallPersistedEvent | ProfileLearnedPersistedEvent | SkillUsedPersistedEvent | ProvisioningPersistedEvent;
 export type TurnStreamingEvent = z.infer<typeof TurnStreamingEventSchema>;

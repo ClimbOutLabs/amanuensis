@@ -32,9 +32,7 @@ describe('RunCodeInputSchema', () => {
     for (const bad of ['a/b.csv', '../evil', '..', '.', 'sub\\x.csv', '']) {
       expect(() => RunCodeInputSchema.parse({ ...valid, files_in: [file(bad)] })).toThrow();
     }
-    expect(() =>
-      RunCodeInputSchema.parse({ ...valid, files_in: [file('data.csv'), file('notes.txt')] }),
-    ).not.toThrow();
+    expect(() => RunCodeInputSchema.parse({ ...valid, files_in: [file('data.csv'), file('notes.txt')] })).not.toThrow();
   });
 
   it('rejects more than 32 files_in entries', () => {
@@ -82,8 +80,6 @@ describe('RunCodeResultSchema', () => {
 
   it('rejects unknown statuses and error codes', () => {
     expect(() => RunCodeResultSchema.parse({ status: 'maybe', ...base })).toThrow();
-    expect(() =>
-      RunCodeResultSchema.parse({ status: 'failed', error_code: 'nope', error: 'x', ...base }),
-    ).toThrow();
+    expect(() => RunCodeResultSchema.parse({ status: 'failed', error_code: 'nope', error: 'x', ...base })).toThrow();
   });
 });

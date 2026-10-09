@@ -1,9 +1,11 @@
 # Spec: Embedded Maps
 
 ## Problem
+
 Location-related queries return text-only responses. Users cannot see spatial context (where a place is, what is around it) without doing the mental mapping themselves.
 
 ## Solution
+
 Add a model-callable `render_map` tool. When the user asks about a place and a map would help, the model calls the tool and an interactive map card appears inline in the conversation.
 
 Model-callable tool only. No Map button in the UI. No automatic detection of the user's own location.
@@ -60,6 +62,7 @@ Errors: if geocoding returns no match, the tool returns `{ error: "not_found" }`
 POI zero-match: if the place geocodes but the POI search returns no matches, the tool returns the place map with `pins: []`. The model says it found the place but found no matching POIs nearby (e.g. "I found Hospital Clinic, but no parking nearby"). This is not an error; the card renders with the place pin.
 
 `render_route` errors:
+
 - `{ error: "not_found", field: "from_place" }` or `{ error: "not_found", field: "to_place" }`: names which endpoint failed to geocode, so the model can say which one it could not find.
 - `{ error: "no_route" }`: both endpoints geocoded, but OSRM found no road connection (e.g. islands). The model explains in plain text that it cannot route between them.
 - `{ error: "service_unavailable" }`: Nominatim or OSRM unreachable. The model says so in plain text.
@@ -69,13 +72,16 @@ No map card renders for any `render_route` error.
 ## Call rules for the model
 
 Call `render_map` when:
+
 - The user asks to see a place: "show me X", "show me X on a map", "where is X", "map of X". "Show me Paris" works; the model does not require the words "on a map".
 - The user asks for POIs near a named place: "coffee shops in Paris", "pharmacies near the Eiffel Tower". The area comes from the named place, never from the user's location.
 
 Call `render_route` when:
+
 - The user asks for directions between two named places: "directions from Madrid to Barcelona", "how do I get from X to Y", "route from X to Y". Both endpoints must be named.
 
 Do NOT call when:
+
 - A location is mentioned in passing ("my Paris trip was great"). No map appears uninvited.
 - "Show me X" where X is clearly not a place ("show me the quarterly report", "show me your code"). The model uses judgment; the tool is for places.
 - The user asks for "nearest X" without naming a place ("nearest coffee shop"). The model asks which area to search, since it does not track the user's location.

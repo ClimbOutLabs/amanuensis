@@ -68,9 +68,7 @@ function createFakeClient(sessions: Partial<FakeSessions>): {
 describe('isPendingApprovalsError', () => {
   it('matches the server 422 message', () => {
     assert.equal(
-      isPendingApprovalsError(
-        new Error('user message cannot be sent while approvals or questions are pending'),
-      ),
+      isPendingApprovalsError(new Error('user message cannot be sent while approvals or questions are pending')),
       true,
     );
   });
@@ -105,9 +103,7 @@ describe('peekSessionTip', () => {
     assert.deepEqual(tip, {
       turnId: 'trn_1',
       status: 'done',
-      pendingApprovals: [
-        { toolCallId: 'call_1', threadId: 'main', createdAt: '2026-09-25T00:00:00.000Z' },
-      ],
+      pendingApprovals: [{ toolCallId: 'call_1', threadId: 'main', createdAt: '2026-09-25T00:00:00.000Z' }],
     });
     assert.deepEqual(sessions.listTurns.mock.calls[0], ['ses_1', { limit: 1 }]);
   });

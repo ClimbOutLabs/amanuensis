@@ -2,8 +2,8 @@
 
 import type { FC } from 'react';
 
-import { Icon } from '../icons/Icon.js';
 import { Button } from '../atoms/primitives/Button.js';
+import { Icon } from '../icons/Icon.js';
 import type { SentinelApprovalCard } from './types.js';
 
 export type Tier3ApprovalCardProps = {
@@ -38,10 +38,7 @@ export const Tier3ApprovalCard: FC<Tier3ApprovalCardProps> = ({
   disabled = false,
 }) => {
   const hasDetails =
-    card.destination !== null ||
-    card.recipient !== null ||
-    card.amount !== null ||
-    card.parsed_command !== null;
+    card.destination !== null || card.recipient !== null || card.amount !== null || card.parsed_command !== null;
 
   return (
     <div className="rounded-lg border border-primary-button-bg/30 bg-primary-button-bg/10">
@@ -73,21 +70,15 @@ export const Tier3ApprovalCard: FC<Tier3ApprovalCardProps> = ({
         )}
 
         {card.why_asked_again !== null && (
-          <p className="text-xs text-text-secondary">
-            You have seen this before: {card.why_asked_again}
-          </p>
+          <p className="text-xs text-text-secondary">You have seen this before: {card.why_asked_again}</p>
         )}
 
         {hasDetails && (
           <dl className="space-y-1.5 rounded border border-border bg-primary-bg px-3 py-2">
-            {card.destination !== null && (
-              <DetailRow label="Destination" value={card.destination} mono />
-            )}
+            {card.destination !== null && <DetailRow label="Destination" value={card.destination} mono />}
             {card.recipient !== null && <DetailRow label="Recipient" value={card.recipient} />}
             {card.amount !== null && <DetailRow label="Amount" value={card.amount} mono />}
-            {card.parsed_command !== null && (
-              <DetailRow label="Command" value={card.parsed_command} mono />
-            )}
+            {card.parsed_command !== null && <DetailRow label="Command" value={card.parsed_command} mono />}
           </dl>
         )}
 

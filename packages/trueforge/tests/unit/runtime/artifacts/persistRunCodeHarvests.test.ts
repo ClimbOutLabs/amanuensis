@@ -1,10 +1,10 @@
 import { createLogger } from 'winston';
 
-import { FakeTurnArtifactStore } from '../../../fixtures/fakeTurnArtifactStore';
 import {
   RUN_CODE_ARTIFACT_PATH_PREFIX,
   buildRunCodeHarvestSink,
 } from '../../../../src/runtime/artifacts/persistRunCodeHarvests';
+import { FakeTurnArtifactStore } from '../../../fixtures/fakeTurnArtifactStore';
 
 const logger = createLogger({ silent: true });
 

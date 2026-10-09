@@ -41,18 +41,15 @@ export const SentinelSettings: FC = () => {
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-base font-semibold text-text-primary">Permissions</h2>
-        <p className="mt-1 text-sm text-text-secondary">
-          How the assistant asks before acting on your behalf.
-        </p>
+        <p className="mt-1 text-sm text-text-secondary">How the assistant asks before acting on your behalf.</p>
       </div>
 
       <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-4">
         <div>
           <p className="text-sm font-medium text-text-primary">Offline mode</p>
           <p className="mt-1 text-sm text-text-secondary">
-            While on, actions outside this device that would need your approval are denied
-            automatically instead of showing an approval card. Tier 1 reads and Tier 2
-            notices are unaffected.
+            While on, actions outside this device that would need your approval are denied automatically instead of
+            showing an approval card. Tier 1 reads and Tier 2 notices are unaffected.
           </p>
           {error !== null && (
             <p className="mt-2 text-xs text-failure-bg" role="alert">

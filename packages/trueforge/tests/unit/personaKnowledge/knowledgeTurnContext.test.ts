@@ -27,12 +27,12 @@ jest.mock('../../../src/runtime/memory/embeddingModel', () => ({
 }));
 
 import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
+import type { KnowledgeRelevanceJudge } from '../../../src/personaKnowledge/knowledgeRelevanceJudge';
 import {
   extractHistoryKnowledgeQuery,
   resolvePersonaKnowledgeBlock,
 } from '../../../src/personaKnowledge/knowledgeTurnContext';
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
-import type { KnowledgeRelevanceJudge } from '../../../src/personaKnowledge/knowledgeRelevanceJudge';
 import {
   buildInternalSourceToolPolicy,
   createInternalSourceState,
