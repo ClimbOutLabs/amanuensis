@@ -13,6 +13,7 @@ import { realpathSync } from 'fs';
 import {
   actionIdFor,
   normalizeCwd,
+  toJsonSafeParams,
   type ShellApprovalBinding,
 } from './approvalTokens';
 import {
@@ -1012,12 +1013,19 @@ export async function classifyHostToolCall(input: {
   workspace_cwd: string | null;
   action: SentinelAction;
 }): Promise<TierDecision> {
+  // Normalize canonical params to JSON form once, here, so every caller mints
+  // approval tokens over the same value the verify path re-parses from the
+  // serialized arguments string (see toJsonSafeParams).
+  const action: SentinelAction = {
+    ...input.action,
+    canonical_params: toJsonSafeParams(input.action.canonical_params),
+  };
   const ctx = classifyContextFor({
     host: input.sentinel,
     repository_id: input.repository_id,
     workspace_cwd: input.workspace_cwd,
   });
-  const decision = await classifyTier(input.action, ctx);
+  const decision = await classifyTier(action, ctx);
   await recordClassificationAudit({
     services: ctx.services,
     identity: {
@@ -1028,7 +1036,7 @@ export async function classifyHostToolCall(input: {
       workspace_cwd: ctx.workspace_cwd,
       agent_intent: ctx.agent_intent,
     },
-    tool_name: input.action.tool_name,
+    tool_name: action.tool_name,
     decision,
   });
   return decision;
