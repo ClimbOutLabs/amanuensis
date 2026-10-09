@@ -133,6 +133,39 @@ describe('extractSentinelFromEvent', () => {
     expect(notices[0]?.kind).toBeNull();
   });
 
+  it('parses the SDK-parsed camelCase toolCalls shape from the live tap', () => {
+    // The tap in chatServer.ts receives events after the SDK serializer has
+    // converted tool_calls to toolCalls; unknown ref fields (tier, tier3_card)
+    // pass through untouched.
+    const { approvals } = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      id: 'evt-1',
+      createdAt: '2026-10-08T00:00:00.000Z',
+      threadId: 'thread-1',
+      toolCalls: [
+        {
+          id: 'call-10',
+          sourceEventId: 'msg-1',
+          tier: 3,
+          tier3_card: {
+            plain_what: 'Run `echo hello-sentinel`.',
+            plain_why: null,
+            cannot_be_undone: null,
+            why_asked_again: null,
+            destination: null,
+            recipient: null,
+            amount: null,
+            parsed_command: 'echo hello-sentinel',
+          },
+        },
+      ],
+    });
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]?.toolCallId).toBe('call-10');
+    expect(approvals[0]?.tier).toBe(3);
+    expect(approvals[0]?.card.parsed_command).toBe('echo hello-sentinel');
+  });
+
   it('reads per-action fields at the event top level for single-action events', () => {
     const { approvals } = extractSentinelFromEvent({
       type: 'tool.approval_required',
