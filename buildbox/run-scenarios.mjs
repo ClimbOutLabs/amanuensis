@@ -108,32 +108,24 @@ async function api(method, p, body, { timeoutMs = 30000 } = {}) {
 // ------------------------------------------------------------ preflight ----
 const MODEL_HEADERS = MODEL_API_KEY ? { authorization: `Bearer ${MODEL_API_KEY}` } : {};
 
-// GET <base>/models. The insecure variant disables TLS verification for the
-// call only, for endpoints behind self-signed certificates.
-async function fetchModels({ insecure }) {
-  const url = `${PROVIDER_MANIFEST.base_url}/models`;
-  const previous = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  if (insecure) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+// GET <base>/models with strict TLS, the same verification the server applies.
+async function fetchModels() {
   try {
-    const res = await fetch(url, { headers: MODEL_HEADERS, signal: AbortSignal.timeout(20000) });
+    const res = await fetch(`${PROVIDER_MANIFEST.base_url}/models`, {
+      headers: MODEL_HEADERS,
+      signal: AbortSignal.timeout(20000),
+    });
     const body = (await res.text()).trim();
     return res.ok ? { ok: true, body } : { ok: false, error: `HTTP ${res.status}` };
   } catch (e) {
     return { ok: false, error: String(e?.cause?.code ?? e?.message ?? e).slice(0, 200) };
-  } finally {
-    if (previous === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previous;
   }
 }
 
 async function modelEndpointReachable() {
-  for (const insecure of [false, true]) {
-    if ((await fetchModels({ insecure })).ok) {
-      log(`model endpoint reachable (${insecure ? 'insecure TLS' : 'strict TLS'})`);
-      return true;
-    }
-  }
-  return false;
+  if (!(await fetchModels()).ok) return false;
+  log('model endpoint reachable');
+  return true;
 }
 
 // The endpoint serves exactly one model; resolve its id at runtime instead of
@@ -147,16 +139,12 @@ async function resolveModelId() {
   // before giving up.
   const maxAttempts = 10;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    for (const insecure of [false, true]) {
-      const mode = insecure ? 'insecure' : 'strict';
-      const r = await fetchModels({ insecure });
-      if (!r.ok) {
-        log(`WARN: ${url} request failed (${mode}): ${r.error}`);
-        continue;
-      }
-      const out = r.body;
+    const r = await fetchModels();
+    if (!r.ok) {
+      log(`WARN: ${url} request failed: ${r.error}`);
+    } else {
       try {
-        const id = JSON.parse(out)?.data?.[0]?.id;
+        const id = JSON.parse(r.body)?.data?.[0]?.id;
         if (typeof id === 'string' && id.length > 0) {
           try {
             mkdirSync(path.dirname(MODEL_ID_CACHE), { recursive: true });
@@ -166,9 +154,9 @@ async function resolveModelId() {
           }
           return id;
         }
-        log(`WARN: ${url} (${mode}) returned no usable model id; body head: ${out.slice(0, 300)}`);
+        log(`WARN: ${url} returned no usable model id; body head: ${r.body.slice(0, 300)}`);
       } catch (e) {
-        log(`WARN: ${url} (${mode}) returned unparseable body (${e.message}); body head: ${out.slice(0, 300)}`);
+        log(`WARN: ${url} returned unparseable body (${e.message}); body head: ${r.body.slice(0, 300)}`);
       }
     }
     if (attempt < maxAttempts) {
@@ -392,7 +380,7 @@ async function runTurn(sessionId, turn, index) {
       fail(`turn ended with status ${st}: ` + JSON.stringify(t).slice(0, 600));
     }
     if (Date.now() > deadline) fail('turn timed out after 600s');
-    log('turn status:', st ?? 'unknown', '— waiting');
+    log('turn status:', st ?? 'unknown', 'waiting');
   }
 }
 
@@ -485,7 +473,7 @@ function slugifyModelName(id) {
 
 try {
   log(`scenario: ${scenarioName} (${scenario.turns.length} turns)`);
-  if (!(await modelEndpointReachable())) fail('model endpoint unreachable (strict and insecure TLS both failed)');
+  if (!(await modelEndpointReachable())) fail('model endpoint unreachable');
   const servedModelId = await resolveModelId();
   const servedModelName = slugifyModelName(servedModelId);
   MODEL_FQN = `${PROVIDER_NAME}/${servedModelName}`;
