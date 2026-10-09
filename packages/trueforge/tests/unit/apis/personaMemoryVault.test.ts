@@ -64,11 +64,17 @@ async function createPersona(server: ApprovalTestServer, displayName: string): P
   return z.object({ data: z.object({ id: z.string() }).loose() }).parse(body).data.id;
 }
 
-/** Puts the session back on the default assistant, as the persona pill does. */
-async function clearSessionPersona(server: ApprovalTestServer, sessionId: string): Promise<void> {
-  const response = await server.request(`/api/v1/sessions/${sessionId}/persona`, jsonInit({ persona_id: null }, 'PUT'));
+/** Selects the session's speaker as the persona pill does; `null` is the default assistant. */
+async function setSessionPersona(
+  server: ApprovalTestServer,
+  options: { sessionId: string; personaId: string | null },
+): Promise<void> {
+  const response = await server.request(
+    `/api/v1/sessions/${options.sessionId}/persona`,
+    jsonInit({ persona_id: options.personaId }, 'PUT'),
+  );
   if (response.status !== 200) {
-    throw new Error(`clearing the session persona failed (${String(response.status)}): ${await response.text()}`);
+    throw new Error(`setting the session persona failed (${String(response.status)}): ${await response.text()}`);
   }
 }
 
@@ -245,7 +251,7 @@ describe('persona memory vaults over the turn path', () => {
         const sessionId = await createSession(server);
         await runTurn(server, { sessionId, content: 'Zara, note that the clock-tower gardener is Ottoline.' });
         await waitForVaultText(zaraVault(), 'Ottoline');
-        await clearSessionPersona(server, sessionId);
+        await setSessionPersona(server, { sessionId, personaId: null });
         await runTurn(server, { sessionId, content: 'Please note that the market baker is Cassian.' });
 
         const sharedLog = await waitForVaultText(sharedVault(), 'Cassian');
@@ -264,8 +270,7 @@ describe('persona memory vaults over the turn path', () => {
         await runTurn(server, { sessionId, content: 'Zara, note that the bell ringer is Ignatius.' });
 
         const zaraLog = await waitForVaultText(zaraVault(), 'Ignatius');
-        // The chat title is session metadata on every entry; the earlier exchange itself must stay out.
-        expect(zaraLog).not.toContain('User: Please note that the ferry captain');
+        expect(zaraLog).not.toContain('Dorothea');
         expect(occurrences((await vaultLog(sharedVault())) ?? '', 'User: Please note that the ferry captain')).toBe(1);
       },
       TURN_TIMEOUT_MS,
@@ -281,6 +286,79 @@ describe('persona memory vaults over the turn path', () => {
         await waitForVaultText(zaraVault(), 'second shelf');
 
         expect(occurrences((await vaultLog(zaraVault())) ?? '', 'Lambrusco')).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+  });
+
+  describe('session title in retained entries', () => {
+    it(
+      'keeps the first message of a persona out of every later entry of another persona',
+      async () => {
+        const sessionId = await createSession(server);
+        await setSessionPersona(server, { sessionId, personaId: zaraId });
+        await runTurn(server, { sessionId, content: 'My locker combination is 4821.' });
+        const zaraLog = await waitForVaultText(zaraVault(), '4821');
+        expect(zaraLog).toContain('Chat title: My locker combination is 4821.');
+
+        await setSessionPersona(server, { sessionId, personaId: mirelaId });
+        await runTurn(server, { sessionId, content: 'The harbour cat is called Pepin2.' });
+        await waitForVaultText(mirelaVault(), 'Pepin2');
+        await runTurn(server, { sessionId, content: 'And the dock cat is called Marlow.' });
+
+        const mirelaLog = await waitForVaultText(mirelaVault(), 'Marlow');
+        expect(mirelaLog).not.toContain('locker combination');
+        expect(mirelaLog).not.toContain('4821');
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'keeps the first message of a persona out of the shared vault',
+      async () => {
+        const sessionId = await createSession(server);
+        await setSessionPersona(server, { sessionId, personaId: zaraId });
+        await runTurn(server, { sessionId, content: 'My bike lock code is 7305.' });
+        await waitForVaultText(zaraVault(), '7305');
+
+        await setSessionPersona(server, { sessionId, personaId: null });
+        await runTurn(server, { sessionId, content: 'Please note that the tram driver is Evander.' });
+
+        const sharedLog = await waitForVaultText(sharedVault(), 'Evander');
+        expect(sharedLog).not.toContain('bike lock');
+        expect(sharedLog).not.toContain('7305');
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'keeps the first message of the default assistant out of a persona vault',
+      async () => {
+        const sessionId = await createSession(server);
+        await runTurn(server, { sessionId, content: 'My garage door code is 2468.' });
+        await waitForVaultText(sharedVault(), '2468');
+
+        await setSessionPersona(server, { sessionId, personaId: zaraId });
+        await runTurn(server, { sessionId, content: 'The cellar is stocked with Barolo.' });
+
+        const zaraLog = await waitForVaultText(zaraVault(), 'Barolo');
+        expect(zaraLog).not.toContain('garage door');
+        expect(zaraLog).not.toContain('2468');
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'keeps the title on entries written in the vault the session started in',
+      async () => {
+        const sessionId = await createSession(server);
+        await setSessionPersona(server, { sessionId, personaId: zaraId });
+        await runTurn(server, { sessionId, content: 'My shed key is under the blue pot.' });
+        await waitForVaultText(zaraVault(), 'blue pot');
+        await runTurn(server, { sessionId, content: 'And what else is on the shelf?' });
+
+        const zaraLog = await waitForVaultText(zaraVault(), 'on the shelf');
+        expect(occurrences(zaraLog, 'Chat title: My shed key is under the blue pot.')).toBe(2);
       },
       TURN_TIMEOUT_MS,
     );

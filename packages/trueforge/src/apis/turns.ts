@@ -1602,8 +1602,16 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           }
         : undefined,
     });
+    // The title comes from the session's first message, so it may only ride along in the vault
+    // that first turn ran under; in any other vault it would carry that turn's text across.
+    const firstTurn =
+      session.record.last_turn_id === null ? undefined : (await session.listTurns({ limit: 1 })).data[0];
+    const titleSharesVault =
+      session.record.last_turn_id === null ||
+      (firstTurn !== undefined &&
+        (firstTurn.custom?.persona?.persona_name ?? null) === (vaultScope?.personaName ?? null));
     const sessionTitleForMemory = chatTitleContext({
-      title: session.record.title ?? deriveSessionTitle(body.input),
+      title: titleSharesVault ? (session.record.title ?? deriveSessionTitle(body.input)) : undefined,
       assistantNames: [
         profile?.assistant_name,
         ...(await deps.personaStore.listPersonas({ tenant_id: requestContext.tenant_id, created_by: userRef })).flatMap(

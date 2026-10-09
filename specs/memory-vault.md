@@ -16,7 +16,7 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 
 **Facts are the unit of management.** A fact is a single atomic claim extracted from the memory files (e.g. "the user prefers oat milk"). The vault lists facts with their source file and timestamp.
 
-**Vault scopes.** Memory is stored in vaults. The shared vault belongs to the user and is a scope readable by every persona and by the default assistant. Each persona has its own vault (`persona:<name>`) that only chats with that persona write to. The vault is the unit of scoping for both writing and recall. Distinct persona names always map to distinct vaults, even when they differ only in punctuation, accents, or script.
+**Vault scopes.** Memory is stored in vaults. The shared vault belongs to the user and is a scope readable by every persona and by the default assistant. Each persona has its own vault (`persona:<name>`) that only chats with that persona write to. The vault is the unit of scoping for both writing and recall. Distinct persona names always map to distinct vaults, even when they differ only in punctuation, accents, or script. Persona names with spaces or non-ASCII characters map to hashed vault directories; facts imported earlier under such a name stay on disk under the old directory and are not moved.
 
 **Write rule.** A fact learned in a chat is retained into exactly one vault. With a persona active it goes to that persona's vault. With no persona active it goes to the shared vault. Facts are never copied between vaults.
 
@@ -26,7 +26,7 @@ A Memory Vault UI and API layer on top of the existing Markdown memory backend. 
 
 **Delete and edit.** Deleting a fact removes it from the vault view and from recall for every persona that could read that vault. Editing replaces the fact text everywhere it is recalled. The history stays in the append-only logs; only the effective view changes.
 
-**Derived state is per vault.** Search indexes, retain bookkeeping, and caches are kept inside each vault, so nothing derived from one vault can surface in another.
+**Derived state is per vault.** Search indexes, retain bookkeeping, and caches are kept inside each vault, so nothing derived from one vault can surface in another. The chat title is stored only with entries written in the vault the chat started in, because it comes from the chat's first message.
 
 **Persona rename and delete.** A persona's vault is addressed by its name. Renaming a persona never moves or deletes facts: the old vault stays intact on disk and is reachable through the vault API by its old name, while the renamed persona starts with an empty vault. The vault list shows only current personas, so an orphaned vault is not listed, and sharing grants that refer to it are not shown in Sharing. Export from the old vault and import into the new one to carry facts over. Deleting a persona leaves its vault untouched; no persona recalls it until a persona with the same name exists again.
 
