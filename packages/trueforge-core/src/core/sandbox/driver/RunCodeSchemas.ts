@@ -16,18 +16,23 @@ export const RUN_CODE_ERROR_CODES = [
 export type RunCodeErrorCode = (typeof RUN_CODE_ERROR_CODES)[number];
 
 /**
- * Basename-only: no separators, no traversal, 1-256 chars.
- * The three alternatives enumerate the `.`/`..` rejection without lookahead:
- * xgrammar (vLLM's grammar compiler) cannot compile lookahead assertions,
- * so `(?!.{1,2}$)` would crash EngineCore. Each branch carries its own tail
- * bound so the total length never exceeds 256.
+ * Basename-only: no separators, no `.`/`..`. The pattern must stay within what
+ * xgrammar (vLLM's grammar compiler) compiles, or EngineCore crashes: the
+ * alternatives reject `.`/`..` without lookahead, and the length cap lives in
+ * `.max(256)` because cached compiles assert on bounded repetitions above 128.
  */
-export const FILE_BASENAME_PATTERN = /^([^./\\][^/\\]{0,255}|\.[^./\\][^/\\]{0,254}|\.\.[^/\\][^/\\]{0,253})$/;
+const FILE_BASENAME_PATTERN = /^([^./\\][^/\\]*|\.[^./\\][^/\\]*|\.\.[^/\\][^/\\]*)$/;
+
+export const RunCodeFileNameSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(FILE_BASENAME_PATTERN, 'must be a basename (no separators or traversal)');
 
 export const RunCodeLanguageSchema = z.enum(['python', 'node']);
 
 const RunCodeFileInSchema = z.object({
-  name: z.string().min(1).max(256).regex(FILE_BASENAME_PATTERN, 'must be a basename (no separators or traversal)'),
+  name: RunCodeFileNameSchema,
   content_base64: z.string().min(1),
 });
 

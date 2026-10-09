@@ -8,7 +8,7 @@ import { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './err
 import type { DriverReadiness, DriverRunParams, DriverRunResult, IsolationDriver } from './IsolationDriver';
 import { OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX } from './IsolationDriver';
 import {
-  FILE_BASENAME_PATTERN,
+  RunCodeFileNameSchema,
   RunCodeInputSchema,
   RunCodeResultSchema,
   type RunCodeErrorCode,
@@ -799,7 +799,7 @@ export class RunCodeService implements RunCodeBackend {
         }
         const path = entry.path;
         const name = basename(path);
-        if (!FILE_BASENAME_PATTERN.test(name) || name.startsWith(RUN_CODE_RESERVED_PREFIX)) {
+        if (!RunCodeFileNameSchema.safeParse(name).success || name.startsWith(RUN_CODE_RESERVED_PREFIX)) {
           input.harvestWarnings.push(`Skipped result file with an invalid name: ${name}.`);
           continue;
         }

@@ -1,4 +1,8 @@
-import { RunCodeInputSchema, RunCodeResultSchema } from '../../../../src/core/sandbox/driver/RunCodeSchemas';
+import {
+  RunCodeFileNameSchema,
+  RunCodeInputSchema,
+  RunCodeResultSchema,
+} from '../../../../src/core/sandbox/driver/RunCodeSchemas';
 
 describe('RunCodeInputSchema', () => {
   const valid = { language: 'python', code: 'print("hi")' };
@@ -33,6 +37,22 @@ describe('RunCodeInputSchema', () => {
       expect(() => RunCodeInputSchema.parse({ ...valid, files_in: [file(bad)] })).toThrow();
     }
     expect(() => RunCodeInputSchema.parse({ ...valid, files_in: [file('data.csv'), file('notes.txt')] })).not.toThrow();
+  });
+
+  it('accepts dot-prefixed basenames up to 256 chars and rejects longer ones', () => {
+    for (const ok of ['.env', '..x', '...', 'a'.repeat(256), `.${'a'.repeat(255)}`]) {
+      expect(RunCodeFileNameSchema.safeParse(ok).success).toBe(true);
+    }
+    for (const bad of ['a'.repeat(257), `..${'a'.repeat(255)}`]) {
+      expect(RunCodeFileNameSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it('emits no bounded regex repetition above 128 to the model-facing JSON Schema', () => {
+    // vLLM's cached xgrammar compile asserts on these and takes EngineCore down.
+    const json = JSON.stringify(RunCodeInputSchema.toJSONSchema({ io: 'input' }));
+    const bounds = [...json.matchAll(/\{(\d+)(?:,(\d*))?\}/g)].map(([, min, max]) => Number(max || min));
+    expect(bounds.filter(bound => bound > 128)).toEqual([]);
   });
 
   it('rejects more than 32 files_in entries', () => {
