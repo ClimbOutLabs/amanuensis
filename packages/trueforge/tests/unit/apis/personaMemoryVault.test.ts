@@ -45,7 +45,7 @@ async function createSession(server: ApprovalTestServer): Promise<string> {
   return z.object({ data: z.object({ id: z.string() }).loose() }).parse(body).data.id;
 }
 
-async function createPersona(server: ApprovalTestServer, displayName: string): Promise<void> {
+async function createPersona(server: ApprovalTestServer, displayName: string): Promise<string> {
   const response = await server.request(
     '/api/v1/personas',
     jsonInit({
@@ -57,8 +57,25 @@ async function createPersona(server: ApprovalTestServer, displayName: string): P
       },
     }),
   );
+  const body: unknown = await response.json();
   if (response.status !== 201) {
-    throw new Error(`persona create failed (${String(response.status)}): ${await response.text()}`);
+    throw new Error(`persona create failed (${String(response.status)}): ${JSON.stringify(body)}`);
+  }
+  return z.object({ data: z.object({ id: z.string() }).loose() }).parse(body).data.id;
+}
+
+/** Puts the session back on the default assistant, as the persona pill does. */
+async function clearSessionPersona(server: ApprovalTestServer, sessionId: string): Promise<void> {
+  const response = await server.request(`/api/v1/sessions/${sessionId}/persona`, jsonInit({ persona_id: null }, 'PUT'));
+  if (response.status !== 200) {
+    throw new Error(`clearing the session persona failed (${String(response.status)}): ${await response.text()}`);
+  }
+}
+
+async function putSharing(server: ApprovalTestServer, shares: Record<string, string[]>): Promise<void> {
+  const response = await server.request('/api/v1/memory/vault/sharing', jsonInit({ shares }, 'PUT'));
+  if (response.status !== 200) {
+    throw new Error(`sharing update failed (${String(response.status)}): ${await response.text()}`);
   }
 }
 
@@ -100,19 +117,23 @@ async function vaultLog(directory: string): Promise<string | undefined> {
   }
 }
 
-/** The retain runs after the turn's answer, so wait for the vault log to appear. */
-async function waitForVaultLog(directory: string): Promise<string> {
+/** The retain runs after the turn's answer, so wait for the vault log to hold the text. */
+async function waitForVaultText(directory: string, needle: string): Promise<string> {
   const start = Date.now();
   for (;;) {
     const log = await vaultLog(directory);
-    if (log !== undefined) {
+    if (log?.includes(needle) === true) {
       return log;
     }
     if (Date.now() - start > RETAIN_TIMEOUT_MS) {
-      throw new Error(`no memory was retained under ${directory}`);
+      throw new Error(`"${needle}" was never retained under ${directory}`);
     }
     await new Promise(resolve => setTimeout(resolve, 50));
   }
+}
+
+function occurrences(text: string, needle: string): number {
+  return text.split(needle).length - 1;
 }
 
 describe('persona memory vaults over the turn path', () => {
@@ -124,6 +145,13 @@ describe('persona memory vaults over the turn path', () => {
   };
   let memoryDir = '';
   let server: ApprovalTestServer;
+  let zaraId = '';
+  let mirelaId = '';
+
+  const vaultDir = (name: string): string => path.join(memoryDir, name);
+  const zaraVault = (): string => vaultDir('default__persona_Zara');
+  const mirelaVault = (): string => vaultDir('default__persona_Mirela');
+  const sharedVault = (): string => vaultDir('default');
 
   beforeAll(async () => {
     memoryDir = await mkdtemp(path.join(tmpdir(), 'persona-memory-'));
@@ -132,8 +160,8 @@ describe('persona memory vaults over the turn path', () => {
     configuration.MEMORY_EMBEDDINGS_ENABLED = false;
     configuration.MEMORY_SUMMARIZE = false;
     server = await startApprovalTestServer();
-    await createPersona(server, 'Zara');
-    await createPersona(server, 'Mirela');
+    zaraId = await createPersona(server, 'Zara');
+    mirelaId = await createPersona(server, 'Mirela');
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -152,7 +180,7 @@ describe('persona memory vaults over the turn path', () => {
         sessionId: await createSession(server),
         content: 'Zara, note that my favourite fruit is the medlar.',
       });
-      expect(await waitForVaultLog(path.join(memoryDir, 'default__persona_Zara'))).toContain('medlar');
+      expect(await waitForVaultText(path.join(memoryDir, 'default__persona_Zara'), 'medlar')).toContain('medlar');
       expect(await vaultLog(path.join(memoryDir, 'default'))).toBeUndefined();
 
       await runTurn(server, {
@@ -183,13 +211,105 @@ describe('persona memory vaults over the turn path', () => {
         sessionId: await createSession(server),
         content: 'Please note that our neighbour keeps a tortoise called Quillon.',
       });
-      expect(await waitForVaultLog(path.join(memoryDir, 'default'))).toContain('Quillon');
+      expect(await waitForVaultText(path.join(memoryDir, 'default'), 'Quillon')).toContain('Quillon');
 
       await runTurn(server, {
         sessionId: await createSession(server),
         content: 'Mirela, what is the neighbour tortoise called?',
       });
       expect(lastModelRequestText(server)).toContain('Quillon');
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  describe('switching speakers inside one session', () => {
+    it(
+      'does not copy a persona turn into another persona vault',
+      async () => {
+        const sessionId = await createSession(server);
+        await runTurn(server, { sessionId, content: 'Zara, note that the lighthouse keeper is called Tobiah.' });
+        await waitForVaultText(zaraVault(), 'Tobiah');
+        await runTurn(server, { sessionId, content: 'Mirela, note that the harbour cat is called Pepin.' });
+
+        const mirelaLog = await waitForVaultText(mirelaVault(), 'Pepin');
+        expect(mirelaLog).not.toContain('Tobiah');
+        expect(await vaultLog(zaraVault())).not.toContain('Pepin');
+        expect(occurrences((await vaultLog(zaraVault())) ?? '', 'Tobiah')).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'does not copy a persona turn into the shared vault',
+      async () => {
+        const sessionId = await createSession(server);
+        await runTurn(server, { sessionId, content: 'Zara, note that the clock-tower gardener is Ottoline.' });
+        await waitForVaultText(zaraVault(), 'Ottoline');
+        await clearSessionPersona(server, sessionId);
+        await runTurn(server, { sessionId, content: 'Please note that the market baker is Cassian.' });
+
+        const sharedLog = await waitForVaultText(sharedVault(), 'Cassian');
+        expect(sharedLog).not.toContain('Ottoline');
+        expect(await vaultLog(zaraVault())).not.toContain('Cassian');
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'does not copy a shared-vault turn into a persona vault',
+      async () => {
+        const sessionId = await createSession(server);
+        await runTurn(server, { sessionId, content: 'Please note that the ferry captain is Dorothea.' });
+        await waitForVaultText(sharedVault(), 'Dorothea');
+        await runTurn(server, { sessionId, content: 'Zara, note that the bell ringer is Ignatius.' });
+
+        const zaraLog = await waitForVaultText(zaraVault(), 'Ignatius');
+        // The chat title is session metadata on every entry; the earlier exchange itself must stay out.
+        expect(zaraLog).not.toContain('User: Please note that the ferry captain');
+        expect(occurrences((await vaultLog(sharedVault())) ?? '', 'User: Please note that the ferry captain')).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'still verifies the previous turn without duplicating it when the persona stays the same',
+      async () => {
+        const sessionId = await createSession(server);
+        await runTurn(server, { sessionId, content: 'Zara, note that the cellar is stocked with Lambrusco.' });
+        await waitForVaultText(zaraVault(), 'Lambrusco');
+        await runTurn(server, { sessionId, content: 'And what else is on the second shelf?' });
+        await waitForVaultText(zaraVault(), 'second shelf');
+
+        expect(occurrences((await vaultLog(zaraVault())) ?? '', 'Lambrusco')).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+  });
+
+  it(
+    'recalls a vault granted over the sharing API and stops once the grant is revoked',
+    async () => {
+      await runTurn(server, {
+        sessionId: await createSession(server),
+        content: 'Zara, note that my favourite spice is the sumac.',
+      });
+      await waitForVaultText(zaraVault(), 'sumac');
+      const askMirela = async (): Promise<string> => {
+        await runTurn(server, {
+          sessionId: await createSession(server),
+          content: 'Mirela, which spice is my favourite?',
+        });
+        return lastModelRequestText(server);
+      };
+
+      expect(await askMirela()).not.toContain('sumac');
+
+      await putSharing(server, { [mirelaId]: ['persona:Zara'] });
+      expect(await askMirela()).toContain('sumac');
+
+      await putSharing(server, {});
+      expect(await askMirela()).not.toContain('sumac');
+      expect(zaraId).not.toBe(mirelaId);
     },
     TURN_TIMEOUT_MS,
   );

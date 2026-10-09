@@ -1568,14 +1568,21 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             logger: deps.logger,
           })
         : undefined;
+    const vaultScope =
+      persona?.kind === 'persona'
+        ? { personaName: persona.persona.display_name, personaId: persona.persona.id }
+        : undefined;
+    // The previous turn's retain lives in the vault that turn ran under. Verifying or recovering
+    // it through another vault's client would copy that exchange across vaults, so only a turn
+    // in the same vault hands its id to memory.
+    const previousTurnPersonaName =
+      previousTurnCustom?.persona?.persona_name ?? legacyParentActivation?.persona_name ?? null;
+    const memoryPreviousTurnId = previousTurnPersonaName === (vaultScope?.personaName ?? null) ? previousTurnId : null;
     const memoryClient = createMemoryClient({
       backend: configuration.MEMORY_BACKEND,
       markdownDir: configuration.MEMORY_MARKDOWN_DIR,
       namespace: requestContext.tenant_id,
-      vaultScope:
-        persona?.kind === 'persona'
-          ? { personaName: persona.persona.display_name, personaId: persona.persona.id }
-          : undefined,
+      vaultScope,
       hindsight:
         memoryProvider === undefined
           ? undefined
@@ -1700,7 +1707,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryClient,
       memoryProviderServerName: memoryProvider?.serverName,
       memorySettings: effectiveMemorySettings,
-      previousTurnId,
+      previousTurnId: memoryPreviousTurnId,
       sessionTitle: sessionTitleForMemory,
       spaceStore: deps.spaceStore,
       clientTimezone: body.client_timezone,
