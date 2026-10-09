@@ -222,16 +222,16 @@ async function ensurePersona() {
   if (!scenario.persona) return null;
   const wanted = scenario.persona.display_name;
   const list = await api('GET', '/api/v1/personas');
-  const rows = list?.personas ?? list ?? [];
+  const rows = list?.data ?? list?.personas ?? list ?? [];
   const found = Array.isArray(rows) ? rows.find((p) => p?.display_name === wanted || p?.persona?.display_name === wanted) : null;
   if (found) {
-    const id = found.id ?? found.persona?.id;
+    const id = found?.data?.id ?? found?.id ?? found?.persona?.id;
     log(`persona "${wanted}" already exists (${id})`);
     return id;
   }
   log(`creating persona "${wanted}" ...`);
   const created = await api('POST', '/api/v1/personas', { persona: scenario.persona }, { timeoutMs: 60000 });
-  const id = created?.persona?.id ?? created?.id;
+  const id = created?.data?.id ?? created?.persona?.id ?? created?.id;
   if (!id) fail('persona create returned no id: ' + JSON.stringify(created).slice(0, 300));
   log(`persona created (${id})`);
   return id;
@@ -244,14 +244,14 @@ async function createSession() {
     { agent: { spec: { model: { name: MODEL_FQN } } } },
     { timeoutMs: 60000 },
   );
-  const id = created?.session?.id ?? created?.id;
+  const id = created?.data?.id ?? created?.session?.id ?? created?.id;
   if (!id) fail('session create returned no id: ' + JSON.stringify(created).slice(0, 300));
   log('session created:', id);
   return id;
 }
 
 function extractAssistantText(turn) {
-  const output = turn?.turn?.state?.output ?? turn?.state?.output ?? [];
+  const output = turn?.data?.state?.output ?? turn?.turn?.state?.output ?? turn?.state?.output ?? [];
   const texts = [];
   if (Array.isArray(output)) {
     for (const ev of output) {
@@ -280,13 +280,13 @@ async function runTurn(sessionId, content, index) {
     { input: [{ type: 'user.message', content }], stream: false },
     { timeoutMs: 120000 },
   );
-  const turnId = created?.turn?.id ?? created?.id;
+  const turnId = created?.data?.id ?? created?.turn?.id ?? created?.id;
   if (!turnId) fail('turn create returned no id: ' + JSON.stringify(created).slice(0, 300));
   const deadline = Date.now() + 600000;
   for (;;) {
     await sleep(5000);
     const t = await api('GET', `/api/v1/sessions/${sessionId}/turns/${turnId}`, undefined, { timeoutMs: 30000 });
-    const st = t?.turn?.state?.status ?? t?.state?.status;
+    const st = t?.data?.state?.status ?? t?.turn?.state?.status ?? t?.state?.status;
     if (st === 'done') {
       const text = extractAssistantText(t);
       log(`assistant (${text.length} chars):`, text.slice(0, 220).replace(/\n/g, ' '));
