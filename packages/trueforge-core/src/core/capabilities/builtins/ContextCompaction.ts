@@ -11,6 +11,7 @@ import {
   isInternalSystemMessage,
   isLLMContextMessage,
   userAuthoredText,
+  type CurrentContextUsage,
 } from '../../runtime/contextUtils';
 import type { TokenCounter } from '../../llm/tokenizer';
 import {
