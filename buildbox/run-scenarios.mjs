@@ -432,14 +432,30 @@ async function takeScreenshots(sessionId, lastText) {
 
 // ------------------------------------------------------------------ main ---
 let lastText = '';
+
+/**
+ * The served id is provider-shaped (e.g. `nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4`)
+ * but the manifest's `name` must satisfy NameSchema (2-64 lowercase chars, leading
+ * letter, trailing alphanumeric, hyphens only), and the agent spec addresses the
+ * model as `provider_name/model_name`. Slugify for `name`/FQN; `model_id` keeps the
+ * exact upstream id the provider API needs.
+ */
+function slugifyModelName(id) {
+  let slug = id.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/, '');
+  if (!/^[a-z]/.test(slug)) slug = `m-${slug}`.replace(/-+$/, '');
+  if (slug.length < 2) slug = 'model';
+  return slug;
+}
+
 try {
   log(`scenario: ${scenarioName} (${scenario.turns.length} turns)`);
   if (!sparkReachable()) fail('spark model endpoint unreachable (strict and insecure TLS both failed)');
   const servedModelId = resolveSparkModelId();
-  MODEL_FQN = `spark/${servedModelId}`;
+  const servedModelName = slugifyModelName(servedModelId);
+  MODEL_FQN = `spark/${servedModelName}`;
   PROVIDER_MANIFEST.models[0].model_id = servedModelId;
-  PROVIDER_MANIFEST.models[0].name = servedModelId;
-  log('using spark model:', servedModelId);
+  PROVIDER_MANIFEST.models[0].name = servedModelName;
+  log('using spark model:', servedModelId, `(as ${servedModelName})`);
   await startServers();
   await ensureProvider();
   const personaId = await ensurePersona();
