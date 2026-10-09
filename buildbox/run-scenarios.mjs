@@ -20,7 +20,7 @@
  * packages/frontend/node_modules at runtime.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -109,11 +109,19 @@ function sparkReachable() {
 // hardcoding it. The hardcoded name goes stale whenever the brain is swapped
 // (the 404 on gpt-oss-120b-derestricted after the DeepSeek cutover), so the
 // harness asks the endpoint what it actually serves.
+const SPARK_MODEL_ID_CACHE = path.join(
+  process.env.HOME || '/tmp',
+  '.buildbox-runner',
+  'spark-model-id',
+);
+
 function resolveSparkModelId() {
   const url = `${PROVIDER_MANIFEST.base_url}/models`;
-  // The Spark endpoint intermittently returns empty bodies; retry a few times
-  // before giving up so a transient flake does not fail the gate.
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  // The models endpoint intermittently returns empty bodies (curl exit 0,
+  // zero-length response); bad windows have lasted 30s+, so retry patiently
+  // before giving up.
+  const maxAttempts = 10;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     for (const extra of [[], ['-k']]) {
       const mode = extra.includes('-k') ? 'insecure' : 'strict';
       const r = spawnSync('curl', ['-sS', '-m', '20', ...extra, url], { encoding: 'utf8' });
@@ -124,16 +132,36 @@ function resolveSparkModelId() {
       }
       try {
         const id = JSON.parse(out)?.data?.[0]?.id;
-        if (typeof id === 'string' && id.length > 0) return id;
+        if (typeof id === 'string' && id.length > 0) {
+          try {
+            mkdirSync(path.dirname(SPARK_MODEL_ID_CACHE), { recursive: true });
+            writeFileSync(SPARK_MODEL_ID_CACHE, id + '\n');
+          } catch {
+            /* cache is best-effort */
+          }
+          return id;
+        }
         log(`WARN: ${url} (${mode}) returned no usable model id; body head: ${out.slice(0, 300)}`);
       } catch (e) {
         log(`WARN: ${url} (${mode}) returned unparseable body (${e.message}); body head: ${out.slice(0, 300)}`);
       }
     }
-    if (attempt < 3) {
-      log(`WARN: retrying ${url} in 15s (attempt ${attempt}/3) ...`);
-      spawnSync('sleep', ['15']);
+    if (attempt < maxAttempts) {
+      log(`WARN: retrying ${url} in 30s (attempt ${attempt}/${maxAttempts}) ...`);
+      spawnSync('sleep', ['30']);
     }
+  }
+  // Last resort: reuse the most recently resolved id. A brain swap during an
+  // endpoint outage would make this stale (the turn then 404s, exactly as the
+  // old hardcoded name did), but that is rarer than the endpoint flake.
+  try {
+    const cached = readFileSync(SPARK_MODEL_ID_CACHE, 'utf8').trim();
+    if (cached) {
+      log(`WARN: using cached model id '${cached}' after ${maxAttempts} failed resolution attempts`);
+      return cached;
+    }
+  } catch {
+    /* no cache yet */
   }
   fail('could not resolve the served model id from the Spark /v1/models endpoint');
 }
