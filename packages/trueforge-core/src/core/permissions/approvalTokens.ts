@@ -49,6 +49,21 @@ export function hashCanonicalParams(params: unknown): string {
   return createHash('sha256').update(stableStringify(params)).digest('hex');
 }
 
+/**
+ * Normalize canonical params to their JSON-serialized form.
+ *
+ * Approval tokens bind an approval to sha256(stableStringify(canonical_params)),
+ * but the verify path rebuilds params with JSON.parse of the serialized
+ * arguments string. Values that do not survive a JSON round-trip (class
+ * instances, Dates, undefined, functions) would hash differently at mint than
+ * at verify, and legitimate approvals would be rejected as "action identity
+ * changed". Normalize here, at the classification choke point, so ToolSet,
+ * Sandbox, and AgentThread all share the invariant.
+ */
+export function toJsonSafeParams(params: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(params)) as Record<string, unknown>;
+}
+
 /** Deterministic action id over tool name + canonical params. */
 export function actionIdFor(input: { tool_name: string; canonical_params: unknown }): string {
   return createHash('sha256')

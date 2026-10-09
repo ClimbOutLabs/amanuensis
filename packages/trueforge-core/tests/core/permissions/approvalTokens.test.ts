@@ -3,6 +3,7 @@ import {
   hashCanonicalParams,
   InMemoryApprovalTokenStore,
   stableStringify,
+  toJsonSafeParams,
   verifyApprovalToken,
 } from '../../../src/core/permissions/approvalTokens';
 
@@ -19,6 +20,78 @@ describe('hashCanonicalParams', () => {
   test('is key-order insensitive but value sensitive', () => {
     expect(hashCanonicalParams({ a: 1, b: 2 })).toBe(hashCanonicalParams({ b: 2, a: 1 }));
     expect(hashCanonicalParams({ a: 1 })).not.toBe(hashCanonicalParams({ a: 2 }));
+  });
+});
+
+describe('toJsonSafeParams', () => {
+  test('round-trips Dates to ISO strings like the verify path JSON.parse does', () => {
+    const at = new Date('2026-01-02T03:04:05.006Z');
+    const normalized = toJsonSafeParams({ at, path: '/tmp/f' });
+    expect(normalized).toEqual({ at: '2026-01-02T03:04:05.006Z', path: '/tmp/f' });
+  });
+
+  test('drops undefined values, matching JSON.stringify', () => {
+    const normalized = toJsonSafeParams({ keep: 1, drop: undefined });
+    expect(normalized).toEqual({ keep: 1 });
+    expect('drop' in normalized).toBe(false);
+  });
+
+  test('converts class instances to plain data', () => {
+    class Params {
+      readonly command = 'ls';
+      method(): string {
+        return this.command;
+      }
+    }
+    const nested: Record<string, unknown> = { nested: new Params() };
+    const normalized = toJsonSafeParams(nested);
+    expect(normalized).toEqual({ nested: { command: 'ls' } });
+  });
+
+  test('handles nested structures and preserves JSON-safe values', () => {
+    const params = {
+      command: 'git status',
+      argv: ['git', 'status'],
+      nested: { depth: 2, flag: true, nothing: null },
+    };
+    expect(toJsonSafeParams(params)).toEqual(params);
+  });
+
+  test('hashes identically to the verify-path JSON round-trip', () => {
+    const params = {
+      command: 'ls',
+      at: new Date('2026-01-02T03:04:05.006Z'),
+      extra: undefined,
+      nested: { list: [1, 'two', null] },
+    };
+    const fromMint = hashCanonicalParams(toJsonSafeParams(params));
+    const verifyForm: Record<string, unknown> = JSON.parse(JSON.stringify(params));
+    const fromVerify = hashCanonicalParams(verifyForm);
+    expect(fromMint).toBe(fromVerify);
+  });
+
+  test('minting over normalized params verifies against JSON-parsed args', () => {
+    const store = new InMemoryApprovalTokenStore();
+    const liveParams = { command: 'ls', at: new Date('2026-01-02T03:04:05.006Z') };
+    const normalized = toJsonSafeParams(liveParams);
+    const token = store.mint({
+      action_id: actionIdFor({ tool_name: 'exec', canonical_params: normalized }),
+      canonical_params: normalized,
+    });
+    const redeemed = store.redeem({ token_id: token.token_id });
+    expect(redeemed).toBeDefined();
+    if (redeemed === undefined) {
+      return;
+    }
+    // The verify path rebuilds params via JSON.parse of the serialized
+    // arguments string; the token must validate against that form.
+    const verifyParams: Record<string, unknown> = JSON.parse(JSON.stringify(liveParams));
+    const result = verifyApprovalToken({
+      token: redeemed,
+      action_id: actionIdFor({ tool_name: 'exec', canonical_params: verifyParams }),
+      canonical_params: verifyParams,
+    });
+    expect(result).toEqual({ valid: true });
   });
 });
 

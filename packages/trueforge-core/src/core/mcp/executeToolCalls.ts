@@ -30,6 +30,7 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
+import { CALL_TOOL_NAME, tryUnwrapCallToolInput } from '../runtime/DeferredTool';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import { approvalGrantKey } from './approvalGrant';
 import type { MappedMCPTool } from './convertMCPServers';
@@ -507,13 +508,28 @@ async function verifySentinelPreDispatch(input: {
   } catch {
     return 'Tool arguments could not be parsed; request approval again.';
   }
+  // Deferred `call_tool` invocations are classified (and their approval tokens
+  // minted) against the underlying tool's name and inner input, not the wrapper
+  // (see DeferredTool.toolCallInfo). When mint unwrapped, the verifier must hash
+  // the same inner input, or every approved deferred call fails as "action
+  // identity changed". Wrapper-classified fallbacks keep
+  // original_tool_name === 'call_tool' and are verified against the wrapper.
+  if (info.is_deferred === true && info.original_tool_name !== CALL_TOOL_NAME) {
+    canonicalParams = tryUnwrapCallToolInput(canonicalParams) ?? canonicalParams;
+  }
+  // When the mint site recorded its exact identity (sandbox: invoked name and
+  // normalized args, while original_tool_name is remapped for display), verify
+  // against the recorded values instead of reconstructing.
+  if (info.mint_canonical_params !== undefined) {
+    canonicalParams = info.mint_canonical_params;
+  }
   const offline = await sentinel.services.isOffline({
     tenant_id: sentinel.identity.tenant_id,
     created_by: sentinel.identity.created_by,
   });
   return verifyPreDispatch({
     call: {
-      tool_name: info.original_tool_name,
+      tool_name: info.mint_tool_name ?? info.original_tool_name,
       tool_type: info.type,
       canonical_params: canonicalParams,
       tier: info.tier,
