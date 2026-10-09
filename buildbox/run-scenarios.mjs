@@ -111,20 +111,28 @@ function sparkReachable() {
 // harness asks the endpoint what it actually serves.
 function resolveSparkModelId() {
   const url = `${PROVIDER_MANIFEST.base_url}/models`;
-  for (const extra of [[], ['-k']]) {
-    const mode = extra.includes('-k') ? 'insecure' : 'strict';
-    const r = spawnSync('curl', ['-sS', '-m', '20', ...extra, url], { encoding: 'utf8' });
-    const out = (r.stdout || '').trim();
-    if (r.status !== 0) {
-      log(`WARN: ${url} curl exit ${r.status} (${mode}): ${(r.stderr || '').trim().slice(0, 200)}`);
-      continue;
+  // The Spark endpoint intermittently returns empty bodies; retry a few times
+  // before giving up so a transient flake does not fail the gate.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    for (const extra of [[], ['-k']]) {
+      const mode = extra.includes('-k') ? 'insecure' : 'strict';
+      const r = spawnSync('curl', ['-sS', '-m', '20', ...extra, url], { encoding: 'utf8' });
+      const out = (r.stdout || '').trim();
+      if (r.status !== 0) {
+        log(`WARN: ${url} curl exit ${r.status} (${mode}): ${(r.stderr || '').trim().slice(0, 200)}`);
+        continue;
+      }
+      try {
+        const id = JSON.parse(out)?.data?.[0]?.id;
+        if (typeof id === 'string' && id.length > 0) return id;
+        log(`WARN: ${url} (${mode}) returned no usable model id; body head: ${out.slice(0, 300)}`);
+      } catch (e) {
+        log(`WARN: ${url} (${mode}) returned unparseable body (${e.message}); body head: ${out.slice(0, 300)}`);
+      }
     }
-    try {
-      const id = JSON.parse(out)?.data?.[0]?.id;
-      if (typeof id === 'string' && id.length > 0) return id;
-      log(`WARN: ${url} (${mode}) returned no usable model id; body head: ${out.slice(0, 300)}`);
-    } catch (e) {
-      log(`WARN: ${url} (${mode}) returned unparseable body (${e.message}); body head: ${out.slice(0, 300)}`);
+    if (attempt < 3) {
+      log(`WARN: retrying ${url} in 15s (attempt ${attempt}/3) ...`);
+      spawnSync('sleep', ['15']);
     }
   }
   fail('could not resolve the served model id from the Spark /v1/models endpoint');
