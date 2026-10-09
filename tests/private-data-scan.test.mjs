@@ -139,3 +139,28 @@ test('tree scan fails closed on non-UTF-8 Git pathnames', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('tree scan flags Tailscale tailnet hostnames', () => {
+  const root = mkdtempSync(join(tmpdir(), 'aman-private-data-scan-'));
+  try {
+    git(root, ['init', '--quiet']);
+    git(root, ['config', 'user.email', 'private-data-test@example.invalid']);
+    git(root, ['config', 'user.name', 'Private Data Test']);
+
+    // Assembled from parts so this file does not match its own rule.
+    const host = ['box-1', 'tail0e1aa9', 'ts', 'net'].join('.');
+    writeFileSync(join(root, 'config.mjs'), `const base_url = 'https://${host}:8456/v1';\n`);
+    writeFileSync(join(root, 'clean.mjs'), 'const base_url = process.env.BASE_URL;\n');
+    git(root, ['add', '.']);
+    git(root, ['commit', '--quiet', '-m', 'fixture with tailnet host']);
+
+    assert.deepEqual(scanPrivateData({ rootDirectory: root }).findings, [
+      {
+        file: 'config.mjs',
+        reasons: ['file content matches Tailscale tailnet hostname'],
+      },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

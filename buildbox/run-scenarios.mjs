@@ -3,9 +3,14 @@
  * buildbox/run-scenarios.mjs
  *
  * Drives one scripted assistant scenario against a local standalone Amanuensis
- * harness backed by the Spark model, then captures UI screenshots.
+ * harness backed by an OpenAI-compatible model endpoint, then captures UI
+ * screenshots.
  *
- * Usage: node buildbox/run-scenarios.mjs --scenario <name>
+ * Usage: SCENARIO_MODEL_BASE_URL=https://host/v1 node buildbox/run-scenarios.mjs --scenario <name>
+ *
+ * Env:
+ *   SCENARIO_MODEL_BASE_URL  required; base URL of the endpoint, including /v1
+ *   SCENARIO_MODEL_API_KEY   optional; bearer key for the endpoint
  *
  * The scenario file lives at buildbox/scenarios/<name>.json and describes:
  *   - an optional persona to create and attach to the session
@@ -13,7 +18,7 @@
  *   - how many screenshots to take of the finished conversation
  *
  * Needs: pnpm install already done at the repo root, outbound network access
- * to the Spark model endpoint, and (for screenshots) a Chromium binary —
+ * to the model endpoint, and (for screenshots) a Chromium binary —
  * installed on first run via `npx playwright-core install chromium`.
  *
  * Only Node builtins are used, plus playwright-core resolved from
@@ -29,11 +34,19 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const API = 'http://127.0.0.1:8790';
 const UI = 'http://127.0.0.1:5173';
-let MODEL_FQN = ''; // resolved from the Spark /v1/models at startup (see resolveSparkModelId)
+let MODEL_FQN = ''; // resolved from the endpoint's /models at startup (see resolveModelId)
+const MODEL_BASE_URL = process.env.SCENARIO_MODEL_BASE_URL?.replace(/\/+$/, '');
+if (!MODEL_BASE_URL) {
+  console.error('FATAL: SCENARIO_MODEL_BASE_URL is required (e.g. https://host:8000/v1)');
+  process.exit(1);
+}
+const MODEL_API_KEY = process.env.SCENARIO_MODEL_API_KEY || '';
+const PROVIDER_NAME = 'scenario-model';
 const PROVIDER_MANIFEST = {
   type: 'custom',
-  name: 'spark',
-  base_url: 'https://spark-2516.tail0e1aa9.ts.net:8456/v1',
+  name: PROVIDER_NAME,
+  base_url: MODEL_BASE_URL,
+  ...(MODEL_API_KEY ? { auth: { api_key: MODEL_API_KEY } } : {}),
   models: [
     {
       model_id: 'gpt-oss-120b-derestricted',
@@ -93,25 +106,28 @@ async function api(method, p, body, { timeoutMs = 30000 } = {}) {
 }
 
 // ------------------------------------------------------------ preflight ----
-function sparkReachable() {
+// Bearer header args for curl probes of /models; empty when no key is set.
+const CURL_AUTH_ARGS = MODEL_API_KEY ? ['-H', `Authorization: Bearer ${MODEL_API_KEY}`] : [];
+
+function modelEndpointReachable() {
   const url = `${PROVIDER_MANIFEST.base_url}/models`;
   for (const extra of [[], ['-k']]) {
-    const r = spawnSync('curl', ['-sS', '-m', '20', ...extra, url], { encoding: 'utf8' });
+    const r = spawnSync('curl', ['-sS', '-m', '20', ...CURL_AUTH_ARGS, ...extra, url], { encoding: 'utf8' });
     if (r.status === 0) {
-      log(`spark reachable (${extra.includes('-k') ? 'insecure TLS' : 'strict TLS'})`);
+      log(`model endpoint reachable (${extra.includes('-k') ? 'insecure TLS' : 'strict TLS'})`);
       return true;
     }
   }
   return false;
 }
 
-// The Spark serves exactly one vLLM model; resolve its id at runtime instead of
+// The endpoint serves exactly one model; resolve its id at runtime instead of
 // hardcoding it. The hardcoded name goes stale whenever the brain is swapped
 // (the 404 on gpt-oss-120b-derestricted after the DeepSeek cutover), so the
 // harness asks the endpoint what it actually serves.
-const SPARK_MODEL_ID_CACHE = path.join(process.env.HOME || '/tmp', '.buildbox-runner', 'spark-model-id');
+const MODEL_ID_CACHE = path.join(process.env.HOME || '/tmp', '.buildbox-runner', 'scenario-model-id');
 
-function resolveSparkModelId() {
+function resolveModelId() {
   const url = `${PROVIDER_MANIFEST.base_url}/models`;
   // The models endpoint intermittently returns empty bodies (curl exit 0,
   // zero-length response); bad windows have lasted 30s+, so retry patiently
@@ -120,7 +136,7 @@ function resolveSparkModelId() {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     for (const extra of [[], ['-k']]) {
       const mode = extra.includes('-k') ? 'insecure' : 'strict';
-      const r = spawnSync('curl', ['-sS', '-m', '20', ...extra, url], { encoding: 'utf8' });
+      const r = spawnSync('curl', ['-sS', '-m', '20', ...CURL_AUTH_ARGS, ...extra, url], { encoding: 'utf8' });
       const out = (r.stdout || '').trim();
       if (r.status !== 0) {
         log(`WARN: ${url} curl exit ${r.status} (${mode}): ${(r.stderr || '').trim().slice(0, 200)}`);
@@ -130,8 +146,8 @@ function resolveSparkModelId() {
         const id = JSON.parse(out)?.data?.[0]?.id;
         if (typeof id === 'string' && id.length > 0) {
           try {
-            mkdirSync(path.dirname(SPARK_MODEL_ID_CACHE), { recursive: true });
-            writeFileSync(SPARK_MODEL_ID_CACHE, id + '\n');
+            mkdirSync(path.dirname(MODEL_ID_CACHE), { recursive: true });
+            writeFileSync(MODEL_ID_CACHE, id + '\n');
           } catch {
             /* cache is best-effort */
           }
@@ -151,7 +167,7 @@ function resolveSparkModelId() {
   // endpoint outage would make this stale (the turn then 404s, exactly as the
   // old hardcoded name did), but that is rarer than the endpoint flake.
   try {
-    const cached = readFileSync(SPARK_MODEL_ID_CACHE, 'utf8').trim();
+    const cached = readFileSync(MODEL_ID_CACHE, 'utf8').trim();
     if (cached) {
       log(`WARN: using cached model id '${cached}' after ${maxAttempts} failed resolution attempts`);
       return cached;
@@ -159,7 +175,7 @@ function resolveSparkModelId() {
   } catch {
     /* no cache yet */
   }
-  fail('could not resolve the served model id from the Spark /v1/models endpoint');
+  fail('could not resolve the served model id from the /models endpoint');
 }
 
 // --------------------------------------------------------------- servers ---
@@ -274,7 +290,7 @@ function stopServers() {
 
 // ------------------------------------------------------------ scenario -----
 async function ensureProvider() {
-  log('registering spark provider ...');
+  log('registering scenario-model provider ...');
   await api('PUT', '/api/v1/settings/model-providers', { manifest: PROVIDER_MANIFEST }, { timeoutMs: 60000 });
   log('provider ok');
 }
@@ -456,13 +472,13 @@ function slugifyModelName(id) {
 
 try {
   log(`scenario: ${scenarioName} (${scenario.turns.length} turns)`);
-  if (!sparkReachable()) fail('spark model endpoint unreachable (strict and insecure TLS both failed)');
-  const servedModelId = resolveSparkModelId();
+  if (!modelEndpointReachable()) fail('model endpoint unreachable (strict and insecure TLS both failed)');
+  const servedModelId = resolveModelId();
   const servedModelName = slugifyModelName(servedModelId);
-  MODEL_FQN = `spark/${servedModelName}`;
+  MODEL_FQN = `${PROVIDER_NAME}/${servedModelName}`;
   PROVIDER_MANIFEST.models[0].model_id = servedModelId;
   PROVIDER_MANIFEST.models[0].name = servedModelName;
-  log('using spark model:', servedModelId, `(as ${servedModelName})`);
+  log('using model:', servedModelId, `(as ${servedModelName})`);
   await startServers();
   await ensureProvider();
   const personaId = await ensurePersona();
