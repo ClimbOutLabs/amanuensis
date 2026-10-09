@@ -3798,7 +3798,15 @@ export class AgentThread {
         id: newEventId(),
         created_at: new Date().toISOString(),
         thread_id: this.threadId,
-        tool_calls: pendingApprovalToolCalls.map(({ id }) => ({ id, source_event_id: modelMessageEventId })),
+        // Carry the Sentinel classification on each ref: the UI mounts the Tier 3
+        // approval card from `tier` + `tier3_card`, and the persisted session
+        // context rebuilds the same cards from these events after a reload.
+        tool_calls: pendingApprovalToolCalls.map(call => ({
+          id: call.id,
+          source_event_id: modelMessageEventId,
+          tier: call.tool_info.tier,
+          tier3_card: call.tool_info.tier3_card ?? null,
+        })),
       };
       yield event;
     }

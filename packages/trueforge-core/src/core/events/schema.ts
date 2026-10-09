@@ -14,6 +14,7 @@ import {
   RegisteredCommandExecutionSchema,
 } from '../llm/LLMTypes';
 import { CurrentContextUsageSchema } from '../runtime/contextUsage';
+import { Tier3CardSchema, TierSchema } from '../permissions/tier';
 
 /**
  * Process-local monotonic ULIDs preserve event creation order, including
@@ -615,6 +616,15 @@ export const ToolCallRefSchema = z
   .object({
     id: z.string().describe('Tool call id awaiting action.'),
     source_event_id: z.string().describe('Event id of the model.message that requested the tool call.'),
+    // Sentinel classification stamped by the server when the call was classified.
+    // The UI mounts the Tier 3 approval card from these fields; without them the
+    // card has nothing to render.
+    tier: TierSchema.optional().describe(
+      'Sentinel permission tier for this call, present when the call was classified.',
+    ),
+    tier3_card: Tier3CardSchema.nullable()
+      .optional()
+      .describe('Server-rendered Tier 3 approval card for this call, or null when not Tier 3.'),
   })
   .openapi('ToolCallRef');
 
