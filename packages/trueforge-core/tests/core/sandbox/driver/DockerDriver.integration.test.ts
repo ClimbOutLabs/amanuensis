@@ -9,7 +9,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { DockerDriver } from '../../../../src/core/sandbox/driver/DockerDriver';
+import { DOCKER_SOCKET_PATH, DockerDriver } from '../../../../src/core/sandbox/driver/DockerDriver';
 import type { DriverRunParams } from '../../../../src/core/sandbox/driver/IsolationDriver';
 
 const execFileAsync = promisify(execFile);
@@ -59,6 +59,7 @@ describe('DockerDriver integration (live daemon)', () => {
         cosignPublicKeyPath: '/nonexistent/cosign.pub',
         dockerBinary: undefined,
         cosignBinary: undefined,
+        dockerSocketPath: DOCKER_SOCKET_PATH,
         commandTimeoutMs: undefined,
         createTimeoutMs: undefined,
       },
@@ -95,6 +96,7 @@ describe('DockerDriver integration (live daemon)', () => {
           cosignPublicKeyPath: '/nonexistent/cosign.pub',
           dockerBinary: undefined,
           cosignBinary: undefined,
+          dockerSocketPath: DOCKER_SOCKET_PATH,
           commandTimeoutMs: undefined,
           createTimeoutMs: undefined,
         },

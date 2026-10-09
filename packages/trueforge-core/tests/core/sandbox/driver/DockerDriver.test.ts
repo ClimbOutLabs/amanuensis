@@ -798,7 +798,7 @@ describe('checkContainerIsolation', () => {
 
   test('rejects a container with network access', () => {
     const entry = goodInspectEntry();
-    (entry.HostConfig as Record<string, unknown>).NetworkMode = 'bridge';
+    (entry['HostConfig'] as Record<string, unknown>)['NetworkMode'] = 'bridge';
     const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -808,7 +808,7 @@ describe('checkContainerIsolation', () => {
 
   test('rejects a writable root filesystem', () => {
     const entry = goodInspectEntry();
-    (entry.HostConfig as Record<string, unknown>).ReadonlyRootfs = false;
+    (entry['HostConfig'] as Record<string, unknown>)['ReadonlyRootfs'] = false;
     const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -818,19 +818,19 @@ describe('checkContainerIsolation', () => {
 
   test.each(['0', 'root', '0:0', ''])('rejects root user %p', (user) => {
     const entry = goodInspectEntry();
-    (entry.Config as Record<string, unknown>).User = user;
+    (entry['Config'] as Record<string, unknown>)['User'] = user;
     expect(checkContainerIsolation({ inspectJson: JSON.stringify([entry]) }).ok).toBe(false);
   });
 
   test('rejects missing capability drop', () => {
     const entry = goodInspectEntry();
-    (entry.HostConfig as Record<string, unknown>).CapDrop = [];
+    (entry['HostConfig'] as Record<string, unknown>)['CapDrop'] = [];
     expect(checkContainerIsolation({ inspectJson: JSON.stringify([entry]) }).ok).toBe(false);
   });
 
   test('rejects missing no-new-privileges', () => {
     const entry = goodInspectEntry();
-    (entry.HostConfig as Record<string, unknown>).SecurityOpt = ['seccomp=default'];
+    (entry['HostConfig'] as Record<string, unknown>)['SecurityOpt'] = ['seccomp=default'];
     const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -840,7 +840,7 @@ describe('checkContainerIsolation', () => {
 
   test('rejects missing seccomp profile', () => {
     const entry = goodInspectEntry();
-    (entry.HostConfig as Record<string, unknown>).SecurityOpt = ['no-new-privileges:true'];
+    (entry['HostConfig'] as Record<string, unknown>)['SecurityOpt'] = ['no-new-privileges:true'];
     const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -859,7 +859,7 @@ describe('DockerDriver.run isolation refusal', () => {
       }
       if (args[0] === 'inspect' && args.length === 2) {
         const entry = goodInspectEntry();
-        (entry.HostConfig as Record<string, unknown>).NetworkMode = 'bridge';
+        (entry['HostConfig'] as Record<string, unknown>)['NetworkMode'] = 'bridge';
         return { ...okResult, stdout: JSON.stringify([entry]) };
       }
       return okResult;

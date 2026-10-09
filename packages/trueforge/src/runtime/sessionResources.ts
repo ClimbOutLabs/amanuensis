@@ -625,6 +625,7 @@ function getSharedRunCodeService(logger: Logger): RunCodeService {
         cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
         dockerBinary: undefined,
         cosignBinary: undefined,
+        dockerSocketPath: undefined,
         commandTimeoutMs: undefined,
         createTimeoutMs: undefined,
       },

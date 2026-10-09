@@ -337,31 +337,31 @@ export function checkContainerIsolation(input: {
     return { ok: false, reason: '`docker inspect` returned a non-object container entry' };
   }
   const record = entry as Record<string, unknown>;
-  const hostConfig: unknown = record.HostConfig;
-  const config: unknown = record.Config;
+  const hostConfig: unknown = record['HostConfig'];
+  const config: unknown = record['Config'];
   if (typeof hostConfig !== 'object' || hostConfig === null || typeof config !== 'object' || config === null) {
     return { ok: false, reason: '`docker inspect` entry is missing HostConfig or Config' };
   }
   const hc = hostConfig as Record<string, unknown>;
   const cc = config as Record<string, unknown>;
 
-  if (hc.NetworkMode !== 'none') {
-    const actual = typeof hc.NetworkMode === 'string' ? hc.NetworkMode : 'missing';
+  if (hc['NetworkMode'] !== 'none') {
+    const actual = typeof hc['NetworkMode'] === 'string' ? hc['NetworkMode'] : 'missing';
     return { ok: false, reason: `container NetworkMode is '${actual}', expected 'none'` };
   }
-  if (hc.ReadonlyRootfs !== true) {
+  if (hc['ReadonlyRootfs'] !== true) {
     return { ok: false, reason: 'container root filesystem is not read-only' };
   }
-  const user: unknown = cc.User;
+  const user: unknown = cc['User'];
   if (typeof user !== 'string' || user === '' || user === '0' || user === 'root' || user === '0:0') {
     const actual = typeof user === 'string' && user !== '' ? user : 'missing';
     return { ok: false, reason: `container user is '${actual}', expected a non-root user` };
   }
-  const capDrop: unknown = hc.CapDrop;
+  const capDrop: unknown = hc['CapDrop'];
   if (!Array.isArray(capDrop) || !capDrop.includes('ALL')) {
     return { ok: false, reason: 'container capabilities were not fully dropped (CapDrop does not include ALL)' };
   }
-  const securityOpt: unknown = hc.SecurityOpt;
+  const securityOpt: unknown = hc['SecurityOpt'];
   const opts = Array.isArray(securityOpt) ? securityOpt.filter((o): o is string => typeof o === 'string') : [];
   if (!opts.includes('no-new-privileges:true')) {
     return { ok: false, reason: 'container is missing no-new-privileges' };
@@ -425,7 +425,7 @@ export class DockerDriver implements IsolationDriver {
     // Docker detection (spec): a missing socket is a distinct, user-actionable
     // state from a wedged daemon. The wrapper surfaces the exact recovery
     // message; detection is memoized per process (see detectDocker).
-    if ((await detectDocker(this.dockerSocketPath)) !== true) {
+    if (!(await detectDocker(this.dockerSocketPath))) {
       return {
         ready: false,
         error_code: 'docker_unavailable',
