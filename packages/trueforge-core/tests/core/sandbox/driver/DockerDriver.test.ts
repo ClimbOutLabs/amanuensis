@@ -8,7 +8,6 @@ import { join } from 'node:path';
 import {
   DOCKER_UNAVAILABLE_MESSAGE,
   DockerDriver,
-  ISOLATION_REFUSED_MARKER,
   ISOLATION_REFUSED_MESSAGE,
   checkContainerIsolation,
   detectDocker,
@@ -17,7 +16,10 @@ import {
   type DockerCommandRunner,
   type DockerDriverOptions,
 } from '../../../../src/core/sandbox/driver/DockerDriver';
-import type { DriverRunParams } from '../../../../src/core/sandbox/driver/IsolationDriver';
+import {
+  ISOLATION_REFUSED_MARKER,
+  type DriverRunParams,
+} from '../../../../src/core/sandbox/driver/IsolationDriver';
 
 const DIGEST = 'sha256:' + 'a'.repeat(64);
 const IMAGE = `ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0@${DIGEST}`;
@@ -360,10 +362,12 @@ describe('DockerDriver.create', () => {
     const result = await driver.run(runParams());
     expect(result.terminatedBy).toBe('oom');
     expect(result.exitCode).toBe(137);
-    // Post-mortem inspect happens before the explicit remove (no --rm).
+    // Two inspects: the post-create isolation verification, then the
+    // post-mortem OOMKilled check, both before the explicit remove (no --rm).
     const inspects = runner.callsFor('inspect');
-    expect(inspects).toHaveLength(1);
-    expect(inspects[0]?.args).toContain('cid-oom');
+    expect(inspects).toHaveLength(2);
+    expect(inspects[0]?.args).toEqual(['inspect', 'cid-oom']);
+    expect(inspects[1]?.args).toEqual(['inspect', '--format', '{{.State.OOMKilled}}', 'cid-oom']);
     const rms = runner.callsFor('rm');
     expect(rms.map((call) => call.args[2])).toContain('cid-oom');
   });
@@ -702,6 +706,9 @@ describe('DockerDriver.dispose', () => {
         }
         return okResult;
       };
+      // The post-create isolation verification inspect must see a hardened
+      // container or the run is refused before attach ever starts.
+      scriptIsolationInspect(runner);
       // Attach hangs until the driver kills the container (dispose path).
       let resolveAttach: ((code: number) => void) | undefined;
       runner.attachHandler = () =>
