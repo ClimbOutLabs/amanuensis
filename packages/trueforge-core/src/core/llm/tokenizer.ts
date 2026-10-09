@@ -1,6 +1,6 @@
 import type { VercelAIProviderName } from './VercelAILLM';
 import type { Tiktoken, TiktokenModel } from '@dqbd/tiktoken';
-import modelToEncoding from '@dqbd/tiktoken/model_to_encoding.json';
+import modelToEncoding from '@dqbd/tiktoken/model_to_encoding.json' with { type: 'json' };
 
 /**
  * Counts tokens in text using a provider's actual tokenizer.
@@ -72,7 +72,11 @@ export class VLLMHttpTokenCounter implements TokenCounter {
     signal?: AbortSignal | undefined;
   }) {
     // Strip trailing slashes so endpoint joining is predictable.
-    this.baseUrl = config.baseUrl.replace(/\/+$/, '');
+    const withoutSlash = config.baseUrl.replace(/\/+$/, '');
+    // vLLM serves /tokenize at the server root only, never under the
+    // OpenAI-compatible /v1 path. Strip a trailing /v1 segment so the
+    // request below does not 404 against .../v1/tokenize.
+    this.baseUrl = withoutSlash.replace(/\/v1$/, '');
     this.modelId = config.modelId;
     this.apiKey = config.apiKey;
     this.headers = config.headers;
