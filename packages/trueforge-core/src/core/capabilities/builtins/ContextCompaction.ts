@@ -11,8 +11,8 @@ import {
   isInternalSystemMessage,
   isLLMContextMessage,
   userAuthoredText,
-  type CurrentContextUsage,
 } from '../../runtime/contextUtils';
+import type { CurrentContextUsage } from '../../runtime/contextUsage';
 import type { TokenCounter } from '../../llm/tokenizer';
 import {
   boundRepositoryContextFromBinding,
