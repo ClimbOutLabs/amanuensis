@@ -18,7 +18,7 @@
  *   - how many screenshots to take of the finished conversation
  *
  * Needs: pnpm install already done at the repo root, outbound network access
- * to the model endpoint, and (for screenshots) a Chromium binary —
+ * to the model endpoint, and (for screenshots) a Chromium binary,
  * installed on first run via `npx playwright-core install chromium`.
  *
  * Only Node builtins are used, plus playwright-core resolved from
@@ -106,15 +106,30 @@ async function api(method, p, body, { timeoutMs = 30000 } = {}) {
 }
 
 // ------------------------------------------------------------ preflight ----
-// Bearer header args for curl probes of /models; empty when no key is set.
-const CURL_AUTH_ARGS = MODEL_API_KEY ? ['-H', `Authorization: Bearer ${MODEL_API_KEY}`] : [];
+const MODEL_HEADERS = MODEL_API_KEY ? { authorization: `Bearer ${MODEL_API_KEY}` } : {};
 
-function modelEndpointReachable() {
+// GET <base>/models. The insecure variant disables TLS verification for the
+// call only, for endpoints behind self-signed certificates.
+async function fetchModels({ insecure }) {
   const url = `${PROVIDER_MANIFEST.base_url}/models`;
-  for (const extra of [[], ['-k']]) {
-    const r = spawnSync('curl', ['-sS', '-m', '20', ...CURL_AUTH_ARGS, ...extra, url], { encoding: 'utf8' });
-    if (r.status === 0) {
-      log(`model endpoint reachable (${extra.includes('-k') ? 'insecure TLS' : 'strict TLS'})`);
+  const previous = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  if (insecure) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  try {
+    const res = await fetch(url, { headers: MODEL_HEADERS, signal: AbortSignal.timeout(20000) });
+    const body = (await res.text()).trim();
+    return res.ok ? { ok: true, body } : { ok: false, error: `HTTP ${res.status}` };
+  } catch (e) {
+    return { ok: false, error: String(e?.cause?.code ?? e?.message ?? e).slice(0, 200) };
+  } finally {
+    if (previous === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previous;
+  }
+}
+
+async function modelEndpointReachable() {
+  for (const insecure of [false, true]) {
+    if ((await fetchModels({ insecure })).ok) {
+      log(`model endpoint reachable (${insecure ? 'insecure TLS' : 'strict TLS'})`);
       return true;
     }
   }
@@ -122,26 +137,24 @@ function modelEndpointReachable() {
 }
 
 // The endpoint serves exactly one model; resolve its id at runtime instead of
-// hardcoding it. The hardcoded name goes stale whenever the brain is swapped
-// (the 404 on gpt-oss-120b-derestricted after the DeepSeek cutover), so the
-// harness asks the endpoint what it actually serves.
+// hardcoding it, since a fixed name goes stale whenever the served model changes.
 const MODEL_ID_CACHE = path.join(process.env.HOME || '/tmp', '.buildbox-runner', 'scenario-model-id');
 
-function resolveModelId() {
+async function resolveModelId() {
   const url = `${PROVIDER_MANIFEST.base_url}/models`;
-  // The models endpoint intermittently returns empty bodies (curl exit 0,
+  // The models endpoint intermittently returns empty bodies (HTTP 200 with a
   // zero-length response); bad windows have lasted 30s+, so retry patiently
   // before giving up.
   const maxAttempts = 10;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    for (const extra of [[], ['-k']]) {
-      const mode = extra.includes('-k') ? 'insecure' : 'strict';
-      const r = spawnSync('curl', ['-sS', '-m', '20', ...CURL_AUTH_ARGS, ...extra, url], { encoding: 'utf8' });
-      const out = (r.stdout || '').trim();
-      if (r.status !== 0) {
-        log(`WARN: ${url} curl exit ${r.status} (${mode}): ${(r.stderr || '').trim().slice(0, 200)}`);
+    for (const insecure of [false, true]) {
+      const mode = insecure ? 'insecure' : 'strict';
+      const r = await fetchModels({ insecure });
+      if (!r.ok) {
+        log(`WARN: ${url} request failed (${mode}): ${r.error}`);
         continue;
       }
+      const out = r.body;
       try {
         const id = JSON.parse(out)?.data?.[0]?.id;
         if (typeof id === 'string' && id.length > 0) {
@@ -160,7 +173,7 @@ function resolveModelId() {
     }
     if (attempt < maxAttempts) {
       log(`WARN: retrying ${url} in 30s (attempt ${attempt}/${maxAttempts}) ...`);
-      spawnSync('sleep', ['30']);
+      await sleep(30000);
     }
   }
   // Last resort: reuse the most recently resolved id. A brain swap during an
@@ -472,8 +485,8 @@ function slugifyModelName(id) {
 
 try {
   log(`scenario: ${scenarioName} (${scenario.turns.length} turns)`);
-  if (!modelEndpointReachable()) fail('model endpoint unreachable (strict and insecure TLS both failed)');
-  const servedModelId = resolveModelId();
+  if (!(await modelEndpointReachable())) fail('model endpoint unreachable (strict and insecure TLS both failed)');
+  const servedModelId = await resolveModelId();
   const servedModelName = slugifyModelName(servedModelId);
   MODEL_FQN = `${PROVIDER_NAME}/${servedModelName}`;
   PROVIDER_MANIFEST.models[0].model_id = servedModelId;
