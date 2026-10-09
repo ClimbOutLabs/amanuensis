@@ -18,6 +18,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentHarnessError,
+  createSentinelHostContext,
   existingSandboxIdForProvider,
   extractErrorLogFields,
   isAgentInputUserMessage,
@@ -30,7 +31,6 @@ import {
   VercelAILLM,
   type BoundRepository,
 } from '@truefoundry/trueforge-core/core';
-import { createSentinelHostContext } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { streamSSE } from 'hono/streaming';
@@ -53,6 +53,7 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import type { PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
 import {
@@ -67,12 +68,16 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
+import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import { submitRetainWithVerification, type SummarizeTurnContext } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
+import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
+import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
 import { mintPeeredTurnId } from '../runtime/peeringIds';
+import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import {
   profileLearningPassConfig,
   resolveTurnModelFqn,
@@ -98,14 +103,10 @@ import {
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
 import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
-import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
-import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
-import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
-import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
@@ -1590,7 +1591,15 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           }
         : undefined,
     });
-    const sessionTitleForMemory = session.record.title ?? deriveSessionTitle(body.input);
+    const sessionTitleForMemory = chatTitleContext({
+      title: session.record.title ?? deriveSessionTitle(body.input),
+      assistantNames: [
+        profile?.assistant_name,
+        ...(await deps.personaStore.listPersonas({ tenant_id: requestContext.tenant_id, created_by: userRef })).flatMap(
+          candidate => [candidate.display_name, ...candidate.aliases],
+        ),
+      ],
+    });
 
     // Resolved before the turn exists, like the memory provider above: the pass itself runs
     // after TURN_DONE (awaited by the tracked drain) and every failure inside it silently
