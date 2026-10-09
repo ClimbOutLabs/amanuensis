@@ -260,7 +260,11 @@ function isSentinelEventType(value: unknown): value is (typeof SENTINEL_EVENT_TY
 }
 
 function toolCallRefs(event: Record<string, unknown>): Record<string, unknown>[] {
-  const refs = event.tool_calls;
+  // The live tap and session reads receive SDK-parsed events, where the
+  // serializer has already converted `tool_calls` to camelCase `toolCalls`;
+  // raw wire events still use `tool_calls`. Accept both so approval data is
+  // not silently dropped when the parsed shape arrives.
+  const refs = event.tool_calls ?? event.toolCalls;
   if (Array.isArray(refs)) return refs.filter(isRecord);
   // Single-action events may carry the per-action fields at the top level.
   return [event];
