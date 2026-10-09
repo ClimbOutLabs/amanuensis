@@ -965,7 +965,10 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
         state: { paths: this.touchedPaths, overflowed: this.touchedPathsOverflowed },
       };
     }
-    const contextTokens = execution.currentContextUsage.prompt_tokens + execution.currentContextUsage.completion_tokens;
+    // Use provider-accurate token count for the trigger decision, not the heuristic-based
+    // currentContextUsage which may undercount. This ensures compaction fires correctly.
+    const providerCountedUsage = await countTokensForContextMessages(execution.context, this.modelClient);
+    const contextTokens = providerCountedUsage.prompt_tokens + execution.currentContextUsage.completion_tokens;
     // Conservative sizing only: a checklist being configured (whether or not it turns out to
     // hold items once fetched below) still counts toward the larger coding-prompt estimate here,
     // so the threshold check never undercounts while the checklist's contents are unknown.
