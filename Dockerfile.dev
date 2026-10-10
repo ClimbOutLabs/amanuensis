@@ -149,6 +149,10 @@ RUN mkdir -p /data/memory /data/persona-knowledge \
 ENV MEMORY_MARKDOWN_DIR=/data/memory \
   PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge
 
+# `docker run --rm -i <image> amanuensis <command>` (hash-password, backup, doctor).
+RUN printf '#!/bin/sh\nexec node /app/packages/trueforge/dist/amanuensis.js "$@"\n' > /usr/local/bin/amanuensis \
+  && chmod 755 /usr/local/bin/amanuensis
+
 EXPOSE 8790
 
 # Launch-only (matches root `pnpm start` / `standalone:start`). Image already contains dist.

@@ -1,0 +1,661 @@
+#!/usr/bin/env bash
+# Host-side doctor: machine checks with the Docker CLI, plus each instance's in-image
+# `amanuensis doctor`, combined into one document. Read-only; needs only Docker (no jq, no Node).
+#
+#   doctor.sh [--home DIR] [--json] [--only ID] [--instance NAME] [--deep]
+#
+# Exit codes: 0 no failures, 1 at least one failure, 2 usage error.
+# Test hooks: AMAN_DOCTOR_NOW (epoch seconds) replaces the clock.
+
+set -u
+
+AMAN_HOME="${AMANUENSIS_HOME:-${HOME:-}/.amanuensis}"
+APP_SERVICE="${AMAN_DOCTOR_APP_SERVICE:-app}"
+AS_JSON=0
+DEEP=0
+ONLY=""
+ONLY_INSTANCE=""
+
+MACHINE_IDS="docker runtime credentials images disk clock backup"
+INSTANCE_IDS="config containers ports service login database disk clock run_code attachments"
+IN_IMAGE_IDS="service login database disk clock run_code attachments"
+
+BACKUP_WARN_DAYS=7
+GIB=$((1024 * 1024 * 1024))
+CLOCK_WARN_SECONDS=60
+CLOCK_FAIL_SECONDS=300
+
+RECORDS=""
+CLEANED=""
+JSON_ESCAPED=""
+DOCKER_OK=0
+DOCKER_ARCH=""
+DOCKER_ROOT=""
+DOCKER_SYSTEM_TIME=""
+DOCKER_SECURITY=""
+DOCKER_OS=""
+APP_CONTAINER=""
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage: doctor.sh [--home DIR] [--json] [--only ID] [--instance NAME] [--deep]
+USAGE
+}
+
+die_usage() {
+  printf '%s\n' "$1" >&2
+  usage
+  exit 2
+}
+
+# ---------------------------------------------------------------- helpers
+
+now_epoch() {
+  if [ -n "${AMAN_DOCTOR_NOW:-}" ]; then
+    printf '%s' "$AMAN_DOCTOR_NOW"
+  else
+    date +%s
+  fi
+}
+
+# Keeps a command from hanging the report; macOS has no `timeout` unless coreutils is installed.
+bounded() {
+  local seconds=$1
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$seconds" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$seconds" "$@"
+  else
+    "$@"
+  fi
+}
+
+PROBE_SECONDS=5
+
+# One printable line, at most 400 characters; JSON output needs nothing stronger after this.
+# Builtins only: this runs for every field and process spawns are the slow part.
+clean() {
+  local value=${1//[^[:print:]]/ }
+  CLEANED=${value:0:400}
+}
+
+record() { # scope id state detail fix
+  local detail fix
+  clean "$4"
+  detail=$CLEANED
+  clean "$5"
+  fix=$CLEANED
+  RECORDS="${RECORDS}${1}"$'\t'"${2}"$'\t'"${3}"$'\t'"${detail}"$'\t'"${fix}"$'\n'
+}
+
+json_escape() {
+  local value=${1//\\/\\\\}
+  JSON_ESCAPED=${value//\"/\\\"}
+}
+
+lowercase() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+# Days-from-civil arithmetic, so no GNU or BSD date flags are needed.
+rfc3339_to_epoch() {
+  local value=$1 date_part rest time_part tz sign offset_h offset_m offset=0
+  local y m d hh mm ss era yoe mp doy doe days
+  date_part=${value%%T*}
+  rest=${value#*T}
+  case "$rest" in
+    *Z)
+      time_part=${rest%Z}
+      ;;
+    *+*)
+      time_part=${rest%+*}
+      tz=${rest##*+}
+      sign=1
+      ;;
+    *-*)
+      time_part=${rest%-*}
+      tz=${rest##*-}
+      sign=-1
+      ;;
+    *) return 1 ;;
+  esac
+  time_part=${time_part%%.*}
+  IFS=- read -r y m d <<<"$date_part"
+  IFS=: read -r hh mm ss <<<"$time_part"
+  case "$y$m$d$hh$mm$ss" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  if [ -n "${tz:-}" ]; then
+    IFS=: read -r offset_h offset_m <<<"$tz"
+    case "${offset_h}${offset_m}" in
+      '' | *[!0-9]*) return 1 ;;
+    esac
+    offset=$((sign * (10#$offset_h * 3600 + 10#$offset_m * 60)))
+  fi
+  y=$((10#$y))
+  m=$((10#$m))
+  d=$((10#$d))
+  if [ "$m" -le 2 ]; then y=$((y - 1)); fi
+  era=$((y / 400))
+  yoe=$((y - era * 400))
+  mp=$(((m + 9) % 12))
+  doy=$(((153 * mp + 2) / 5 + d - 1))
+  doe=$((yoe * 365 + yoe / 4 - yoe / 100 + doy))
+  days=$((era * 146097 + doe - 719468))
+  printf '%s' $((days * 86400 + 10#$hh * 3600 + 10#$mm * 60 + 10#$ss - offset))
+}
+
+file_mtime() {
+  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null
+}
+
+file_mode() {
+  stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null
+}
+
+normalize_arch() {
+  case "$1" in
+    x86_64 | amd64) printf amd64 ;;
+    aarch64 | arm64) printf arm64 ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+json_value() { # file key
+  sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$1" | head -n 1
+}
+
+# ---------------------------------------------------------------- machine checks
+
+check_docker() {
+  local out rc version arch security root systime os compose compose_major
+  if ! command -v docker >/dev/null 2>&1; then
+    record machine docker fail "Docker is not installed, or its command is not on PATH." \
+      "Install Docker: on Linux follow https://docs.docker.com/engine/install/ (or let install.sh do it); on macOS or Windows install Docker Desktop. Then run install.sh again."
+    return
+  fi
+  out=$(bounded "$PROBE_SECONDS" docker info --format '{{.ServerVersion}}|{{.Architecture}}|{{.SecurityOptions}}|{{.DockerRootDir}}|{{.SystemTime}}|{{.OperatingSystem}}' 2>&1)
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    case "$out" in
+      *"permission denied"*)
+        record machine docker fail "Docker is running, but this user is not allowed to use its socket." \
+          "Add yourself to the docker group with: sudo usermod -aG docker \"\$USER\" ; then sign out and back in (the docker group gives full control of this machine). install.sh finishes its own run without that."
+        ;;
+      *"Cannot connect"* | *"daemon running"* | *"error during connect"* | *"connection refused"*)
+        record machine docker fail "Docker is installed, but its engine is not running." \
+          "Start it: on Linux run \"sudo systemctl start docker\"; on macOS or Windows open Docker Desktop and wait until it says it is running."
+        ;;
+      *)
+        record machine docker fail "Docker did not answer: ${out%%$'\n'*}" \
+          "Check that Docker is running with \"docker info\", fix what it reports, then run doctor again."
+        ;;
+    esac
+    return
+  fi
+  IFS='|' read -r version arch security root systime os <<<"$out"
+  DOCKER_ARCH=$(normalize_arch "$arch")
+  DOCKER_ROOT=$root
+  DOCKER_SYSTEM_TIME=$systime
+  DOCKER_SECURITY=$security
+  DOCKER_OS=$os
+  compose=$(bounded "$PROBE_SECONDS" docker compose version --short 2>&1)
+  rc=$?
+  compose=${compose#v}
+  compose_major=${compose%%.*}
+  case "$compose_major" in
+    '' | *[!0-9]*) rc=1 ;;
+  esac
+  if [ "$rc" -ne 0 ] || [ "$compose_major" -lt 2 ]; then
+    record machine docker fail "Docker ${version} is running, but Docker Compose v2 is missing." \
+      "Install the Compose plugin (Linux: sudo apt-get install docker-compose-plugin; Docker Desktop already includes it), then run doctor again."
+    return
+  fi
+  DOCKER_OK=1
+  record machine docker ok "Docker ${version} is running and Compose ${compose} is available." ""
+}
+
+check_runtime() {
+  local components cli_version text
+  if [ "$DOCKER_OK" != 1 ]; then
+    record machine runtime off "Skipped: Docker is not reachable." ""
+    return
+  fi
+  components=$(bounded "$PROBE_SECONDS" docker version --format '{{range .Server.Components}}{{.Name}};{{end}}' 2>/dev/null)
+  cli_version=$(bounded "$PROBE_SECONDS" docker --version 2>/dev/null)
+  text=$(lowercase "$components $cli_version $DOCKER_OS")
+  case "$text" in
+    *podman*)
+      record machine runtime fail "Podman is not supported." \
+        "Install Docker Engine (https://docs.docker.com/engine/install/) or Docker Desktop, point the docker command at it, then run install.sh again."
+      return
+      ;;
+  esac
+  case "$DOCKER_SECURITY" in
+    *rootless*)
+      record machine runtime fail "Rootless Docker is not supported." \
+        "Install the regular Docker Engine (https://docs.docker.com/engine/install/) or Docker Desktop, switch the docker context to it, then run install.sh again."
+      return
+      ;;
+  esac
+  record machine runtime ok "A supported Docker runtime is in use." ""
+}
+
+check_credentials() {
+  local config store helper
+  config="${DOCKER_CONFIG:-${HOME:-}/.docker}/config.json"
+  if [ ! -r "$config" ]; then
+    record machine credentials ok "No Docker settings file, so no credential store is in use." ""
+    return
+  fi
+  store=$(json_value "$config" credsStore)
+  if [ -z "$store" ]; then
+    record machine credentials ok "Docker uses no credential store." ""
+    return
+  fi
+  helper="docker-credential-${store}"
+  if ! command -v "$helper" >/dev/null 2>&1; then
+    record machine credentials fail "Docker is set to use the credential store \"${store}\", but ${helper} is not on PATH; image downloads will fail with \"error getting credentials\"." \
+      "Start Docker Desktop and make sure its tools folder is on PATH (macOS: /Applications/Docker.app/Contents/Resources/bin), or remove the \"credsStore\" line from ${config} and run doctor again."
+    return
+  fi
+  if ! bounded "$PROBE_SECONDS" "$helper" list >/dev/null 2>&1; then
+    record machine credentials fail "The credential store \"${store}\" is installed but did not answer; image downloads will fail." \
+      "Open Docker Desktop and unlock your keychain, or remove the \"credsStore\" line from ${config}, then run doctor again."
+    return
+  fi
+  record machine credentials ok "The Docker credential store \"${store}\" answers." ""
+}
+
+check_images() {
+  local release key ref out rc missing="" wrong_arch="" checked=0 image_arch
+  if [ "$DOCKER_OK" != 1 ]; then
+    record machine images off "Skipped: Docker is not reachable." ""
+    return
+  fi
+  release="${AMAN_HOME}/release/release.json"
+  if [ ! -r "$release" ]; then
+    record machine images warn "No release record was found, so the expected images are unknown." \
+      "Run install.sh to finish the setup; it writes the release record."
+    return
+  fi
+  for key in app_image dex_image stt_image; do
+    ref=$(json_value "$release" "$key")
+    [ -n "$ref" ] || continue
+    checked=$((checked + 1))
+    out=$(bounded "$PROBE_SECONDS" docker image inspect --format '{{.Architecture}}' "$ref" 2>&1)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      missing="${missing} ${key}"
+      continue
+    fi
+    image_arch=$(normalize_arch "$out")
+    if [ -n "$DOCKER_ARCH" ] && [ "$image_arch" != "$DOCKER_ARCH" ]; then
+      wrong_arch="${wrong_arch} ${key}(${image_arch})"
+    fi
+  done
+  if [ "$checked" -eq 0 ]; then
+    record machine images warn "The release record lists no images." "Run install.sh again to rewrite the release record."
+  elif [ -n "$missing" ]; then
+    record machine images fail "Images missing on this machine:${missing}." \
+      "Run install.sh again; it builds the app and speech images from this checkout and pulls Dex by its pinned digest."
+  elif [ -n "$wrong_arch" ]; then
+    record machine images fail "Images built for another CPU type than Docker uses (${DOCKER_ARCH}):${wrong_arch}." \
+      "Run install.sh again to rebuild them for this machine."
+  else
+    record machine images ok "All ${checked} images are present for ${DOCKER_ARCH:-this CPU}." ""
+  fi
+}
+
+format_gb() { # kilobytes
+  awk -v kb="$1" 'BEGIN { printf "%.1f GB", kb / 1048576 }'
+}
+
+check_disk() {
+  local kb bytes
+  if [ "$DOCKER_OK" != 1 ]; then
+    record machine disk off "Skipped: Docker is not reachable." ""
+    return
+  fi
+  if [ -z "$DOCKER_ROOT" ] || [ ! -d "$DOCKER_ROOT" ]; then
+    record machine disk off "Docker keeps its data inside a virtual machine here; free space is checked per instance." ""
+    return
+  fi
+  kb=$(df -Pk "$DOCKER_ROOT" 2>/dev/null | awk 'NR == 2 { print $4 }')
+  case "$kb" in
+    '' | *[!0-9]*)
+      record machine disk warn "The free space for Docker data could not be read." "Run \"df -h\" and check the disk that holds ${DOCKER_ROOT}."
+      return
+      ;;
+  esac
+  bytes=$((kb * 1024))
+  if [ "$bytes" -lt $((2 * GIB)) ]; then
+    record machine disk fail "Only $(format_gb "$kb") is free for Docker data; installs and upgrades will fail." \
+      "Free space with \"docker system prune\" (removes stopped containers and unused images) or by removing old backups, then run doctor again."
+  elif [ "$bytes" -lt $((10 * GIB)) ]; then
+    record machine disk warn "$(format_gb "$kb") is free for Docker data; 10 GB is recommended." \
+      "Free space with \"docker system prune\" (removes stopped containers and unused images) or by removing old backups."
+  else
+    record machine disk ok "$(format_gb "$kb") is free for Docker data." ""
+  fi
+}
+
+check_clock() {
+  local daemon now skew
+  if [ "$DOCKER_OK" != 1 ]; then
+    record machine clock off "Skipped: Docker is not reachable." ""
+    return
+  fi
+  if ! daemon=$(rfc3339_to_epoch "$DOCKER_SYSTEM_TIME"); then
+    record machine clock off "Skipped: Docker did not report a readable time." ""
+    return
+  fi
+  now=$(now_epoch)
+  skew=$((now - daemon))
+  if [ "$skew" -lt 0 ]; then skew=$((-skew)); fi
+  local fix="Turn on automatic time sync (Linux: sudo timedatectl set-ntp true; Docker Desktop: restart it, since its clock drifts after the computer sleeps)."
+  if [ "$skew" -gt "$CLOCK_FAIL_SECONDS" ]; then
+    record machine clock fail "This machine and Docker disagree on the time by ${skew} seconds; sign-in will fail." "$fix"
+  elif [ "$skew" -gt "$CLOCK_WARN_SECONDS" ]; then
+    record machine clock warn "This machine and Docker disagree on the time by ${skew} seconds." "$fix"
+  else
+    record machine clock ok "This machine and Docker agree on the time." ""
+  fi
+}
+
+check_backup() {
+  local dir newest="" newest_time=0 entry mtime age_days now
+  dir="${AMAN_HOME}/backups"
+  for entry in "$dir"/*/; do
+    [ -d "$entry" ] || continue
+    mtime=$(file_mtime "$entry")
+    case "$mtime" in '' | *[!0-9]*) continue ;; esac
+    if [ "$mtime" -gt "$newest_time" ]; then
+      newest_time=$mtime
+      newest=$entry
+    fi
+  done
+  if [ -z "$newest" ]; then
+    record machine backup ok "No backup yet; one is made automatically before your first upgrade." ""
+    return
+  fi
+  now=$(now_epoch)
+  age_days=$(((now - newest_time) / 86400))
+  if [ "$age_days" -gt "$BACKUP_WARN_DAYS" ]; then
+    record machine backup warn "The last backup is ${age_days} days old." "Run \"install.sh backup\" to make a new one."
+  else
+    record machine backup ok "The last backup is ${age_days} days old." ""
+  fi
+}
+
+# ---------------------------------------------------------------- instance checks
+
+check_instance_config() {
+  local name=$1 file mode
+  file="${AMAN_HOME}/instances/${name}/.env"
+  if [ ! -f "$file" ]; then
+    record "$name" config fail "The instance settings file is missing." \
+      "Run install.sh to recreate it, or restore it from a backup."
+    return
+  fi
+  mode=$(file_mode "$file")
+  if [ "$mode" != 600 ]; then
+    record "$name" config fail "The settings file holds secrets but is readable by other users (mode ${mode:-unknown})." \
+      "Run: chmod 600 ${file}"
+    return
+  fi
+  record "$name" config ok "The settings file exists and is private to you." ""
+}
+
+check_instance_containers() { # name; sets APP_CONTAINER
+  local name=$1 line id cname state status service bad="" unhealthy="" starting="" found=0 ports exposed="" count=0
+  APP_CONTAINER=""
+  local up_command="docker compose --project-directory ${AMAN_HOME}/instances/${name} up -d"
+  local lines
+  lines=$(bounded "$PROBE_SECONDS" docker ps -a --filter "label=com.docker.compose.project=aman-${name}" \
+    --format '{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)
+  while IFS='|' read -r id cname state status service; do
+    [ -n "$id" ] || continue
+    found=1
+    count=$((count + 1))
+    case "$state" in
+      running)
+        if [ "$service" = "$APP_SERVICE" ]; then APP_CONTAINER=$id; fi
+        case "$status" in
+          *"(unhealthy)"*) unhealthy="${unhealthy} ${cname}" ;;
+          *"(health: starting)"*) starting="${starting} ${cname}" ;;
+        esac
+        ports=$(bounded "$PROBE_SECONDS" docker port "$id" 2>/dev/null)
+        case "$ports" in
+          *"0.0.0.0:"* | *"[::]:"* | *":::"*) exposed="${exposed} ${cname}" ;;
+        esac
+        ;;
+      exited)
+        case "$status" in
+          "Exited (0)"*) ;;
+          *) bad="${bad} ${cname}" ;;
+        esac
+        ;;
+      *) bad="${bad} ${cname}" ;;
+    esac
+  done <<<"$lines"
+  if [ "$found" = 0 ]; then
+    record "$name" containers fail "This instance has no containers; it is stopped or was removed." "Start it with: ${up_command}"
+    record "$name" ports off "Skipped: the instance has no containers." ""
+    return
+  fi
+  if [ -n "$bad" ]; then
+    record "$name" containers fail "Not running:${bad}." "Start them with: ${up_command}  (read the log with \"docker logs\" if one keeps stopping)"
+  elif [ -n "$unhealthy" ]; then
+    record "$name" containers fail "Reported unhealthy by Docker:${unhealthy}." "Read the log with \"docker logs\" for that container, then restart it with: docker compose --project-directory ${AMAN_HOME}/instances/${name} restart"
+  elif [ -n "$starting" ]; then
+    record "$name" containers warn "Still starting:${starting}." "Wait a minute and run doctor again."
+  else
+    record "$name" containers ok "All ${count} containers are running." ""
+  fi
+  if [ -n "$exposed" ]; then
+    record "$name" ports fail "Ports are open to the whole network, not just this machine:${exposed}." \
+      "Change the published ports in ${AMAN_HOME}/instances/${name}/compose.yaml to start with 127.0.0.1:, then run: ${up_command}"
+  else
+    record "$name" ports ok "Published ports listen on this machine only." ""
+  fi
+}
+
+in_list() { # word list
+  case " $2 " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+run_in_image_checks() { # name
+  local name=$1 out rc line id state detail fix exec_timeout=20 args=(doctor --text)
+  if [ "$DEEP" = 1 ]; then
+    exec_timeout=60
+    args+=(--deep)
+  fi
+  if [ -n "$ONLY" ] && in_list "$ONLY" "$IN_IMAGE_IDS"; then
+    args+=(--only "$ONLY")
+  fi
+  out=$(bounded "$exec_timeout" docker exec "$APP_CONTAINER" amanuensis "${args[@]}" 2>&1)
+  rc=$?
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
+    record "$name" service fail "The checks could not run inside the app container: ${out%%$'\n'*}" \
+      "Rebuild the app image with install.sh (it must include the amanuensis command), then restart the instance."
+    return
+  fi
+  while IFS=$'\t' read -r id state detail fix; do
+    case "$state" in
+      ok | warn | fail | off) record "$name" "$id" "$state" "$detail" "$fix" ;;
+    esac
+  done <<<"$out"
+}
+
+check_instance() {
+  local name=$1
+  check_instance_config "$name"
+  if [ "$DOCKER_OK" != 1 ]; then
+    record "$name" service fail "Docker is not reachable, so this instance cannot be checked." \
+      "Fix the Docker problem reported under the machine checks first."
+    return
+  fi
+  check_instance_containers "$name"
+  if [ -z "$APP_CONTAINER" ]; then
+    record "$name" service fail "The app container is not running." \
+      "Start the instance with: docker compose --project-directory ${AMAN_HOME}/instances/${name} up -d"
+    return
+  fi
+  run_in_image_checks "$name"
+}
+
+list_instances() {
+  local entry
+  for entry in "${AMAN_HOME}/instances"/*/; do
+    [ -d "$entry" ] || continue
+    entry=${entry%/}
+    printf '%s\n' "${entry##*/}"
+  done
+}
+
+# ---------------------------------------------------------------- output
+
+visible_records() { # scope
+  local scope=$1 line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in
+      "${scope}"$'\t'*) ;;
+      *) continue ;;
+    esac
+    if [ -n "$ONLY" ]; then
+      local rest=${line#*$'\t'}
+      [ "${rest%%$'\t'*}" = "$ONLY" ] || continue
+    fi
+    printf '%s\n' "$line"
+  done <<<"$RECORDS"
+}
+
+json_checks() { # scope
+  local first=1 line scope id state detail fix
+  printf '['
+  while IFS=$'\t' read -r scope id state detail fix; do
+    [ -n "$scope" ] || continue
+    if [ "$first" = 1 ]; then first=0; else printf ','; fi
+    json_escape "$id"
+    id=$JSON_ESCAPED
+    json_escape "$detail"
+    detail=$JSON_ESCAPED
+    json_escape "$fix"
+    fix=$JSON_ESCAPED
+    printf '{"id":"%s","state":"%s","detail":"%s","fix":"%s"}' "$id" "$state" "$detail" "$fix"
+  done < <(visible_records "$1")
+  printf ']'
+}
+
+text_checks() { # scope
+  local scope id state detail fix label
+  while IFS=$'\t' read -r scope id state detail fix; do
+    [ -n "$scope" ] || continue
+    case "$state" in
+      ok) label="ok  " ;;
+      warn) label="WARN" ;;
+      fail) label="FAIL" ;;
+      *) label="off " ;;
+    esac
+    printf '  [%s] %-12s %s\n' "$label" "$id" "$detail"
+    if [ -n "$fix" ]; then printf '         Fix: %s\n' "$fix"; fi
+  done < <(visible_records "$1")
+}
+
+print_json() {
+  local name first=1
+  printf '{"machine":'
+  json_checks machine
+  printf ',"instances":{'
+  for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+    if [ "$first" = 1 ]; then first=0; else printf ','; fi
+    json_escape "$name"
+    printf '"%s":' "$JSON_ESCAPED"
+    json_checks "$name"
+  done
+  printf '}}\n'
+}
+
+print_text() {
+  local name
+  printf 'Machine\n'
+  text_checks machine
+  for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+    printf '\nInstance %s\n' "$name"
+    text_checks "$name"
+  done
+}
+
+# ---------------------------------------------------------------- main
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --json) AS_JSON=1 ;;
+    --deep)
+      DEEP=1
+      PROBE_SECONDS=30
+      ;;
+    --home)
+      [ $# -ge 2 ] || die_usage "--home needs a directory."
+      AMAN_HOME=$2
+      shift
+      ;;
+    --only)
+      [ $# -ge 2 ] || die_usage "--only needs a check id."
+      ONLY=$2
+      shift
+      ;;
+    --instance)
+      [ $# -ge 2 ] || die_usage "--instance needs a name."
+      ONLY_INSTANCE=$2
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *) die_usage "Unknown argument: $1" ;;
+  esac
+  shift
+done
+
+if [ -n "$ONLY" ] && ! in_list "$ONLY" "$MACHINE_IDS $INSTANCE_IDS"; then
+  die_usage "Unknown check \"${ONLY}\". Checks: ${MACHINE_IDS} ${INSTANCE_IDS}"
+fi
+
+INSTANCES=()
+if [ -n "$ONLY_INSTANCE" ]; then
+  case "$ONLY_INSTANCE" in
+    '' | *[!a-z0-9-]* | -*) die_usage "Instance names use lowercase letters, digits and hyphens." ;;
+  esac
+  [ -d "${AMAN_HOME}/instances/${ONLY_INSTANCE}" ] || die_usage "No instance named \"${ONLY_INSTANCE}\" under ${AMAN_HOME}/instances."
+  INSTANCES=("$ONLY_INSTANCE")
+else
+  while IFS= read -r instance_name; do
+    [ -n "$instance_name" ] && INSTANCES+=("$instance_name")
+  done < <(list_instances)
+fi
+
+check_docker
+check_runtime
+check_credentials
+check_images
+check_disk
+check_clock
+check_backup
+for instance_name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+  check_instance "$instance_name"
+done
+
+if [ "$AS_JSON" = 1 ]; then print_json; else print_text; fi
+
+failures=0
+while IFS=$'\t' read -r _scope id state _rest; do
+  if [ "$state" = fail ] && { [ -z "$ONLY" ] || [ "$id" = "$ONLY" ]; }; then failures=1; fi
+done <<<"$RECORDS"
+if [ "$failures" = 1 ]; then exit 1; fi
+exit 0
