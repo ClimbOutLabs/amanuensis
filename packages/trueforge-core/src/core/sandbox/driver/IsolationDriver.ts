@@ -127,7 +127,11 @@ export interface DriverRunResult {
 
 export interface IsolationDriver {
   readonly kind: 'docker' | 'firecracker';
-  /** Idempotent readiness: image present, daemon/KVM reachable. Fast; no side effects. */
+  /**
+   * Idempotent readiness: image present and verified, daemon/KVM reachable. Never pulls the
+   * image, but it is neither quick nor read-only: the Docker driver also creates and removes
+   * probe containers and stages, runs and deletes a canary run.
+   */
   ensureReady(signal?: AbortSignal): Promise<DriverReadiness>;
   /**
    * Explicit provisioning step: pull/prepare the image inside

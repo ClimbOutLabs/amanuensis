@@ -211,8 +211,9 @@ export class RunCodeService implements RunCodeBackend {
   }
 
   /**
-   * Fast readiness probes only — never provisions. A missing image surfaces
-   * as a readiness failure; provisioning is the explicit step below.
+   * Readiness probe that never provisions. It can take seconds and runs a canary
+   * container, so hot paths go through the cached checkReadiness. A missing image
+   * surfaces as a readiness failure; provisioning is the explicit step below.
    */
   async ensureReady(signal?: AbortSignal): Promise<DriverReadiness> {
     return this.driver.ensureReady(signal);
