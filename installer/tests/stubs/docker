@@ -22,7 +22,11 @@ case "$cmd" in
       exit 1
     fi
     if [ "${1:-}" = "--format" ]; then
-      printf '[name=seccomp,profile=builtin%s]\n' "${STUB_ROOTLESS:+ name=rootless}"
+      secopts=$(printf '[name=seccomp,profile=builtin%s]' "${STUB_ROOTLESS:+ name=rootless}")
+      case "${2:-}" in
+        *ServerVersion*) printf '27.1.1|x86_64|%s|/nonexistent|%s|Docker Engine\n' "$secopts" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ;;
+        *) printf '%s\n' "$secopts" ;;
+      esac
       exit 0
     fi
     echo "Server Version: 27.1.1"
@@ -42,8 +46,12 @@ case "$cmd" in
     ;;
   image)
     if [ "$1" = inspect ]; then
-      grep -Fxq "$2" "$S/images"
-      exit $?
+      for ref in "$@"; do :; done
+      if grep -Fxq "$ref" "$S/images"; then
+        case "$*" in *Architecture*) echo amd64 ;; esac
+        exit 0
+      fi
+      exit 1
     fi
     ;;
   build)
@@ -69,12 +77,33 @@ case "$cmd" in
     shift
     case "$sub" in
       inspect) grep -Fxq "$1" "$S/volumes"; exit $? ;;
+      create)
+        # Scratch volumes are labelled; the label lets the installer find leftovers.
+        label=
+        name=
+        while [ "$#" -gt 0 ]; do
+          case "$1" in --label) label=$2; shift 2 ;; *) name=$1; shift ;; esac
+        done
+        grep -Fxq "$name" "$S/volumes" || echo "$name" >>"$S/volumes"
+        [ -n "$label" ] && echo "$name" >>"$S/volumes_scratch"
+        echo "$name"
+        exit 0
+        ;;
+      ls)
+        [ -f "$S/volumes_scratch" ] && grep -Fxf "$S/volumes" "$S/volumes_scratch"
+        exit 0
+        ;;
       rm)
         for v in "$@"; do
           [ "$v" = -f ] && continue
           grep -Fxv "$v" "$S/volumes" >"$S/volumes.new" || true
           mv "$S/volumes.new" "$S/volumes"
-          echo "$v" >>"$S/volumes_removed"
+          if [ -f "$S/volumes_scratch" ] && grep -Fxq "$v" "$S/volumes_scratch"; then
+            rm -rf "${S:?}/scratchfs/$v"
+            echo "$v" >>"$S/scratch_removed"
+          else
+            echo "$v" >>"$S/volumes_removed"
+          fi
         done
         exit 0
         ;;
@@ -82,19 +111,46 @@ case "$cmd" in
     ;;
   ps)
     proj=
+    formatted=
     for a in "$@"; do
-      case "$a" in label=com.docker.compose.project=*) proj=${a#label=com.docker.compose.project=} ;; esac
+      case "$a" in
+        label=com.docker.compose.project=*) proj=${a#label=com.docker.compose.project=} ;;
+        '{{'*) formatted=1 ;;
+      esac
     done
     if [ -f "$S/up/$proj" ]; then
-      case "$proj" in aman-machine) echo c1 ;; *) printf 'c1\nc2\nc3\n' ;; esac
+      case "$proj" in
+        aman-machine) echo c1 ;;
+        *)
+          if [ -n "$formatted" ]; then
+            # id|name|state|status|compose service, as the doctor asks for them
+            for svc in loopback app dex; do printf 'c-%s|%s-%s-1|running|Up 2 minutes (healthy)|%s\n' "$svc" "$proj" "$svc" "$svc"; done
+          else
+            printf 'c1\nc2\nc3\n'
+          fi
+          ;;
+      esac
     fi
+    exit 0
+    ;;
+  exec)
+    # `docker exec <container> amanuensis doctor --text`: one tab-separated check per line.
+    printf 'service\tok\tstub\t\n'
     exit 0
     ;;
   run)
     vol=
+    data_vol=
+    scratch_vol=
     prev=
     for a in "$@"; do
-      if [ "$prev" = -v ]; then vol=${a%%:*}; fi
+      if [ "$prev" = -v ]; then
+        vol=${a%%:*}
+        case "$a" in
+          *:/data) data_vol=$vol ;;
+          *:/backup) scratch_vol=$vol ;;
+        esac
+      fi
       prev=$a
     done
     case "$*" in
@@ -106,11 +162,24 @@ case "$cmd" in
         exit 0
         ;;
       *"amanuensis backup"*)
-        printf 'SQLITE-OF-%s\n' "$vol"
+        # Models the CLI: refuses a missing --target, writes db.sqlite, memory/, persona-knowledge/ and a manifest there.
+        echo "$*" >>"$S/backup_runs"
+        [ -n "${STUB_BACKUP_FAIL:-}" ] && { echo "backup failed" >&2; exit 1; }
+        case "$*" in *"--target /backup"*) ;; *) echo "Missing --target <directory>." >&2; exit 2 ;; esac
+        [ -n "$scratch_vol" ] || exit 2
+        out=$S/scratchfs/$scratch_vol
+        mkdir -p "$out/memory" "$out/persona-knowledge"
+        printf 'SQLITE-OF-%s\n' "$data_vol" >"$out/db.sqlite"
+        printf '{"version":1,"files":[]}\n' >"$out/manifest.json"
+        printf '{"target":"/backup","manifest":"manifest.json","files":1,"bytes":1}\n'
         exit 0
         ;;
       *" tar "*)
-        printf 'TAR-OF-%s\n' "$vol"
+        if [ -d "$S/scratchfs/$vol" ]; then
+          tar -C "$S/scratchfs/$vol" -cf - .
+        else
+          printf 'TAR-OF-%s\n' "$vol"
+        fi
         exit 0
         ;;
       *"sh -c"*)
@@ -153,11 +222,6 @@ case "$cmd" in
         ;;
       down)
         rm -f "$S/up/$proj"
-        exit 0
-        ;;
-      exec)
-        [ -n "${STUB_EXEC_FAIL:-}" ] && exit 1
-        printf 'SQLITE-OF-%s\n' "$proj"
         exit 0
         ;;
       *) exit 0 ;;

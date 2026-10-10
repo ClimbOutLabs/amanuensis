@@ -150,7 +150,10 @@ ENV MEMORY_MARKDOWN_DIR=/data/memory \
   PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge
 
 # `docker run --rm -i <image> amanuensis <command>` (hash-password, backup, doctor).
-RUN printf '#!/bin/sh\nexec node /app/packages/trueforge/dist/amanuensis.js "$@"\n' > /usr/local/bin/amanuensis \
+# /backup is the mount point for `amanuensis backup --target /backup`; owning it here lets a fresh
+# named volume mounted there be written by the runtime user.
+RUN mkdir -p /backup && chown 10001:10001 /backup \
+  && printf '#!/bin/sh\nexec node /app/packages/trueforge/dist/amanuensis.js "$@"\n' > /usr/local/bin/amanuensis \
   && chmod 755 /usr/local/bin/amanuensis
 
 EXPOSE 8790

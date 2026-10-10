@@ -52,7 +52,7 @@ test_successful_upgrade_backs_up_first() {
   assert_eq "$(compose_image main)" "$new" "instance runs the new image"
   assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" 1 "one backup"
   local backup_line build_line up_line
-  backup_line=$(grep -n 'exec -T app amanuensis backup' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
+  backup_line=$(grep -n 'amanuensis backup --target' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
   build_line=$(grep -n 'docker build' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
   up_line=$(grep -n 'aman-main.* up -d' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
   if [ "$backup_line" -lt "$build_line" ] && [ "$build_line" -lt "$up_line" ]; then t_pass; else t_fail "order was backup=$backup_line build=$build_line up=$up_line"; fi
@@ -117,9 +117,6 @@ test_doctor_failure_blocks_unless_forced() {
   t_begin "a doctor failure blocks the upgrade unless --force is given"
   sandbox_new
   install_machine
-  mkdir -p "$AMAN_HOME/bin"
-  cp "$TESTS_DIR/stubs/amanuensis-doctor" "$AMAN_HOME/bin/amanuensis"
-  chmod +x "$AMAN_HOME/bin/amanuensis"
   repo_commit_change "needs doctor"
   STUB_DOCTOR_EXIT=1
   run_install upgrade

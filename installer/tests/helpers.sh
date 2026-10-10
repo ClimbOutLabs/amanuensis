@@ -12,7 +12,7 @@ CURRENT_TEST=
 
 # System tools the installer needs. docker, sudo, sg, id and friends are never taken from the host.
 TOOLS="bash sh env awk sed grep egrep cut tr od head tail sort uniq wc cat cp mv rm mkdir rmdir chmod mktemp date cmp find
-basename dirname uname kill sleep ln git sha256sum shasum tee readlink ls touch xargs timeout getconf true false python3 diff"
+basename dirname uname kill sleep ln git sha256sum shasum tee readlink ls touch xargs timeout getconf true false python3 diff tar stat"
 
 sandbox_new() {
   SB=$(mktemp -d)
@@ -30,6 +30,7 @@ sandbox_new() {
       *) cp "$t" "$SB_BIN/" ;;
     esac
   done
+  stage_installer
   STUB_REAL_DF=$(command -v df)
   export STUB_LOG=$SB/stub.log STUB_STATE=$SB_STATE STUB_BIN=$SB_BIN STUB_USER=testuser
   export STUB_DOCKER_SRC=$TESTS_DIR/stubs/docker STUB_REAL_DF
@@ -38,8 +39,17 @@ sandbox_new() {
   REPO=$SB/repo
   fixture_repo "$REPO"
   unset STUB_DOCKER_DENIED STUB_DOCKER_DOWN STUB_ROOTLESS STUB_PODMAN STUB_BUILD_FAIL STUB_UP_FAIL_UNLESS_TAG \
-    STUB_BUSY_PORTS STUB_EXEC_FAIL STUB_ENGINE_VERSION STUB_COMPOSE_VERSION STUB_DOCTOR_EXIT STUB_VIA_SG STUB_VIA_SUDO || true
+    STUB_BUSY_PORTS STUB_BACKUP_FAIL STUB_ENGINE_VERSION STUB_COMPOSE_VERSION STUB_DOCTOR_EXIT STUB_VIA_SG STUB_VIA_SUDO || true
   STUB_DF_KB=50000000
+}
+
+# A copy of the installer with the stub doctor in place of the real shim, so install and upgrade runs
+# do not depend on what the real doctor makes of the stubbed docker. The real shim is tested on its own.
+stage_installer() {
+  SB_INSTALLER=$SB/installer
+  mkdir -p "$SB_INSTALLER/doctor"
+  cp -R "$INSTALLER_DIR/install.sh" "$INSTALLER_DIR/lib" "$INSTALLER_DIR/templates" "$INSTALLER_DIR/release.json" "$INSTALLER_DIR/downloads.txt" "$SB_INSTALLER/"
+  cp "$TESTS_DIR/stubs/amanuensis-doctor" "$SB_INSTALLER/doctor/amanuensis"
 }
 
 sandbox_drop() {
@@ -79,9 +89,9 @@ run_install() {
     STUB_DOCKER_DENIED="${STUB_DOCKER_DENIED:-}" STUB_DOCKER_DOWN="${STUB_DOCKER_DOWN:-}" \
     STUB_ROOTLESS="${STUB_ROOTLESS:-}" STUB_PODMAN="${STUB_PODMAN:-}" STUB_BUILD_FAIL="${STUB_BUILD_FAIL:-}" \
     STUB_UP_FAIL_UNLESS_TAG="${STUB_UP_FAIL_UNLESS_TAG:-}" STUB_DF_KB="${STUB_DF_KB:-}" \
-    STUB_BUSY_PORTS="${STUB_BUSY_PORTS:-}" STUB_EXEC_FAIL="${STUB_EXEC_FAIL:-}" STUB_ENGINE_VERSION="${STUB_ENGINE_VERSION:-}" \
+    STUB_BUSY_PORTS="${STUB_BUSY_PORTS:-}" STUB_BACKUP_FAIL="${STUB_BACKUP_FAIL:-}" STUB_ENGINE_VERSION="${STUB_ENGINE_VERSION:-}" \
     STUB_COMPOSE_VERSION="${STUB_COMPOSE_VERSION:-}" STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" \
-    bash "$INSTALLER_DIR/install.sh" "$@" <"${INPUT_FILE:-/dev/null}" >"$out" 2>"$err"
+    bash "$SB_INSTALLER/install.sh" "$@" <"${INPUT_FILE:-/dev/null}" >"$out" 2>"$err"
   RC=$?
   set -e
   OUT=$(cat "$out")

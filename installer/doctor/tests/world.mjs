@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const DOCTOR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'doctor.sh');
+const DOCTOR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'amanuensis');
 
 export const NOW = 1791633600; // 2026-10-10T12:00:00Z
 export const DAEMON_TIME = '2026-10-10T12:00:00.123456789Z';
@@ -140,12 +140,16 @@ export function createWorld({ instances = ['main'] } = {}) {
       const when = NOW - ageDays * 86400;
       utimesSync(dir, when, when);
     },
-    run(args = [], { env = {} } = {}) {
-      const result = spawnSync('bash', [DOCTOR, '--home', home, ...args], {
+    run(args = [], options) {
+      return world.shim(['doctor', ...args], options);
+    },
+    shim(argv, { env = {} } = {}) {
+      const result = spawnSync('bash', [DOCTOR, ...argv], {
         encoding: 'utf8',
         env: {
           PATH: `${bin}:${tools}`,
           HOME: root,
+          AMANUENSIS_HOME: home,
           DOCKER_CONFIG: dockerConfig,
           FAKE_DOCKER_DIR: fake,
           AMAN_DOCTOR_NOW: String(world.now),

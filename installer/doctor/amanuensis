@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Host-side doctor: machine checks with the Docker CLI, plus each instance's in-image
-# `amanuensis doctor`, combined into one document. Read-only; needs only Docker (no jq, no Node).
+# Host shim installed as ~/.amanuensis/bin/amanuensis. `amanuensis doctor` runs machine checks with
+# the Docker CLI plus each instance's in-image `amanuensis doctor`, combined into one document.
+# Read-only; needs only Docker (no jq, no Node). The state directory is AMANUENSIS_HOME.
 #
-#   doctor.sh [--home DIR] [--json] [--only ID] [--instance NAME] [--deep]
+#   amanuensis doctor [--json] [--only ID] [--instance NAME] [--deep]
 #
 # Exit codes: 0 no failures, 1 at least one failure, 2 usage error.
 # Test hooks: AMAN_DOCTOR_NOW (epoch seconds) replaces the clock.
@@ -38,7 +39,7 @@ APP_CONTAINER=""
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: doctor.sh [--home DIR] [--json] [--only ID] [--instance NAME] [--deep]
+Usage: amanuensis doctor [--json] [--only ID] [--instance NAME] [--deep]
 USAGE
 }
 
@@ -592,17 +593,21 @@ print_text() {
 
 # ---------------------------------------------------------------- main
 
+case "${1:-}" in
+  doctor) shift ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *) die_usage "Unknown command: ${1:-(none)}" ;;
+esac
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --json) AS_JSON=1 ;;
     --deep)
       DEEP=1
       PROBE_SECONDS=30
-      ;;
-    --home)
-      [ $# -ge 2 ] || die_usage "--home needs a directory."
-      AMAN_HOME=$2
-      shift
       ;;
     --only)
       [ $# -ge 2 ] || die_usage "--only needs a check id."

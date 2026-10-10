@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Backups: everything is streamed over stdout from containers, so no host bind mounts are involved.
+# Backups: the CLI writes into a scratch volume and every archive is streamed over stdout, so no host bind mounts are involved.
 
 BACKUP_KEEP=5
 LAST_BACKUP_DIR=
@@ -19,8 +19,42 @@ write_checksums() {
 # Streams a volume's files as a tar archive, read-only, with no network.
 volume_tar() {
   local volume=$1 image=$2
-  shift 2
-  D run --rm --network none -v "$volume:/data:ro" "$image" tar -C /data "$@" -cf - .
+  D run --rm --network none -v "$volume:/data:ro" "$image" tar -C /data -cf - .
+}
+
+# Value of KEY in an instance .env, so the CLI is pointed at the paths the app itself uses.
+env_get() {
+  sed -n "s/^$2=//p" "$1" | head -n 1
+}
+
+BACKUP_SCRATCH_LABEL=com.amanuensis.scratch=backup
+
+# Removes scratch volumes a killed run left behind; only volumes carrying the scratch label are touched.
+backup_scratch_prune() {
+  local volume
+  for volume in $(D volume ls -q --filter "label=$BACKUP_SCRATCH_LABEL" 2>/dev/null || true); do
+    D volume rm -f "$volume" >/dev/null 2>&1 || true
+  done
+}
+
+# backup_data NAME DESTDIR IMAGE: runs `amanuensis backup --target` into a scratch volume mounted at
+# /backup, then streams that volume into DESTDIR as tar. The scratch volume is always removed again.
+# The CLI opens the live database through SQLite's online backup API, safe beside the running app.
+backup_data() {
+  local name=$1 dest=$2 image=$3 scratch env_file rc=0
+  scratch="aman_${name}_backup_scratch"
+  env_file="$(instance_dir "$name")/.env"
+  D volume create --label "$BACKUP_SCRATCH_LABEL" "$scratch" >/dev/null || return 1
+  D run --rm --network none -v "aman_${name}_data:/data" -v "$scratch:/backup" "$image" amanuensis backup \
+    --target /backup \
+    --sqlite "$(env_get "$env_file" SQLITE_PATH)" \
+    --memory-dir "$(env_get "$env_file" MEMORY_MARKDOWN_DIR)" \
+    --persona-dir "$(env_get "$env_file" PERSONA_KNOWLEDGE_DIR)" >/dev/null || rc=1
+  if [ "$rc" = 0 ]; then
+    volume_tar "$scratch" "$image" | tar -x --no-same-owner -C "$dest" -f - || rc=1
+  fi
+  D volume rm -f "$scratch" >/dev/null 2>&1 || true
+  return "$rc"
 }
 
 # backup_instance NAME DESTDIR IMAGE
@@ -28,19 +62,10 @@ backup_instance() {
   local name=$1 dest=$2/$1 image=$3
   ensure_private_dir "$dest"
   if docker_volume_exists "aman_${name}_data"; then
-    # The app image makes the online SQLite copy, so a live database is never copied file by file.
-    if [ "$(instance_state "$name")" = stopped ]; then
-      D run --rm --network none -v "aman_${name}_data:/data" -e STANDALONE=true -e SQLITE_PATH=/data/db/db.sqlite \
-        "$image" amanuensis backup >"$dest/db.sqlite.part" || return 1
-    else
-      dc "$name" exec -T app amanuensis backup >"$dest/db.sqlite.part" || return 1
-    fi
-    mv "$dest/db.sqlite.part" "$dest/db.sqlite"
-    volume_tar "aman_${name}_data" "$image" --exclude=./db >"$dest/files.tar.part" || return 1
-    mv "$dest/files.tar.part" "$dest/files.tar"
+    backup_data "$name" "$dest" "$image" || return 1
   fi
   if docker_volume_exists "aman_${name}_dex"; then
-    D run --rm --network none -v "aman_${name}_dex:/data:ro" "$image" tar -C /data -cf - . >"$dest/dex.tar.part" || return 1
+    volume_tar "aman_${name}_dex" "$image" >"$dest/dex.tar.part" || return 1
     mv "$dest/dex.tar.part" "$dest/dex.tar"
   fi
   cp "$(instance_dir "$name")/.env" "$dest/env"
@@ -65,6 +90,7 @@ backup_run() {
   image=$CUR_APP_TAG
   docker_image_exists "$image" || die "image $image is missing; run install.sh to rebuild it"
   ensure_private_dir "$BACKUPS_DIR"
+  backup_scratch_prune
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   dir=$BACKUPS_DIR/$stamp
   while [ -e "$dir" ]; do

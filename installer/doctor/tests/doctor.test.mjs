@@ -135,6 +135,17 @@ describe('usage', () => {
     }
   });
 
+  it('needs the doctor command and no longer takes --home (the state directory is AMANUENSIS_HOME)', () => {
+    make();
+    for (const argv of [[], ['--json'], ['status'], ['doctor', '--home', '/tmp/elsewhere']]) {
+      const result = world.shim(argv);
+      assert.equal(result.code, 2, argv.join(' '));
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /Usage:/);
+    }
+    assert.equal(world.shim(['doctor', '--json', '--instance', 'main']).code, 0);
+  });
+
   it('--only keeps one check id across machine and instances', () => {
     make();
     const result = world.json(['--only', 'disk']);
