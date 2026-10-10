@@ -3,11 +3,11 @@ import { createDoctor } from '../../../../src/cli/doctor';
 import { CheckSchema } from '../../../../src/cli/doctor/schemas';
 import { UsageError } from '../../../../src/cli/io';
 import { fakeIo } from '../fakeIo';
-import { fakeDeps, networkError, response } from './fakeDeps';
+import { fakeDeps, networkError, response, type FakeGet } from './fakeDeps';
 
 const ISSUER = 'http://127.0.0.1:5556/dex';
 const healthyEnv = { OIDC_ISSUER_URL: ISSUER, SQLITE_PATH: '/data/db/db.sqlite' };
-const healthyGet = ({ url }: { url: string }) =>
+const healthyGet: FakeGet = ({ url }) =>
   Promise.resolve(response(url.endsWith('/healthz') ? {} : { json: { issuer: ISSUER } }));
 
 async function run(args: string[], deps = fakeDeps({ env: healthyEnv, get: healthyGet })) {
@@ -61,10 +61,10 @@ describe('amanuensis doctor', () => {
   it('uses a longer probe timeout with --deep', async () => {
     const get = jest.fn(healthyGet);
     await run(['--deep'], fakeDeps({ env: healthyEnv, get }));
-    expect(get.mock.calls.every(([options]) => (options as { timeoutMs: number }).timeoutMs === 30_000)).toBe(true);
+    expect(get.mock.calls.every(([options]) => options.timeoutMs === 30_000)).toBe(true);
     get.mockClear();
     await run([], fakeDeps({ env: healthyEnv, get }));
-    expect(get.mock.calls.every(([options]) => (options as { timeoutMs: number }).timeoutMs === 5_000)).toBe(true);
+    expect(get.mock.calls.every(([options]) => options.timeoutMs === 5_000)).toBe(true);
   });
 
   it('prints one tab-separated line per check with --text', async () => {
