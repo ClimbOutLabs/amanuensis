@@ -277,7 +277,7 @@ describe('allowlisted git execution under repository config', () => {
       setup(fixture);
       const result = await runExec({ sandbox: realShellSandbox(fixture), fixture, command });
       expect(result.isError).toBe(true);
-      expect(result.text).toContain('needs approval');
+      expect(result.text).toContain('needs your approval');
       expect(existsSync(fixture.marker)).toBe(false);
     } finally {
       fixture.cleanup();
@@ -318,6 +318,133 @@ describe('allowlisted git execution under repository config', () => {
         expect(params.env).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
         expect(params.command).toContain(`safe.directory=${fixture.repo}`);
       }
+    } finally {
+      fixture.cleanup();
+    }
+  });
+});
+
+/** An outer repo whose gitlink points at a nested repo with a filter payload and an uncommitted edit. */
+function nestedRepoFixture(): Fixture {
+  const fixture = repoFixture();
+  git(fixture.repo, ['checkout', '-q', '--', 'f.txt']);
+  const sub = join(fixture.repo, 'sub');
+  mkdirSync(sub);
+  git(sub, ['init', '-q']);
+  writeFileSync(join(sub, '.gitattributes'), '* filter=x\n');
+  writeFileSync(join(sub, 'f'), 'one\n');
+  git(sub, ['add', '-A']);
+  git(sub, ['commit', '-q', '-m', 'sub']);
+  git(sub, ['config', 'filter.x.clean', fixture.script]);
+  writeFileSync(join(sub, 'f'), 'two\n');
+  git(fixture.repo, ['add', 'sub']);
+  git(fixture.repo, ['commit', '-q', '-m', 'top']);
+  writeFileSync(join(sub, 'f'), 'tri\n');
+  rmSync(fixture.marker, { force: true });
+  return fixture;
+}
+
+describe('allowlisted git execution with a nested repository', () => {
+  test.each(['git status --short', 'git diff --stat'])('control: plain `%s` runs the nested payload', command => {
+    const fixture = nestedRepoFixture();
+    try {
+      execFileSync('sh', ['-c', command], { cwd: fixture.repo, stdio: 'ignore' });
+      expect(existsSync(fixture.marker)).toBe(true);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test.each([
+    'git status',
+    'git status --short',
+    'git diff --stat',
+    'git diff --name-only',
+    'git diff --cached',
+    'git log --stat',
+    'git show HEAD',
+    'git ls-files --modified',
+    'git ls-files --stage',
+    'git blame f.txt',
+  ])('`%s` never runs the nested repository payload', async command => {
+    const fixture = nestedRepoFixture();
+    try {
+      const result = await runExec({ sandbox: realShellSandbox(fixture), fixture, command });
+      expect(result.isError).toBe(false);
+      expect(existsSync(fixture.marker)).toBe(false);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+});
+
+describe('allowlisted git execution with inherited git env config', () => {
+  const INHERITED = {
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'filter.x.clean',
+    GIT_CONFIG_VALUE_0: '',
+    GIT_CONFIG_PARAMETERS: '',
+  };
+
+  test('ignores GIT_CONFIG_COUNT pairs and GIT_CONFIG_PARAMETERS from the environment', async () => {
+    const fixture = repoFixture();
+    const saved = Object.fromEntries(
+      [...Object.keys(INHERITED), 'GIT_CONFIG_VALUE_0'].map(key => [key, process.env[key]]),
+    );
+    try {
+      writeFileSync(join(fixture.repo, '.gitattributes'), '*.txt filter=x\n');
+      Object.assign(process.env, {
+        ...INHERITED,
+        GIT_CONFIG_VALUE_0: fixture.script,
+        GIT_CONFIG_PARAMETERS: `'filter.x.smudge=${fixture.script}'`,
+      });
+      execFileSync('git', ['status'], { cwd: fixture.repo, stdio: 'ignore', env: { ...process.env } });
+      expect(existsSync(fixture.marker)).toBe(true);
+      rmSync(fixture.marker);
+      const result = await runExec({ sandbox: realShellSandbox(fixture), fixture, command: 'git status' });
+      expect(result.isError).toBe(false);
+      expect(result.text).toContain('exit_code');
+      expect(existsSync(fixture.marker)).toBe(false);
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      fixture.cleanup();
+    }
+  });
+});
+
+describe('allowlisted git refusal messages', () => {
+  test('an unsafe repository config asks for approval', async () => {
+    const fixture = repoFixture();
+    try {
+      git(fixture.repo, ['config', 'filter.x.clean', fixture.script]);
+      const result = await runExec({ sandbox: realShellSandbox(fixture), fixture, command: 'git status' });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain(
+        "This repository's git settings could run programs, so this command needs your approval.",
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('a directory that is not a git repository says so', async () => {
+    const fixture = repoFixture();
+    try {
+      const plain = join(fixture.root, 'plain');
+      mkdirSync(plain);
+      const result = await runExec({
+        sandbox: realShellSandbox({ ...fixture, repo: plain }),
+        fixture: { ...fixture, repo: plain },
+        command: 'git status',
+      });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('not a git repository');
     } finally {
       fixture.cleanup();
     }
@@ -370,7 +497,7 @@ describe('allowlisted git execution after the sandbox is recreated', () => {
       git(retry.repo, ['config', 'core.fsmonitor', retry.script]);
       const { result, retryCommands } = await runWithRecreate({ first, retry });
       expect(result.isError).toBe(true);
-      expect(result.text).toContain('needs approval');
+      expect(result.text).toContain('needs your approval');
       expect(retryCommands).toHaveLength(1);
       expect(existsSync(retry.marker)).toBe(false);
     } finally {

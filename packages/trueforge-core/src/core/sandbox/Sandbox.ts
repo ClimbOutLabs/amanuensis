@@ -1716,6 +1716,13 @@ export interface WorkspaceVerificationReceiptCandidate extends WorkspaceVerifica
   mutationEpoch: number;
   command: string;
 }
+const GIT_CONFIG_UNSAFE_REFUSAL =
+  "This repository's git settings could run programs, so this command needs your approval. It was not run; use a command that asks the user for approval instead.";
+const GIT_CONFIG_UNREADABLE_REFUSAL =
+  "Could not read this repository's git settings, so this command needs your approval. It was not run; use a command that asks the user for approval instead.";
+
+/** Runs under the workspace lock just before the command; a string refuses the command with that reason. */
+type ExecPreflight = () => Promise<string | undefined>;
 type VerifiedExecOutcome =
   | { status: 'blocked'; reason: string }
   | {
@@ -3741,6 +3748,7 @@ export class Sandbox extends LocalToolMCP {
     effect: SandboxCommandEffect,
     planAdmission: { context: ToolInvocationContext | undefined; scope: ImplementationPlanGrantScope } | undefined,
     dispatchMarker: { dispatched: boolean },
+    preflight: ExecPreflight | undefined,
   ): Promise<VerifiedExecOutcome> {
     const guarded = effect === 'verify' || effect === 'commit' || effect === 'edit' || effect === 'execute';
     // A verify or commit purpose only takes the durable coordination path when a repository
@@ -3749,7 +3757,7 @@ export class Sandbox extends LocalToolMCP {
     const requiresDurableCoordination = guarded && this.boundRepository !== undefined;
     if (!requiresDurableCoordination) {
       const workspaceRoot = await this.resolveWorkspaceRoot(sandboxId, input.cwd);
-      const execute = (): Promise<ExecResult> =>
+      const run = (): Promise<ExecResult> =>
         workspaceRoot === undefined
           ? this.provider.exec({
               sandboxId,
@@ -3771,10 +3779,20 @@ export class Sandbox extends LocalToolMCP {
       // this point on means the target may have run, so replay must stop being
       // safe for verify/commit once this flips.
       dispatchMarker.dispatched = true;
-      const result =
+      // The preflight runs inside the same lock as the command so the checked
+      // repository state cannot change in between.
+      const execute = async (): Promise<ExecResult | { refusal: string }> => {
+        const refusal = await preflight?.();
+        return refusal === undefined ? run() : { refusal };
+      };
+      const outcome =
         workspaceRoot === undefined
           ? await execute()
           : await withWorkspaceMutationLock(this.workspaceMutationKey(sandboxId, workspaceRoot), async () => execute());
+      if ('refusal' in outcome) {
+        return { status: 'blocked', reason: outcome.refusal };
+      }
+      const result = outcome;
       return {
         status: 'completed',
         result,
@@ -3845,6 +3863,10 @@ export class Sandbox extends LocalToolMCP {
               // atomic commit) is about to reach the provider from here, so a
               // SandboxNotAvailableError from this point on can no longer be treated
               // as safe to replay for verify/commit.
+              const refusal = await preflight?.();
+              if (refusal !== undefined) {
+                return { status: 'blocked' as const, reason: refusal };
+              }
               dispatchMarker.dispatched = true;
               if (effect !== 'commit') {
                 return {
@@ -4271,15 +4293,15 @@ export class Sandbox extends LocalToolMCP {
   /**
    * Allowlisted git runs only under system/global config isolation and only
    * when the repository's local config holds nothing but known-safe keys; any
-   * other config can make git execute a program. Other commands pass through.
+   * other config can make git execute a program. The config check is returned
+   * as a preflight so it runs under the same workspace lock as the command.
+   * Other commands pass through unchanged.
    */
-  private async prepareAllowlistedGit(input: {
-    sandboxId: string;
+  private prepareAllowlistedGit(input: { sandboxId: string; exec: SandboxRuntimeExecInput }): {
     exec: SandboxRuntimeExecInput;
-  }): Promise<
-    | { status: 'ready'; exec: SandboxRuntimeExecInput; env: Record<string, string> }
-    | { status: 'refused'; message: string }
-  > {
+    env: Record<string, string>;
+    preflight: ExecPreflight | undefined;
+  } {
     const allowlist = this.sentinelContext?.services.shell_allowlist;
     const workspaceRoot = this.boundRepository?.workspace_cwd ?? input.exec.cwd;
     const hardened =
@@ -4287,32 +4309,29 @@ export class Sandbox extends LocalToolMCP {
         ? undefined
         : hardenAllowlistedGit({ command: input.exec.command, config: allowlist, workspace_root: workspaceRoot });
     if (hardened === undefined) {
-      return { status: 'ready', exec: input.exec, env: {} };
+      return { exec: input.exec, env: {}, preflight: undefined };
     }
-    const probe = await this.provider.exec({
-      sandboxId: input.sandboxId,
-      command: hardened.probe_argv.map(shellEscape).join(' '),
-      cwd: input.exec.cwd,
-      env: hardened.env,
-    });
-    if (!probe.success || probe.response.exitCode !== 0) {
-      return {
-        status: 'refused',
-        message:
-          'Could not verify the Git repository config, so this Git command needs approval. Run it in an approval-requiring form.',
-      };
-    }
-    if (!gitLocalConfigIsSafe(probe.response.result)) {
-      return {
-        status: 'refused',
-        message:
-          'This repository config can make Git run programs, so this Git command needs approval. Run it in an approval-requiring form.',
-      };
-    }
+    const preflight: ExecPreflight = async () => {
+      const probe = await this.provider.exec({
+        sandboxId: input.sandboxId,
+        command: hardened.probe_argv.map(shellEscape).join(' '),
+        cwd: input.exec.cwd,
+        env: { ...hardened.env, LC_ALL: 'C' },
+      });
+      if (!probe.success) {
+        return GIT_CONFIG_UNREADABLE_REFUSAL;
+      }
+      if (probe.response.exitCode !== 0) {
+        return /git repository/iu.test(probe.response.result)
+          ? 'This directory is not a git repository, so this git command cannot run.'
+          : GIT_CONFIG_UNREADABLE_REFUSAL;
+      }
+      return gitLocalConfigIsSafe(probe.response.result) ? undefined : GIT_CONFIG_UNSAFE_REFUSAL;
+    };
     return {
-      status: 'ready',
       exec: { ...input.exec, command: hardened.argv.map(shellEscape).join(' ') },
       env: hardened.env,
+      preflight,
     };
   }
 
@@ -4389,10 +4408,7 @@ export class Sandbox extends LocalToolMCP {
       this.resolvedGitCredentialsContent !== null
         ? buildGitCredentialHelperEnv(this.provider.getGitCredentialsPath(rawId))
         : {};
-    const gitPrep = await this.prepareAllowlistedGit({ sandboxId: rawId, exec: resolvedInput });
-    if (gitPrep.status === 'refused') {
-      return hostRefusalResponse(gitPrep.message);
-    }
+    const gitPrep = this.prepareAllowlistedGit({ sandboxId: rawId, exec: resolvedInput });
     const env = { ...mcpClientEnv, ...gitAuthEnv, ...gitPrep.env };
     const execInput = gitPrep.exec;
 
@@ -4405,6 +4421,7 @@ export class Sandbox extends LocalToolMCP {
         effect,
         planScope === undefined ? undefined : { context, scope: planScope },
         dispatchMarker,
+        gitPrep.preflight,
       );
       if (execution.status === 'blocked') {
         return hostRefusalResponse(execution.reason);
@@ -4448,10 +4465,7 @@ export class Sandbox extends LocalToolMCP {
       await this.ensureSandboxInitialized();
       const recreatedRawId = this.providerSandboxId(recreated.sandboxInfo.sandbox_id);
       const retryCodeModeEnv = await this.ensureCodeModeStarted(recreatedRawId);
-      const retryGitPrep = await this.prepareAllowlistedGit({ sandboxId: recreatedRawId, exec: resolvedInput });
-      if (retryGitPrep.status === 'refused') {
-        return hostRefusalResponse(retryGitPrep.message);
-      }
+      const retryGitPrep = this.prepareAllowlistedGit({ sandboxId: recreatedRawId, exec: resolvedInput });
       const retryEnv = {
         ...injectMCPClientEnv({
           env: input.env,
@@ -4472,6 +4486,7 @@ export class Sandbox extends LocalToolMCP {
         effect,
         planScope === undefined ? undefined : { context, scope: planScope },
         retryDispatchMarker,
+        retryGitPrep.preflight,
       );
       if (retryExecution.status === 'blocked') {
         return hostRefusalResponse(retryExecution.reason);
