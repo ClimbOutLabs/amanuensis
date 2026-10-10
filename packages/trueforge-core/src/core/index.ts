@@ -275,8 +275,19 @@ export type {
   RunCodeLanguage,
   SandboxIdentity,
 } from './sandbox/driver/IsolationDriver';
-export { RUN_CODE_ERROR_CODES, RunCodeInputSchema, RunCodeResultSchema } from './sandbox/driver/RunCodeSchemas';
-export type { RunCodeErrorCode, RunCodeInput, RunCodeResult } from './sandbox/driver/RunCodeSchemas';
+export {
+  RUN_CODE_ERROR_CODES,
+  RUN_CODE_SETUP_ERROR_CODES,
+  RunCodeInputSchema,
+  RunCodeResultSchema,
+  RunCodeSetupFailureSchema,
+} from './sandbox/driver/RunCodeSchemas';
+export type {
+  RunCodeErrorCode,
+  RunCodeInput,
+  RunCodeResult,
+  RunCodeSetupFailure,
+} from './sandbox/driver/RunCodeSchemas';
 export { RunCodeService, validateRunCodeStartupConfig } from './sandbox/driver/RunCodeService';
 export type {
   HarvestedFile,

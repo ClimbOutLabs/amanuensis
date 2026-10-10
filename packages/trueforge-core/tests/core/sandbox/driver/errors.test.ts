@@ -1,4 +1,5 @@
 import { errorCodeForTermination, errorTextForCode, scrubHostPaths } from '../../../../src/core/sandbox/driver/errors';
+import { RUN_CODE_SETUP_ERROR_CODES } from '../../../../src/core/sandbox/driver/RunCodeSchemas';
 
 describe('errorCodeForTermination', () => {
   it('maps driver terminations onto the model-visible taxonomy', () => {
@@ -67,5 +68,13 @@ describe('docker_unavailable / isolation_refused', () => {
   it('falls back without detail', () => {
     expect(errorTextForCode({ error_code: 'docker_unavailable', detail: undefined })).toContain('Docker');
     expect(errorTextForCode({ error_code: 'isolation_refused', detail: undefined })).toContain('isolation');
+  });
+});
+
+describe('setup failure text', () => {
+  it.each(RUN_CODE_SETUP_ERROR_CODES)('is written for the user, not the model, for %s', error_code => {
+    const text = errorTextForCode({ error_code, detail: 'Docker daemon not reachable' });
+    expect(text).toContain('Docker daemon not reachable');
+    expect(text).not.toMatch(/\bexec\b|\bshell tool\b|\bNEVER\b|do NOT/);
   });
 });

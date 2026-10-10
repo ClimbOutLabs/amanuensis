@@ -20,6 +20,18 @@ export const RUN_CODE_ERROR_CODES = [
 export type RunCodeErrorCode = (typeof RUN_CODE_ERROR_CODES)[number];
 
 /**
+ * Failures where the sandbox could not start, so no code ran. Their `error` text is written for
+ * the user (what to install or repair), unlike the model-directed text of the other codes, and
+ * must be shown to the user verbatim.
+ */
+export const RUN_CODE_SETUP_ERROR_CODES = [
+  'image_unavailable',
+  'daemon_unavailable',
+  'docker_unavailable',
+  'isolation_refused',
+] as const satisfies readonly RunCodeErrorCode[];
+
+/**
  * Basename-only: no separators, no traversal, 1-256 chars.
  * The three alternatives enumerate the `.`/`..` rejection without lookahead:
  * xgrammar (vLLM's grammar compiler) cannot compile lookahead assertions,
@@ -76,3 +88,12 @@ export const RunCodeResultSchema = z.discriminatedUnion('status', [
 ]);
 
 export type RunCodeResult = z.infer<typeof RunCodeResultSchema>;
+
+/** The part of a failed result that identifies a setup failure, for readers of persisted tool output. */
+export const RunCodeSetupFailureSchema = z.object({
+  status: z.literal('failed'),
+  error_code: z.enum(RUN_CODE_SETUP_ERROR_CODES),
+  error: z.string().min(1),
+});
+
+export type RunCodeSetupFailure = z.infer<typeof RunCodeSetupFailureSchema>;

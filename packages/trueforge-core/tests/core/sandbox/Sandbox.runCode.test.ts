@@ -229,6 +229,16 @@ describe('Sandbox run_code tool', () => {
     expect(runCodeTool?.description).toContain('do NOT re-upload via files_in');
   });
 
+  it('tells the model to relay a failure verbatim with its links and never predict output', () => {
+    const { service } = makeRunCodeService();
+    const sandbox = makeSandbox(makeProvider(), service);
+
+    const runCodeTool = sandbox.listToolsForTest().find(tool => tool.name === SANDBOX_RUN_CODE_TOOL_NAME);
+
+    expect(runCodeTool?.description).toContain('quote the error text exactly as returned, including any links');
+    expect(runCodeTool?.description).toContain('NEVER state or predict what it would have printed');
+  });
+
   it('removes the attachment from the ingress list when the upload is rolled back', async () => {
     const { service } = makeRunCodeService();
     const execImpl: SandboxProvider['exec'] = (params: SandboxExecParams) => {
