@@ -314,6 +314,36 @@ describe('MemoryTurnContextProvider', () => {
     expect(screen.getByTestId('has-error-trn_1')).toHaveTextContent('false');
   });
 
+  it('keeps a failed full read error through successful incremental reads, until a full read succeeds', async () => {
+    useThreadIsRunning.mockReturnValue(true);
+    const listMemoryTurnContext = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValue([recallContext('trn_1')]);
+    render(tree({ listMemoryTurnContext }));
+
+    // The initial full read failed.
+    await flush();
+    expect(screen.getByTestId('has-error-trn_1')).toHaveTextContent('true');
+
+    // Two incremental polls succeed; neither may clear the full-read error.
+    await flush(2_000);
+    await flush(2_000);
+    expect(listMemoryTurnContext).toHaveBeenLastCalledWith('sess-1', { afterEventId: 'evt_recall_trn_1' });
+    expect(screen.getByTestId('has-error-trn_1')).toHaveTextContent('true');
+
+    // A full re-read (showing the page again) succeeds and clears the error.
+    await act(async () => {
+      setVisibility('hidden');
+    });
+    await act(async () => {
+      setVisibility('visible');
+    });
+    await flush();
+    expect(listMemoryTurnContext).toHaveBeenLastCalledWith('sess-1', undefined);
+    expect(screen.getByTestId('has-error-trn_1')).toHaveTextContent('false');
+  });
+
   describe('events saved behind the cursor', () => {
     const turns = ['trn_1', 'trn_2'];
 

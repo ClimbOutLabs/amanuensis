@@ -59,10 +59,17 @@ class MemoryTurnContextStore {
     return this.latestEventId;
   }
 
-  /** Folds fetched entries in, keeping each unchanged entry's identity, and clears any error. */
-  merge(items: readonly MemoryTurnContext[]): void {
-    let changed = this.hasError;
-    this.hasError = false;
+  /**
+   * Folds fetched entries in, keeping each unchanged entry's identity. Only a full read clears
+   * a recorded error: an incremental read cannot fill the gap a failed full read left, so it
+   * must not clear the error flag.
+   */
+  merge(items: readonly MemoryTurnContext[], scope: RefreshScope): void {
+    const fullRead = scope === 'all';
+    let changed = fullRead && this.hasError;
+    if (fullRead) {
+      this.hasError = false;
+    }
     for (const item of items) {
       const existing = this.byTurn.get(item.turnId);
       const recall = item.recall ?? existing?.recall;
@@ -207,7 +214,7 @@ export function MemoryTurnContextProvider({ children }: PropsWithChildren) {
       void api
         .listMemoryTurnContext(sessionId, afterEventId === undefined ? undefined : { afterEventId })
         .then(items => {
-          if (!cancelled) store.merge(items);
+          if (!cancelled) store.merge(items, scope);
         })
         .catch(() => {
           if (!cancelled) store.fail();

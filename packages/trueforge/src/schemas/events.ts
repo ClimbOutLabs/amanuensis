@@ -147,7 +147,7 @@ export const ListSessionEventsRequestQuerySchema = z
         .min(1)
         .max(SessionEventTypeSchema.options.length)
         .optional()
-        .describe('Only list events of these types. Repeat the parameter to pass several. Omit to list every type.'),
+        .describe('Event types to include; at most 19 entries.'),
     ),
     after_event_id: z
       .string()
