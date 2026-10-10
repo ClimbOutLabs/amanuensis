@@ -688,6 +688,7 @@ try {
   });
 
   // Fail closed before anything is created: standalone never starts without login.
+  // Any CLI subcommand is dispatched in cli.ts before this module is imported, so it never reaches this check.
   assertNetworkAuthRequirement({
     authMode: getTrueForgeAuthMode(configuration),
     standalone: configuration.STANDALONE,

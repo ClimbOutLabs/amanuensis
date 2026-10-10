@@ -1904,7 +1904,8 @@ export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement
     throw new Error(
       'Refusing to start without login: standalone mode requires OIDC. ' +
         'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET (REQUIRE_AUTH=false no longer opts out). ' +
-        'The installer sets up a bundled Dex login for you.',
+        'For local development run `pnpm dev:login` and add the lines it prints to packages/trueforge/.env; ' +
+        'see docs/authentication/overview.mdx.',
     );
   }
   if (!requirement.requireAuth) {
