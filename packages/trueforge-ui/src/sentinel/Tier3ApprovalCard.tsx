@@ -38,7 +38,11 @@ export const Tier3ApprovalCard: FC<Tier3ApprovalCardProps> = ({
   disabled = false,
 }) => {
   const hasDetails =
-    card.destination !== null || card.recipient !== null || card.amount !== null || card.parsed_command !== null;
+    card.destination !== null ||
+    card.recipient !== null ||
+    card.amount !== null ||
+    card.parsed_command !== null ||
+    card.destination_host !== null;
 
   return (
     <div className="rounded-lg border border-primary-button-bg/30 bg-primary-button-bg/10">
@@ -79,7 +83,15 @@ export const Tier3ApprovalCard: FC<Tier3ApprovalCardProps> = ({
             {card.recipient !== null && <DetailRow label="Recipient" value={card.recipient} />}
             {card.amount !== null && <DetailRow label="Amount" value={card.amount} mono />}
             {card.parsed_command !== null && <DetailRow label="Command" value={card.parsed_command} mono />}
+            {card.destination_host !== null && <DetailRow label="Sends to" value={card.destination_host} mono />}
           </dl>
+        )}
+
+        {card.outbound_text !== null && (
+          <div className="rounded border border-border bg-primary-bg px-3 py-2">
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Outbound data</p>
+            <pre className="whitespace-pre-wrap break-all font-mono text-xs text-text-primary">{card.outbound_text}</pre>
+          </div>
         )}
 
         <div className="flex gap-2">

@@ -15,6 +15,8 @@ function baseCard(): SentinelApprovalCard {
     recipient: null,
     amount: null,
     parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
   };
 }
 
@@ -58,6 +60,26 @@ describe('Tier3ApprovalCard', () => {
     expect(screen.queryByText('Destination')).not.toBeInTheDocument();
     expect(screen.queryByText('Command')).not.toBeInTheDocument();
     expect(screen.queryByText(/Cannot be undone/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Sends to')).not.toBeInTheDocument();
+    expect(screen.queryByText('Outbound data')).not.toBeInTheDocument();
+  });
+
+  it('renders the outbound query and host for connector tools', () => {
+    renderCard({
+      outbound_text: 'sensitive internal project name',
+      destination_host: 'www.google.com',
+    });
+    expect(screen.getByText('Sends to')).toBeInTheDocument();
+    expect(screen.getByText('www.google.com')).toBeInTheDocument();
+    expect(screen.getByText('Outbound data')).toBeInTheDocument();
+    expect(screen.getByText('sensitive internal project name')).toBeInTheDocument();
+  });
+
+  it('renders outbound text in a monospace block', () => {
+    renderCard({ outbound_text: 'https://example.com/fetch?x=1' });
+    const block = screen.getByText('https://example.com/fetch?x=1');
+    expect(block.tagName.toLowerCase()).toBe('pre');
+    expect(block.className).toContain('font-mono');
   });
 
   it('calls Approve and Deny', () => {

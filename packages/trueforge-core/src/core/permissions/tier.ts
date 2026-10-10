@@ -38,6 +38,16 @@ export const Tier3CardSchema = z
     recipient: z.string().nullable().describe('Verifiable recipient (address, handle), or null.'),
     amount: z.string().nullable().describe('Verifiable amount, or null.'),
     parsed_command: z.string().nullable().describe('Server-parsed command structure for shell actions, or null.'),
+    outbound_text: z
+      .string()
+      .nullable()
+      .describe(
+        'Exact text leaving the machine (search query, URL, message preview), truncated to 500 characters, or null.',
+      ),
+    destination_host: z
+      .string()
+      .nullable()
+      .describe('Host the call reaches, from a URL argument or the connector server URL, or null.'),
   })
   .openapi('Tier3Card');
 

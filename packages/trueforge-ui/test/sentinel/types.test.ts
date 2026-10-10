@@ -73,6 +73,29 @@ describe('extractSentinelFromEvent', () => {
     expect(first?.card.amount).toBe('$250');
     expect(first?.card.why_asked_again).toBeNull();
     expect(first?.card.parsed_command).toBeNull();
+    expect(first?.card.outbound_text).toBeNull();
+    expect(first?.card.destination_host).toBeNull();
+  });
+
+  it('parses outbound_text and destination_host from the card', () => {
+    const event = {
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          tool_call_id: 'call-9',
+          tier: 3,
+          tier3_card: {
+            plain_what: 'Run web_search',
+            outbound_text: 'my secret query',
+            destination_host: 'www.google.com',
+          },
+        },
+      ],
+    };
+    const { approvals } = extractSentinelFromEvent(event);
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]?.card.outbound_text).toBe('my secret query');
+    expect(approvals[0]?.card.destination_host).toBe('www.google.com');
   });
 
   it('parses an approval event after the SDK deserializes it', () => {

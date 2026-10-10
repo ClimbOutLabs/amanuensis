@@ -49,6 +49,7 @@ export function parseTier2ActionKind(value: unknown): Tier2ActionKind | undefine
  * Server-rendered Tier 3 approval card. Mirrors the backend `Tier3Card` schema:
  * destination/recipient/amount come from the server-side extractor registry over
  * canonical params, never agent text. Shell cards carry the server-parsed command.
+ * Connector cards carry the exact outbound payload and destination host.
  */
 export type SentinelApprovalCard = {
   /** One plain-language sentence describing what will happen. No jargon. Always present. */
@@ -67,6 +68,10 @@ export type SentinelApprovalCard = {
   amount: string | null;
   /** Server-parsed command structure for shell actions, or null. */
   parsed_command: string | null;
+  /** Exact text leaving the machine (query, URL, message preview), truncated to 500 chars, or null. */
+  outbound_text: string | null;
+  /** Host the call reaches, from a URL argument or the connector server URL, or null. */
+  destination_host: string | null;
 };
 
 /** Everything the UI needs to render a Tier 3 approval, keyed to one tool call. */
@@ -219,6 +224,8 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     recipient: cardString(value, { snake: 'recipient', camel: 'recipient' }),
     amount: cardString(value, { snake: 'amount', camel: 'amount' }),
     parsed_command: cardString(value, { snake: 'parsed_command', camel: 'parsedCommand' }),
+    outbound_text: cardString(value, { snake: 'outbound_text', camel: 'outboundText' }),
+    destination_host: cardString(value, { snake: 'destination_host', camel: 'destinationHost' }),
   };
 }
 

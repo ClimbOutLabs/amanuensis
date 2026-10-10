@@ -20,6 +20,10 @@ export interface ExtractedCardFields {
   destination: string | null;
   recipient: string | null;
   amount: string | null;
+  /** Exact text leaving the machine (query, URL, message preview), truncated to 500 chars. */
+  outbound_text: string | null;
+  /** Host the call reaches, from a URL argument or the connector server URL. */
+  destination_host: string | null;
 }
 
 export type CardFieldExtractor = (params: Record<string, unknown>) => ExtractedCardFields;
@@ -103,6 +107,153 @@ export function genericExtractor(params: Record<string, unknown>): ExtractedCard
     destination: firstOrNull(stringValues(params, DESTINATION_KEYS)),
     recipient: joinOrNull(stringValues(params, RECIPIENT_KEYS)),
     amount: firstOrNull(stringValues(params, AMOUNT_KEYS)),
+    outbound_text: null,
+    destination_host: null,
+  };
+}
+
+/** Max characters for outbound_text; longer text is truncated with a marker. */
+const OUTBOUND_TEXT_MAX_LENGTH = 500;
+
+function truncateOutboundText(text: string): string {
+  if (text.length <= OUTBOUND_TEXT_MAX_LENGTH) {
+    return text;
+  }
+  return text.slice(0, OUTBOUND_TEXT_MAX_LENGTH) + '... (truncated)';
+}
+
+/** Extract the host from a URL string, handling protocol-relative URLs. Null when not a URL. */
+function hostFromUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return null;
+  }
+  const trimmed = value.trim();
+  try {
+    const normalized = trimmed.startsWith('//') ? `https:${trimmed}` : trimmed;
+    const url = new URL(normalized);
+    return url.host !== '' ? url.host : null;
+  } catch {
+    return null;
+  }
+}
+
+/** First non-empty string value for the given keys, or null. */
+function firstParam(params: Record<string, unknown>, keys: string[]): string | null {
+  return firstOrNull(stringValues(params, keys));
+}
+
+/** Param keys that can carry a search query. */
+const SEARCH_QUERY_KEYS = ['query', 'q', 'search_query', 'text', 'keywords', 'search_text'];
+
+/** Param keys that can carry a URL to fetch. */
+const FETCH_URL_KEYS = ['url', 'link', 'href', 'target_url'];
+
+/**
+ * Search tools: any tool whose name indicates search, plus the known search
+ * connectors. The outbound text is the query; the destination defaults to
+ * 'web search' so the card shows instead of auto-denying (there is no URL or
+ * recipient to verify, but the service is known).
+ */
+function searchExtractor(params: Record<string, unknown>): ExtractedCardFields {
+  const base = genericExtractor(params);
+  const query = firstParam(params, SEARCH_QUERY_KEYS);
+  return {
+    ...base,
+    destination: base.destination ?? 'web search',
+    outbound_text: query === null ? null : truncateOutboundText(query),
+  };
+}
+
+/**
+ * Fetch tools: the outbound text is the URL being fetched, and the host is
+ * parsed from it.
+ */
+function fetchExtractor(params: Record<string, unknown>): ExtractedCardFields {
+  const base = genericExtractor(params);
+  const url = firstParam(params, FETCH_URL_KEYS);
+  return {
+    ...base,
+    destination: url ?? base.destination,
+    outbound_text: url === null ? null : truncateOutboundText(url),
+    destination_host: hostFromUrl(url),
+  };
+}
+
+/** Param keys for GitHub write tools. */
+const GITHUB_OWNER_KEYS = ['owner'];
+const GITHUB_REPO_KEYS = ['repo', 'repository', 'repository_name'];
+const GITHUB_BRANCH_KEYS = ['branch', 'ref', 'base_branch'];
+const GITHUB_FILE_KEYS = ['path', 'file_path', 'filepath', 'filename'];
+const GITHUB_CONTENT_KEYS = ['content', 'body', 'text'];
+
+/**
+ * GitHub writes: owner/repo, branch, visibility, and file paths. The content
+ * preview shows what is being written.
+ */
+function githubWriteExtractor(params: Record<string, unknown>): ExtractedCardFields {
+  const base = genericExtractor(params);
+  const owner = firstParam(params, GITHUB_OWNER_KEYS);
+  const repo = firstParam(params, GITHUB_REPO_KEYS);
+  const branch = firstParam(params, GITHUB_BRANCH_KEYS);
+  const filePaths = stringValues(params, GITHUB_FILE_KEYS);
+  const visibility = firstParam(params, ['visibility', 'public', 'private']);
+  const content = firstParam(params, GITHUB_CONTENT_KEYS);
+
+  const repoLabel = owner !== null && repo !== null ? `${owner}/${repo}` : (repo ?? owner);
+  const lines: string[] = [];
+  if (repoLabel !== null) {
+    lines.push(`Repository: ${repoLabel}`);
+  }
+  if (branch !== null) {
+    lines.push(`Branch: ${branch}`);
+  }
+  if (visibility !== null) {
+    lines.push(`Visibility: ${visibility}`);
+  }
+  if (filePaths.length > 0) {
+    lines.push(`Files: ${filePaths.join(', ')}`);
+  }
+  if (content !== null) {
+    lines.push(`Content preview: ${content.slice(0, 200)}`);
+  }
+  const outbound = lines.length === 0 ? null : truncateOutboundText(lines.join('\n'));
+
+  return {
+    ...base,
+    destination: repoLabel ?? base.destination,
+    outbound_text: outbound,
+    destination_host: 'github.com',
+  };
+}
+
+/** Param keys for email subject and body. */
+const EMAIL_SUBJECT_KEYS = ['subject', 'title'];
+const EMAIL_BODY_KEYS = ['body', 'message', 'text', 'content', 'html'];
+
+/**
+ * Gmail send, reply, forward, and draft: recipients come from the generic
+ * extractor; the outbound text adds subject and a body preview.
+ */
+function gmailExtractor(params: Record<string, unknown>): ExtractedCardFields {
+  const base = genericExtractor(params);
+  const subject = firstParam(params, EMAIL_SUBJECT_KEYS);
+  const body = firstParam(params, EMAIL_BODY_KEYS);
+
+  const lines: string[] = [];
+  if (base.recipient !== null) {
+    lines.push(`To: ${base.recipient}`);
+  }
+  if (subject !== null) {
+    lines.push(`Subject: ${subject}`);
+  }
+  if (body !== null) {
+    lines.push(`Body preview: ${body.slice(0, 200)}`);
+  }
+  const outbound = lines.length === 0 ? null : truncateOutboundText(lines.join('\n'));
+
+  return {
+    ...base,
+    outbound_text: outbound,
   };
 }
 
@@ -126,8 +277,13 @@ function nameIncludes(...fragments: string[]): (toolName: string) => boolean {
  */
 const EXTRACTOR_REGISTRY: ExtractorEntry[] = [
   {
-    match: nameIncludes('send_email', 'sendemail', 'email_send'),
-    extract: genericExtractor,
+    match: nameIncludes('send_email', 'sendemail', 'email_send', 'gmail_send', 'gmail_reply', 'gmail_forward'),
+    extract: gmailExtractor,
+    external_service: true,
+  },
+  {
+    match: nameIncludes('create_draft', 'draft_email', 'gmail_draft'),
+    extract: gmailExtractor,
     external_service: true,
   },
   {
@@ -148,6 +304,21 @@ const EXTRACTOR_REGISTRY: ExtractorEntry[] = [
   {
     match: nameIncludes('share', 'webhook'),
     extract: genericExtractor,
+    external_service: true,
+  },
+  {
+    match: nameIncludes('push_files', 'create_or_update_file', 'create_repository', 'create_gist', 'update_gist', 'gist'),
+    extract: githubWriteExtractor,
+    external_service: true,
+  },
+  {
+    match: nameIncludes('fetch_url', 'web_fetch', 'fetchurl', 'get_url', 'http_get', 'fetch_page', 'webfetch'),
+    extract: fetchExtractor,
+    external_service: true,
+  },
+  {
+    match: nameIncludes('search', 'exa', 'tavily', 'parallel', 'bright_data', 'brightdata'),
+    extract: searchExtractor,
     external_service: true,
   },
 ];
