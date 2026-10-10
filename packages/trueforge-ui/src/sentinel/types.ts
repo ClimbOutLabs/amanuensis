@@ -198,19 +198,27 @@ function tier2ActionKindArray(value: unknown): Tier2ActionKind[] {
   return kinds;
 }
 
+// Events reach the UI raw or through the SDK, which camel-cases the keys it knows.
+function cardString(
+  record: Record<string, unknown>,
+  { snake, camel }: { snake: string; camel: string },
+): string | null {
+  return nullableString(record, snake) ?? nullableString(record, camel);
+}
+
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
-  const plain_what = optionalString(value, 'plain_what');
+  const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
   if (plain_what === undefined) return undefined;
   return {
     plain_what,
-    plain_why: nullableString(value, 'plain_why'),
-    cannot_be_undone: nullableString(value, 'cannot_be_undone'),
-    why_asked_again: nullableString(value, 'why_asked_again'),
-    destination: nullableString(value, 'destination'),
-    recipient: nullableString(value, 'recipient'),
-    amount: nullableString(value, 'amount'),
-    parsed_command: nullableString(value, 'parsed_command'),
+    plain_why: cardString(value, { snake: 'plain_why', camel: 'plainWhy' }),
+    cannot_be_undone: cardString(value, { snake: 'cannot_be_undone', camel: 'cannotBeUndone' }),
+    why_asked_again: cardString(value, { snake: 'why_asked_again', camel: 'whyAskedAgain' }),
+    destination: cardString(value, { snake: 'destination', camel: 'destination' }),
+    recipient: cardString(value, { snake: 'recipient', camel: 'recipient' }),
+    amount: cardString(value, { snake: 'amount', camel: 'amount' }),
+    parsed_command: cardString(value, { snake: 'parsed_command', camel: 'parsedCommand' }),
   };
 }
 
@@ -223,7 +231,7 @@ function toolCallIdFrom(record: Record<string, unknown>): string | undefined {
 function parseApprovalInfo(ref: Record<string, unknown>): SentinelApprovalInfo | undefined {
   const tier = parseToolTier(ref.tier);
   // The backend stamps the decision card as `tier3_card`; `card` is the provisional name.
-  const card = parseApprovalCard(ref.tier3_card ?? ref.card);
+  const card = parseApprovalCard(ref.tier3_card ?? ref.tier3Card ?? ref.card);
   const toolCallId = toolCallIdFrom(ref);
   if (tier === undefined || card === undefined || toolCallId === undefined) return undefined;
   return { toolCallId, tier, card };
@@ -258,7 +266,7 @@ function isSentinelEventType(value: unknown): value is (typeof SENTINEL_EVENT_TY
 }
 
 function toolCallRefs(event: Record<string, unknown>): Record<string, unknown>[] {
-  const refs = event.tool_calls;
+  const refs = event.tool_calls ?? event.toolCalls;
   if (Array.isArray(refs)) return refs.filter(isRecord);
   // Single-action events may carry the per-action fields at the top level.
   return [event];
