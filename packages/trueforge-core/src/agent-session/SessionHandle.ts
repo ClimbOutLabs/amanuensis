@@ -46,7 +46,7 @@ import type { ITurnResourceResolver, ResolvedAgentDefinition } from './ITurnReso
 import type { SessionRecord } from './models/SessionRecord';
 import { MAIN_THREAD_ID, type TurnRecord } from './models/TurnRecord';
 import type { AgentSpec } from './schemas/agentSpec';
-import type { SessionEventItem } from './schemas/events';
+import type { PersistedTurnEvent, SessionEventItem } from './schemas/events';
 import { EventType, type TurnDoneEvent } from './schemas/events';
 import type { TokenPagination } from './schemas/pagination';
 import type { SessionAgent } from './schemas/session';
@@ -677,6 +677,8 @@ export class SessionHandle<
     limit: number;
     page_token?: string | undefined;
     last_turn_id?: string | undefined;
+    types?: readonly PersistedTurnEvent['type'][] | undefined;
+    after_event_id?: string | undefined;
   }): Promise<{
     data: SessionEventItem[];
     pagination: TokenPagination;
@@ -686,6 +688,8 @@ export class SessionHandle<
       limit: input.limit,
       page_token: input.page_token,
       last_turn_id: input.last_turn_id,
+      types: input.types,
+      after_event_id: input.after_event_id,
     });
   }
 

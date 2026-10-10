@@ -612,6 +612,8 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
         limit: query.limit,
         page_token: query.page_token,
         last_turn_id: query.last_turn_id,
+        types: query.types,
+        after_event_id: query.after_event_id,
       });
       return c.json({ data, pagination }, 200);
     } catch (error) {
