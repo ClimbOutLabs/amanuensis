@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { chown, mkdir, readdir, realpath, writeFile } from 'node:fs/promises';
+import { chmod, chown, lstat, mkdir, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { runCodeProgramName, type RunCodeLanguage, type SandboxIdentity } from './IsolationDriver';
 
@@ -163,4 +163,34 @@ export function measureRunDiskUsage(input: { scratchDir: string; egressDir: stri
       },
     );
   });
+}
+
+/**
+ * Gives the owner back rwx on dirs and rw on files so a tree whose permissions
+ * sandbox code stripped can be deleted. Symlinks are skipped, never followed.
+ * Best-effort: the removal that follows reports anything still stuck.
+ */
+async function restoreOwnerAccess(path: string): Promise<void> {
+  const info = await lstat(path).catch(() => undefined);
+  if (info === undefined || info.isSymbolicLink()) {
+    return;
+  }
+  if (info.isFile()) {
+    await chmod(path, (info.mode & 0o7777) | 0o600).catch(() => undefined);
+    return;
+  }
+  if (!info.isDirectory()) {
+    return;
+  }
+  await chmod(path, (info.mode & 0o7777) | 0o700).catch(() => undefined);
+  const names = await readdir(path).catch(() => []);
+  for (const name of names) {
+    await restoreOwnerAccess(join(path, name));
+  }
+}
+
+/** Deletes a run tree after restoring owner access; throws when the removal fails. */
+export async function removeRunTree(runRoot: string): Promise<void> {
+  await restoreOwnerAccess(runRoot);
+  await rm(runRoot, { recursive: true, force: true });
 }

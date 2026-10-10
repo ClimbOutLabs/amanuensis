@@ -1,6 +1,6 @@
 import { execFile as execFileCallback, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFile, rm, stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import {
@@ -16,6 +16,7 @@ import {
 } from './IsolationDriver.js';
 import {
   measureRunDiskUsage,
+  removeRunTree,
   resolveSandboxIdentity,
   SANDBOX_RUN_ENV,
   sandboxRunsDir,
@@ -174,7 +175,7 @@ function errorText(error: unknown): string {
 /** Deletes the canary run root; the server must be able to remove what the container wrote. */
 async function removeCanaryRoot(runRoot: string): Promise<string | undefined> {
   try {
-    await rm(runRoot, { recursive: true, force: true });
+    await removeRunTree(runRoot);
   } catch (error: unknown) {
     return `the host could not remove the run directory: ${errorText(error)}`;
   }

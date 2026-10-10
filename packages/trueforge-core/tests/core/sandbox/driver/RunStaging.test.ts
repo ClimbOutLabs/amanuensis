@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   measureRunDiskUsage,
+  removeRunTree,
   resolveSandboxIdentity,
   SANDBOX_RUN_ENV,
   sandboxRunsDir,
@@ -180,5 +181,57 @@ describe('measureRunDiskUsage', () => {
     const egressDir = join(root, 'egress');
     await mkdir(egressDir);
     await expect(measureRunDiskUsage({ scratchDir: join(root, 'missing'), egressDir })).resolves.toBeUndefined();
+  });
+});
+
+describe('removeRunTree', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'run-rm-'));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('removes a tree whose dirs and files the sandbox stripped of permissions', async () => {
+    const runRoot = join(root, 'run');
+    await mkdir(join(runRoot, 'scratch', 'locked', 'deeper'), { recursive: true });
+    await writeFile(join(runRoot, 'scratch', 'locked', 'deeper', 'f'), 'x');
+    await writeFile(join(runRoot, 'egress', 'no-access'), 'y').catch(async () => {
+      await mkdir(join(runRoot, 'egress'));
+      await writeFile(join(runRoot, 'egress', 'no-access'), 'y');
+    });
+    await chmod(join(runRoot, 'scratch', 'locked', 'deeper'), 0o000);
+    await chmod(join(runRoot, 'scratch', 'locked'), 0o000);
+    await chmod(join(runRoot, 'egress', 'no-access'), 0o000);
+    await chmod(join(runRoot, 'egress'), 0o500);
+
+    await removeRunTree(runRoot);
+
+    await expect(stat(runRoot)).rejects.toHaveProperty('code', 'ENOENT');
+  });
+
+  it('never follows a symlink out of the run tree', async () => {
+    const outside = join(root, 'outside');
+    await mkdir(outside);
+    await writeFile(join(outside, 'keep'), 'z');
+    await chmod(join(outside, 'keep'), 0o400);
+    await chmod(outside, 0o500);
+    const runRoot = join(root, 'run');
+    await mkdir(runRoot);
+    await symlink(outside, join(runRoot, 'link'));
+
+    await removeRunTree(runRoot);
+
+    await expect(stat(runRoot)).rejects.toHaveProperty('code', 'ENOENT');
+    expect((await stat(outside)).mode & 0o777).toBe(0o500);
+    expect((await stat(join(outside, 'keep'))).mode & 0o777).toBe(0o400);
+    await chmod(outside, 0o700);
+  });
+
+  it('is a no-op for a root that does not exist', async () => {
+    await expect(removeRunTree(join(root, 'missing'))).resolves.toBeUndefined();
   });
 });

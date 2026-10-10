@@ -2,7 +2,7 @@
  * Unit tests for the Docker isolation driver. No daemon: every docker/cosign
  * interaction is scripted through a fake DockerCommandRunner.
  */
-import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
@@ -1196,6 +1196,30 @@ describe('DockerDriver.ensureReady canary', () => {
     if (!readiness.ready) {
       expect(readiness.error).toMatch(/does not match what the container read from ingress/);
     }
+  });
+
+  test('the canary run root is removed even when the program stripped its own permissions', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const runCanaryProgram = runner.attachHandler;
+    runner.attachHandler = async input => {
+      const exitCode = await runCanaryProgram(input);
+      const locked = join(hostDirOf(runner, '/scratch'), 'locked');
+      await mkdir(join(locked, 'inner'), { recursive: true });
+      await writeFile(join(locked, 'inner', 'f'), 'x');
+      await chmod(join(locked, 'inner'), 0o000);
+      await chmod(locked, 0o000);
+      return exitCode;
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    // du may legitimately fail on the sealed dir; the cleanup itself must not.
+    if (!readiness.ready) {
+      expect(readiness.error).not.toMatch(/remove the run directory|still exists/);
+    }
+    expect(await runDirEntries()).toEqual([]);
   });
 
   test('a canary whose directories du cannot account for is not ready', async () => {

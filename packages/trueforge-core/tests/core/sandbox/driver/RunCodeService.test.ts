@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type {
@@ -339,6 +339,22 @@ describe('RunCodeService', () => {
       expect(driver.runs).toHaveLength(0);
       expect(await readdir(join(dataDir, 'sandbox-runs'))).toEqual([]);
     });
+  });
+
+  it('removes the run root even when the program stripped its own permissions', async () => {
+    driver.runBehavior = async params => {
+      await mkdir(join(params.scratchDir, 'locked', 'inner'), { recursive: true });
+      await writeFile(join(params.scratchDir, 'locked', 'inner', 'f'), 'x');
+      await mkdir(join(params.egressDir, 'sealed'));
+      await writeFile(join(params.egressDir, 'sealed', 'g'), 'y');
+      await chmod(join(params.scratchDir, 'locked', 'inner'), 0o000);
+      await chmod(join(params.scratchDir, 'locked'), 0o000);
+      await chmod(join(params.egressDir, 'sealed'), 0o000);
+      return { ...OK_RESULT };
+    };
+    const result = await service.runCode(VALID_INPUT);
+    expect(result.status).toBe('ok');
+    expect(await readdir(join(dataDir, 'sandbox-runs'))).toEqual([]);
   });
 
   it('reports a completed non-zero exit verbatim as ok, not as an infra failure', async () => {

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { lstat, readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import type { Logger } from 'winston';
 import { onSignalAbort, signalAbortError } from '../../util/abort';
@@ -16,6 +16,7 @@ import {
 } from './RunCodeSchemas';
 import {
   measureRunDiskUsage,
+  removeRunTree,
   resolveSandboxIdentity,
   SANDBOX_RUN_ENV,
   sandboxRunsDir,
@@ -930,7 +931,7 @@ export class RunCodeService implements RunCodeBackend {
       try {
         const fileStat = await stat(path);
         if (fileStat.mtimeMs < cutoff) {
-          await rm(path, { recursive: true, force: true });
+          await removeRunTree(path);
         }
       } catch {
         // Best-effort sweep; a racing run dir is left for the next pass.
@@ -940,7 +941,7 @@ export class RunCodeService implements RunCodeBackend {
 
   private async removeRunRoot(runRoot: string): Promise<void> {
     try {
-      await rm(runRoot, { recursive: true, force: true });
+      await removeRunTree(runRoot);
     } catch (error) {
       this.logger.warn('run_code run-root cleanup failed; left for the reaper', {
         runRoot,
