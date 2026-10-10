@@ -48,11 +48,13 @@ async function* hangingStream(): AsyncGenerator<ExtendedChatCompletionChunk, Raw
   return { output: { role: 'assistant', content: 'never' }, usage: getEmptyUsage(), finish_reason: 'stop' };
 }
 
-function makeWebToolSet(): IToolSet {
+/** A `web` tool set; deferred ones are reachable only through `call_tool`. */
+function makeWebToolSet(options: { deferred?: boolean } = {}): IToolSet {
+  const preload = options.deferred !== true;
   const toolSet = makeMockIMCPServer({
     name: 'web',
-    preload: true,
-    tools: [{ name: 'web_search', description: 'Search the web', inputSchema: OBJECT_INPUT_SCHEMA, preload: true }],
+    preload,
+    tools: [{ name: 'web_search', description: 'Search the web', inputSchema: OBJECT_INPUT_SCHEMA, preload }],
   });
   jest.mocked(toolSet.toolCallInfo).mockImplementation(params =>
     Promise.resolve({
@@ -67,7 +69,7 @@ function makeWebToolSet(): IToolSet {
   return toolSet;
 }
 
-/** The real resolver class, with one extra tool set attached to every thread. */
+/** The real resolver class, with one extra agent tool set (deferred ones sit behind `call_tool`). */
 class ToolSetResolver extends TurnResourceResolver {
   constructor(
     deps: ConstructorParameters<typeof TurnResourceResolver>[0],
@@ -80,7 +82,7 @@ class ToolSetResolver extends TurnResourceResolver {
     const resolved = await super.resolveAgentDefinition(input);
     return {
       ...resolved,
-      extraCapabilities: [...(resolved.extraCapabilities ?? []), { systemToolSets: [this.toolSet] }],
+      definition: { ...resolved.definition, toolSets: [...(resolved.definition.toolSets ?? []), this.toolSet] },
     };
   }
 }
@@ -120,8 +122,12 @@ function makeResolver(input: {
   );
 }
 
-/** Calls the advertised web_search tool once, then answers. */
-function webSearchingModel(requests: LLMCreateParamsStreaming[]): ILLM {
+/**
+ * Searches the web once, then answers: directly through the advertised
+ * web_search tool, or through the `call_tool` dispatcher's envelope.
+ */
+function webSearchingModel(requests: LLMCreateParamsStreaming[], options: { viaCallTool?: boolean } = {}): ILLM {
+  const target = options.viaCallTool === true ? 'call_tool' : 'web_search';
   return {
     create: jest.fn((request: LLMCreateParamsStreaming) => {
       requests.push(request);
@@ -130,11 +136,15 @@ function webSearchingModel(requests: LLMCreateParamsStreaming[]): ILLM {
       }
       const name = request.tools
         ?.flatMap(tool => (tool.type === 'function' ? [tool.function.name] : []))
-        .find(candidate => candidate.includes('web_search'));
+        .find(candidate => candidate.includes(target));
       if (name === undefined) {
-        throw new Error('web_search was not advertised to the model');
+        throw new Error(`${target} was not advertised to the model`);
       }
-      return toolCallStream({ name, args: { query: 'library question' } });
+      const query = { query: 'library question' };
+      return toolCallStream({
+        name,
+        args: options.viaCallTool === true ? { mcp_server: 'web', tool_name: 'web_search', input: query } : query,
+      });
     }),
     createNonStream: jest.fn(),
   };
@@ -180,6 +190,32 @@ describe('TurnResourceResolver host controls reach the turn', () => {
     );
     // Blocked calls never run and never reach the approval gate: the model
     // gets the host message as the tool error and answers.
+    expect(toolSet.callTool).not.toHaveBeenCalled();
+    expect(pendingApprovals(turn)).toEqual([]);
+    expect(JSON.stringify(requests[1]?.messages)).toContain(BLOCK_MESSAGE);
+  });
+
+  it('judges a call_tool dispatch by its underlying tool and unwrapped input', async () => {
+    const toolSet = makeWebToolSet({ deferred: true });
+    const requests: LLMCreateParamsStreaming[] = [];
+    const policy = jest.fn<ReturnType<HostToolCallPolicy>, Parameters<HostToolCallPolicy>>(call =>
+      call.underlyingToolName === 'web_search' ? { message: BLOCK_MESSAGE } : undefined,
+    );
+
+    const turn = await runTurn(
+      makeResolver({
+        modelClient: webSearchingModel(requests, { viaCallTool: true }),
+        toolSet,
+        toolCallPolicy: policy,
+      }),
+    );
+
+    expect(turn.state.status).toBe('done');
+    expect(policy).toHaveBeenCalledWith({
+      functionName: 'call_tool',
+      underlyingToolName: 'web_search',
+      args: { query: 'library question' },
+    });
     expect(toolSet.callTool).not.toHaveBeenCalled();
     expect(pendingApprovals(turn)).toEqual([]);
     expect(JSON.stringify(requests[1]?.messages)).toContain(BLOCK_MESSAGE);
