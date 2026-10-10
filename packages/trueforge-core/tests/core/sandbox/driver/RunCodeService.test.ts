@@ -314,6 +314,17 @@ describe('RunCodeService', () => {
       );
     });
 
+    it('refuses to run a non-root server in group 0', async () => {
+      getuidSpy.mockReturnValue(4242);
+      getgidSpy.mockReturnValue(0);
+      const result = await service.runCode(VALID_INPUT);
+      expect(result.status).toBe('failed');
+      if (result.status === 'failed') {
+        expect(result.error).toMatch(/gid 0/);
+      }
+      expect(driver.runs).toHaveLength(0);
+    });
+
     it('fails the run before the container starts when the root handoff fails', async () => {
       getuidSpy.mockReturnValue(0);
       getgidSpy.mockReturnValue(0);

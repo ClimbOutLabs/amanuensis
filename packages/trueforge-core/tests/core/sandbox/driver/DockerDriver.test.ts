@@ -1049,6 +1049,26 @@ describe('DockerDriver.ensureReady canary', () => {
     expect(await runDirEntries()).toEqual([]);
   });
 
+  test('a non-root server in group 0 is not ready and starts no canary container', async () => {
+    const containers = new FakeSandboxContainers(undefined);
+    const runner = new FakeRunner();
+    scriptReadyPath(runner, DIGEST, containers);
+    getuidSpy.mockReturnValue(4242);
+    getgidSpy.mockReturnValue(0);
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('daemon_unavailable');
+      expect(readiness.error).toMatch(/gid 0/);
+    }
+    // Only the wedged-daemon probe created a container.
+    expect(runner.callsFor('create')).toHaveLength(1);
+    expect(await runDirEntries()).toEqual([]);
+  });
+
   test('root server: canary runs as the image uid after handing every dir and file to it', async () => {
     const server = { uid: 0, gid: 0 };
     const containers = new FakeSandboxContainers(server);

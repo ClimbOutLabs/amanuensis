@@ -27,13 +27,19 @@ export const SANDBOX_RUN_ENV: Readonly<Record<string, string>> = {
  * A non-root server runs the container as itself: everything it stages is then
  * already accessible, with no chown it could not perform and no supplementary
  * groups. Root cannot (the container user must be non-root), so it hands the
- * run dirs to the image's sandbox user instead.
+ * run dirs to the image's sandbox user instead. A non-root server whose gid is
+ * 0 is refused: the sandbox must never run in group 0.
  */
 export function resolveSandboxIdentity(): SandboxIdentity {
   const uid = process.getuid?.();
   const gid = process.getgid?.();
   if (uid === undefined || gid === undefined || uid === 0) {
     return { uid: IMAGE_SANDBOX_UID, gid: IMAGE_SANDBOX_GID, chownRunDirs: true };
+  }
+  if (gid === 0) {
+    throw new Error(
+      `the server runs as uid ${String(uid)} with gid 0, and the sandbox must never run in group 0; run the server with a non-zero primary group`,
+    );
   }
   return { uid, gid, chownRunDirs: false };
 }

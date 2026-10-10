@@ -941,7 +941,12 @@ export class DockerDriver implements IsolationDriver {
   private async probeBindMountOwnership(
     signal: AbortSignal | undefined,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    const identity = resolveSandboxIdentity();
+    let identity;
+    try {
+      identity = resolveSandboxIdentity();
+    } catch (error: unknown) {
+      return { ok: false, error: `sandbox canary run not started: ${errorText(error)}` };
+    }
     const token = randomUUID();
     const runId = `canary-${token}`;
     const runRoot = join(sandboxRunsDir(this.dataDir), runId);

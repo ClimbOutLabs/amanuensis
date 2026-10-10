@@ -35,6 +35,12 @@ describe('resolveSandboxIdentity', () => {
     expect(resolveSandboxIdentity()).toEqual({ uid: 65532, gid: 65532, chownRunDirs: true });
   });
 
+  it('refuses a non-root server whose gid is 0', () => {
+    getuidSpy.mockReturnValue(1000);
+    getgidSpy.mockReturnValue(0);
+    expect(() => resolveSandboxIdentity()).toThrow(/gid 0/);
+  });
+
   it('takes the root path when the platform has no uid', () => {
     getuidSpy.mockReturnValue(undefined);
     expect(resolveSandboxIdentity()).toEqual({ uid: 65532, gid: 65532, chownRunDirs: true });
