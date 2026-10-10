@@ -68,7 +68,11 @@ cmd_upgrade() {
     done
     return 0
   fi
-  say "An upgrade would change:"
+  if [ "$OPT_CHECK" = 1 ] || [ "$DRY_RUN" = 1 ]; then
+    say "An upgrade would change:"
+  else
+    say "Upgrading these parts of the installed version:"
+  fi
   [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] || say "  app     $CUR_APP_TAG -> $REL_APP_TAG"
   [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] || say "  speech  $CUR_STT_TAG -> $REL_STT_TAG"
   [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ] || say "  login   $CUR_DEX_IMAGE -> $REL_DEX_IMAGE"
@@ -80,6 +84,8 @@ cmd_upgrade() {
     return 0
   fi
   lock_acquire
+  say "Order: check health, back up every instance, build the new images, restart the instances, check health again."
+  say "If a restart fails, the old images come back and each database is restored from the new backup."
   if [ -x "$(doctor_shim)" ] && [ "$OPT_FORCE" != 1 ]; then
     run_doctor --json >/dev/null 2>&1 || die "doctor reports a failure; fix it first or run upgrade --force"
   fi

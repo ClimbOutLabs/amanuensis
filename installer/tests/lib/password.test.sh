@@ -6,8 +6,8 @@ set -euo pipefail
 
 ANSWERS="Instance name=>
 Owner email=>owner@example.invalid
-Public https URL=>
-Model server endpoint=>
+Address you will use from other devices=>
+Model server address=>
 Go ahead?=>y
 Password for the owner account=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"

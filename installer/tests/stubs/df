@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-if [ -n "${STUB_DF_KB:-}" ]; then
+if [ -n "${STUB_DOCKER_ROOT_KB:-}" ] && [ "${!#}" = "${STUB_DOCKER_ROOT:-}" ]; then
+  echo "Filesystem 1024-blocks Used Available Capacity Mounted"
+  echo "stub 100000000 1 $STUB_DOCKER_ROOT_KB 1% /docker"
+elif [ -n "${STUB_DF_KB:-}" ]; then
   echo "Filesystem 1024-blocks Used Available Capacity Mounted"
   echo "stub 100000000 1 $STUB_DF_KB 1% /"
 else

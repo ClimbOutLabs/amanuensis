@@ -63,30 +63,45 @@ consent_root() {
   confirm "$1"
 }
 
+# One plain sentence when the password cannot be used, empty when it can. bcrypt ignores everything past
+# 72 bytes, so a longer one would silently be shortened; bytes, not characters, are counted.
+password_problem() {
+  local LC_ALL=C
+  if [ "${#1}" -lt 8 ]; then
+    echo "the password needs at least 8 characters"
+  elif [ "${#1}" -gt 72 ]; then
+    echo "the password can be at most 72 bytes long (accented and non-Latin characters count as several)"
+  fi
+}
+
 # Reads a password twice without echo into the variable named by $1. The value stays in shell
-# memory: it is never put in argv, a file or the environment of a child process.
+# memory: it is never put in argv, a file or the environment of a child process. Ending the input
+# (Ctrl-D) stops the run.
 ask_password() {
-  local __var=$1 __first='' __second=''
+  local __var=$1 __first='' __second='' __problem
   if [ "$PASSWORD_FROM_STDIN" = 1 ]; then
     IFS= read -r __first || true
     [ -n "$__first" ] || usage_die "--password-stdin got an empty line"
+    __problem=$(password_problem "$__first")
+    [ -z "$__problem" ] || usage_die "$__problem"
     printf -v "$__var" '%s' "$__first"
     return 0
   fi
   while :; do
     if [ -t 0 ]; then
       printf 'Password for the owner account: ' >&2
-      IFS= read -rs __first || true
+      IFS= read -rs __first || { printf '\n' >&2; die "no password was entered, so nothing more was changed"; }
       printf '\n' >&2
       printf 'Repeat the password: ' >&2
-      IFS= read -rs __second || true
+      IFS= read -rs __second || { printf '\n' >&2; die "no password was entered, so nothing more was changed"; }
       printf '\n' >&2
     else
-      IFS= read -r __first || true
-      IFS= read -r __second || true
+      IFS= read -r __first || die "no password was provided on stdin"
+      IFS= read -r __second || die "the password was not repeated on stdin"
     fi
-    if [ "${#__first}" -lt 8 ]; then
-      warn "the password needs at least 8 characters"
+    __problem=$(password_problem "$__first")
+    if [ -n "$__problem" ]; then
+      warn "$__problem"
     elif [ "$__first" != "$__second" ]; then
       warn "the two entries differ"
     else

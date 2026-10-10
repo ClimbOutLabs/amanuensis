@@ -7,6 +7,8 @@
 set -euo pipefail
 # Everything written is private unless a file is deliberately made world-readable.
 umask 077
+# A password in the caller's environment is never used and must not reach a child process.
+unset AMAN_PASSWORD
 
 INSTALLER_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=${AMAN_REPO_ROOT:-$(cd -P -- "$INSTALLER_DIR/.." && pwd)}
@@ -82,11 +84,11 @@ Options
   --dry-run             stop after printing the plan
   --name NAME           first instance name (default main)
   --email ADDRESS       owner email
-  --password-stdin      read the owner password from the first line of stdin
-  --public-url URL      https origin of the reverse proxy for the app
-  --login-url URL       https origin of the reverse proxy for login
-  --port N              loopback port for the app
-  --login-port N        loopback port for login
+  --password-stdin      read the owner password from the first line of stdin, before any prompt
+  --public-url URL      https address you will use from other devices (behind your own reverse proxy)
+  --login-url URL       https address for the sign-in service behind the same proxy
+  --port N              port on this computer for the app
+  --login-port N        port on this computer for the sign-in service
   --model-endpoint URL  model server endpoint to remind you of at the end
   --confirm-name NAME   with --purge-data, the instance name typed in advance
   --print-root-steps    print the root steps for installing Docker and stop
@@ -201,7 +203,7 @@ main() {
     exit 0
   fi
   if [ "$PRINT_PROXY" = 1 ]; then
-    print_proxy_requirements "https://<app-origin>" "<app loopback port>" "https://<login-origin>" "<login loopback port>"
+    print_proxy_requirements "https://<app-origin>" "<app port>" "https://<login-origin>" "<login port>"
     exit 0
   fi
   if [ "$DRY_RUN" = 1 ]; then

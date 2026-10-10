@@ -38,10 +38,40 @@ plan_add() {
 # Free space of the filesystem holding a path (nearest existing ancestor), in KB.
 free_kb() {
   local path=$1
+  local kb
   while [ ! -e "$path" ] && [ "$path" != / ]; do
     path=$(dirname "$path")
   done
-  df -Pk "$path" 2>/dev/null | awk 'NR == 2 {print $4}'
+  # A directory this user cannot enter (Docker's data root) cannot be measured; its parent is on the
+  # same disk unless the data root is a mount of its own.
+  while :; do
+    kb=$(df -Pk "$path" 2>/dev/null | awk 'NR == 2 {print $4}')
+    if [ -n "$kb" ] || [ "$path" = / ]; then
+      printf '%s' "$kb"
+      return 0
+    fi
+    path=$(dirname "$path")
+  done
+}
+
+# The disk holding Docker's data is the one the images, builds and volumes fill, and it is often not the
+# one holding the install home. Docker Desktop keeps its data in a virtual machine, so it is skipped there.
+preflight_docker_space() {
+  local root free
+  case "$DOCKER_ACCESS" in direct | sg) ;; *) return 0 ;; esac
+  root=$(D info --format '{{.DockerRootDir}}' 2>/dev/null || true)
+  if [ -z "$root" ] || [ ! -d "$root" ]; then
+    return 0
+  fi
+  free=$(free_kb "$root")
+  case "${free:-}" in
+    '' | *[!0-9]*) ;;
+    *)
+      if [ "$free" -lt "$MIN_FREE_KB" ]; then
+        plan_add blocked "Less than 10 GB free on the disk holding Docker's data ($root): $((free / 1024 / 1024)) GB free. Free space with: docker system prune"
+      fi
+      ;;
+  esac
 }
 
 preflight_system() {
@@ -154,6 +184,9 @@ plan_build() {
     plan_add blocked "$PLAN_BLOCKER"
   fi
   case "$DOCKER_ACCESS" in direct | sg) AMAN_DOCKER_MODE=$DOCKER_ACCESS ;; esac
+  if [ -z "$PLAN_BLOCKERS" ]; then
+    preflight_docker_space
+  fi
 
   if [ -f "$RELEASE_DIR/release.json" ]; then
     have_release=1
@@ -206,7 +239,7 @@ plan_build() {
     done
   fi
   if need_new_instance; then
-    plan_add todo "Create instance $I_NAME for $I_EMAIL: app $I_PUBLIC_URL (loopback port $I_PORT), login $I_LOGIN_URL (loopback port $I_LOGIN_PORT)"
+    plan_add todo "Create instance $I_NAME for $I_EMAIL: app at $I_PUBLIC_URL (port $I_PORT on this computer), sign-in service on port $I_LOGIN_PORT"
     dl_add embed
   fi
 }
@@ -237,7 +270,9 @@ cmd_install() {
   DL_LINES=
   DL_HOSTS=
   release_resolve
+  AMAN_PASSWORD=
   if need_new_instance; then
+    read_password_first
     instance_collect main
     instance_derive
   fi
@@ -278,8 +313,7 @@ install_execute() {
   ensure_private_dir "$MACHINE_DIR"
   ensure_private_dir "$INSTANCES_DIR"
   install_doctor_shim
-  if need_new_instance; then
-    AMAN_PASSWORD=
+  if need_new_instance && [ -z "$AMAN_PASSWORD" ]; then
     ask_password AMAN_PASSWORD
   fi
   images_ensure

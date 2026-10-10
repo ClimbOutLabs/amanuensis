@@ -3,9 +3,16 @@
 # real machine is never touched.
 printf 'sudo %s\n' "$*" >>"$STUB_LOG"
 case "$1" in
-  docker | env)
-    [ "$1" = env ] && shift 2
+  docker)
     STUB_VIA_SUDO=1 exec "${STUB_BIN}/docker" "${@:2}"
+    ;;
+  env)
+    shift
+    while [ "$#" -gt 0 ] && [[ $1 == *=* ]]; do shift; done
+    if [ "$1" = docker ]; then
+      STUB_VIA_SUDO=1 exec "${STUB_BIN}/docker" "${@:2}"
+    fi
+    STUB_VIA_SUDO=1 exec "$@"
     ;;
   sh)
     if printf '%s' "$3" | grep -q 'apt-get install -y docker-ce'; then

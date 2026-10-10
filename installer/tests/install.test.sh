@@ -231,7 +231,7 @@ test_print_only_flags() {
   run_install --print-proxy-requirements
   assert_rc 0
   assert_contains "$OUT" "Requirements for your reverse proxy"
-  assert_contains "$OUT" "forward to http://127.0.0.1:<app loopback port>"
+  assert_contains "$OUT" "forward to http://127.0.0.1:<app port>"
   run_install --print-network
   assert_rc 0
   assert_contains "$OUT" "huggingface.co"

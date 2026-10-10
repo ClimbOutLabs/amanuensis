@@ -44,7 +44,10 @@ test_daemon_down() {
   t_begin "a stopped daemon gets a start instruction and changes nothing"
   sandbox_new
   STUB_DOCKER_DOWN=1
+  with_input "$SENTINEL_PASSWORD
+"
   run_install --yes --password-stdin --email owner@example.invalid
+  clear_input
   assert_rc 1
   assert_contains "$OUT$ERR" "not running"
   assert_no_path "$AMAN_HOME/state/instances"
@@ -66,6 +69,28 @@ test_group_member_without_relogin_uses_sg() {
   assert_contains "$(cat "$STUB_LOG")" "sg docker -c env DOCKER_BUILDKIT=1 docker build"
   assert_tree_lacks "$AMAN_HOME" "$SENTINEL_PASSWORD"
   assert_not_contains "$(cat "$STUB_LOG")" "$SENTINEL_PASSWORD"
+  assert_log_has "sg docker -c env AMANUENSIS_HOME=$AMAN_HOME HOME=$SB/user timeout 60 $AMAN_HOME/bin/amanuensis doctor"
+  run_install instance list
+  assert_rc 0
+  assert_log_has "sg docker -c env AMANUENSIS_HOME=$AMAN_HOME HOME=$SB/user timeout 60 $AMAN_HOME/bin/amanuensis doctor --json --instance main"
+  repo_commit_change "upgrade under sg"
+  run_install upgrade
+  assert_rc 0
+  assert_eq "$(grep -c 'sg docker -c env AMANUENSIS_HOME=.* doctor --json$' "$STUB_LOG")" 1 "the upgrade preflight runs the doctor with the run's access"
+  assert_eq "$(grep -c '^doctor ' "$STUB_LOG")" "$(grep -c 'sg docker -c env AMANUENSIS_HOME' "$STUB_LOG")" "every doctor call went through sg"
+  sandbox_drop
+}
+
+test_doctor_follows_sudo_access() {
+  t_begin "when the run uses sudo for Docker (after consent), the doctor does too"
+  sandbox_new
+  STUB_DOCKER_DENIED=1
+  : >"$SB_STATE/group_members"
+  rm -f "$SB_BIN/sg"
+  INSTALL_EXTRA=(--add-docker-group)
+  install_machine
+  assert_contains "$ERR" "using sudo for Docker during this run only"
+  assert_log_has "sudo env AMANUENSIS_HOME=$AMAN_HOME HOME=$SB/user timeout 60 $AMAN_HOME/bin/amanuensis doctor"
   sandbox_drop
 }
 
@@ -242,6 +267,7 @@ test_old_engine_and_compose_v1
 test_daemon_down
 test_group_member_without_relogin_uses_sg
 test_non_member_is_added_then_sg
+test_doctor_follows_sudo_access
 test_install_offer_declined
 test_install_offer_accepted
 test_print_root_steps

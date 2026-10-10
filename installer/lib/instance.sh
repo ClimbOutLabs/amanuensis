@@ -116,12 +116,14 @@ install_doctor_shim() {
 
 # Runs the doctor shim with a time bound; prints nothing when it is not installed.
 run_doctor() {
+  local bound=()
   [ -x "$(doctor_shim)" ] || return 127
   if command -v timeout >/dev/null 2>&1; then
-    AMANUENSIS_HOME="$AMAN_HOME" timeout 60 "$(doctor_shim)" doctor "$@"
-  else
-    AMANUENSIS_HOME="$AMAN_HOME" "$(doctor_shim)" doctor "$@"
+    bound=(timeout 60)
   fi
+  # Same Docker access as the rest of the run (direct, sg or sudo), so a fresh docker group member
+  # does not get a failing report for a problem the run itself worked around.
+  as_docker_user env "AMANUENSIS_HOME=$AMAN_HOME" "HOME=$HOME" ${bound[@]+"${bound[@]}"} "$(doctor_shim)" doctor "$@"
 }
 
 doctor_status() {
@@ -159,20 +161,23 @@ instance_collect() {
   fi
   ask I_EMAIL "Owner email" ""
   valid_email "$I_EMAIL" || usage_die "a valid owner email is required"
-  ask I_PUBLIC_URL "Public https URL for the reverse proxy (empty keeps it local-only on loopback)" ""
+  ask I_PUBLIC_URL "Address you will use from other devices (press Enter to use this computer only)" ""
   if [ -n "$I_PUBLIC_URL" ]; then
     valid_origin "$I_PUBLIC_URL" || usage_die "the public URL must be an origin such as https://aman.example.com with no path"
     case "$I_PUBLIC_URL" in https://*) ;; *) usage_die "a public URL must be https" ;; esac
-    ask I_LOGIN_URL "Public https URL for the login service (its own origin, never a path)" ""
+    ask I_LOGIN_URL "Address for the sign-in service (its own https address, never a path of the first one)" ""
     valid_origin "$I_LOGIN_URL" || usage_die "the login URL must be an origin such as https://login.example.com with no path"
     case "$I_LOGIN_URL" in https://*) ;; *) usage_die "the login URL must be https" ;; esac
     [ "$I_LOGIN_URL" != "$I_PUBLIC_URL" ] || usage_die "the app and the login service need two different origins"
   elif [ -n "$I_LOGIN_URL" ]; then
     usage_die "--login-url needs --public-url"
   fi
-  ask I_MODEL "Model server endpoint (optional, e.g. http://host.docker.internal:11434/v1)" ""
+  ask I_MODEL "Model server address (optional; for one on this computer, for example http://host.docker.internal:11434/v1)" ""
   if [ -n "$I_MODEL" ]; then
-    valid_model_endpoint "$I_MODEL" || usage_die "the model endpoint must be an http(s) URL"
+    valid_model_endpoint "$I_MODEL" || usage_die "the model server address must be an http(s) URL"
+    if matches_whole "$I_MODEL" '^https?://(localhost|127\.0\.0\.1|\[::1\])([:/].*)?$'; then
+      warn "inside the app, localhost is the app itself, so it cannot reach a model server there. Use host.docker.internal instead of localhost."
+    fi
   fi
 }
 
@@ -186,13 +191,13 @@ instance_derive() {
     check_port_usable "$OPT_PORT" "$all_reserved" "--port"
     I_PORT=$OPT_PORT
   else
-    I_PORT=$(pick_port 8791 "$all_reserved") || die "no free loopback port found for the app near 8791"
+    I_PORT=$(pick_port 8791 "$all_reserved") || die "no free port found on this computer for the app near 8791"
   fi
   if [ -n "${OPT_LOGIN_PORT:-}" ]; then
     check_port_usable "$OPT_LOGIN_PORT" "$all_reserved $I_PORT" "--login-port"
     I_LOGIN_PORT=$OPT_LOGIN_PORT
   else
-    I_LOGIN_PORT=$(pick_port 5556 "$all_reserved $I_PORT") || die "no free loopback port found for login near 5556"
+    I_LOGIN_PORT=$(pick_port 5556 "$all_reserved $I_PORT") || die "no free port found on this computer for sign-in near 5556"
   fi
   if [ -z "$I_PUBLIC_URL" ]; then
     I_PUBLIC_URL="http://127.0.0.1:$I_PORT"
@@ -205,7 +210,7 @@ instance_derive() {
 issuer_check() {
   case "$1" in
     https://*) ;;
-    *) is_loopback_origin "${1%/dex}" || die "an http login issuer is only allowed on loopback; use an https URL" ;;
+    *) is_loopback_origin "${1%/dex}" || die "a sign-in address without https is only allowed on this computer; use an https address" ;;
   esac
 }
 
@@ -259,23 +264,40 @@ print_proxy_requirements() {
   say "    the app contacts the login origin from inside its container."
 }
 
+# With --password-stdin the password is the first line of stdin, read before any prompt can take it.
+read_password_first() {
+  if [ "$PASSWORD_FROM_STDIN" = 1 ] && [ "$DRY_RUN" != 1 ]; then
+    ask_password AMAN_PASSWORD
+  fi
+}
+
+# Next step for the model server. Generic on purpose: no product is named.
+print_model_hint() {
+  if [ -n "$1" ]; then
+    say "  Model:    open Settings > Models and enter $1"
+  else
+    say "  Model:    not set yet. Next step: open Settings > Models and add your model server address or a provider key."
+  fi
+  say "            A model server running on this computer must listen on more than 127.0.0.1 to be reachable"
+  say "            from the app, which sees this computer as host.docker.internal. Make it listen on all addresses"
+  say "            (or on the Docker bridge address), then use http://host.docker.internal:<its port>/v1."
+}
+
 print_instance_summary() {
   local name=$1
   say ""
   say "Instance $name"
   say "  Open:     $(reg_get "$name" public_url)"
   say "  Sign in:  $(reg_get "$name" owner_email) with the password you chose"
-  say "  Login:    $(reg_get "$name" login_url)/dex"
+  say "  Sign-in service (used by the app automatically, not a page to open): $(reg_get "$name" login_url)/dex"
   say "  Data:     Docker volumes aman_${name}_data and aman_${name}_dex"
   if is_loopback_origin "$(reg_get "$name" public_url)"; then
-    say "  Use 127.0.0.1 in the browser, not localhost; the login redirect depends on the exact name."
+    say "  Use 127.0.0.1 in the browser, not localhost; sign-in depends on the exact name."
     say "  To reach it from other devices later, see: install.sh --print-proxy-requirements"
   else
     print_proxy_requirements "$(reg_get "$name" public_url)" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_url)" "$(reg_get "$name" login_port)"
   fi
-  if [ -n "$(reg_get "$name" model_endpoint)" ]; then
-    say "  Model:    enter $(reg_get "$name" model_endpoint) under Settings > Models"
-  fi
+  print_model_hint "$(reg_get "$name" model_endpoint)"
   say "  Run code and attachment extraction are off in this version."
 }
 
@@ -306,19 +328,33 @@ cmd_instance_add() {
     print_instance_summary "$I_NAME"
     return 0
   fi
+  AMAN_PASSWORD=
+  read_password_first
   instance_collect "$OPT_NAME"
   instance_derive
   if [ "$DRY_RUN" = 1 ]; then
-    say "Would create instance $I_NAME for $I_EMAIL: app $I_PUBLIC_URL (loopback port $I_PORT), login $I_LOGIN_URL (loopback port $I_LOGIN_PORT). Nothing was changed."
+    say "Would create instance $I_NAME for $I_EMAIL: app at $I_PUBLIC_URL (port $I_PORT on this computer), sign-in service port $I_LOGIN_PORT. Nothing was changed."
     return 0
   fi
-  AMAN_PASSWORD=
-  ask_password AMAN_PASSWORD
+  [ -n "$AMAN_PASSWORD" ] || ask_password AMAN_PASSWORD
   machine_running || machine_up "$REL_STT_TAG"
   instance_create
   AMAN_PASSWORD=
   print_instance_summary "$I_NAME"
   print_signout_note
+}
+
+# Pads tab-separated columns to the widest cell of each, so long names and addresses stay aligned.
+align_columns() {
+  awk -F'\t' '
+    { rows[NR] = $0; for (i = 1; i <= NF; i++) if (length($i) > w[i]) w[i] = length($i); if (NF > n) n = NF }
+    END {
+      for (r = 1; r <= NR; r++) {
+        split(rows[r], cell, "\t"); line = ""
+        for (i = 1; i <= n; i++) line = line (i < n ? sprintf("%-" w[i] "s  ", cell[i]) : cell[i])
+        print line
+      }
+    }'
 }
 
 cmd_instance_list() {
@@ -332,13 +368,15 @@ cmd_instance_list() {
     direct | sg) AMAN_DOCKER_MODE=$DOCKER_ACCESS ;;
     *) warn "Docker is not reachable, so the states below are unknown" ;;
   esac
-  printf '%-14s %-6s %-6s %-10s %-9s %-7s %s\n' NAME APP LOGIN STATE DOCTOR OWNER URL
-  for name in $(reg_names); do
-    state=unknown
-    case "$DOCKER_ACCESS" in direct | sg) state=$(instance_state "$name") ;; esac
-    printf '%-14s %-6s %-6s %-10s %-9s %-7s %s\n' "$name" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_port)" \
-      "$state" "$(doctor_status "$name")" "$(reg_get "$name" owner_email)" "$(reg_get "$name" public_url)"
-  done
+  {
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' NAME 'APP PORT' 'SIGN-IN PORT' STATE DOCTOR OWNER ADDRESS
+    for name in $(reg_names); do
+      state=unknown
+      case "$DOCKER_ACCESS" in direct | sg) state=$(instance_state "$name") ;; esac
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_port)" \
+        "$state" "$(doctor_status "$name")" "$(reg_get "$name" owner_email)" "$(reg_get "$name" public_url)"
+    done
+  } | align_columns
 }
 
 # Volumes that belong to an instance: those labelled for it plus the two it is named after.

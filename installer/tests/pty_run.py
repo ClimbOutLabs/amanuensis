@@ -1,6 +1,6 @@
 """Runs a command on a pseudo terminal and answers its prompts in order.
 
-Usage: pty_run.py ANSWERS_FILE -- command...  Each ANSWERS_FILE line is "prompt text=>reply". The transcript is
+Usage: pty_run.py ANSWERS_FILE -- command...  Each ANSWERS_FILE line is "prompt text=>reply" ("<EOF>" sends Ctrl-D). The transcript is
 what a terminal would show, so a reply is echoed unless the program turned echo off, as for passwords.
 The last line is "[exit N]".
 """
@@ -36,7 +36,9 @@ while time.time() < deadline:
         buf += chunk
         if idx < len(answers) and answers[idx][0].encode() in buf:
             time.sleep(0.05)
-            os.write(fd, (answers[idx][1] + "\n").encode())
+            reply = answers[idx][1]
+            # "<EOF>" sends Ctrl-D at the start of a line, as a person ending the input would.
+            os.write(fd, b"\x04" if reply == "<EOF>" else (reply + "\n").encode())
             buf = b""
             idx += 1
     else:
@@ -46,6 +48,9 @@ while time.time() < deadline:
             break
         if done:
             break
+if time.time() >= deadline:
+    os.kill(pid, 9)
+    sys.stderr.write("pty_run: gave up waiting; unanswered prompt or hang\n")
 try:
     _, status = os.waitpid(pid, 0)
 except ChildProcessError:

@@ -13,13 +13,18 @@ NEEDS_SIGNOUT=0
 # Runs docker the way this run was granted access: directly, through the docker group for this
 # process only (sg), or through sudo. BuildKit is required by Dockerfile.dev.
 D() {
+  as_docker_user env DOCKER_BUILDKIT=1 docker "$@"
+}
+
+# Runs any command with the Docker access of this run, so the doctor sees what the installer sees.
+as_docker_user() {
   case "$AMAN_DOCKER_MODE" in
-    direct) DOCKER_BUILDKIT=1 docker "$@" ;;
-    sudo) sudo env DOCKER_BUILDKIT=1 docker "$@" ;;
+    direct) "$@" ;;
+    sudo) sudo "$@" ;;
     sg)
-      local cmd="env DOCKER_BUILDKIT=1 docker" arg
+      local cmd='' arg
       for arg in "$@"; do
-        cmd="$cmd $(printf '%q' "$arg")"
+        cmd="${cmd:+$cmd }$(printf '%q' "$arg")"
       done
       sg docker -c "$cmd"
       ;;
