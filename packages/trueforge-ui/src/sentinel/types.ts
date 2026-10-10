@@ -70,6 +70,10 @@ export type SentinelApprovalInfo = {
   toolCallId: string;
   tier: ToolTier;
   card: SentinelApprovalCard;
+  /** Id of the `tool.approval_required` event that asked; calls from one event share it. */
+  eventId: string | null;
+  /** Thread that owns the call; a sub-agent's calls carry its own thread id. */
+  threadId: string | null;
 };
 
 export const SENTINEL_AUDIT_OUTCOMES = ['logged', 'ran', 'approved', 'denied', 'auto_denied'] as const;
@@ -191,12 +195,15 @@ function toolCallIdFrom(record: Record<string, unknown>): string | undefined {
   );
 }
 
-function parseApprovalInfo(ref: Record<string, unknown>): SentinelApprovalInfo | undefined {
+function parseApprovalInfo(
+  ref: Record<string, unknown>,
+  origin: { eventId: string | null; threadId: string | null },
+): SentinelApprovalInfo | undefined {
   const tier = parseToolTier(ref.tier);
   const card = parseApprovalCard(ref.tier3_card ?? ref.tier3Card ?? ref.card);
   const toolCallId = toolCallIdFrom(ref);
   if (tier === undefined || card === undefined || toolCallId === undefined) return undefined;
-  return { toolCallId, tier, card };
+  return { toolCallId, tier, card, ...origin };
 }
 
 export const APPROVAL_REQUIRED_EVENT_TYPE = 'tool.approval_required';
@@ -215,9 +222,13 @@ function toolCallRefs(event: Record<string, unknown>): Record<string, unknown>[]
  */
 export function extractSentinelFromEvent(event: unknown): SentinelApprovalInfo[] {
   if (!isRecord(event) || event.type !== APPROVAL_REQUIRED_EVENT_TYPE) return [];
+  const origin = {
+    eventId: optionalString(event, 'id') ?? null,
+    threadId: optionalString(event, 'thread_id') ?? optionalString(event, 'threadId') ?? null,
+  };
   const approvals: SentinelApprovalInfo[] = [];
   for (const ref of toolCallRefs(event)) {
-    const approval = parseApprovalInfo(ref);
+    const approval = parseApprovalInfo(ref, origin);
     if (approval !== undefined) approvals.push(approval);
   }
   return approvals;

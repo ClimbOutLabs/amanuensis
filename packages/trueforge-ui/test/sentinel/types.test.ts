@@ -152,6 +152,25 @@ describe('extractSentinelFromEvent', () => {
     ]);
   });
 
+  it('records the asking event and thread on each approval', () => {
+    const approvals = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      id: 'evt-7',
+      thread_id: 'sub-agent',
+      tool_calls: [{ id: 'call-1', tier: 2, tier3_card: { plain_what: 'Edit notes.md' } }],
+    });
+    expect(approvals[0]?.eventId).toBe('evt-7');
+    expect(approvals[0]?.threadId).toBe('sub-agent');
+    const camel = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      id: 'evt-8',
+      threadId: 'main',
+      toolCalls: [{ id: 'call-2', tier: 2, tier3Card: { plainWhat: 'Edit notes.md' } }],
+    });
+    expect(camel[0]?.eventId).toBe('evt-8');
+    expect(camel[0]?.threadId).toBe('main');
+  });
+
   it('no longer reads Tier 2 notice events', () => {
     expect(
       extractSentinelFromEvent({

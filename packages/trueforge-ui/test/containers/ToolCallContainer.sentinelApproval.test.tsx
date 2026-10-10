@@ -11,7 +11,7 @@ import { RuntimeHarness } from './RuntimeHarness.js';
 
 const { respondToApproval, pendingApprovals } = vi.hoisted(() => ({
   respondToApproval: vi.fn(),
-  pendingApprovals: { current: [] as Array<{ approvalId: string }> },
+  pendingApprovals: { current: [] as Array<{ approvalId: string; threadId: string }> },
 }));
 
 vi.mock('@truefoundry/assistant-ui-runtime', async importOriginal => {
@@ -54,10 +54,19 @@ function pendingCall(id: string, toolName: string): Exclude<ThreadMessageLike['c
   };
 }
 
+type PendingCall = {
+  id: string;
+  tier: 2 | 3;
+  /** The approval event that asked; calls of one event share it. */
+  event?: string;
+  /** Thread that owns the call. */
+  thread?: string;
+};
+
 /** Renders pending calls with the given tiers; the runtime reports each as awaiting approval. */
-function renderPending(calls: Array<{ id: string; tier: 2 | 3 }>, onRespondToToolApproval = vi.fn()) {
+function renderPending(calls: PendingCall[], onRespondToToolApproval = vi.fn()) {
   const content = calls.map(call => pendingCall(call.id, `tool_${call.id}`));
-  pendingApprovals.current = calls.map(call => ({ approvalId: call.id }));
+  pendingApprovals.current = calls.map(call => ({ approvalId: call.id, threadId: call.thread ?? 'main' }));
   const message: ThreadMessageLike = {
     role: 'assistant',
     content,
@@ -72,7 +81,13 @@ function renderPending(calls: Array<{ id: string; tier: 2 | 3 }>, onRespondToToo
   );
   act(() => {
     for (const call of calls) {
-      publishSentinelEvent({ toolCallId: call.id, tier: call.tier, card: card(`Do ${call.id}`) });
+      publishSentinelEvent({
+        toolCallId: call.id,
+        tier: call.tier,
+        card: card(`Do ${call.id}`),
+        eventId: call.event ?? 'evt-1',
+        threadId: call.thread ?? 'main',
+      });
     }
   });
   return { onRespondToToolApproval };
@@ -152,5 +167,35 @@ describe('ToolCallContainer Sentinel approvals', () => {
     fireEvent.click(firstButton('Deny'));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalId: 'a', approved: false }));
     expect(respondToApproval).not.toHaveBeenCalled();
+  });
+
+  it('does not batch across sub-agent threads', () => {
+    renderPending([
+      { id: 'a', tier: 2 },
+      { id: 'b', tier: 2 },
+      { id: 'sub-1', tier: 2, thread: 'sub-agent' },
+      { id: 'sub-2', tier: 2, thread: 'sub-agent' },
+    ]);
+    fireEvent.click(firstButton('Approve all (2)'));
+    expect(respondToApproval.mock.calls.map(([response]) => response.approvalId)).toEqual(['a', 'b']);
+  });
+
+  it('does not batch a call from an earlier approval event', () => {
+    renderPending([
+      { id: 'old', tier: 2, event: 'evt-0' },
+      { id: 'a', tier: 2 },
+      { id: 'b', tier: 2 },
+    ]);
+    fireEvent.click(firstButton('Approve all (2)'));
+    expect(respondToApproval.mock.calls.map(([response]) => response.approvalId)).toEqual(['a', 'b']);
+  });
+
+  it('offers no batch when the other Tier 2 calls belong to another thread or event', () => {
+    renderPending([
+      { id: 'a', tier: 2 },
+      { id: 'sub', tier: 2, thread: 'sub-agent' },
+      { id: 'old', tier: 2, event: 'evt-0' },
+    ]);
+    expect(screen.queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
   });
 });

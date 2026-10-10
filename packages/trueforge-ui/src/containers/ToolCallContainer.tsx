@@ -142,13 +142,27 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     const options = buildApprovalOptions(part.approval?.options);
     const allowOption = options.find(option => option.isAllow);
     const denyOption = options.find(option => !option.isAllow);
-    // Only Tier 2 calls batch: each still gets its own allow and redeems its own
-    // single-use token. A Tier 3 call is never listed here, so "Approve all" cannot reach it.
-    const tier2Pending = pendingApprovals.filter(pending => sentinel?.approvalFor(pending.approvalId)?.tier === 2);
+    // Only Tier 2 calls batch, and only those asked by this same approval event on this
+    // same thread: a sub-agent's calls never ride along with the parent's. Each call still
+    // gets its own allow and redeems its own single-use token. A Tier 3 call is never listed
+    // here, so "Approve all" cannot reach it.
+    const thisPending = pendingApprovals.find(pending => pending.approvalId === approvalInfo.toolCallId);
+    const tier2Batch =
+      approvalInfo.tier === 2 && thisPending !== undefined && approvalInfo.eventId !== null
+        ? pendingApprovals.filter(pending => {
+            const info = sentinel?.approvalFor(pending.approvalId);
+            return (
+              info?.tier === 2 &&
+              info.eventId === approvalInfo.eventId &&
+              info.threadId === approvalInfo.threadId &&
+              pending.threadId === thisPending.threadId
+            );
+          })
+        : [];
     const approveAll =
-      approvalInfo.tier === 2 && tier2Pending.length > 1
+      tier2Batch.length > 1
         ? () => {
-            for (const pending of tier2Pending) {
+            for (const pending of tier2Batch) {
               respondToApproval({ approvalId: pending.approvalId, approved: true });
             }
           }
@@ -161,7 +175,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         onApprove={() => onSelectOption(allowOption?.id ?? '__allow')}
         onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
         onApproveAll={approveAll}
-        batchSize={approveAll === undefined ? undefined : tier2Pending.length}
+        batchSize={approveAll === undefined ? undefined : tier2Batch.length}
         disabled={isNestedReadonly}
       />
     );

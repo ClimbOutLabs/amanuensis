@@ -39,19 +39,27 @@ const CARD = {
 describe('SentinelStateProvider', () => {
   it('finds an approval filed under the server id when looked up by the invocation key', () => {
     renderProbe(INVOCATION_KEY);
-    act(() => publishSentinelEvent({ toolCallId: 'call-9', tier: 3, card: CARD }));
+    act(() => publishSentinelEvent({ toolCallId: 'call-9', tier: 3, card: CARD, eventId: null, threadId: null }));
     expect(screen.getByTestId('approval')).toHaveTextContent('Run code in the sandbox');
   });
 
   it('finds a Tier 2 approval filed under the server id when looked up by the invocation key', () => {
     renderProbe(INVOCATION_KEY);
-    act(() => publishSentinelEvent({ toolCallId: 'call-9', tier: 2, card: { ...CARD, plain_what: 'Edit notes.md' } }));
+    act(() =>
+      publishSentinelEvent({
+        toolCallId: 'call-9',
+        tier: 2,
+        card: { ...CARD, plain_what: 'Edit notes.md' },
+        eventId: null,
+        threadId: null,
+      }),
+    );
     expect(screen.getByTestId('approval')).toHaveTextContent('Edit notes.md');
   });
 
   it('still finds an approval looked up by the bare server id', () => {
     renderProbe('call-9');
-    act(() => publishSentinelEvent({ toolCallId: 'call-9', tier: 3, card: CARD }));
+    act(() => publishSentinelEvent({ toolCallId: 'call-9', tier: 3, card: CARD, eventId: null, threadId: null }));
     expect(screen.getByTestId('approval')).toHaveTextContent('Run code in the sandbox');
   });
 });
