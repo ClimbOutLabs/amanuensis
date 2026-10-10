@@ -10,7 +10,26 @@ import {
   type ImplementationPlanGrant,
   type ImplementationPlanGrantApi,
 } from '../components/ImplementationPlanGrantContext.js';
+import { useDocumentVisible } from '../hooks/useDocumentVisible.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
+
+const POLL_INTERVAL_MS = 2_000;
+
+/** Grants are immutable once minted, so the same ids and plan hashes in order mean nothing changed. */
+function sameGrants({
+  shown,
+  next,
+}: {
+  shown: readonly ImplementationPlanGrant[];
+  next: readonly ImplementationPlanGrant[];
+}): boolean {
+  return (
+    shown.length === next.length &&
+    shown.every(
+      (grant, index) => grant.grant_id === next[index]?.grant_id && grant.plan_hash === next[index]?.plan_hash,
+    )
+  );
+}
 
 export type ImplementationPlanGrantControlsProps = {
   sessionId?: string | null;
@@ -28,8 +47,14 @@ function ImplementationPlanGrantControlsWithApi({
   const sessionIdRef = useRef(sessionId);
   const requestVersionRef = useRef(0);
   sessionIdRef.current = sessionId;
+  // What is on screen, so a poll that changes nothing dispatches no state update at all.
+  const shownRef = useRef({ grants, loadError });
+  useEffect(() => {
+    shownRef.current = { grants, loadError };
+  });
 
   const { listImplementationPlanGrants, revokeImplementationPlanGrant } = api;
+  const isVisible = useDocumentVisible();
 
   useEffect(() => {
     requestVersionRef.current += 1;
@@ -38,35 +63,45 @@ function ImplementationPlanGrantControlsWithApi({
     setRevokingGrantId(null);
   }, [sessionId]);
 
+  // A hidden page neither loads nor polls; showing it again reloads at once.
   useEffect(() => {
-    if (sessionId == null) {
+    if (sessionId == null || !isVisible) {
       return;
     }
 
     let cancelled = false;
+    let inFlight = false;
     const refresh = () => {
+      // A tick that lands while the previous read is still out skips rather than stacking requests.
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
       const requestVersion = requestVersionRef.current + 1;
       requestVersionRef.current = requestVersion;
       void listImplementationPlanGrants(sessionId)
         .then(next => {
           if (!cancelled && requestVersionRef.current === requestVersion) {
-            setGrants(next);
-            setLoadError(null);
+            if (!sameGrants({ shown: shownRef.current.grants, next })) setGrants(next);
+            if (shownRef.current.loadError !== null) setLoadError(null);
           }
         })
         .catch(error => {
           if (!cancelled && requestVersionRef.current === requestVersion) {
             setLoadError(getErrorMessage(error, 'Could not load implementation-plan grants.'));
           }
+        })
+        .finally(() => {
+          inFlight = false;
         });
     };
     refresh();
-    const intervalId = isRunning ? setInterval(refresh, 2_000) : undefined;
+    const intervalId = isRunning ? setInterval(refresh, POLL_INTERVAL_MS) : undefined;
     return () => {
       cancelled = true;
       if (intervalId !== undefined) clearInterval(intervalId);
     };
-  }, [isRunning, listImplementationPlanGrants, sessionId]);
+  }, [isRunning, isVisible, listImplementationPlanGrants, sessionId]);
 
   const revoke = useCallback(
     (grant: ImplementationPlanGrant) => {
