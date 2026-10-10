@@ -88,14 +88,26 @@ export async function resolveTurnInternalSources(input: {
   logger: Logger;
 }): Promise<TurnInternalSources> {
   const internalSourceState = createInternalSourceState();
-  const libraryFallback = await collectLibraryFallbackContext({
-    session: input.session,
-    previousTurnId: input.previousTurnId,
-    previousTurn: input.previousTurn,
-  });
+  if (input.persona === undefined) {
+    return {
+      internalSourceState,
+      personaKnowledgeBlock: undefined,
+      personaKnowledgeHits: undefined,
+      libraryNearMiss: null,
+    };
+  }
+  // History only matters for a resubmission, which carries no question of its own.
+  const libraryFallback =
+    extractKnowledgeQuery(input.turnInput) === undefined
+      ? await collectLibraryFallbackContext({
+          session: input.session,
+          previousTurnId: input.previousTurnId,
+          previousTurn: input.previousTurn,
+        })
+      : { historyInputs: [], previousTurnNearMiss: false };
   const tenantId = input.session.tenant_id;
   const knowledge = await resolvePersonaKnowledgeBlock({
-    personaId: input.persona?.id,
+    personaId: input.persona.id,
     tenantId,
     turnInput: input.turnInput,
     historyInputs: libraryFallback.historyInputs,
@@ -103,15 +115,12 @@ export async function resolveTurnInternalSources(input: {
     knowledgeDir: input.knowledgeDir,
     modelDir: input.modelDir,
     logger: input.logger,
-    judge:
-      input.persona === undefined
-        ? undefined
-        : createKnowledgeRelevanceJudge({
-            tenantId,
-            modelName: input.persona.modelName,
-            modelProviderStore: input.modelProviderStore,
-            logger: input.logger,
-          }),
+    judge: createKnowledgeRelevanceJudge({
+      tenantId,
+      modelName: input.persona.modelName,
+      modelProviderStore: input.modelProviderStore,
+      logger: input.logger,
+    }),
     sourceState: internalSourceState,
   });
   const nearMiss = internalSourceState.libraryConsulted && !internalSourceState.libraryAnswered;
