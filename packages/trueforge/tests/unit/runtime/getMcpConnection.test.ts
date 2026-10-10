@@ -1,4 +1,5 @@
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import configuration from '../../../src/config';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import type { IMcpServerWithAuthStore } from '../../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
@@ -255,7 +256,17 @@ describe('getMcpConnection', () => {
   });
 
   describe('first_party marker', () => {
-    const MEMORY_URL = 'https://hindsight.example.com/mcp/aman';
+    const LISTED_ORIGIN = 'https://hindsight.example.com';
+    const MEMORY_URL = `${LISTED_ORIGIN}/mcp/aman`;
+    const originalOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+
+    beforeEach(() => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = [LISTED_ORIGIN];
+    });
+
+    afterAll(() => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = originalOrigins;
+    });
 
     beforeAll(async () => {
       await mcpServerStore.upsertServer({
@@ -296,7 +307,7 @@ describe('getMcpConnection', () => {
       return connection;
     }
 
-    it('reports the stored marker, so the turn resolver can tell a first-party connector from the rest', async () => {
+    it('reports the stored marker while the operator lists the origin, so the turn resolver can tell a first-party connector from the rest', async () => {
       await mcpServerStore.upsertServer({
         tenant_id: 'default',
         name: 'memory-mcp',
@@ -331,6 +342,54 @@ describe('getMcpConnection', () => {
 
       expect((await connectionFor('memory-oauth-mcp')).first_party).toBe(true);
       expect((await connectionFor('plain-oauth-mcp')).first_party).toBe(false);
+    });
+
+    it('stops reporting the marker once the operator no longer lists the origin, without any save', async () => {
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'memory-unlisted',
+        manifest: {
+          type: 'remote',
+          name: 'memory-unlisted',
+          url: MEMORY_URL,
+          description: 'Memory provider.',
+          memory_provider: true,
+        },
+        first_party: true,
+      });
+      expect((await connectionFor('memory-unlisted')).first_party).toBe(true);
+
+      configuration.FIRST_PARTY_MCP_ORIGINS = [];
+      expect((await connectionFor('memory-unlisted')).first_party).toBe(false);
+
+      configuration.FIRST_PARTY_MCP_ORIGINS = ['https://another.example.com'];
+      expect((await connectionFor('memory-unlisted')).first_party).toBe(false);
+
+      configuration.FIRST_PARTY_MCP_ORIGINS = [LISTED_ORIGIN];
+      expect((await connectionFor('memory-unlisted')).first_party).toBe(true);
+    });
+
+    it('does not report a stored marker for a URL on an origin other than the listed one', async () => {
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'memory-elsewhere',
+        manifest: {
+          type: 'remote',
+          name: 'memory-elsewhere',
+          url: 'https://attacker.example.net/mcp/aman',
+          description: 'Memory provider.',
+          memory_provider: true,
+        },
+        first_party: true,
+      });
+
+      expect((await connectionFor('memory-elsewhere')).first_party).toBe(false);
+    });
+
+    it('never reports a marker the store did not set, however the operator lists the origin', async () => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = ['https://mcp.plain.example', LISTED_ORIGIN];
+
+      expect((await connectionFor('plain-mcp')).first_party).toBe(false);
     });
   });
 

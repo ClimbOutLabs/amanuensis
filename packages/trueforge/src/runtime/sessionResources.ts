@@ -30,6 +30,7 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { isFirstPartyOrigin } from '../mcp/firstParty';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { toSandboxProviderFromRecord } from '../sandbox/providerUtils';
@@ -42,7 +43,7 @@ import { buildRunCodeHarvestSink } from './artifacts/persistRunCodeHarvests';
 export interface McpConnection {
   url: string;
   headers: RemoteMcpHeaders;
-  /** The stored connector's server-owned trust marker. */
+  /** The stored connector's trust marker, and only while the operator still lists its origin. */
   first_party: boolean;
 }
 
@@ -475,6 +476,11 @@ export async function getMcpConnection({
   if (record === undefined) {
     return undefined;
   }
+  // The stored mark is what setup decided at save time. It counts only while the operator still
+  // lists the origin, so dropping an origin from the configuration takes effect on the next turn.
+  const firstParty =
+    record.first_party &&
+    isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS });
   const needsLiveAuth = record.manifest.auth?.type === 'dcr' || record.manifest.auth?.type === 'oauth_client';
   // Only the live-auth case delegates: a with-auth store's `resolveInvokeHeaders` may be
   // TrueFoundry-managed (mid-turn re-authorization through the gateway) rather than the generic
@@ -485,7 +491,7 @@ export async function getMcpConnection({
     return {
       url: record.manifest.url,
       headers: store.resolveInvokeHeaders({ record, userRef }),
-      first_party: record.first_party,
+      first_party: firstParty,
     };
   }
   if (needsLiveAuth && tokenStore !== undefined && clientName !== undefined) {
@@ -498,13 +504,13 @@ export async function getMcpConnection({
         clientName,
         userRef,
       }),
-      first_party: record.first_party,
+      first_party: firstParty,
     };
   }
   return {
     url: record.manifest.url,
     headers: resolveManifestRequestHeaders(record.manifest),
-    first_party: record.first_party,
+    first_party: firstParty,
   };
 }
 

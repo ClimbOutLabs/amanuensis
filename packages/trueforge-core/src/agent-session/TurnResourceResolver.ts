@@ -98,8 +98,9 @@ export class TurnResourceResolver<
        * the AgentSpec carries names only (no url/headers on the wire) — the
        * runtime supplies the catalog. Called once per distinct server name per
        * turn. Throw for unknown names. `headers` supports the async resolver form.
-       * `first_party` is true only for a connector the host provisioned itself: it lets that
-       * server's read-only, explicitly closed-world tools run without a card.
+       * `first_party` is true only for a connector the host itself vouches for, never one a user,
+       * a request or the model described: it lets that server's read-only, explicitly
+       * closed-world tools run without a card.
        */
       mcp: (name: string) => Promise<{ url: string; headers?: RemoteMcpHeaders; first_party?: boolean }>;
       mcpRequestTimeoutMs: number;

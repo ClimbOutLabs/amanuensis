@@ -1,39 +1,63 @@
-import type { McpServerRecord } from '../db/mcpServerStore';
 import type { McpServerManifest } from '../schemas/mcpServer';
 
-function isMemoryProvider(manifest: McpServerManifest): boolean {
-  return manifest.type === 'remote' && manifest.memory_provider === true;
+/**
+ * Origin (scheme, host and port) of an absolute http(s) URL as the URL standard normalizes it, so
+ * letter case and default ports compare equal. Undefined for anything else, and for a URL that
+ * carries credentials: an `@` in a URL is how a lookalike host passes for a trusted one.
+ */
+export function normalizedOrigin(url: string): string | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return undefined;
+  }
+  if (parsed.username !== '' || parsed.password !== '') {
+    return undefined;
+  }
+  return parsed.origin;
 }
 
 /**
- * Whether the connector a save leaves behind is first-party: the server's own mark that the
- * product's setup provisioned it, which lets its read-only, explicitly closed-world tools run
- * without asking. The mark lives on the stored record, is never read from a request, and is never
- * derived from a URL. Only the memory provider setup grants it.
+ * Whether `url` is on one of the operator's first-party origins. `origins` comes from the server
+ * configuration (`FIRST_PARTY_MCP_ORIGINS`) already normalized, and is matched exactly: no
+ * wildcards, no suffixes, no prefixes.
+ */
+export function isFirstPartyOrigin({ url, origins }: { url: string; origins: readonly string[] }): boolean {
+  const origin = normalizedOrigin(url);
+  return origin !== undefined && origins.includes(origin);
+}
+
+/**
+ * Whether the connector a save leaves behind is first-party: the server's own mark, which lets
+ * its read-only, explicitly closed-world tools run without asking. Three things must all hold: the
+ * save designates the connector as the memory provider, this very save passed the memory provider
+ * connection check, and the connector's origin is one the operator listed in the server
+ * configuration. Nothing a request carries, the URL included, can add an origin to that list, so
+ * a connector added by URL is never first-party unless the operator vouched for its origin.
  *
- * `memoryProviderChecked` is true only when this very save passed the memory provider connection
- * check. A save that establishes the designation (a new connector, or the flag switched on) is
- * granted the mark. A save that keeps the designation keeps the stored mark only while the URL is
- * unchanged, so repointing a first-party connector drops it until the designation is switched off
- * and on again. Any other save clears it.
+ * Every save decides afresh, so any other save clears the mark. The mark is stored on the
+ * connector record and checked against the list again each time the connector is loaded.
  *
  * A connector the server mounts itself, with no stored row, is marked where it is mounted:
  * `firstParty: true` on its tool set.
  */
 export function firstPartyAfterSave({
   manifest,
-  stored,
   memoryProviderChecked,
+  origins,
 }: {
   manifest: McpServerManifest;
-  stored: McpServerRecord | undefined;
   memoryProviderChecked: boolean;
+  origins: readonly string[];
 }): boolean {
-  if (!memoryProviderChecked || !isMemoryProvider(manifest)) {
-    return false;
-  }
-  if (stored === undefined || !isMemoryProvider(stored.manifest)) {
-    return true;
-  }
-  return stored.first_party && stored.manifest.url === manifest.url;
+  return (
+    memoryProviderChecked &&
+    manifest.type === 'remote' &&
+    manifest.memory_provider === true &&
+    isFirstPartyOrigin({ url: manifest.url, origins })
+  );
 }

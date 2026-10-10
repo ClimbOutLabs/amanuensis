@@ -90,6 +90,8 @@ export interface InertMcpServer {
   url: string;
   /** The same endpoint as a single-bank memory provider URL; the setup's recall check is answered. */
   memoryProviderUrl: string;
+  /** Origin of {@link InertMcpServer.url}: what an operator lists in `FIRST_PARTY_MCP_ORIGINS` to vouch for this server. */
+  origin: string;
   /** Times the gated write tool actually started executing. */
   writeInvocations: () => number;
   echoInvocations: () => number;
@@ -447,10 +449,12 @@ export async function startInertMcpServer(): Promise<InertMcpServer> {
   httpServer = makeHttpServer();
   boundPort = await listen(httpServer, 0);
   running = true;
-  const url = `http://127.0.0.1:${String(boundPort)}/mcp`;
+  const origin = `http://127.0.0.1:${String(boundPort)}`;
+  const url = `${origin}/mcp`;
 
   return {
     url,
+    origin,
     memoryProviderUrl: `${url}/${INERT_MEMORY_BANK}`,
     writeInvocations: () => counters.write,
     echoInvocations: () => counters.echo,

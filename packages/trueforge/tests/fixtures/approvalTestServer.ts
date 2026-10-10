@@ -8,7 +8,9 @@
  *
  * The `inert` connector is stored directly, like one a user added by URL. The first-party
  * memory connector, when asked for, is registered through the real memory-provider setup
- * (`POST /api/v1/settings/mcp-servers` with `memory_provider`), so the server itself marks it.
+ * (`POST /api/v1/settings/mcp-servers` with `memory_provider`), so the server itself marks it, and
+ * only because the fixture lists the inert server's origin as the operator would in
+ * `FIRST_PARTY_MCP_ORIGINS`. Without that option the list is empty and nothing is first-party.
  */
 import type { OpenAPIHono } from '@hono/zod-openapi';
 import { Sessions, type TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
@@ -31,7 +33,7 @@ import { McpCatalog } from '../../src/catalog/McpCatalog';
 import { ModelCatalog } from '../../src/catalog/ModelCatalog';
 import { SandboxCatalog } from '../../src/catalog/SandboxCatalog';
 import { SkillCatalog } from '../../src/catalog/SkillCatalog';
-import { TrueForgeAuthMode } from '../../src/config';
+import configuration, { TrueForgeAuthMode } from '../../src/config';
 import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
@@ -77,6 +79,8 @@ export interface ApprovalTestServer {
   model: ScriptedModelServer;
   /** A store bound to the current database — call fresh after `restart()`, never cache. */
   mcpServerStore: () => IMcpServerStore;
+  /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
+  setFirstPartyOrigins: (origins: string[]) => void;
   close: () => Promise<void>;
 }
 
@@ -226,6 +230,9 @@ export async function startApprovalTestServer(options?: {
     first_party: false,
   });
 
+  const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+  configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
+
   let app = buildApp(db, options?.sandboxProvider);
   if (options?.memoryProvider === true) {
     await registerMemoryProvider({ app, mcp });
@@ -243,7 +250,11 @@ export async function startApprovalTestServer(options?: {
     mcp,
     model,
     mcpServerStore: () => new SqliteMcpServerStore(db),
+    setFirstPartyOrigins: origins => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = origins;
+    },
     close: async () => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
       await db.destroy();
       await model.close();
       await mcp.close();

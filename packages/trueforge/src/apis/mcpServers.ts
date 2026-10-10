@@ -510,7 +510,11 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
             tenant_id: requestContext.tenant_id,
             name: manifest.name,
             manifest,
-            first_party: firstPartyAfterSave({ manifest, stored: undefined, memoryProviderChecked }),
+            first_party: firstPartyAfterSave({
+              manifest,
+              memoryProviderChecked,
+              origins: configuration.FIRST_PARTY_MCP_ORIGINS,
+            }),
           },
           transaction,
         );
@@ -627,8 +631,8 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
             // The digest check above proves this exact URL and credential passed the provider check.
             first_party: firstPartyAfterSave({
               manifest,
-              stored: existing,
               memoryProviderChecked: probedDigest !== undefined,
+              origins: configuration.FIRST_PARTY_MCP_ORIGINS,
             }),
           },
           transaction,
