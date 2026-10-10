@@ -57,6 +57,9 @@ const DEFAULT_POSTGRES_DB = 'trueforge';
 const DEFAULT_POSTGRES_HOST = 'localhost';
 const DEFAULT_POSTGRES_PORT = 5432;
 const DEFAULT_REDIS_URL = 'redis://localhost:6379';
+/**
+ * Legacy fixed local service credential for `STANDALONE=true`.
+ * Kept exported for compatibility; standalone now generates a fresh random key
  * at process start when `TRUEFORGE_API_KEY` is unset (see `resolveTrueForgeApiKey`).
  * Local testing only — not for distributed deployments.
  */
