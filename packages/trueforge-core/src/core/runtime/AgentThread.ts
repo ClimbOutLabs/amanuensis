@@ -168,7 +168,8 @@ import {
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
 } from './contextUtils';
-import { DeferredTool } from './DeferredTool';
+import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
+import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThreadMetrics } from './metrics';
 import {
   getClosableOpenToolCallOutcomes,
@@ -1155,11 +1156,15 @@ async function enrichAssistantMessage({
   toolMapping,
   resolveUnderlyingTool,
   sentinel,
+  toolCallPolicy,
+  logger,
 }: {
   assistantMessage: RawAssistantMessage;
   toolMapping: Map<string, MappedMCPTool>;
   resolveUnderlyingTool: boolean;
   sentinel: SentinelHostContext | undefined;
+  toolCallPolicy: HostToolCallPolicy | undefined;
+  logger: HostToolCallPolicyLogger | undefined;
 }): Promise<InternalEnrichedAssistantMessage> {
   // Omit tool_calls when empty; OpenAI rejects `tool_calls: []` on replay.
   if (!assistantMessage.tool_calls?.length) {
@@ -1183,10 +1188,33 @@ async function enrichAssistantMessage({
       ...(resolveUnderlyingTool ? { arguments: tryParseToolArgs(toolCall.function.arguments) } : {}),
     };
     const resolved = await resolveToolCallInfo({ toolInfo, params, resolveUnderlyingTool });
+    // The host policy runs before Sentinel classification so a call it blocks
+    // never reaches the permission layer. It sees the effective call: the
+    // underlying tool (e.g. `web_search` reached through `call_tool`) with its
+    // args unwrapped from the dispatcher's envelope.
+    let policed = resolved;
+    if (toolCallPolicy !== undefined) {
+      const underlyingToolName = resolved.type === 'mcp' ? resolved.original_tool_name : undefined;
+      const parsedArgs = params.arguments ?? tryParseToolArgs(toolCall.function.arguments);
+      const viaCallTool =
+        toolInfo.originalToolName === CALL_TOOL_NAME &&
+        underlyingToolName !== undefined &&
+        underlyingToolName !== CALL_TOOL_NAME;
+      policed = applyHostToolCallPolicy({
+        call: {
+          functionName: toolCall.function.name,
+          underlyingToolName,
+          args: viaCallTool ? (tryUnwrapCallToolInput(parsedArgs) ?? parsedArgs) : parsedArgs,
+        },
+        toolInfo: resolved,
+        policy: toolCallPolicy,
+        logger,
+      });
+    }
     const tool_info = await classifyUnstampedToolCall({
       sentinel,
       canonical_params: params.arguments ?? {},
-      info: resolved,
+      info: policed,
     });
     enrichedToolCalls.push({ ...toolCall, tool_info });
   }
@@ -1329,6 +1357,7 @@ export class AgentThread {
   private readonly toolCallTimeoutMs?: number | undefined;
   private readonly runCodeToolCallTimeoutMs?: number | undefined;
   private readonly modelFirstResponseTimeoutMs: number;
+  private readonly toolCallPolicy: HostToolCallPolicy | undefined;
   private readonly preLLMProcessorsTimeoutMs: number;
   private readonly sandboxRefreshTimeoutMs: number;
   private readonly sentinel?: SentinelHostContext | undefined;
@@ -1377,6 +1406,7 @@ export class AgentThread {
     this.toolCallTimeoutMs = input.toolCallTimeoutMs;
     this.runCodeToolCallTimeoutMs = input.runCodeToolCallTimeoutMs;
     this.modelFirstResponseTimeoutMs = input.modelFirstResponseTimeoutMs ?? DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
+    this.toolCallPolicy = input.toolCallPolicy;
     this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
     this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
     this.sentinel = input.sentinel;
@@ -2771,6 +2801,8 @@ export class AgentThread {
       // Hence, we resolve the underlying tool to get the tool information.
       resolveUnderlyingTool: true,
       sentinel: this.sentinel,
+      toolCallPolicy: this.toolCallPolicy,
+      logger: this.logger,
     });
     const finishReason = result.value.finish_reason;
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the
