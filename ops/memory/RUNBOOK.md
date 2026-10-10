@@ -79,18 +79,28 @@ the memory check clears the REST API.
 
 ### First-party status
 
-Saving a connector as the memory provider, once the check above passes, also marks
-it first-party on the server. The mark lives on the stored connector, never in the
-manifest, and no request can set it. On a first-party connector a tool that
-declares itself read-only and explicitly closed-world (`readOnlyHint` true and
-`openWorldHint` false) runs without an approval card, and each run is recorded in
-the audit log. Everything else keeps asking.
+A memory provider is first-party only when the operator says so in the server
+configuration. Set `FIRST_PARTY_MCP_ORIGINS` to a comma-separated list of exact
+origins (scheme, host and port, no path), for example `https://memory.internal:8443`,
+and restart. The default is empty, which means nothing is first-party. List only an
+origin that serves nothing but your own memory provider.
 
-Saving the connector with a different URL, or without `memory_provider`, clears the
-mark. A save that keeps `memory_provider: true` at the same URL keeps it. To get it
-back after moving the connector, save it once without the flag and once more with
-it. Connectors saved before the mark existed start without it, so do the same for
-an existing memory provider to turn it on.
+A save marks the connector first-party when it keeps `memory_provider: true`, the
+check above passes in that same save, and the URL's origin is on the list. The mark
+lives on the stored connector, never in the manifest, and no request can set it. The
+server also reads the list again each time it loads the connector for a turn, so
+removing an origin takes effect after the restart with no save.
+
+On a first-party connector a tool that declares itself read-only and explicitly
+closed-world (`readOnlyHint` true and `openWorldHint` false) runs without an approval
+card, and each run is recorded in the audit log. Everything else keeps asking,
+including a tool that leaves `openWorldHint` out, since an absent hint means open-world.
+
+Every save decides the mark afresh. A provider on an origin that is not listed stays
+a user-added connector whatever its URL looks like: another port, `http` instead of
+`https`, a longer host name, or an `@` in the URL each name a different origin. Adding
+an origin to the list does not mark a provider saved earlier. Save the provider again,
+which re-runs the check, to turn the mark on.
 
 ### Per-bank tuning in Settings > Memory
 

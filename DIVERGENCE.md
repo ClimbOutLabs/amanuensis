@@ -54,7 +54,7 @@ Shared files carrying memory wiring:
 | packages/trueforge/src/schemas/events.ts                    | MemoryRecallPersistedEvent in list and streaming unions                            |
 | packages/trueforge/src/schemas/mcpServer.ts                 | memory_provider manifest flag                                                      |
 | packages/trueforge/src/schemas/turn.ts                      | Widened list-events response                                                       |
-| packages/trueforge/src/config.ts                            | MEMORY_* settings                                                                  |
+| packages/trueforge/src/config.ts                            | MEMORY_* settings, FIRST_PARTY_MCP_ORIGINS                                         |
 | packages/trueforge/src/apis/mcpServers.ts                   | Single-provider 409, connector delete + OAuth purge, first-party mark              |
 | packages/trueforge/src/routes/mcpServerRoutes.ts            | Delete route, 409 declarations                                                     |
 | packages/trueforge/src/db/mcpServerStore.ts + both backends | deleteServer, first_party column                                                   |
