@@ -97,6 +97,8 @@ describe('isGitControlPath', () => {
     '.GIT/config',
     '.git./config',
     'GIT~1/config',
+    'GITMOD~1',
+    'sub/gitatt~1',
     '.gitattributes',
     'a/b/.gitattributes',
     '.gitmodules',

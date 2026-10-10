@@ -488,6 +488,9 @@ describe('Suite B - workspace containment escapes', () => {
       symlinkSync(join(ws, '.git'), join(ws, 'link'));
       const ctx = makeCtx({ workspace_cwd: ws });
       for (const tool of ['write_file', 'replace_text']) {
+        const viaCwd = await classifyTier(action(tool, { path: 'config', cwd: join(ws, '.git'), content: 'x' }), ctx);
+        expect(viaCwd.tier).toBe(3);
+        expect(viaCwd.reason).toBe('git_control_write');
         for (const path of ['.git/config', '.GIT/config', 'link/config', 'sub/.gitattributes', '.gitmodules']) {
           const decision = await classifyTier(action(tool, { path, content: 'x' }), ctx);
           expect(decision.tier).toBe(3);

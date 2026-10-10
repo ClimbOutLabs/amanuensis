@@ -146,13 +146,13 @@ const GIT_CONTROL_FILE_NAMES = new Set(['.gitattributes', '.gitmodules']);
 
 /**
  * True when a path has a component naming git control state: the `.git`
- * directory (any case, trailing dots or spaces, 8.3 alias), `.gitattributes`
+ * directory (any case, trailing dots or spaces, 8.3 aliases), `.gitattributes`
  * or `.gitmodules`. Writing these can make git run agent-chosen programs.
  */
 export function isGitControlPath(p: string): boolean {
   return p.split(/[\\/]+/u).some(component => {
     const name = component.replace(/[. ]+$/u, '').toLowerCase();
-    return name === '.git' || /^git~\d+$/u.test(name) || GIT_CONTROL_FILE_NAMES.has(name);
+    return name === '.git' || /^(git|gitmod|gitatt)~\d+$/u.test(name) || GIT_CONTROL_FILE_NAMES.has(name);
   });
 }
 

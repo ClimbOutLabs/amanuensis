@@ -650,7 +650,8 @@ function mintPlainToken(input: { services: SentinelServices; tool_name: string; 
 
 async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const target = stringParam(action.canonical_params, 'path') ?? stringParam(action.canonical_params, 'target');
-  const identityCwd = resolveIdentityCwd(ctx, null);
+  // Relative targets resolve against the call's cwd, matching dispatch.
+  const identityCwd = resolveIdentityCwd(ctx, stringParam(action.canonical_params, 'cwd'));
   // Fail closed on null target or missing workspace: treat as outside workspace.
   if (target === null || ctx.workspace_cwd === null) {
     return tier3Decision({
