@@ -4,11 +4,11 @@ import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
 import {
   classifyHostToolCall,
-  recordToolGrantRun,
+  recordStandingTrustRun,
   type SentinelHostContext,
   type TierDecision,
 } from '../permissions';
-import { TOOL_GRANT_REASON } from '../permissions/toolGrants';
+import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -98,6 +98,7 @@ export class ToolSet implements IToolSet {
   private readonly source: ToolSource;
   private readonly policy: ToolSelectorPolicy;
   private readonly sentinel: SentinelHostContext | undefined;
+  private readonly firstParty: boolean;
 
   constructor(params: {
     source: ToolSource;
@@ -111,6 +112,12 @@ export class ToolSet implements IToolSet {
      * classification runs.
      */
     sentinel?: SentinelHostContext | undefined;
+    /**
+     * The host provisioned this connector itself, so a tool that declares itself read-only and
+     * explicitly closed-world runs without a card. Set by the host only, never from a connector
+     * URL, client input, or tool metadata. Has no effect without `sentinel`.
+     */
+    firstParty?: boolean | undefined;
   }) {
     this.source = params.source;
     this.name = params.source.name;
@@ -121,6 +128,7 @@ export class ToolSet implements IToolSet {
       preload: params.preload,
     });
     this.sentinel = params.sentinel;
+    this.firstParty = params.firstParty === true;
   }
 
   // True when every exposed tool is eager. Tracks the policy live: for an auto-preload server
@@ -207,8 +215,13 @@ export class ToolSet implements IToolSet {
         });
       }
 
-      if (decision === undefined && classification?.reason === TOOL_GRANT_REASON && this.sentinel !== undefined) {
-        await recordToolGrantRun({
+      if (
+        decision === undefined &&
+        classification !== undefined &&
+        isStandingTrustDecision(classification) &&
+        this.sentinel !== undefined
+      ) {
+        await recordStandingTrustRun({
           services: this.sentinel.services,
           identity: this.sentinel,
           tool_name: params.name,
@@ -300,6 +313,7 @@ export class ToolSet implements IToolSet {
         canonical_params: isRecord(params.arguments) ? params.arguments : {},
         tool_type: info.type,
         mcp_server_name: info.mcp_server_name,
+        mcp_first_party: this.firstParty,
         mcp_hints: {
           read_only_hint: info.read_only_hint,
           destructive_hint: info.destructive_hint,

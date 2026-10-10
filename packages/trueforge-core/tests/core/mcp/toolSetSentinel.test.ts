@@ -1,6 +1,12 @@
 import { createLogger } from 'winston';
-import { RemoteMCP, ToolSet, createSentinelHostContext, defaultSentinelServices } from '../../../src/core';
-import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
+import {
+  RemoteMCP,
+  ToolSet,
+  createSentinelHostContext,
+  defaultSentinelServices,
+  type ToolSource,
+} from '../../../src/core';
+import { toolResultResponse, type ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
@@ -22,6 +28,7 @@ function makeToolSet(params: {
   tools: ToolSchema[];
   services: SentinelServices;
   requireApprovalForTools?: string[];
+  firstParty?: boolean;
 }): ToolSet {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
@@ -59,6 +66,7 @@ function makeToolSet(params: {
       conversation_id: 'c1',
       services: params.services,
     }),
+    firstParty: params.firstParty,
   });
 }
 
@@ -198,6 +206,148 @@ describe('ToolSet Sentinel classification of connector tools', () => {
     }).toolCallInfo({ name: 'lookup_note', arguments: {} });
     expect(info.tier).toBe(3);
     expect(info.is_approval_required).toBe(false);
+    expect(info.pre_dispatch_failure).toEqual({ kind: 'policy_blocked', message: 'Auto-denied: offline mode is on.' });
+  });
+});
+
+describe('ToolSet Sentinel classification of first-party connector tools', () => {
+  function auditedServices(): { services: SentinelServices; recorded: AuditRecordInput[] } {
+    const services = servicesWithGrants([]);
+    const recorded: AuditRecordInput[] = [];
+    services.audit = {
+      record: input => {
+        recorded.push(input);
+        return Promise.resolve();
+      },
+      updateOutcome: () => Promise.resolve(),
+    };
+    return { services, recorded };
+  }
+
+  it('runs a read-only, explicitly closed-world tool at Tier 1 without approval, and audits the run exactly once', async () => {
+    const { services, recorded } = auditedServices();
+    const toolSet = makeToolSet({ tools: [closedWorldRead], services, firstParty: true });
+
+    const info = await toolSet.toolCallInfo({ name: 'lookup_note', arguments: {} });
+    expect(info.tier).toBe(1);
+    expect(info.is_approval_required).toBe(false);
+    // Classification runs several times per call; only the dispatch is the run.
+    expect(recorded).toEqual([]);
+
+    const response = await toolSet.callTool({ name: 'lookup_note', arguments: {} });
+    expect(response).not.toHaveProperty('approvalRequired');
+    expect(recorded).toEqual([
+      expect.objectContaining({
+        tier: 1,
+        tool_name: 'lookup_note',
+        outcome: 'logged',
+        conversation_id: 'c1',
+        description: expect.stringContaining('First-party'),
+      }),
+    ]);
+  });
+
+  it('asks for the same tool on a connector that is not first-party, and audits nothing', async () => {
+    const { services, recorded } = auditedServices();
+    const toolSet = makeToolSet({ tools: [closedWorldRead], services, firstParty: false });
+
+    const response = await toolSet.callTool({ name: 'lookup_note', arguments: {} });
+    expect(response).toHaveProperty('approvalRequired');
+    expect(recorded).toEqual([]);
+  });
+
+  it('keeps asking for a read-only tool that omits openWorldHint', async () => {
+    const info = await makeToolSet({
+      tools: [readWithoutOpenWorld],
+      services: servicesWithGrants([]),
+      firstParty: true,
+    }).toolCallInfo({ name: 'peek_note', arguments: {} });
+    expect(info.tier).toBe(3);
+    expect(info.is_approval_required).toBe(true);
+  });
+
+  it('lets a destructive hint escalate over first-party trust', async () => {
+    const info = await makeToolSet({
+      tools: [destructiveRead],
+      services: servicesWithGrants([]),
+      firstParty: true,
+    }).toolCallInfo({ name: 'archive_note', arguments: {} });
+    expect(info.tier).toBe(3);
+    expect(info.is_approval_required).toBe(true);
+  });
+
+  it('keeps an unannotated tool at Tier 3 with approval required', async () => {
+    const info = await makeToolSet({
+      tools: [unannotated],
+      services: servicesWithGrants([]),
+      firstParty: true,
+    }).toolCallInfo({ name: 'poke_note', arguments: {} });
+    expect(info.tier).toBe(3);
+    expect(info.is_approval_required).toBe(true);
+  });
+
+  it('still gates a first-party tool that an explicit require-approval selector names, and audits nothing', async () => {
+    const { services, recorded } = auditedServices();
+    const toolSet = makeToolSet({
+      tools: [closedWorldRead],
+      services,
+      requireApprovalForTools: ['lookup_note'],
+      firstParty: true,
+    });
+
+    const info = await toolSet.toolCallInfo({ name: 'lookup_note', arguments: {} });
+    expect(info.tier).toBe(1);
+    expect(info.is_approval_required).toBe(true);
+
+    const response = await toolSet.callTool({ name: 'lookup_note', arguments: {} });
+    expect(response).toHaveProperty('approvalRequired');
+    expect(recorded).toEqual([]);
+  });
+
+  it('honors first-party trust for a tool source the host builds itself, with no stored connector behind it', async () => {
+    const inProcessSource: ToolSource = {
+      name: 'mail',
+      id: 'mail',
+      listTools: () =>
+        Promise.resolve({ result: { tools: [{ ...closedWorldRead, preload: true }] }, wasInitialized: undefined }),
+      callTool: params => Promise.resolve(toolResultResponse({ text: `called ${params.name}` })),
+      toolCallInfo: params =>
+        Promise.resolve({
+          type: 'mcp',
+          mcp_server_id: 'mail',
+          mcp_server_name: 'mail',
+          original_tool_name: params.name,
+          is_approval_required: false,
+        }),
+    };
+    const sentinel = createSentinelHostContext({
+      tenant_id: 't1',
+      created_by: 'u1',
+      conversation_id: 'c1',
+      services: servicesWithGrants([]),
+    });
+    const selectors: ToolSelectorConfig = {
+      enableTools: ['@all'],
+      disableTools: [],
+      preloadTools: [],
+      requireApprovalForTools: [],
+    };
+
+    const marked = new ToolSet({ source: inProcessSource, selectors, preload: true, sentinel, firstParty: true });
+    const unmarked = new ToolSet({ source: inProcessSource, selectors, preload: true, sentinel });
+
+    expect((await marked.toolCallInfo({ name: 'lookup_note', arguments: {} })).tier).toBe(1);
+    expect((await unmarked.toolCallInfo({ name: 'lookup_note', arguments: {} })).tier).toBe(3);
+  });
+
+  it('does not run a first-party tool while offline mode auto-denies it', async () => {
+    const services = servicesWithGrants([]);
+    services.isOffline = () => Promise.resolve(true);
+    const info = await makeToolSet({ tools: [closedWorldRead], services, firstParty: true }).toolCallInfo({
+      name: 'lookup_note',
+      arguments: {},
+    });
+    expect(info.tier).toBe(3);
     expect(info.pre_dispatch_failure).toEqual({ kind: 'policy_blocked', message: 'Auto-denied: offline mode is on.' });
   });
 });

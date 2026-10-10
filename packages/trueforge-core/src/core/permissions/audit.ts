@@ -72,10 +72,11 @@ export async function recordClassificationAudit(input: {
 }
 
 /**
- * Record a call a standing tool grant ran without asking. Written once, right before dispatch,
- * because the same call is classified several times on its way there.
+ * Record a call that ran without asking on standing trust: a first-party connector, or the user's
+ * own tool grant. Written once, right before dispatch, because the same call is classified several
+ * times on its way there.
  */
-export async function recordToolGrantRun(input: {
+export async function recordStandingTrustRun(input: {
   services: SentinelServices;
   identity: Pick<SentinelCallIdentity, 'tenant_id' | 'created_by' | 'conversation_id'>;
   tool_name: string;

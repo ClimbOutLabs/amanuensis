@@ -9,6 +9,7 @@ import {
   type ClassifyContext,
   type SentinelAction,
 } from '../../../src/core/permissions/classifier';
+import { FIRST_PARTY_TOOL_REASON, isStandingTrustDecision } from '../../../src/core/permissions/connectorTrust';
 import {
   createSentinelHostContext,
   defaultSentinelServices,
@@ -365,6 +366,147 @@ describe('classifyTier connector tools and standing grants', () => {
     });
 
     expect(decision.reason).toBe(TOOL_GRANT_REASON);
+    expect(recorded).toEqual([]);
+  });
+});
+
+describe('classifyTier first-party connector tools', () => {
+  const closedWorldRead: SentinelAction['mcp_hints'] = { read_only_hint: true, open_world_hint: false };
+
+  function connectorAction(input?: {
+    tool_name?: string;
+    mcp_first_party?: boolean;
+    mcp_hints?: SentinelAction['mcp_hints'];
+    canonical_params?: Record<string, unknown>;
+  }): SentinelAction {
+    return {
+      tool_name: input?.tool_name ?? 'ask_memory',
+      canonical_params: input?.canonical_params ?? { question: 'when is the dentist appointment' },
+      tool_type: 'mcp',
+      mcp_server_name: 'memory',
+      mcp_first_party: input?.mcp_first_party ?? true,
+      mcp_hints: input?.mcp_hints ?? closedWorldRead,
+    };
+  }
+
+  test('a read-only, explicitly closed-world tool runs at Tier 1 without a card', async () => {
+    const decision = await classifyTier(connectorAction(), makeCtx());
+    expect(decision.tier).toBe(1);
+    expect(decision.reason).toBe(FIRST_PARTY_TOOL_REASON);
+    expect(decision.card).toBeNull();
+    expect(decision.approval_token_id).toBeNull();
+    expect(isStandingTrustDecision(decision)).toBe(true);
+  });
+
+  test('the same tool on a connector that is not first-party asks', async () => {
+    const decision = await classifyTier(connectorAction({ mcp_first_party: false }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('unrecognized_tool');
+  });
+
+  test('a connector that never says whether it is first-party asks', async () => {
+    const { mcp_first_party: _omitted, ...unmarked } = connectorAction();
+    const decision = await classifyTier(unmarked, makeCtx());
+    expect(decision.tier).toBe(3);
+  });
+
+  test('a tool that omits openWorldHint asks, since absent means open-world', async () => {
+    const decision = await classifyTier(connectorAction({ mcp_hints: { read_only_hint: true } }), makeCtx());
+    expect(decision.tier).toBe(3);
+  });
+
+  test('a tool that claims to reach the open world asks', async () => {
+    const decision = await classifyTier(
+      connectorAction({ mcp_hints: { read_only_hint: true, open_world_hint: true } }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+  });
+
+  test('a tool that does not claim to be read-only asks, annotated or not', async () => {
+    const writes = await classifyTier(
+      connectorAction({ mcp_hints: { read_only_hint: false, open_world_hint: false } }),
+      makeCtx(),
+    );
+    const unannotated = await classifyTier(connectorAction({ mcp_hints: {} }), makeCtx());
+    expect([writes.tier, unannotated.tier]).toEqual([3, 3]);
+  });
+
+  test('a destructive hint escalates over first-party trust', async () => {
+    const decision = await classifyTier(
+      connectorAction({ mcp_hints: { ...closedWorldRead, destructive_hint: true } }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('mcp_destructive_hint');
+  });
+
+  test('a destructive tool name escalates over first-party trust', async () => {
+    const decision = await classifyTier(connectorAction({ tool_name: 'delete_memory' }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('destructive_action');
+  });
+
+  test('an install tool name escalates over first-party trust', async () => {
+    const decision = await classifyTier(connectorAction({ tool_name: 'install_plugin' }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('install_action');
+  });
+
+  test('an external-service action escalates over first-party trust', async () => {
+    const decision = await classifyTier(
+      connectorAction({ tool_name: 'send_email', canonical_params: { to: 'someone@example.com', subject: 'hi' } }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('external_service');
+  });
+
+  test('a sensitive read escalates over first-party trust', async () => {
+    const decision = await classifyTier(
+      connectorAction({ canonical_params: { path: '/home/someone/.ssh/id_ed25519' } }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.sensitive_read).toBe(true);
+  });
+
+  test('offline mode auto-denies a first-party tool', async () => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    services.isOffline = () => Promise.resolve(true);
+    const decision = await classifyTier(connectorAction(), makeCtx({ services }));
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBe('offline_mode');
+  });
+
+  test('a built-in tool never reads connector trust', async () => {
+    const decision = await classifyTier(
+      { ...connectorAction({ mcp_hints: {} }), tool_type: 'truefoundry-system' },
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+  });
+
+  test('classifying a first-party call writes no audit entry: the run is recorded once, at dispatch', async () => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const recorded: AuditRecordInput[] = [];
+    services.audit = {
+      record: input => {
+        recorded.push(input);
+        return Promise.resolve();
+      },
+      updateOutcome: () => Promise.resolve(),
+    };
+    const sentinel = createSentinelHostContext({ tenant_id: 't1', created_by: 'u1', conversation_id: 'c1', services });
+
+    const decision = await classifyHostToolCall({
+      sentinel,
+      repository_id: null,
+      workspace_cwd: null,
+      action: connectorAction(),
+    });
+
+    expect(decision.reason).toBe(FIRST_PARTY_TOOL_REASON);
     expect(recorded).toEqual([]);
   });
 });

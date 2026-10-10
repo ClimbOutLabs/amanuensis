@@ -4,16 +4,19 @@
  * Full action matrix, fail-closed on anything unrecognized. Ordering per the
  * spec: offline auto-deny first; write-then-execute check before allowlist
  * matching; allowlist before Tier 3; extractor fallback for external-service
- * actions; MCP hints only escalate a connector tool, never lower it. The one
- * way a connector tool skips its card is the user's own standing grant, and
- * every escalation is checked before it. Returns a TierDecision with stable
- * reason codes, the Tier 3 card when required, Tier 2 matched files/kind, and
- * the tracked-execution approval binding.
+ * actions. A connector tool's own MCP hints escalate it but never lower it by
+ * themselves. Two things let a read-only, explicitly closed-world connector
+ * tool skip its card: the host's first-party trust in the connector, and the
+ * user's own standing grant for the tool. Every escalation is checked before
+ * either. Returns a TierDecision with stable reason codes, the Tier 3 card
+ * when required, Tier 2 matched files/kind, and the tracked-execution approval
+ * binding.
  */
 import { realpathSync } from 'fs';
 import path from 'path';
 import { actionIdFor, normalizeCwd, toJsonSafeParams, type ShellApprovalBinding } from './approvalTokens';
 import { recordClassificationAudit } from './audit';
+import { FIRST_PARTY_TOOL_REASON } from './connectorTrust';
 import {
   classifyContextFor,
   type SentinelCallIdentity,
@@ -57,12 +60,14 @@ export interface SentinelAction {
   tool_name: string;
   /** The exact arguments the server will act on. */
   canonical_params: Record<string, unknown>;
-  /** 'truefoundry-system' for sandbox/first-party tools, 'mcp' for MCP tools. */
+  /** 'truefoundry-system' for sandbox and other built-in tools, 'mcp' for MCP tools. */
   tool_type: 'truefoundry-system' | 'mcp';
   /** Sandbox command effect when the action ran through the sandbox effect layer. */
   sandbox_effect?: string | undefined;
   /** Connector serving an MCP tool; keys the user's standing tool grants. */
   mcp_server_name?: string | undefined;
+  /** The host provisioned this connector itself. Never derived from tool metadata or client input. */
+  mcp_first_party?: boolean | undefined;
   mcp_hints: {
     read_only_hint?: boolean | undefined;
     destructive_hint?: boolean | undefined;
@@ -929,27 +934,40 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
-  // A connector tool's own hints never lower it. The user's standing grant skips the card, but
-  // only after every escalation above, never for a sensitive read, and only while the tool still
-  // claims to be read-only and explicitly closed-world (an absent openWorldHint means open).
+  // A connector tool's own hints never lower it. Trust in the connector (first-party) or in the
+  // tool (the user's standing grant) skips the card, but only after every escalation above, never
+  // for a sensitive read, and only while the tool still claims to be read-only and explicitly
+  // closed-world (an absent openWorldHint means open).
   if (
     action.tool_type === 'mcp' &&
-    action.mcp_server_name !== undefined &&
     readOnlyHint &&
     action.mcp_hints.open_world_hint === false &&
-    !sensitiveReadHit(action.canonical_params) &&
-    (await services.tool_grants.hasToolGrant({
-      tenant_id: ctx.tenant_id,
-      created_by: ctx.created_by,
-      mcp_server_name: action.mcp_server_name,
-      tool_name: action.tool_name,
-    }))
+    !sensitiveReadHit(action.canonical_params)
   ) {
-    return tier1Decision({
-      reason: TOOL_GRANT_REASON,
-      reason_detail: `Always allowed: \`${action.tool_name}\` on ${action.mcp_server_name}.`,
-      sensitive_read: false,
-    });
+    if (action.mcp_first_party === true) {
+      return tier1Decision({
+        reason: FIRST_PARTY_TOOL_REASON,
+        reason_detail: `First-party read-only tool \`${action.tool_name}\`${
+          action.mcp_server_name === undefined ? '' : ` on ${action.mcp_server_name}`
+        }.`,
+        sensitive_read: false,
+      });
+    }
+    if (
+      action.mcp_server_name !== undefined &&
+      (await services.tool_grants.hasToolGrant({
+        tenant_id: ctx.tenant_id,
+        created_by: ctx.created_by,
+        mcp_server_name: action.mcp_server_name,
+        tool_name: action.tool_name,
+      }))
+    ) {
+      return tier1Decision({
+        reason: TOOL_GRANT_REASON,
+        reason_detail: `Always allowed: \`${action.tool_name}\` on ${action.mcp_server_name}.`,
+        sensitive_read: false,
+      });
+    }
   }
 
   // Host built-in read-only tools: Tier 1.
@@ -982,7 +1000,8 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
 
 /**
  * The single authoritative tier classifier. Fail-closed on anything
- * unrecognized; MCP hints only escalate.
+ * unrecognized; MCP hints escalate, and lower a connector tool only through
+ * first-party trust or a standing grant.
  */
 export async function classifyTier(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const name = action.tool_name;

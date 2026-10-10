@@ -6,7 +6,7 @@
  */
 export { InMemoryApprovalTokenStore } from './approvalTokens';
 export type { ApprovalTokenStore } from './approvalTokens';
-export { recordClassificationAudit, recordToolGrantRun } from './audit';
+export { recordClassificationAudit, recordStandingTrustRun } from './audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './audit';
 export { canonicalShellForm, classifyHostToolCall, classifyTier, shellBindingFromForm } from './classifier';
 export type { ClassifyContext, SentinelAction } from './classifier';
