@@ -3,7 +3,7 @@ import { sql, type Kysely } from 'kysely';
 /**
  * Server-owned trust marker on a stored connector: 1 only for a connector the product's own setup
  * provisioned. Defaults to 0 so every existing connector starts untrusted.
- * Mirrors db/postgres/migrations/20261010_000002_mcp_server_first_party.ts.
+ * Mirrors db/postgres/migrations/20261010_000004_mcp_server_first_party.ts.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   // Kysely's SqliteAdapter reports supportsTransactionalDdl: false, so the Migrator runs this
