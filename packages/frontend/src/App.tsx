@@ -414,7 +414,8 @@ export function App() {
           let pageToken: string | undefined;
           do {
             const page = await bootClient.sessions.listEvents(sessionId, {
-              limit: 200,
+              // The server's maximum page size; anything larger is rejected with a 400.
+              limit: 100,
               ...(pageToken === undefined ? {} : { pageToken }),
             });
             for (const item of page.data) {
