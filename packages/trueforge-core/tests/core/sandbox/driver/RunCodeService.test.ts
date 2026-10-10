@@ -280,24 +280,24 @@ describe('RunCodeService', () => {
   describe('sandbox identity', () => {
     const fsPromises: typeof import('node:fs/promises') = jest.requireActual('node:fs/promises');
     let chownSpy: jest.SpyInstance;
-    let getuidSpy: jest.SpyInstance;
-    let getgidSpy: jest.SpyInstance;
+    let geteuidSpy: jest.SpyInstance;
+    let getegidSpy: jest.SpyInstance;
 
     beforeEach(() => {
       chownSpy = jest.spyOn(fsPromises, 'chown').mockResolvedValue(undefined);
-      getuidSpy = jest.spyOn(process, 'getuid');
-      getgidSpy = jest.spyOn(process, 'getgid');
+      geteuidSpy = jest.spyOn(process, 'geteuid');
+      getegidSpy = jest.spyOn(process, 'getegid');
     });
 
     afterEach(() => {
       chownSpy.mockRestore();
-      getuidSpy.mockRestore();
-      getgidSpy.mockRestore();
+      geteuidSpy.mockRestore();
+      getegidSpy.mockRestore();
     });
 
     it('runs a non-root server as its own uid:gid without chowning anything', async () => {
-      getuidSpy.mockReturnValue(4242);
-      getgidSpy.mockReturnValue(4343);
+      geteuidSpy.mockReturnValue(4242);
+      getegidSpy.mockReturnValue(4343);
       const result = await service.runCode(VALID_INPUT);
       expect(result.status).toBe('ok');
       expect(driver.runs[0]?.sandboxIdentity).toEqual({ uid: 4242, gid: 4343, chownRunDirs: false });
@@ -305,8 +305,8 @@ describe('RunCodeService', () => {
     });
 
     it('hands every staged dir and file to the image sandbox uid when the server is root', async () => {
-      getuidSpy.mockReturnValue(0);
-      getgidSpy.mockReturnValue(0);
+      geteuidSpy.mockReturnValue(0);
+      getegidSpy.mockReturnValue(0);
       const result = await service.runCode({
         ...VALID_INPUT,
         files_in: [{ name: 'data.csv', content_base64: Buffer.from('a,b').toString('base64') }],
@@ -325,8 +325,8 @@ describe('RunCodeService', () => {
     });
 
     it('refuses to run a non-root server in group 0', async () => {
-      getuidSpy.mockReturnValue(4242);
-      getgidSpy.mockReturnValue(0);
+      geteuidSpy.mockReturnValue(4242);
+      getegidSpy.mockReturnValue(0);
       const result = await service.runCode(VALID_INPUT);
       expect(result.status).toBe('failed');
       if (result.status === 'failed') {
@@ -336,8 +336,8 @@ describe('RunCodeService', () => {
     });
 
     it('fails the run before the container starts when the root handoff fails', async () => {
-      getuidSpy.mockReturnValue(0);
-      getgidSpy.mockReturnValue(0);
+      geteuidSpy.mockReturnValue(0);
+      getegidSpy.mockReturnValue(0);
       chownSpy.mockRejectedValue(new Error(`EPERM: operation not permitted, chown '${dataDir}/sandbox-runs/x'`));
       const result = await service.runCode(VALID_INPUT);
       expect(result.status).toBe('failed');

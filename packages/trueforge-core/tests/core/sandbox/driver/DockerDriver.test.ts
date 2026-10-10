@@ -1335,13 +1335,13 @@ describe('DockerDriver.run isolation refusal', () => {
 describe('DockerDriver.ensureReady canary', () => {
   const fsPromises: typeof import('node:fs/promises') = jest.requireActual('node:fs/promises');
   let chownSpy: jest.SpyInstance;
-  let getuidSpy: jest.SpyInstance;
-  let getgidSpy: jest.SpyInstance;
+  let geteuidSpy: jest.SpyInstance;
+  let getegidSpy: jest.SpyInstance;
 
   /** The server process acts as this uid:gid; every chown is recorded on the fake host instead of applied. */
   function actAsServer(input: { server: { uid: number; gid: number }; containers: FakeSandboxContainers }): void {
-    getuidSpy.mockReturnValue(input.server.uid);
-    getgidSpy.mockReturnValue(input.server.gid);
+    geteuidSpy.mockReturnValue(input.server.uid);
+    getegidSpy.mockReturnValue(input.server.gid);
     chownSpy.mockImplementation((path: string, uid: number, gid: number) => {
       input.containers.recordChown({ path, owner: { uid, gid } });
       return Promise.resolve();
@@ -1376,14 +1376,14 @@ describe('DockerDriver.ensureReady canary', () => {
 
   beforeEach(() => {
     chownSpy = jest.spyOn(fsPromises, 'chown');
-    getuidSpy = jest.spyOn(process, 'getuid');
-    getgidSpy = jest.spyOn(process, 'getgid');
+    geteuidSpy = jest.spyOn(process, 'geteuid');
+    getegidSpy = jest.spyOn(process, 'getegid');
   });
 
   afterEach(async () => {
     chownSpy.mockRestore();
-    getuidSpy.mockRestore();
-    getgidSpy.mockRestore();
+    geteuidSpy.mockRestore();
+    getegidSpy.mockRestore();
     // A failed canary must not leave its run root behind for the next test's assertions.
     for (const entry of await runDirEntries()) {
       await rm(join(fakeDataDir, 'sandbox-runs', entry), { recursive: true, force: true });
@@ -1420,8 +1420,8 @@ describe('DockerDriver.ensureReady canary', () => {
     const containers = new FakeSandboxContainers(undefined);
     const runner = new FakeRunner();
     scriptReadyPath(runner, DIGEST, containers);
-    getuidSpy.mockReturnValue(4242);
-    getgidSpy.mockReturnValue(0);
+    geteuidSpy.mockReturnValue(4242);
+    getegidSpy.mockReturnValue(0);
     const driver = new DockerDriver(driverOptions(), runner);
 
     const readiness = await driver.ensureReady();
@@ -1461,8 +1461,8 @@ describe('DockerDriver.ensureReady canary', () => {
     const containers = new FakeSandboxContainers({ uid: 0, gid: 0 });
     const runner = new FakeRunner();
     scriptReadyPath(runner, DIGEST, containers);
-    getuidSpy.mockReturnValue(0);
-    getgidSpy.mockReturnValue(0);
+    geteuidSpy.mockReturnValue(0);
+    getegidSpy.mockReturnValue(0);
     chownSpy.mockRejectedValue(new Error('EPERM: operation not permitted, chown'));
     const driver = new DockerDriver(driverOptions(), runner);
 
@@ -1483,8 +1483,8 @@ describe('DockerDriver.ensureReady canary', () => {
     const containers = new FakeSandboxContainers({ uid: 0, gid: 0 });
     const runner = new FakeRunner();
     scriptReadyPath(runner, DIGEST, containers);
-    getuidSpy.mockReturnValue(0);
-    getgidSpy.mockReturnValue(0);
+    geteuidSpy.mockReturnValue(0);
+    getegidSpy.mockReturnValue(0);
     chownSpy.mockResolvedValue(undefined);
     const driver = new DockerDriver(driverOptions(), runner);
 

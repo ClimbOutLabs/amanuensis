@@ -11,46 +11,64 @@ import {
 } from '../../../../src/core/sandbox/driver/RunStaging';
 
 describe('resolveSandboxIdentity', () => {
-  let getuidSpy: jest.SpyInstance;
-  let getgidSpy: jest.SpyInstance;
+  let geteuidSpy: jest.SpyInstance;
+  let getegidSpy: jest.SpyInstance;
 
   beforeEach(() => {
-    getuidSpy = jest.spyOn(process, 'getuid');
-    getgidSpy = jest.spyOn(process, 'getgid');
+    geteuidSpy = jest.spyOn(process, 'geteuid');
+    getegidSpy = jest.spyOn(process, 'getegid');
   });
 
   afterEach(() => {
-    getuidSpy.mockRestore();
-    getgidSpy.mockRestore();
+    geteuidSpy.mockRestore();
+    getegidSpy.mockRestore();
   });
 
   it('runs a non-root server as its own numeric uid:gid with no handoff', () => {
-    getuidSpy.mockReturnValue(1000);
-    getgidSpy.mockReturnValue(1001);
+    geteuidSpy.mockReturnValue(1000);
+    getegidSpy.mockReturnValue(1001);
     expect(resolveSandboxIdentity()).toEqual({ uid: 1000, gid: 1001, chownRunDirs: false });
   });
 
   it('keeps the image sandbox uid and requires the handoff when the server is root', () => {
-    getuidSpy.mockReturnValue(0);
-    getgidSpy.mockReturnValue(0);
+    geteuidSpy.mockReturnValue(0);
+    getegidSpy.mockReturnValue(0);
     expect(resolveSandboxIdentity()).toEqual({ uid: 65532, gid: 65532, chownRunDirs: true });
   });
 
   it('refuses a non-root server whose gid is 0', () => {
-    getuidSpy.mockReturnValue(1000);
-    getgidSpy.mockReturnValue(0);
+    geteuidSpy.mockReturnValue(1000);
+    getegidSpy.mockReturnValue(0);
     expect(() => resolveSandboxIdentity()).toThrow(/gid 0/);
   });
 
   it('takes the root path when the platform has no uid', () => {
-    getuidSpy.mockReturnValue(undefined);
+    geteuidSpy.mockReturnValue(undefined);
     expect(resolveSandboxIdentity()).toEqual({ uid: 65532, gid: 65532, chownRunDirs: true });
+  });
+
+  it('goes by the effective ids, not the real ones a setuid launch leaves behind', () => {
+    const getuidSpy = jest.spyOn(process, 'getuid').mockReturnValue(0);
+    const getgidSpy = jest.spyOn(process, 'getgid').mockReturnValue(0);
+    try {
+      geteuidSpy.mockReturnValue(1000);
+      getegidSpy.mockReturnValue(1001);
+      expect(resolveSandboxIdentity()).toEqual({ uid: 1000, gid: 1001, chownRunDirs: false });
+      geteuidSpy.mockReturnValue(0);
+      getegidSpy.mockReturnValue(0);
+      getuidSpy.mockReturnValue(1000);
+      getgidSpy.mockReturnValue(1001);
+      expect(resolveSandboxIdentity()).toEqual({ uid: 65532, gid: 65532, chownRunDirs: true });
+    } finally {
+      getuidSpy.mockRestore();
+      getgidSpy.mockRestore();
+    }
   });
 
   it('never resolves to root', () => {
     for (const uid of [0, 1, 1000, 65532]) {
-      getuidSpy.mockReturnValue(uid);
-      getgidSpy.mockReturnValue(uid);
+      geteuidSpy.mockReturnValue(uid);
+      getegidSpy.mockReturnValue(uid);
       expect(resolveSandboxIdentity().uid).not.toBe(0);
     }
   });
