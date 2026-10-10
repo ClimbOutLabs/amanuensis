@@ -30,6 +30,7 @@ import {
   extractExecutedFileOperand,
   sha256FileContent,
   splitWordsLenient,
+  writeTargetTouchesGitControl,
 } from './trackedExecutables';
 
 export interface VerifiableCall {
@@ -114,6 +115,9 @@ function verifyTier2Containment(input: { call: VerifiableCall; workspace_root: s
       const identity = canonicalWriteTarget({ p: target, cwd });
       if (identity === null || !insideRoot(identity)) {
         return 'Tier 2 write target is outside the workspace at dispatch; request approval again.';
+      }
+      if (writeTargetTouchesGitControl({ p: target, cwd })) {
+        return 'Tier 2 write target is Git control state at dispatch; request approval again.';
       }
     }
     return undefined;

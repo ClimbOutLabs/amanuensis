@@ -29,8 +29,8 @@ function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () 
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
+      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
+      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });
@@ -46,8 +46,8 @@ function servicesWithCatAllowlist(): { services: SentinelServices; cleanup: () =
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      cat: { args: ['-n'], operands: 'workspace_relative', offline_ok: true },
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
+      cat: { args: ['-n'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
+      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });
@@ -478,6 +478,30 @@ describe('Suite B - workspace containment escapes', () => {
     }
   });
 
+  test('B8 GAP: writes to git control files and symlinks into .git are Tier 3', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      mkdirSync(join(ws, '.git'));
+      mkdirSync(join(ws, '.GIT'));
+      mkdirSync(join(ws, 'sub'));
+      symlinkSync(join(ws, '.git'), join(ws, 'link'));
+      const ctx = makeCtx({ workspace_cwd: ws });
+      for (const tool of ['write_file', 'replace_text']) {
+        const viaCwd = await classifyTier(action(tool, { path: 'config', cwd: join(ws, '.git'), content: 'x' }), ctx);
+        expect(viaCwd.tier).toBe(3);
+        expect(viaCwd.reason).toBe('git_control_write');
+        for (const path of ['.git/config', '.GIT/config', 'link/config', 'sub/.gitattributes', '.gitmodules']) {
+          const decision = await classifyTier(action(tool, { path, content: 'x' }), ctx);
+          expect(decision.tier).toBe(3);
+          expect(decision.reason).toBe('git_control_write');
+        }
+        expect((await classifyTier(action(tool, { path: 'notes.txt', content: 'x' }), ctx)).tier).toBe(2);
+      }
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
   test('B7 GAP: write_file with no path fails closed as Tier 3', async () => {
     const decision = await classifyTier(action('write_file', {}), makeCtx());
     expect(decision.tier).toBe(3);
@@ -829,6 +853,34 @@ describe('Suite F - tier boundary probes', () => {
       expect((await classifyTier(action('exec', { command: 'git --config user.x y' }), ctx)).tier).toBe(3);
       expect((await classifyTier(action('exec', { command: 'git -c user.x=y status' }), ctx)).tier).toBe(3);
       expect((await classifyTier(action('exec', { command: 'git status' }), ctx)).tier).toBe(1);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('F3b GAP: git subcommands outside the read-only list are Tier 3', async () => {
+    const { services, cleanup } = servicesWithSeededTools();
+    try {
+      const ctx = makeCtx({ services });
+      const bypasses = [
+        'git push origin main',
+        'git pull',
+        'git fetch',
+        'git remote add origin https://example.com/r.git',
+        "git config core.fsmonitor 'sh x.sh'",
+        "git config alias.x '!sh x.sh'",
+        'git x',
+        "git -c alias.x='!sh x.sh' x",
+        'git --exec-path=. status',
+        'git -C . status',
+        'git branch newbranch',
+      ];
+      for (const command of bypasses) {
+        expect((await classifyTier(action('exec', { command }), ctx)).tier).toBe(3);
+      }
+      for (const command of ['git status', 'git log --oneline -n 5', 'git diff --cached', 'git branch --list']) {
+        expect((await classifyTier(action('exec', { command }), ctx)).tier).toBe(1);
+      }
     } finally {
       cleanup();
     }

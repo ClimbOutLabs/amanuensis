@@ -23,8 +23,8 @@ function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () 
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
+      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
+      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });
