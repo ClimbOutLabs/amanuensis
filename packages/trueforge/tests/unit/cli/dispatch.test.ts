@@ -60,4 +60,10 @@ describe('amanuensis dispatcher', () => {
     expect(failure.out).toEqual([]);
     expect(failure.err.join('')).not.toBe('');
   });
+
+  it('routes doctor to its own parser', async () => {
+    const io = fakeIo();
+    expect(await runCli({ argv: ['doctor', '--only', 'nope'], io })).toBe(2);
+    expect(io.err.join('')).toContain('Unknown check "nope"');
+  });
 });
