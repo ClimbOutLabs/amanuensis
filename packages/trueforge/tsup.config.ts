@@ -37,6 +37,8 @@ export default defineConfig([
     entry: {
       main: 'src/main.ts',
       'controller-main': 'src/controller-main.ts',
+      // Config-free `amanuensis <command>` dispatcher for `docker run <image> amanuensis ...`.
+      amanuensis: 'src/cli/main.ts',
       // Emit both engines under dist/{postgres,sqlite}/migrations/.
       // Runtime selects migrations via STANDALONE (false → postgres, true → sqlite).
       ...migrationEntries('postgres'),
