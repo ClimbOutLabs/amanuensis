@@ -1,4 +1,6 @@
 import Database from 'better-sqlite3';
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import {
   CompiledQuery,
   Kysely,
@@ -162,7 +164,12 @@ function shouldParseJsonResultColumn(_value: string, jsonPath: string): boolean 
 }
 
 export function createSqliteDb(filename: string): Kysely<Schema> {
+  const isNewFile = !existsSync(filename);
+  mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
   const database = new Database(filename);
+  if (isNewFile) {
+    chmodSync(filename, 0o600);
+  }
   applyPragmas(database);
   return new Kysely<Schema>({
     dialect: new ImmediateSqliteDialect(database),

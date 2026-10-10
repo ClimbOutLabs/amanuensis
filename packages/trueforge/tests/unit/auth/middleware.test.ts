@@ -409,6 +409,7 @@ describe('createApiKeyAuthMiddleware', () => {
   it.each([
     ['missing header', undefined],
     ['wrong key', 'Bearer wrong-key'],
+    ['wrong key of a different length', 'Bearer short'],
   ])('rejects %s', async (_name, authorization) => {
     const response = await createServiceApp('service-key').request('/', {
       method: 'POST',

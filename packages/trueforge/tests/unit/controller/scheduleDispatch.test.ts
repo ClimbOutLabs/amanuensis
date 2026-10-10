@@ -1,4 +1,4 @@
-import configuration, { STANDALONE_TRUEFORGE_API_KEY } from '../../../src/config';
+import configuration from '../../../src/config';
 import {
   createHttpScheduleRunExecutor,
   loadScheduleDispatchItem,
@@ -100,7 +100,7 @@ describe('schedule execution HTTP transport', () => {
     const [url, init] = request.mock.calls[0] ?? [];
     expect(String(url)).toBe(`${configuration.SERVER_URL}/api/internal/schedules/runs/execute`);
     expect(init?.method).toBe('POST');
-    expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${STANDALONE_TRUEFORGE_API_KEY}`);
+    expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${configuration.TRUEFORGE_API_KEY}`);
     expect(init?.body).toBe(JSON.stringify({ schedule_run_id: 'run-1' }));
   });
 });

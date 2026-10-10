@@ -293,7 +293,7 @@ async function createStandalonePersistence(options: {
   logger: Logger;
 }): Promise<ServerPersistence<Transaction<SqliteDatabase>>> {
   const { sqlitePath, logger } = options;
-  await mkdir(path.dirname(sqlitePath), { recursive: true });
+  await mkdir(path.dirname(sqlitePath), { recursive: true, mode: 0o700 });
   const [{ createSqliteDb }, { migrateSqliteToLatest }, sqliteStores] = await Promise.all([
     import('./db/sqlite/client'),
     import('./db/migrateSqlite'),
