@@ -10,7 +10,14 @@
  */
 import { realpathSync } from 'fs';
 import path from 'path';
-import { actionIdFor, normalizeCwd, toJsonSafeParams, type ShellApprovalBinding } from './approvalTokens';
+import {
+  actionIdFor,
+  approvalTokenExpiry,
+  normalizeCwd,
+  toJsonSafeParams,
+  type ApprovalTokenScope,
+  type ShellApprovalBinding,
+} from './approvalTokens';
 import { recordClassificationAudit } from './audit';
 import {
   classifyContextFor,
@@ -394,12 +401,13 @@ export function shellBindingFromForm(form: CanonicalShellForm): ShellApprovalBin
   };
 }
 
-function mintShellToken(input: { services: SentinelServices; tool_name: string; form: CanonicalShellForm }): {
+async function mintShellToken(input: { ctx: ClassifyContext; tool_name: string; form: CanonicalShellForm }): Promise<{
   token_id: string;
   binding: ShellApprovalBinding;
-} {
+}> {
   const binding = shellBindingFromForm(input.form);
-  const token = input.services.token_store.mint({
+  const token = await input.ctx.services.token_store.mint({
+    ...approvalTokenOwner(input.ctx),
     action_id: actionIdFor({ tool_name: input.tool_name, canonical_params: input.form }),
     canonical_params: input.form,
     shell: binding,
@@ -407,14 +415,19 @@ function mintShellToken(input: { services: SentinelServices; tool_name: string; 
   return { token_id: token.token_id, binding };
 }
 
+/** Scope and expiry every approval token is minted with; dispatch redeems under the same identity. */
+function approvalTokenOwner(ctx: ClassifyContext): ApprovalTokenScope & { expires_at: string } {
+  return { tenant_id: ctx.tenant_id, created_by: ctx.created_by, expires_at: approvalTokenExpiry() };
+}
+
 /** Token and parsed binding that let dispatch re-verify an approved shell command. */
-function mintShellApproval(input: {
+async function mintShellApproval(input: {
   ctx: ClassifyContext;
   action: SentinelAction;
   command: string;
   cwd: string | null;
   env: Record<string, string> | null;
-}): { approval_token_id: string; shell_binding: ShellApprovalBinding } {
+}): Promise<{ approval_token_id: string; shell_binding: ShellApprovalBinding }> {
   const { ctx, action } = input;
   const form = canonicalShellForm({
     command: input.command,
@@ -423,7 +436,7 @@ function mintShellApproval(input: {
     allowlist: ctx.services.shell_allowlist,
     workspace_cwd: ctx.workspace_cwd,
   });
-  const { token_id, binding } = mintShellToken({ services: ctx.services, tool_name: action.tool_name, form });
+  const { token_id, binding } = await mintShellToken({ ctx, tool_name: action.tool_name, form });
   return { approval_token_id: token_id, shell_binding: binding };
 }
 
@@ -461,7 +474,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       reason: 'env_overrides_present',
       reason_detail: 'Custom environment variables require approval.',
       sensitive_read: false,
-      ...mintShellApproval({ ctx, action, command, cwd, env }),
+      ...(await mintShellApproval({ ctx, action, command, cwd, env })),
     });
   }
 
@@ -514,7 +527,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         reason: 'tracked_check_unresolvable',
         reason_detail: 'The executed operand could not be resolved; failing closed.',
         sensitive_read: false,
-        approval_token_id: mintPlainToken({ services, tool_name: action.tool_name, params: action.canonical_params }),
+        approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
       });
     }
     if (services.tracked_store.isTracked({ scope: workspaceScope(ctx), file_identity: identity })) {
@@ -540,11 +553,8 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         };
         const token =
           grantParams === null
-            ? mintPlainToken({ services, tool_name: action.tool_name, params: action.canonical_params })
-            : services.token_store.mint({
-                action_id: actionIdFor({ tool_name: action.tool_name, canonical_params: grantParams }),
-                canonical_params: grantParams,
-              }).token_id;
+            ? await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params })
+            : await mintPlainToken({ ctx, tool_name: action.tool_name, params: grantParams });
         return tier3Decision({
           card: {
             plain_what: `Execute \`${basenameOf(identity)}\`, a script the agent wrote earlier.`,
@@ -591,7 +601,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           reason: 'workspace_unknown',
           reason_detail: 'There is no workspace to keep the command inside.',
           sensitive_read: false,
-          ...mintShellApproval({ ctx, action, command, cwd, env }),
+          ...(await mintShellApproval({ ctx, action, command, cwd, env })),
         });
       }
       const cwdInside = isInsideWorkspace({ p: identityCwd, cwd: '/', workspace_root: workspaceRoot });
@@ -610,7 +620,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           reason: 'cwd_outside_workspace',
           reason_detail: 'The working directory is outside the workspace.',
           sensitive_read: false,
-          ...mintShellApproval({ ctx, action, command, cwd, env }),
+          ...(await mintShellApproval({ ctx, action, command, cwd, env })),
         });
       }
       if (!shellOperandsInsideWorkspace({ parsed, cwd: identityCwd, workspace_root: workspaceRoot })) {
@@ -628,7 +638,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           reason: 'file_outside_workspace',
           reason_detail: 'A file operand resolves outside the workspace.',
           sensitive_read: false,
-          ...mintShellApproval({ ctx, action, command, cwd, env }),
+          ...(await mintShellApproval({ ctx, action, command, cwd, env })),
         });
       }
       // Every allowlist entry is read-only by curation (no writes, no network), so a match
@@ -649,7 +659,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     allowlist: services.shell_allowlist,
     workspace_cwd: ctx.workspace_cwd,
   });
-  const { token_id, binding } = mintShellToken({ services, tool_name: action.tool_name, form });
+  const { token_id, binding } = await mintShellToken({ ctx, tool_name: action.tool_name, form });
   return tier3Decision({
     card: {
       plain_what:
@@ -672,11 +682,13 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   });
 }
 
-function mintPlainToken(input: { services: SentinelServices; tool_name: string; params: unknown }): string {
-  return input.services.token_store.mint({
+async function mintPlainToken(input: { ctx: ClassifyContext; tool_name: string; params: unknown }): Promise<string> {
+  const token = await input.ctx.services.token_store.mint({
+    ...approvalTokenOwner(input.ctx),
     action_id: actionIdFor({ tool_name: input.tool_name, canonical_params: input.params }),
     canonical_params: input.params,
-  }).token_id;
+  });
+  return token.token_id;
 }
 
 async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
@@ -699,8 +711,8 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       reason: 'write_outside_workspace',
       reason_detail: 'Write target is null or workspace is unknown.',
       sensitive_read: false,
-      approval_token_id: mintPlainToken({
-        services: ctx.services,
+      approval_token_id: await mintPlainToken({
+        ctx,
         tool_name: action.tool_name,
         params: action.canonical_params,
       }),
@@ -736,8 +748,8 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       reason: 'write_outside_workspace',
       reason_detail: 'Write targets outside the workspace are never Tier 2.',
       sensitive_read: false,
-      approval_token_id: mintPlainToken({
-        services: ctx.services,
+      approval_token_id: await mintPlainToken({
+        ctx,
         tool_name: action.tool_name,
         params: action.canonical_params,
       }),
@@ -759,8 +771,8 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       reason: 'git_control_write',
       reason_detail: 'Writes to .git, .gitattributes, and .gitmodules always require approval.',
       sensitive_read: false,
-      approval_token_id: mintPlainToken({
-        services: ctx.services,
+      approval_token_id: await mintPlainToken({
+        ctx,
         tool_name: action.tool_name,
         params: action.canonical_params,
       }),
@@ -839,8 +851,8 @@ async function decideTier2(input: {
   }
   return tier2Decision({
     ...base,
-    approval_token_id: mintPlainToken({
-      services: ctx.services,
+    approval_token_id: await mintPlainToken({
+      ctx,
       tool_name: action.tool_name,
       params: action.canonical_params,
     }),
@@ -946,7 +958,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason_detail: 'MCP annotations flagged the tool; hints escalate only.',
       sensitive_read: sensitiveReadHit(action.canonical_params),
       escalated: true,
-      approval_token_id: mintPlainToken({ services, tool_name: action.tool_name, params: action.canonical_params }),
+      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
   }
 
@@ -981,7 +993,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason: extraction.external_service ? 'external_service' : isInstall ? 'install_action' : 'destructive_action',
       reason_detail: 'Name-based Tier 3 class.',
       sensitive_read: sensitiveReadHit(action.canonical_params),
-      approval_token_id: mintPlainToken({ services, tool_name: action.tool_name, params: action.canonical_params }),
+      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
   }
 
@@ -1009,7 +1021,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     reason: 'unrecognized_tool',
     reason_detail: 'Fail-closed: unrecognized tools require approval.',
     sensitive_read: sensitiveReadHit(action.canonical_params),
-    approval_token_id: mintPlainToken({ services, tool_name: action.tool_name, params: action.canonical_params }),
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
   });
 }
 
@@ -1054,8 +1066,8 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         reason: name === 'run_code' ? 'arbitrary_code_execution' : 'plan_submission',
         reason_detail: 'Always Tier 3 by policy.',
         sensitive_read: false,
-        approval_token_id: mintPlainToken({
-          services: ctx.services,
+        approval_token_id: await mintPlainToken({
+          ctx,
           tool_name: action.tool_name,
           params: action.canonical_params,
         }),

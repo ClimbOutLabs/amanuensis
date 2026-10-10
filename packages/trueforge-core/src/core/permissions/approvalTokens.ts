@@ -116,29 +116,110 @@ export interface ApprovalToken {
   created_at: string;
 }
 
+/** Tenant and user an approval belongs to; both are required, so an unscoped token cannot exist. */
+export interface ApprovalTokenScope {
+  tenant_id: string;
+  created_by: string;
+}
+
+export interface MintApprovalTokenInput extends ApprovalTokenScope {
+  action_id: string;
+  /** The caller supplies the canonical params; the store hashes them. */
+  canonical_params: unknown;
+  shell?: ShellApprovalBinding | null;
+  /** ISO instant after which the token no longer redeems. */
+  expires_at: string;
+}
+
+/** Identifies a token to look up or redeem; the scope must match the one it was minted with. */
+export interface ApprovalTokenRef extends ApprovalTokenScope {
+  token_id: string;
+}
+
+/**
+ * Redeem is atomic and single-use: of any number of concurrent redeems of one
+ * token, at most one returns it. Stores fail closed: errors propagate, and a
+ * token that is missing, used, expired or outside the caller's scope reads as
+ * undefined.
+ */
 export interface ApprovalTokenStore {
-  /**
-   * Mint a token binding the action id to the canonical params hash. The
-   * caller supplies the canonical params; the store hashes them.
-   */
-  mint(input: { action_id: string; canonical_params: unknown; shell?: ShellApprovalBinding | null }): ApprovalToken;
-  /** Look up a token without consuming it. */
-  peek(input: { token_id: string }): ApprovalToken | undefined;
-  /**
-   * Single-use redeem: returns the token and marks it consumed. Returns
-   * undefined when the token is missing or already redeemed.
-   */
-  redeem(input: { token_id: string }): ApprovalToken | undefined;
-  /** Drop tokens created before the cutoff (abandoned denials, restarts). */
-  pruneBefore(input: { cutoff_iso: string }): void;
+  /** Mint a token binding the action id to the canonical params hash, and drop spent tokens. */
+  mint(input: MintApprovalTokenInput): Promise<ApprovalToken>;
+  /** Look up a token that can still be redeemed, without consuming it. */
+  peek(input: ApprovalTokenRef): Promise<ApprovalToken | undefined>;
+  /** Single-use redeem: returns the token and marks it consumed. */
+  redeem(input: ApprovalTokenRef): Promise<ApprovalToken | undefined>;
+}
+
+/**
+ * How long a pending approval stays redeemable. Bounds how long an unanswered
+ * card or an abandoned denial can leave a live token behind.
+ */
+export const APPROVAL_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+export function approvalTokenExpiry(): string {
+  return new Date(Date.now() + APPROVAL_TOKEN_TTL_MS).toISOString();
+}
+
+export function hasApprovalScope(scope: ApprovalTokenScope): boolean {
+  return (
+    typeof scope.tenant_id === 'string' &&
+    scope.tenant_id.length > 0 &&
+    typeof scope.created_by === 'string' &&
+    scope.created_by.length > 0
+  );
+}
+
+/** Token ids are bearer secrets; stores keep only this digest. */
+export function hashApprovalTokenId(tokenId: string): string {
+  return createHash('sha256').update(tokenId).digest('hex');
+}
+
+export interface PreparedApprovalToken {
+  token: ApprovalToken;
+  token_hash: string;
+  /** Normalized to an ISO instant, so text comparison orders by time. */
+  expires_at: string;
+}
+
+/**
+ * Shared mint rules for every store: a complete scope, a parseable expiry, a
+ * fresh random id, and the params hash. Throws instead of minting a token the
+ * redeem path could never scope or expire.
+ */
+export function prepareApprovalToken(input: MintApprovalTokenInput): PreparedApprovalToken {
+  if (!hasApprovalScope(input)) {
+    throw new Error('Approval token requires a tenant and a user');
+  }
+  const expiresAt = new Date(input.expires_at);
+  if (Number.isNaN(expiresAt.getTime())) {
+    throw new Error('Approval token requires a valid expiry');
+  }
+  const token: ApprovalToken = {
+    token_id: randomBytes(16).toString('hex'),
+    action_id: input.action_id,
+    params_hash: hashCanonicalParams(input.canonical_params),
+    shell: input.shell ?? null,
+    created_at: new Date().toISOString(),
+  };
+  return { token, token_hash: hashApprovalTokenId(token.token_id), expires_at: expiresAt.toISOString() };
 }
 
 const MAX_TOKENS = 5000;
 
-export class InMemoryApprovalTokenStore implements ApprovalTokenStore {
-  private readonly tokens = new Map<string, { token: ApprovalToken; used: boolean }>();
+interface InMemoryEntry {
+  token: ApprovalToken;
+  scope: ApprovalTokenScope;
+  expires_at_ms: number;
+  used: boolean;
+}
 
-  mint(input: { action_id: string; canonical_params: unknown; shell?: ShellApprovalBinding | null }): ApprovalToken {
+export class InMemoryApprovalTokenStore implements ApprovalTokenStore {
+  private readonly tokens = new Map<string, InMemoryEntry>();
+
+  async mint(input: MintApprovalTokenInput): Promise<ApprovalToken> {
+    const prepared = prepareApprovalToken(input);
+    this.dropSpent();
     if (this.tokens.size >= MAX_TOKENS) {
       // Oldest first: insertion-ordered map, evict from the front.
       const oldest = this.tokens.keys().next();
@@ -146,33 +227,54 @@ export class InMemoryApprovalTokenStore implements ApprovalTokenStore {
         this.tokens.delete(oldest.value);
       }
     }
-    const token: ApprovalToken = {
-      token_id: randomBytes(16).toString('hex'),
-      action_id: input.action_id,
-      params_hash: hashCanonicalParams(input.canonical_params),
-      shell: input.shell ?? null,
-      created_at: new Date().toISOString(),
-    };
-    this.tokens.set(token.token_id, { token, used: false });
-    return token;
+    this.tokens.set(prepared.token.token_id, {
+      token: prepared.token,
+      scope: { tenant_id: input.tenant_id, created_by: input.created_by },
+      expires_at_ms: Date.parse(prepared.expires_at),
+      used: false,
+    });
+    return prepared.token;
   }
 
-  peek(input: { token_id: string }): ApprovalToken | undefined {
-    return this.tokens.get(input.token_id)?.token;
+  async peek(input: ApprovalTokenRef): Promise<ApprovalToken | undefined> {
+    return this.live(input)?.token;
   }
 
-  redeem(input: { token_id: string }): ApprovalToken | undefined {
-    const entry = this.tokens.get(input.token_id);
-    if (entry === undefined || entry.used) {
+  async redeem(input: ApprovalTokenRef): Promise<ApprovalToken | undefined> {
+    const entry = this.live(input);
+    if (entry === undefined) {
       return undefined;
     }
     entry.used = true;
     return entry.token;
   }
 
-  pruneBefore(input: { cutoff_iso: string }): void {
+  /** Rows held, spent ones included until the next mint drops them. */
+  get size(): number {
+    return this.tokens.size;
+  }
+
+  private live(input: ApprovalTokenRef): InMemoryEntry | undefined {
+    if (!hasApprovalScope(input)) {
+      return undefined;
+    }
+    const entry = this.tokens.get(input.token_id);
+    if (
+      entry === undefined ||
+      entry.used ||
+      entry.expires_at_ms <= Date.now() ||
+      entry.scope.tenant_id !== input.tenant_id ||
+      entry.scope.created_by !== input.created_by
+    ) {
+      return undefined;
+    }
+    return entry;
+  }
+
+  private dropSpent(): void {
+    const now = Date.now();
     for (const [id, entry] of this.tokens) {
-      if (entry.token.created_at < input.cutoff_iso) {
+      if (entry.used || entry.expires_at_ms <= now) {
         this.tokens.delete(id);
       }
     }
