@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { createLogger } from 'winston';
 import { TENANT_ID } from '../../src/apis/sessions';
 import { createServerApp } from '../../src/app';
+import type { Authenticator } from '../../src/auth/authenticator';
 import { TrueForgeAuthorizer } from '../../src/auth/authorizer';
 import { createAuthenticator } from '../../src/auth/createAuthenticator';
 import { McpCatalog } from '../../src/catalog/McpCatalog';
@@ -68,7 +69,11 @@ export interface ApprovalTestServer {
   close: () => Promise<void>;
 }
 
-function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): OpenAPIHono {
+function buildApp(
+  db: SqliteDb,
+  sandboxProvider: SandboxProvider | undefined,
+  authenticator: Authenticator | undefined,
+): OpenAPIHono {
   const sessionStore = new SqliteSessionStore(db);
   const tokenStore = new SqliteOAuthTokenStore(db);
   const agentStore = new SqliteAgentStore(db);
@@ -109,7 +114,7 @@ function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): O
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
     oidcClient: undefined,
-    authenticator: createAuthenticator({ mode: TrueForgeAuthMode.Standalone }),
+    authenticator: authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone }),
     authorizer: new TrueForgeAuthorizer(),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
@@ -122,6 +127,8 @@ function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): O
 
 export async function startApprovalTestServer(options?: {
   sandboxProvider?: SandboxProvider | undefined;
+  /** Replaces the standalone authenticator, e.g. to prove a mount is auth-protected. */
+  authenticator?: Authenticator | undefined;
 }): Promise<ApprovalTestServer> {
   const mcp = await startInertMcpServer();
   const model = await startScriptedModelServer();
@@ -183,7 +190,7 @@ export async function startApprovalTestServer(options?: {
     },
   });
 
-  let app = buildApp(db, options?.sandboxProvider);
+  let app = buildApp(db, options?.sandboxProvider, options?.authenticator);
 
   return {
     // Hono's request() is sync-or-async depending on the route; the fixture
@@ -192,7 +199,7 @@ export async function startApprovalTestServer(options?: {
     restart: async () => {
       await db.destroy();
       db = createSqliteDb(databaseFile);
-      app = buildApp(db, options?.sandboxProvider);
+      app = buildApp(db, options?.sandboxProvider, options?.authenticator);
     },
     mcp,
     model,

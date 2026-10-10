@@ -145,7 +145,7 @@ describe('resolvePersonaKnowledgeBlock near-miss wiring', () => {
   it('records answered when the judge keeps a passage, leaving web_search alone', async () => {
     const { block, sourceState } = await resolveWithJudge(async () => [0]);
 
-    expect(block).toContain('twenty million dollars');
+    expect(block?.block).toContain('twenty million dollars');
     expect(sourceState.libraryConsulted).toBe(true);
     expect(sourceState.libraryAnswered).toBe(true);
 

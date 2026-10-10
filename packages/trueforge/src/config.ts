@@ -649,6 +649,14 @@ export interface SharedServerConfiguration {
    */
   TOOL_CALL_TIMEOUT_MS: number;
   /**
+   * Bound in milliseconds on waiting for a model call's first output before
+   * the turn fails visibly instead of hanging. A provider that accepts the
+   * request but never produces a first chunk would otherwise leave the turn
+   * active indefinitely. Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default
+   * 600000 (10 minutes).
+   */
+  MODEL_FIRST_RESPONSE_TIMEOUT_MS: number;
+  /**
    * Client name used for Dynamic Client Registration (DCR) of MCP servers.
    * This is the client name shown on authorization-server consent screens.
    * Env: `MCP_DCR_OAUTH_CLIENT_NAME`. Default: "truefoundry-harness".
@@ -1045,6 +1053,14 @@ export interface SharedServerConfiguration {
    */
   MEMORY_EMBEDDINGS_MODEL_DIR: string;
   /**
+   * Root directory for persona knowledge libraries. Each persona gets its own
+   * SQLite database file under a sanitized tenant subdirectory, so knowledge
+   * can never leak across personas. Persist it (Docker volume) or libraries
+   * vanish on container recreate.
+   * Env: `PERSONA_KNOWLEDGE_DIR`. Default `./data/persona-knowledge` (relative to the process cwd).
+   */
+  PERSONA_KNOWLEDGE_DIR: string;
+  /**
    * Memories embedded per background-backfill batch. Smaller batches yield to the
    * event loop more often; larger batches finish sooner.
    * Env: `MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE`. Default 8.
@@ -1282,6 +1298,13 @@ const shared: SharedServerConfiguration = {
     // deadline (see getRunCodeToolCallTimeoutMs), so the long bound is scoped
     // to the one tool that needs it instead of every tool.
     defaultValue: 240_000,
+  }),
+  MODEL_FIRST_RESPONSE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_FIRST_RESPONSE_TIMEOUT_MS',
+    raw: getEnv('MODEL_FIRST_RESPONSE_TIMEOUT_MS'),
+    // Literal mirror of DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS in
+    // trueforge-core's AgentThread.ts (the canonical owner).
+    defaultValue: 600_000,
   }),
   MCP_DCR_OAUTH_CLIENT_NAME:
     getEnv('MCP_DCR_OAUTH_CLIENT_NAME', { defaultValue: 'truefoundry-harness' }) ?? 'truefoundry-harness',
@@ -1574,6 +1597,8 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE'),
     defaultValue: 8,
   }),
+  PERSONA_KNOWLEDGE_DIR:
+    getEnv('PERSONA_KNOWLEDGE_DIR', { defaultValue: './data/persona-knowledge' }) ?? './data/persona-knowledge',
   MEMORY_REFLECT_MAX_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_REFLECT_MAX_TOKENS',
     raw: getEnv('MEMORY_REFLECT_MAX_TOKENS'),
