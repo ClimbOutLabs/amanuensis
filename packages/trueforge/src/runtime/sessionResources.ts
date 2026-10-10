@@ -626,6 +626,7 @@ function getSharedRunCodeService(logger: Logger): RunCodeService {
         dockerBinary: undefined,
         cosignBinary: undefined,
         dockerSocketPath: undefined,
+        dataDir: configuration.SANDBOX_RUNS_DIR,
         commandTimeoutMs: undefined,
         createTimeoutMs: undefined,
       },

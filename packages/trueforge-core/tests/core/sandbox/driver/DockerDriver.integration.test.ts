@@ -5,12 +5,13 @@
  * is unreachable, so the suite is green on machines without Docker.
  */
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { DOCKER_SOCKET_PATH, DockerDriver } from '../../../../src/core/sandbox/driver/DockerDriver';
 import type { DriverRunParams } from '../../../../src/core/sandbox/driver/IsolationDriver';
+import { resolveSandboxIdentity, SANDBOX_RUN_ENV, stageRunDirs } from '../../../../src/core/sandbox/driver/RunStaging';
 
 const execFileAsync = promisify(execFile);
 
@@ -60,6 +61,7 @@ describe('DockerDriver integration (live daemon)', () => {
         dockerBinary: undefined,
         cosignBinary: undefined,
         dockerSocketPath: DOCKER_SOCKET_PATH,
+        dataDir: tmpdir(),
         commandTimeoutMs: undefined,
         createTimeoutMs: undefined,
       },
@@ -82,13 +84,15 @@ describe('DockerDriver integration (live daemon)', () => {
     }
     const runRoot = await mkdtemp(join(tmpdir(), 'sandbox-itest-'));
     try {
-      const ingressDir = join(runRoot, 'ingress');
-      const scratchDir = join(runRoot, 'scratch');
-      const egressDir = join(runRoot, 'egress');
-      await mkdir(ingressDir, { recursive: true });
-      await mkdir(scratchDir, { recursive: true });
-      await mkdir(egressDir, { recursive: true });
-      await writeFile(join(ingressDir, '__runcode_main.py'), 'print("hello from sandbox")\n');
+      const code = 'print("hello from sandbox")';
+      const sandboxIdentity = resolveSandboxIdentity();
+      const { ingressDir, scratchDir, egressDir } = await stageRunDirs({
+        runRoot,
+        language: 'python',
+        code,
+        files: [],
+        identity: sandboxIdentity,
+      });
 
       const runId = `itest-${String(Date.now())}`;
       const driver = new DockerDriver(
@@ -98,6 +102,7 @@ describe('DockerDriver integration (live daemon)', () => {
           dockerBinary: undefined,
           cosignBinary: undefined,
           dockerSocketPath: DOCKER_SOCKET_PATH,
+          dataDir: tmpdir(),
           commandTimeoutMs: undefined,
           createTimeoutMs: undefined,
         },
@@ -105,7 +110,7 @@ describe('DockerDriver integration (live daemon)', () => {
       );
       const params: DriverRunParams = {
         language: 'python',
-        code: 'print("hello from sandbox")',
+        code,
         filesIn: [],
         ingressDir,
         scratchDir,
@@ -114,7 +119,8 @@ describe('DockerDriver integration (live daemon)', () => {
         memoryMb: 512,
         diskMb: 256,
         runId,
-        env: { PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8', HOME: '/scratch' },
+        env: SANDBOX_RUN_ENV,
+        sandboxIdentity,
         signal: undefined,
         harvestGraceMs: 2000,
       };

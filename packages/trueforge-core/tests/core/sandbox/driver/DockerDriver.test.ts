@@ -2,21 +2,23 @@
  * Unit tests for the Docker isolation driver. No daemon: every docker/cosign
  * interaction is scripted through a fake DockerCommandRunner.
  */
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
+  checkContainerIsolation,
+  detectDocker,
   DOCKER_UNAVAILABLE_MESSAGE,
   DockerDriver,
   ISOLATION_REFUSED_MESSAGE,
-  checkContainerIsolation,
-  detectDocker,
   resetDockerDetectionForTests,
   type DockerCommandResult,
   type DockerCommandRunner,
   type DockerDriverOptions,
 } from '../../../../src/core/sandbox/driver/DockerDriver';
 import { ISOLATION_REFUSED_MARKER, type DriverRunParams } from '../../../../src/core/sandbox/driver/IsolationDriver';
+import { stageRunDirs } from '../../../../src/core/sandbox/driver/RunStaging';
+import { FakeSandboxContainers } from './FakeSandboxContainers';
 
 const DIGEST = 'sha256:' + 'a'.repeat(64);
 const IMAGE = `ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0@${DIGEST}`;
@@ -84,6 +86,7 @@ function driverOptions(): DockerDriverOptions {
     dockerBinary: undefined,
     cosignBinary: undefined,
     dockerSocketPath: fakeSocketPath,
+    dataDir: fakeDataDir,
     commandTimeoutMs: undefined,
     createTimeoutMs: undefined,
   };
@@ -95,10 +98,15 @@ function driverOptions(): DockerDriverOptions {
  * tests so each test's detection is independent.
  */
 let fakeSocketPath: string | undefined;
+let fakeDataDir = '';
 beforeAll(async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tf-docker-socket-'));
   fakeSocketPath = join(dir, 'docker.sock');
   await writeFile(fakeSocketPath, '');
+  fakeDataDir = await mkdtemp(join(tmpdir(), 'tf-docker-data-'));
+});
+afterAll(async () => {
+  await rm(fakeDataDir, { recursive: true, force: true });
 });
 beforeEach(() => {
   resetDockerDetectionForTests();
@@ -117,14 +125,26 @@ function runParams(overrides: { signal?: AbortSignal | undefined } = {}): Driver
     diskMb: 1024,
     runId: 'run-123',
     env: { PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8', HOME: '/scratch' },
+    sandboxIdentity: { uid: 65532, gid: 65532, chownRunDirs: true },
     signal: overrides.signal,
     harvestGraceMs: 2000,
   };
 }
 
-/** ensureReady happy path: info, inspect (pinned digest), cosign, create probe, ownership probe. */
-function scriptReadyPath(runner: FakeRunner, digest = DIGEST): void {
-  runner.runHandler = async (binary, args) => {
+/**
+ * ensureReady happy path: info, inspect (pinned digest), cosign, create probe,
+ * then the canary run (create, isolation inspect, attach, kill, rm). The canary
+ * container is the DAC-enforcing fake, so a staging/uid mismatch fails it.
+ */
+function scriptReadyPath(runner: FakeRunner, digest = DIGEST, containers = new FakeSandboxContainers(undefined)): void {
+  runner.attachHandler = input =>
+    containers.attach({
+      containerId: input.containerId,
+      onStderr: chunk => {
+        input.onStderr(chunk);
+      },
+    });
+  runner.runHandler = (binary, args) => {
     if (binary === 'docker' && args[0] === 'info') {
       return okResult;
     }
@@ -138,19 +158,14 @@ function scriptReadyPath(runner: FakeRunner, digest = DIGEST): void {
       return okResult;
     }
     if (binary === 'docker' && args[0] === 'create') {
-      return { ...okResult, stdout: 'probe-container-id\n' };
+      // The wedged-daemon probe carries --entrypoint; anything else is the canary run.
+      const id = args.includes('--entrypoint') ? 'probe-container-id' : containers.create(args);
+      return { ...okResult, stdout: `${id}\n` };
     }
-    if (binary === 'docker' && args[0] === 'run') {
-      // Simulate the daemon's bind-mount write as the sandbox uid: the probe
-      // container touches /probe/write-test, which must appear on the host.
-      const volume = args.find(arg => arg.endsWith(':/probe:rw'));
-      const hostDir = volume?.split(':')[0];
-      if (hostDir !== undefined) {
-        await writeFile(join(hostDir, 'write-test'), 'probe');
-      }
-      return { ...okResult, stdout: 'PROBE_OK\n' };
+    if (binary === 'docker' && args[0] === 'inspect' && args.length === 2) {
+      return { ...okResult, stdout: JSON.stringify([goodInspectEntry()]) };
     }
-    if (binary === 'docker' && args[0] === 'rm') {
+    if (binary === 'docker' && (args[0] === 'rm' || args[0] === 'kill')) {
       return okResult;
     }
     throw new Error(`unexpected call: ${binary} ${args.join(' ')}`);
@@ -158,9 +173,9 @@ function scriptReadyPath(runner: FakeRunner, digest = DIGEST): void {
 }
 
 /** A `docker inspect` entry carrying every mandatory isolation flag. */
-function goodInspectEntry(): Record<string, unknown> {
+function goodInspectEntry(user = '65532:65532'): Record<string, unknown> {
   return {
-    Config: { User: '65532:65532' },
+    Config: { User: user },
     HostConfig: {
       NetworkMode: 'none',
       ReadonlyRootfs: true,
@@ -255,6 +270,22 @@ describe('DockerDriver.create', () => {
       'python3',
       '/ingress/__runcode_main.py',
     ]);
+  });
+
+  test('runs as the numeric server uid:gid with no supplementary groups', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-1\n' };
+      }
+      return okResult;
+    };
+    scriptIsolationInspect(runner);
+    const driver = new DockerDriver(driverOptions(), runner);
+    await driver.run({ ...runParams(), sandboxIdentity: { uid: 1000, gid: 1001, chownRunDirs: false } });
+    const args = runner.callsFor('create')[0]?.args ?? [];
+    expect(args[args.indexOf('--user') + 1]).toBe('1000:1001');
+    expect(args.some(arg => arg.startsWith('--group-add'))).toBe(false);
   });
 
   test('node runs the staged .mjs program', async () => {
@@ -440,28 +471,24 @@ describe('DockerDriver.ensureReady', () => {
     scriptReadyPath(runner);
     const driver = new DockerDriver(driverOptions(), runner);
     await expect(driver.ensureReady()).resolves.toEqual({ ready: true });
-    const rms = runner.callsFor('rm');
-    expect(rms).toHaveLength(1);
-    expect(rms[0]?.args).toContain('probe-container-id');
+    // Both throwaway containers are removed: the wedged-daemon probe and the canary run.
+    expect(runner.callsFor('rm').map(call => call.args[2])).toEqual(['probe-container-id', 'fake-container-1']);
   });
 
-  test('bind-mount ownership probe failure is daemon_unavailable', async () => {
+  test('a canary container that cannot write is daemon_unavailable', async () => {
     const runner = new FakeRunner();
     scriptReadyPath(runner);
-    const readyPath = runner.runHandler;
-    runner.runHandler = async (binary, args) => {
-      if (binary === 'docker' && args[0] === 'run') {
-        return { ...okResult, exitCode: 1, stderr: 'touch: /probe/write-test: Permission denied' };
-      }
-      return readyPath(binary, args);
+    runner.attachHandler = input => {
+      input.onStderr(Buffer.from("PermissionError: [Errno 13] Permission denied: '/egress/out'\n"));
+      return Promise.resolve(1);
     };
     const driver = new DockerDriver(driverOptions(), runner);
     const readiness = await driver.ensureReady();
     expect(readiness.ready).toBe(false);
     if (!readiness.ready) {
       expect(readiness.error_code).toBe('daemon_unavailable');
-      expect(readiness.error).toMatch(/ownership probe failed/);
-      expect(readiness.error).toMatch(/virtiofs/);
+      expect(readiness.error).toMatch(/canary run failed/);
+      expect(readiness.error).toMatch(/Permission denied/);
     }
   });
 
@@ -854,6 +881,10 @@ describe('checkContainerIsolation', () => {
     }
   });
 
+  test.each(['1000:1001', '65532:65532'])('accepts the non-root numeric user %p', user => {
+    expect(checkContainerIsolation({ inspectJson: JSON.stringify([goodInspectEntry(user)]) })).toEqual({ ok: true });
+  });
+
   test.each(['0', 'root', '0:0', ''])('rejects root user %p', user => {
     const entry = goodInspectEntry();
     (entry['Config'] as Record<string, unknown>)['User'] = user;
@@ -931,5 +962,315 @@ describe('DockerDriver.run isolation refusal', () => {
     const result = await driver.run(runParams());
     expect(result.terminatedBy).toBe('internal');
     expect(result.internalError).toBe(`${ISOLATION_REFUSED_MARKER}${ISOLATION_REFUSED_MESSAGE}`);
+  });
+});
+
+describe('DockerDriver.ensureReady canary', () => {
+  const fsPromises: typeof import('node:fs/promises') = jest.requireActual('node:fs/promises');
+  let chownSpy: jest.SpyInstance;
+  let getuidSpy: jest.SpyInstance;
+  let getgidSpy: jest.SpyInstance;
+
+  /** The server process acts as this uid:gid; every chown is recorded on the fake host instead of applied. */
+  function actAsServer(input: { server: { uid: number; gid: number }; containers: FakeSandboxContainers }): void {
+    getuidSpy.mockReturnValue(input.server.uid);
+    getgidSpy.mockReturnValue(input.server.gid);
+    chownSpy.mockImplementation((path: string, uid: number, gid: number) => {
+      input.containers.recordChown({ path, owner: { uid, gid } });
+      return Promise.resolve();
+    });
+  }
+
+  function canaryCreate(runner: FakeRunner): string[] {
+    const canary = runner.callsFor('create').find(call => !call.args.includes('--entrypoint'));
+    if (canary === undefined) {
+      throw new Error('expected a canary docker create');
+    }
+    return canary.args;
+  }
+
+  function flagValues(args: string[], flag: string): string[] {
+    return args.flatMap((arg, index) => (arg === flag ? [args[index + 1] ?? ''] : []));
+  }
+
+  /** Host dir behind one of the canary container's bind mounts. */
+  function hostDirOf(runner: FakeRunner, containerPath: string): string {
+    const mount = flagValues(canaryCreate(runner), '-v').find(value => value.split(':')[1] === containerPath);
+    const hostDir = mount?.split(':')[0];
+    if (hostDir === undefined) {
+      throw new Error(`expected a canary mount at ${containerPath}`);
+    }
+    return hostDir;
+  }
+
+  async function runDirEntries(): Promise<string[]> {
+    return readdir(join(fakeDataDir, 'sandbox-runs')).catch(() => []);
+  }
+
+  beforeEach(() => {
+    chownSpy = jest.spyOn(fsPromises, 'chown');
+    getuidSpy = jest.spyOn(process, 'getuid');
+    getgidSpy = jest.spyOn(process, 'getgid');
+  });
+
+  afterEach(async () => {
+    chownSpy.mockRestore();
+    getuidSpy.mockRestore();
+    getgidSpy.mockRestore();
+    // A failed canary must not leave its run root behind for the next test's assertions.
+    for (const entry of await runDirEntries()) {
+      await rm(join(fakeDataDir, 'sandbox-runs', entry), { recursive: true, force: true });
+    }
+  });
+
+  test('non-root server: canary runs as its own uid:gid, unchowned, under the runs dir, and cleans up', async () => {
+    const server = { uid: 4242, gid: 4343 };
+    const containers = new FakeSandboxContainers(server);
+    const runner = new FakeRunner();
+    scriptReadyPath(runner, DIGEST, containers);
+    actAsServer({ server, containers });
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    await expect(driver.ensureReady()).resolves.toEqual({ ready: true });
+
+    expect(chownSpy).not.toHaveBeenCalled();
+    const args = canaryCreate(runner);
+    expect(flagValues(args, '--user')).toEqual(['4242:4343']);
+    expect(args.some(arg => arg.startsWith('--group-add'))).toBe(false);
+    const env = flagValues(args, '-e');
+    expect(env).toEqual(expect.arrayContaining(['USER=sandbox', 'LOGNAME=sandbox', 'HOME=/scratch']));
+    // The canary is staged beside real runs, never in os.tmpdir().
+    const runsDir = join(await realpath(fakeDataDir), 'sandbox-runs');
+    const mounts = flagValues(args, '-v');
+    expect(mounts).toHaveLength(3);
+    for (const mount of mounts) {
+      expect(mount.startsWith(`${runsDir}/canary-`)).toBe(true);
+    }
+    expect(await runDirEntries()).toEqual([]);
+  });
+
+  test('a non-root server in group 0 is not ready and starts no canary container', async () => {
+    const containers = new FakeSandboxContainers(undefined);
+    const runner = new FakeRunner();
+    scriptReadyPath(runner, DIGEST, containers);
+    getuidSpy.mockReturnValue(4242);
+    getgidSpy.mockReturnValue(0);
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('daemon_unavailable');
+      expect(readiness.error).toMatch(/gid 0/);
+    }
+    // Only the wedged-daemon probe created a container.
+    expect(runner.callsFor('create')).toHaveLength(1);
+    expect(await runDirEntries()).toEqual([]);
+  });
+
+  test('root server: canary runs as the image uid after handing every dir and file to it', async () => {
+    const server = { uid: 0, gid: 0 };
+    const containers = new FakeSandboxContainers(server);
+    const runner = new FakeRunner();
+    scriptReadyPath(runner, DIGEST, containers);
+    actAsServer({ server, containers });
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    await expect(driver.ensureReady()).resolves.toEqual({ ready: true });
+
+    const args = canaryCreate(runner);
+    expect(flagValues(args, '--user')).toEqual(['65532:65532']);
+    const chowned = chownSpy.mock.calls.map(call => ({ path: String(call[0]), uid: call[1], gid: call[2] }));
+    expect(chowned.every(call => call.uid === 65532 && call.gid === 65532)).toBe(true);
+    const chownedNames = chowned.map(call => basename(call.path));
+    expect(chownedNames).toEqual(
+      expect.arrayContaining(['ingress', 'scratch', 'egress', 'canary_in', '__runcode_main.py']),
+    );
+    expect(await runDirEntries()).toEqual([]);
+  });
+
+  test('root server: a failing chown handoff is not ready and starts no canary container', async () => {
+    const containers = new FakeSandboxContainers({ uid: 0, gid: 0 });
+    const runner = new FakeRunner();
+    scriptReadyPath(runner, DIGEST, containers);
+    getuidSpy.mockReturnValue(0);
+    getgidSpy.mockReturnValue(0);
+    chownSpy.mockRejectedValue(new Error('EPERM: operation not permitted, chown'));
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('daemon_unavailable');
+      expect(readiness.error).toMatch(/could not hand the run directories to sandbox uid 65532:65532/);
+      expect(readiness.error).toMatch(/EPERM/);
+    }
+    // Only the wedged-daemon probe created a container.
+    expect(runner.callsFor('create')).toHaveLength(1);
+    expect(await runDirEntries()).toEqual([]);
+  });
+
+  test('root server: a chown that is silently ignored fails the canary instead of passing', async () => {
+    const containers = new FakeSandboxContainers({ uid: 0, gid: 0 });
+    const runner = new FakeRunner();
+    scriptReadyPath(runner, DIGEST, containers);
+    getuidSpy.mockReturnValue(0);
+    getgidSpy.mockReturnValue(0);
+    chownSpy.mockResolvedValue(undefined);
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).toMatch(/canary run failed as 65532:65532/);
+      expect(readiness.error).toMatch(/Permission denied/);
+      expect(readiness.error).not.toContain(fakeDataDir);
+    }
+    // The failed canary container is still killed and removed.
+    expect(runner.callsFor('rm').map(call => call.args[2])).toContain('fake-container-1');
+  });
+
+  test('regression: the image uid against 0700 dirs owned by another server uid is denied, the server uid is not', async () => {
+    // Pre-fix shape: the container always ran as 65532 and the dirs belonged to the server.
+    const server = { uid: 4242, gid: 4343 };
+    const stagedForServer = await stageRunDirs({
+      runRoot: join(fakeDataDir, 'legacy-run'),
+      language: 'python',
+      code: 'pass',
+      files: [{ name: 'canary_in', bytes: Buffer.from('token') }],
+      identity: { ...server, chownRunDirs: false },
+    });
+    const mounts = [
+      '-v',
+      `${stagedForServer.ingressDir}:/ingress:ro`,
+      '-v',
+      `${stagedForServer.scratchDir}:/scratch:rw`,
+      '-v',
+      `${stagedForServer.egressDir}:/egress:rw`,
+    ];
+    const containers = new FakeSandboxContainers(server);
+    const denied: string[] = [];
+    const legacy = containers.create(['create', '--user', '65532:65532', ...mounts]);
+    const legacyExit = await containers.attach({
+      containerId: legacy,
+      onStderr: chunk => denied.push(chunk.toString()),
+    });
+    expect(legacyExit).toBe(1);
+    expect(denied.join('')).toMatch(/Permission denied/);
+
+    const asServer = containers.create(['create', '--user', '4242:4343', ...mounts]);
+    const serverExit = await containers.attach({ containerId: asServer, onStderr: () => undefined });
+    expect(serverExit).toBe(0);
+    expect(await readFile(join(stagedForServer.egressDir, 'out'), 'utf8')).toBe('token');
+  });
+
+  test('a canary that wrote nothing to egress is not ready', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    runner.attachHandler = () => Promise.resolve(0);
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).toMatch(/could not read the file the container wrote to egress/);
+    }
+  });
+
+  test('a canary whose egress output differs from its ingress input is not ready', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    runner.attachHandler = async () => {
+      await writeFile(join(hostDirOf(runner, '/egress'), 'out'), 'stale');
+      return 0;
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).toMatch(/does not match what the container read from ingress/);
+    }
+  });
+
+  test('the canary run root is removed even when the program stripped its own permissions', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const runCanaryProgram = runner.attachHandler;
+    runner.attachHandler = async input => {
+      const exitCode = await runCanaryProgram(input);
+      const locked = join(hostDirOf(runner, '/scratch'), 'locked');
+      await mkdir(join(locked, 'inner'), { recursive: true });
+      await writeFile(join(locked, 'inner', 'f'), 'x');
+      await chmod(join(locked, 'inner'), 0o000);
+      await chmod(locked, 0o000);
+      return exitCode;
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    // du may legitimately fail on the sealed dir; the cleanup itself must not.
+    if (!readiness.ready) {
+      expect(readiness.error).not.toMatch(/remove the run directory|still exists/);
+    }
+    expect(await runDirEntries()).toEqual([]);
+  });
+
+  test('a canary whose directories du cannot account for is not ready', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const runCanaryProgram = runner.attachHandler;
+    runner.attachHandler = async input => {
+      const exitCode = await runCanaryProgram(input);
+      // du fails closed on a dir it cannot read; a vanished dir stands in for an unreadable one.
+      await rm(hostDirOf(runner, '/scratch'), { recursive: true, force: true });
+      return exitCode;
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).toMatch(/could not measure the canary directories with du/);
+    }
+  });
+
+  test('a run root that survives removal is not ready', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const rmSpy = jest.spyOn(fsPromises, 'rm').mockResolvedValue(undefined);
+    const driver = new DockerDriver(driverOptions(), runner);
+    try {
+      const readiness = await driver.ensureReady();
+      expect(readiness.ready).toBe(false);
+      if (!readiness.ready) {
+        expect(readiness.error).toMatch(/run directory still exists after removal/);
+      }
+    } finally {
+      rmSpy.mockRestore();
+    }
+  });
+
+  test('a failing run root removal is not ready', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const rmSpy = jest.spyOn(fsPromises, 'rm').mockRejectedValue(new Error('EACCES: permission denied, rmdir'));
+    const driver = new DockerDriver(driverOptions(), runner);
+    try {
+      const readiness = await driver.ensureReady();
+      expect(readiness.ready).toBe(false);
+      if (!readiness.ready) {
+        expect(readiness.error).toMatch(/could not remove the run directory: EACCES/);
+      }
+    } finally {
+      rmSpy.mockRestore();
+    }
   });
 });
