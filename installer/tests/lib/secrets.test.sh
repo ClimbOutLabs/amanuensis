@@ -21,14 +21,17 @@ test_random_secrets() {
 }
 
 test_hash_parsing() {
-  t_begin "the hash is read from JSON or plain output and validated as bcrypt"
+  t_begin "the hash is read from the CLI's JSON and validated as bcrypt"
   sandbox_new
   local good="\$2a\$10\$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY01"
   local out
   out=$(in_lib "D() { cat >/dev/null; echo '{\"hash\":\"$good\"}'; }; AMAN_PASSWORD=x; hash_password img")
   assert_eq "$out" "$good" "json"
-  out=$(in_lib "D() { cat >/dev/null; echo '$good'; }; AMAN_PASSWORD=x; hash_password img")
-  assert_eq "$out" "$good" "plain"
+  if in_lib "D() { cat >/dev/null; echo '$good'; }; AMAN_PASSWORD=x; hash_password img" >/dev/null 2>&1; then
+    t_fail "a bare hash is not the CLI's output and must be refused"
+  else
+    t_pass
+  fi
   if in_lib "D() { cat >/dev/null; echo 'not-a-hash'; }; AMAN_PASSWORD=x; hash_password img" >/dev/null 2>&1; then
     t_fail "garbage accepted"
   else
