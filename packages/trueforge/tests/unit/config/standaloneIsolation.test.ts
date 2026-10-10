@@ -1,5 +1,4 @@
 import * as fs from 'node:fs';
-import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,9 +34,9 @@ describe('per-port Code Mode socket folders', () => {
         await prepareCodeModeSocketParent({ path: folder, logger });
       }
       await removeCodeModeSocketParent(folders[0]);
-      expect(existsSync(folders[0])).toBe(false);
-      expect(existsSync(folders[1])).toBe(true);
-      expect(existsSync(folders[2])).toBe(true);
+      expect(fs.existsSync(folders[0])).toBe(false);
+      expect(fs.existsSync(folders[1])).toBe(true);
+      expect(fs.existsSync(folders[2])).toBe(true);
     } finally {
       for (const folder of folders) {
         await rm(folder, { recursive: true, force: true });
