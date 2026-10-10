@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Records the call. Docker passes through as root would; anything else only gets logged, so the
+# real machine is never touched.
+printf 'sudo %s\n' "$*" >>"$STUB_LOG"
+case "$1" in
+  docker | env)
+    [ "$1" = env ] && shift 2
+    STUB_VIA_SUDO=1 exec "${STUB_BIN}/docker" "${@:2}"
+    ;;
+  sh)
+    if printf '%s' "$3" | grep -q 'apt-get install -y docker-ce'; then
+      cp "$STUB_DOCKER_SRC" "$STUB_BIN/docker"
+      printf '%s\n' "$STUB_USER" >"$STUB_STATE/group_members"
+    fi
+    ;;
+  usermod)
+    printf '%s\n' "$STUB_USER" >"$STUB_STATE/group_members"
+    ;;
+esac
+exit 0

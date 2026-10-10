@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+if [ -n "${STUB_DF_KB:-}" ]; then
+  echo "Filesystem 1024-blocks Used Available Capacity Mounted"
+  echo "stub 100000000 1 $STUB_DF_KB 1% /"
+else
+  exec "$STUB_REAL_DF" "$@"
+fi
