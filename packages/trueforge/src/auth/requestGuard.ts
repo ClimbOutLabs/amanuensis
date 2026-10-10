@@ -33,7 +33,8 @@ function isPathExempt(path: string): boolean {
 /**
  * Standalone request guard for cookie-authenticated sessions. Forwarded-* headers are never read.
  * - Host must be a loopback name on the instance port or the public URL's host, else 421
- *   (defeats DNS rebinding). A request with no Host header passes: browsers always send one.
+ *   (defeats DNS rebinding). When the public URL is itself loopback, any loopback name
+ *   on its port is accepted too, so `localhost` works for a `127.0.0.1` public URL. A request with no Host header passes: browsers always send one.
  * - State-changing requests need a same-origin signal: an allowed Origin, else
  *   `Sec-Fetch-Site: same-origin|none`, else a Bearer header; otherwise 403.
  */
@@ -41,9 +42,16 @@ export function createRequestGuardMiddleware(options: { port: number; publicBase
   const publicUrl = new URL(options.publicBaseUrl);
   const publicHost = { hostname: publicUrl.hostname, port: canonicalPort(publicUrl.port) };
   const instancePort = canonicalPort(String(options.port));
+  const publicIsLoopback = isLoopbackHost(publicUrl.hostname);
+  const loopbackPorts = new Set([instancePort, ...(publicIsLoopback ? [publicHost.port] : [])]);
   const allowedOrigins = new Set([
     publicUrl.origin,
     ...LOOPBACK_ORIGIN_HOSTS.map(host => `http://${host}:${String(options.port)}`),
+    ...(publicIsLoopback
+      ? LOOPBACK_ORIGIN_HOSTS.map(
+          host => `${publicUrl.protocol}//${host}${publicUrl.port === '' ? '' : `:${publicUrl.port}`}`,
+        )
+      : []),
   ]);
 
   return async (c, next) => {
@@ -58,7 +66,7 @@ export function createRequestGuardMiddleware(options: { port: number; publicBase
       const allowed =
         host !== undefined &&
         ((host.hostname === publicHost.hostname && host.port === publicHost.port) ||
-          (isLoopbackHost(host.hostname) && host.port === instancePort));
+          (isLoopbackHost(host.hostname) && loopbackPorts.has(host.port)));
       if (!allowed) {
         throw new HTTPException(421, { message: 'Misdirected request: unrecognized Host' });
       }

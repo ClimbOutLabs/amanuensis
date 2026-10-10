@@ -72,6 +72,58 @@ describe('request guard: Host', () => {
   });
 });
 
+describe('request guard: loopback public URL', () => {
+  const app = () => appFor({ port: 8790, publicBaseUrl: 'http://127.0.0.1:18790' });
+
+  it.each(['127.0.0.1:18790', 'localhost:18790', '[::1]:18790', 'LOCALHOST:18790'])(
+    'accepts %s on the public port',
+    async host => {
+      expect(await status({ app: app(), headers: { host } })).toBe(200);
+    },
+  );
+
+  it('still accepts every loopback name on the instance port', async () => {
+    expect(await status({ app: app(), headers: { host: 'localhost:8790' } })).toBe(200);
+  });
+
+  it.each([
+    'evil.example:18790',
+    'localhost.evil.com:18790',
+    '10.0.0.5:18790',
+    'localhost:9999',
+    '[::1]:9999',
+    'localhost',
+  ])('rejects %s with 421', async host => {
+    expect(await status({ app: app(), headers: { host } })).toBe(421);
+  });
+
+  it.each(['http://127.0.0.1:18790', 'http://localhost:18790', 'http://[::1]:18790'])(
+    'accepts Origin %s on writes',
+    async origin => {
+      expect(await status({ app: app(), method: 'POST', headers: { host: 'localhost:18790', origin } })).toBe(200);
+    },
+  );
+
+  it.each(['http://localhost:9999', 'https://localhost:18790', 'http://evil.example:18790'])(
+    'rejects Origin %s on writes',
+    async origin => {
+      expect(await status({ app: app(), method: 'POST', headers: { host: 'localhost:18790', origin } })).toBe(403);
+    },
+  );
+
+  it('does not widen a non-loopback public URL to loopback names on its port', async () => {
+    const remote = appFor({ port: 8790, publicBaseUrl: 'https://amanuensis.example:9443' });
+    expect(await status({ app: remote, headers: { host: 'localhost:9443' } })).toBe(421);
+    expect(
+      await status({
+        app: remote,
+        method: 'POST',
+        headers: { host: 'localhost:8790', origin: 'https://localhost:9443' },
+      }),
+    ).toBe(403);
+  });
+});
+
 describe('request guard: Origin', () => {
   const host = { host: 'amanuensis.example' };
 
