@@ -55,6 +55,14 @@ confirm() {
   esac
 }
 
+# Root-level changes need their own flag or an interactive yes; --yes never grants them.
+# consent_root "question" FLAGVALUE
+consent_root() {
+  [ "$2" = 1 ] && return 0
+  [ "$ASSUME_YES" = 1 ] && return 1
+  confirm "$1"
+}
+
 # Reads a password twice without echo into the variable named by $1. The value stays in shell
 # memory: it is never put in argv, a file or the environment of a child process.
 ask_password() {

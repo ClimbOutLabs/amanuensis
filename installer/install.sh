@@ -41,6 +41,8 @@ AMAN_HOME=${AMAN_HOME:-$HOME/.amanuensis}
 ASSUME_YES=0
 DRY_RUN=0
 PASSWORD_FROM_STDIN=0
+OPT_INSTALL_DOCKER=0
+OPT_ADD_DOCKER_GROUP=0
 PRINT_ROOT_STEPS=0
 PRINT_NETWORK=0
 PRINT_PROXY=0
@@ -74,7 +76,9 @@ Amanuensis installer
 
 Options
   --home DIR            state directory (default ~/.amanuensis)
-  --yes                 accept the plan and the defaults without asking
+  --yes                 accept the plan and the defaults without asking (never installs Docker or changes groups)
+  --install-docker      let the installer run the printed root steps to install Docker Engine (Debian, Ubuntu)
+  --add-docker-group    let the installer add your user to the docker group (needs sudo)
   --dry-run             stop after printing the plan
   --name NAME           first instance name (default main)
   --email ADDRESS       owner email
@@ -113,6 +117,8 @@ parse_args() {
       --yes | -y) ASSUME_YES=1 ;;
       --dry-run) DRY_RUN=1 ;;
       --password-stdin) PASSWORD_FROM_STDIN=1 ;;
+      --install-docker) OPT_INSTALL_DOCKER=1 ;;
+      --add-docker-group) OPT_ADD_DOCKER_GROUP=1 ;;
       --print-root-steps) PRINT_ROOT_STEPS=1 ;;
       --print-network) PRINT_NETWORK=1 ;;
       --print-proxy-requirements) PRINT_PROXY=1 ;;

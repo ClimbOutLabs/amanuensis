@@ -41,6 +41,7 @@ sandbox_new() {
   unset STUB_DOCKER_DENIED STUB_DOCKER_DOWN STUB_ROOTLESS STUB_PODMAN STUB_BUILD_FAIL STUB_UP_FAIL_UNLESS_TAG \
     STUB_BUSY_PORTS STUB_BACKUP_FAIL STUB_ENGINE_VERSION STUB_COMPOSE_VERSION STUB_DOCTOR_EXIT STUB_VIA_SG STUB_VIA_SUDO || true
   STUB_DF_KB=50000000
+  INSTALL_EXTRA=()
 }
 
 # A copy of the installer with the stub doctor in place of the real shim, so install and upgrade runs
@@ -111,10 +112,12 @@ os_release_ubuntu() {
 }
 
 # Install with defaults for tests that need an installed machine. Docker stub reachable, one instance "main".
+# INSTALL_EXTRA holds extra install.sh arguments for the call, for example (--add-docker-group).
+INSTALL_EXTRA=()
 install_machine() {
   with_input "$SENTINEL_PASSWORD
 "
-  run_install --yes --password-stdin --email owner@example.invalid
+  run_install --yes --password-stdin --email owner@example.invalid ${INSTALL_EXTRA[@]+"${INSTALL_EXTRA[@]}"}
   clear_input
   [ "$RC" = 0 ] || {
     printf 'install_machine failed (rc=%s)\n%s\n%s\n' "$RC" "$OUT" "$ERR" >&2

@@ -101,6 +101,21 @@ run_root() {
   fi
 }
 
+# Shell function the root steps run on the downloaded key. The file must hold exactly one primary key
+# and its fingerprint must be the pinned one; subkey fingerprints belong to that primary key, so only
+# the fingerprint that follows each pub record is compared.
+docker_key_check_snippet() {
+  cat <<'SNIPPET'
+docker_key_ok() {
+  gpg --show-keys --with-colons "$1" | awk -F: -v want="$2" '
+    $1 == "pub" { keys++; primary = 1; next }
+    $1 == "sub" { primary = 0; next }
+    $1 == "fpr" && primary { primary = 0; if ($10 != want) bad = 1 }
+    END { if (keys == 1 && !bad) exit 0; exit 1 }'
+}
+SNIPPET
+}
+
 # The exact root steps. Printed before they run; the convenience script is never used.
 docker_root_steps_script() {
   local distro codename arch user
@@ -115,9 +130,9 @@ apt-get update
 apt-get install -y ca-certificates curl gnupg
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/$distro/gpg -o /etc/apt/keyrings/docker.asc.download
-fpr=\$(gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc.download | awk -F: '/^fpr:/ {print \$10; exit}')
-if [ "\$fpr" != "$DOCKER_APT_KEY_FPR" ]; then
-  echo "Docker repository key fingerprint mismatch: \$fpr" >&2
+$(docker_key_check_snippet)
+if ! docker_key_ok /etc/apt/keyrings/docker.asc.download $DOCKER_APT_KEY_FPR; then
+  echo "The downloaded Docker repository key is not the pinned key $DOCKER_APT_KEY_FPR, or holds other keys" >&2
   rm -f /etc/apt/keyrings/docker.asc.download
   exit 1
 fi
@@ -150,8 +165,8 @@ docker_prepare() {
       say "Docker is not installed. Installing it needs root and changes this machine:"
       print_root_steps
       say "Members of the docker group have root-equivalent access to this machine."
-      if ! confirm "Install Docker Engine now?"; then
-        die "Docker is required. Nothing was installed. Install it, then run this again."
+      if ! consent_root "Install Docker Engine now?" "$OPT_INSTALL_DOCKER"; then
+        die "Docker is required and nothing was installed. Install Docker Engine with the steps above (or: install.sh --print-root-steps), then run this again. To let this installer run them, answer yes when asked, or pass --install-docker; --yes alone never installs software."
       fi
       run_root sh -c "$(docker_root_steps_script)" || die "the Docker install steps failed; nothing else was changed"
       NEEDS_SIGNOUT=1
@@ -161,14 +176,15 @@ docker_prepare() {
   if [ "$DOCKER_ACCESS" = add-group ]; then
     say "Your user cannot reach the Docker socket. Adding it to the docker group needs root."
     say "Members of the docker group have root-equivalent access to this machine."
-    if confirm "Add $(current_user) to the docker group?"; then
-      run_root usermod -aG docker "$(current_user)" || die "usermod failed; add your user to the docker group and run this again"
-      NEEDS_SIGNOUT=1
-      if docker_works_via_sg; then
-        DOCKER_ACCESS=sg
-      fi
+    if ! consent_root "Add $(current_user) to the docker group?" "$OPT_ADD_DOCKER_GROUP"; then
+      die "Docker needs access you have not granted, so nothing was changed. Run: sudo usermod -aG docker $(current_user)   then sign out and back in (or run: newgrp docker) and run this again. To let this installer do it, answer yes when asked, or pass --add-docker-group; --yes alone never changes groups."
     fi
-    if [ "$DOCKER_ACCESS" != sg ] && command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
+    run_root usermod -aG docker "$(current_user)" || die "usermod failed; add your user to the docker group and run this again"
+    NEEDS_SIGNOUT=1
+    if docker_works_via_sg; then
+      DOCKER_ACCESS=sg
+    elif command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
+      # Only reached after the yes above, for this run only.
       warn "using sudo for Docker during this run only"
       DOCKER_ACCESS=sudo
     fi

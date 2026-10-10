@@ -115,7 +115,7 @@ print_plan() {
   say ""
   say "Images are built on this machine from the checkout. Nothing is pushed to any registry."
   if [ "$PLAN_ROOT" -gt 0 ]; then
-    say "Steps marked [root] use sudo; the docker group is root-equivalent."
+    say "Steps marked [root] use sudo and only run if you answer yes when asked (or pass --install-docker / --add-docker-group; --yes alone does not allow them). The docker group is root-equivalent."
   fi
   if [ -n "$DL_LINES" ]; then
     total_gb=$(awk -v mb="$DL_TOTAL_MB" 'BEGIN {printf "%.1f", mb / 1024}')

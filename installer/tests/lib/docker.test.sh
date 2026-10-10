@@ -74,6 +74,7 @@ test_non_member_is_added_then_sg() {
   sandbox_new
   STUB_DOCKER_DENIED=1
   : >"$SB_STATE/group_members"
+  INSTALL_EXTRA=(--add-docker-group)
   install_machine
   assert_log_has "sudo usermod -aG docker testuser"
   assert_log_has "sg docker -c"
@@ -94,7 +95,7 @@ n
 "
   run_install --name main --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "Nothing was installed"
+  assert_contains "$ERR" "nothing was installed"
   assert_log_lacks "sudo "
   assert_no_path "$SB_BIN/docker"
   assert_no_path "$AMAN_HOME/state/instances"
@@ -108,12 +109,111 @@ test_install_offer_accepted() {
   os_release_ubuntu
   rm -f "$SB_BIN/docker"
   STUB_DOCKER_DENIED=1
+  INSTALL_EXTRA=(--install-docker)
   install_machine
   assert_log_has "sudo sh -c"
   assert_contains "$OUT" "Root steps to install Docker Engine"
   assert_contains "$OUT" "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
   assert_contains "$OUT" "Sign out and back in"
   assert_file "$AMAN_HOME/state/instances/main.conf"
+  sandbox_drop
+}
+
+# Runs the key check the root steps embed, against a gpg stand-in that prints the given colon records.
+key_check() {
+  local records=$1
+  cat >"$SB_BIN/gpg" <<'GPG'
+#!/bin/sh
+printf '%s\n' "$GPG_RECORDS"
+GPG
+  chmod +x "$SB_BIN/gpg"
+  GPG_RECORDS=$records PATH=$SB_BIN "$SB_BIN/bash" -c ". '$INSTALLER_DIR/lib/docker.sh'; eval \"\$(docker_key_check_snippet)\"; docker_key_ok /dev/null $PINNED"
+}
+
+test_key_fingerprint_is_checked() {
+  t_begin "the vendor key is accepted only as exactly one key with the pinned fingerprint"
+  sandbox_new
+  local PINNED=9DC858229FC7DD38854AE2D88D81803C0EBFCD88 other=0000000000000000000000000000000000000000
+  local pub="pub:-:4096:1:8D81803C0EBFCD88:1487788586:::-:::scESC::::::23::0:"
+  local good="fpr:::::::::$PINNED:"
+  local bad="fpr:::::::::$other:"
+  local sub="sub:-:4096:1:7EA0A9C3F273FCD8:1487788586::::::s::::::23:"
+  if key_check "$pub
+$good
+uid:-::::1487788586::X::Docker Release (CE deb) <docker@docker.com>::::::::::0:"; then t_pass; else t_fail "the pinned key was refused"; fi
+  if key_check "$pub
+$good
+$sub
+fpr:::::::::$other:"; then t_pass; else t_fail "a subkey of the pinned key was refused"; fi
+  if key_check "$pub
+$bad"; then t_fail "a wrong fingerprint was accepted"; else t_pass; fi
+  if key_check "$pub
+$good
+$pub
+$bad"; then t_fail "a second key was accepted"; else t_pass; fi
+  if key_check "$pub
+$good
+$pub
+$good"; then t_fail "two primary keys were accepted even with the same fingerprint"; else t_pass; fi
+  if key_check "$pub
+$bad
+$pub
+$good"; then t_fail "a wrong first key was accepted"; else t_pass; fi
+  if key_check ""; then t_fail "an empty key file was accepted"; else t_pass; fi
+  os_release_ubuntu
+  run_install --print-root-steps
+  assert_contains "$OUT" "docker_key_ok /etc/apt/keyrings/docker.asc.download $PINNED"
+  assert_contains "$OUT" "exit 1"
+  sandbox_drop
+}
+
+test_group_decline_stops_without_sudo() {
+  t_begin "answering no to the docker group stops the run: no sudo, no usermod, clear steps"
+  sandbox_new
+  STUB_DOCKER_DENIED=1
+  : >"$SB_STATE/group_members"
+  with_input "
+
+y
+n
+"
+  run_install --name main --email owner@example.invalid
+  assert_rc 1
+  assert_contains "$ERR" "sudo usermod -aG docker testuser"
+  assert_contains "$ERR" "nothing was changed"
+  assert_log_lacks "usermod -aG"
+  assert_log_lacks "sudo docker"
+  assert_no_path "$AMAN_HOME/state/instances"
+  assert_eq "$(log_count "docker build")" 0 "no builds"
+  clear_input
+  sandbox_drop
+}
+
+test_yes_does_not_consent_to_root_changes() {
+  t_begin "--yes alone neither installs Docker nor changes groups; the explicit flags do"
+  sandbox_new
+  STUB_DOCKER_DENIED=1
+  : >"$SB_STATE/group_members"
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email owner@example.invalid
+  assert_rc 1
+  assert_contains "$ERR" "--add-docker-group"
+  assert_log_lacks "usermod"
+  assert_log_lacks "sudo "
+  clear_input
+  sandbox_drop
+  sandbox_new
+  os_release_ubuntu
+  rm -f "$SB_BIN/docker"
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email owner@example.invalid
+  assert_rc 1
+  assert_contains "$ERR" "--install-docker"
+  assert_log_lacks "sudo "
+  assert_no_path "$SB_BIN/docker"
+  clear_input
   sandbox_drop
 }
 
@@ -145,4 +245,7 @@ test_non_member_is_added_then_sg
 test_install_offer_declined
 test_install_offer_accepted
 test_print_root_steps
+test_group_decline_stops_without_sudo
+test_yes_does_not_consent_to_root_changes
+test_key_fingerprint_is_checked
 tests_finish
