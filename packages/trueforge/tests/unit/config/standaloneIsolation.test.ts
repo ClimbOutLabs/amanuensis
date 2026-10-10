@@ -26,17 +26,18 @@ describe('per-port Code Mode socket folders', () => {
   });
 
   it('removing one instance folder leaves the others in place', async () => {
-    const folders = [48721, 48722, 48723].map(port =>
-      resolveCodeModeSocketParent({ port }),
-    );
+    const folderA = resolveCodeModeSocketParent({ port: 48721 });
+    const folderB = resolveCodeModeSocketParent({ port: 48722 });
+    const folderC = resolveCodeModeSocketParent({ port: 48723 });
+    const folders = [folderA, folderB, folderC];
     try {
       for (const folder of folders) {
         await prepareCodeModeSocketParent({ path: folder, logger });
       }
-      await removeCodeModeSocketParent(folders[0]);
-      expect(fs.existsSync(folders[0])).toBe(false);
-      expect(fs.existsSync(folders[1])).toBe(true);
-      expect(fs.existsSync(folders[2])).toBe(true);
+      await removeCodeModeSocketParent(folderA);
+      expect(fs.existsSync(folderA)).toBe(false);
+      expect(fs.existsSync(folderB)).toBe(true);
+      expect(fs.existsSync(folderC)).toBe(true);
     } finally {
       for (const folder of folders) {
         await rm(folder, { recursive: true, force: true });

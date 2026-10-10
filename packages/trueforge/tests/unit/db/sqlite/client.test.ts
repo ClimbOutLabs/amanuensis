@@ -1,7 +1,7 @@
 import { chmodSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSqliteDb } from '../../../src/db/sqlite/client';
+import { createSqliteDb } from '../../../../src/db/sqlite/client';
 
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), 'sqlite-perm-test-'));
