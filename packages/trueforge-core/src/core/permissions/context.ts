@@ -4,8 +4,8 @@
  * The classifier and the dispatch guards need a small set of server-owned
  * services: the tracked-executable store, the approval-token store, the audit
  * writer, the shell allowlist, and readers for the per-user offline toggle
- * and Tier 2 "always ask" toggles. Defaults are in-memory and permissive
- * (offline off, no toggles) so core works without server wiring.
+ * and Tier 2 relaxations. Defaults are in-memory (offline off, nothing
+ * relaxed, so Tier 2 asks) so core works without server wiring.
  */
 import { InMemoryApprovalTokenStore, type ApprovalTokenStore } from './approvalTokens';
 import type { AuditLogWriter } from './audit';
@@ -19,7 +19,8 @@ export interface SentinelServices {
   audit: AuditLogWriter | null;
   shell_allowlist: ShellAllowlistConfig;
   isOffline: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
-  alwaysAsk: (input: { tenant_id: string; created_by: string }) => Promise<ReadonlySet<Tier2ActionKind>>;
+  /** Tier 2 kinds the user relaxed to run without asking. */
+  tier2AutoAllow: (input: { tenant_id: string; created_by: string }) => Promise<ReadonlySet<Tier2ActionKind>>;
 }
 
 /** Server-owned identity for one tool call. Never agent-supplied. */
@@ -46,8 +47,16 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     audit: null,
     shell_allowlist: seedShellAllowlist(input.pinned_path),
     isOffline: () => Promise.resolve(false),
-    alwaysAsk: () => Promise.resolve(new Set<Tier2ActionKind>()),
+    tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
   };
+}
+
+/**
+ * Services for unattended sessions: user relaxations never apply, so a Tier 2
+ * action parks for approval instead of running while nobody watches.
+ */
+export function withoutTier2Relaxations(services: SentinelServices): SentinelServices {
+  return { ...services, tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()) };
 }
 
 /**

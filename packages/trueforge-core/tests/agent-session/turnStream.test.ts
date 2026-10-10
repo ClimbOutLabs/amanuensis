@@ -1952,4 +1952,58 @@ describe('TurnResourceResolver caches', () => {
     expect(received[0]?.created_by).toBe('user-1');
     expect(received[0]?.conversation_id).toBe('s');
   });
+
+  it.each([
+    { source: { type: 'schedule' as const, id: 'sched-1', run_id: 'run-1' }, relaxed: [] },
+    { source: null, relaxed: ['shell'] },
+  ])('applies Tier 2 relaxations only to attended sessions (source: $source)', async ({ source, relaxed }) => {
+    const sandbox = makeStubPublicSandbox();
+    jest.spyOn(sandbox, 'close').mockResolvedValue(undefined);
+    const sentinelServices = {
+      ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
+      tier2AutoAllow: () => Promise.resolve(new Set<'shell'>(['shell'])),
+    };
+    const received: SentinelHostContext[] = [];
+    const resolver = new TurnResourceResolver({
+      llm: () =>
+        Promise.resolve({
+          modelClient: makeMockILLM({ create: jest.fn().mockImplementation(() => emptyLlmStream()) }),
+          defaultModelParams: {},
+          modelId: undefined,
+          modelSupportsVision: false,
+        }),
+      mcp: () => Promise.resolve({ url: 'http://localhost' }),
+      mcpRequestTimeoutMs: 60_000,
+      mcpConnectTimeoutMs: 5_000,
+      sandboxProvider: input => {
+        received.push(input.sentinel);
+        return Promise.resolve(sandbox);
+      },
+      logger: makeSilentLogger(),
+    });
+    const sessions = new Sessions({ sessionStore: new InMemorySessionStore(), sentinelServices });
+    const session = await sessions.create({
+      tenant_id: 't',
+      session_id: 's',
+      created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+      agent: {
+        type: 'inline',
+        spec: makeAgentSpec({ config: { sandbox: { enabled: true, file_downloads: true } } }),
+      },
+      external_id: null,
+      source,
+    });
+    const turn = await session.createTurn({
+      turn_id: mintTestTurnId(),
+      input: [{ type: EventType.USER_MESSAGE, content: 'hi' }],
+      previous_turn_id: 'none',
+      signal: new AbortController().signal,
+      resolver,
+    });
+    for await (const event of turn.stream()) {
+      void event;
+    }
+    const granted = await received[0]?.services.tier2AutoAllow({ tenant_id: 't', created_by: 'user-1' });
+    expect([...(granted ?? [])]).toEqual(relaxed);
+  });
 });

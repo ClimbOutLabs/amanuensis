@@ -626,7 +626,7 @@ export const ApprovalToolCallRefSchema = z
     tier3_card: z
       .union([Tier3CardSchema, z.null()])
       .optional()
-      .describe('Plain-language approval card for a Tier 3 call, or null.'),
+      .describe('Plain-language approval card for a Tier 2 or Tier 3 call, or null.'),
   })
   .openapi('ApprovalToolCallRef');
 

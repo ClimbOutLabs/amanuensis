@@ -338,7 +338,6 @@ describe('Suite A - shell parser bypass attempts', () => {
     try {
       const decision = await classifyTier(action('exec', { command: 'ls \\\n-la' }), makeCtx({ services }));
       expect(decision.tier).toBe(2);
-      expect(decision.tier2_files).toEqual([]); // unresolvable operand contributes nothing
     } finally {
       cleanup();
     }

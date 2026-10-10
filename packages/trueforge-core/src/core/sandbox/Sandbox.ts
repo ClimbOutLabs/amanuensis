@@ -2256,7 +2256,6 @@ export class Sandbox extends LocalToolMCP {
             tier: sentinelStamp.tier,
             tier3_card: sentinelStamp.tier3_card,
             tier2_kind: sentinelStamp.tier2_kind,
-            tier2_files: sentinelStamp.tier2_files,
             approval_token_id: sentinelStamp.approval_token_id,
             approval_binding: sentinelStamp.approval_binding,
             shell_binding: sentinelStamp.shell_binding,

@@ -5,8 +5,8 @@
  * spec: offline auto-deny first; write-then-execute check before allowlist
  * matching; allowlist before Tier 3; extractor fallback for external-service
  * actions; MCP hints escalate-only, never lower. Returns a TierDecision with
- * stable reason codes, the Tier 3 card when required, Tier 2 matched
- * files/kind, and the tracked-execution approval binding.
+ * stable reason codes, the approval card, the Tier 2 kind, and the
+ * tracked-execution approval binding.
  */
 import { realpathSync } from 'fs';
 import path from 'path';
@@ -460,15 +460,23 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         sensitive_read: false,
       });
     }
-    const identityCwd = resolveIdentityCwd(ctx, cwd);
-    const decision = tier2Decision({
+    return decideTier2({
+      ctx,
+      action,
       kind: 'shell',
-      files: operandIdentities(parsed, identityCwd),
+      plain_what: `Run \`${commandName}\` in your workspace.`,
+      parsed_command: command,
       reason: 'shell_allowlist_offline',
       reason_detail: `Offline: ran allowlisted command \`${commandName}\`.`,
       sensitive_read: sensitiveReadHit(action.canonical_params),
+      shell_form: canonicalShellForm({
+        command,
+        cwd,
+        env,
+        allowlist: services.shell_allowlist,
+        workspace_cwd: ctx.workspace_cwd,
+      }),
     });
-    return applyAlwaysAsk({ decision, kind: 'shell', ctx, action });
   }
 
   // Write-then-execute check BEFORE allowlist matching. Scan every segment
@@ -598,14 +606,23 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           });
         }
       }
-      const decision = tier2Decision({
+      return decideTier2({
+        ctx,
+        action,
         kind: 'shell',
-        files: operandIdentities(parsed, identityCwd),
+        plain_what: `Run \`${parsed.argv[0] ?? command}\` in your workspace.`,
+        parsed_command: command,
         reason: 'shell_allowlist',
         reason_detail: `Ran allowlisted command \`${parsed.argv[0] ?? command}\`.`,
         sensitive_read: sensitiveReadHit(action.canonical_params),
+        shell_form: canonicalShellForm({
+          command,
+          cwd,
+          env,
+          allowlist: services.shell_allowlist,
+          workspace_cwd: ctx.workspace_cwd,
+        }),
       });
-      return applyAlwaysAsk({ decision, kind: 'shell', ctx, action });
     }
   }
 
@@ -710,25 +727,24 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       }),
     });
   }
-  // `target` is `string` (not null) here: the early return above guarantees it.
-  // `inside` is true, so the path is in the workspace.
-  const identity = canonicalWriteTarget({ p: target, cwd: identityCwd });
-  const decision = tier2Decision({
+  return decideTier2({
+    ctx,
+    action,
     kind: 'file_write',
-    files: identity === null ? [] : [identity],
+    plain_what: `Change \`${target}\` in your workspace.`,
+    parsed_command: null,
     reason: 'sandbox_write',
     reason_detail: `Sandbox file write to \`${target}\`.`,
     sensitive_read: isSensitivePath(target),
+    shell_form: null,
   });
-  return applyAlwaysAsk({ decision, kind: 'file_write', ctx, action });
 }
 
 function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierDecision {
   const workflowParam = action.canonical_params['workflow'];
   const workflowName = typeof workflowParam === 'string' ? workflowParam : 'unknown';
-  // Runner workflows execute agent-controlled package.json script targets.
-  // Tier 2 is non-blocking, which would allow code execution without
-  // approval: escalate to Tier 3.
+  // Runner workflows execute agent-controlled package.json script targets,
+  // which a Tier 2 relaxation must not be able to auto-run: always Tier 3.
   return tier3Decision({
     card: {
       plain_what: `Run the \`${workflowName}\` workflow (executes package.json scripts).`,
@@ -746,38 +762,54 @@ function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierD
   });
 }
 
-/** Tier 2 decision escalated to Tier 3 by the user's "always ask me" toggle. */
-async function applyAlwaysAsk(input: {
-  decision: TierDecision;
-  kind: Tier2ActionKind;
+/**
+ * Tier 2 asks unless the user relaxed its kind. An unrelaxed call carries a
+ * single-use token (parsed form for shell, so dispatch re-verifies it) and
+ * parks for approval; a relaxed one runs after the containment re-check.
+ */
+async function decideTier2(input: {
   ctx: ClassifyContext;
   action: SentinelAction;
+  kind: Tier2ActionKind;
+  plain_what: string;
+  parsed_command: string | null;
+  reason: string;
+  reason_detail: string;
+  sensitive_read: boolean;
+  shell_form: CanonicalShellForm | null;
 }): Promise<TierDecision> {
-  const { decision, kind, ctx, action } = input;
-  if (decision.tier !== 2) {
-    return decision;
+  const { ctx, action, shell_form } = input;
+  const card = {
+    plain_what: input.plain_what,
+    plain_why: plainWhy(ctx.agent_intent),
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: input.parsed_command,
+  };
+  const base = {
+    kind: input.kind,
+    card,
+    reason: input.reason,
+    reason_detail: input.reason_detail,
+    sensitive_read: input.sensitive_read,
+  };
+  const relaxed = await ctx.services.tier2AutoAllow({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
+  if (relaxed.has(input.kind)) {
+    return tier2Decision(base);
   }
-  const alwaysAsk = await ctx.services.alwaysAsk({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
-  if (!alwaysAsk.has(kind)) {
-    return decision;
+  if (shell_form !== null) {
+    const { token_id, binding } = mintShellToken({
+      services: ctx.services,
+      tool_name: action.tool_name,
+      form: shell_form,
+    });
+    return tier2Decision({ ...base, approval_token_id: token_id, shell_binding: binding });
   }
-  return tier3Decision({
-    card: {
-      plain_what: decision.reason_detail ?? 'Run an action you asked to always approve.',
-      plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'You turned on "always ask me" for this kind of action.',
-      why_asked_again: null,
-      destination: null,
-      recipient: null,
-      amount: null,
-      parsed_command: null,
-    },
-    reason: 'always_ask_toggle',
-    reason_detail: `Escalated by the always-ask toggle for ${kind}.`,
-    sensitive_read: decision.sensitive_read,
-    escalated: true,
-    tier2_kind: kind,
-    tier2_files: decision.tier2_files,
+  return tier2Decision({
+    ...base,
     approval_token_id: mintPlainToken({
       services: ctx.services,
       tool_name: action.tool_name,
