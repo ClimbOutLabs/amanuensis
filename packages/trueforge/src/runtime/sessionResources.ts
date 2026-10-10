@@ -623,6 +623,7 @@ function getSharedRunCodeService(logger: Logger): RunCodeService {
       {
         image: configuration.SANDBOX_IMAGE,
         cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
+        stateDir: configuration.SANDBOX_STATE_DIR,
         dockerBinary: undefined,
         cosignBinary: undefined,
         dockerSocketPath: undefined,
