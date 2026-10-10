@@ -57,6 +57,7 @@
     "test:trueforge": "pnpm --filter @truefoundry/trueforge test",
     "test:local-sandbox:contract": "pnpm --filter @truefoundry/trueforge test:local-sandbox:contract",
     "test:private-data": "node scripts/check-no-private-data.mjs",
+    "send-test-mailbox": "node scripts/send-test-mailbox.mjs",
     "test:pre-push": "node --test tests/pre-push-selection.test.mjs tests/private-data-scan.test.mjs",
     "smoke:local-sandbox": "pnpm --filter @truefoundry/trueforge smoke:local-sandbox",
     "smoke:local-sandbox:lima": "pnpm --filter @truefoundry/trueforge smoke:local-sandbox:lima",

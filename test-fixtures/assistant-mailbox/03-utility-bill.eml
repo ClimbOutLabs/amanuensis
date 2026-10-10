@@ -1,0 +1,50 @@
+From: Metro Power & Light <billing@metro-power-utility.example.net>
+To: Alex Rivera <alex.rivera@example.com>
+Date: Mon, 05 Oct 2026 08:30:11 -0700
+Subject: Your October bill is ready: $184.62 due November 5
+Message-ID: <bill-202610@metro-power-utility.example.net>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=_fixture-boundary-7d3a9f2c"
+
+------=_fixture-boundary-7d3a9f2c
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Hi Alex,
+
+Your October 2026 bill is ready.
+
+  Account:   88214470
+  Amount:    $184.62
+  Due date:  November 5, 2026
+  Usage:     612 kWh
+
+A detailed statement is attached as a PDF.
+
+- Metro Power & Light
+------=_fixture-boundary-7d3a9f2c
+Content-Type: application/pdf; name="bill.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="bill.pdf"
+
+JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq
+CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq
+CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIg
+NzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMgNCAw
+IFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA0NjQgPj4Kc3RyZWFtCkJUIC9GMSAxMSBU
+ZiA3MiA3NDAgVGQgKE1FVFJPIFBPV0VSICYgTElHSFQgLSBCSUxMKSBUaiBFVApCVCAvRjEgMTEg
+VGYgNzIgNzI1IFRkIChBY2NvdW50OiA4ODIxNDQ3MCkgVGogRVQKQlQgL0YxIDExIFRmIDcyIDcx
+MCBUZCAoQmlsbGluZyBwZXJpb2Q6IFNlcCA1LCAyMDI2IC0gT2N0IDQsIDIwMjYpIFRqIEVUCkJU
+IC9GMSAxMSBUZiA3MiA2OTUgVGQgKCkgVGogRVQKQlQgL0YxIDExIFRmIDcyIDY4MCBUZCAoVXNh
+Z2U6IDYxMiBrV2gpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2NjUgVGQgKEFtb3VudCBkdWU6ICQx
+ODQuNjIpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2NTAgVGQgKER1ZSBkYXRlOiBOb3ZlbWJlciA1
+LCAyMDI2KSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNjM1IFRkICgpIFRqIEVUCkJUIC9GMSAxMSBU
+ZiA3MiA2MjAgVGQgKFBheSBhdCBodHRwczovL3d3dy5leGFtcGxlLmNvbS9wYXkpIFRqIEVUCmVu
+ZHN0cmVhbQplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jh
+c2VGb250IC9IZWx2ZXRpY2EgPj4KZW5kb2JqCjYgMCBvYmoKPDwgL1RpdGxlIChCaWxsIE9jdCAy
+MDI2KSAvUHJvZHVjZXIgKGZpeHR1cmUtZ2VuZXJhdG9yKSA+PgplbmRvYmoKeHJlZgowIDcKMDAw
+MDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAK
+MDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDA3NTYgMDAwMDAg
+biAKMDAwMDAwMDgyNiAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDcgL1Jvb3QgMSAwIFIgL0lu
+Zm8gNiAwIFIgPj4Kc3RhcnR4cmVmCjkwMAolJUVPRg==
+------=_fixture-boundary-7d3a9f2c--

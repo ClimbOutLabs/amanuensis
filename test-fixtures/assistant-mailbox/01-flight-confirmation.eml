@@ -1,0 +1,71 @@
+From: Skyward Air <bookings@skyward-air.example.com>
+To: Alex Rivera <alex.rivera@example.com>
+Date: Mon, 12 Oct 2026 09:14:22 -0700
+Subject: Your booking is confirmed: Skyward Air XK7Q2P
+Message-ID: <xk7q2p-confirmation@skyward-air.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=_fixture-boundary-7d3a9f2c"
+
+------=_fixture-boundary-7d3a9f2c
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Hi Alex,
+
+Your booking is confirmed. Booking reference: XK7Q2P
+
+  Flight:    SW 214 (Skyward Air)
+  From:      San Francisco (SFO)
+  To:        New York (JFK)
+  Date:      Saturday, October 24, 2026
+  Departs:   08:05 AM PDT
+  Arrives:   04:32 PM EDT
+  Passenger: Alex Rivera
+  Seat:      14A (Economy)
+
+Your itinerary is attached as a PDF, and a calendar file is
+attached so you can add the flight to your calendar.
+
+Safe travels,
+Skyward Air
+------=_fixture-boundary-7d3a9f2c
+Content-Type: application/pdf; name="itinerary.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="itinerary.pdf"
+
+JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq
+CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq
+CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIg
+NzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMgNCAw
+IFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA2MzUgPj4Kc3RyZWFtCkJUIC9GMSAxMSBU
+ZiA3MiA3NDAgVGQgKFNLWVdBUkQgQUlSIC0gSVRJTkVSQVJZKSBUaiBFVApCVCAvRjEgMTEgVGYg
+NzIgNzI1IFRkIChCb29raW5nIHJlZmVyZW5jZTogWEs3UTJQKSBUaiBFVApCVCAvRjEgMTEgVGYg
+NzIgNzEwIFRkICgpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2OTUgVGQgKFBhc3NlbmdlcjogQWxl
+eCBSaXZlcmEpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2ODAgVGQgKEZsaWdodDogU1cgMjE0KSBU
+aiBFVApCVCAvRjEgMTEgVGYgNzIgNjY1IFRkIChTYW4gRnJhbmNpc2NvIFwoU0ZPXCkgLT4gTmV3
+IFlvcmsgXChKRktcKSkgVGogRVQKQlQgL0YxIDExIFRmIDcyIDY1MCBUZCAoU2F0dXJkYXksIE9j
+dG9iZXIgMjQsIDIwMjYpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2MzUgVGQgKERlcGFydHVyZTog
+MDg6MDUgQU0gUERUKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIgNjIwIFRkIChBcnJpdmFsOiAwNDoz
+MiBQTSBFRFQpIFRqIEVUCkJUIC9GMSAxMSBUZiA3MiA2MDUgVGQgKFNlYXQ6IDE0QSwgRWNvbm9t
+eSkgVGogRVQKQlQgL0YxIDExIFRmIDcyIDU5MCBUZCAoKSBUaiBFVApCVCAvRjEgMTEgVGYgNzIg
+NTc1IFRkIChQbGVhc2UgYXJyaXZlIDIgaG91cnMgYmVmb3JlIGRlcGFydHVyZS4pIFRqIEVUCmVu
+ZHN0cmVhbQplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jh
+c2VGb250IC9IZWx2ZXRpY2EgPj4KZW5kb2JqCjYgMCBvYmoKPDwgL1RpdGxlIChJdGluZXJhcnkg
+WEs3UTJQKSAvUHJvZHVjZXIgKGZpeHR1cmUtZ2VuZXJhdG9yKSA+PgplbmRvYmoKeHJlZgowIDcK
+MDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAg
+biAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDA5MjcgMDAw
+MDAgbiAKMDAwMDAwMDk5NyAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDcgL1Jvb3QgMSAwIFIg
+L0luZm8gNiAwIFIgPj4Kc3RhcnR4cmVmCjEwNzQKJSVFT0Y=
+------=_fixture-boundary-7d3a9f2c
+Content-Type: text/calendar; name="flight.ics"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="flight.ics"
+
+QkVHSU46VkNBTEVOREFSDQpWRVJTSU9OOjIuMA0KUFJPRElEOi0vL0V4YW1wbGUgRml4dHVyZXMv
+L0ZsaWdodC8vRU4NCkJFR0lOOlZFVkVOVA0KVUlEOnN3MjE0LXhrN3EycEBza3l3YXJkLWFpci5l
+eGFtcGxlLmNvbQ0KRFRTVEFNUDoyMDI2MTAxMlQxNjE0MjJaDQpEVFNUQVJUOjIwMjYxMDI0VDE1
+MDUwMFoNCkRURU5EOjIwMjYxMDI0VDIwMzIwMFoNClNVTU1BUlk6U1cgMjE0OiBTYW4gRnJhbmNp
+c2NvIHRvIE5ldyBZb3JrDQpERVNDUklQVElPTjpCb29raW5nIFhLN1EyUFwsIHNlYXQgMTRBDQpM
+T0NBVElPTjpTYW4gRnJhbmNpc2NvIEludGVybmF0aW9uYWwgQWlycG9ydCAoU0ZPKQ0KRU5EOlZF
+VkVOVA0KRU5EOlZDQUxFTkRBUg0K
+------=_fixture-boundary-7d3a9f2c--
