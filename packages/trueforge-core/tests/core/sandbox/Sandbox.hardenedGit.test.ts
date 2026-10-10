@@ -228,13 +228,18 @@ function makeSandbox(input: { provider: SandboxProvider; fixture: Fixture; exist
   });
 }
 
-async function runExec(input: { sandbox: Sandbox; fixture: Fixture; command: string }): Promise<{
+async function runExec(input: { sandbox: Sandbox; fixture: Fixture; command: string; cwd?: string }): Promise<{
   isError: boolean;
   text: string;
 }> {
   const result = await input.sandbox.callTool({
     name: SANDBOX_EXEC_TOOL_NAME,
-    arguments: { intent: 'inspect', purpose: 'inspect', command: input.command, cwd: input.fixture.repo },
+    arguments: {
+      intent: 'inspect',
+      purpose: 'inspect',
+      command: input.command,
+      cwd: input.cwd ?? input.fixture.repo,
+    },
   });
   if (!isCallToolResponseResult(result)) {
     throw new Error('expected a tool result, not an approval request');
@@ -371,6 +376,53 @@ describe('allowlisted git execution with a nested repository', () => {
     try {
       const result = await runExec({ sandbox: realShellSandbox(fixture), fixture, command });
       expect(result.isError).toBe(false);
+      expect(existsSync(fixture.marker)).toBe(false);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+});
+
+/** The workspace repo with a nested repo whose own config names a program for core.fsmonitor. */
+function nestedFsmonitorFixture(): Fixture & { nested: string } {
+  const fixture = repoFixture();
+  const nested = join(fixture.repo, 'nested');
+  mkdirSync(nested);
+  git(nested, ['init', '-q']);
+  writeFileSync(join(nested, 'f.txt'), 'one\n');
+  git(nested, ['add', 'f.txt']);
+  git(nested, ['commit', '-q', '-m', 'nested']);
+  writeFileSync(join(nested, 'f.txt'), 'two\n');
+  git(nested, ['config', 'core.fsmonitor', fixture.script]);
+  rmSync(fixture.marker, { force: true });
+  return { ...fixture, nested };
+}
+
+describe('silent (Tier 1) git in a nested repository whose config names a program', () => {
+  test('control: plain git status in the nested repository runs the fsmonitor program', () => {
+    const fixture = nestedFsmonitorFixture();
+    try {
+      execFileSync('sh', ['-c', 'git status'], { cwd: fixture.nested, stdio: 'ignore' });
+      expect(existsSync(fixture.marker)).toBe(true);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('git status is classified Tier 1 but still refuses and never runs the program', async () => {
+    const fixture = nestedFsmonitorFixture();
+    try {
+      const sandbox = realShellSandbox(fixture);
+      const info = await sandbox.toolCallInfo({
+        name: SANDBOX_EXEC_TOOL_NAME,
+        arguments: { intent: 'inspect', purpose: 'inspect', command: 'git status', cwd: fixture.nested },
+      });
+      expect(info.tier).toBe(1);
+      expect(info.is_approval_required).toBe(false);
+
+      const result = await runExec({ sandbox, fixture, command: 'git status', cwd: fixture.nested });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('needs your approval');
       expect(existsSync(fixture.marker)).toBe(false);
     } finally {
       fixture.cleanup();
