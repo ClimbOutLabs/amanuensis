@@ -305,6 +305,12 @@ describe('hardenAllowlistedGit', () => {
     'core.sshCommand=',
     '-c',
     'diff.external=',
+    '-c',
+    'diff.ignoreSubmodules=all',
+    '-c',
+    'submodule.recurse=false',
+    '-c',
+    'status.submoduleSummary=false',
   ];
 
   function harden(command: string): HardenedGitInvocation | undefined {
@@ -317,13 +323,20 @@ describe('hardenAllowlistedGit', () => {
   }
 
   test('prepends global overrides and the subcommand forced flags', () => {
-    expect(harden('git status --short')?.argv).toEqual(['git', ...hardening, 'status', '--short']);
+    expect(harden('git status --short')?.argv).toEqual([
+      'git',
+      ...hardening,
+      'status',
+      '--ignore-submodules=all',
+      '--short',
+    ]);
     expect(harden('git diff --cached src')?.argv).toEqual([
       'git',
       ...hardening,
       'diff',
       '--no-ext-diff',
       '--no-textconv',
+      '--ignore-submodules=all',
       '--cached',
       'src',
     ]);
@@ -332,7 +345,13 @@ describe('hardenAllowlistedGit', () => {
 
   test('isolates system and global config and builds a local-config probe', () => {
     const hardened = harden('git status');
-    expect(hardened?.env).toEqual({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ATTR_NOSYSTEM: '1' });
+    expect(hardened?.env).toEqual({
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_COUNT: '0',
+      GIT_CONFIG_PARAMETERS: '',
+      GIT_ATTR_NOSYSTEM: '1',
+    });
     expect(hardened?.probe_argv).toEqual([
       'git',
       ...hardening,

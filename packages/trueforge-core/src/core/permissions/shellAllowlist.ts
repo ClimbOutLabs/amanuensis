@@ -352,7 +352,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
           status: {
             args: ['--short', '--porcelain', '--branch', '-s', '-b'],
             operands: 'workspace_relative',
-            forced_args: [],
+            forced_args: ['--ignore-submodules=all'],
           },
           log: {
             args: [
@@ -369,7 +369,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
               '--',
             ],
             operands: 'workspace_relative',
-            forced_args: ['--no-ext-diff', '--no-textconv'],
+            forced_args: ['--no-ext-diff', '--no-textconv', '--ignore-submodules=all'],
           },
           diff: {
             args: [
@@ -386,7 +386,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
               '--',
             ],
             operands: 'workspace_relative',
-            forced_args: ['--no-ext-diff', '--no-textconv'],
+            forced_args: ['--no-ext-diff', '--no-textconv', '--ignore-submodules=all'],
           },
           show: {
             args: [
@@ -401,7 +401,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
               '--',
             ],
             operands: 'workspace_relative',
-            forced_args: ['--no-ext-diff', '--no-textconv'],
+            forced_args: ['--no-ext-diff', '--no-textconv', '--ignore-submodules=all'],
           },
           branch: {
             args: ['--list', '--all', '--remotes', '--show-current', '-a', '-r', '-v', '-vv'],
@@ -469,13 +469,25 @@ function gitHardeningGlobalArgs(workspaceRoot: string): string[] {
     'core.sshCommand=',
     '-c',
     'diff.external=',
+    '-c',
+    'diff.ignoreSubmodules=all',
+    '-c',
+    'submodule.recurse=false',
+    '-c',
+    'status.submoduleSummary=false',
   ];
 }
 
-/** Drops system and global git config so only the repository's own config is in play. */
+/**
+ * Drops system, global and inherited env-injected git config so only the
+ * repository's own config is in play. A zero count also ignores any inherited
+ * GIT_CONFIG_KEY_* / GIT_CONFIG_VALUE_* pairs.
+ */
 const GIT_HARDENING_ENV: Readonly<Record<string, string>> = {
   GIT_CONFIG_NOSYSTEM: '1',
   GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_COUNT: '0',
+  GIT_CONFIG_PARAMETERS: '',
   GIT_ATTR_NOSYSTEM: '1',
 };
 
