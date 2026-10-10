@@ -143,30 +143,41 @@ lock_release() {
   fi
 }
 
-# Validators: values end up in templates, so each one is limited to a safe character set.
+# Validators: values end up in templates and paths, so each one must match as a whole string. They use
+# bash's [[ =~ ]], where ^ and $ anchor the entire value; line-wise tools such as grep would accept a
+# value whose second line matches.
+has_control_chars() {
+  [[ $1 == *[[:cntrl:]]* ]]
+}
+
+# Whole-string match of $1 against the extended regex $2, never accepting control characters.
+matches_whole() {
+  has_control_chars "$1" && return 1
+  [[ $1 =~ $2 ]]
+}
+
 valid_name() {
-  case "$1" in
-    machine) return 1 ;;
-  esac
-  printf '%s' "$1" | grep -Eq '^[a-z][a-z0-9-]{0,22}[a-z0-9]$|^[a-z]$'
+  [ "$1" != machine ] && matches_whole "$1" '^[a-z]([a-z0-9-]{0,22}[a-z0-9])?$'
 }
 
 valid_email() {
-  printf '%s' "$1" | grep -Eq '^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'
+  [ "${#1}" -le 254 ] && matches_whole "$1" '^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'
 }
 
 # A bare origin: scheme, host and optional port; no path, query or userinfo.
 valid_origin() {
-  printf '%s' "$1" | grep -Eq '^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$'
+  matches_whole "$1" '^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$'
+}
+
+valid_model_endpoint() {
+  matches_whole "$1" '^https?://[A-Za-z0-9._:/-]+$'
 }
 
 valid_port() {
-  case "$1" in
-    '' | *[!0-9]*) return 1 ;;
-  esac
-  [ "$1" -ge 1024 ] && [ "$1" -le 65535 ]
+  matches_whole "$1" '^[0-9]{1,5}$' || return 1
+  [ "$((10#$1))" -ge 1024 ] && [ "$((10#$1))" -le 65535 ]
 }
 
 is_loopback_origin() {
-  printf '%s' "$1" | grep -Eq '^http://(127\.0\.0\.1|\[::1\]|localhost)(:[0-9]+)?$'
+  matches_whole "$1" '^http://(127\.0\.0\.1|\[::1\]|localhost)(:[0-9]+)?$'
 }

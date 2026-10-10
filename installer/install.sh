@@ -129,6 +129,7 @@ parse_args() {
         ;;
       -*) usage_die "unknown option $arg" ;;
       *)
+        safe_value "$arg" || usage_die "an argument contains a character that is not allowed"
         positional=$((positional + 1))
         case "$positional:$COMMAND" in
           1:install)

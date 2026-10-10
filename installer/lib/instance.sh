@@ -5,6 +5,22 @@ APP_EXPECTED_CONTAINERS=3
 
 instance_dir() { printf '%s/%s' "$INSTANCES_DIR" "$1"; }
 
+# The only place an instance directory is deleted. The name must be valid and the resolved path a
+# direct child of <home>/instances, so no name or symlink can point the deletion elsewhere.
+remove_instance_dir() {
+  local name=$1 dir parent resolved
+  valid_name "$name" || die "refusing to remove an instance directory for an invalid name"
+  dir=$(instance_dir "$name")
+  if [ ! -e "$dir" ] && [ ! -L "$dir" ]; then
+    return 0
+  fi
+  [ ! -L "$dir" ] || die "refusing to remove $dir: it is a symbolic link"
+  parent=$(cd -P -- "$INSTANCES_DIR" && pwd) || die "cannot resolve $INSTANCES_DIR"
+  resolved=$(cd -P -- "$dir" && pwd) || die "cannot resolve $dir"
+  [ "$resolved" = "$parent/$name" ] || die "refusing to remove $dir: it is not a direct child of $parent"
+  rm -rf -- "$dir"
+}
+
 # Docker Compose for one instance project.
 dc() {
   local name=$1 dir
@@ -156,7 +172,7 @@ instance_collect() {
   fi
   ask I_MODEL "Model server endpoint (optional, e.g. http://host.docker.internal:11434/v1)" ""
   if [ -n "$I_MODEL" ]; then
-    printf '%s' "$I_MODEL" | grep -Eq '^https?://[A-Za-z0-9._:/-]+$' || usage_die "the model endpoint must be an http(s) URL"
+    valid_model_endpoint "$I_MODEL" || usage_die "the model endpoint must be an http(s) URL"
   fi
 }
 
@@ -205,7 +221,7 @@ instance_create() {
     return
   fi
   issuer_check "$I_ISSUER"
-  rm -rf "$dir"
+  remove_instance_dir "$I_NAME"
   ensure_private_dir "$dir"
   cookie=$(rand_hex 4)
   while printf '%s' " $(reg_all cookie_suffix) " | grep -Fq " $cookie "; do
@@ -346,7 +362,7 @@ cmd_instance_remove() {
   if [ -f "$(instance_dir "$name")/compose.yaml" ] && [ -f "$(instance_dir "$name")/.env" ]; then
     dc "$name" down || warn "could not stop the stack cleanly; continuing with the removal"
   fi
-  rm -rf "$(instance_dir "$name")"
+  remove_instance_dir "$name"
   reg_remove "$name"
   log_event "instance $name removed"
   if [ "${OPT_PURGE:-0}" = 1 ]; then

@@ -21,8 +21,9 @@ render_template() {
 
 # Rejects characters that would break out of a YAML scalar or a replacement.
 safe_value() {
+  has_control_chars "$1" && return 1
   case "$1" in
-    *[\&\\\"\'\`\;\|]* | *$'\n'*) return 1 ;;
+    *[\&\\\"\'\`\;\|]*) return 1 ;;
   esac
   return 0
 }

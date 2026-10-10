@@ -7,7 +7,7 @@ json_get() {
 }
 
 valid_digest_ref() {
-  printf '%s' "$1" | grep -Eq '^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$'
+  matches_whole "$1" '^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$'
 }
 
 # Checks the pins shipped with the installer before anything is pulled or written.

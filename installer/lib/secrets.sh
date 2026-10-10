@@ -12,7 +12,7 @@ hash_password() {
   out=$(printf '%s\n' "$AMAN_PASSWORD" | D run --rm -i --network none "$image" amanuensis hash-password) ||
     die "the app image could not hash the password (amanuensis hash-password failed)"
   hash=$(printf '%s' "$out" | sed -n 's/.*"hash"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
-  printf '%s' "$hash" | grep -Eq '^[$]2[aby][$][0-9]{2}[$][./A-Za-z0-9]{53}$' ||
+  matches_whole "$hash" '^[$]2[aby][$][0-9]{2}[$][./A-Za-z0-9]{53}$' ||
     die "the app image returned something that is not a bcrypt hash"
   printf '%s\n' "$hash"
 }
