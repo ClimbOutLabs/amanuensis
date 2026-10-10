@@ -50,26 +50,26 @@ function tree(api: MemoryRecallApi, turnIds: string[] = ['trn_1']) {
   );
 }
 
-function profileContext(turnId: string, revision = 1): MemoryTurnContext {
+function profileContext(turnId: string, { id = `evt_profile_${turnId}_1` }: { id?: string } = {}): MemoryTurnContext {
   return {
     turnId,
     profile: {
       type: 'aman.profile.learned',
-      id: `evt_profile_${turnId}_${String(revision)}`,
+      id,
       createdAt: '2026-08-03T00:00:01.000Z',
       previous: null,
       current: '# Learned profile',
-      revision,
+      revision: 1,
     },
   };
 }
 
-function recallContext(turnId: string): MemoryTurnContext {
+function recallContext(turnId: string, { id = `evt_recall_${turnId}` }: { id?: string } = {}): MemoryTurnContext {
   return {
     turnId,
     recall: {
       type: 'aman.memory.recall',
-      id: `evt_recall_${turnId}`,
+      id,
       createdAt: '2026-08-03T00:00:00.000Z',
       injectedBlock: '<aman-memory>fact</aman-memory>',
       stats: {
@@ -88,7 +88,36 @@ function recallContext(turnId: string): MemoryTurnContext {
 }
 
 let threadMessages: { role: string; metadata: { custom: Record<string, unknown> } }[] = [];
+let remoteId = 'sess-1';
 let visibility: DocumentVisibilityState = 'visible';
+
+/** Assistant messages stamped with these turn ids, so the last one is the newest turn. */
+function assistantTurns(...turnIds: string[]): typeof threadMessages {
+  return turnIds.map(turnId => ({ role: 'assistant', metadata: { custom: { turnId } } }));
+}
+
+/**
+ * Per-session event log that answers like the server: a cursor read returns only events whose id
+ * sorts after the cursor, so an event saved with an older id than one already read is invisible
+ * to cursor reads and shows up only in a full read. Each item carries one event, like a page row.
+ */
+function eventLog() {
+  const saved = new Map<string, MemoryTurnContext[]>();
+  const listMemoryTurnContext = vi.fn(
+    async (sessionId: string, options?: { afterEventId?: string | undefined }): Promise<MemoryTurnContext[]> => {
+      const after = options?.afterEventId;
+      return (saved.get(sessionId) ?? [])
+        .filter(item => after === undefined || (item.recall?.id ?? item.profile?.id ?? '') > after)
+        .map(item => structuredClone(item));
+    },
+  );
+  const save = (sessionId: string, ...items: MemoryTurnContext[]) => {
+    saved.set(sessionId, [...(saved.get(sessionId) ?? []), ...items]);
+  };
+  return { listMemoryTurnContext, save };
+}
+
+type EventLog = ReturnType<typeof eventLog>;
 
 function setVisibility(next: DocumentVisibilityState) {
   visibility = next;
@@ -106,11 +135,12 @@ describe('MemoryTurnContextProvider', () => {
     vi.useFakeTimers();
     renders.clear();
     threadMessages = [];
+    remoteId = 'sess-1';
     visibility = 'visible';
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
     useThreadIsRunning.mockReturnValue(false);
     useAuiState.mockImplementation((selector: (state: unknown) => unknown) =>
-      selector({ threadListItem: { remoteId: 'sess-1' }, thread: { messages: threadMessages } }),
+      selector({ threadListItem: { remoteId }, thread: { messages: threadMessages } }),
     );
   });
 
@@ -166,7 +196,7 @@ describe('MemoryTurnContextProvider', () => {
     useThreadIsRunning.mockReturnValue(true);
     const turnIds = ['trn_1', 'trn_2', 'trn_3'];
     // Every poll returns fresh objects with the same content, as a full re-read would.
-    let response = (): MemoryTurnContext[] => turnIds.map(recallContext);
+    let response = (): MemoryTurnContext[] => turnIds.map(turnId => recallContext(turnId));
     const listMemoryTurnContext = vi.fn(async () => response());
 
     render(tree({ listMemoryTurnContext }, turnIds));
@@ -177,7 +207,7 @@ describe('MemoryTurnContextProvider', () => {
     expect(listMemoryTurnContext.mock.calls.length).toBeGreaterThanOrEqual(10);
     expect(renders).toEqual(settled);
 
-    response = () => [...turnIds.map(recallContext), profileContext('trn_2')];
+    response = () => [...turnIds.map(turnId => recallContext(turnId)), profileContext('trn_2')];
     await flush(2_000);
     expect(screen.getByTestId('profile-revision-trn_2')).toHaveTextContent('1');
     expect(renders.get('trn_2')).toBe((settled.get('trn_2') ?? 0) + 1);
@@ -227,7 +257,7 @@ describe('MemoryTurnContextProvider', () => {
     expect(screen.getByTestId('profile-revision-trn_1')).toHaveTextContent('1');
   });
 
-  it("stops polling once the finished turn's profile event arrives", async () => {
+  it("stops polling once the finished turn's profile event arrives, leaving only the closing full read", async () => {
     threadMessages = [
       { role: 'user', metadata: { custom: {} } },
       { role: 'assistant', metadata: { custom: { turnId: 'trn_1' } } },
@@ -245,8 +275,13 @@ describe('MemoryTurnContextProvider', () => {
     expect(screen.getByTestId('profile-revision-trn_1')).toHaveTextContent('1');
     const afterProfile = listMemoryTurnContext.mock.calls.length;
 
-    await flush(60_000);
+    await flush(50_000);
     expect(listMemoryTurnContext).toHaveBeenCalledTimes(afterProfile);
+
+    // The grace period still closes with one full read, for profiles saved behind the cursor.
+    await flush(10_000);
+    expect(listMemoryTurnContext).toHaveBeenCalledTimes(afterProfile + 1);
+    expect(listMemoryTurnContext).toHaveBeenLastCalledWith('sess-1', undefined);
   });
 
   it('stops polling when the grace period ends without a profile event', async () => {
@@ -277,5 +312,153 @@ describe('MemoryTurnContextProvider', () => {
       await Promise.resolve();
     });
     expect(screen.getByTestId('has-error-trn_1')).toHaveTextContent('false');
+  });
+
+  describe('events saved behind the cursor', () => {
+    const turns = ['trn_1', 'trn_2'];
+
+    /**
+     * trn_1 and trn_2 are loaded (cursor evt_03) and the run has just ended. trn_1's profile is
+     * yet to be saved as evt_02: its id came before trn_2's recall, so cursor reads cannot see it.
+     */
+    async function endRunWithBothTurnsLoaded() {
+      threadMessages = assistantTurns(...turns);
+      const log = eventLog();
+      log.save('sess-1', recallContext('trn_1', { id: 'evt_01' }), recallContext('trn_2', { id: 'evt_03' }));
+      const api = { listMemoryTurnContext: log.listMemoryTurnContext };
+      useThreadIsRunning.mockReturnValue(true);
+      const { rerender } = render(tree(api, turns));
+      await flush();
+      useThreadIsRunning.mockReturnValue(false);
+      rerender(tree(api, turns));
+      return log;
+    }
+
+    /** Lets trn_2's own profile arrive, which ends polling, then saves trn_1's profile behind the cursor. */
+    async function saveProfilesAfterPollingEnds(log: EventLog) {
+      log.save('sess-1', profileContext('trn_2', { id: 'evt_04' }));
+      await flush(2_000);
+      expect(screen.getByTestId('profile-revision-trn_2')).toHaveTextContent('1');
+      log.save('sess-1', profileContext('trn_1', { id: 'evt_02' }));
+    }
+
+    it('re-reads the whole history when the grace period ends, rendering only what changed', async () => {
+      const log = await endRunWithBothTurnsLoaded();
+      await saveProfilesAfterPollingEnds(log);
+      const polled = log.listMemoryTurnContext.mock.calls.length;
+
+      await flush(60_000);
+      expect(log.listMemoryTurnContext).toHaveBeenCalledTimes(polled);
+      expect(screen.getByTestId('profile-revision-trn_1')).toHaveTextContent('none');
+
+      const settled = new Map(renders);
+      await flush(5_000);
+      expect(log.listMemoryTurnContext).toHaveBeenCalledTimes(polled + 1);
+      expect(log.listMemoryTurnContext).toHaveBeenLastCalledWith('sess-1', undefined);
+      expect(screen.getByTestId('profile-revision-trn_1')).toHaveTextContent('1');
+      expect(renders.get('trn_1')).toBe((settled.get('trn_1') ?? 0) + 1);
+      expect(renders.get('trn_2')).toBe(settled.get('trn_2'));
+    });
+
+    it('retries a failed closing read as a full read', async () => {
+      const log = await endRunWithBothTurnsLoaded();
+      await saveProfilesAfterPollingEnds(log);
+
+      log.listMemoryTurnContext.mockRejectedValueOnce(new Error('network down'));
+      await flush(65_000);
+      expect(screen.getByTestId('has-error-trn_1')).toHaveTextContent('true');
+      expect(screen.getByTestId('profile-revision-trn_1')).toHaveTextContent('none');
+
+      await act(async () => {
+        screen.getByRole('button', { name: 'retry trn_1' }).click();
+      });
+      await flush();
+      expect(log.listMemoryTurnContext).toHaveBeenLastCalledWith('sess-1', undefined);
+      expect(screen.getByTestId('has-error-trn_1')).toHaveTextContent('false');
+      expect(screen.getByTestId('profile-revision-trn_1')).toHaveTextContent('1');
+    });
+
+    it('skips the closing read while the page is hidden and does it when the page is shown', async () => {
+      const log = await endRunWithBothTurnsLoaded();
+      await act(async () => {
+        setVisibility('hidden');
+      });
+      const whileHidden = log.listMemoryTurnContext.mock.calls.length;
+
+      // The grace period ends while hidden, and the profile is saved after that.
+      await flush(70_000);
+      log.save('sess-1', profileContext('trn_1', { id: 'evt_02' }));
+      await flush(10_000);
+      expect(log.listMemoryTurnContext).toHaveBeenCalledTimes(whileHidden);
+      expect(screen.getByTestId('profile-revision-trn_1')).toHaveTextContent('none');
+
+      await act(async () => {
+        setVisibility('visible');
+      });
+      await flush();
+      expect(log.listMemoryTurnContext).toHaveBeenCalledTimes(whileHidden + 1);
+      expect(log.listMemoryTurnContext).toHaveBeenLastCalledWith('sess-1', undefined);
+      expect(screen.getByTestId('profile-revision-trn_1')).toHaveTextContent('1');
+
+      await flush(60_000);
+      expect(log.listMemoryTurnContext).toHaveBeenCalledTimes(whileHidden + 1);
+    });
+  });
+
+  it('keeps a full read queued behind a slow poll from being downgraded by a later poll tick', async () => {
+    useThreadIsRunning.mockReturnValue(true);
+    let release: (items: MemoryTurnContext[]) => void = () => {};
+    const slowPoll = new Promise<MemoryTurnContext[]>(resolve => {
+      release = resolve;
+    });
+    const listMemoryTurnContext = vi
+      .fn()
+      .mockResolvedValueOnce([recallContext('trn_1')])
+      .mockReturnValueOnce(slowPoll)
+      .mockResolvedValue([]);
+    render(tree({ listMemoryTurnContext }));
+    await flush();
+    await flush(2_000);
+    expect(listMemoryTurnContext).toHaveBeenCalledTimes(2);
+
+    // Showing the page queues a full read behind the poll that is still out; the next tick joins it.
+    await act(async () => {
+      setVisibility('hidden');
+    });
+    await act(async () => {
+      setVisibility('visible');
+    });
+    await flush(2_000);
+    expect(listMemoryTurnContext).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      release([]);
+    });
+    await flush();
+    expect(listMemoryTurnContext).toHaveBeenCalledTimes(3);
+    expect(listMemoryTurnContext).toHaveBeenLastCalledWith('sess-1', undefined);
+  });
+
+  it("does not re-read a switched session when the previous session's grace period ends", async () => {
+    const log = eventLog();
+    log.save('sess-1', recallContext('trn_1', { id: 'evt_01' }));
+    log.save('sess-2', recallContext('trn_2', { id: 'evt_02' }));
+    const api = { listMemoryTurnContext: log.listMemoryTurnContext };
+    useThreadIsRunning.mockReturnValue(true);
+    const { rerender } = render(tree(api));
+    await flush();
+
+    useThreadIsRunning.mockReturnValue(false);
+    rerender(tree(api));
+    await flush(30_000);
+
+    remoteId = 'sess-2';
+    rerender(tree(api));
+    await flush();
+    const loaded = log.listMemoryTurnContext.mock.calls.length;
+
+    // The first session's grace period would have ended somewhere in here.
+    await flush(60_000);
+    expect(log.listMemoryTurnContext).toHaveBeenCalledTimes(loaded);
   });
 });

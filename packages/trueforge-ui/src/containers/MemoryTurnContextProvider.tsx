@@ -26,7 +26,8 @@ const POLL_INTERVAL_MS = 2_000;
  * appends `aman.profile.learned` once its distillation call and profile write finish; that call
  * is allowed up to 60s (`DISTILLATION_TIMEOUT_MS` in `runtime/profileLearning.ts`). The window is
  * kept at that worst case because each poll only asks for newer recall/profile events, so an idle
- * poll returns no rows and renders nothing; it ends early once the finished turn's profile arrives.
+ * poll returns no rows and renders nothing; polling stops early once the finished turn's profile
+ * arrives.
  */
 const POST_RUN_POLL_MS = 65_000;
 
@@ -115,6 +116,13 @@ class MemoryTurnContextStore {
 
 type MemoryTurnContextValue = { store: MemoryTurnContextStore; retry: () => void };
 
+/**
+ * `newer` reads past the newest event id held; `all` re-reads the whole filtered history. The
+ * cursor follows event creation order, not save order, so an event saved after a newer one (a
+ * learned profile landing after the next turn's recall) can sit behind it until an `all` read.
+ */
+type RefreshScope = 'newer' | 'all';
+
 const EMPTY_VALUE: MemoryTurnContextValue = { store: new MemoryTurnContextStore(), retry: () => {} };
 
 const MemoryTurnContextContext = createContext<MemoryTurnContextValue>(EMPTY_VALUE);
@@ -141,8 +149,10 @@ function latestAssistantTurnId(
  * re-renders that message when its entry changes.
  *
  * Polls are incremental (only events newer than the newest one held) and pause while the page is
- * hidden; showing the page again catches up immediately. The grace period ends as soon as the
- * newest turn's profile event arrives, since nothing later is expected for it.
+ * hidden. Showing the page again and the end of the grace period each re-read the whole filtered
+ * history once (see `RefreshScope`); unchanged entries keep their identity, so that renders nothing
+ * new. Polling in the grace period stops early once the newest turn's profile event arrives, but
+ * the closing full read still happens.
  *
  * A refresh already in flight is never abandoned by the next poll tick: overlapping requests are
  * coalesced (at most one more refresh is queued behind the in-flight one) instead of each tick
@@ -163,11 +173,12 @@ export function MemoryTurnContextProvider({ children }: PropsWithChildren) {
   const isRunning = useThreadIsRunning();
   const isVisible = useDocumentVisible();
   const [store] = useState(() => new MemoryTurnContextStore());
-  const refreshRef = useRef<() => void>(() => {});
+  const refreshRef = useRef<(scope: RefreshScope) => void>(() => {});
   const [inGracePeriod, setInGracePeriod] = useState(false);
   // Only a running→stopped transition earns the grace period; a session that opens already idle
   // (e.g. a completed session loaded fresh) needs just the one initial load.
   const wasRunningRef = useRef(false);
+  const isVisibleRef = useRef(isVisible);
   const latestTurnHasProfile = useSyncExternalStore(
     store.subscribe,
     () => latestTurnId !== undefined && store.getTurn(latestTurnId)?.profile !== undefined,
@@ -183,16 +194,16 @@ export function MemoryTurnContextProvider({ children }: PropsWithChildren) {
     store.reset();
     let cancelled = false;
     let inFlight = false;
-    let rerunRequested = false;
+    let rerun: RefreshScope | undefined;
 
-    const refresh = () => {
+    const refresh = (scope: RefreshScope) => {
       if (cancelled) return;
       if (inFlight) {
-        rerunRequested = true;
+        rerun = rerun === 'all' ? 'all' : scope;
         return;
       }
       inFlight = true;
-      const afterEventId = store.getLatestEventId();
+      const afterEventId = scope === 'all' ? undefined : store.getLatestEventId();
       void api
         .listMemoryTurnContext(sessionId, afterEventId === undefined ? undefined : { afterEventId })
         .then(items => {
@@ -203,15 +214,14 @@ export function MemoryTurnContextProvider({ children }: PropsWithChildren) {
         })
         .finally(() => {
           inFlight = false;
-          if (cancelled) return;
-          if (rerunRequested) {
-            rerunRequested = false;
-            refresh();
-          }
+          if (cancelled || rerun === undefined) return;
+          const next = rerun;
+          rerun = undefined;
+          refresh(next);
         });
     };
     refreshRef.current = refresh;
-    refresh();
+    refresh('all');
 
     return () => {
       cancelled = true;
@@ -233,28 +243,37 @@ export function MemoryTurnContextProvider({ children }: PropsWithChildren) {
     if (!wasRunningRef.current) return;
     wasRunningRef.current = false;
     setInGracePeriod(true);
-    const timeoutId = setTimeout(() => setInGracePeriod(false), POST_RUN_POLL_MS);
-    return () => clearTimeout(timeoutId);
   }, [isRunning]);
+
+  // Owned by the grace state so a new run or a session switch cancels it along with the state.
+  useEffect(() => {
+    if (!inGracePeriod) return;
+    const timeoutId = setTimeout(() => {
+      setInGracePeriod(false);
+      // One last full read picks up a profile saved behind the cursor; a hidden page does it on show.
+      if (isVisibleRef.current) refreshRef.current('all');
+    }, POST_RUN_POLL_MS);
+    return () => clearTimeout(timeoutId);
+  }, [inGracePeriod]);
 
   const shouldPoll =
     api != null && sessionId != null && isVisible && (isRunning || (inGracePeriod && !latestTurnHasProfile));
 
   useEffect(() => {
     if (!shouldPoll) return;
-    const intervalId = setInterval(() => refreshRef.current(), POLL_INTERVAL_MS);
+    const intervalId = setInterval(() => refreshRef.current('newer'), POLL_INTERVAL_MS);
     return () => clearInterval(intervalId);
   }, [shouldPoll]);
 
-  // Showing the page again catches up at once: a hidden tab skips polls and may have outlived the
-  // grace period that would have picked up a late profile write.
-  const wasVisibleRef = useRef(isVisible);
+  // Showing the page again catches up at once with a full read: a hidden tab skips polls and may
+  // have outlived the grace period that would have picked up a late profile write.
   useEffect(() => {
-    if (isVisible && !wasVisibleRef.current) refreshRef.current();
-    wasVisibleRef.current = isVisible;
+    if (isVisible && !isVisibleRef.current) refreshRef.current('all');
+    isVisibleRef.current = isVisible;
   }, [isVisible]);
 
-  const retry = useCallback(() => refreshRef.current(), []);
+  // The read that failed may have been a full one, so a retry re-reads everything.
+  const retry = useCallback(() => refreshRef.current('all'), []);
   const value = useMemo(() => ({ store, retry }), [store, retry]);
 
   return <MemoryTurnContextContext.Provider value={value}>{children}</MemoryTurnContextContext.Provider>;
