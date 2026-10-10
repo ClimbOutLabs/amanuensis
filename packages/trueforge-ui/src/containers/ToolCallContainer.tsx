@@ -140,7 +140,9 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   const approvalInfo = sentinel?.approvalFor(part.toolCallId);
   if (approvalInfo?.tier === 2 || approvalInfo?.tier === 3) {
     const options = buildApprovalOptions(part.approval?.options);
-    const allowOption = options.find(option => option.isAllow);
+    // Approve is always a single-use allow: a declared chat-scoped grant can sort first,
+    // and taking the first allow option would silently approve every later equivalent call.
+    const allowOnceId = part.approval?.options?.find(option => option.kind === 'allow-once')?.id ?? '__allow';
     const denyOption = options.find(option => !option.isAllow);
     // Only Tier 2 calls batch, and only those asked by this same approval event on this
     // same thread: a sub-agent's calls never ride along with the parent's. Each call still
@@ -172,7 +174,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         toolName={part.toolName}
         card={approvalInfo.card}
         tier={approvalInfo.tier}
-        onApprove={() => onSelectOption(allowOption?.id ?? '__allow')}
+        onApprove={() => onSelectOption(allowOnceId)}
         onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
         onApproveAll={approveAll}
         batchSize={approveAll === undefined ? undefined : tier2Batch.length}

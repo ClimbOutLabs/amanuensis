@@ -36,7 +36,20 @@ function card(plain_what: string): SentinelApprovalCard {
   };
 }
 
-function pendingCall(id: string, toolName: string): Exclude<ThreadMessageLike['content'], string>[number] {
+type ApprovalOptions = NonNullable<
+  Extract<Exclude<ThreadMessageLike['content'], string>[number], { type: 'tool-call' }>['approval']
+>['options'];
+
+const ALLOW_ONCE_THEN_DENY: ApprovalOptions = [
+  { id: 'allow-once', kind: 'allow-once' },
+  { id: 'deny', kind: 'reject-once', confirm: {} },
+];
+
+function pendingCall(
+  id: string,
+  toolName: string,
+  options: ApprovalOptions = ALLOW_ONCE_THEN_DENY,
+): Exclude<ThreadMessageLike['content'], string>[number] {
   return {
     type: 'tool-call',
     toolCallId: id,
@@ -46,10 +59,7 @@ function pendingCall(id: string, toolName: string): Exclude<ThreadMessageLike['c
     approval: {
       id,
       approved: undefined,
-      options: [
-        { id: 'allow-once', kind: 'allow-once' },
-        { id: 'deny', kind: 'reject-once', confirm: {} },
-      ],
+      options,
     },
   };
 }
@@ -61,11 +71,13 @@ type PendingCall = {
   event?: string;
   /** Thread that owns the call. */
   thread?: string;
+  /** Approval options the server declared; defaults to allow-once then deny. */
+  options?: ApprovalOptions;
 };
 
 /** Renders pending calls with the given tiers; the runtime reports each as awaiting approval. */
 function renderPending(calls: PendingCall[], onRespondToToolApproval = vi.fn()) {
-  const content = calls.map(call => pendingCall(call.id, `tool_${call.id}`));
+  const content = calls.map(call => pendingCall(call.id, `tool_${call.id}`, call.options));
   pendingApprovals.current = calls.map(call => ({ approvalId: call.id, threadId: call.thread ?? 'main' }));
   const message: ThreadMessageLike = {
     role: 'assistant',
@@ -197,5 +209,46 @@ describe('ToolCallContainer Sentinel approvals', () => {
       { id: 'old', tier: 2, event: 'evt-0' },
     ]);
     expect(screen.queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
+  });
+
+  it.each([2, 3] as const)(
+    'Approve on a Tier %i card sends allow-once even when allow-chat is declared first',
+    tier => {
+      const { onRespondToToolApproval } = renderPending([
+        {
+          id: 'a',
+          tier,
+          options: [
+            { id: 'allow-chat', kind: 'allow-always', label: 'Allow in this chat' },
+            { id: 'allow-once', kind: 'allow-once' },
+            { id: 'deny', kind: 'reject-once', confirm: {} },
+          ],
+        },
+      ]);
+      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+      expect(onRespondToToolApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ approvalId: 'a', approved: true, optionId: 'allow-once' }),
+      );
+      // Chat scope is routed through the runtime hook; it must stay untouched.
+      expect(respondToApproval).not.toHaveBeenCalled();
+    },
+  );
+
+  it('Approve falls back to a plain single-use allow when no allow-once option is declared', () => {
+    const { onRespondToToolApproval } = renderPending([
+      {
+        id: 'a',
+        tier: 2,
+        options: [
+          { id: 'allow-chat', kind: 'allow-always' },
+          { id: 'deny', kind: 'reject-once', confirm: {} },
+        ],
+      },
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    const [response] = onRespondToToolApproval.mock.calls[0] ?? [];
+    expect(response).toMatchObject({ approvalId: 'a', approved: true });
+    expect(response).not.toHaveProperty('optionId');
+    expect(respondToApproval).not.toHaveBeenCalled();
   });
 });
