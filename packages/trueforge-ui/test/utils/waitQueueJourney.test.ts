@@ -5,6 +5,7 @@ import {
   buildLongWaitNote,
   deriveWaitQueue,
   LONG_WAIT_MS,
+  spriteStateFor,
   type WaitQueueInput,
   type WaitQueuePart,
 } from '@/utils/waitQueueJourney.js';
@@ -326,5 +327,73 @@ describe('long-wait show', () => {
     expect(first).toBe(second);
     expect(first).not.toMatch(/\d+s/);
     expect(first).toBe('Still searching the web — this is taking longer than usual.');
+  });
+});
+
+describe('spriteStateFor', () => {
+  it('shows listening while the turn is waiting for its first response', () => {
+    expect(spriteStateFor({ activeStation: 'listening', recallJustLanded: false, longWait: false })).toBe('listening');
+  });
+
+  it('falls back to remembering for a thinking gap with no recall', () => {
+    expect(spriteStateFor({ activeStation: null, recallJustLanded: false, longWait: false })).toBe('remembering');
+  });
+
+  it('shows found-memories when recall lands with items before any part', () => {
+    expect(spriteStateFor({ activeStation: null, recallJustLanded: true, longWait: false })).toBe('found-memories');
+  });
+
+  it('keeps doing once a tool starts, even with a fresh recall', () => {
+    expect(spriteStateFor({ activeStation: 'doing', recallJustLanded: true, longWait: false })).toBe('doing');
+  });
+
+  it('keeps writing once text streams, even with a fresh recall', () => {
+    expect(spriteStateFor({ activeStation: 'writing', recallJustLanded: true, longWait: false })).toBe('writing');
+  });
+
+  it('switches writing to still-writing at the long-wait threshold', () => {
+    expect(spriteStateFor({ activeStation: 'writing', recallJustLanded: false, longWait: false })).toBe('writing');
+    expect(spriteStateFor({ activeStation: 'writing', recallJustLanded: false, longWait: true })).toBe('still-writing');
+  });
+
+  it('keeps doing for a long tool run (still-writing is writing-only)', () => {
+    expect(spriteStateFor({ activeStation: 'doing', recallJustLanded: false, longWait: true })).toBe('doing');
+  });
+});
+
+describe('recallJustLanded', () => {
+  const landedMemory = { available: true, landed: true, items: 2, outcome: 'ok' as const };
+
+  it('is true when recall lands with items before any part', () => {
+    const snapshot = deriveWaitQueue(input({ memory: landedMemory }));
+    expect(snapshot.recallJustLanded).toBe(true);
+  });
+
+  it('is false for a thinking gap with no recall', () => {
+    const snapshot = deriveWaitQueue(input({ memory: { available: true, landed: false } }));
+    expect(snapshot.recallJustLanded).toBe(false);
+  });
+
+  it.each([
+    ['zero items', { available: true, landed: true, items: 0, outcome: 'ok' as const }],
+    ['empty outcome', { available: true, landed: true, items: 3, outcome: 'empty' as const }],
+    ['timeout outcome', { available: true, landed: true, items: 3, outcome: 'timeout' as const }],
+  ])('is false for %s (remembering sprite stays)', (_label, memory) => {
+    const snapshot = deriveWaitQueue(input({ memory }));
+    expect(snapshot.recallJustLanded).toBe(false);
+  });
+
+  it('is false once a tool part exists (recall then tool)', () => {
+    const snapshot = deriveWaitQueue(
+      input({ memory: landedMemory, parts: [part({ type: 'tool-call', toolName: 'web_search' })] }),
+    );
+    expect(snapshot.recallJustLanded).toBe(false);
+    expect(snapshot.activeStation).toBe('doing');
+  });
+
+  it('is false once a text part exists (recall then text)', () => {
+    const snapshot = deriveWaitQueue(input({ memory: landedMemory, parts: [part({ type: 'text' })] }));
+    expect(snapshot.recallJustLanded).toBe(false);
+    expect(snapshot.activeStation).toBe('writing');
   });
 });
