@@ -1,8 +1,12 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useState, type FC, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type FC, type ReactNode } from 'react';
 
 import type { SentinelApi, SentinelUserSettings } from './types.js';
+
+/** A settings patch, or a function deriving one from the latest saved settings. */
+export type SentinelSettingsChange =
+  Partial<SentinelUserSettings> | ((current: SentinelUserSettings) => Partial<SentinelUserSettings>);
 
 export type SentinelApiState = {
   api: SentinelApi;
@@ -11,10 +15,12 @@ export type SentinelApiState = {
   settingsError: string | null;
   refreshSettings: () => Promise<void>;
   /**
-   * Applies a settings patch through the host API and publishes the returned settings,
+   * Applies a settings change through the host API and publishes the returned settings,
    * so the offline indicator and the Settings section stay in sync with no reload.
+   * Changes run one at a time, and a function change sees the settings the previous one
+   * saved, so two quick edits of the same list cannot overwrite each other.
    */
-  updateSettings: (patch: Partial<SentinelUserSettings>) => Promise<SentinelUserSettings>;
+  updateSettings: (change: SentinelSettingsChange) => Promise<SentinelUserSettings>;
 };
 
 const SentinelApiContext = createContext<SentinelApiState | null>(null);
@@ -33,10 +39,14 @@ function readErrorMessage(error: unknown): string {
 export const SentinelApiProvider: FC<{ api: SentinelApi; children: ReactNode }> = ({ api, children }) => {
   const [settings, setSettings] = useState<SentinelUserSettings | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const latestSettings = useRef<SentinelUserSettings | null>(null);
+  const updateQueue = useRef<Promise<unknown>>(Promise.resolve());
 
   const refreshSettings = useCallback(async () => {
     try {
-      setSettings(await api.getUserSettings());
+      const loaded = await api.getUserSettings();
+      latestSettings.current = loaded;
+      setSettings(loaded);
       setSettingsError(null);
     } catch (error) {
       setSettingsError(readErrorMessage(error));
@@ -48,11 +58,19 @@ export const SentinelApiProvider: FC<{ api: SentinelApi; children: ReactNode }> 
   }, [refreshSettings]);
 
   const updateSettings = useCallback(
-    async (patch: Partial<SentinelUserSettings>) => {
-      const next = await api.updateUserSettings(patch);
-      setSettings(next);
-      setSettingsError(null);
-      return next;
+    (change: SentinelSettingsChange) => {
+      const run = async () => {
+        const patch =
+          typeof change === 'function' ? change(latestSettings.current ?? (await api.getUserSettings())) : change;
+        const next = await api.updateUserSettings(patch);
+        latestSettings.current = next;
+        setSettings(next);
+        setSettingsError(null);
+        return next;
+      };
+      const result = updateQueue.current.then(run, run);
+      updateQueue.current = result.catch(() => undefined);
+      return result;
     },
     [api],
   );

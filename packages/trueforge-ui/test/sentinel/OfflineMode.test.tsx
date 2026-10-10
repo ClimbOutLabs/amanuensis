@@ -55,7 +55,9 @@ describe('SentinelSettings', () => {
     const toggle = await screen.findByRole('switch', { name: 'Offline mode' });
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
-    expect(updateUserSettings).toHaveBeenCalledWith({ offline_mode: true });
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({ offline_mode: true });
+    });
     // The provider applies the updated settings, so the switch follows.
     await waitFor(() => {
       expect(screen.getByRole('switch', { name: 'Offline mode' })).toBeChecked();

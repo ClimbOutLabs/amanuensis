@@ -129,6 +129,42 @@ describe('SentinelAuditFeed', () => {
     });
   });
 
+  it('keeps both kinds when two different toggles are flipped before the first save returns', async () => {
+    const { api } = stubApi([]);
+    let stored: SentinelUserSettings = { offline_mode: false, tier2_auto_allow: [] };
+    const patches: Array<SentinelUserSettings['tier2_auto_allow']> = [];
+    let releaseFirstSave: () => void = () => {};
+    const firstSaveGate = new Promise<void>(resolve => {
+      releaseFirstSave = resolve;
+    });
+    api.getUserSettings = vi.fn(async () => stored);
+    api.updateUserSettings = vi.fn(async (patch: Partial<SentinelUserSettings>) => {
+      if (patch.tier2_auto_allow !== undefined) patches.push(patch.tier2_auto_allow);
+      if (patches.length === 1) await firstSaveGate;
+      stored = { ...stored, ...patch };
+      return stored;
+    });
+    render(
+      <SentinelApiProvider api={api}>
+        <SentinelAuditFeed sessionId="session-1" />
+      </SentinelApiProvider>,
+    );
+    const shellToggle = await screen.findByRole('switch', { name: 'Run without asking: shell' });
+    await waitFor(() => {
+      expect(shellToggle).toBeEnabled();
+    });
+    fireEvent.click(shellToggle);
+    fireEvent.click(screen.getByRole('switch', { name: 'Run without asking: file_write' }));
+    releaseFirstSave();
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Run without asking: shell' })).toBeChecked();
+      expect(screen.getByRole('switch', { name: 'Run without asking: file_write' })).toBeChecked();
+    });
+    expect(patches).toEqual([['shell'], ['shell', 'file_write']]);
+    expect(stored.tier2_auto_allow).toEqual(['shell', 'file_write']);
+  });
+
   it('reflects the server-side relaxed kinds', async () => {
     const { api } = stubApi([makeEntry({ id: 'entry-1' })]);
     api.getUserSettings = vi.fn(async () => ({

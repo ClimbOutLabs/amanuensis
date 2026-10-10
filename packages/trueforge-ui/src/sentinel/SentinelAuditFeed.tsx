@@ -11,7 +11,6 @@ import {
   TIER2_ACTION_LABELS,
   type SentinelAuditEntry,
   type SentinelAuditOutcome,
-  type SentinelUserSettings,
   type Tier2ActionKind,
 } from './types.js';
 
@@ -100,14 +99,15 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
   const handleToggle = useCallback(
     async (input: { actionType: Tier2ActionKind; relaxed: boolean }) => {
       if (sentinel === null) return;
-      const current = sentinel.settings?.tier2_auto_allow ?? [];
-      const next: Tier2ActionKind[] = input.relaxed
-        ? current.includes(input.actionType)
-          ? current
-          : [...current, input.actionType]
-        : current.filter(kind => kind !== input.actionType);
-      const patch: Partial<SentinelUserSettings> = { tier2_auto_allow: next };
-      await sentinel.updateSettings(patch);
+      // Derived from the latest saved settings, not this render's snapshot, so a toggle of
+      // another kind that is still saving is not overwritten.
+      await sentinel.updateSettings(({ tier2_auto_allow: current }) => ({
+        tier2_auto_allow: input.relaxed
+          ? current.includes(input.actionType)
+            ? current
+            : [...current, input.actionType]
+          : current.filter(kind => kind !== input.actionType),
+      }));
     },
     [sentinel],
   );
