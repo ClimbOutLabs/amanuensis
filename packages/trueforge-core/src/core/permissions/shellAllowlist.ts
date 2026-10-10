@@ -46,6 +46,8 @@ export interface ShellSubcommandPolicy {
   /** Exact flag spellings allowed after the subcommand. */
   args: readonly string[];
   operands: 'none' | 'workspace_relative';
+  /** Flags the executor inserts right after the subcommand; never model-supplied. */
+  forced_args: readonly string[];
 }
 
 export interface ShellAllowlistConfig {
@@ -341,13 +343,17 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
       git: {
         // Read-only inspection only. Config, remote, network and mutating
         // subcommands, aliases, and global options are absent so they fall to
-        // Tier 3. Diff-capable subcommands list `--no-ext-diff`/`--no-textconv`
-        // but never the flags that run external programs or write files.
+        // Tier 3. Flags that run external programs or write files are never
+        // listed; `forced_args` are added by hardenAllowlistedGit at execution.
         args: [],
         operands: 'none',
         offline_ok: true,
         subcommands: {
-          status: { args: ['--short', '--porcelain', '--branch', '-s', '-b'], operands: 'workspace_relative' },
+          status: {
+            args: ['--short', '--porcelain', '--branch', '-s', '-b'],
+            operands: 'workspace_relative',
+            forced_args: [],
+          },
           log: {
             args: [
               '--oneline',
@@ -363,6 +369,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
               '--',
             ],
             operands: 'workspace_relative',
+            forced_args: ['--no-ext-diff', '--no-textconv'],
           },
           diff: {
             args: [
@@ -379,6 +386,7 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
               '--',
             ],
             operands: 'workspace_relative',
+            forced_args: ['--no-ext-diff', '--no-textconv'],
           },
           show: {
             args: [
@@ -393,14 +401,17 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
               '--',
             ],
             operands: 'workspace_relative',
+            forced_args: ['--no-ext-diff', '--no-textconv'],
           },
           branch: {
             args: ['--list', '--all', '--remotes', '--show-current', '-a', '-r', '-v', '-vv'],
             operands: 'none',
+            forced_args: [],
           },
           'rev-parse': {
             args: ['--git-dir', '--show-toplevel', '--abbrev-ref', '--short', '--is-inside-work-tree', '--show-prefix'],
             operands: 'workspace_relative',
+            forced_args: [],
           },
           'ls-files': {
             args: [
@@ -418,10 +429,12 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
               '--',
             ],
             operands: 'workspace_relative',
+            forced_args: [],
           },
           blame: {
             args: ['--porcelain', '--line-porcelain', '-w', '-e', '--'],
             operands: 'workspace_relative',
+            forced_args: ['--no-textconv'],
           },
         },
       },
@@ -439,6 +452,52 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
       },
     },
   };
+}
+
+/**
+ * Global git options the executor prepends to every allowlisted git command so
+ * repository config cannot run code (fsmonitor, hooks, pager, external diff).
+ */
+const GIT_HARDENING_GLOBAL_ARGS: readonly string[] = [
+  '--no-pager',
+  '--no-optional-locks',
+  '-c',
+  'core.fsmonitor=false',
+  '-c',
+  'core.hooksPath=/dev/null',
+  '-c',
+  'core.sshCommand=',
+  '-c',
+  'diff.external=',
+];
+
+/**
+ * Rewrite an allowlisted git command into the argv the executor must run, or
+ * undefined when the command is not an allowlisted git invocation. Applied at
+ * the execution site so the model's argv and the approval binding stay as
+ * written.
+ */
+export function hardenAllowlistedGit(input: { command: string; config: ShellAllowlistConfig }): string[] | undefined {
+  const parsed = parseSimpleCommand(input.command);
+  if (parsed === undefined || matchAllowlist(parsed, input.config) === undefined) {
+    return undefined;
+  }
+  const [name, subcommand, ...rest] = parsed.argv;
+  if (name !== 'git' || subcommand === undefined) {
+    return undefined;
+  }
+  const policy = input.config.commands[name]?.subcommands?.[subcommand];
+  if (policy === undefined) {
+    return undefined;
+  }
+  return [
+    ...(parsed.wrapper === null ? [] : [parsed.wrapper]),
+    name,
+    ...GIT_HARDENING_GLOBAL_ARGS,
+    subcommand,
+    ...policy.forced_args,
+    ...rest,
+  ];
 }
 
 /**

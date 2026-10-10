@@ -479,6 +479,27 @@ describe('Suite B - workspace containment escapes', () => {
     }
   });
 
+  test('B8 GAP: writes to git control files and symlinks into .git are Tier 3', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      mkdirSync(join(ws, '.git'));
+      mkdirSync(join(ws, '.GIT'));
+      mkdirSync(join(ws, 'sub'));
+      symlinkSync(join(ws, '.git'), join(ws, 'link'));
+      const ctx = makeCtx({ workspace_cwd: ws });
+      for (const tool of ['write_file', 'replace_text']) {
+        for (const path of ['.git/config', '.GIT/config', 'link/config', 'sub/.gitattributes', '.gitmodules']) {
+          const decision = await classifyTier(action(tool, { path, content: 'x' }), ctx);
+          expect(decision.tier).toBe(3);
+          expect(decision.reason).toBe('git_control_write');
+        }
+        expect((await classifyTier(action(tool, { path: 'notes.txt', content: 'x' }), ctx)).tier).toBe(2);
+      }
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
   test('B7 GAP: write_file with no path fails closed as Tier 3', async () => {
     const decision = await classifyTier(action('write_file', {}), makeCtx());
     expect(decision.tier).toBe(3);

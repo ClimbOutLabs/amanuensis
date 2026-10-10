@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  hardenAllowlistedGit,
   hashArgv,
   matchAllowlist,
   OFFLINE_SHELL_COMMANDS,
@@ -285,6 +286,54 @@ describe('matchAllowlist for seeded git', () => {
     } finally {
       cleanup();
     }
+  });
+});
+
+describe('hardenAllowlistedGit', () => {
+  const hardening = [
+    '--no-pager',
+    '--no-optional-locks',
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    'core.hooksPath=/dev/null',
+    '-c',
+    'core.sshCommand=',
+    '-c',
+    'diff.external=',
+  ];
+
+  function harden(command: string): string[] | undefined {
+    const { dir, cleanup } = tempBin('git');
+    try {
+      return hardenAllowlistedGit({ command, config: seedShellAllowlist(dir) });
+    } finally {
+      cleanup();
+    }
+  }
+
+  test('prepends global overrides and the subcommand forced flags', () => {
+    expect(harden('git status --short')).toEqual(['git', ...hardening, 'status', '--short']);
+    expect(harden('git diff --cached src')).toEqual([
+      'git',
+      ...hardening,
+      'diff',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--cached',
+      'src',
+    ]);
+    expect(harden('git blame f.txt')).toEqual(['git', ...hardening, 'blame', '--no-textconv', 'f.txt']);
+  });
+
+  test('keeps the nice wrapper in front', () => {
+    expect(harden('nice git status')?.slice(0, 2)).toEqual(['nice', 'git']);
+  });
+
+  test('leaves non-allowlisted and non-git commands alone', () => {
+    expect(harden('git push origin main')).toBeUndefined();
+    expect(harden('git -c core.fsmonitor=x status')).toBeUndefined();
+    expect(harden('ls -l')).toBeUndefined();
   });
 });
 

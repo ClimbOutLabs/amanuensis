@@ -46,6 +46,7 @@ import {
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
+import { hardenAllowlistedGit } from '../permissions/shellAllowlist';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
 import {
   DEFERRED_TOOLS_SERVER_ID,
@@ -4267,6 +4268,14 @@ export class Sandbox extends LocalToolMCP {
     }
   }
 
+  /** Runs allowlisted git with config-driven code execution disabled; other commands are unchanged. */
+  private withHardenedGit(input: SandboxRuntimeExecInput): SandboxRuntimeExecInput {
+    const allowlist = this.sentinelContext?.services.shell_allowlist;
+    const argv =
+      allowlist === undefined ? undefined : hardenAllowlistedGit({ command: input.command, config: allowlist });
+    return argv === undefined ? input : { ...input, command: argv.map(shellEscape).join(' ') };
+  }
+
   private async handleExec(
     input: SandboxRuntimeExecInput,
     approvalDecision?: ApprovalDecision,
@@ -4341,12 +4350,13 @@ export class Sandbox extends LocalToolMCP {
         ? buildGitCredentialHelperEnv(this.provider.getGitCredentialsPath(rawId))
         : {};
     const env = { ...mcpClientEnv, ...gitAuthEnv };
+    const execInput = this.withHardenedGit(resolvedInput);
 
     const dispatchMarker = { dispatched: false };
     try {
       const execution = await this.runExecWithVerification(
         rawId,
-        resolvedInput,
+        execInput,
         env,
         effect,
         planScope === undefined ? undefined : { context, scope: planScope },
@@ -4408,7 +4418,7 @@ export class Sandbox extends LocalToolMCP {
       const retryDispatchMarker = { dispatched: false };
       const retryExecution = await this.runExecWithVerification(
         recreatedRawId,
-        resolvedInput,
+        execInput,
         retryEnv,
         effect,
         planScope === undefined ? undefined : { context, scope: planScope },
