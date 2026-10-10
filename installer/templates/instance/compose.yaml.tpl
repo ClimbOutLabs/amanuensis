@@ -75,10 +75,15 @@ configs:
     file: ./dex.yaml
 
 volumes:
+  # The label lets a later purge find the data even after the instance directory is gone.
   data:
     name: aman_@@NAME@@_data
+    labels:
+      com.amanuensis.instance: @@NAME@@
   dex:
     name: aman_@@NAME@@_dex
+    labels:
+      com.amanuensis.instance: @@NAME@@
 
 networks:
   machine:

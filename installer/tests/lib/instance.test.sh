@@ -121,7 +121,57 @@ test_remove_keeps_volumes() {
   assert_no_path "$SB_STATE/volumes_removed"
   run_install instance remove second
   assert_rc 0
+  assert_contains "$OUT" "already removed"
+  assert_contains "$OUT" "instance remove second --purge-data"
+  run_install instance remove nosuch
+  assert_rc 0
   assert_contains "$OUT" "nothing to do"
+  sandbox_drop
+}
+
+test_purge_after_remove_deletes_the_leftover_volumes() {
+  t_begin "the purge the remove message advertises works after the instance is gone"
+  sandbox_new
+  install_machine
+  add_instance second
+  run_install instance remove second
+  assert_rc 0
+  run_install instance remove second --purge-data --confirm-name wrong
+  assert_rc 1
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_second_data" "a wrong name deletes nothing"
+  assert_no_path "$SB_STATE/volumes_removed"
+  run_install instance remove second --purge-data --yes
+  assert_rc 1
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_second_data" "--yes does not confirm"
+  run_install instance remove second --purge-data --confirm-name second
+  assert_rc 0
+  assert_contains "$OUT" "deleted its data volumes"
+  assert_contains "$(cat "$SB_STATE/volumes_removed")" "aman_second_data"
+  assert_contains "$(cat "$SB_STATE/volumes_removed")" "aman_second_dex"
+  assert_not_contains "$(cat "$SB_STATE/volumes")" "aman_second_"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_data" "other instance's data untouched"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_dex"
+  run_install instance remove second --purge-data --confirm-name second
+  assert_rc 0
+  assert_contains "$OUT" "nothing to do"
+  sandbox_drop
+}
+
+test_purge_failure_is_not_reported_as_success() {
+  t_begin "a volume that cannot be deleted fails the purge and is named"
+  sandbox_new
+  install_machine
+  add_instance second
+  STUB_VOLUME_RM_FAIL=aman_second_data
+  run_install instance remove second --purge-data --confirm-name second
+  assert_rc 1
+  assert_contains "$ERR" "could not delete the volumes: aman_second_data"
+  assert_not_contains "$OUT" "deleted its data volumes"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_second_data"
+  unset STUB_VOLUME_RM_FAIL
+  run_install instance remove second --purge-data --confirm-name second
+  assert_rc 0
+  assert_not_contains "$(cat "$SB_STATE/volumes")" "aman_second_data"
   sandbox_drop
 }
 
@@ -276,6 +326,8 @@ test_explicit_busy_port_is_refused
 test_add_existing_is_idempotent
 test_list
 test_remove_keeps_volumes
+test_purge_after_remove_deletes_the_leftover_volumes
+test_purge_failure_is_not_reported_as_success
 test_purge_needs_typed_name
 test_yes_does_not_bypass_purge_confirmation
 test_name_validation

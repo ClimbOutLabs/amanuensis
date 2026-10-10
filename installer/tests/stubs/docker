@@ -90,12 +90,20 @@ case "$cmd" in
         exit 0
         ;;
       ls)
-        [ -f "$S/volumes_scratch" ] && grep -Fxf "$S/volumes" "$S/volumes_scratch"
+        case "$*" in
+          *label=com.amanuensis.instance=*)
+            inst=${*##*label=com.amanuensis.instance=}
+            inst=${inst%% *}
+            [ -f "$S/volumes_labels" ] && awk -v i="$inst" '$2 == i {print $1}' "$S/volumes_labels" | grep -Fxf - "$S/volumes"
+            ;;
+          *) [ -f "$S/volumes_scratch" ] && grep -Fxf "$S/volumes" "$S/volumes_scratch" ;;
+        esac
         exit 0
         ;;
       rm)
         for v in "$@"; do
           [ "$v" = -f ] && continue
+          case " ${STUB_VOLUME_RM_FAIL:-} " in *" $v "*) echo "volume is in use" >&2; exit 1 ;; esac
           grep -Fxv "$v" "$S/volumes" >"$S/volumes.new" || true
           mv "$S/volumes.new" "$S/volumes"
           if [ -f "$S/volumes_scratch" ] && grep -Fxq "$v" "$S/volumes_scratch"; then
@@ -215,6 +223,7 @@ case "$cmd" in
           exit 1
         fi
         printf '%s\n' "$img" >"$S/up/$proj"
+        awk '/^    name: / {n = $2} /com.amanuensis.instance:/ {print n, $2}' "$file" >>"$S/volumes_labels"
         grep -o 'name: aman_[a-z0-9_-]*' "$file" | sed 's/name: //' | while read -r v; do
           grep -Fxq "$v" "$S/volumes" || echo "$v" >>"$S/volumes"
         done

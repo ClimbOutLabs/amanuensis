@@ -341,33 +341,96 @@ cmd_instance_list() {
   done
 }
 
+# Volumes that belong to an instance: those labelled for it plus the two it is named after.
+instance_volumes() {
+  local name=$1 volume
+  {
+    D volume ls -q --filter "label=com.amanuensis.instance=$name" 2>/dev/null || true
+    for volume in "aman_${name}_data" "aman_${name}_dex"; do
+      if docker_volume_exists "$volume"; then
+        printf '%s\n' "$volume"
+      fi
+    done
+  } | sort -u
+}
+
+# Deletes the given volumes. Every failure is reported and the return code says so.
+volumes_purge() {
+  local volume failed=
+  for volume in "$@"; do
+    if ! D volume rm "$volume" >/dev/null 2>&1; then
+      failed="$failed $volume"
+    fi
+  done
+  if [ -n "$failed" ]; then
+    warn "could not delete the volumes:$failed. Something may still be using them; check docker ps -a, then run the purge again."
+    return 1
+  fi
+}
+
+# Read-only use of Docker for leftovers of an instance that is already gone; no prompts, no sudo.
+docker_reach_quietly() {
+  docker_plan_access
+  case "$DOCKER_ACCESS" in
+    direct | sg) AMAN_DOCKER_MODE=$DOCKER_ACCESS ;;
+    *) return 1 ;;
+  esac
+}
+
+confirm_purge_name() {
+  local name=$1 typed=${OPT_CONFIRM_NAME:-}
+  if [ -z "$typed" ]; then
+    printf 'This permanently deletes the data of instance %s. Type its name to confirm: ' "$name" >&2
+    read -r typed || true
+  fi
+  [ "$typed" = "$name" ] || die "the typed name did not match; nothing was removed"
+}
+
 cmd_instance_remove() {
-  local name=${OPT_NAME:-} typed=
+  local name=${OPT_NAME:-} exists=0 volumes purge_list
   [ -n "$name" ] || usage_die "usage: install.sh instance remove <name> [--purge-data]"
   valid_name "$name" || usage_die "invalid instance name"
-  if ! reg_exists "$name" && [ ! -d "$(instance_dir "$name")" ]; then
-    say "Instance $name does not exist; nothing to do."
-    return 0
+  if reg_exists "$name" || [ -d "$(instance_dir "$name")" ]; then
+    exists=1
+  fi
+  if [ "$exists" = 0 ]; then
+    volumes=
+    if docker_reach_quietly; then
+      volumes=$(instance_volumes "$name" | tr '\n' ' ')
+    fi
+    if [ -z "${volumes// /}" ]; then
+      say "Instance $name does not exist; nothing to do."
+      return 0
+    fi
+    if [ "${OPT_PURGE:-0}" != 1 ]; then
+      say "Instance $name is already removed, but its data is still in the volumes: $volumes"
+      say "To delete the data: install.sh instance remove $name --purge-data"
+      return 0
+    fi
   fi
   if [ "${OPT_PURGE:-0}" = 1 ]; then
-    typed=${OPT_CONFIRM_NAME:-}
-    if [ -z "$typed" ]; then
-      printf 'This permanently deletes the data of instance %s. Type its name to confirm: ' "$name" >&2
-      read -r typed || true
-    fi
-    [ "$typed" = "$name" ] || die "the typed name did not match; nothing was removed"
+    confirm_purge_name "$name"
   fi
   docker_prepare
   lock_acquire
-  if [ -f "$(instance_dir "$name")/compose.yaml" ] && [ -f "$(instance_dir "$name")/.env" ]; then
-    dc "$name" down || warn "could not stop the stack cleanly; continuing with the removal"
+  if [ "$exists" = 1 ]; then
+    if [ -f "$(instance_dir "$name")/compose.yaml" ] && [ -f "$(instance_dir "$name")/.env" ]; then
+      dc "$name" down || warn "could not stop the stack cleanly; continuing with the removal"
+    fi
+    remove_instance_dir "$name"
+    reg_remove "$name"
+    log_event "instance $name removed"
   fi
-  remove_instance_dir "$name"
-  reg_remove "$name"
-  log_event "instance $name removed"
   if [ "${OPT_PURGE:-0}" = 1 ]; then
-    D volume rm -f "aman_${name}_data" "aman_${name}_dex" >/dev/null 2>&1 || true
-    say "Removed instance $name and its data volumes."
+    volumes=$(instance_volumes "$name" | tr '\n' ' ')
+    if [ -z "${volumes// /}" ]; then
+      say "Removed instance $name. It had no data volumes left to delete."
+      return 0
+    fi
+    read -r -a purge_list <<<"$volumes"
+    volumes_purge "${purge_list[@]}" || exit 1
+    log_event "instance $name purged"
+    say "Removed instance $name and deleted its data volumes: $volumes"
   else
     say "Removed instance $name. Its data is kept in the volumes aman_${name}_data and aman_${name}_dex."
     say "To delete the data too: install.sh instance remove $name --purge-data"
