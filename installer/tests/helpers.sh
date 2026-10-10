@@ -79,24 +79,44 @@ repo_commit_change() {
   )
 }
 
+# The environment every installer run gets: nothing from the caller except the stub switches.
+build_run_env() {
+  RUN_ENV=(PATH="$SB_BIN" HOME="$SB/user" AMAN_HOME="$AMAN_HOME" AMAN_REPO_ROOT="$REPO"
+    AMAN_OS_RELEASE="${AMAN_OS_RELEASE:-$SB/os-release}"
+    STUB_LOG="$STUB_LOG" STUB_STATE="$STUB_STATE" STUB_BIN="$STUB_BIN" STUB_USER="$STUB_USER"
+    STUB_DOCKER_SRC="$STUB_DOCKER_SRC" STUB_REAL_DF="$STUB_REAL_DF"
+    STUB_DOCKER_DENIED="${STUB_DOCKER_DENIED:-}" STUB_DOCKER_DOWN="${STUB_DOCKER_DOWN:-}"
+    STUB_ROOTLESS="${STUB_ROOTLESS:-}" STUB_PODMAN="${STUB_PODMAN:-}" STUB_BUILD_FAIL="${STUB_BUILD_FAIL:-}"
+    STUB_UP_FAIL_UNLESS_TAG="${STUB_UP_FAIL_UNLESS_TAG:-}" STUB_DF_KB="${STUB_DF_KB:-}"
+    STUB_BUSY_PORTS="${STUB_BUSY_PORTS:-}" STUB_BACKUP_FAIL="${STUB_BACKUP_FAIL:-}" STUB_VOLUME_RM_FAIL="${STUB_VOLUME_RM_FAIL:-}"
+    STUB_ENGINE_VERSION="${STUB_ENGINE_VERSION:-}" STUB_COMPOSE_VERSION="${STUB_COMPOSE_VERSION:-}"
+    STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}")
+}
+
 # run_install [args...] with optional stdin from $INPUT. Output lands in OUT, ERR and RC.
 run_install() {
   local out=$SB/out err=$SB/err
+  build_run_env
   set +e
-  env -i PATH="$SB_BIN" HOME="$SB/user" AMAN_HOME="$AMAN_HOME" AMAN_REPO_ROOT="$REPO" \
-    AMAN_OS_RELEASE="${AMAN_OS_RELEASE:-$SB/os-release}" \
-    STUB_LOG="$STUB_LOG" STUB_STATE="$STUB_STATE" STUB_BIN="$STUB_BIN" STUB_USER="$STUB_USER" \
-    STUB_DOCKER_SRC="$STUB_DOCKER_SRC" STUB_REAL_DF="$STUB_REAL_DF" \
-    STUB_DOCKER_DENIED="${STUB_DOCKER_DENIED:-}" STUB_DOCKER_DOWN="${STUB_DOCKER_DOWN:-}" \
-    STUB_ROOTLESS="${STUB_ROOTLESS:-}" STUB_PODMAN="${STUB_PODMAN:-}" STUB_BUILD_FAIL="${STUB_BUILD_FAIL:-}" \
-    STUB_UP_FAIL_UNLESS_TAG="${STUB_UP_FAIL_UNLESS_TAG:-}" STUB_DF_KB="${STUB_DF_KB:-}" \
-    STUB_BUSY_PORTS="${STUB_BUSY_PORTS:-}" STUB_BACKUP_FAIL="${STUB_BACKUP_FAIL:-}" STUB_VOLUME_RM_FAIL="${STUB_VOLUME_RM_FAIL:-}" STUB_ENGINE_VERSION="${STUB_ENGINE_VERSION:-}" \
-    STUB_COMPOSE_VERSION="${STUB_COMPOSE_VERSION:-}" STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" \
-    bash "$SB_INSTALLER/install.sh" "$@" <"${INPUT_FILE:-/dev/null}" >"$out" 2>"$err"
+  env -i "${RUN_ENV[@]}" bash "$SB_INSTALLER/install.sh" "$@" <"${INPUT_FILE:-/dev/null}" >"$out" 2>"$err"
   RC=$?
   set -e
   OUT=$(cat "$out")
   ERR=$(cat "$err")
+}
+
+# run_install_tty "prompt=>reply" lines, then args: runs on a pseudo terminal, so echo behaves as it does for a
+# person. The transcript lands in OUT and the exit code in RC.
+run_install_tty() {
+  local answers=$1
+  shift
+  build_run_env
+  printf '%s\n' "$answers" >"$SB/answers"
+  set +e
+  OUT=$(python3 "$TESTS_DIR/pty_run.py" "$SB/answers" -- env -i "${RUN_ENV[@]}" TERM=dumb bash "$SB_INSTALLER/install.sh" "$@")
+  set -e
+  RC=$(printf '%s\n' "$OUT" | sed -n 's/^\[exit \([0-9]*\)\]$/\1/p' | tail -n 1)
+  ERR=
 }
 
 # Feeds stdin to the next run_install from a string.

@@ -83,6 +83,29 @@ test_failed_upgrade_restores_database_and_images() {
   sandbox_drop
 }
 
+test_restore_goes_only_into_the_right_volume() {
+  t_begin "with two instances each database is restored into its own volume and no other"
+  sandbox_new
+  install_machine
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install instance add second --yes --password-stdin --email second@example.invalid
+  clear_input
+  assert_rc 0
+  local old
+  old=$(app_tag "$AMAN_HOME/release/release.json")
+  repo_commit_change "unhealthy change for two"
+  STUB_UP_FAIL_UNLESS_TAG=$old
+  run_install upgrade
+  assert_rc 1
+  assert_eq "$(sort "$SB_STATE/restores" | tr '\n' ',')" "restore aman_main_data,restore aman_second_data," "one restore per instance"
+  assert_eq "$(cat "$SB_STATE/restored_aman_main_data")" "SQLITE-OF-aman_main_data" "main gets main's database"
+  assert_eq "$(cat "$SB_STATE/restored_aman_second_data")" "SQLITE-OF-aman_second_data" "second gets second's database"
+  assert_eq "$(find "$SB_STATE" -maxdepth 1 -name 'restored_*' | wc -l | tr -d ' ')" 2 "no other volume was written"
+  assert_not_contains "$(cat "$STUB_LOG")" "restored_" "no restore touches a dex volume"
+  sandbox_drop
+}
+
 test_restore_does_not_wait_for_a_migration_marker() {
   t_begin "the database is restored even when no migration ran"
   sandbox_new
@@ -132,6 +155,7 @@ test_noop_when_current
 test_check_reports_without_changing
 test_successful_upgrade_backs_up_first
 test_failed_upgrade_restores_database_and_images
+test_restore_goes_only_into_the_right_volume
 test_restore_does_not_wait_for_a_migration_marker
 test_failed_build_changes_nothing
 test_doctor_failure_blocks_unless_forced
