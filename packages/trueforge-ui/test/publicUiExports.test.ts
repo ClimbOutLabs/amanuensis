@@ -179,7 +179,7 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'ThreadRootShell',
   'ThreadViewportShell',
   'Tier2RelaxationToggle',
-  'Tier3ApprovalCard',
+  'PermissionApprovalCard',
   'Toast',
   'ToastStack',
   'ToolApprovalBar',

@@ -2,7 +2,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Tier3ApprovalCard, type Tier3ApprovalCardProps } from '@/sentinel/Tier3ApprovalCard.js';
+import { PermissionApprovalCard, type PermissionApprovalCardProps } from '@/sentinel/PermissionApprovalCard.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
 
 function baseCard(): SentinelApprovalCard {
@@ -18,17 +18,17 @@ function baseCard(): SentinelApprovalCard {
   };
 }
 
-function renderCard(overrides: Partial<SentinelApprovalCard> = {}, props: Partial<Tier3ApprovalCardProps> = {}) {
+function renderCard(overrides: Partial<SentinelApprovalCard> = {}, props: Partial<PermissionApprovalCardProps> = {}) {
   const card: SentinelApprovalCard = { ...baseCard(), ...overrides };
   const onApprove = vi.fn();
   const onDeny = vi.fn();
   render(
-    <Tier3ApprovalCard toolName="payment" card={card} tier={3} onApprove={onApprove} onDeny={onDeny} {...props} />,
+    <PermissionApprovalCard toolName="payment" card={card} tier={3} onApprove={onApprove} onDeny={onDeny} {...props} />,
   );
   return { onApprove, onDeny };
 }
 
-describe('Tier3ApprovalCard', () => {
+describe('PermissionApprovalCard', () => {
   it('renders the server-supplied what, why, and details', () => {
     renderCard({
       destination: 'acme-corp',
@@ -72,8 +72,14 @@ describe('Tier3ApprovalCard', () => {
 
   it('labels the tier the server sent', () => {
     renderCard({}, { tier: 2 });
-    expect(screen.getByText('Tier 2 check')).toBeInTheDocument();
-    expect(screen.queryByText('Tier 3 review')).not.toBeInTheDocument();
+    expect(screen.getByText('Needs your OK')).toBeInTheDocument();
+    expect(screen.queryByText('Review carefully')).not.toBeInTheDocument();
+  });
+
+  it('labels a Tier 3 card for careful review without tier jargon', () => {
+    renderCard({}, { tier: 3 });
+    expect(screen.getByText('Review carefully')).toBeInTheDocument();
+    expect(screen.queryByText(/Tier \d/)).not.toBeInTheDocument();
   });
 
   it('offers Approve all only when the container passes a batch handler', () => {

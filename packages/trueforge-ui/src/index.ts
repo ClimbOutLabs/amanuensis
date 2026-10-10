@@ -347,6 +347,8 @@ export type { UseResourcePermissionsOptions, UseResourcePermissionsResult } from
 export { useRuntimeConnectivity } from './hooks/useRuntimeConnectivity.js';
 export type { RuntimeConnectivity, UseRuntimeConnectivityOptions } from './hooks/useRuntimeConnectivity.js';
 export { OfflineIndicator } from './sentinel/OfflineIndicator.js';
+export { PermissionApprovalCard } from './sentinel/PermissionApprovalCard.js';
+export type { PermissionApprovalCardProps } from './sentinel/PermissionApprovalCard.js';
 export {
   SentinelApiProvider,
   useOptionalSentinelApi,
@@ -358,8 +360,6 @@ export type { SentinelAuditFeedProps } from './sentinel/SentinelAuditFeed.js';
 export { SentinelSettings } from './sentinel/SentinelSettings.js';
 export { Tier2RelaxationToggle } from './sentinel/Tier2RelaxationToggle.js';
 export type { Tier2RelaxationToggleProps } from './sentinel/Tier2RelaxationToggle.js';
-export { Tier3ApprovalCard } from './sentinel/Tier3ApprovalCard.js';
-export type { Tier3ApprovalCardProps } from './sentinel/Tier3ApprovalCard.js';
 export {
   extractSentinelFromEvent,
   extractSentinelSessionContext,

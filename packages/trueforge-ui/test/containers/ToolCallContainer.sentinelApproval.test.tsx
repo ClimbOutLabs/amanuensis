@@ -123,7 +123,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
   it('renders the plain-language card for a Tier 2 approval', () => {
     renderPending([{ id: 'a', tier: 2 }]);
     expect(screen.getByText('Do a')).toBeInTheDocument();
-    expect(screen.getByText('Tier 2 check')).toBeInTheDocument();
+    expect(screen.getByText('Needs your OK')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
   });
 

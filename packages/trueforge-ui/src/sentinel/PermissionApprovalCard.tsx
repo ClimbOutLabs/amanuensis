@@ -8,9 +8,9 @@ import type { SentinelApprovalCard } from './types.js';
 
 type ApprovalCardTier = 2 | 3;
 
-const TIER_LABELS: Record<ApprovalCardTier, string> = { 2: 'Tier 2 check', 3: 'Tier 3 review' };
+const TIER_LABELS: Record<ApprovalCardTier, string> = { 2: 'Needs your OK', 3: 'Review carefully' };
 
-export type Tier3ApprovalCardProps = {
+export type PermissionApprovalCardProps = {
   toolName: string;
   card: SentinelApprovalCard;
   /** Tier the server sent; it only changes the badge, never the controls. */
@@ -43,7 +43,7 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
  * cards, so the card never needs to know which tool it is. The card never infers the
  * tier; the container only mounts it for an explicit Tier 2 or Tier 3 approval.
  */
-export const Tier3ApprovalCard: FC<Tier3ApprovalCardProps> = ({
+export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   toolName,
   card,
   tier,

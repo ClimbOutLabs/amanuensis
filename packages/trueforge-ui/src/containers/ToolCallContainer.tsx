@@ -12,8 +12,8 @@ import {
 import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useState } from 'react';
 
+import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
-import { Tier3ApprovalCard } from '../sentinel/Tier3ApprovalCard.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import {
   ASK_USER_TOOL_NAME,
@@ -170,7 +170,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
           }
         : undefined;
     return (
-      <Tier3ApprovalCard
+      <PermissionApprovalCard
         toolName={part.toolName}
         card={approvalInfo.card}
         tier={approvalInfo.tier}
