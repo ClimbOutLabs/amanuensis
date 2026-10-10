@@ -84,6 +84,7 @@ import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
 import { SentinelAuditStore, type ISentinelAuditStore, type SentinelAuditDatabase } from './db/sentinelAuditStore';
+import type { ISentinelSettingsStore } from './db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
@@ -100,6 +101,7 @@ import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { sentinelSettingsServices } from './runtime/sentinelSettingsServices';
 import { TurnDrainRegistry } from './runtime/turnDrains';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
@@ -150,6 +152,7 @@ interface ServerPersistence<TTransaction> {
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
+  sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
   /** One shared client for TrueFoundry store resolvers + auth; undefined when TrueFoundry mode is off. */
@@ -313,6 +316,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/repository-store/SqliteRepositoryStore'),
       import('./db/sqlite/turn-artifact-store/SqliteTurnArtifactStore'),
       import('./db/sqlite/global-settings-store/SqliteGlobalSettingsStore'),
+      import('./db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore'),
     ]),
   ]);
   const [
@@ -331,6 +335,7 @@ async function createStandalonePersistence(options: {
     { SqliteRepositoryStore },
     { SqliteTurnArtifactStore },
     { SqliteGlobalSettingsStore },
+    { SqliteSentinelSettingsStore },
   ] = sqliteStores;
 
   const db = createSqliteDb(sqlitePath);
@@ -365,6 +370,7 @@ async function createStandalonePersistence(options: {
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
+    sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
     resolveSandboxProviderStore: () => sandboxProviderStore,
@@ -412,6 +418,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/repository-store/PostgresRepositoryStore'),
       import('./db/postgres/turn-artifact-store/PostgresTurnArtifactStore'),
       import('./db/postgres/global-settings-store/PostgresGlobalSettingsStore'),
+      import('./db/postgres/sentinel-settings-store/PostgresSentinelSettingsStore'),
     ]),
   ]);
   const [
@@ -430,6 +437,7 @@ async function createDistributedPersistence(options: {
     { PostgresRepositoryStore },
     { PostgresTurnArtifactStore },
     { PostgresGlobalSettingsStore },
+    { PostgresSentinelSettingsStore },
   ] = postgresStores;
 
   const db = createDb({
@@ -512,6 +520,7 @@ async function createDistributedPersistence(options: {
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
+    sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     resolveModelProviderStore,
     resolveMcpServerStore,
     resolveSandboxProviderStore,
@@ -544,6 +553,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     turnArtifactStore,
     globalSettingsStore,
     sentinelAuditStore,
+    sentinelSettingsStore,
     destroyDb,
     redis,
     serviceFoundryClient,
@@ -570,6 +580,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const sentinelServices: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     audit: sentinelAuditStore,
+    ...sentinelSettingsServices(sentinelSettingsStore),
   };
   const sessions = new Sessions({ sessionStore, sentinelServices });
 
@@ -661,6 +672,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sessionStore,
     sessionMetricsStore,
     sentinelAuditStore,
+    sentinelSettingsStore,
     sessions,
     activeTurns,
     turnDrains,

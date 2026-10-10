@@ -48,6 +48,7 @@ export const TABLES_TO_MOVE = [
   'artifact_blob',
   'turn_artifact',
   'global_settings',
+  'sentinel_user_settings',
 ] as const;
 
 /**
