@@ -34,9 +34,9 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
 
   it('patch on a user with no row applies defaults to omitted fields', async () => {
     const store = getStore();
-    expect(await store.patch({ ...alice, offline_mode: undefined, tier2_auto_allow: ['branch'] })).toEqual({
+    expect(await store.patch({ ...alice, offline_mode: undefined, tier2_auto_allow: ['file_write'] })).toEqual({
       offline_mode: false,
-      tier2_auto_allow: ['branch'],
+      tier2_auto_allow: ['file_write'],
     });
   });
 
