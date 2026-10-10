@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import type { Logger } from 'winston';
 import {
   cosignKeyFingerprint,
   readImageVerificationRecord,
@@ -156,6 +157,7 @@ export interface DockerDriverOptions {
   commandTimeoutMs: number | undefined;
   /** Bound for the wedged-daemon docker create probe. Default 30000. */
   createTimeoutMs: number | undefined;
+  logger: Logger;
 }
 
 /** execFile-shaped failure: non-zero exit or timeout kill. */
@@ -184,6 +186,13 @@ function isExecFileFailure(error: unknown): error is ExecFileFailure {
 
 function truncateSingleLine(text: string, maxChars: number): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, maxChars);
+}
+
+/** The errno-style `code` of a failed fs call, without the message that would carry its path. */
+function errorCode(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : 'unknown';
 }
 
 function errorText(error: unknown): string {
@@ -463,6 +472,7 @@ export class DockerDriver implements IsolationDriver {
   private readonly dataDir: string;
   private readonly commandTimeoutMs: number;
   private readonly createTimeoutMs: number;
+  private readonly logger: Logger;
   private readonly runner: DockerCommandRunner;
   /** containerId → in-flight run, for dispose()'s drain-then-kill. */
   private readonly inFlight = new Map<string, Promise<DriverRunResult>>();
@@ -479,6 +489,7 @@ export class DockerDriver implements IsolationDriver {
     this.dataDir = options.dataDir;
     this.commandTimeoutMs = options.commandTimeoutMs ?? 5000;
     this.createTimeoutMs = options.createTimeoutMs ?? 30000;
+    this.logger = options.logger;
     this.runner = commandRunner ?? createDefaultDockerCommandRunner({ dockerBinary: this.dockerBinary });
   }
 
@@ -650,8 +661,12 @@ export class DockerDriver implements IsolationDriver {
           stateDir: this.stateDir,
           record: { ...subject, verified_at: new Date().toISOString() },
         });
-      } catch {
-        // Best-effort: the image is verified now; an unwritable record only means the next probe verifies again.
+      } catch (error: unknown) {
+        // The image is verified now, so this does not fail readiness; the next probe verifies again.
+        // Only the errno code is logged: fs messages carry the state dir path.
+        this.logger.warn('sandbox image verification record could not be saved; the next probe verifies again', {
+          errorCode: errorCode(error),
+        });
       }
     }
     return { ok: true };

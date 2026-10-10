@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import { DOCKER_SOCKET_PATH, DockerDriver } from '../../../../src/core/sandbox/driver/DockerDriver';
 import type { DriverRunParams } from '../../../../src/core/sandbox/driver/IsolationDriver';
 import { resolveSandboxIdentity, SANDBOX_RUN_ENV, stageRunDirs } from '../../../../src/core/sandbox/driver/RunStaging';
+import { makeSilentLogger } from '../../harnessMocks';
 
 const execFileAsync = promisify(execFile);
 
@@ -67,6 +68,7 @@ describe('DockerDriver integration (live daemon)', () => {
           dockerSocketPath: DOCKER_SOCKET_PATH,
           commandTimeoutMs: undefined,
           createTimeoutMs: undefined,
+          logger: makeSilentLogger(),
         },
         undefined,
       );
@@ -112,6 +114,7 @@ describe('DockerDriver integration (live daemon)', () => {
           dataDir: tmpdir(),
           commandTimeoutMs: undefined,
           createTimeoutMs: undefined,
+          logger: makeSilentLogger(),
         },
         undefined,
       );

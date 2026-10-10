@@ -23,6 +23,7 @@ import {
 } from '../../../../src/core/sandbox/driver/ImageVerificationRecord';
 import { ISOLATION_REFUSED_MARKER, type DriverRunParams } from '../../../../src/core/sandbox/driver/IsolationDriver';
 import { stageRunDirs } from '../../../../src/core/sandbox/driver/RunStaging';
+import { makeSilentLogger } from '../../harnessMocks';
 import { FakeSandboxContainers } from './FakeSandboxContainers';
 
 const DIGEST = 'sha256:' + 'a'.repeat(64);
@@ -96,6 +97,7 @@ function driverOptions(): DockerDriverOptions {
     dataDir: fakeDataDir,
     commandTimeoutMs: undefined,
     createTimeoutMs: undefined,
+    logger: makeSilentLogger(),
   };
 }
 
@@ -992,6 +994,30 @@ describe('DockerDriver image verification record', () => {
     const runner = new FakeRunner();
     scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
     await expect(newDriver(runner, { stateDir: blocker }).ensureReady()).resolves.toEqual({ ready: true });
+  });
+
+  test('an unwritable state dir is logged by errno code, without the host path', async () => {
+    const blocker = join(keyDir, 'not-a-directory');
+    await writeFile(blocker, '');
+    const logger = makeSilentLogger();
+    const warn = jest.spyOn(logger, 'warn');
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
+    await newDriver(runner, { stateDir: join(blocker, 'state'), logger }).ensureReady();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('verification record could not be saved'), {
+      errorCode: 'ENOTDIR',
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(keyDir);
+  });
+
+  test('a saved record logs nothing', async () => {
+    const logger = makeSilentLogger();
+    const warn = jest.spyOn(logger, 'warn');
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
+    await newDriver(runner, { logger }).ensureReady();
+    expect(warn).not.toHaveBeenCalled();
   });
 
   test('an image whose inspect reports no ID is refused', async () => {
