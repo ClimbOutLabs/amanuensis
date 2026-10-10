@@ -260,8 +260,73 @@ describe('RunCodeService', () => {
       PATH: '/usr/local/bin:/usr/bin:/bin',
       LANG: 'C.UTF-8',
       HOME: '/scratch',
+      USER: 'sandbox',
+      LOGNAME: 'sandbox',
       PIP_NO_INDEX: '1',
       npm_config_registry: 'http://127.0.0.1:1/',
+    });
+  });
+
+  describe('sandbox identity', () => {
+    const fsPromises: typeof import('node:fs/promises') = jest.requireActual('node:fs/promises');
+    let chownSpy: jest.SpyInstance;
+    let getuidSpy: jest.SpyInstance;
+    let getgidSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      chownSpy = jest.spyOn(fsPromises, 'chown').mockResolvedValue(undefined);
+      getuidSpy = jest.spyOn(process, 'getuid');
+      getgidSpy = jest.spyOn(process, 'getgid');
+    });
+
+    afterEach(() => {
+      chownSpy.mockRestore();
+      getuidSpy.mockRestore();
+      getgidSpy.mockRestore();
+    });
+
+    it('runs a non-root server as its own uid:gid without chowning anything', async () => {
+      getuidSpy.mockReturnValue(4242);
+      getgidSpy.mockReturnValue(4343);
+      const result = await service.runCode(VALID_INPUT);
+      expect(result.status).toBe('ok');
+      expect(driver.runs[0]?.sandboxIdentity).toEqual({ uid: 4242, gid: 4343, chownRunDirs: false });
+      expect(chownSpy).not.toHaveBeenCalled();
+    });
+
+    it('hands every staged dir and file to the image sandbox uid when the server is root', async () => {
+      getuidSpy.mockReturnValue(0);
+      getgidSpy.mockReturnValue(0);
+      const result = await service.runCode({
+        ...VALID_INPUT,
+        files_in: [{ name: 'data.csv', content_base64: Buffer.from('a,b').toString('base64') }],
+      });
+      expect(result.status).toBe('ok');
+      expect(driver.runs[0]?.sandboxIdentity).toEqual({ uid: 65532, gid: 65532, chownRunDirs: true });
+      const chowned = chownSpy.mock.calls.map(call => ({
+        name: basename(String(call[0])),
+        uid: call[1],
+        gid: call[2],
+      }));
+      expect(chowned.every(call => call.uid === 65532 && call.gid === 65532)).toBe(true);
+      expect(chowned.map(call => call.name)).toEqual(
+        expect.arrayContaining(['ingress', 'scratch', 'egress', 'data.csv', '__runcode_main.py']),
+      );
+    });
+
+    it('fails the run before the container starts when the root handoff fails', async () => {
+      getuidSpy.mockReturnValue(0);
+      getgidSpy.mockReturnValue(0);
+      chownSpy.mockRejectedValue(new Error(`EPERM: operation not permitted, chown '${dataDir}/sandbox-runs/x'`));
+      const result = await service.runCode(VALID_INPUT);
+      expect(result.status).toBe('failed');
+      if (result.status === 'failed') {
+        expect(result.error_code).toBe('internal');
+        expect(result.error).toMatch(/could not hand the run directories to sandbox uid 65532:65532/);
+        expect(result.error).not.toContain(dataDir);
+      }
+      expect(driver.runs).toHaveLength(0);
+      expect(await readdir(join(dataDir, 'sandbox-runs'))).toEqual([]);
     });
   });
 

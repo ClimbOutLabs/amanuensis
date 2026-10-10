@@ -1,6 +1,6 @@
 import { execFile as execFileCallback, spawn } from 'node:child_process';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { readFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import {
@@ -12,7 +12,15 @@ import {
   type DriverRunResult,
   type IsolationDriver,
   type RunCodeLanguage,
+  type SandboxIdentity,
 } from './IsolationDriver.js';
+import {
+  measureRunDiskUsage,
+  resolveSandboxIdentity,
+  SANDBOX_RUN_ENV,
+  sandboxRunsDir,
+  stageRunDirs,
+} from './RunStaging.js';
 
 const execFileAsync = promisify(execFileCallback);
 
@@ -20,8 +28,15 @@ const execFileAsync = promisify(execFileCallback);
 const SANDBOX_RUN_LABEL = 'tf.sandbox.run';
 /** Label for the transient wedged-daemon probe container. */
 const PROBE_LABEL = 'tf.sandbox.probe';
-/** Sandbox uid:gid baked into the image (plan §2.5). */
-const SANDBOX_USER = '65532:65532';
+/** Readiness canary: a python program touching every mount the way a real run does. */
+const CANARY_INPUT_NAME = 'canary_in';
+const CANARY_PROGRAM = [
+  'import pathlib',
+  `data = pathlib.Path('/ingress/${CANARY_INPUT_NAME}').read_bytes()`,
+  "pathlib.Path('/scratch/sub').mkdir()",
+  "pathlib.Path('/scratch/sub/f').write_bytes(data)",
+  "pathlib.Path('/egress/out').write_bytes(data)",
+].join('\n');
 /** Driver-internal per-stream capture bound; the wrapper owns the model-visible contract. */
 const TRANSPORT_STREAM_CAP_BYTES = 4 * 1024 * 1024;
 /** Reaper age: containers older than this are crashed-supervisor leaks. */
@@ -116,6 +131,8 @@ export interface DockerDriverOptions {
   cosignBinary: string | undefined;
   /** Override for the Docker socket path probed by detectDocker(). Defaults to /var/run/docker.sock. */
   dockerSocketPath: string | undefined;
+  /** Same data dir the RunCodeService stages runs under; the readiness canary stages there too. */
+  dataDir: string;
   /** Bound for docker info / image inspect / cosign verify. Default 5000. */
   commandTimeoutMs: number | undefined;
   /** Bound for the wedged-daemon docker create probe. Default 30000. */
@@ -148,6 +165,26 @@ function isExecFileFailure(error: unknown): error is ExecFileFailure {
 
 function truncateSingleLine(text: string, maxChars: number): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, maxChars);
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Deletes the canary run root; the server must be able to remove what the container wrote. */
+async function removeCanaryRoot(runRoot: string): Promise<string | undefined> {
+  try {
+    await rm(runRoot, { recursive: true, force: true });
+  } catch (error: unknown) {
+    return `the host could not remove the run directory: ${errorText(error)}`;
+  }
+  try {
+    await stat(runRoot);
+  } catch (error: unknown) {
+    const gone = typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+    return gone ? undefined : `the host could not confirm the run directory was removed: ${errorText(error)}`;
+  }
+  return 'the run directory still exists after removal';
 }
 
 /** Production runner: real docker/cosign binaries via execFile/spawn. */
@@ -375,6 +412,7 @@ export class DockerDriver implements IsolationDriver {
   private readonly dockerBinary: string;
   private readonly cosignBinary: string;
   private readonly dockerSocketPath: string;
+  private readonly dataDir: string;
   private readonly commandTimeoutMs: number;
   private readonly createTimeoutMs: number;
   private readonly runner: DockerCommandRunner;
@@ -389,6 +427,7 @@ export class DockerDriver implements IsolationDriver {
     this.dockerBinary = options.dockerBinary ?? 'docker';
     this.cosignBinary = options.cosignBinary ?? 'cosign';
     this.dockerSocketPath = options.dockerSocketPath ?? DOCKER_SOCKET_PATH;
+    this.dataDir = options.dataDir;
     this.commandTimeoutMs = options.commandTimeoutMs ?? 5000;
     this.createTimeoutMs = options.createTimeoutMs ?? 30000;
     this.runner = commandRunner ?? createDefaultDockerCommandRunner({ dockerBinary: this.dockerBinary });
@@ -503,10 +542,8 @@ export class DockerDriver implements IsolationDriver {
       timeoutMs: this.commandTimeoutMs,
       signal: undefined,
     });
-    // Bind-mount ownership probe (plan E-B1): Docker Desktop/macOS virtiofs may
-    // squash or silently ignore the chown the wrapper best-effort applies. A
-    // failed probe is a clear capability error here, not a silent permission
-    // failure mid-run.
+    // Canary run through the real staging and create flags: a host/uid mismatch
+    // is a clear capability error here, not a permission failure mid-run.
     const ownership = await this.probeBindMountOwnership(signal);
     if (!ownership.ok) {
       return { ready: false, error_code: 'daemon_unavailable', error: ownership.error };
@@ -727,7 +764,7 @@ export class DockerDriver implements IsolationDriver {
       '--tmpfs',
       '/tmp:rw,noexec,nosuid,size=64m',
       '--user',
-      SANDBOX_USER,
+      `${String(params.sandboxIdentity.uid)}:${String(params.sandboxIdentity.gid)}`,
       '--cap-drop=ALL',
       '--security-opt',
       'no-new-privileges:true',
@@ -895,58 +932,88 @@ export class DockerDriver implements IsolationDriver {
   }
 
   /**
-   * Runs a throwaway container as the sandbox uid against a host temp dir and
-   * requires a file write to land both inside the container and back on the
-   * host. Catches the Docker Desktop/macOS virtiofs uid-mapping quirk where
-   * chown through a bind mount is silently ignored.
+   * Readiness canary: a throwaway run with the same staging, identity, env and
+   * create flags as a real one. It then checks what the host relies on later:
+   * the container read ingress and wrote scratch and egress, du can account for
+   * them, and the run root can be deleted. Catches uid/permission mismatches,
+   * including bind mounts that ignore ownership (Docker Desktop).
    */
   private async probeBindMountOwnership(
     signal: AbortSignal | undefined,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    const probeDir = await mkdtemp(join(tmpdir(), 'tf-sandbox-probe-'));
-    try {
-      const result = await this.runner.run(
-        this.dockerBinary,
-        [
-          'run',
-          '--rm',
-          '--network',
-          'none',
-          '--user',
-          SANDBOX_USER,
-          '-v',
-          `${probeDir}:/probe:rw`,
-          '--entrypoint',
-          'sh',
-          this.image,
-          '-c',
-          'touch /probe/write-test && echo PROBE_OK',
-        ],
-        { timeoutMs: this.commandTimeoutMs, signal },
-      );
-      const wroteInside = !result.timedOut && result.exitCode === 0 && result.stdout.includes('PROBE_OK');
-      let visibleOnHost = false;
-      if (wroteInside) {
-        try {
-          await stat(join(probeDir, 'write-test'));
-          visibleOnHost = true;
-        } catch {
-          visibleOnHost = false;
-        }
-      }
-      if (!wroteInside || !visibleOnHost) {
-        return {
-          ok: false,
-          error:
-            'sandbox bind-mount ownership probe failed: a container running as the sandbox uid (65532) could not write through a host bind mount. ' +
-            "On Docker Desktop/macOS this is the virtiofs uid-mapping quirk — the wrapper's chown is silently ignored and runs would fail on permissions. " +
-            `Probe output: ${truncateSingleLine(result.stderr, 300)}`,
-        };
-      }
+    const identity = resolveSandboxIdentity();
+    const token = randomUUID();
+    const runId = `canary-${token}`;
+    const runRoot = join(sandboxRunsDir(this.dataDir), runId);
+    const canaryProblem = await this.runCanary({ runId, runRoot, token, identity, signal });
+    // Always clean up: a failed canary must not leave container-written files behind.
+    const cleanupProblem = await removeCanaryRoot(runRoot);
+    const problem = canaryProblem ?? cleanupProblem;
+    if (problem === undefined) {
       return { ok: true };
-    } finally {
-      await rm(probeDir, { recursive: true, force: true });
     }
+    const sandboxUser = `${String(identity.uid)}:${String(identity.gid)}`;
+    return {
+      ok: false,
+      error: `sandbox canary run failed as ${sandboxUser}: ${problem.split(runRoot).join('<canary>')}`,
+    };
+  }
+
+  /** Returns the first failed check, or undefined when the canary behaved like a healthy run. */
+  private async runCanary(input: {
+    runId: string;
+    runRoot: string;
+    token: string;
+    identity: SandboxIdentity;
+    signal: AbortSignal | undefined;
+  }): Promise<string | undefined> {
+    const files = [{ name: CANARY_INPUT_NAME, bytes: Buffer.from(input.token) }];
+    let dirs;
+    try {
+      dirs = await stageRunDirs({
+        runRoot: input.runRoot,
+        language: 'python',
+        code: CANARY_PROGRAM,
+        files,
+        identity: input.identity,
+      });
+    } catch (error: unknown) {
+      return `the host could not stage the run directories: ${errorText(error)}`;
+    }
+    const timeout = AbortSignal.timeout(this.createTimeoutMs);
+    const result = await this.run({
+      language: 'python',
+      code: CANARY_PROGRAM,
+      filesIn: files,
+      ingressDir: dirs.ingressDir,
+      scratchDir: dirs.scratchDir,
+      egressDir: dirs.egressDir,
+      timeoutMs: this.createTimeoutMs,
+      memoryMb: 256,
+      diskMb: 16,
+      runId: input.runId,
+      env: SANDBOX_RUN_ENV,
+      sandboxIdentity: input.identity,
+      signal: input.signal === undefined ? timeout : AbortSignal.any([input.signal, timeout]),
+      harvestGraceMs: 0,
+    });
+    if (result.terminatedBy !== 'completed' || result.exitCode !== 0) {
+      const detail = truncateSingleLine(result.internalError ?? result.stderr, 300);
+      return `the canary container ended as ${result.terminatedBy} (exit ${String(result.exitCode)}): ${detail}`;
+    }
+    let output: string;
+    try {
+      output = await readFile(join(dirs.egressDir, 'out'), 'utf8');
+    } catch (error: unknown) {
+      return `the host could not read the file the container wrote to egress: ${errorText(error)}`;
+    }
+    if (output !== input.token) {
+      return 'the file read back from egress does not match what the container read from ingress';
+    }
+    if ((await measureRunDiskUsage({ scratchDir: dirs.scratchDir, egressDir: dirs.egressDir })) === undefined) {
+      return 'the host could not measure the canary directories with du';
+    }
+    return undefined;
   }
 
   /** Best-effort OOM check: false when the inspect fails or the flag is absent. */

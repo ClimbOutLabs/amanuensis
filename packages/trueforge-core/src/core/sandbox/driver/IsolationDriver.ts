@@ -29,9 +29,22 @@ export const ISOLATION_REFUSED_MARKER = 'isolation_refused:';
  */
 export const RUN_CODE_RESERVED_PREFIX = '__runcode_';
 
+/** File name of the staged program inside ingress. */
+export function runCodeProgramName(language: RunCodeLanguage): string {
+  return `${RUN_CODE_RESERVED_PREFIX}main.${language === 'python' ? 'py' : 'mjs'}`;
+}
+
 /** Container-side path of the staged program (ingress mounts read-only at /ingress). */
 export function runCodeProgramPath(language: RunCodeLanguage): string {
-  return `/ingress/${RUN_CODE_RESERVED_PREFIX}main.${language === 'python' ? 'py' : 'mjs'}`;
+  return `/ingress/${runCodeProgramName(language)}`;
+}
+
+/** Uid:gid the container runs as, plus whether staged run dirs must be handed to it. */
+export interface SandboxIdentity {
+  uid: number;
+  gid: number;
+  /** True when the server cannot run as `uid`, so it must chown the run dirs to it. */
+  chownRunDirs: boolean;
 }
 
 /** How a driver run ended, before the wrapper maps it onto the error taxonomy. */
@@ -78,10 +91,13 @@ export interface DriverRunParams {
   /** Label/tracking for reaping. */
   runId: string;
   /**
-   * Curated environment only (PATH, LANG, HOME=/scratch, PIP_NO_INDEX=1,
-   * npm_config_registry dead-end). The host process env is never passed through.
+   * Curated environment only (PATH, LANG, HOME=/scratch, USER/LOGNAME,
+   * PIP_NO_INDEX=1, npm_config_registry dead-end). The host process env is never
+   * passed through.
    */
   env: Readonly<Record<string, string>>;
+  /** Container user; the wrapper stages the run dirs so this uid can use them. */
+  sandboxIdentity: SandboxIdentity;
   /** Cancels the run: the driver must kill the container/VM on abort. */
   signal: AbortSignal | undefined;
   /** FC pull-before-kill best-effort grace in ms (Docker ignores it). */
