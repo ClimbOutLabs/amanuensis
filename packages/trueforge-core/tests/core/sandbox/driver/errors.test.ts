@@ -61,7 +61,7 @@ describe('docker_unavailable / isolation_refused', () => {
   });
 
   it('surfaces the isolation_refused detail verbatim', () => {
-    const message = "I can't run this safely — the sandbox couldn't apply all isolation guarantees.";
+    const message = "I can't run this safely, the sandbox couldn't apply all isolation guarantees.";
     expect(errorTextForCode({ error_code: 'isolation_refused', detail: message })).toBe(message);
   });
 

@@ -1342,6 +1342,10 @@ describe('checkContainerIsolation', () => {
 });
 
 describe('DockerDriver.run isolation refusal', () => {
+  test('the refusal message uses plain punctuation, with no em dashes', () => {
+    expect(ISOLATION_REFUSED_MESSAGE).not.toContain('\u2014');
+  });
+
   test('refuses the run when the created container lacks network isolation', async () => {
     const runner = new FakeRunner();
     let attached = false;

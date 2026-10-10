@@ -77,7 +77,7 @@ export const DOCKER_UNAVAILABLE_MESSAGE =
  * applied (spec acceptance #6). Quoted verbatim from the spec.
  */
 export const ISOLATION_REFUSED_MESSAGE =
-  "I can't run this safely — the sandbox couldn't apply all isolation guarantees.";
+  "I can't run this safely, the sandbox couldn't apply all isolation guarantees.";
 
 const dockerDetectionCache = new Map<string, Promise<boolean>>();
 
@@ -724,7 +724,7 @@ export class DockerDriver implements IsolationDriver {
       // Fail-closed isolation verification (spec): the flags passed to
       // `docker create` must be reflected in the created container. A
       // container missing any mandatory guarantee is removed and the run is
-      // refused — never executed with reduced isolation.
+      // refused, never executed with reduced isolation.
       await this.verifyContainerIsolation(containerId, params.sandboxIdentity);
       const task = this.attachAndRun(containerId, params);
       this.inFlight.set(containerId, task);

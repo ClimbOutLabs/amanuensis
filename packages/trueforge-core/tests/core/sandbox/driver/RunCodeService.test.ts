@@ -189,7 +189,7 @@ describe('RunCodeService', () => {
   });
 
   it('maps the isolation-refused marker onto isolation_refused with the exact message', async () => {
-    const message = "I can't run this safely — the sandbox couldn't apply all isolation guarantees.";
+    const message = "I can't run this safely, the sandbox couldn't apply all isolation guarantees.";
     driver.runBehavior = () =>
       Promise.resolve({
         exitCode: -1,
