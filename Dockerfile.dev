@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 #
 # From-source multi-stage build for local smoke / floating-main / SHA-tagged
 # dev images. Production/OSS Helm images use the root Dockerfile (npm install).
@@ -11,7 +11,7 @@
 # See https://pnpm.io/cli/fetch. BuildKit cache mounts are avoided so the same
 # file builds on Railway Metal (which requires a hardcoded service id in mount ids).
 
-FROM node:24-slim AS base
+FROM node:24-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && pnpm config set store-dir /pnpm/store
