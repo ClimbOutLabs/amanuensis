@@ -25,7 +25,7 @@ Six sprite states. `WaitStationId` (4 stations, `waitQueueJourney.ts:12`) is unc
 
 Signal sources:
 
-- Recall: `listMemoryTurnContext` polled every 2 s while running (`MemoryTurnContextProvider.tsx:12,89,113`), read in `useWaitQueue.ts:95-101` as `WaitQueueMemory`. Landing can lag the event by up to one poll interval, so found-memories is bounded by the 2 s poll and may be brief or skipped; that is expected, and the sprite never claims a recall before it lands.
+- Recall: `listMemoryTurnContext` polled every 2 s while running (`MemoryTurnContextProvider.tsx:21,197,245`), read in `useWaitQueue.ts:95-101` as `WaitQueueMemory`. Landing can lag the event by up to one poll interval, so found-memories is bounded by the 2 s poll and may be brief or skipped; that is expected, and the sprite never claims a recall before it lands.
 - Long wait: per-turn clock in `useWaitQueue.ts:47-120`, already exposed as `elapsedMs`/`longWait` (`:134`). The existing note reads "Still writing - Ns so far" in this same condition (`buildLongWaitNote`), so sprite and text agree. A turn that spends 20 s in tools and then starts writing shows still-writing at once; the text says the same.
 - `remembering` stays event-sourced only: it is never "active" because no signal says recall is running (`waitQueueJourney.ts:222-224`). Found-memories is the only recall-aware sprite.
 - Zero-item, empty, timeout, and error recalls keep the remembering sprite, matching the calm tick policy (`:157-173`).
