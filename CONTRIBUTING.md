@@ -61,7 +61,7 @@ There are two dev topologies. Both serve the UI on [http://localhost:3000](http:
 
 ### Standalone (zero infra)
 
-SQLite only - good for most day-to-day development. Standalone mode is intended for local use; it is not a production-safe topology (no login by default, local SQLite). Please do not expose it beyond localhost.
+SQLite only - good for most day-to-day development. Standalone mode is intended for local use; it is not a production-safe topology (local SQLite). Please do not expose it beyond localhost. Login is mandatory: run `pnpm dev:login` in a second terminal (needs Docker), add the `OIDC_*` lines it prints and `PUBLIC_BASE_URL=http://localhost:3000` to `packages/trueforge/.env`, then:
 
 ```bash
 pnpm standalone:dev

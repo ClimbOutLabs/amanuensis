@@ -1,9 +1,9 @@
 ---
 title: 'Setup Login'
-description: 'Keep the no-auth default for local use, or turn on OIDC so your team signs in with your identity provider.'
+description: 'Standalone always signs in through OIDC; hosted deployments can add OIDC so your team signs in with your identity provider.'
 ---
 
-Login in TrueForge is **optional**. Run it without auth for personal, local use, or connect an OIDC identity provider (Okta, Microsoft Entra ID, or any standard OIDC IdP) so your team signs in and Settings stay admin-only.
+Login is **mandatory in standalone mode** (the server refuses to start without OIDC) and optional in hosted mode. For local development run `pnpm dev:login`, which starts a Dex identity provider in Docker and prints the `OIDC_*` lines for `packages/trueforge/.env`. Otherwise connect any standard OIDC identity provider (Okta, Microsoft Entra ID, Dex, Authentik) so people sign in and Settings stay admin-only.
 
 ## Choose your mode
 
