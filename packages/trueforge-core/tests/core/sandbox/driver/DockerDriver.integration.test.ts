@@ -49,7 +49,7 @@ async function containersWithLabel(labelValue: string): Promise<string> {
 }
 
 describe('DockerDriver integration (live daemon)', () => {
-  test('ensureReady reports image_unavailable (not daemon_unavailable) when the daemon is up but the image is missing', async () => {
+  test('ensureReady reports image_missing (not daemon_unavailable) when the daemon is up but the image is absent', async () => {
     if (!(await dockerAvailable())) {
       return;
     }
@@ -68,7 +68,8 @@ describe('DockerDriver integration (live daemon)', () => {
     const readiness = await driver.ensureReady();
     expect(readiness.ready).toBe(false);
     if (!readiness.ready) {
-      expect(readiness.error_code).toBe('image_unavailable');
+      // A pullable-but-absent image is healable; RunCodeService provisions it before surfacing image_unavailable.
+      expect(readiness.error_code).toBe('image_missing');
     }
   });
 
