@@ -24,6 +24,11 @@
  * connector offline and bring it back on the same port (a refused connection,
  * simulating the server process being down), distinct from `sever`/`restore`
  * (which keeps listening but answers every request with a 503).
+ *
+ * The same server doubles as a Hindsight-shaped memory provider: `memoryProviderUrl`
+ * has the `{apiBase}/mcp/{bank}` shape the memory-provider setup requires, and the fixture answers the
+ * REST recall route behind it, so the setup's connection check passes and a connector registered
+ * through the real setup flow is first-party.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -40,6 +45,10 @@ export const INERT_WRITE_TOOL = 'inert_write';
 export const INERT_UNANNOTATED_TOOL = 'inert_unannotated';
 export const INERT_ASK_MEMORY_TOOL = 'ask_memory';
 export const INERT_SEARCH_MEMORY_TOOL = 'search_memory';
+
+/** Bank in `memoryProviderUrl`; the fixture answers a recall for any bank, so a URL can move between them. */
+const INERT_MEMORY_BANK = 'aman';
+const MEMORY_RECALL_PATH = /^\/v1\/default\/banks\/[^/]+\/memories\/recall$/;
 
 /**
  * LKOS's `AskMemoryResponse` shape: empty means empty context plus empty claim groups.
@@ -79,6 +88,8 @@ export interface WriteHold {
 export interface InertMcpServer {
   /** Streamable HTTP endpoint to register as the connector `url`. Stable across `stop`/`start`. */
   url: string;
+  /** The same endpoint as a single-bank memory provider URL; the setup's recall check is answered. */
+  memoryProviderUrl: string;
   /** Times the gated write tool actually started executing. */
   writeInvocations: () => number;
   echoInvocations: () => number;
@@ -86,7 +97,7 @@ export interface InertMcpServer {
   unannotatedInvocations: () => number;
   askMemoryInvocations: () => number;
   searchMemoryInvocations: () => number;
-  /** Resets every invocation counter and returns both memory tools to `'result'` mode. */
+  /** Resets every invocation counter and the last `Authorization` value, and returns both memory tools to `'result'` mode. */
   resetInvocations: () => void;
   /** Parks the next write invocation so a turn can be cancelled mid-execution. */
   holdNextWrite: () => WriteHold;
@@ -97,7 +108,11 @@ export interface InertMcpServer {
   setAskMemoryMode: (mode: MemoryToolMode) => void;
   /** Sets the result shape the next (and every subsequent) `search_memory` call answers with. */
   setSearchMemoryMode: (mode: MemoryToolMode) => void;
-  /** The `Authorization` header value the most recent HTTP request carried, if any. */
+  /**
+   * The `Authorization` value of the most recent HTTP request that carried one since the last
+   * reset. A request without it never clears it: an earlier session's client can still retry its
+   * event stream against a restarted connector, and that stray request carries no credential.
+   */
   lastAuthorizationHeader: () => string | undefined;
   /**
    * Closes the listening socket and every open MCP session, simulating the
@@ -330,11 +345,21 @@ export async function startInertMcpServer(): Promise<InertMcpServer> {
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const authHeader = req.headers.authorization;
-    lastAuthorizationHeader = typeof authHeader === 'string' ? authHeader : undefined;
+    if (typeof authHeader === 'string') {
+      lastAuthorizationHeader = authHeader;
+    }
 
     if (severed) {
       res.writeHead(503, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'inert MCP fixture is severed' }));
+      return;
+    }
+    if (req.method === 'POST' && req.url !== undefined && MEMORY_RECALL_PATH.test(req.url)) {
+      // The memory-provider setup check: an authenticated, empty recall.
+      req.resume();
+      const body = JSON.stringify({ results: [], entities: {} });
+      res.writeHead(200, { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body)) });
+      res.end(body);
       return;
     }
     const sessionHeader = req.headers['mcp-session-id'];
@@ -426,6 +451,7 @@ export async function startInertMcpServer(): Promise<InertMcpServer> {
 
   return {
     url,
+    memoryProviderUrl: `${url}/${INERT_MEMORY_BANK}`,
     writeInvocations: () => counters.write,
     echoInvocations: () => counters.echo,
     readInvocations: () => counters.read,
@@ -441,6 +467,7 @@ export async function startInertMcpServer(): Promise<InertMcpServer> {
       counters.searchMemory = 0;
       memoryModes.ask = 'result';
       memoryModes.search = 'result';
+      lastAuthorizationHeader = undefined;
     },
     holdNextWrite: () => {
       const entered: PromiseWithResolvers<void> = Promise.withResolvers();

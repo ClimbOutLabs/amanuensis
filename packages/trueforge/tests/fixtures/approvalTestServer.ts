@@ -5,6 +5,10 @@
  *
  * The database lives in a temp directory rather than `:memory:` so `restart()` can
  * drop every in-process registry and reopen the same durable state.
+ *
+ * The `inert` connector is stored directly, like one a user added by URL. The first-party
+ * memory connector, when asked for, is registered through the real memory-provider setup
+ * (`POST /api/v1/settings/mcp-servers` with `memory_provider`), so the server itself marks it.
  */
 import type { OpenAPIHono } from '@hono/zod-openapi';
 import { Sessions, type TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
@@ -59,6 +63,8 @@ export const MODEL_PROVIDER_NAME = 'scripted';
 export const MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-model`;
 /** A second configured model, so a test can prove which one a turn actually used. */
 export const ALT_MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-alt-model`;
+/** The inert server registered as the memory provider, when a test asks for it. */
+export const INERT_MEMORY_SERVER_NAME = 'inert-memory';
 
 type SqliteDb = ReturnType<typeof createSqliteDb>;
 
@@ -134,8 +140,30 @@ function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): O
   });
 }
 
+/** Registers the inert server as the memory provider through the settings API, as a user would. */
+async function registerMemoryProvider({ app, mcp }: { app: OpenAPIHono; mcp: InertMcpServer }): Promise<void> {
+  const response = await app.request('/api/v1/settings/mcp-servers', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      manifest: {
+        type: 'remote',
+        name: INERT_MEMORY_SERVER_NAME,
+        url: mcp.memoryProviderUrl,
+        description: 'Inert connector registered as the memory provider.',
+        memory_provider: true,
+      },
+    }),
+  });
+  if (response.status !== 201) {
+    throw new Error(`memory provider setup failed (${String(response.status)}): ${await response.text()}`);
+  }
+}
+
 export async function startApprovalTestServer(options?: {
   sandboxProvider?: SandboxProvider | undefined;
+  /** Also register the inert server as the memory provider, which makes that connector first-party. */
+  memoryProvider?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
   const mcp = await startInertMcpServer();
   const model = await startScriptedModelServer();
@@ -199,6 +227,9 @@ export async function startApprovalTestServer(options?: {
   });
 
   let app = buildApp(db, options?.sandboxProvider);
+  if (options?.memoryProvider === true) {
+    await registerMemoryProvider({ app, mcp });
+  }
 
   return {
     // Hono's request() is sync-or-async depending on the route; the fixture

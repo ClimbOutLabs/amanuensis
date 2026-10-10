@@ -11,12 +11,18 @@ import { TurnSchema, type Turn, type TurnInputItem } from '@truefoundry/trueforg
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import { ListSessionEventsResponseSchema, TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema, ListTurnsResponseSchema } from '../../../src/schemas/turn';
-import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import {
+  INERT_MEMORY_SERVER_NAME,
+  MODEL_FQN,
+  startApprovalTestServer,
+  type ApprovalTestServer,
+} from '../../fixtures/approvalTestServer';
 import {
   INERT_ASK_MEMORY_TOOL,
   INERT_ECHO_TOOL,
   INERT_READ_TOOL,
   INERT_SERVER_NAME,
+  INERT_UNANNOTATED_TOOL,
   INERT_WRITE_TOOL,
 } from '../../fixtures/inertMcpServer';
 import { RUN_DIRECTIVE_PREFIX } from '../../fixtures/scriptedModelServer';
@@ -66,6 +72,19 @@ const UNFORCED_AGENT_SPEC = {
     { name: INERT_SERVER_NAME, preload: true, require_approval_for_tools: ['@write', '@destructive', '@unclassified'] },
   ],
 };
+
+/**
+ * Mounts the memory-provider connector, which the server marked first-party when it was set up.
+ * Same default gating as UNFORCED_AGENT_SPEC.
+ */
+function firstPartyAgentSpec(requireApprovalForTools: string[] = ['@write', '@destructive', '@unclassified']) {
+  return {
+    ...AGENT_SPEC,
+    mcp_servers: [
+      { name: INERT_MEMORY_SERVER_NAME, preload: true, require_approval_for_tools: requireApprovalForTools },
+    ],
+  };
+}
 
 const ToolGrantsResponseSchema = z.object({ data: z.array(z.object({ tool_name: z.string() }).loose()) });
 
@@ -306,7 +325,7 @@ describe('approval gate over an inert connector', () => {
   let server: ApprovalTestServer;
 
   beforeAll(async () => {
-    server = await startApprovalTestServer();
+    server = await startApprovalTestServer({ memoryProvider: true });
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -332,6 +351,118 @@ describe('approval gate over an inert connector', () => {
     },
     TURN_TIMEOUT_MS,
   );
+
+  describe('first-party connector (the memory provider)', () => {
+    async function auditEntries(sessionId: string) {
+      const audit = await server.request(`/api/v1/sessions/${sessionId}/audit-log`);
+      expect(audit.status).toBe(200);
+      return AuditLogResponseSchema.parse(await audit.json()).entries;
+    }
+
+    /** Saves the memory connector the way the settings page does, so the server re-decides its trust. */
+    async function saveMemoryConnector({ url, memoryProvider }: { url: string; memoryProvider: boolean }) {
+      const response = await server.request('/api/v1/settings/mcp-servers', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          manifest: {
+            type: 'remote',
+            name: INERT_MEMORY_SERVER_NAME,
+            url,
+            description: 'Inert connector registered as the memory provider.',
+            ...(memoryProvider ? { memory_provider: true } : {}),
+          },
+        }),
+      });
+      expect(response.status).toBe(200);
+    }
+
+    it(
+      'autoruns a read-only annotated tool and records the run in the audit log',
+      async () => {
+        const sessionId = await createSession(server, firstPartyAgentSpec());
+        const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+
+        expect(requiredActions(turn)).toEqual([]);
+        expect(server.mcp.askMemoryInvocations()).toBe(1);
+        expect(await auditEntries(sessionId)).toEqual([
+          expect.objectContaining({
+            tier: 1,
+            tool_name: INERT_ASK_MEMORY_TOOL,
+            outcome: 'logged',
+            description: expect.stringContaining('First-party'),
+          }),
+        ]);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'asks for the same tool on a user-added connector with identical hints',
+      async () => {
+        const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+
+        expect(pendingApproval(turn)).toBeDefined();
+        expect(server.mcp.askMemoryInvocations()).toBe(0);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it.each([
+      ['a read-only tool that does not declare itself closed-world', INERT_ECHO_TOOL, 'echoInvocations'],
+      ['a write tool', INERT_WRITE_TOOL, 'writeInvocations'],
+      ['an unannotated tool', INERT_UNANNOTATED_TOOL, 'unannotatedInvocations'],
+    ] as const)(
+      'still asks for %s',
+      async (_label, tool, invocations) => {
+        const sessionId = await createSession(server, firstPartyAgentSpec());
+        const turn = await runTurn({ server, sessionId, input: userMessage(tool) });
+
+        expect(pendingApproval(turn)).toBeDefined();
+        expect(server.mcp[invocations]()).toBe(0);
+        expect(await auditEntries(sessionId)).toEqual([]);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'still asks when an explicit require-approval selector names the tool, and audits no autorun',
+      async () => {
+        const spec = firstPartyAgentSpec(['@write', '@destructive', '@unclassified', INERT_ASK_MEMORY_TOOL]);
+        const sessionId = await createSession(server, spec);
+        const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+
+        expect(pendingApproval(turn)).toBeDefined();
+        expect(server.mcp.askMemoryInvocations()).toBe(0);
+        expect(await auditEntries(sessionId)).toEqual([]);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    // Last in this block: it repoints the shared connector, then restores it through setup.
+    it(
+      'asks again once the connector is repointed, until it is set up again',
+      async () => {
+        try {
+          await saveMemoryConnector({ url: `${server.mcp.url}/other`, memoryProvider: true });
+          const repointed = await createSession(server, firstPartyAgentSpec());
+          const asked = await runTurn({ server, sessionId: repointed, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+          expect(pendingApproval(asked)).toBeDefined();
+          expect(server.mcp.askMemoryInvocations()).toBe(0);
+        } finally {
+          await saveMemoryConnector({ url: server.mcp.memoryProviderUrl, memoryProvider: false });
+          await saveMemoryConnector({ url: server.mcp.memoryProviderUrl, memoryProvider: true });
+        }
+
+        const restored = await createSession(server, firstPartyAgentSpec());
+        const ran = await runTurn({ server, sessionId: restored, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+        expect(requiredActions(ran)).toEqual([]);
+        expect(server.mcp.askMemoryInvocations()).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+  });
 
   it(
     'pauses the write tool before it executes',
