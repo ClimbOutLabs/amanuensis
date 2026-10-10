@@ -458,6 +458,80 @@ describe('verifyPreDispatch', () => {
     }
   });
 
+  test.each([
+    {
+      ask: 'model-supplied environment',
+      approved: (ws: string) => ({ command: 'ls', cwd: ws, env: { LD_PRELOAD: '/tmp/a.so' } }),
+      changed: (ws: string) => ({ command: 'ls', cwd: ws, env: { LD_PRELOAD: '/tmp/b.so' } }),
+    },
+    {
+      ask: 'a working directory outside the workspace',
+      approved: () => ({ command: 'ls', cwd: '/' }),
+      changed: () => ({ command: 'ls', cwd: '/usr' }),
+    },
+    {
+      ask: 'an operand outside the workspace',
+      approved: (ws: string) => ({ command: 'cat ../a.txt', cwd: ws }),
+      changed: (ws: string) => ({ command: 'cat ../b.txt', cwd: ws }),
+    },
+  ])('the token for $ask binds the arguments it was minted for', async ({ approved, changed }) => {
+    const { services, workspace, cleanup } = seededWorkspace();
+    try {
+      const ctx = makeCtx({ services, workspace_cwd: workspace });
+      const asked = approved(workspace);
+      const decision = await classifyTier(action('exec', asked), ctx);
+      expect(decision.tier).toBe(3);
+      const callFor = (canonical_params: Record<string, unknown>) => ({
+        tool_name: 'exec',
+        tool_type: 'truefoundry-system' as const,
+        canonical_params,
+        tier: 3 as const,
+        approval_token_id: decision.approval_token_id,
+        approval_binding: null,
+        shell_binding: decision.shell_binding,
+      });
+      const verifyCtx = { ...ctx, offline: false };
+
+      // A token minted for other arguments is rejected, and the failed try spends it.
+      expect(await verifyPreDispatch({ call: callFor(changed(workspace)), ctx: verifyCtx })).toMatch(
+        /changed|invalid/i,
+      );
+      expect(await verifyPreDispatch({ call: callFor(asked), ctx: verifyCtx })).toMatch(/already used|invalid/i);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test.each([
+    {
+      ask: 'model-supplied environment',
+      params: (ws: string) => ({ command: 'ls', cwd: ws, env: { LD_PRELOAD: '/tmp/a.so' } }),
+    },
+    { ask: 'a working directory outside the workspace', params: () => ({ command: 'ls', cwd: '/' }) },
+    { ask: 'an operand outside the workspace', params: (ws: string) => ({ command: 'cat ../a.txt', cwd: ws }) },
+  ])('the token for $ask verifies for the same arguments exactly once', async ({ params }) => {
+    const { services, workspace, cleanup } = seededWorkspace();
+    try {
+      const ctx = makeCtx({ services, workspace_cwd: workspace });
+      const asked = params(workspace);
+      const decision = await classifyTier(action('exec', asked), ctx);
+      const call = {
+        tool_name: 'exec',
+        tool_type: 'truefoundry-system' as const,
+        canonical_params: asked,
+        tier: 3 as const,
+        approval_token_id: decision.approval_token_id,
+        approval_binding: null,
+        shell_binding: decision.shell_binding,
+      };
+      const verifyCtx = { ...ctx, offline: false };
+      expect(await verifyPreDispatch({ call, ctx: verifyCtx })).toBeUndefined();
+      expect(await verifyPreDispatch({ call, ctx: verifyCtx })).toMatch(/already used|invalid/i);
+    } finally {
+      cleanup();
+    }
+  });
+
   test('a silent shell command is refused at dispatch when no workspace is set', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const result = await verifyPreDispatch({
