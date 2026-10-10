@@ -479,6 +479,7 @@ describe('capabilities routers', () => {
           memory_provider: true,
           memory_settings: { screen_enabled: false },
         },
+        first_party: false,
       });
 
       const response = await router.request('/');
@@ -505,6 +506,7 @@ describe('capabilities routers', () => {
           memory_provider: true,
           memory_settings: { screen_enabled: true },
         },
+        first_party: false,
       });
 
       const response = await router.request('/');
@@ -531,6 +533,7 @@ describe('capabilities routers', () => {
           memory_provider: true,
           memory_settings: { recall_timeout_ms: 6000 },
         },
+        first_party: false,
       });
 
       const response = await router.request('/');
@@ -661,6 +664,7 @@ describe('capabilities routers', () => {
           memory_provider: true,
           memory_settings: { screen_enabled: true },
         },
+        first_party: false,
       });
 
       await globalSettingsStore.setSetting({ key: 'memory_screen_enabled', value: 'false' });

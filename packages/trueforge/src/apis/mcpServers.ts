@@ -25,6 +25,7 @@ import type { WithTransaction } from '../db/transaction';
 import { createMcpOAuthClient } from '../mcp/auth/mcpDcr';
 import { mcpOAuthCallbackUrl } from '../mcp/auth/mcpOAuthHelpers';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
+import { firstPartyAfterSave } from '../mcp/firstParty';
 import {
   authorizeMcpServerRoute,
   createMcpServerRoute,
@@ -485,6 +486,7 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
 
     // After secret resolution, so the check dials with the credential the row will actually
     // carry, and before the write, so a provider memory cannot reach is never committed.
+    let memoryProviderChecked = false;
     if (manifest.type === 'remote' && manifest.memory_provider === true) {
       // No stored row on create: a name clash is a 409 below, so nothing of an existing row can
       // be inherited by this write, and a DCR manifest has no token yet to check with.
@@ -498,6 +500,7 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
       if (rejection !== undefined) {
         return c.json({ error: { message: rejection } }, 422);
       }
+      memoryProviderChecked = true;
     }
 
     try {
@@ -507,6 +510,7 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
             tenant_id: requestContext.tenant_id,
             name: manifest.name,
             manifest,
+            first_party: firstPartyAfterSave({ manifest, stored: undefined, memoryProviderChecked }),
           },
           transaction,
         );
@@ -620,6 +624,12 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
             tenant_id: requestContext.tenant_id,
             name: manifest.name,
             manifest,
+            // The digest check above proves this exact URL and credential passed the provider check.
+            first_party: firstPartyAfterSave({
+              manifest,
+              stored: existing,
+              memoryProviderChecked: probedDigest !== undefined,
+            }),
           },
           transaction,
         );

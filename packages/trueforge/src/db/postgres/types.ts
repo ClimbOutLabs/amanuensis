@@ -682,6 +682,8 @@ export interface McpServerTable {
    * oauth_client are null until first successful DCR.
    */
   oauth_client: JSONColumnType<OAuthClient, OAuthClient, OAuthClient> | null;
+  /** Defaults to false, never client-supplied: true only for a connector the product's own setup provisioned. */
+  first_party: Generated<boolean>;
   created_at: Date;
   updated_at: Date;
 }

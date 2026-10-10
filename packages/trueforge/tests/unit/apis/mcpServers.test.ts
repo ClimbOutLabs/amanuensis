@@ -182,6 +182,7 @@ describe('mcp-servers routers', () => {
       tenant_id: 'default',
       name: body.name,
       manifest: body,
+      first_party: false,
     });
     await mcpServerStore.saveClient({
       id: record.id,
@@ -223,6 +224,7 @@ describe('mcp-servers routers', () => {
           description: 'Memory provider whose tools listing must stay complete.',
           memory_provider: true,
         },
+        first_party: false,
       });
 
       const response = await mcpServersRouter.request(`/${name}/tools`);
@@ -548,6 +550,7 @@ describe('mcp-servers routers', () => {
         tenant_id: 'default',
         name: putBodyWithDcr.name,
         manifest: putBodyWithDcr,
+        first_party: false,
       });
       await mcpServerStore.saveClient({
         id: record.id,
@@ -840,6 +843,7 @@ describe('mcp-servers routers', () => {
           description: 'Memory provider that must not be offered in chats.',
           memory_provider: true,
         },
+        first_party: false,
       });
 
       const chat = await mcpServersRouter.request('/');
@@ -1318,7 +1322,12 @@ describe('mcp-servers routers', () => {
           server.manifest.type === 'remote' && server.manifest.memory_provider === true,
       )) {
         const { memory_provider: _flag, ...withoutFlag } = holder.manifest;
-        await mcpServerStore.upsertServer({ tenant_id: TENANT_ID, name: holder.name, manifest: withoutFlag });
+        await mcpServerStore.upsertServer({
+          tenant_id: TENANT_ID,
+          name: holder.name,
+          manifest: withoutFlag,
+          first_party: false,
+        });
       }
     });
 
@@ -1495,6 +1504,7 @@ describe('mcp-servers routers', () => {
         tenant_id: TENANT_ID,
         name: dcrProvider.name,
         manifest: dcrProvider,
+        first_party: false,
       });
       await mcpServerStore.saveClient({
         id: record.id,
@@ -1559,7 +1569,7 @@ describe('mcp-servers routers', () => {
       };
       hindsightRecall = async () => {
         // Lands after the unlocked read the check resolved from, before the write txn locks.
-        await mcpServerStore.upsertServer({ tenant_id: TENANT_ID, name, manifest: raced });
+        await mcpServerStore.upsertServer({ tenant_id: TENANT_ID, name, manifest: raced, first_party: false });
         return memoryRecallResponse();
       };
 

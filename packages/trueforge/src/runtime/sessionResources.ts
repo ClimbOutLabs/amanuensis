@@ -42,6 +42,8 @@ import { buildRunCodeHarvestSink } from './artifacts/persistRunCodeHarvests';
 export interface McpConnection {
   url: string;
   headers: RemoteMcpHeaders;
+  /** The stored connector's server-owned trust marker. */
+  first_party: boolean;
 }
 
 const GITHUB_MCP_SERVER_NAME = 'github';
@@ -483,6 +485,7 @@ export async function getMcpConnection({
     return {
       url: record.manifest.url,
       headers: store.resolveInvokeHeaders({ record, userRef }),
+      first_party: record.first_party,
     };
   }
   if (needsLiveAuth && tokenStore !== undefined && clientName !== undefined) {
@@ -495,11 +498,13 @@ export async function getMcpConnection({
         clientName,
         userRef,
       }),
+      first_party: record.first_party,
     };
   }
   return {
     url: record.manifest.url,
     headers: resolveManifestRequestHeaders(record.manifest),
+    first_party: record.first_party,
   };
 }
 

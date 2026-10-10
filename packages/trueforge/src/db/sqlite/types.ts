@@ -522,6 +522,8 @@ export interface McpServerTable {
    */
   oauth_server: JsonbColumn<OAuthServer> | null;
   oauth_client: JsonbColumn<OAuthClient> | null;
+  /** 0/1 (defaults to 0), never client-supplied: 1 only for a connector the product's own setup provisioned. */
+  first_party: Generated<number>;
   created_at: string;
   updated_at: string;
 }

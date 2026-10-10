@@ -195,6 +195,7 @@ export async function startApprovalTestServer(options?: {
       url: mcp.url,
       description: 'Inert connector used by approval-flow tests.',
     },
+    first_party: false,
   });
 
   let app = buildApp(db, options?.sandboxProvider);

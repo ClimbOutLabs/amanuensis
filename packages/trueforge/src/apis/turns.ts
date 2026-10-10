@@ -392,6 +392,7 @@ function createTurnResolver(deps: {
             headers: connection.headers,
             metadataHeaders,
           }),
+          first_party: connection.first_party,
         };
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,

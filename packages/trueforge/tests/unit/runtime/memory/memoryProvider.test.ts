@@ -77,6 +77,7 @@ describe('resolveMemoryProvider', () => {
         url: 'https://hindsight.example.com/mcp/aman/',
         description: 'Not a memory provider.',
       },
+      first_party: false,
     });
 
     const connection = await resolveMemoryProvider({
@@ -103,6 +104,7 @@ describe('resolveMemoryProvider', () => {
         memory_provider: true,
         memory_settings: { recall_timeout_ms: 6000, reflect_enabled: false },
       },
+      first_party: false,
     });
 
     const connection = await resolveMemoryProvider({
@@ -141,6 +143,7 @@ describe('resolveMemoryProvider', () => {
         description: 'Second flagged memory provider (legacy row).',
         memory_provider: true,
       },
+      first_party: false,
     });
     await isolatedMcpServerStore.upsertServer({
       tenant_id: TENANT_ID,
@@ -152,6 +155,7 @@ describe('resolveMemoryProvider', () => {
         description: 'First flagged memory provider alphabetically (legacy row).',
         memory_provider: true,
       },
+      first_party: false,
     });
     const warn = jest.spyOn(logger, 'warn');
 
@@ -189,6 +193,7 @@ describe('resolveMemoryProvider', () => {
         description: 'Misconfigured memory provider.',
         memory_provider: true,
       },
+      first_party: false,
     });
     const warn = jest.spyOn(logger, 'warn');
 
@@ -232,6 +237,7 @@ describe('findMemoryProviderSettings', () => {
         memory_provider: true,
         memory_settings: { screen_enabled: true, recall_timeout_ms: 6000 },
       },
+      first_party: false,
     });
 
     const settings = await findMemoryProviderSettings({ mcpServerStore, tenantId: TENANT_ID });
@@ -250,6 +256,7 @@ describe('findMemoryProviderSettings', () => {
         description: 'Hindsight memory provider.',
         memory_provider: true,
       },
+      first_party: false,
     });
 
     const settings = await findMemoryProviderSettings({ mcpServerStore, tenantId: TENANT_ID });

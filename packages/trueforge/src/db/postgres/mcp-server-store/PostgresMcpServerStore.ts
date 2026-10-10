@@ -23,6 +23,7 @@ function toRecord(row: Selectable<McpServerTable>): McpServerRecord {
     tenant_id: row.tenant_id,
     name: row.name,
     manifest: row.manifest,
+    first_party: row.first_party,
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
   };
@@ -85,6 +86,7 @@ export class PostgresMcpServerStore implements IMcpServerStore<Transaction<Datab
           manifest: json(input.manifest),
           oauth_server: null,
           oauth_client: null,
+          first_party: input.first_party,
           created_at: now(),
           updated_at: now(),
         })
@@ -110,12 +112,14 @@ export class PostgresMcpServerStore implements IMcpServerStore<Transaction<Datab
         manifest: json(input.manifest),
         oauth_server: null,
         oauth_client: null,
+        first_party: input.first_party,
         created_at: now(),
         updated_at: now(),
       })
       .onConflict(oc =>
         oc.columns(['tenant_id', 'name']).doUpdateSet({
           manifest: json(input.manifest),
+          first_party: input.first_party,
           updated_at: now(),
         }),
       )

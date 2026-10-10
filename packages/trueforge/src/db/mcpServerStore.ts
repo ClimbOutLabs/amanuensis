@@ -13,6 +13,11 @@ export interface McpServerRecord {
   tenant_id: string;
   name: ResourceName;
   manifest: McpServerManifest;
+  /**
+   * Server-owned trust marker, never part of the manifest or any request: true only for a
+   * connector the product's own setup provisioned.
+   */
+  first_party: boolean;
   /** ISO-8601 UTC instant. */
   created_at: string;
   /** ISO-8601 UTC instant. */
@@ -39,6 +44,8 @@ export interface CreateMcpServerInput {
   tenant_id: string;
   name: ResourceName;
   manifest: McpServerManifest;
+  /** Written as given on every create and upsert, never merged with the stored value. */
+  first_party: boolean;
 }
 
 /** Same shape as create for now; kept as a distinct name for the upsert path. */
@@ -100,7 +107,7 @@ export interface IMcpServerStore<TTransaction = never> extends IOAuthClientStore
   /** Inserts a new server with a generated ULID. Throws McpServerNameConflictError on name clash. */
   createServer(input: CreateMcpServerInput, transaction?: TTransaction): Promise<McpServerRecord>;
   /**
-   * Creates the server or replaces `manifest` (+ `updated_at`) only.
+   * Creates the server or replaces `manifest`, `first_party` and `updated_at` only.
    * Never overwrites `id`, `oauth_server`, or `oauth_client`.
    */
   upsertServer(input: UpsertMcpServerInput, transaction?: TTransaction): Promise<McpServerRecord>;
