@@ -29,8 +29,8 @@ function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () 
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
+      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
+      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });
@@ -46,8 +46,8 @@ function servicesWithCatAllowlist(): { services: SentinelServices; cleanup: () =
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      cat: { args: ['-n'], operands: 'workspace_relative', offline_ok: true },
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
+      cat: { args: ['-n'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
+      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });
@@ -830,6 +830,34 @@ describe('Suite F - tier boundary probes', () => {
       expect((await classifyTier(action('exec', { command: 'git --config user.x y' }), ctx)).tier).toBe(3);
       expect((await classifyTier(action('exec', { command: 'git -c user.x=y status' }), ctx)).tier).toBe(3);
       expect((await classifyTier(action('exec', { command: 'git status' }), ctx)).tier).toBe(2);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('F3b GAP: git subcommands outside the read-only list are Tier 3', async () => {
+    const { services, cleanup } = servicesWithSeededTools();
+    try {
+      const ctx = makeCtx({ services });
+      const bypasses = [
+        'git push origin main',
+        'git pull',
+        'git fetch',
+        'git remote add origin https://example.com/r.git',
+        "git config core.fsmonitor 'sh x.sh'",
+        "git config alias.x '!sh x.sh'",
+        'git x',
+        "git -c alias.x='!sh x.sh' x",
+        'git --exec-path=. status',
+        'git -C . status',
+        'git branch newbranch',
+      ];
+      for (const command of bypasses) {
+        expect((await classifyTier(action('exec', { command }), ctx)).tier).toBe(3);
+      }
+      for (const command of ['git status', 'git log --oneline -n 5', 'git diff --cached', 'git branch --list']) {
+        expect((await classifyTier(action('exec', { command }), ctx)).tier).toBe(2);
+      }
     } finally {
       cleanup();
     }

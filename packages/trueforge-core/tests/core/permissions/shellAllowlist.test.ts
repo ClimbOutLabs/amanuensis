@@ -26,7 +26,7 @@ function tempConfig(): { config: ShellAllowlistConfig; cleanup: () => void } {
   const config: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
+      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
     },
   };
   return { config, cleanup };
@@ -196,6 +196,92 @@ describe('matchAllowlist', () => {
       // The bare nice wrapper parses, but 'mycmd' under nice still matches
       // the allowlist entry for the underlying command.
       expect(matchAllowlist(parsed, config)).toBeDefined();
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe('matchAllowlist for seeded git', () => {
+  const allowed = [
+    'git status',
+    'git status --short --branch',
+    'git log --oneline -n 5',
+    'git log --oneline -- src/index.ts',
+    'git diff',
+    'git diff --cached --stat',
+    'git diff --no-ext-diff HEAD',
+    'git show HEAD',
+    'git show --no-patch HEAD',
+    'git branch',
+    'git branch --list',
+    'git branch -a -v',
+    'git rev-parse --show-toplevel',
+    'git rev-parse HEAD',
+    'git ls-files',
+    'git ls-files --others --exclude-standard',
+    'git blame src/index.ts',
+  ];
+  const rejected = [
+    'git push origin main',
+    'git pull',
+    'git fetch',
+    'git clone https://example.com/r.git',
+    'git remote add origin https://example.com/r.git',
+    'git remote -v',
+    'git submodule update --init',
+    'git config core.fsmonitor "sh x.sh"',
+    'git config alias.x "!sh x.sh"',
+    'git config --get user.name',
+    'git x',
+    'git constructor',
+    'git __proto__',
+    'git "!sh x.sh"',
+    'git status "!sh x.sh"',
+    'git -c alias.x=!sh status',
+    'git -c core.fsmonitor=x status',
+    'git -calias.x=!sh x',
+    'git --config-env=alias.x=VAR x',
+    'git --exec-path=. status',
+    'git --exec-path status',
+    'git -C . status',
+    'git --git-dir=.git status',
+    'git --no-pager status',
+    'git',
+    'git branch newbranch',
+    'git branch -D main',
+    'git branch --delete main',
+    'git branch -m old new',
+    'git checkout main',
+    'git commit -m x',
+    'git reset --hard',
+    'git ls-remote',
+    'git diff --output=out.txt',
+    'git diff --ext-diff',
+    'git log --output=out.txt',
+    'git show --textconv HEAD',
+    'git ls-files --exclude-from=x',
+    'git status --upload-pack=x',
+  ];
+
+  function matches(command: string, config: ShellAllowlistConfig): boolean {
+    const parsed = parseSimpleCommand(command);
+    return parsed !== undefined && matchAllowlist(parsed, config) !== undefined;
+  }
+
+  test.each(allowed)('accepts %s', command => {
+    const { dir, cleanup } = tempBin('git');
+    try {
+      expect(matches(command, seedShellAllowlist(dir))).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test.each(rejected)('rejects %s', command => {
+    const { dir, cleanup } = tempBin('git');
+    try {
+      expect(matches(command, seedShellAllowlist(dir))).toBe(false);
     } finally {
       cleanup();
     }

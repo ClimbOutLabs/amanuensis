@@ -34,6 +34,18 @@ export interface ShellAllowlistEntry {
   operands: 'none' | 'workspace_relative';
   /** True when the command has no network capability (offline-mode subset). */
   offline_ok: boolean;
+  /**
+   * When non-null the command is subcommand-driven: argv[1] must name one of
+   * these and only that subcommand's policy applies; `args`/`operands` are unused.
+   */
+  subcommands: Readonly<Record<string, ShellSubcommandPolicy>> | null;
+}
+
+/** Flags and operands permitted for one subcommand of a subcommand-driven command. */
+export interface ShellSubcommandPolicy {
+  /** Exact flag spellings allowed after the subcommand. */
+  args: readonly string[];
+  operands: 'none' | 'workspace_relative';
 }
 
 export interface ShellAllowlistConfig {
@@ -210,6 +222,41 @@ function isWorkspaceRelativeOperand(token: string): boolean {
   return true;
 }
 
+/**
+ * The subcommand must be the first token, so global options (`-c`, `-C`,
+ * `--exec-path`, `--config-env`) and aliases never reach a policy. A `!`
+ * operand is a shell-alias marker and fails closed.
+ */
+function matchSubcommand(input: {
+  tokens: readonly string[];
+  subcommands: Readonly<Record<string, ShellSubcommandPolicy>>;
+}): boolean {
+  const [name, ...rest] = input.tokens;
+  if (name === undefined || !Object.hasOwn(input.subcommands, name)) {
+    return false;
+  }
+  const policy = input.subcommands[name];
+  if (policy === undefined) {
+    return false;
+  }
+  for (const token of rest) {
+    if (token.startsWith('-')) {
+      if (!policy.args.includes(token)) {
+        return false;
+      }
+      continue;
+    }
+    if (token.startsWith('!')) {
+      return false;
+    }
+    if (policy.operands === 'workspace_relative' && isWorkspaceRelativeOperand(token)) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
 export interface AllowlistMatch {
   /** argv with argv[0] resolved to its absolute path at parse time. */
   argv: string[];
@@ -235,6 +282,12 @@ export function matchAllowlist(parsed: ParsedSimpleCommand, config: ShellAllowli
   const argv0Resolved = resolveOnPinnedPath(argv0, config.pinned_path);
   if (argv0Resolved === null) {
     return undefined;
+  }
+  if (entry.subcommands !== null) {
+    if (!matchSubcommand({ tokens: parsed.argv.slice(1), subcommands: entry.subcommands })) {
+      return undefined;
+    }
+    return { argv: [argv0Resolved, ...parsed.argv.slice(1)], argv0_resolved: argv0Resolved, wrapper: parsed.wrapper };
   }
   for (const token of parsed.argv.slice(1)) {
     if (token.startsWith('-')) {
@@ -271,53 +324,118 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
         args: ['-l', '-a', '-la', '-al', '-lh', '-1', '--all', '--almost-all'],
         operands: 'workspace_relative',
         offline_ok: true,
+        subcommands: null,
       },
       cat: {
         args: ['-n'],
         operands: 'workspace_relative',
         offline_ok: true,
+        subcommands: null,
       },
       pwd: {
         args: [],
         operands: 'none',
         offline_ok: true,
+        subcommands: null,
       },
       git: {
-        // Read-only subcommands only. Mutating subcommands (checkout -b,
-        // branch, commit, push) and `--config`/`-c` overrides are absent by
-        // curation, so they fail closed to Tier 3.
-        args: [
-          'status',
-          '--short',
-          '--porcelain',
-          '--branch',
-          'log',
-          '--oneline',
-          '--stat',
-          '--name-only',
-          '-n',
-          'diff',
-          '--cached',
-          '--staged',
-          'show',
-          '--no-patch',
-          'rev-parse',
-          '--git-dir',
-          '--show-toplevel',
-          'HEAD',
-        ],
-        operands: 'workspace_relative',
+        // Read-only inspection only. Config, remote, network and mutating
+        // subcommands, aliases, and global options are absent so they fall to
+        // Tier 3. Diff-capable subcommands list `--no-ext-diff`/`--no-textconv`
+        // but never the flags that run external programs or write files.
+        args: [],
+        operands: 'none',
         offline_ok: true,
+        subcommands: {
+          status: { args: ['--short', '--porcelain', '--branch', '-s', '-b'], operands: 'workspace_relative' },
+          log: {
+            args: [
+              '--oneline',
+              '--stat',
+              '--name-only',
+              '--name-status',
+              '--graph',
+              '--decorate',
+              '--no-color',
+              '--no-ext-diff',
+              '--no-textconv',
+              '-n',
+              '--',
+            ],
+            operands: 'workspace_relative',
+          },
+          diff: {
+            args: [
+              '--cached',
+              '--staged',
+              '--stat',
+              '--shortstat',
+              '--numstat',
+              '--name-only',
+              '--name-status',
+              '--no-color',
+              '--no-ext-diff',
+              '--no-textconv',
+              '--',
+            ],
+            operands: 'workspace_relative',
+          },
+          show: {
+            args: [
+              '--no-patch',
+              '--stat',
+              '--name-only',
+              '--name-status',
+              '--oneline',
+              '--no-color',
+              '--no-ext-diff',
+              '--no-textconv',
+              '--',
+            ],
+            operands: 'workspace_relative',
+          },
+          branch: {
+            args: ['--list', '--all', '--remotes', '--show-current', '-a', '-r', '-v', '-vv'],
+            operands: 'none',
+          },
+          'rev-parse': {
+            args: ['--git-dir', '--show-toplevel', '--abbrev-ref', '--short', '--is-inside-work-tree', '--show-prefix'],
+            operands: 'workspace_relative',
+          },
+          'ls-files': {
+            args: [
+              '--cached',
+              '--modified',
+              '--others',
+              '--deleted',
+              '--stage',
+              '--exclude-standard',
+              '-c',
+              '-m',
+              '-o',
+              '-d',
+              '-s',
+              '--',
+            ],
+            operands: 'workspace_relative',
+          },
+          blame: {
+            args: ['--porcelain', '--line-porcelain', '-w', '-e', '--'],
+            operands: 'workspace_relative',
+          },
+        },
       },
       node: {
         args: ['--version'],
         operands: 'none',
         offline_ok: true,
+        subcommands: null,
       },
       python3: {
         args: ['--version'],
         operands: 'none',
         offline_ok: true,
+        subcommands: null,
       },
     },
   };
