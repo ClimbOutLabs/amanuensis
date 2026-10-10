@@ -30,28 +30,31 @@ describe('WelcomeScreen', () => {
     expect(heading).not.toHaveClass('delay-75');
   });
 
+  // The provider's preset is initial state, so each preset gets its own mount.
   it('uses preset-specific icon behavior', () => {
-    const { container, rerender } = render(
+    const chatgpt = render(
       <ThemeProvider theme={{ preset: 'chatgpt', mode: 'light' }}>
         <WelcomeScreen />
       </ThemeProvider>,
     );
-    expect(container.querySelector('.aui-thread-welcome-root svg')).not.toBeInTheDocument();
+    expect(chatgpt.container.querySelector('.aui-thread-welcome-root svg')).not.toBeInTheDocument();
     expect(screen.getByRole('heading')).toHaveClass('font-normal');
+    chatgpt.unmount();
 
-    rerender(
+    const claude = render(
       <ThemeProvider theme={{ preset: 'claude', mode: 'light' }}>
         <WelcomeScreen />
       </ThemeProvider>,
     );
-    expect(container.querySelector('.aui-thread-welcome-root svg')).toHaveClass('fill-current');
+    expect(claude.container.querySelector('.aui-thread-welcome-root svg')).toHaveClass('fill-current');
+    claude.unmount();
 
-    rerender(
+    const gemini = render(
       <ThemeProvider theme={{ preset: 'gemini', mode: 'light' }}>
         <WelcomeScreen />
       </ThemeProvider>,
     );
-    expect(container.querySelector('.aui-thread-welcome-root')).toHaveClass('py-8');
-    expect(container.querySelector('[aria-hidden].motion-safe\\:animate-pulse')).toBeInTheDocument();
+    expect(gemini.container.querySelector('.aui-thread-welcome-root')).toHaveClass('py-8');
+    expect(gemini.container.querySelector('[aria-hidden].motion-safe\\:animate-pulse')).toBeInTheDocument();
   });
 });
