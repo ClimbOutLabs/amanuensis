@@ -24,11 +24,10 @@ describe('parseToolTier', () => {
 });
 
 describe('parseTier2ActionKind', () => {
-  it('accepts the four backend kinds and nothing else', () => {
+  it('accepts the backend kinds and nothing else', () => {
     expect(parseTier2ActionKind('file_write')).toBe('file_write');
     expect(parseTier2ActionKind('shell')).toBe('shell');
-    expect(parseTier2ActionKind('runner')).toBe('runner');
-    expect(parseTier2ActionKind('branch')).toBe('branch');
+    expect(parseTier2ActionKind('runner')).toBeUndefined();
     expect(parseTier2ActionKind('file.write')).toBeUndefined();
     expect(parseTier2ActionKind(undefined)).toBeUndefined();
   });
@@ -59,8 +58,7 @@ describe('extractSentinelFromEvent', () => {
   };
 
   it('parses per-tool-call approval cards with the backend field names', () => {
-    const { approvals, notices } = extractSentinelFromEvent(approvalEvent);
-    expect(notices).toEqual([]);
+    const approvals = extractSentinelFromEvent(approvalEvent);
     expect(approvals).toHaveLength(2);
     const first = approvals[0];
     expect(first?.toolCallId).toBe('call-1');
@@ -94,7 +92,7 @@ describe('extractSentinelFromEvent', () => {
       },
       { unrecognizedObjectKeys: 'passthrough', allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true },
     );
-    const { approvals } = extractSentinelFromEvent(parsed);
+    const approvals = extractSentinelFromEvent(parsed);
     expect(approvals).toHaveLength(1);
     expect(approvals[0]?.toolCallId).toBe('call-9');
     expect(approvals[0]?.tier).toBe(3);
@@ -103,7 +101,7 @@ describe('extractSentinelFromEvent', () => {
   });
 
   it('reads a camel-cased card from a regenerated SDK shape', () => {
-    const { approvals } = extractSentinelFromEvent({
+    const approvals = extractSentinelFromEvent({
       type: 'tool.approval_required',
       toolCalls: [
         {
@@ -123,7 +121,7 @@ describe('extractSentinelFromEvent', () => {
   });
 
   it('accepts the provisional `card` field name', () => {
-    const { approvals } = extractSentinelFromEvent({
+    const approvals = extractSentinelFromEvent({
       type: 'tool.approval_required',
       tool_calls: [
         {
@@ -140,49 +138,33 @@ describe('extractSentinelFromEvent', () => {
     expect(approvals[0]?.card.why_asked_again).toBe('the previous approval expired');
   });
 
-  it('parses a Tier 2 notice with kind, undo/stop flags, and tier2 files', () => {
-    const { approvals, notices } = extractSentinelFromEvent({
-      type: 'tool.tier2_notice',
+  it('parses a Tier 2 approval card next to a Tier 3 one', () => {
+    const approvals = extractSentinelFromEvent({
+      type: 'tool.approval_required',
       tool_calls: [
-        {
-          tool_call_id: 'call-3',
-          tier: 2,
-          tier2_kind: 'shell',
-          message: 'Ran the test suite',
-          undoable: true,
-          stoppable: false,
-          tier2_files: ['src/a.ts', 'src/b.ts'],
-          notice_id: 'notice-3',
-        },
+        { id: 'call-3', tier: 2, tier3_card: { plain_what: 'Change `notes.md` in your workspace.' } },
+        { id: 'call-4', tier: 3, tier3_card: { plain_what: 'Send $250 to Acme Corp' } },
       ],
     });
-    expect(approvals).toEqual([]);
-    expect(notices).toHaveLength(1);
-    const notice = notices[0];
-    expect(notice?.toolCallId).toBe('call-3');
-    expect(notice?.kind).toBe('shell');
-    expect(notice?.message).toBe('Ran the test suite');
-    expect(notice?.undoable).toBe(true);
-    expect(notice?.stoppable).toBe(false);
-    expect(notice?.tracked_files).toEqual(['src/a.ts', 'src/b.ts']);
-    expect(notice?.notice_id).toBe('notice-3');
+    expect(approvals.map(approval => [approval.toolCallId, approval.tier])).toEqual([
+      ['call-3', 2],
+      ['call-4', 3],
+    ]);
   });
 
-  it('falls back to the tool call id when the notice has no notice_id', () => {
-    const { notices } = extractSentinelFromEvent({
-      type: 'tool.tier2_notice',
-      tool_call_id: 'call-4',
-      tier: 2,
-      message: 'Ran the test suite',
-      undoable: false,
-      stoppable: true,
-    });
-    expect(notices[0]?.notice_id).toBe('call-4');
-    expect(notices[0]?.kind).toBeNull();
+  it('no longer reads Tier 2 notice events', () => {
+    expect(
+      extractSentinelFromEvent({
+        type: 'tool.tier2_notice',
+        tool_call_id: 'call-3',
+        tier: 2,
+        message: 'Ran the test suite',
+      }),
+    ).toEqual([]);
   });
 
   it('reads per-action fields at the event top level for single-action events', () => {
-    const { approvals } = extractSentinelFromEvent({
+    const approvals = extractSentinelFromEvent({
       type: 'tool.approval_required',
       tool_call_id: 'call-5',
       tier: 3,
@@ -193,11 +175,11 @@ describe('extractSentinelFromEvent', () => {
   });
 
   it('ignores events without Sentinel data and drops malformed refs', () => {
-    expect(extractSentinelFromEvent({ type: 'model.message' })).toEqual({ approvals: [], notices: [] });
-    expect(extractSentinelFromEvent(null)).toEqual({ approvals: [], notices: [] });
-    expect(extractSentinelFromEvent('nope')).toEqual({ approvals: [], notices: [] });
+    expect(extractSentinelFromEvent({ type: 'model.message' })).toEqual([]);
+    expect(extractSentinelFromEvent(null)).toEqual([]);
+    expect(extractSentinelFromEvent('nope')).toEqual([]);
     // Tier without a card is not an approval card; a card without plain_what is dropped.
-    const { approvals } = extractSentinelFromEvent({
+    const approvals = extractSentinelFromEvent({
       type: 'tool.approval_required',
       tool_calls: [
         { tool_call_id: 'call-6', tier: 3 },
@@ -212,27 +194,12 @@ describe('extractSentinelFromEvent', () => {
 describe('extractSentinelSessionContext', () => {
   it('folds events to one record per tool call, later events winning', () => {
     const context = extractSentinelSessionContext([
-      {
-        type: 'tool.tier2_notice',
-        tool_call_id: 'call-1',
-        tier: 2,
-        message: 'First',
-        undoable: false,
-        stoppable: false,
-      },
-      {
-        type: 'tool.tier2_notice',
-        tool_call_id: 'call-1',
-        tier: 2,
-        message: 'Second',
-        undoable: true,
-        stoppable: false,
-      },
+      { type: 'tool.approval_required', tool_call_id: 'call-1', tier: 2, tier3_card: { plain_what: 'First' } },
+      { type: 'tool.approval_required', tool_call_id: 'call-1', tier: 3, tier3_card: { plain_what: 'Second' } },
     ]);
-    expect(context.notices).toHaveLength(1);
-    expect(context.notices[0]?.message).toBe('Second');
-    expect(context.notices[0]?.undoable).toBe(true);
-    expect(context.approvals).toEqual([]);
+    expect(context.approvals).toHaveLength(1);
+    expect(context.approvals[0]?.card.plain_what).toBe('Second');
+    expect(context.approvals[0]?.tier).toBe(3);
   });
 });
 
@@ -291,29 +258,37 @@ describe('parseAuditEntries', () => {
   });
 
   it('covers every audit outcome', () => {
-    const outcomes = ['logged', 'ran', 'stopped_by_user', 'undone', 'approved', 'denied', 'auto_denied'];
+    const outcomes = ['logged', 'ran', 'approved', 'denied', 'auto_denied'];
     for (const outcome of outcomes) {
       const parsed = parseAuditEntries([{ ...entry, id: outcome, outcome }]);
       expect(parsed[0]?.outcome).toBe(outcome);
     }
     expect(parseAuditEntries([{ ...entry, outcome: 'maybe' }])).toEqual([]);
+    expect(parseAuditEntries([{ ...entry, outcome: 'undone' }])).toEqual([]);
   });
 });
 
 describe('parseUserSettings', () => {
-  it('defaults to offline off and no escalated kinds', () => {
-    expect(parseUserSettings(null)).toEqual({ offline_mode: false, tier2_always_ask: [] });
-    expect(parseUserSettings({})).toEqual({ offline_mode: false, tier2_always_ask: [] });
-    expect(parseUserSettings({ offline_mode: 'yes', tier2_always_ask: ['file.write', 42] })).toEqual({
-      offline_mode: false,
-      tier2_always_ask: [],
-    });
+  it('defaults to offline off and nothing relaxed', () => {
+    const defaults = { offline_mode: false, tier2_auto_allow: [] };
+    expect(parseUserSettings(null)).toEqual(defaults);
+    expect(parseUserSettings({})).toEqual(defaults);
+    expect(parseUserSettings({ data: null })).toEqual(defaults);
+    expect(parseUserSettings({ data: { offline_mode: 'yes', tier2_auto_allow: ['file.write', 42] } })).toEqual(
+      defaults,
+    );
   });
 
-  it('keeps explicit values and drops unknown kinds', () => {
-    expect(parseUserSettings({ offline_mode: true, tier2_always_ask: ['shell', 'file_write', 'nope'] })).toEqual({
-      offline_mode: true,
-      tier2_always_ask: ['shell', 'file_write'],
+  it('reads the server envelope, keeping known kinds once', () => {
+    expect(
+      parseUserSettings({ data: { offline_mode: true, tier2_auto_allow: ['shell', 'file_write', 'nope', 'shell'] } }),
+    ).toEqual({ offline_mode: true, tier2_auto_allow: ['shell', 'file_write'] });
+  });
+
+  it('does not read a bare settings object', () => {
+    expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['shell'] })).toEqual({
+      offline_mode: false,
+      tier2_auto_allow: [],
     });
   });
 });

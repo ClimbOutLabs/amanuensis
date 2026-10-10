@@ -7,8 +7,8 @@ import { useOptionalSentinelApiState } from './SentinelApiContext.js';
 
 /**
  * Settings > Permissions: the user-only offline mode toggle. While offline mode is on,
- * external Tier 3 actions are auto-denied without an approval card, and the persistent
- * offline indicator shows in the app shell.
+ * actions outside this device are auto-denied without an approval card, and the
+ * persistent offline indicator shows in the app shell.
  */
 export const SentinelSettings: FC = () => {
   const sentinel = useOptionalSentinelApiState();
@@ -49,7 +49,7 @@ export const SentinelSettings: FC = () => {
           <p className="text-sm font-medium text-text-primary">Offline mode</p>
           <p className="mt-1 text-sm text-text-secondary">
             While on, actions outside this device that would need your approval are denied automatically instead of
-            showing an approval card. Tier 1 reads and Tier 2 notices are unaffected.
+            showing an approval card. Reads and workspace actions you allowed are unaffected.
           </p>
           {error !== null && (
             <p className="mt-2 text-xs text-failure-bg" role="alert">

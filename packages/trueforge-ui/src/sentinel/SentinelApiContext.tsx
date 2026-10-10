@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState, type FC, type ReactNode } from 'react';
 
-import { parseUserSettings, type SentinelApi, type SentinelUserSettings } from './types.js';
+import type { SentinelApi, SentinelUserSettings } from './types.js';
 
 export type SentinelApiState = {
   api: SentinelApi;
@@ -36,8 +36,7 @@ export const SentinelApiProvider: FC<{ api: SentinelApi; children: ReactNode }> 
 
   const refreshSettings = useCallback(async () => {
     try {
-      const next = parseUserSettings(await api.getUserSettings());
-      setSettings(next);
+      setSettings(await api.getUserSettings());
       setSettingsError(null);
     } catch (error) {
       setSettingsError(readErrorMessage(error));
@@ -50,7 +49,7 @@ export const SentinelApiProvider: FC<{ api: SentinelApi; children: ReactNode }> 
 
   const updateSettings = useCallback(
     async (patch: Partial<SentinelUserSettings>) => {
-      const next = parseUserSettings(await api.updateUserSettings(patch));
+      const next = await api.updateUserSettings(patch);
       setSettings(next);
       setSettingsError(null);
       return next;

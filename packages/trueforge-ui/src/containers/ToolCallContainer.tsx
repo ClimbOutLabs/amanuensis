@@ -9,11 +9,10 @@ import {
   type ToolCallMessagePartComponent,
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
-import { useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
+import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useState } from 'react';
 
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
-import { Tier2Indicator } from '../sentinel/Tier2Indicator.js';
 import { Tier3ApprovalCard } from '../sentinel/Tier3ApprovalCard.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import {
@@ -82,6 +81,8 @@ function NestedSubAgentAssistantMessage() {
 function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   const isNestedReadonly = useNestedApprovalBridge();
   const respondToNestedApproval = useTrueFoundryRespondToToolApproval();
+  const { pending: pendingApprovals, respond: respondToApproval } = useTrueFoundryApprovals();
+  const sentinel = useOptionalSentinelState();
 
   const respond = (response: ToolApprovalResponse) => {
     if (part.approval == null) return;
@@ -131,23 +132,36 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     return respond({ optionId, reason });
   };
 
-  // A Tier 3 approval whose server-built plain-language card arrived on the
+  // An approval whose server-built plain-language card arrived on the
   // `tool.approval_required` event replaces the generic approval card. The branch keys
   // on the explicit numeric `tier` the server sent; without it the generic card
   // renders as before. Approve/Deny reuse the same option plumbing, so grants and
   // confirmations behave identically.
-  const sentinel = useOptionalSentinelState();
   const approvalInfo = sentinel?.approvalFor(part.toolCallId);
-  if (approvalInfo?.tier === 3) {
+  if (approvalInfo?.tier === 2 || approvalInfo?.tier === 3) {
     const options = buildApprovalOptions(part.approval?.options);
     const allowOption = options.find(option => option.isAllow);
     const denyOption = options.find(option => !option.isAllow);
+    // Only Tier 2 calls batch: each still gets its own allow and redeems its own
+    // single-use token. A Tier 3 call is never listed here, so "Approve all" cannot reach it.
+    const tier2Pending = pendingApprovals.filter(pending => sentinel?.approvalFor(pending.approvalId)?.tier === 2);
+    const approveAll =
+      approvalInfo.tier === 2 && tier2Pending.length > 1
+        ? () => {
+            for (const pending of tier2Pending) {
+              respondToApproval({ approvalId: pending.approvalId, approved: true });
+            }
+          }
+        : undefined;
     return (
       <Tier3ApprovalCard
         toolName={part.toolName}
         card={approvalInfo.card}
+        tier={approvalInfo.tier}
         onApprove={() => onSelectOption(allowOption?.id ?? '__allow')}
         onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
+        onApproveAll={approveAll}
+        batchSize={approveAll === undefined ? undefined : tier2Pending.length}
         disabled={isNestedReadonly}
       />
     );
@@ -188,7 +202,7 @@ function RequestResponseSlots({
   };
 }
 
-const ToolCallContainerInner: ToolCallMessagePartComponent = part => {
+export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const ToolCallCard = useSlot('ToolCallCard');
   const SubAgentCard = useSlot('SubAgentCard');
   const AskUserPrompt = useSlot('AskUserPrompt');
@@ -386,28 +400,3 @@ const ToolCallContainerInner: ToolCallMessagePartComponent = part => {
     />
   );
 };
-
-/**
- * Subtle non-blocking Tier 2 notice rendered under the tool card when the server
- * reported one for this tool call. Renders nothing without a notice, so every
- * existing card layout is untouched.
- */
-function SentinelNoticeSlot({ toolCallId }: { toolCallId: string }) {
-  const sentinel = useOptionalSentinelState();
-  const notice = sentinel?.noticeFor(toolCallId);
-  if (sentinel === null || notice === undefined) return null;
-  return (
-    <Tier2Indicator
-      notice={notice}
-      onUndo={() => sentinel.undoNotice(toolCallId)}
-      onStop={() => sentinel.stopNotice(toolCallId)}
-    />
-  );
-}
-
-export const ToolCallContainer: ToolCallMessagePartComponent = part => (
-  <>
-    <ToolCallContainerInner {...part} />
-    <SentinelNoticeSlot toolCallId={part.toolCallId} />
-  </>
-);

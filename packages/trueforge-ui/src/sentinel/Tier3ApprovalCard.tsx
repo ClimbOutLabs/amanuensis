@@ -6,11 +6,24 @@ import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import type { SentinelApprovalCard } from './types.js';
 
+type ApprovalCardTier = 2 | 3;
+
+const TIER_LABELS: Record<ApprovalCardTier, string> = { 2: 'Tier 2 check', 3: 'Tier 3 review' };
+
 export type Tier3ApprovalCardProps = {
   toolName: string;
   card: SentinelApprovalCard;
+  /** Tier the server sent; it only changes the badge, never the controls. */
+  tier: ApprovalCardTier;
   onApprove: () => void;
   onDeny: () => void;
+  /**
+   * Approves every pending Tier 2 call in one step. Only the container passes it, and
+   * only for a Tier 2 card with other Tier 2 calls waiting; Tier 3 never gets it.
+   */
+  onApproveAll?: (() => void) | undefined;
+  /** How many Tier 2 calls "Approve all" covers, shown on its button. */
+  batchSize?: number | undefined;
   disabled?: boolean;
 };
 
@@ -24,17 +37,20 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
 }
 
 /**
- * Plain-language Tier 3 approval card. Every row renders only what the server sent:
+ * Plain-language approval card for Tier 3 actions and Tier 2 actions that ask. Every row renders only what the server sent:
  * `plain_what` is always present, everything else renders when non-null. The parsed
  * command renders whenever the card carries one; the server only attaches it to shell
  * cards, so the card never needs to know which tool it is. The card never infers the
- * tier; the container only mounts it for an explicit Tier 3 approval.
+ * tier; the container only mounts it for an explicit Tier 2 or Tier 3 approval.
  */
 export const Tier3ApprovalCard: FC<Tier3ApprovalCardProps> = ({
   toolName,
   card,
+  tier,
   onApprove,
   onDeny,
+  onApproveAll,
+  batchSize,
   disabled = false,
 }) => {
   const hasDetails =
@@ -51,7 +67,7 @@ export const Tier3ApprovalCard: FC<Tier3ApprovalCardProps> = ({
           </span>
         </div>
         <span className="shrink-0 rounded border border-primary-button-bg/40 bg-primary-bg px-2 py-0.5 text-[0.6875rem] font-medium text-text-secondary">
-          Tier 3 review
+          {TIER_LABELS[tier]}
         </span>
       </div>
 
@@ -90,6 +106,11 @@ export const Tier3ApprovalCard: FC<Tier3ApprovalCardProps> = ({
             Deny
           </Button>
         </div>
+        {onApproveAll !== undefined && (
+          <Button variant="secondary" size="small" onClick={onApproveAll} disabled={disabled} className="w-full">
+            {batchSize === undefined ? 'Approve all' : `Approve all (${String(batchSize)})`}
+          </Button>
+        )}
       </div>
     </div>
   );

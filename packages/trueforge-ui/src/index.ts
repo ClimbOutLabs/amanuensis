@@ -356,10 +356,8 @@ export type { SentinelApiState } from './sentinel/SentinelApiContext.js';
 export { SentinelAuditFeed } from './sentinel/SentinelAuditFeed.js';
 export type { SentinelAuditFeedProps } from './sentinel/SentinelAuditFeed.js';
 export { SentinelSettings } from './sentinel/SentinelSettings.js';
-export { Tier2EscalationToggle } from './sentinel/Tier2EscalationToggle.js';
-export type { Tier2EscalationToggleProps } from './sentinel/Tier2EscalationToggle.js';
-export { Tier2Indicator } from './sentinel/Tier2Indicator.js';
-export type { Tier2IndicatorProps } from './sentinel/Tier2Indicator.js';
+export { Tier2RelaxationToggle } from './sentinel/Tier2RelaxationToggle.js';
+export type { Tier2RelaxationToggleProps } from './sentinel/Tier2RelaxationToggle.js';
 export { Tier3ApprovalCard } from './sentinel/Tier3ApprovalCard.js';
 export type { Tier3ApprovalCardProps } from './sentinel/Tier3ApprovalCard.js';
 export {
@@ -377,7 +375,6 @@ export type {
   SentinelAuditOutcome,
   SentinelSessionContext,
   SentinelUserSettings,
-  Tier2Notice,
   ToolTier,
 } from './sentinel/types.js';
 export {

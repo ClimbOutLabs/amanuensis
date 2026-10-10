@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 import { MessageTimestamp } from '../atoms/MessageTimestamp.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalSentinelApiState } from './SentinelApiContext.js';
-import { Tier2EscalationToggle } from './Tier2EscalationToggle.js';
+import { Tier2RelaxationToggle } from './Tier2RelaxationToggle.js';
 import {
   TIER2_ACTION_KINDS,
   TIER2_ACTION_LABELS,
@@ -21,8 +21,6 @@ const AUDIT_POLL_MS = 5000;
 const OUTCOME_LABELS: Record<SentinelAuditOutcome, string> = {
   logged: 'Logged',
   ran: 'Ran',
-  stopped_by_user: 'Stopped by user',
-  undone: 'Undone',
   approved: 'Approved',
   denied: 'Denied',
   auto_denied: 'Auto-denied',
@@ -32,8 +30,6 @@ function outcomeTone(outcome: SentinelAuditOutcome): string {
   switch (outcome) {
     case 'approved':
     case 'ran':
-    case 'undone':
-    case 'stopped_by_user':
       return 'text-text-secondary';
     case 'denied':
     case 'auto_denied':
@@ -65,9 +61,9 @@ export type SentinelAuditFeedProps = {
 
 /**
  * Live permissions audit feed for the right rail. Polls the host's audit-log API for
- * the active session: Tier 1 sensitive reads (`logged`), Tier 2 executions (`ran`,
- * `stopped_by_user`, `undone`) and Tier 3 decisions (`approved`, `denied`,
- * `auto_denied` with the reason). Each Tier 2 action kind gets an "always ask me"
+ * the active session: Tier 1 sensitive reads (`logged`), Tier 2 and Tier 3 decisions
+ * (`approved`, `denied`), relaxed Tier 2 executions (`ran`) and auto-denials
+ * (`auto_denied` with the reason). Each Tier 2 action kind gets a "run without asking"
  * toggle beside it, wired to the user settings API.
  */
 export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => {
@@ -102,15 +98,15 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
   const tier2ActionKinds: Tier2ActionKind[] = useMemo(() => [...TIER2_ACTION_KINDS], []);
 
   const handleToggle = useCallback(
-    async (input: { actionType: Tier2ActionKind; escalated: boolean }) => {
+    async (input: { actionType: Tier2ActionKind; relaxed: boolean }) => {
       if (sentinel === null) return;
-      const current = sentinel.settings?.tier2_always_ask ?? [];
-      const next: Tier2ActionKind[] = input.escalated
+      const current = sentinel.settings?.tier2_auto_allow ?? [];
+      const next: Tier2ActionKind[] = input.relaxed
         ? current.includes(input.actionType)
           ? current
           : [...current, input.actionType]
         : current.filter(kind => kind !== input.actionType);
-      const patch: Partial<SentinelUserSettings> = { tier2_always_ask: next };
+      const patch: Partial<SentinelUserSettings> = { tier2_auto_allow: next };
       await sentinel.updateSettings(patch);
     },
     [sentinel],
@@ -128,9 +124,10 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
           {tier2ActionKinds.map(kind => (
             <li key={kind} className="flex items-center justify-between gap-2">
               <span className="min-w-0 truncate text-[0.6875rem] text-text-secondary">{TIER2_ACTION_LABELS[kind]}</span>
-              <Tier2EscalationToggle
+              <Tier2RelaxationToggle
                 actionType={kind}
-                escalated={settings?.tier2_always_ask.includes(kind) ?? false}
+                relaxed={settings?.tier2_auto_allow.includes(kind) ?? false}
+                disabled={settings === null}
                 onChange={handleToggle}
               />
             </li>
