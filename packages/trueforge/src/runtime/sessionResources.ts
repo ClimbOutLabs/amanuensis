@@ -690,11 +690,8 @@ export function buildTurnSandbox(input: {
         store: ITurnArtifactStore;
       }
     | undefined;
-  /**
-   * Sentinel permission context for this session. Passed through to Sandbox
-   * for run_code dispatch verification. Undefined means Sentinel is not active.
-   */
-  sentinel?: SentinelHostContext | undefined;
+  /** Session-scoped Sentinel context; sandbox approvals must use the session's services. */
+  sentinel: SentinelHostContext;
 }): Sandbox {
   // Empty mounter still uploads requested-skills file so existing skills are cleaned up.
   const skillMounter = new SkillMounter(
