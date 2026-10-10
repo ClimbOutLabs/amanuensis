@@ -46,6 +46,7 @@ import {
   sha256FileContent,
   splitCompoundSegments,
   splitWordsLenient,
+  writeTargetTouchesGitControl,
   type TrackedExecutableScope,
 } from './trackedExecutables';
 
@@ -649,7 +650,8 @@ function mintPlainToken(input: { services: SentinelServices; tool_name: string; 
 
 async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const target = stringParam(action.canonical_params, 'path') ?? stringParam(action.canonical_params, 'target');
-  const identityCwd = resolveIdentityCwd(ctx, null);
+  // Relative targets resolve against the call's cwd, matching dispatch.
+  const identityCwd = resolveIdentityCwd(ctx, stringParam(action.canonical_params, 'cwd'));
   // Fail closed on null target or missing workspace: treat as outside workspace.
   if (target === null || ctx.workspace_cwd === null) {
     return tier3Decision({
@@ -702,6 +704,29 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       },
       reason: 'write_outside_workspace',
       reason_detail: 'Write targets outside the workspace are never Tier 2.',
+      sensitive_read: false,
+      approval_token_id: mintPlainToken({
+        services: ctx.services,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+      }),
+    });
+  }
+  // Git control files can make later allowlisted git commands run code.
+  if (writeTargetTouchesGitControl({ p: target, cwd: identityCwd })) {
+    return tier3Decision({
+      card: {
+        plain_what: `Write Git control file \`${target}\`.`,
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: 'Git configuration, hooks, and attributes can make Git run programs.',
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: null,
+      },
+      reason: 'git_control_write',
+      reason_detail: 'Writes to .git, .gitattributes, and .gitmodules always require approval.',
       sensitive_read: false,
       approval_token_id: mintPlainToken({
         services: ctx.services,
