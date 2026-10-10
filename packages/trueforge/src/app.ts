@@ -43,11 +43,17 @@ import {
   truefoundryAdminMiddleware,
 } from './auth/middleware';
 import type { OidcDiscoveryHandle } from './auth/oidc';
+import { createRequestGuardMiddleware } from './auth/requestGuard';
 import type { McpCatalog } from './catalog/McpCatalog';
 import type { ModelCatalog } from './catalog/ModelCatalog';
 import type { SandboxCatalog } from './catalog/SandboxCatalog';
 import type { SkillCatalog } from './catalog/SkillCatalog';
-import configuration, { getPublicUiBasePath, getTrueForgeAuthMode, TrueForgeAuthMode } from './config';
+import configuration, {
+  getPublicBaseUrl,
+  getPublicUiBasePath,
+  getTrueForgeAuthMode,
+  TrueForgeAuthMode,
+} from './config';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
@@ -284,6 +290,10 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   }
   if (!configuration.STANDALONE && configuration.TRUEFORGE_MTLS_ENABLED) {
     app.use('*', createClientCertificateMiddleware(deps.logger));
+  }
+  // Standalone sessions are cookies, so reject foreign Hosts and cross-origin writes before any router.
+  if (configuration.STANDALONE && authEnabled) {
+    app.use('*', createRequestGuardMiddleware({ port: configuration.PORT, publicBaseUrl: getPublicBaseUrl() }));
   }
   app.use('*', createRequestBodyLimitMiddleware(configuration.MAX_REQUEST_BODY_BYTES));
 
