@@ -28,13 +28,28 @@ function envelope(result: unknown) {
   return { schema_version: 'tool.response.v2', outcome: { disposition: 'executed_nonzero' }, result };
 }
 
-function runCodePart({ result, toolCallId = 'call-1' }: { result?: unknown; toolCallId?: string }): AssistantPart {
+/** What the runtime records for a call the server identified as a built-in tool. */
+const BUILT_IN_RUN_CODE = { builtInToolName: 'run_code' };
+
+type ToolCallPart = Extract<AssistantPart, { type: 'tool-call' }>;
+
+/** A null artifact leaves the part without one, as for a call the server did not identify as built in. */
+function runCodePart({
+  result,
+  toolCallId = 'call-1',
+  artifact = BUILT_IN_RUN_CODE,
+}: {
+  result?: unknown;
+  toolCallId?: string;
+  artifact?: ToolCallPart['artifact'];
+}): AssistantPart {
   return {
     type: 'tool-call',
     toolCallId,
     toolName: 'run_code',
     args: { language: 'python', code: 'print(1)' },
     argsText: '{"language":"python","code":"print(1)"}',
+    ...(artifact === null ? {} : { artifact }),
     ...(result === undefined ? {} : { result }),
   };
 }
@@ -157,6 +172,16 @@ describe('collectRunCodeSetupFailures', () => {
         },
       ]),
     ).toEqual([]);
+  });
+
+  it.each([
+    ['an MCP tool that is also named run_code', null],
+    ['a tool named run_code that only claims to be built in', { toolInfoType: 'truefoundry-system' }],
+    ['another built-in tool that returns the same payload', { builtInToolName: 'exec' }],
+    ['a malformed marker', { builtInToolName: ['run_code'] }],
+    ['an artifact that is not an object', 'run_code'],
+  ])('ignores %s', (_name, artifact) => {
+    expect(collectRunCodeSetupFailures([runCodePart({ result: dockerFailure, artifact })])).toEqual([]);
   });
 
   it('finds failures in a sub-agent thread', () => {

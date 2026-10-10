@@ -12,6 +12,16 @@ const RUN_CODE_TOOL_NAME = 'run_code';
 export type MessagePart = ThreadMessage['content'][number];
 
 /**
+ * True for a call the host identified as the built-in run_code tool. The runtime records that from the
+ * server's tool info, so an MCP tool that merely shares the name, or one the model describes, never
+ * qualifies: its result is third-party text and must not be shown as a trusted notice with links.
+ */
+function isBuiltInRunCodeCall(artifact: unknown): boolean {
+  if (artifact === null || typeof artifact !== 'object' || Array.isArray(artifact)) return false;
+  return Object.entries(artifact).some(([key, value]) => key === 'builtInToolName' && value === RUN_CODE_TOOL_NAME);
+}
+
+/**
  * Reads a run_code tool result and returns its failure when the sandbox could not start. Only the
  * result's own top-level fields count: output a program printed lives under `stdout`, so code
  * can never pass for a setup failure, and a non-zero exit is an `ok` result.
@@ -30,7 +40,7 @@ export function getRunCodeSetupFailure(result: unknown): RunCodeSetupFailure | u
 }
 
 /**
- * Setup failures reported by run_code calls in these parts, sub-agent threads included, in call
+ * Setup failures reported by built-in run_code calls in these parts, sub-agent threads included, in call
  * order. Repeated failures with the same text (a retried call) are reported once.
  */
 export function collectRunCodeSetupFailures(parts: readonly MessagePart[]): RunCodeSetupFailure[] {
@@ -40,7 +50,7 @@ export function collectRunCodeSetupFailures(parts: readonly MessagePart[]): RunC
       if (part.type !== 'tool-call') {
         continue;
       }
-      if (part.toolName === RUN_CODE_TOOL_NAME) {
+      if (isBuiltInRunCodeCall(part.artifact)) {
         const failure = getRunCodeSetupFailure(part.result);
         if (failure !== undefined && !failures.has(failure.error)) {
           failures.set(failure.error, failure);
