@@ -16,6 +16,7 @@
 //   pnpm send-test-mailbox --dry-run   print what would be sent
 //   pnpm send-test-mailbox             send for real
 
+import { Buffer } from 'node:buffer';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { connect as tlsConnect } from 'node:tls';
@@ -39,10 +40,7 @@ function parseEnvFile(text) {
     }
     const key = line.slice(0, eq).trim();
     let value = line.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1);
     }
     values[key] = value;
@@ -51,10 +49,8 @@ function parseEnvFile(text) {
 }
 
 function loadConfig() {
-  const fileValues = existsSync(envFile)
-    ? parseEnvFile(readFileSync(envFile, 'utf8'))
-    : {};
-  const get = (name) => process.env[name] ?? fileValues[name] ?? '';
+  const fileValues = existsSync(envFile) ? parseEnvFile(readFileSync(envFile, 'utf8')) : {};
+  const get = name => process.env[name] ?? fileValues[name] ?? '';
   const port = Number.parseInt(get('TEST_MAILBOX_SMTP_PORT') || '587', 10);
   const secureRaw = get('TEST_MAILBOX_SMTP_SECURE');
   return {
@@ -72,11 +68,11 @@ function loadConfig() {
 function smtpSession(socket) {
   let buffer = '';
   let pending = [];
-  socket.on('data', (chunk) => {
+  socket.on('data', chunk => {
     buffer += chunk.toString('utf8');
     drain();
   });
-  socket.on('error', (err) => {
+  socket.on('error', err => {
     const reject = pending;
     pending = [];
     for (const { reject: rej } of reject) {
@@ -156,9 +152,9 @@ function parseHeaders(raw) {
 
 function listFixtures() {
   return readdirSync(fixtureDir)
-    .filter((name) => name.endsWith('.eml'))
+    .filter(name => name.endsWith('.eml'))
     .sort()
-    .map((name) => {
+    .map(name => {
       const raw = readFileSync(path.join(fixtureDir, name), 'utf8');
       const headers = parseHeaders(raw);
       return {
@@ -181,11 +177,11 @@ async function sendAll({ config, fixtures }) {
     rawSocket.once('error', reject);
   });
 
-  const startSession = async (socket) => {
+  const startSession = async socket => {
     const session = smtpSession(socket);
     await session.greeting();
     let reply = await session.command('EHLO fixture-sender');
-    const offersStartTls = reply.some((line) => /STARTTLS/i.test(line));
+    const offersStartTls = reply.some(line => /STARTTLS/i.test(line));
     if (!config.secure && offersStartTls) {
       await session.command('STARTTLS');
       const upgraded = tlsConnect({ socket, host: config.host });
@@ -196,15 +192,18 @@ async function sendAll({ config, fixtures }) {
       const upgradedSession = smtpSession(upgraded);
       await upgradedSession.greeting();
       reply = await upgradedSession.command('EHLO fixture-sender');
-      return { session: upgradedSession, extensions: reply };
+      return { session: upgradedSession, extensions: reply, tls: true };
     }
-    return { session, extensions: reply };
+    return { session, extensions: reply, tls: config.secure };
   };
 
-  const { session, extensions } = await startSession(rawSocket);
+  const { session, extensions, tls } = await startSession(rawSocket);
 
   if (config.user !== '') {
-    const offersAuth = extensions.some((line) => /^250[ -]AUTH/i.test(line));
+    if (!tls) {
+      throw new Error('refusing to send SMTP credentials over an unencrypted connection');
+    }
+    const offersAuth = extensions.some(line => /^250[ -]AUTH/i.test(line));
     if (!offersAuth) {
       throw new Error('SMTP server does not offer AUTH');
     }
@@ -222,7 +221,7 @@ async function sendAll({ config, fixtures }) {
     const stuffed = fixture.raw
       .replace(/\r\n/g, '\n')
       .split('\n')
-      .map((line) => (line.startsWith('.') ? `.${line}` : line))
+      .map(line => (line.startsWith('.') ? `.${line}` : line))
       .join('\r\n');
     await session.command(`${stuffed}\r\n.`);
     console.log(`sent ${fixture.name} -> ${config.to}`);
@@ -248,21 +247,16 @@ function main() {
   if (dryRun) {
     console.log(`would send ${fixtures.length} messages:`);
     for (const fixture of fixtures) {
-      console.log(
-        `  ${fixture.name} | from: ${fixture.from} | subject: ${fixture.subject} | ${fixture.bytes} bytes`,
-      );
+      console.log(`  ${fixture.name} | from: ${fixture.from} | subject: ${fixture.subject} | ${fixture.bytes} bytes`);
     }
     return;
   }
 
   const config = loadConfig();
   if (config.to === '' || config.host === '') {
-    throw new Error(
-      'TEST_MAILBOX_TO and TEST_MAILBOX_SMTP_HOST are required ' +
-        '(environment or .env.test-mailbox)',
-    );
+    throw new Error('TEST_MAILBOX_TO and TEST_MAILBOX_SMTP_HOST are required ' + '(environment or .env.test-mailbox)');
   }
-  sendAll({ config, fixtures }).catch((err) => {
+  sendAll({ config, fixtures }).catch(err => {
     console.error(`send failed: ${err.message}`);
     process.exitCode = 1;
   });

@@ -39,9 +39,9 @@ sending anything.
 ## 05-school-newsletter.eml
 
 Question: "What school events are coming up?"
-Must contain all three: Fall Fair on Saturday October 18 (10:00 AM to
-2:00 PM), parent-teacher conferences October 23-24, Science Night on
-Thursday November 6 at 6:00 PM.
+Must contain all three: Fall Fair on Sunday October 18 (10:00 AM to
+2:00 PM), parent-teacher conferences Friday and Saturday October 23-24,
+Science Night on Friday November 6 at 6:00 PM.
 
 ## 06-package-delivery.eml
 

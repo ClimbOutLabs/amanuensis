@@ -13,11 +13,11 @@ See EXPECTATIONS.md for what a useful assistant should do with each message.
 ## Regenerating
 
 The `.eml` files (with attachments embedded) are produced deterministically by
-`generate-fixtures.py`. To regenerate them byte-identically:
+`generate-fixtures.mjs`. To regenerate them byte-identically:
 
-    python3 test-fixtures/assistant-mailbox/generate-fixtures.py
+    pnpm generate-test-mailbox
 
-The script needs Python 3 and Pillow (`pip install pillow`). No standalone
+The script needs only Node.js and no extra dependencies. No standalone
 binary attachments are committed; everything is embedded in the `.eml` files.
 
 ## Sending
