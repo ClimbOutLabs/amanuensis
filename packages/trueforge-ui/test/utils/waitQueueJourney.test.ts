@@ -344,16 +344,68 @@ describe('spriteStateFor', () => {
   });
 
   it('keeps doing once a tool starts, even with a fresh recall', () => {
-    expect(spriteStateFor({ activeStation: 'doing', recallJustLanded: true, longWait: false })).toBe('doing');
+    // Real snapshot: recall landed, then a tool started. deriveWaitQueue
+    // clears recallJustLanded once a part exists, so doing wins honestly.
+    const snapshot = deriveWaitQueue(
+      input({
+        memory: { available: true, landed: true, items: 2, outcome: 'ok' },
+        parts: [part({ type: 'tool-call', toolName: 'web_search' })],
+      }),
+    );
+    expect(snapshot.recallJustLanded).toBe(false);
+    expect(
+      spriteStateFor({
+        activeStation: snapshot.activeStation,
+        recallJustLanded: snapshot.recallJustLanded,
+        longWait: false,
+      }),
+    ).toBe('doing');
   });
 
   it('keeps writing once text streams, even with a fresh recall', () => {
-    expect(spriteStateFor({ activeStation: 'writing', recallJustLanded: true, longWait: false })).toBe('writing');
+    // Real snapshot: recall landed, then text started streaming.
+    const snapshot = deriveWaitQueue(
+      input({
+        memory: { available: true, landed: true, items: 2, outcome: 'ok' },
+        parts: [part({ type: 'text' })],
+      }),
+    );
+    expect(snapshot.recallJustLanded).toBe(false);
+    expect(
+      spriteStateFor({
+        activeStation: snapshot.activeStation,
+        recallJustLanded: snapshot.recallJustLanded,
+        longWait: false,
+      }),
+    ).toBe('writing');
   });
 
-  it('switches writing to still-writing at the long-wait threshold', () => {
-    expect(spriteStateFor({ activeStation: 'writing', recallJustLanded: false, longWait: false })).toBe('writing');
-    expect(spriteStateFor({ activeStation: 'writing', recallJustLanded: false, longWait: true })).toBe('still-writing');
+  it('keeps doing when approval is pending', () => {
+    // Real snapshot: a tool awaiting approval parks the turn on doing.
+    const snapshot = deriveWaitQueue(
+      input({ parts: [part({ type: 'tool-call', toolName: 'exec', statusType: 'requires-action' })] }),
+    );
+    expect(snapshot.activeStation).toBe('doing');
+    expect(
+      spriteStateFor({
+        activeStation: snapshot.activeStation,
+        recallJustLanded: snapshot.recallJustLanded,
+        longWait: false,
+      }),
+    ).toBe('doing');
+  });
+
+  it('shows writing just under the long-wait threshold and still-writing at it', () => {
+    // The component computes longWait as elapsedMs >= LONG_WAIT_MS; the
+    // sprite must flip exactly at the boundary.
+    const justUnder = 14_999 >= LONG_WAIT_MS;
+    const atThreshold = 15_000 >= LONG_WAIT_MS;
+    expect(justUnder).toBe(false);
+    expect(atThreshold).toBe(true);
+    expect(spriteStateFor({ activeStation: 'writing', recallJustLanded: false, longWait: justUnder })).toBe('writing');
+    expect(spriteStateFor({ activeStation: 'writing', recallJustLanded: false, longWait: atThreshold })).toBe(
+      'still-writing',
+    );
   });
 
   it('keeps doing for a long tool run (still-writing is writing-only)', () => {

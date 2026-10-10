@@ -65,8 +65,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build downscaled turn-status sprites.")
     parser.add_argument(
         "--source",
-        default="packages/frontend/src/assets/turn-status",
-        help="Directory with the six source .webp originals",
+        required=True,
+        help=(
+            "Directory with the six source .webp originals. "
+            "The originals live on the feat/turn-status-sprites branch under "
+            "packages/frontend/src/assets/turn-status/ and are not on main; "
+            "check out that branch or copy the files locally first."
+        ),
     )
     args = parser.parse_args()
 
