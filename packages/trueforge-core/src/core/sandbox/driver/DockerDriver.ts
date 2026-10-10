@@ -4,6 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import {
+  cosignKeyFingerprint,
+  readImageVerificationRecord,
+  recordVouchesForSubject,
+  writeImageVerificationRecord,
+} from './ImageVerificationRecord.js';
+import {
   ISOLATION_REFUSED_MARKER,
   OUTPUT_EXCEEDED_MARKER,
   runCodeProgramPath,
@@ -28,6 +34,10 @@ const TRANSPORT_STREAM_CAP_BYTES = 4 * 1024 * 1024;
 const STALE_CONTAINER_MS = 30 * 60 * 1000;
 /** dispose() drains in-flight runs up to this long, then kills the remainder. */
 const DISPOSE_DRAIN_MS = 30 * 1000;
+
+/** cosign stderr that means the registry could not be reached, as opposed to the signature being bad. */
+const REGISTRY_UNREACHABLE_PATTERN =
+  /dial tcp|no such host|server misbehaving|name resolution|network is unreachable|no route to host|connection (refused|reset)|timeout|timed out|deadline exceeded/i;
 
 /** Default Docker socket path probed by detectDocker(). */
 export const DOCKER_SOCKET_PATH = '/var/run/docker.sock';
@@ -112,6 +122,8 @@ export interface DockerDriverOptions {
   image: string;
   /** Path to the cosign public-key PEM. Signature verification is fail-closed. */
   cosignPublicKeyPath: string;
+  /** Directory owned by the app where the driver remembers its last successful signature verification. */
+  stateDir: string;
   dockerBinary: string | undefined;
   cosignBinary: string | undefined;
   /** Override for the Docker socket path probed by detectDocker(). Defaults to /var/run/docker.sock. */
@@ -266,11 +278,11 @@ export function createDefaultDockerCommandRunner(options: { dockerBinary: string
   };
 }
 
-/** docker image inspect → RepoDigest pin check. */
-function checkRepoDigest(input: {
+/** docker image inspect → RepoDigest pin check; yields the local image ID a verification record binds to. */
+function checkPinnedImage(input: {
   inspectJson: string;
   expectedDigest: string;
-}): { ok: true } | { ok: false; error: string } {
+}): { ok: true; imageId: string } | { ok: false; error: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(input.inspectJson);
@@ -281,6 +293,7 @@ function checkRepoDigest(input: {
     return { ok: false, error: '`docker image inspect` returned no image data' };
   }
   const digests: string[] = [];
+  let imageId: string | undefined;
   const entries: unknown[] = parsed;
   for (const entry of entries) {
     if (typeof entry === 'object' && entry !== null && 'RepoDigests' in entry) {
@@ -291,6 +304,12 @@ function checkRepoDigest(input: {
             digests.push(digest);
           }
         }
+      }
+    }
+    if (imageId === undefined && typeof entry === 'object' && entry !== null && 'Id' in entry) {
+      const id: unknown = entry.Id;
+      if (typeof id === 'string' && id.length > 0) {
+        imageId = id;
       }
     }
   }
@@ -308,7 +327,13 @@ function checkRepoDigest(input: {
       error: `sandbox image digest mismatch: expected ${input.expectedDigest}, image reports ${digests.join(', ')} — refusing to run`,
     };
   }
-  return { ok: true };
+  if (imageId === undefined) {
+    return {
+      ok: false,
+      error: '`docker image inspect` reported no image ID; refusing to run an unidentifiable image',
+    };
+  }
+  return { ok: true, imageId };
 }
 
 /**
@@ -372,6 +397,7 @@ export class DockerDriver implements IsolationDriver {
 
   private readonly image: string;
   private readonly cosignPublicKeyPath: string;
+  private readonly stateDir: string;
   private readonly dockerBinary: string;
   private readonly cosignBinary: string;
   private readonly dockerSocketPath: string;
@@ -386,6 +412,7 @@ export class DockerDriver implements IsolationDriver {
   constructor(options: DockerDriverOptions, commandRunner: DockerCommandRunner | undefined) {
     this.image = options.image;
     this.cosignPublicKeyPath = options.cosignPublicKeyPath;
+    this.stateDir = options.stateDir;
     this.dockerBinary = options.dockerBinary ?? 'docker';
     this.cosignBinary = options.cosignBinary ?? 'cosign';
     this.dockerSocketPath = options.dockerSocketPath ?? DOCKER_SOCKET_PATH;
@@ -409,6 +436,20 @@ export class DockerDriver implements IsolationDriver {
   }
 
   async ensureReady(signal?: AbortSignal): Promise<DriverReadiness> {
+    return this.probeReadiness({ signal, forceVerification: false });
+  }
+
+  /**
+   * forceVerification re-runs the cosign check even when a matching record
+   * exists; provisioning uses it because a pull is online and refreshes trust.
+   */
+  private async probeReadiness({
+    signal,
+    forceVerification,
+  }: {
+    signal: AbortSignal | undefined;
+    forceVerification: boolean;
+  }): Promise<DriverReadiness> {
     // v1: the Docker driver needs a Linux container host (plan §4 edge 11).
     if (process.platform === 'win32') {
       return {
@@ -457,23 +498,18 @@ export class DockerDriver implements IsolationDriver {
         error: `sandbox image '${this.image}' is not present locally — the harness will pull it as an explicit provisioning step`,
       };
     }
-    const digestCheck = checkRepoDigest({ inspectJson: inspect.stdout, expectedDigest });
+    const digestCheck = checkPinnedImage({ inspectJson: inspect.stdout, expectedDigest });
     if (!digestCheck.ok) {
       return { ready: false, error_code: 'image_unavailable', error: digestCheck.error };
     }
-    const cosign = await this.runner.run(this.cosignBinary, ['verify', '--key', this.cosignPublicKeyPath, this.image], {
-      timeoutMs: this.commandTimeoutMs,
+    const verification = await this.verifyImageSignature({
+      expectedDigest,
+      imageId: digestCheck.imageId,
+      forceVerification,
       signal,
     });
-    if (cosign.timedOut || cosign.exitCode !== 0) {
-      return {
-        ready: false,
-        error_code: 'image_unavailable',
-        // cosign echoes the --key path in its stderr (missing/unreadable
-        // key file); the detail is model-visible, so the host key path is
-        // redacted before it leaves the driver.
-        error: `cosign signature verification failed for '${this.image}': ${truncateSingleLine(this.scrubCosignKeyPath(cosign.stderr), 300)}`,
-      };
+    if (!verification.ok) {
+      return { ready: false, error_code: 'image_unavailable', error: verification.error };
     }
     // Wedged-daemon escalation (plan §2.8): dockerd answers `docker info` but
     // `docker create` never returns → daemon_unavailable, manual remediation.
@@ -514,6 +550,69 @@ export class DockerDriver implements IsolationDriver {
     return { ready: true };
   }
 
+  /**
+   * cosign verify fetches signatures from the registry, so it must not gate
+   * every probe or run_code breaks offline. A prior success is trusted only
+   * while the pinned reference and digest, the local image ID, and the key
+   * fingerprint all equal what is observed now; anything else re-verifies.
+   */
+  private async verifyImageSignature(input: {
+    expectedDigest: string;
+    imageId: string;
+    forceVerification: boolean;
+    signal: AbortSignal | undefined;
+  }): Promise<{ ok: true } | { ok: false; error: string }> {
+    const keyFingerprint = await cosignKeyFingerprint({ keyPath: this.cosignPublicKeyPath });
+    const subject =
+      keyFingerprint === undefined
+        ? undefined
+        : {
+            image_ref: this.image,
+            image_digest: input.expectedDigest,
+            image_id: input.imageId,
+            key_fingerprint: keyFingerprint,
+          };
+    if (subject !== undefined && !input.forceVerification) {
+      const record = await readImageVerificationRecord({ stateDir: this.stateDir });
+      if (recordVouchesForSubject({ record, subject })) {
+        return { ok: true };
+      }
+    }
+    const cosign = await this.runner.run(this.cosignBinary, ['verify', '--key', this.cosignPublicKeyPath, this.image], {
+      timeoutMs: this.commandTimeoutMs,
+      signal: input.signal,
+    });
+    if (cosign.timedOut || cosign.exitCode !== 0) {
+      return { ok: false, error: this.describeCosignFailure(cosign) };
+    }
+    if (subject !== undefined) {
+      try {
+        await writeImageVerificationRecord({
+          stateDir: this.stateDir,
+          record: { ...subject, verified_at: new Date().toISOString() },
+        });
+      } catch {
+        // Best-effort: the image is verified now; an unwritable record only means the next probe verifies again.
+      }
+    }
+    return { ok: true };
+  }
+
+  private describeCosignFailure(cosign: DockerCommandResult): string {
+    // cosign echoes the --key path in its stderr (missing/unreadable key
+    // file); the detail is model-visible, so the host key path is redacted
+    // before it leaves the driver.
+    const detail = truncateSingleLine(this.scrubCosignKeyPath(cosign.stderr), 300);
+    if (cosign.timedOut || REGISTRY_UNREACHABLE_PATTERN.test(cosign.stderr)) {
+      return (
+        `cosign could not reach the image registry to verify the signature of '${this.image}'. ` +
+        'The signature is verified once when the image is set up and remembered afterwards, so run_code works offline from then on; ' +
+        `connect to the internet once so the check can complete.${detail === '' ? '' : ` Detail: ${detail}`}`
+      );
+    }
+    return `cosign signature verification failed for '${this.image}': ${detail}`;
+  }
+
   async provision(input: {
     signal: AbortSignal | undefined;
     onProgress: (message: string) => void;
@@ -528,7 +627,7 @@ export class DockerDriver implements IsolationDriver {
       await this.pullBounded(input);
       // A pulled image is verified exactly like a present one: digest pin +
       // cosign signature, or the provisioning fails.
-      const readiness = await this.ensureReady(input.signal ?? undefined);
+      const readiness = await this.probeReadiness({ signal: input.signal, forceVerification: true });
       if (!readiness.ready) {
         throw new Error(`provisioned image failed verification: ${readiness.error}`);
       }

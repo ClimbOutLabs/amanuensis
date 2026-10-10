@@ -2,7 +2,8 @@
  * Unit tests for the Docker isolation driver. No daemon: every docker/cosign
  * interaction is scripted through a fake DockerCommandRunner.
  */
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { createHash, generateKeyPairSync } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -16,10 +17,15 @@ import {
   type DockerCommandRunner,
   type DockerDriverOptions,
 } from '../../../../src/core/sandbox/driver/DockerDriver';
+import {
+  imageVerificationRecordPath,
+  readImageVerificationRecord,
+} from '../../../../src/core/sandbox/driver/ImageVerificationRecord';
 import { ISOLATION_REFUSED_MARKER, type DriverRunParams } from '../../../../src/core/sandbox/driver/IsolationDriver';
 
 const DIGEST = 'sha256:' + 'a'.repeat(64);
 const IMAGE = `ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0@${DIGEST}`;
+const IMAGE_ID = 'sha256:' + '1'.repeat(64);
 const KEY_PATH = '/etc/amanuensis/cosign.pub';
 
 interface RecordedCall {
@@ -81,6 +87,7 @@ function driverOptions(): DockerDriverOptions {
   return {
     image: IMAGE,
     cosignPublicKeyPath: KEY_PATH,
+    stateDir,
     dockerBinary: undefined,
     cosignBinary: undefined,
     dockerSocketPath: fakeSocketPath,
@@ -95,13 +102,19 @@ function driverOptions(): DockerDriverOptions {
  * tests so each test's detection is independent.
  */
 let fakeSocketPath: string | undefined;
+/** Per-test driver state dir, so a verification record never leaks between tests. */
+let stateDir = '';
 beforeAll(async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tf-docker-socket-'));
   fakeSocketPath = join(dir, 'docker.sock');
   await writeFile(fakeSocketPath, '');
 });
-beforeEach(() => {
+beforeEach(async () => {
   resetDockerDetectionForTests();
+  stateDir = await mkdtemp(join(tmpdir(), 'tf-docker-state-'));
+});
+afterEach(async () => {
+  await rm(stateDir, { recursive: true, force: true });
 });
 
 function runParams(overrides: { signal?: AbortSignal | undefined } = {}): DriverRunParams {
@@ -122,6 +135,11 @@ function runParams(overrides: { signal?: AbortSignal | undefined } = {}): Driver
   };
 }
 
+/** `docker image inspect` output for the pinned image as the daemon reports it. */
+function inspectOutput({ digest, imageId }: { digest: string; imageId: string }): string {
+  return JSON.stringify([{ Id: imageId, RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${digest}`] }]);
+}
+
 /** ensureReady happy path: info, inspect (pinned digest), cosign, create probe, ownership probe. */
 function scriptReadyPath(runner: FakeRunner, digest = DIGEST): void {
   runner.runHandler = async (binary, args) => {
@@ -129,10 +147,7 @@ function scriptReadyPath(runner: FakeRunner, digest = DIGEST): void {
       return okResult;
     }
     if (binary === 'docker' && args[0] === 'image') {
-      return {
-        ...okResult,
-        stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${digest}`] }]),
-      };
+      return { ...okResult, stdout: inspectOutput({ digest, imageId: IMAGE_ID }) };
     }
     if (binary === 'cosign') {
       return okResult;
@@ -557,10 +572,7 @@ describe('DockerDriver.ensureReady', () => {
         return okResult;
       }
       if (binary === 'docker' && args[0] === 'image') {
-        return {
-          ...okResult,
-          stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${DIGEST}`] }]),
-        };
+        return { ...okResult, stdout: inspectOutput({ digest: DIGEST, imageId: IMAGE_ID }) };
       }
       if (binary === 'cosign') {
         return { ...okResult, exitCode: 1, stderr: 'no matching signatures' };
@@ -585,10 +597,7 @@ describe('DockerDriver.ensureReady', () => {
         return okResult;
       }
       if (binary === 'docker' && args[0] === 'image') {
-        return {
-          ...okResult,
-          stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${DIGEST}`] }]),
-        };
+        return { ...okResult, stdout: inspectOutput({ digest: DIGEST, imageId: IMAGE_ID }) };
       }
       if (binary === 'cosign') {
         // cosign echoes the missing/unreadable key path in stderr.
@@ -612,10 +621,7 @@ describe('DockerDriver.ensureReady', () => {
         return okResult;
       }
       if (binary === 'docker' && args[0] === 'image') {
-        return {
-          ...okResult,
-          stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${DIGEST}`] }]),
-        };
+        return { ...okResult, stdout: inspectOutput({ digest: DIGEST, imageId: IMAGE_ID }) };
       }
       if (binary === 'cosign') {
         return okResult;
@@ -688,6 +694,296 @@ describe('DockerDriver.provision', () => {
     await expect(driver.provision({ signal: undefined, onProgress: noop, timeoutSeconds: 0 })).rejects.toThrow(
       'did not complete within 0s',
     );
+  });
+});
+
+describe('DockerDriver image verification record', () => {
+  const OTHER_DIGEST = 'sha256:' + 'b'.repeat(64);
+  const OTHER_IMAGE_ID = 'sha256:' + '2'.repeat(64);
+  const OFFLINE: DockerCommandResult = {
+    stdout: '',
+    stderr: 'Error: getting signature: Get "https://ghcr.io/v2/": dial tcp: lookup ghcr.io: no such host',
+    exitCode: 1,
+    timedOut: false,
+  };
+  const BAD_SIGNATURE: DockerCommandResult = { ...okResult, exitCode: 1, stderr: 'no matching signatures' };
+
+  /** What the daemon and the registry say right now; tests mutate it between probes. */
+  interface World {
+    digest: string;
+    imageId: string;
+    cosign: DockerCommandResult;
+  }
+
+  let keyDir = '';
+  let keyPath = '';
+
+  function publicKeyPem(): string {
+    const { publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    return publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  }
+
+  function expectedFingerprint(pem: string): string {
+    const body = pem.replace(/-----[A-Z ]+-----/g, '').replace(/\s+/g, '');
+    return `sha256:${createHash('sha256').update(Buffer.from(body, 'base64')).digest('hex')}`;
+  }
+
+  beforeEach(async () => {
+    keyDir = await mkdtemp(join(tmpdir(), 'tf-docker-key-'));
+    keyPath = join(keyDir, 'cosign.pub');
+    await writeFile(keyPath, publicKeyPem());
+  });
+  afterEach(async () => {
+    await rm(keyDir, { recursive: true, force: true });
+  });
+
+  function scriptWorld(runner: FakeRunner, world: World): void {
+    scriptReadyPath(runner);
+    const ready = runner.runHandler;
+    runner.runHandler = (binary, args) => {
+      if (binary === 'docker' && args[0] === 'image') {
+        return { ...okResult, stdout: inspectOutput({ digest: world.digest, imageId: world.imageId }) };
+      }
+      if (binary === 'cosign') {
+        return world.cosign;
+      }
+      return ready(binary, args);
+    };
+  }
+
+  function newDriver(runner: FakeRunner, overrides: Partial<DockerDriverOptions> = {}): DockerDriver {
+    return new DockerDriver({ ...driverOptions(), cosignPublicKeyPath: keyPath, ...overrides }, runner);
+  }
+
+  function cosignCalls(runner: FakeRunner): number {
+    return runner.calls.filter(call => call.binary === 'cosign').length;
+  }
+
+  /** A runner whose first probe verified online and recorded; the network is down afterwards. */
+  async function recordedThenOffline(): Promise<{ runner: FakeRunner; world: World }> {
+    const runner = new FakeRunner();
+    const world: World = { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult };
+    scriptWorld(runner, world);
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(1);
+    world.cosign = OFFLINE;
+    return { runner, world };
+  }
+
+  test('the first probe verifies online and records the result bound to digest, image ID, and key', async () => {
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    const record = await readImageVerificationRecord({ stateDir });
+    expect(record).toMatchObject({
+      image_ref: IMAGE,
+      image_digest: DIGEST,
+      image_id: IMAGE_ID,
+      key_fingerprint: expectedFingerprint(await readFile(keyPath, 'utf8')),
+    });
+    expect(Number.isNaN(Date.parse(record?.verified_at ?? ''))).toBe(false);
+  });
+
+  test('readiness passes offline after a recorded verification, even from a fresh driver', async () => {
+    const { runner } = await recordedThenOffline();
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(1);
+  });
+
+  test('offline readiness still enforces the RepoDigest pin', async () => {
+    const { runner, world } = await recordedThenOffline();
+    world.digest = OTHER_DIGEST;
+    const readiness = await newDriver(runner).ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_unavailable');
+      expect(readiness.error).toContain('mismatch');
+    }
+    expect(cosignCalls(runner)).toBe(1);
+  });
+
+  test('a changed local image ID forces re-verification and the new result is recorded', async () => {
+    const { runner, world } = await recordedThenOffline();
+    world.imageId = OTHER_IMAGE_ID;
+    const offline = await newDriver(runner).ensureReady();
+    expect(offline.ready).toBe(false);
+    expect(cosignCalls(runner)).toBe(2);
+
+    world.cosign = okResult;
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(3);
+    expect((await readImageVerificationRecord({ stateDir }))?.image_id).toBe(OTHER_IMAGE_ID);
+
+    world.cosign = OFFLINE;
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(3);
+  });
+
+  test('a changed pinned digest forces re-verification', async () => {
+    const { runner, world } = await recordedThenOffline();
+    world.digest = OTHER_DIGEST;
+    const driver = newDriver(runner, { image: `ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0@${OTHER_DIGEST}` });
+    const offline = await driver.ensureReady();
+    expect(offline.ready).toBe(false);
+    expect(cosignCalls(runner)).toBe(2);
+
+    world.cosign = okResult;
+    await expect(driver.ensureReady()).resolves.toEqual({ ready: true });
+    expect((await readImageVerificationRecord({ stateDir }))?.image_digest).toBe(OTHER_DIGEST);
+  });
+
+  test('a record made under a different key fingerprint is ignored', async () => {
+    const { runner } = await recordedThenOffline();
+    await writeFile(keyPath, publicKeyPem());
+    const readiness = await newDriver(runner).ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_unavailable');
+    }
+    expect(cosignCalls(runner)).toBe(2);
+  });
+
+  test('an unreadable key never lets a record stand in for verification', async () => {
+    const { runner } = await recordedThenOffline();
+    const readiness = await newDriver(runner, { cosignPublicKeyPath: join(keyDir, 'missing.pub') }).ensureReady();
+    expect(readiness.ready).toBe(false);
+    expect(cosignCalls(runner)).toBe(2);
+  });
+
+  test('an unrecordable key re-verifies on every probe', async () => {
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
+    const driver = newDriver(runner, { cosignPublicKeyPath: join(keyDir, 'missing.pub') });
+    await driver.ensureReady();
+    await driver.ensureReady();
+    expect(cosignCalls(runner)).toBe(2);
+    expect(await readImageVerificationRecord({ stateDir })).toBeUndefined();
+  });
+
+  const tamperings: [string, () => Promise<void>][] = [
+    ['a missing record', () => rm(imageVerificationRecordPath({ stateDir }))],
+    ['a record that is not JSON', () => writeFile(imageVerificationRecordPath({ stateDir }), 'not json')],
+    ['a record of the wrong shape', () => writeFile(imageVerificationRecordPath({ stateDir }), '{"image_id":"x"}')],
+    [
+      'a record whose image ID was edited',
+      async () => {
+        const record = await readImageVerificationRecord({ stateDir });
+        await writeFile(
+          imageVerificationRecordPath({ stateDir }),
+          JSON.stringify({ ...record, image_id: OTHER_IMAGE_ID }),
+        );
+      },
+    ],
+    [
+      'a record whose image reference was edited',
+      async () => {
+        const record = await readImageVerificationRecord({ stateDir });
+        await writeFile(
+          imageVerificationRecordPath({ stateDir }),
+          JSON.stringify({ ...record, image_ref: `registry.example/other@${DIGEST}` }),
+        );
+      },
+    ],
+  ];
+
+  test.each(tamperings)('%s re-verifies', async (_name, tamper) => {
+    const { runner, world } = await recordedThenOffline();
+    await tamper();
+    const offline = await newDriver(runner).ensureReady();
+    expect(offline.ready).toBe(false);
+    expect(cosignCalls(runner)).toBe(2);
+
+    world.cosign = okResult;
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(3);
+
+    world.cosign = OFFLINE;
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(3);
+  });
+
+  test('provisioning re-verifies even when a matching record exists', async () => {
+    const { runner, world } = await recordedThenOffline();
+    world.cosign = okResult;
+    await newDriver(runner).provision({ signal: undefined, onProgress: () => undefined, timeoutSeconds: 600 });
+    expect(cosignCalls(runner)).toBe(2);
+  });
+
+  test('a provisioned image is recorded so later probes pass offline', async () => {
+    const runner = new FakeRunner();
+    const world: World = { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult };
+    scriptWorld(runner, world);
+    await newDriver(runner).provision({ signal: undefined, onProgress: () => undefined, timeoutSeconds: 600 });
+    world.cosign = OFFLINE;
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(1);
+  });
+
+  test('verification needed while offline is image_unavailable with actionable text', async () => {
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: OFFLINE });
+    const readiness = await newDriver(runner, { cosignPublicKeyPath: keyPath }).ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_unavailable');
+      expect(readiness.error).toContain('could not reach the image registry');
+      expect(readiness.error).toContain('connect to the internet once');
+      expect(readiness.error).not.toContain(keyPath);
+    }
+    expect(runner.callsFor('create')).toHaveLength(0);
+  });
+
+  test('a cosign timeout is reported as an unreachable registry, not a bad signature', async () => {
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: { ...okResult, exitCode: -1, timedOut: true } });
+    const readiness = await newDriver(runner).ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).toContain('could not reach the image registry');
+    }
+  });
+
+  test('a rejected signature keeps the verification-failed wording and writes no record', async () => {
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: BAD_SIGNATURE });
+    const readiness = await newDriver(runner).ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).toContain('cosign signature verification failed');
+      expect(readiness.error).not.toContain('could not reach');
+    }
+    expect(await readImageVerificationRecord({ stateDir })).toBeUndefined();
+  });
+
+  test('an unwritable state dir does not fail an otherwise verified readiness', async () => {
+    const blocker = join(keyDir, 'not-a-directory');
+    await writeFile(blocker, '');
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
+    await expect(newDriver(runner, { stateDir: blocker }).ensureReady()).resolves.toEqual({ ready: true });
+  });
+
+  test('an image whose inspect reports no ID is refused', async () => {
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
+    const ready = runner.runHandler;
+    runner.runHandler = (binary, args) => {
+      if (binary === 'docker' && args[0] === 'image') {
+        return {
+          ...okResult,
+          stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${DIGEST}`] }]),
+        };
+      }
+      return ready(binary, args);
+    };
+    const readiness = await newDriver(runner).ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_unavailable');
+      expect(readiness.error).toContain('no image ID');
+    }
+    expect(cosignCalls(runner)).toBe(0);
   });
 });
 

@@ -53,23 +53,29 @@ describe('DockerDriver integration (live daemon)', () => {
     if (!(await dockerAvailable())) {
       return;
     }
-    const driver = new DockerDriver(
-      {
-        image: 'ghcr.io/climboutlabs/amanuensis-sandbox:0.0.0-integration-missing@sha256:' + '0'.repeat(64),
-        cosignPublicKeyPath: '/nonexistent/cosign.pub',
-        dockerBinary: undefined,
-        cosignBinary: undefined,
-        dockerSocketPath: DOCKER_SOCKET_PATH,
-        commandTimeoutMs: undefined,
-        createTimeoutMs: undefined,
-      },
-      undefined,
-    );
-    const readiness = await driver.ensureReady();
-    expect(readiness.ready).toBe(false);
-    if (!readiness.ready) {
-      // An image absent locally is healable; RunCodeService provisions it before surfacing image_unavailable.
-      expect(readiness.error_code).toBe('image_missing');
+    const stateDir = await mkdtemp(join(tmpdir(), 'sandbox-itest-state-'));
+    try {
+      const driver = new DockerDriver(
+        {
+          image: 'ghcr.io/climboutlabs/amanuensis-sandbox:0.0.0-integration-missing@sha256:' + '0'.repeat(64),
+          cosignPublicKeyPath: '/nonexistent/cosign.pub',
+          stateDir,
+          dockerBinary: undefined,
+          cosignBinary: undefined,
+          dockerSocketPath: DOCKER_SOCKET_PATH,
+          commandTimeoutMs: undefined,
+          createTimeoutMs: undefined,
+        },
+        undefined,
+      );
+      const readiness = await driver.ensureReady();
+      expect(readiness.ready).toBe(false);
+      if (!readiness.ready) {
+        // An image absent locally is healable; RunCodeService provisions it before surfacing image_unavailable.
+        expect(readiness.error_code).toBe('image_missing');
+      }
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
     }
   });
 
@@ -95,6 +101,7 @@ describe('DockerDriver integration (live daemon)', () => {
         {
           image: TEST_IMAGE,
           cosignPublicKeyPath: '/nonexistent/cosign.pub',
+          stateDir: join(runRoot, 'state'),
           dockerBinary: undefined,
           cosignBinary: undefined,
           dockerSocketPath: DOCKER_SOCKET_PATH,
