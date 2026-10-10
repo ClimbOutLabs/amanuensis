@@ -1,4 +1,9 @@
-import { RunCodeInputSchema, RunCodeResultSchema } from '../../../../src/core/sandbox/driver/RunCodeSchemas';
+import {
+  RUN_CODE_SETUP_ERROR_CODES,
+  RunCodeInputSchema,
+  RunCodeResultSchema,
+  RunCodeSetupFailureSchema,
+} from '../../../../src/core/sandbox/driver/RunCodeSchemas';
 
 describe('RunCodeInputSchema', () => {
   const valid = { language: 'python', code: 'print("hi")' };
@@ -81,5 +86,72 @@ describe('RunCodeResultSchema', () => {
   it('rejects unknown statuses and error codes', () => {
     expect(() => RunCodeResultSchema.parse({ status: 'maybe', ...base })).toThrow();
     expect(() => RunCodeResultSchema.parse({ status: 'failed', error_code: 'nope', error: 'x', ...base })).toThrow();
+  });
+});
+
+describe('run_code setup failures', () => {
+  const fullResult = {
+    stdout: '',
+    stderr: '',
+    stdout_truncated: false,
+    stderr_truncated: false,
+    files_out: [],
+    harvest_warnings: [],
+  };
+
+  it('are exactly the codes where no code ran and the text is written for the user', () => {
+    expect([...RUN_CODE_SETUP_ERROR_CODES].sort()).toEqual([
+      'daemon_unavailable',
+      'docker_unavailable',
+      'image_unavailable',
+      'isolation_refused',
+    ]);
+  });
+
+  it('exclude failures of code that ran or that the model can fix itself', () => {
+    for (const code of [
+      'timeout',
+      'memory_exceeded',
+      'disk_exceeded',
+      'output_exceeded',
+      'invalid_input',
+      'internal',
+    ]) {
+      expect(RUN_CODE_SETUP_ERROR_CODES).not.toContain(code);
+      expect(RunCodeSetupFailureSchema.safeParse({ status: 'failed', error_code: code, error: 'text' }).success).toBe(
+        false,
+      );
+    }
+    expect(RUN_CODE_SETUP_ERROR_CODES).not.toContain('concurrency_exceeded');
+  });
+
+  it('parse from a full failed result without needing its other fields', () => {
+    const full = RunCodeResultSchema.parse({
+      status: 'failed',
+      error_code: 'docker_unavailable',
+      error: 'Docker is missing.',
+      ...fullResult,
+    });
+    expect(RunCodeSetupFailureSchema.parse(full)).toEqual({
+      status: 'failed',
+      error_code: 'docker_unavailable',
+      error: 'Docker is missing.',
+    });
+    expect(
+      RunCodeSetupFailureSchema.safeParse({ status: 'failed', error_code: 'docker_unavailable', error: 'x' }).success,
+    ).toBe(true);
+  });
+
+  it('reject ok results, whatever their output says, and failures without text', () => {
+    expect(
+      RunCodeSetupFailureSchema.safeParse({ status: 'ok', exit_code: 1, error_code: 'docker_unavailable', error: 'x' })
+        .success,
+    ).toBe(false);
+    expect(
+      RunCodeSetupFailureSchema.safeParse({ status: 'failed', error_code: 'docker_unavailable', error: '' }).success,
+    ).toBe(false);
+    expect(RunCodeSetupFailureSchema.safeParse({ status: 'failed', error_code: 'docker_unavailable' }).success).toBe(
+      false,
+    );
   });
 });
