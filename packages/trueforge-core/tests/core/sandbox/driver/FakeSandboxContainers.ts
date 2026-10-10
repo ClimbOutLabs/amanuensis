@@ -72,6 +72,12 @@ export class FakeSandboxContainers {
     return id;
   }
 
+  /** The `--user` value a container was created with, as `docker inspect` reports it in Config.User. */
+  userOf(containerId: string): string | undefined {
+    const user = this.containers.get(containerId)?.user;
+    return user === undefined ? undefined : `${String(user.uid)}:${String(user.gid)}`;
+  }
+
   /** Runs the canary program; resolves with the container exit code. */
   async attach(input: { containerId: string; onStderr: (chunk: Buffer) => void }): Promise<number> {
     const container = this.containers.get(input.containerId);

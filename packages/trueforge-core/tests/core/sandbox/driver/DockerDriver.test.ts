@@ -178,7 +178,7 @@ function scriptReadyPath(runner: FakeRunner, digest = DIGEST, containers = new F
       return { ...okResult, stdout: `${id}\n` };
     }
     if (binary === 'docker' && args[0] === 'inspect' && args.length === 2) {
-      return { ...okResult, stdout: JSON.stringify([goodInspectEntry()]) };
+      return { ...okResult, stdout: JSON.stringify([goodInspectEntry(containers.userOf(args[1] ?? ''))]) };
     }
     if (binary === 'docker' && (args[0] === 'rm' || args[0] === 'kill')) {
       return okResult;
@@ -1218,20 +1218,24 @@ describe('DockerDriver.ensureReady docker detection', () => {
 });
 
 describe('checkContainerIsolation', () => {
+  const SANDBOX_IDENTITY = { uid: 65532, gid: 65532, chownRunDirs: true };
+
   test('accepts a fully hardened container', () => {
-    expect(checkContainerIsolation({ inspectJson: JSON.stringify([goodInspectEntry()]) })).toEqual({ ok: true });
+    expect(
+      checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([goodInspectEntry()]) }),
+    ).toEqual({ ok: true });
   });
 
   test('rejects malformed inspect output', () => {
-    expect(checkContainerIsolation({ inspectJson: 'not json' }).ok).toBe(false);
-    expect(checkContainerIsolation({ inspectJson: '[]' }).ok).toBe(false);
-    expect(checkContainerIsolation({ inspectJson: '{}' }).ok).toBe(false);
+    expect(checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: 'not json' }).ok).toBe(false);
+    expect(checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: '[]' }).ok).toBe(false);
+    expect(checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: '{}' }).ok).toBe(false);
   });
 
   test('rejects a container with network access', () => {
     const entry = goodInspectEntry();
     (entry['HostConfig'] as Record<string, unknown>)['NetworkMode'] = 'bridge';
-    const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
+    const result = checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toMatch(/NetworkMode/);
@@ -1241,33 +1245,59 @@ describe('checkContainerIsolation', () => {
   test('rejects a writable root filesystem', () => {
     const entry = goodInspectEntry();
     (entry['HostConfig'] as Record<string, unknown>)['ReadonlyRootfs'] = false;
-    const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
+    const result = checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toMatch(/read-only/);
     }
   });
 
-  test.each(['1000:1001', '65532:65532'])('accepts the non-root numeric user %p', user => {
-    expect(checkContainerIsolation({ inspectJson: JSON.stringify([goodInspectEntry(user)]) })).toEqual({ ok: true });
+  test.each([
+    [1000, 1001],
+    [65532, 65532],
+  ])('accepts a container running as the expected user %p:%p', (uid, gid) => {
+    expect(
+      checkContainerIsolation({
+        identity: { uid, gid, chownRunDirs: false },
+        inspectJson: JSON.stringify([goodInspectEntry(`${String(uid)}:${String(gid)}`)]),
+      }),
+    ).toEqual({ ok: true });
   });
+
+  test.each(['1000:1001', '65532', '4242:65532', '65532:4242', 'nobody'])(
+    'rejects the non-root user %p when the container was created for 65532:65532',
+    user => {
+      const result = checkContainerIsolation({
+        identity: SANDBOX_IDENTITY,
+        inspectJson: JSON.stringify([goodInspectEntry(user)]),
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe(`container user is '${user}', expected '65532:65532'`);
+      }
+    },
+  );
 
   test.each(['0', 'root', '0:0', ''])('rejects root user %p', user => {
     const entry = goodInspectEntry();
     (entry['Config'] as Record<string, unknown>)['User'] = user;
-    expect(checkContainerIsolation({ inspectJson: JSON.stringify([entry]) }).ok).toBe(false);
+    expect(checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) }).ok).toBe(
+      false,
+    );
   });
 
   test('rejects missing capability drop', () => {
     const entry = goodInspectEntry();
     (entry['HostConfig'] as Record<string, unknown>)['CapDrop'] = [];
-    expect(checkContainerIsolation({ inspectJson: JSON.stringify([entry]) }).ok).toBe(false);
+    expect(checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) }).ok).toBe(
+      false,
+    );
   });
 
   test('rejects missing no-new-privileges', () => {
     const entry = goodInspectEntry();
     (entry['HostConfig'] as Record<string, unknown>)['SecurityOpt'] = ['seccomp=default'];
-    const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
+    const result = checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toMatch(/no-new-privileges/);
@@ -1277,7 +1307,7 @@ describe('checkContainerIsolation', () => {
   test('rejects missing seccomp profile', () => {
     const entry = goodInspectEntry();
     (entry['HostConfig'] as Record<string, unknown>)['SecurityOpt'] = ['no-new-privileges:true'];
-    const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
+    const result = checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toMatch(/seccomp/);
@@ -1311,6 +1341,30 @@ describe('DockerDriver.run isolation refusal', () => {
     // The program never started: attach was never called.
     expect(attached).toBe(false);
     // The offending container was removed.
+    expect(runner.callsFor('rm').length).toBeGreaterThan(0);
+  });
+
+  test('refuses the run when the created container runs as a different non-root user than requested', async () => {
+    const runner = new FakeRunner();
+    let attached = false;
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-wronguser\n' };
+      }
+      if (args[0] === 'inspect' && args.length === 2) {
+        return { ...okResult, stdout: JSON.stringify([goodInspectEntry('4242:4242')]) };
+      }
+      return okResult;
+    };
+    runner.attachHandler = () => {
+      attached = true;
+      return Promise.resolve(0);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const result = await driver.run(runParams());
+    expect(result.terminatedBy).toBe('internal');
+    expect(result.internalError).toBe(`${ISOLATION_REFUSED_MARKER}${ISOLATION_REFUSED_MESSAGE}`);
+    expect(attached).toBe(false);
     expect(runner.callsFor('rm').length).toBeGreaterThan(0);
   });
 

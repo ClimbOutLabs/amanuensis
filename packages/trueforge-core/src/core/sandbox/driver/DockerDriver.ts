@@ -387,12 +387,17 @@ function checkPinnedImage(input: {
 }
 
 /**
- * Verify a created container actually carries the mandatory isolation flags.
+ * Verify a created container actually carries the mandatory isolation flags,
+ * including the uid:gid it was created to run as.
  * Fail-closed (spec): any missing guarantee refuses the run. A partial
  * sandbox is never silently downgraded. Defensive unknown-typed navigation in
  * the checkRepoDigest style; exported for unit tests.
  */
-export function checkContainerIsolation(input: { inspectJson: string }): { ok: true } | { ok: false; reason: string } {
+export function checkContainerIsolation(input: {
+  inspectJson: string;
+  /** The uid:gid the container was created to run as. */
+  identity: SandboxIdentity;
+}): { ok: true } | { ok: false; reason: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(input.inspectJson);
@@ -426,6 +431,10 @@ export function checkContainerIsolation(input: { inspectJson: string }): { ok: t
   if (typeof user !== 'string' || user === '' || user === '0' || user === 'root' || user === '0:0') {
     const actual = typeof user === 'string' && user !== '' ? user : 'missing';
     return { ok: false, reason: `container user is '${actual}', expected a non-root user` };
+  }
+  const expectedUser = `${String(input.identity.uid)}:${String(input.identity.gid)}`;
+  if (user !== expectedUser) {
+    return { ok: false, reason: `container user is '${user}', expected '${expectedUser}'` };
   }
   const capDrop: unknown = hc['CapDrop'];
   if (!Array.isArray(capDrop) || !capDrop.includes('ALL')) {
@@ -701,7 +710,7 @@ export class DockerDriver implements IsolationDriver {
       // `docker create` must be reflected in the created container. A
       // container missing any mandatory guarantee is removed and the run is
       // refused — never executed with reduced isolation.
-      await this.verifyContainerIsolation(containerId);
+      await this.verifyContainerIsolation(containerId, params.sandboxIdentity);
       const task = this.attachAndRun(containerId, params);
       this.inFlight.set(containerId, task);
       try {
@@ -949,7 +958,7 @@ export class DockerDriver implements IsolationDriver {
    * the run is refused with the spec's exact message, marked with
    * ISOLATION_REFUSED_MARKER for the wrapper.
    */
-  private async verifyContainerIsolation(containerId: string): Promise<void> {
+  private async verifyContainerIsolation(containerId: string, identity: SandboxIdentity): Promise<void> {
     const inspect = await this.runner.run(this.dockerBinary, ['inspect', containerId], {
       timeoutMs: this.commandTimeoutMs,
       signal: undefined,
@@ -957,7 +966,7 @@ export class DockerDriver implements IsolationDriver {
     const check: { ok: true } | { ok: false; reason: string } =
       inspect.timedOut || inspect.exitCode !== 0
         ? { ok: false, reason: '`docker inspect` failed on the created container' }
-        : checkContainerIsolation({ inspectJson: inspect.stdout });
+        : checkContainerIsolation({ inspectJson: inspect.stdout, identity });
     if (!check.ok) {
       await this.removeContainer(containerId);
       throw new Error(`${ISOLATION_REFUSED_MARKER}${ISOLATION_REFUSED_MESSAGE}`);
