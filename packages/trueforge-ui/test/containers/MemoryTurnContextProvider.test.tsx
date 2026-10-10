@@ -405,6 +405,54 @@ describe('MemoryTurnContextProvider', () => {
     });
   });
 
+  it('picks up a profile that lands after the grace period when the next run polls', async () => {
+    const log = eventLog();
+    log.save('sess-1', recallContext('trn_1', { id: 'evt_01' }));
+    const api = { listMemoryTurnContext: log.listMemoryTurnContext };
+    useThreadIsRunning.mockReturnValue(true);
+    const { rerender } = render(tree(api));
+    await flush();
+
+    useThreadIsRunning.mockReturnValue(false);
+    rerender(tree(api));
+    await flush(70_000);
+    const afterGrace = log.listMemoryTurnContext.mock.calls.length;
+
+    log.save('sess-1', profileContext('trn_1', { id: 'evt_02' }));
+    await flush(60_000);
+    expect(log.listMemoryTurnContext).toHaveBeenCalledTimes(afterGrace);
+    expect(screen.getByTestId('profile-revision-trn_1')).toHaveTextContent('none');
+
+    useThreadIsRunning.mockReturnValue(true);
+    rerender(tree(api));
+    await flush(2_000);
+    expect(log.listMemoryTurnContext).toHaveBeenLastCalledWith('sess-1', { afterEventId: 'evt_01' });
+    expect(screen.getByTestId('profile-revision-trn_1')).toHaveTextContent('1');
+  });
+
+  it("starts a switched session from its own history instead of the previous session's cursor", async () => {
+    const log = eventLog();
+    log.save('sess-1', recallContext('trn_1', { id: 'evt_90' }), profileContext('trn_1', { id: 'evt_91' }));
+    log.save('sess-2', recallContext('trn_2', { id: 'evt_10' }));
+    const api = { listMemoryTurnContext: log.listMemoryTurnContext };
+    useThreadIsRunning.mockReturnValue(true);
+    const { rerender } = render(tree(api, ['trn_1', 'trn_2']));
+    await flush();
+    expect(screen.getByTestId('profile-revision-trn_1')).toHaveTextContent('1');
+
+    remoteId = 'sess-2';
+    rerender(tree(api, ['trn_1', 'trn_2']));
+    await flush();
+    expect(log.listMemoryTurnContext).toHaveBeenLastCalledWith('sess-2', undefined);
+    expect(screen.getByTestId('profile-revision-trn_1')).toHaveTextContent('none');
+
+    // evt_50 sorts below the previous session's newest event, so a carried-over cursor would hide it.
+    log.save('sess-2', profileContext('trn_2', { id: 'evt_50' }));
+    await flush(2_000);
+    expect(log.listMemoryTurnContext).toHaveBeenLastCalledWith('sess-2', { afterEventId: 'evt_10' });
+    expect(screen.getByTestId('profile-revision-trn_2')).toHaveTextContent('1');
+  });
+
   it('keeps a full read queued behind a slow poll from being downgraded by a later poll tick', async () => {
     useThreadIsRunning.mockReturnValue(true);
     let release: (items: MemoryTurnContext[]) => void = () => {};

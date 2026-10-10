@@ -40,6 +40,7 @@ import { createPostgresTestDatabase, type PostgresTestDatabase } from '../../db/
 type SessionStore = ISessionStore<SessionCustom, TurnCustom>;
 
 const SESSION_ID = 'events-session';
+const OTHER_SESSION_ID = 'other-session';
 
 interface Backend {
   name: string;
@@ -132,11 +133,10 @@ function profileLearned(revision: number): PersistedTurnEvent {
   });
 }
 
-/** t1 and t2 done, t3 still running; every turn carries one learned-profile row among its events. */
-async function seedSession(store: SessionStore) {
+async function createSession({ store, sessionId }: { store: SessionStore; sessionId: string }) {
   await store.createSession({
     tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id,
-    session_id: SESSION_ID,
+    session_id: sessionId,
     created_by_subject: {
       subject_id: STANDALONE_REQUEST_CONTEXT.subject.id,
       subject_type: STANDALONE_REQUEST_CONTEXT.subject.type,
@@ -148,6 +148,11 @@ async function seedSession(store: SessionStore) {
     external_id: null,
     source: null,
   });
+}
+
+/** t1 and t2 done, t3 still running; every turn carries one learned-profile row among its events. */
+async function seedSession(store: SessionStore) {
+  await createSession({ store, sessionId: SESSION_ID });
   const turnIds = ['t1', 't2', 't3'];
   for (const [index, turnId] of turnIds.entries()) {
     const previousTurnId = turnIds[index - 1];
@@ -178,6 +183,15 @@ async function seedSession(store: SessionStore) {
       });
     }
   }
+}
+
+/** A second session with one turn of its own, whose events must never surface through `SESSION_ID`. */
+async function seedOtherSession(store: SessionStore) {
+  await createSession({ store, sessionId: OTHER_SESSION_ID });
+  await store.createTurn(makeCreateTurnInput<TurnCustom>({ sessionId: OTHER_SESSION_ID, turnId: 'other-1' }));
+  const events = [makeTurnCreatedEvent('other-1'), profileLearned(9)];
+  await store.appendToEvents({ session_id: OTHER_SESSION_ID, turn_id: 'other-1', events });
+  return events;
 }
 
 type Row = { turn_id: string; type: string; id: string };
@@ -313,5 +327,29 @@ describe.each(backends)('GET /sessions/{session_id}/events on $name', backend =>
 
     expect((await listPage(app, `after_event_id=${'0'.repeat(MAX_EVENT_ID_LENGTH)}`)).status).toBe(200);
     expect((await listPage(app, `after_event_id=${'0'.repeat(MAX_EVENT_ID_LENGTH + 1)}`)).status).toBe(400);
+  });
+
+  it("answers another session's page token with a 404 that reveals none of its events", async () => {
+    await seedOtherSession(store);
+    const otherPage = await app.request(`/${OTHER_SESSION_ID}/events?limit=1`);
+    const otherToken = ListSessionEventsResponseSchema.parse(await otherPage.json()).pagination.next_page_token;
+    expect(otherToken).toBeDefined();
+
+    const response = await app.request(`/${SESSION_ID}/events?page_token=${otherToken ?? ''}`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: { message: 'Turn not found: other-1' } });
+  });
+
+  it("lists none of another session's events for an event id taken from it", async () => {
+    const [firstOtherEvent] = await seedOtherSession(store);
+    const cursor = firstOtherEvent?.id ?? '';
+    expect(cursor).not.toBe('');
+    // The foreign id is only a lower bound: this session's newer event comes back, the other's do not.
+    const newer = makeModelMessageEvent();
+    await store.appendToEvents({ session_id: SESSION_ID, turn_id: 't3', events: [newer] });
+
+    const page = await listPage(app, `after_event_id=${cursor}`);
+    expect(page.status).toBe(200);
+    expect(page.rows).toEqual([{ turn_id: 't3', type: newer.type, id: newer.id }]);
   });
 });

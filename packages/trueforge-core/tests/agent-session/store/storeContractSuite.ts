@@ -4314,6 +4314,47 @@ export function runStoreContractSuite<
         ).rejects.toBeInstanceOf(SessionStoreConflictError);
       }
     });
+
+    it("listSessionEvents rejects another session's page token as an unknown turn", async () => {
+      const store = createStore();
+      await seedEventChain(store);
+      const otherSessionId = 's2';
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: otherSessionId,
+        created_by_subject: { subject_id: createdBy, subject_type: 'user', subject_display_name: createdBy },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+      await store.createTurn(makeCreateTurnInput({ sessionId: otherSessionId, turnId: 'other-1' }));
+      await store.appendToEvents({
+        session_id: otherSessionId,
+        turn_id: 'other-1',
+        events: [makeTurnCreatedEvent('other-1'), makeModelMessageEvent()],
+      });
+      const otherPage = await store.listSessionEvents({
+        session_id: otherSessionId,
+        limit: 1,
+        last_turn_id: undefined,
+        page_token: undefined,
+        types: undefined,
+        after_event_id: undefined,
+      });
+
+      await expect(
+        store.listSessionEvents({
+          session_id: sessionId,
+          limit: 10,
+          last_turn_id: undefined,
+          page_token: mustGet(otherPage.pagination.next_page_token),
+          types: undefined,
+          after_event_id: undefined,
+        }),
+      ).rejects.toBeInstanceOf(TurnNotFoundError);
+    });
   });
 
   describe('deep-copy boundary', () => {
