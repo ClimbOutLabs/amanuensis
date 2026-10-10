@@ -85,6 +85,8 @@ function memoryRecallResponse(body: unknown = { results: [], entities: {} }, sta
  */
 let hindsightRecall: () => Response | Promise<Response> = () => memoryRecallResponse();
 const hindsightRecallCalls: string[] = [];
+/** The request options each save-time check was dialed with, in order. */
+const hindsightRecallInits: (RequestInit | undefined)[] = [];
 
 function wrapManifest(manifest: unknown) {
   return { manifest };
@@ -134,6 +136,7 @@ describe('mcp-servers routers', () => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       if (url === HINDSIGHT_RECALL_URL) {
         hindsightRecallCalls.push(url);
+        hindsightRecallInits.push(init);
         return await hindsightRecall();
       }
       if (new URL(url).hostname === '127.0.0.1') {
@@ -1364,6 +1367,37 @@ describe('mcp-servers routers', () => {
       });
       expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'hindsight-create-401' })).toBeUndefined();
     });
+
+    it.each([
+      ['PUT', putInit],
+      ['POST', postInit],
+    ])(
+      'rejects a %s whose provider answers the check with a redirect, and does not follow it',
+      async (method, init) => {
+        hindsightRecall = () =>
+          new Response(null, {
+            status: 308,
+            headers: { location: 'https://other.example.com/v1/default/banks/aman/memories/recall?key=hunter2' },
+          });
+        const name = `hindsight-redirect-${method.toLowerCase()}`;
+        const dialed = hindsightRecallInits.length;
+
+        const response = await settingsRouter.request(
+          '/',
+          init(wrapManifest(hindsightManifest(name, { memory_provider: true }))),
+        );
+
+        expect(response.status).toBe(422);
+        expect(await response.json()).toEqual({
+          error: {
+            message:
+              'memory provider check failed: recall returned HTTP 308, a redirect to https://other.example.com; redirects are not followed',
+          },
+        });
+        expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name })).toBeUndefined();
+        expect(hindsightRecallInits.slice(dialed)).toEqual([expect.objectContaining({ redirect: 'manual' })]);
+      },
+    );
 
     it('leaves an existing provider untouched when a later edit fails the check', async () => {
       const enable = await settingsRouter.request(

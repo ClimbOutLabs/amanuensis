@@ -449,6 +449,53 @@ describe('approval gate over an inert connector', () => {
       TURN_TIMEOUT_MS,
     );
 
+    it(
+      'refuses a listed origin that answers with a redirect to another host, so the tool never runs there',
+      async () => {
+        // An origin the operator never listed, which would serve the same routes if it were followed.
+        const elsewhere = await startInertMcpServer();
+        try {
+          server.mcp.redirectAllTo({ to: elsewhere.origin, status: 302 });
+          const sessionId = await createSession(server, firstPartyAgentSpec());
+          const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+
+          expect(turn.state).toMatchObject({
+            status: 'error',
+            message: `Failed to connect to remote MCP server '${INERT_MEMORY_SERVER_NAME}': server answered HTTP 302 with a redirect to ${elsewhere.origin}, and this connection does not follow redirects`,
+          });
+          expect(server.mcp.askMemoryInvocations()).toBe(0);
+          expect(elsewhere.requestsSeen()).toBe(0);
+          expect(elsewhere.askMemoryInvocations()).toBe(0);
+        } finally {
+          await elsewhere.close();
+        }
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'refuses the same redirect when the connector page tests the connection',
+      async () => {
+        const elsewhere = await startInertMcpServer();
+        try {
+          // A 307 keeps the request, so following it would have reached a server that answers.
+          server.mcp.redirectAllTo({ to: elsewhere.origin, status: 307 });
+          const response = await server.request(`/api/v1/mcp-servers/${INERT_MEMORY_SERVER_NAME}/tools`);
+
+          expect(response.status).toBe(502);
+          expect(await response.json()).toEqual({
+            error: {
+              message: `Failed to connect to remote MCP server '${INERT_MEMORY_SERVER_NAME}': server answered HTTP 307 with a redirect to ${elsewhere.origin}, and this connection does not follow redirects`,
+            },
+          });
+          expect(elsewhere.requestsSeen()).toBe(0);
+        } finally {
+          await elsewhere.close();
+        }
+      },
+      TURN_TIMEOUT_MS,
+    );
+
     // Last in this block: it repoints the shared connector, then restores it through setup.
     it(
       'keeps trust on another bank of the same origin, and asks once the connector moves to an origin the operator did not list',

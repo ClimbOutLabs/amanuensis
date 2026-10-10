@@ -85,6 +85,13 @@ export interface WriteHold {
   release: () => void;
 }
 
+/** A redirect for `InertMcpServer.redirectAllTo`. */
+export interface InertRedirect {
+  /** Origin the redirect points at. The request's own path is appended, so that origin serves the same route. */
+  to: string;
+  status: 301 | 302 | 303 | 307 | 308;
+}
+
 export interface InertMcpServer {
   /** Streamable HTTP endpoint to register as the connector `url`. Stable across `stop`/`start`. */
   url: string;
@@ -99,8 +106,18 @@ export interface InertMcpServer {
   unannotatedInvocations: () => number;
   askMemoryInvocations: () => number;
   searchMemoryInvocations: () => number;
-  /** Resets every invocation counter and the last `Authorization` value, and returns both memory tools to `'result'` mode. */
+  /**
+   * Resets every invocation counter, the request count and the last `Authorization` value, drops
+   * any redirect, and returns both memory tools to `'result'` mode.
+   */
   resetInvocations: () => void;
+  /**
+   * While set, every request is answered with this redirect instead of its normal reply: an
+   * origin that points somewhere else. Pass `undefined` to serve normally again.
+   */
+  redirectAllTo: (redirect: InertRedirect | undefined) => void;
+  /** HTTP requests received since the last reset, whatever they were answered with. */
+  requestsSeen: () => number;
   /** Parks the next write invocation so a turn can be cancelled mid-execution. */
   holdNextWrite: () => WriteHold;
   /** Refuses every request until {@link InertMcpServer.restore}, severing an in-flight submission. */
@@ -340,6 +357,8 @@ export async function startInertMcpServer(): Promise<InertMcpServer> {
   const gates: WriteGate[] = [];
   const transports = new Map<string, StreamableHTTPServerTransport>();
   let severed = false;
+  let redirect: InertRedirect | undefined;
+  let requestCount = 0;
   let lastAuthorizationHeader: string | undefined;
   let running = false;
   let boundPort: number | undefined;
@@ -351,6 +370,13 @@ export async function startInertMcpServer(): Promise<InertMcpServer> {
       lastAuthorizationHeader = authHeader;
     }
 
+    requestCount += 1;
+    if (redirect !== undefined) {
+      req.resume();
+      res.writeHead(redirect.status, { location: `${redirect.to}${req.url ?? '/'}` });
+      res.end();
+      return;
+    }
     if (severed) {
       res.writeHead(503, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'inert MCP fixture is severed' }));
@@ -472,7 +498,13 @@ export async function startInertMcpServer(): Promise<InertMcpServer> {
       memoryModes.ask = 'result';
       memoryModes.search = 'result';
       lastAuthorizationHeader = undefined;
+      requestCount = 0;
+      redirect = undefined;
     },
+    redirectAllTo: next => {
+      redirect = next;
+    },
+    requestsSeen: () => requestCount,
     holdNextWrite: () => {
       const entered: PromiseWithResolvers<void> = Promise.withResolvers();
       const released: PromiseWithResolvers<void> = Promise.withResolvers();

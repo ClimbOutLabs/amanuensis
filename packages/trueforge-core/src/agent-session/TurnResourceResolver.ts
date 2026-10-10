@@ -324,6 +324,8 @@ export class TurnResourceResolver<
               sessionId: previousTurn?.snapshot.mcp_servers?.[entry.name]?.session_id,
               requestTimeoutMs: this.deps.mcpRequestTimeoutMs,
               connectTimeoutMs: this.deps.mcpConnectTimeoutMs,
+              // A vouched-for connector must not hand its trust to wherever it redirects.
+              refuseRedirects: first_party === true,
               logger: this.deps.logger,
               tracing,
               signal,

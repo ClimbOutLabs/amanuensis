@@ -86,6 +86,10 @@ async function tierOf(toolSets: readonly IToolSet[], serverName: string): Promis
 }
 
 describe('TurnResourceResolver first-party connectors', () => {
+  beforeEach(() => {
+    mockConnect.mockClear();
+  });
+
   it('runs a closed-world read at Tier 1 only on the connectors the host reports as first-party', async () => {
     const toolSets = await resolveToolSets(makeResolver(['memory']));
 
@@ -98,6 +102,16 @@ describe('TurnResourceResolver first-party connectors', () => {
 
     expect(await tierOf(toolSets, 'memory')).toBe(3);
     expect(await tierOf(toolSets, 'notes')).toBe(3);
+  });
+
+  it('connects a first-party connector without following redirects, and every other one as before', async () => {
+    const toolSets = await resolveToolSets(makeResolver(['memory']));
+    await tierOf(toolSets, 'memory');
+    await tierOf(toolSets, 'notes');
+
+    const refusesRedirects = new Map(mockConnect.mock.calls.map(([params]) => [params.url, params.refuseRedirects]));
+    expect(refusesRedirects.get('https://memory.example.com/mcp')).toBe(true);
+    expect(refusesRedirects.get('https://notes.example.com/mcp')).toBe(false);
   });
 
   it('keeps the marker when another thread of the same turn mounts the shared connection', async () => {

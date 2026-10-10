@@ -96,6 +96,13 @@ closed-world (`readOnlyHint` true and `openWorldHint` false) runs without an app
 card, and each run is recorded in the audit log. Everything else keeps asking,
 including a tool that leaves `openWorldHint` out, since an absent hint means open-world.
 
+A first-party connection does not follow redirects, and neither does the check above. A
+provider whose URL answers with a 3xx (for example `http` redirecting to `https`, or a
+trailing slash) fails the check with "recall returned HTTP 308, a redirect to ...", and a
+saved first-party connector that starts redirecting fails its turns with "server answered
+HTTP 302 with a redirect to ...", so that a listed origin cannot hand its mark to another
+host. Save the address that serves the provider directly.
+
 Every save decides the mark afresh. A provider on an origin that is not listed stays
 a user-added connector whatever its URL looks like: another port, `http` instead of
 `https`, a longer host name, or an `@` in the URL each name a different origin. Adding
