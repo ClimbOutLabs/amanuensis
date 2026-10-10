@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import type { Stats } from 'node:fs';
 import { chmod, chown, lstat, mkdir, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { runCodeProgramName, type RunCodeLanguage, type SandboxIdentity } from './IsolationDriver';
@@ -165,32 +166,47 @@ export function measureRunDiskUsage(input: { scratchDir: string; egressDir: stri
   });
 }
 
+/** The entry as lstat last saw it, still a real dir or file at the same inode; undefined when it changed. */
+async function stillSame(path: string, seen: Stats): Promise<Stats | undefined> {
+  const now = await lstat(path).catch(() => undefined);
+  const unchanged = now?.dev === seen.dev && now.ino === seen.ino;
+  return unchanged && (now.isDirectory() || now.isFile()) ? now : undefined;
+}
+
 /**
  * Gives the owner back rwx on dirs and rw on files so a tree whose permissions
- * sandbox code stripped can be deleted. Symlinks are skipped, never followed.
- * Best-effort: the removal that follows reports anything still stuck.
+ * sandbox code stripped can be deleted. Only real dirs and files are touched:
+ * chmod and readdir follow symlinks, so each entry is re-checked with lstat right
+ * before it is used. Best-effort: the removal that follows reports anything still stuck.
  */
 async function restoreOwnerAccess(path: string): Promise<void> {
-  const info = await lstat(path).catch(() => undefined);
-  if (info === undefined || info.isSymbolicLink()) {
+  const seen = await lstat(path).catch(() => undefined);
+  if (seen === undefined || (!seen.isDirectory() && !seen.isFile())) {
     return;
   }
-  if (info.isFile()) {
-    await chmod(path, (info.mode & 0o7777) | 0o600).catch(() => undefined);
+  const beforeChmod = await stillSame(path, seen);
+  if (beforeChmod === undefined) {
     return;
   }
-  if (!info.isDirectory()) {
+  await chmod(path, (beforeChmod.mode & 0o7777) | (beforeChmod.isDirectory() ? 0o700 : 0o600)).catch(() => undefined);
+  if (!beforeChmod.isDirectory() || (await stillSame(path, seen)) === undefined) {
     return;
   }
-  await chmod(path, (info.mode & 0o7777) | 0o700).catch(() => undefined);
   const names = await readdir(path).catch(() => []);
   for (const name of names) {
     await restoreOwnerAccess(join(path, name));
   }
 }
 
-/** Deletes a run tree after restoring owner access; throws when the removal fails. */
-export async function removeRunTree(runRoot: string): Promise<void> {
-  await restoreOwnerAccess(runRoot);
+/**
+ * Deletes a run tree. Owner access is restored first only when the run's
+ * container is confirmed stopped and removed: while it may be alive, sandbox
+ * code could swap entries for symlinks between the check and the chmod. A tree
+ * whose removal then fails stays for the reaper; throws when the removal fails.
+ */
+export async function removeRunTree({ runRoot, runStopped }: { runRoot: string; runStopped: boolean }): Promise<void> {
+  if (runStopped) {
+    await restoreOwnerAccess(runRoot);
+  }
   await rm(runRoot, { recursive: true, force: true });
 }

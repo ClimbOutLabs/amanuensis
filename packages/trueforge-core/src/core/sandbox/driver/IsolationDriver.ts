@@ -142,6 +142,12 @@ export interface IsolationDriver {
   /** One execution. The driver owns ALL isolation; the wrapper owns contract + bounds. */
   run(params: DriverRunParams): Promise<DriverRunResult>;
   /**
+   * True only when no container or VM for this run exists any more. False when
+   * one is still there or the answer could not be confirmed; the wrapper
+   * touches a run tree's permissions only after a true.
+   */
+  isRunGone(runId: string): Promise<boolean>;
+  /**
    * Reaper support: kill labeled containers/VMs older than the abandon
    * deadline. Called on the 5-minute cadence and at startup (crash recovery).
    */

@@ -57,6 +57,16 @@ class FakeDriver implements IsolationDriver {
     return Promise.resolve();
   }
 
+  /** What isRunGone confirms; tests set false for a run whose container may still be alive. */
+  runsGone = true;
+
+  goneChecks: string[] = [];
+
+  isRunGone(runId: string): Promise<boolean> {
+    this.goneChecks.push(runId);
+    return Promise.resolve(this.runsGone);
+  }
+
   dispose(): Promise<void> {
     this.disposed = true;
     return Promise.resolve();
@@ -355,6 +365,68 @@ describe('RunCodeService', () => {
     const result = await service.runCode(VALID_INPUT);
     expect(result.status).toBe('ok');
     expect(await readdir(join(dataDir, 'sandbox-runs'))).toEqual([]);
+  });
+
+  describe('restoring permissions before the run root is deleted', () => {
+    const fsPromises: typeof import('node:fs/promises') = jest.requireActual('node:fs/promises');
+    let chmodSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      chmodSpy = jest.spyOn(fsPromises, 'chmod');
+    });
+
+    afterEach(() => {
+      chmodSpy.mockRestore();
+    });
+
+    const stageStaleRun = async (): Promise<string> => {
+      const staleRun = join(dataDir, 'sandbox-runs', 'stalerun');
+      await mkdir(join(staleRun, 'scratch'), { recursive: true });
+      const twoHoursAgo = new Date(Date.now() - 2 * 3600 * 1000);
+      await utimes(staleRun, twoHoursAgo, twoHoursAgo);
+      return staleRun;
+    };
+
+    it('restores them once the driver confirms the run is gone', async () => {
+      const result = await service.runCode(VALID_INPUT);
+      expect(result.status).toBe('ok');
+      expect(chmodSpy).toHaveBeenCalled();
+      expect(await readdir(join(dataDir, 'sandbox-runs'))).toEqual([]);
+    });
+
+    it('leaves them alone, but still deletes, while the run may be alive', async () => {
+      driver.runsGone = false;
+      const result = await service.runCode(VALID_INPUT);
+      expect(result.status).toBe('ok');
+      expect(chmodSpy).not.toHaveBeenCalled();
+      expect(await readdir(join(dataDir, 'sandbox-runs'))).toEqual([]);
+    });
+
+    it('asks the driver about the run it is cleaning up', async () => {
+      await service.runCode(VALID_INPUT);
+      expect(driver.goneChecks).toEqual([driver.runs[0]?.runId]);
+    });
+
+    it('treats a driver that cannot answer as not gone', async () => {
+      driver.isRunGone = () => Promise.reject(new Error('daemon down'));
+      const result = await service.runCode(VALID_INPUT);
+      expect(result.status).toBe('ok');
+      expect(chmodSpy).not.toHaveBeenCalled();
+    });
+
+    it('sweeps a stale run dir without restoring while the run may be alive', async () => {
+      const staleRun = await stageStaleRun();
+      driver.runsGone = false;
+      await service.reap();
+      expect(chmodSpy).not.toHaveBeenCalled();
+      await expect(readdir(staleRun)).rejects.toThrow();
+    });
+
+    it('sweeps a stale run dir with restoring once the run is gone', async () => {
+      const staleRun = await stageStaleRun();
+      await service.reap();
+      expect(chmodSpy).toHaveBeenCalledWith(staleRun, expect.anything());
+    });
   });
 
   it('reports a completed non-zero exit verbatim as ok, not as an infra failure', async () => {

@@ -33,6 +33,12 @@ const execFileAsync = promisify(execFileCallback);
 
 /** Label selecting sandbox run containers for the reaper. */
 const SANDBOX_RUN_LABEL = 'tf.sandbox.run';
+
+/** The `key=value` label that ties a container to its run; the value is made label-safe. */
+function runLabel(runId: string): string {
+  return `${SANDBOX_RUN_LABEL}=${runId.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
+}
+
 /** Label for the transient wedged-daemon probe container. */
 const PROBE_LABEL = 'tf.sandbox.probe';
 /** Readiness canary: a python program touching every mount the way a real run does. */
@@ -185,9 +191,15 @@ function errorText(error: unknown): string {
 }
 
 /** Deletes the canary run root; the server must be able to remove what the container wrote. */
-async function removeCanaryRoot(runRoot: string): Promise<string | undefined> {
+async function removeCanaryRoot({
+  runRoot,
+  runStopped,
+}: {
+  runRoot: string;
+  runStopped: boolean;
+}): Promise<string | undefined> {
   try {
-    await removeRunTree(runRoot);
+    await removeRunTree({ runRoot, runStopped });
   } catch (error: unknown) {
     return `the host could not remove the run directory: ${errorText(error)}`;
   }
@@ -725,6 +737,19 @@ export class DockerDriver implements IsolationDriver {
     return result;
   }
 
+  async isRunGone(runId: string): Promise<boolean> {
+    try {
+      const ps = await this.runner.run(
+        this.dockerBinary,
+        ['ps', '-a', '--filter', `label=${runLabel(runId)}`, '--format', '{{.ID}}'],
+        { timeoutMs: this.commandTimeoutMs, signal: undefined },
+      );
+      return !ps.timedOut && ps.exitCode === 0 && ps.stdout.trim().length === 0;
+    } catch {
+      return false;
+    }
+  }
+
   /** Reaper support: remove labeled containers older than 30 minutes. */
   async reapStale(): Promise<void> {
     const ps = await this.runner.run(
@@ -850,7 +875,6 @@ export class DockerDriver implements IsolationDriver {
    * in config. Curated env only — the host process env never passes through.
    */
   private async createContainer(params: DriverRunParams): Promise<string> {
-    const safeRunId = params.runId.replace(/[^a-zA-Z0-9_.-]/g, '_');
     const envArgs = Object.entries(params.env).flatMap(([key, value]: [string, string]) => ['-e', `${key}=${value}`]);
     const args = [
       'create',
@@ -889,7 +913,7 @@ export class DockerDriver implements IsolationDriver {
       '--log-opt',
       'max-file=2',
       '--label',
-      `${SANDBOX_RUN_LABEL}=${safeRunId}`,
+      runLabel(params.runId),
       '-v',
       `${params.ingressDir}:/ingress:ro`,
       '-v',
@@ -1052,7 +1076,7 @@ export class DockerDriver implements IsolationDriver {
     const runRoot = join(sandboxRunsDir(this.dataDir), runId);
     const canaryProblem = await this.runCanary({ runId, runRoot, token, identity, signal });
     // Always clean up: a failed canary must not leave container-written files behind.
-    const cleanupProblem = await removeCanaryRoot(runRoot);
+    const cleanupProblem = await removeCanaryRoot({ runRoot, runStopped: await this.isRunGone(runId) });
     const problem = canaryProblem ?? cleanupProblem;
     if (problem === undefined) {
       return { ok: true };

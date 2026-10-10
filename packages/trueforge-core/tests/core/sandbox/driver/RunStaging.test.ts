@@ -185,6 +185,7 @@ describe('measureRunDiskUsage', () => {
 });
 
 describe('removeRunTree', () => {
+  const fsPromises: typeof import('node:fs/promises') = jest.requireActual('node:fs/promises');
   let root: string;
 
   beforeEach(async () => {
@@ -192,6 +193,7 @@ describe('removeRunTree', () => {
   });
 
   afterEach(async () => {
+    jest.restoreAllMocks();
     await rm(root, { recursive: true, force: true });
   });
 
@@ -208,8 +210,34 @@ describe('removeRunTree', () => {
     await chmod(join(runRoot, 'egress', 'no-access'), 0o000);
     await chmod(join(runRoot, 'egress'), 0o500);
 
-    await removeRunTree(runRoot);
+    await removeRunTree({ runRoot, runStopped: true });
 
+    await expect(stat(runRoot)).rejects.toHaveProperty('code', 'ENOENT');
+  });
+
+  it('gives the owner access back to dirs and files once the run is stopped', async () => {
+    const runRoot = join(root, 'run');
+    await mkdir(join(runRoot, 'locked'), { recursive: true });
+    await writeFile(join(runRoot, 'locked', 'f'), 'x');
+    await chmod(join(runRoot, 'locked', 'f'), 0o000);
+    await chmod(join(runRoot, 'locked'), 0o000);
+    const chmodSpy = jest.spyOn(fsPromises, 'chmod');
+
+    await removeRunTree({ runRoot, runStopped: true });
+
+    expect(chmodSpy).toHaveBeenCalledWith(join(runRoot, 'locked'), 0o700);
+    expect(chmodSpy).toHaveBeenCalledWith(join(runRoot, 'locked', 'f'), 0o600);
+  });
+
+  it('leaves permissions alone while the run may still be alive', async () => {
+    const runRoot = join(root, 'run');
+    await mkdir(join(runRoot, 'locked'), { recursive: true });
+    await writeFile(join(runRoot, 'locked', 'f'), 'x');
+    const chmodSpy = jest.spyOn(fsPromises, 'chmod');
+
+    await removeRunTree({ runRoot, runStopped: false });
+
+    expect(chmodSpy).not.toHaveBeenCalled();
     await expect(stat(runRoot)).rejects.toHaveProperty('code', 'ENOENT');
   });
 
@@ -223,7 +251,7 @@ describe('removeRunTree', () => {
     await mkdir(runRoot);
     await symlink(outside, join(runRoot, 'link'));
 
-    await removeRunTree(runRoot);
+    await removeRunTree({ runRoot, runStopped: true });
 
     await expect(stat(runRoot)).rejects.toHaveProperty('code', 'ENOENT');
     expect((await stat(outside)).mode & 0o777).toBe(0o500);
@@ -231,7 +259,75 @@ describe('removeRunTree', () => {
     await chmod(outside, 0o700);
   });
 
+  describe('when an entry is swapped for another between the check and its use', () => {
+    const swappedFor = async (target: string) => {
+      const outside = join(root, 'outside');
+      await mkdir(outside);
+      await symlink(outside, target);
+      return { outside, linkStats: await fsPromises.lstat(target) };
+    };
+
+    /** The first lstat of `path` sees the real entry; every later one sees `after`. */
+    const swapAfterFirstLstat = (input: { path: string; after: Awaited<ReturnType<typeof fsPromises.lstat>> }) => {
+      let seen = 0;
+      const realLstat = fsPromises.lstat;
+      jest.spyOn(fsPromises, 'lstat').mockImplementation(async path => {
+        if (path === input.path) {
+          seen += 1;
+          if (seen > 1) {
+            return input.after;
+          }
+        }
+        return realLstat(path);
+      });
+    };
+
+    it('does not chmod a file that became a symlink', async () => {
+      const runRoot = join(root, 'run');
+      await mkdir(runRoot);
+      const file = join(runRoot, 'f');
+      await writeFile(file, 'x');
+      const { linkStats } = await swappedFor(join(root, 'link'));
+      swapAfterFirstLstat({ path: file, after: linkStats });
+      const chmodSpy = jest.spyOn(fsPromises, 'chmod');
+
+      await removeRunTree({ runRoot, runStopped: true });
+
+      expect(chmodSpy).not.toHaveBeenCalledWith(file, expect.anything());
+    });
+
+    it('does not chmod or list a dir that became a symlink', async () => {
+      const runRoot = join(root, 'run');
+      const dir = join(runRoot, 'd');
+      await mkdir(dir, { recursive: true });
+      const { linkStats } = await swappedFor(join(root, 'link'));
+      swapAfterFirstLstat({ path: dir, after: linkStats });
+      const chmodSpy = jest.spyOn(fsPromises, 'chmod');
+      const readdirSpy = jest.spyOn(fsPromises, 'readdir');
+
+      await removeRunTree({ runRoot, runStopped: true });
+
+      expect(chmodSpy).not.toHaveBeenCalledWith(dir, expect.anything());
+      expect(readdirSpy).not.toHaveBeenCalledWith(dir);
+    });
+
+    it('does not chmod a file replaced by a different file', async () => {
+      const runRoot = join(root, 'run');
+      await mkdir(runRoot);
+      const file = join(runRoot, 'f');
+      const other = join(root, 'other');
+      await writeFile(file, 'x');
+      await writeFile(other, 'y');
+      swapAfterFirstLstat({ path: file, after: await fsPromises.lstat(other) });
+      const chmodSpy = jest.spyOn(fsPromises, 'chmod');
+
+      await removeRunTree({ runRoot, runStopped: true });
+
+      expect(chmodSpy).not.toHaveBeenCalledWith(file, expect.anything());
+    });
+  });
+
   it('is a no-op for a root that does not exist', async () => {
-    await expect(removeRunTree(join(root, 'missing'))).resolves.toBeUndefined();
+    await expect(removeRunTree({ runRoot: join(root, 'missing'), runStopped: true })).resolves.toBeUndefined();
   });
 });

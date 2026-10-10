@@ -408,7 +408,7 @@ export class RunCodeService implements RunCodeBackend {
       });
     } finally {
       this.activeRuns -= 1;
-      await this.removeRunRoot(runRoot);
+      await this.removeRunRoot({ runId, runRoot });
     }
   }
 
@@ -931,7 +931,7 @@ export class RunCodeService implements RunCodeBackend {
       try {
         const fileStat = await stat(path);
         if (fileStat.mtimeMs < cutoff) {
-          await removeRunTree(path);
+          await removeRunTree({ runRoot: path, runStopped: await this.isRunGone(entry.name) });
         }
       } catch {
         // Best-effort sweep; a racing run dir is left for the next pass.
@@ -939,9 +939,18 @@ export class RunCodeService implements RunCodeBackend {
     }
   }
 
-  private async removeRunRoot(runRoot: string): Promise<void> {
+  /** A driver that cannot answer counts as "not gone": the tree's permissions are then left alone. */
+  private async isRunGone(runId: string): Promise<boolean> {
     try {
-      await removeRunTree(runRoot);
+      return await this.driver.isRunGone(runId);
+    } catch {
+      return false;
+    }
+  }
+
+  private async removeRunRoot({ runId, runRoot }: { runId: string; runRoot: string }): Promise<void> {
+    try {
+      await removeRunTree({ runRoot, runStopped: await this.isRunGone(runId) });
     } catch (error) {
       this.logger.warn('run_code run-root cleanup failed; left for the reaper', {
         runRoot,

@@ -183,6 +183,9 @@ function scriptReadyPath(runner: FakeRunner, digest = DIGEST, containers = new F
     if (binary === 'docker' && (args[0] === 'rm' || args[0] === 'kill')) {
       return okResult;
     }
+    if (binary === 'docker' && args[0] === 'ps') {
+      return okResult;
+    }
     throw new Error(`unexpected call: ${binary} ${args.join(' ')}`);
   };
 }
@@ -1045,6 +1048,74 @@ describe('DockerDriver.reapStale', () => {
     runner.runHandler = () => ({ ...okResult, exitCode: 1, stderr: 'daemon down' });
     const driver = new DockerDriver(driverOptions(), runner);
     await expect(driver.reapStale()).resolves.toBeUndefined();
+  });
+});
+
+describe('DockerDriver.isRunGone', () => {
+  const gone = async (result: DockerCommandResult | Error): Promise<boolean> => {
+    const runner = new FakeRunner();
+    runner.runHandler = () => {
+      if (result instanceof Error) {
+        throw result;
+      }
+      return result;
+    };
+    return new DockerDriver(driverOptions(), runner).isRunGone('run-1');
+  };
+
+  test('asks for containers of that run in any state, under the label the run was created with', async () => {
+    const runner = new FakeRunner();
+    await new DockerDriver(driverOptions(), runner).isRunGone('run/1 x');
+    expect(runner.callsFor('ps')[0]?.args).toEqual([
+      'ps',
+      '-a',
+      '--filter',
+      'label=tf.sandbox.run=run_1_x',
+      '--format',
+      '{{.ID}}',
+    ]);
+  });
+
+  test('is gone when no container carries the label', async () => {
+    await expect(gone(okResult)).resolves.toBe(true);
+  });
+
+  test('is not gone while a container still carries the label', async () => {
+    await expect(gone({ ...okResult, stdout: 'abc123\n' })).resolves.toBe(false);
+  });
+
+  test.each([
+    ['the query fails', { ...okResult, exitCode: 1, stderr: 'daemon down' }],
+    ['the query times out', { ...okResult, timedOut: true }],
+    ['the runner throws', new Error('spawn failed')],
+  ])('is not gone when %s, because it cannot be confirmed', async (_name, result) => {
+    await expect(gone(result)).resolves.toBe(false);
+  });
+});
+
+describe('DockerDriver.ensureReady canary cleanup', () => {
+  const fsPromises: typeof import('node:fs/promises') = jest.requireActual('node:fs/promises');
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const readyWithPs = async (psStdout: string): Promise<jest.SpyInstance> => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const ready = runner.runHandler;
+    runner.runHandler = (binary, args) => (args[0] === 'ps' ? { ...okResult, stdout: psStdout } : ready(binary, args));
+    const chmodSpy = jest.spyOn(fsPromises, 'chmod');
+    await expect(new DockerDriver(driverOptions(), runner).ensureReady()).resolves.toEqual({ ready: true });
+    return chmodSpy;
+  };
+
+  test('restores permissions on the canary tree once its container is gone', async () => {
+    expect(await readyWithPs('')).toHaveBeenCalled();
+  });
+
+  test('leaves the canary tree permissions alone while its container may be alive', async () => {
+    expect(await readyWithPs('canary-container\n')).not.toHaveBeenCalled();
   });
 });
 
