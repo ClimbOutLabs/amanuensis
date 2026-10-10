@@ -509,7 +509,7 @@ export function assertOidcIssuerTransportAllowed(issuerUrl: string): void {
   if (parsed.protocol === 'https:') {
     return;
   }
-  if (parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname.replace(/^\[|\]$/g, ''))) {
+  if (parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname)) {
     return;
   }
   throw new Error('OIDC_ISSUER_URL must use https, except http on a loopback host (localhost, 127.0.0.1, ::1)');
@@ -1859,7 +1859,9 @@ function isIpv4MappedIpv6Loopback(addr: string): boolean {
  * Handles IPv6 zone IDs (e.g., ::1%eth0) by stripping them before validation.
  */
 export function isLoopbackHost(host: string): boolean {
-  const trimmed = host.trim().toLowerCase();
+  const lowered = host.trim().toLowerCase();
+  // URL hostnames and Host headers spell IPv6 literals as [::1].
+  const trimmed = lowered.startsWith('[') && lowered.endsWith(']') ? lowered.slice(1, -1) : lowered;
 
   if (trimmed === 'localhost') {
     return true;
@@ -2008,11 +2010,14 @@ if (!configuration.STANDALONE && configuration.TRUEFORGE_API_KEY.trim() === '') 
   throw new Error('TRUEFORGE_API_KEY must not be empty when STANDALONE=false.');
 }
 
+/** The settings the public URL helpers read. */
+export type PublicUrlConfig = Pick<ServerConfiguration, 'STANDALONE' | 'PORT' | 'PUBLIC_BASE_URL'>;
+
 /**
  * Effective public application URL. Empty `PUBLIC_BASE_URL` stays empty
  * (callers that need a callback origin throw).
  */
-function effectivePublicBaseUrl(config: ServerConfiguration): string {
+function effectivePublicBaseUrl(config: PublicUrlConfig): string {
   if (config.STANDALONE && config.PUBLIC_BASE_URL === '') {
     return `http://localhost:${String(config.PORT)}`;
   }
@@ -2024,7 +2029,7 @@ function effectivePublicBaseUrl(config: ServerConfiguration): string {
  * `PUBLIC_BASE_URL` when set; standalone defaults to `http://localhost:$PORT`
  * (distributed throws if empty).
  */
-export function getPublicBaseUrl(config: ServerConfiguration = configuration): string {
+export function getPublicBaseUrl(config: PublicUrlConfig = configuration): string {
   const publicBaseUrl = effectivePublicBaseUrl(config);
   if (publicBaseUrl === '') {
     throw new Error('PUBLIC_BASE_URL is required for OIDC callbacks but was empty');
@@ -2049,7 +2054,7 @@ export function getRunCodeToolCallTimeoutMs(config: ServerConfiguration = config
 }
 
 /** `/` or `/custom/proxy/path/` — trailing slash for asset URLs and the boot script. Empty → `/`. */
-export function getPublicUiBasePath(config: ServerConfiguration = configuration): string {
+export function getPublicUiBasePath(config: PublicUrlConfig = configuration): string {
   const publicBaseUrl = effectivePublicBaseUrl(config);
   if (publicBaseUrl === '') {
     return '/';

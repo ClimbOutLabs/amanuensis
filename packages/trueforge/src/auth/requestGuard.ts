@@ -58,7 +58,7 @@ export function createRequestGuardMiddleware(options: { port: number; publicBase
       const allowed =
         host !== undefined &&
         ((host.hostname === publicHost.hostname && host.port === publicHost.port) ||
-          (isLoopbackHost(host.hostname.replace(/^\[|\]$/g, '')) && host.port === instancePort));
+          (isLoopbackHost(host.hostname) && host.port === instancePort));
       if (!allowed) {
         throw new HTTPException(421, { message: 'Misdirected request: unrecognized Host' });
       }

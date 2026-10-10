@@ -139,8 +139,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      # OIDC discovery runs at startup, so with the login profile Dex must be
-      # up first. Optional: without the profile the entry is skipped.
+      # Discovery retries in the background, but starting after Dex avoids a
+      # first-request login retry page. Optional: without the profile the
+      # entry is skipped.
       dex:
         condition: service_healthy
         required: false

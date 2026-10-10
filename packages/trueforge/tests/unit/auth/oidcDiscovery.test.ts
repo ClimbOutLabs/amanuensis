@@ -181,14 +181,6 @@ describe('initOidc issuer transport', () => {
     expect(getOidcVerify()?.issuer).toBe(issuer);
   });
 
-  it('refuses a plain-http issuer on a non-loopback host without contacting it', async () => {
-    const fetchSpy = jest.fn<Promise<Response>, []>();
-    globalThis.fetch = fetchSpy;
-
-    await expect(initOidc(oidcConfig('http://login.example/dex'))).rejects.toThrow(/https, except http on a loopback/);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
   it('keeps https issuers on the strict transport (no insecure requests)', async () => {
     globalThis.fetch = () => Promise.reject(new TypeError('fetch failed'));
 

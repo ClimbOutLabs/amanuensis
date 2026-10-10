@@ -12,7 +12,7 @@ import {
   randomState,
 } from 'openid-client';
 import type { Logger } from 'winston';
-import { assertOidcIssuerTransportAllowed, getPublicBaseUrl, type OIDCConfig } from '../config';
+import { getPublicBaseUrl, type OIDCConfig } from '../config';
 import { buildAuthorizationRequestParams, type IdTokenClaims } from './claims';
 import { ID_TOKEN_COOKIE, OAUTH_STATE_COOKIE, setAuthCookie } from './cookies';
 import { assertEmailAllowed } from './emailAllowlist';
@@ -65,9 +65,8 @@ export async function initOidc(oidc: OIDCConfig | undefined): Promise<Configurat
     return undefined;
   }
 
-  assertOidcIssuerTransportAllowed(oidc.OIDC_ISSUER_URL);
   const issuer = new URL(oidc.OIDC_ISSUER_URL);
-  // Only a loopback issuer can be http (checked above); every other issuer stays https-only.
+  // Config load already limited http issuers to loopback hosts; every other issuer stays https-only.
   const client = await discovery(
     issuer,
     oidc.OIDC_CLIENT_ID,

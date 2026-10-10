@@ -7,6 +7,7 @@ import {
   parsePublicBaseUrl,
   parseTokenFactoryMode,
   TrueForgeAuthMode,
+  type PublicUrlConfig,
   type ServerConfiguration,
 } from '../../../src/config';
 import { resolveTrueFoundrySandboxProviderConfig } from '../../../src/truefoundry/resolveTrueFoundrySandboxProviderConfig';
@@ -118,36 +119,31 @@ describe('resolveTrueFoundrySandboxProviderConfig', () => {
 });
 
 describe('public base URL', () => {
-  it('honors PUBLIC_BASE_URL in production standalone', () => {
-    const config = {
-      STANDALONE: true,
-      NODE_ENV: 'production',
-      PORT: 8790,
-      PUBLIC_BASE_URL: 'https://host.example',
-    } as ServerConfiguration;
+  const urlConfig = (overrides: Partial<PublicUrlConfig>): PublicUrlConfig => ({
+    STANDALONE: true,
+    PORT: 8790,
+    PUBLIC_BASE_URL: '',
+    ...overrides,
+  });
 
-    expect(getPublicBaseUrl(config)).toBe('https://host.example');
+  it('honors PUBLIC_BASE_URL in production standalone', () => {
+    expect(getPublicBaseUrl(urlConfig({ PUBLIC_BASE_URL: 'https://host.example' }))).toBe('https://host.example');
   });
 
   it('defaults to the loopback address in standalone when unset', () => {
-    const config = { STANDALONE: true, NODE_ENV: 'production', PORT: 8123, PUBLIC_BASE_URL: '' } as ServerConfiguration;
+    const config = urlConfig({ PORT: 8123 });
 
     expect(getPublicBaseUrl(config)).toBe('http://localhost:8123');
     expect(getPublicUiBasePath(config)).toBe('/');
   });
 
   it('still requires PUBLIC_BASE_URL in distributed mode', () => {
-    const config = { STANDALONE: false, PORT: 8790, PUBLIC_BASE_URL: '' } as ServerConfiguration;
-
-    expect(() => getPublicBaseUrl(config)).toThrow(/PUBLIC_BASE_URL is required/);
+    expect(() => getPublicBaseUrl(urlConfig({ STANDALONE: false }))).toThrow(/PUBLIC_BASE_URL is required/);
   });
 
   it('honors the PUBLIC_BASE_URL pathname in distributed mode', () => {
     expect(
-      getPublicUiBasePath({
-        STANDALONE: false,
-        PUBLIC_BASE_URL: 'https://host.example/custom/proxy/path',
-      } as ServerConfiguration),
+      getPublicUiBasePath(urlConfig({ STANDALONE: false, PUBLIC_BASE_URL: 'https://host.example/custom/proxy/path' })),
     ).toBe('/custom/proxy/path/');
   });
 });
@@ -198,6 +194,8 @@ describe('isLoopbackHost', () => {
       '127.0.1.2',
       '127.255.255.255',
       '::1',
+      '[::1]',
+      '[LOCALHOST]',
       '0:0:0:0:0:0:0:1',
       '::ffff:127.0.0.1',
       '::ffff:127.255.255.255',
@@ -231,6 +229,14 @@ describe('isLoopbackHost', () => {
       '127.foo.bar',
       '127.256.0.1',
       '127.0.0',
+      'localhost.evil.com',
+      '127.0.0.1@evil.com',
+      '[::1]x',
+      'x[::1]',
+      '[127.0.0.1',
+      '[localhost.evil.com]',
+      'foo.localhost',
+      'localhost:8790',
     ])('treats %s as a network listener', host => {
       expect(isLoopbackHost(host)).toBe(false);
     });
