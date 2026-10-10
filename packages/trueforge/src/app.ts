@@ -7,7 +7,6 @@ import type { RequestReplyRouter } from '@truefoundry/trueforge-core/request-rep
 import type { Context, ErrorHandler, MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
-import type { Configuration } from 'openid-client';
 import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 import { createAgentImportRouter } from './apis/agentImport';
@@ -43,6 +42,7 @@ import {
   createAuthMiddleware,
   truefoundryAdminMiddleware,
 } from './auth/middleware';
+import type { OidcDiscoveryHandle } from './auth/oidc';
 import type { McpCatalog } from './catalog/McpCatalog';
 import type { ModelCatalog } from './catalog/ModelCatalog';
 import type { SandboxCatalog } from './catalog/SandboxCatalog';
@@ -244,8 +244,8 @@ export interface ServerDeps<TTransaction> {
   /** Hands out each turn's resumable event stream to the create and subscribe handlers. */
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
   logger: Logger;
-  /** Discovered openid-client configuration; undefined when browser login is disabled. */
-  oidcClient: Configuration | undefined;
+  /** Background OIDC discovery; undefined when browser login is disabled. */
+  oidcDiscovery: OidcDiscoveryHandle | undefined;
   /** Startup-selected authenticator; middleware is built from this once per app. */
   authenticator: Authenticator;
   /** Startup-selected agent authorization policy. */
@@ -292,7 +292,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/v1/auth',
     createAuthRouter({
-      oidcClient: deps.oidcClient,
+      oidcDiscovery: deps.oidcDiscovery,
       logger: deps.logger,
       authMiddleware,
     }),

@@ -63,7 +63,7 @@ import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
 import { resolveRequestContext, type RequestContext } from './auth/identity';
-import { initOidc } from './auth/oidc';
+import { startOidcDiscovery } from './auth/oidc';
 import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
 import { SandboxCatalog } from './catalog/SandboxCatalog';
@@ -579,7 +579,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   } else {
     logger.warn('Auth is disabled; browser login is off');
   }
-  const oidcClient = await initOidc(oidc);
+  const oidcDiscovery = oidc ? startOidcDiscovery({ oidc, logger }) : undefined;
 
   let authenticator;
   let authorizer: Authorizer;
@@ -661,7 +661,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     requestReplyRouter,
     eventSubscriptions,
     logger,
-    oidcClient,
+    oidcDiscovery,
     authenticator,
     authorizer,
   });
@@ -670,6 +670,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     activeTurns,
     app,
     controller,
+    oidcDiscovery,
     destroyDb,
     redis,
     requestReplyRouter,
@@ -724,6 +725,7 @@ try {
     activeTurns,
     app,
     controller,
+    oidcDiscovery,
     destroyDb,
     redis,
     requestReplyRouter,
@@ -967,6 +969,7 @@ try {
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       clearInterval(commandExecutionRecoveryTimer);
       clearInterval(artifactRetentionTimer);
+      oidcDiscovery?.stop();
       // Stop serving peer requests (waits for in-flight replies), then close
       // the clients this process owns: the subscriber duplicate and the primary.
       await requestReplyExecutor?.drain();

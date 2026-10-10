@@ -1,12 +1,11 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context, MiddlewareHandler } from 'hono';
-import type { Configuration } from 'openid-client';
 import type { Logger } from 'winston';
 import { clearAuthCookie, ID_TOKEN_COOKIE, OAUTH_STATE_COOKIE, readOAuthStateCookie } from '../auth/cookies';
 import { resolveRequestContext } from '../auth/identity';
 import { resolveOidcRequestContext } from '../auth/middleware';
-import { buildLoginAuthorization, exchangeAuthorizationCode } from '../auth/oidc';
+import { buildLoginAuthorization, exchangeAuthorizationCode, type OidcDiscoveryHandle } from '../auth/oidc';
 import { safeReturnTo } from '../auth/safeReturnTo';
 import { getPublicUiBasePath, isTrueFoundryModeEnabled } from '../config';
 import { authLoginRoute, authLogoutRoute, meRoute, oAuthCallbackRoute } from '../routes/authRoutes';
@@ -17,6 +16,23 @@ import { buildTrueFoundryExternalLoginHref, resolveTrueFoundryLoginReturnTo } fr
 function oauthErrorRedirect(reason: string): string {
   return `${getPublicUiBasePath()}?error=${encodeURIComponent(reason)}`;
 }
+
+const LOGIN_RETRY_SECONDS = 5;
+
+/** Plain page (no script) shown while the identity provider is unreachable; it refreshes itself. */
+const LOGIN_UNAVAILABLE_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="${String(LOGIN_RETRY_SECONDS)}">
+<title>Login unavailable</title>
+</head>
+<body>
+<h1>Login unavailable, retrying</h1>
+<p>The sign-in service is not reachable yet. This page refreshes automatically.</p>
+</body>
+</html>
+`;
 
 /**
  * Soft-success probe for callback: a usable session → redirect; a leftover cookie
@@ -43,20 +59,30 @@ async function redirectIfAlreadyAuthenticated(params: {
  * Login, callback, and logout stay public; me requires the injected {@link authMiddleware}.
  */
 export function createAuthRouter(params: {
-  oidcClient: Configuration | undefined;
+  /** Undefined when no OIDC provider is configured. */
+  oidcDiscovery: OidcDiscoveryHandle | undefined;
   logger: Logger;
   authMiddleware: MiddlewareHandler;
 }) {
   const router = new OpenAPIHono();
 
+  // Registered before the route so the retry page needs no OpenAPI response entry.
+  router.use('/login', async (c, next) => {
+    if (params.oidcDiscovery !== undefined && params.oidcDiscovery.client() === undefined) {
+      return c.html(LOGIN_UNAVAILABLE_PAGE, 503, { 'Retry-After': String(LOGIN_RETRY_SECONDS) });
+    }
+    return next();
+  });
+
   router.openapi(authLoginRoute, async c => {
     const returnTo = c.req.valid('query').return_to;
 
-    if (params.oidcClient) {
+    const oidcClient = params.oidcDiscovery?.client();
+    if (oidcClient) {
       try {
         const authorizationUrl = await buildLoginAuthorization({
           context: c,
-          client: params.oidcClient,
+          client: oidcClient,
           returnTo,
         });
         return c.redirect(authorizationUrl, 302);
@@ -79,7 +105,8 @@ export function createAuthRouter(params: {
   });
 
   router.openapi(oAuthCallbackRoute, async c => {
-    if (!params.oidcClient) {
+    const oidcClient = params.oidcDiscovery?.client();
+    if (!oidcClient) {
       return c.redirect(getPublicUiBasePath(), 302);
     }
 
@@ -107,7 +134,7 @@ export function createAuthRouter(params: {
     try {
       await exchangeAuthorizationCode({
         context: c,
-        client: params.oidcClient,
+        client: oidcClient,
         callbackParams: new URL(c.req.url).searchParams,
         codeVerifier: pending.code_verifier,
         state: pending.state,
@@ -140,7 +167,7 @@ export function createAuthRouter(params: {
     const body: GetMeResponse = {
       data: {
         // FE logout chrome keys off `oidc-connected` (browser SSO cookie session).
-        type: params.oidcClient !== undefined ? 'oidc-connected' : 'default',
+        type: params.oidcDiscovery?.client() !== undefined ? 'oidc-connected' : 'default',
         tenant_id: requestContext.tenant_id,
         subject: requestContext.subject,
         roles: requestContext.roles,
