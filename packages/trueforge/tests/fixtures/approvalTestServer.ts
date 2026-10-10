@@ -66,6 +66,8 @@ export interface ApprovalTestServer {
   model: ScriptedModelServer;
   /** A store bound to the current database — call fresh after `restart()`, never cache. */
   mcpServerStore: () => IMcpServerStore;
+  /** Same contract as `mcpServerStore`: reads private turn metadata the HTTP surface does not expose. */
+  sessionStore: () => SqliteSessionStore;
   close: () => Promise<void>;
 }
 
@@ -129,8 +131,10 @@ export async function startApprovalTestServer(options?: {
   sandboxProvider?: SandboxProvider | undefined;
   /** Replaces the standalone authenticator, e.g. to prove a mount is auth-protected. */
   authenticator?: Authenticator | undefined;
+  /** Adds the inert connector's opt-in `web_search` tool. */
+  inertWebSearch?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
-  const mcp = await startInertMcpServer();
+  const mcp = await startInertMcpServer({ webSearch: options?.inertWebSearch === true });
   const model = await startScriptedModelServer();
   const directory = await mkdtemp(join(tmpdir(), 'tfy-approval-'));
   const databaseFile = join(directory, 'approvals.sqlite');
@@ -204,6 +208,7 @@ export async function startApprovalTestServer(options?: {
     mcp,
     model,
     mcpServerStore: () => new SqliteMcpServerStore(db),
+    sessionStore: () => new SqliteSessionStore(db),
     close: async () => {
       await db.destroy();
       await model.close();
