@@ -13,7 +13,7 @@ export type Tier = 1 | 2 | 3;
 export const TierSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]).describe('Sentinel permission tier.');
 
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
-export const TIER2_ACTION_KINDS = ['file_write', 'shell'] as const;
+export const TIER2_ACTION_KINDS = ['file_write'] as const;
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 
 /** Machine-readable reasons a Tier 3 action is auto-denied without a card. */
@@ -146,7 +146,6 @@ export function tier2Decision(input: {
   reason_detail: string | null;
   sensitive_read: boolean;
   approval_token_id?: string | null | undefined;
-  shell_binding?: ShellApprovalBinding | null | undefined;
 }): TierDecision {
   return {
     ...baseDecision(),
@@ -157,7 +156,6 @@ export function tier2Decision(input: {
     card: input.card,
     tier2_kind: input.kind,
     approval_token_id: input.approval_token_id ?? null,
-    shell_binding: input.shell_binding ?? null,
   };
 }
 

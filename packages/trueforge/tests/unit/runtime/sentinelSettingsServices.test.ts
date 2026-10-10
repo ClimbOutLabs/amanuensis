@@ -5,10 +5,10 @@ describe('sentinelSettingsServices', () => {
   it('reads each user their own offline mode and relaxed Tier 2 kinds', async () => {
     const store = new InMemorySentinelSettingsStore();
     const services = sentinelSettingsServices(store);
-    await store.patch({ tenant_id: 't1', created_by: 'alice', offline_mode: true, tier2_auto_allow: ['shell'] });
+    await store.patch({ tenant_id: 't1', created_by: 'alice', offline_mode: true, tier2_auto_allow: ['file_write'] });
 
     expect(await services.isOffline({ tenant_id: 't1', created_by: 'alice' })).toBe(true);
-    expect([...(await services.tier2AutoAllow({ tenant_id: 't1', created_by: 'alice' }))]).toEqual(['shell']);
+    expect([...(await services.tier2AutoAllow({ tenant_id: 't1', created_by: 'alice' }))]).toEqual(['file_write']);
     expect(await services.isOffline({ tenant_id: 't1', created_by: 'bob' })).toBe(false);
     expect((await services.tier2AutoAllow({ tenant_id: 't1', created_by: 'bob' })).size).toBe(0);
   });

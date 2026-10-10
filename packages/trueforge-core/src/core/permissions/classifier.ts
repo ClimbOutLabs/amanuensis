@@ -406,6 +406,26 @@ function mintShellToken(input: { services: SentinelServices; tool_name: string; 
   return { token_id: token.token_id, binding };
 }
 
+/** Token and parsed binding that let dispatch re-verify an approved shell command. */
+function mintShellApproval(input: {
+  ctx: ClassifyContext;
+  action: SentinelAction;
+  command: string;
+  cwd: string | null;
+  env: Record<string, string> | null;
+}): { approval_token_id: string; shell_binding: ShellApprovalBinding } {
+  const { ctx, action } = input;
+  const form = canonicalShellForm({
+    command: input.command,
+    cwd: input.cwd,
+    env: input.env,
+    allowlist: ctx.services.shell_allowlist,
+    workspace_cwd: ctx.workspace_cwd,
+  });
+  const { token_id, binding } = mintShellToken({ services: ctx.services, tool_name: action.tool_name, form });
+  return { approval_token_id: token_id, shell_binding: binding };
+}
+
 function envOverrides(params: Record<string, unknown>): Record<string, string> | null {
   const raw = params['env'];
   if (typeof raw !== 'object' || raw === null) {
@@ -440,6 +460,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       reason: 'env_overrides_present',
       reason_detail: 'Custom environment variables require approval.',
       sensitive_read: false,
+      ...mintShellApproval({ ctx, action, command, cwd, env }),
     });
   }
 
@@ -460,23 +481,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         sensitive_read: false,
       });
     }
-    return decideTier2({
-      ctx,
-      action,
-      kind: 'shell',
-      plain_what: `Run \`${commandName}\` in your workspace.`,
-      parsed_command: command,
-      reason: 'shell_allowlist_offline',
-      reason_detail: `Offline: ran allowlisted command \`${commandName}\`.`,
-      sensitive_read: sensitiveReadHit(action.canonical_params),
-      shell_form: canonicalShellForm({
-        command,
-        cwd,
-        env,
-        allowlist: services.shell_allowlist,
-        workspace_cwd: ctx.workspace_cwd,
-      }),
-    });
+    // An allowed offline command continues to the same containment checks as online.
   }
 
   // Write-then-execute check BEFORE allowlist matching. Scan every segment
@@ -567,7 +572,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     if (matched !== undefined) {
       const identityCwd = resolveIdentityCwd(ctx, cwd);
       // The cwd and every file operand must resolve inside the workspace.
-      // An agent-controlled cwd or a symlink escape must not get Tier 2.
+      // An agent-controlled cwd or a symlink escape must not run silently.
       const workspaceRoot = ctx.workspace_cwd;
       if (workspaceRoot !== null) {
         const cwdInside = isInsideWorkspace({ p: identityCwd, cwd: '/', workspace_root: workspaceRoot });
@@ -586,6 +591,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
             reason: 'cwd_outside_workspace',
             reason_detail: 'The working directory is outside the workspace.',
             sensitive_read: false,
+            ...mintShellApproval({ ctx, action, command, cwd, env }),
           });
         }
         if (!shellOperandsInsideWorkspace({ parsed, cwd: identityCwd, workspace_root: workspaceRoot })) {
@@ -603,25 +609,16 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
             reason: 'file_outside_workspace',
             reason_detail: 'A file operand resolves outside the workspace.',
             sensitive_read: false,
+            ...mintShellApproval({ ctx, action, command, cwd, env }),
           });
         }
       }
-      return decideTier2({
-        ctx,
-        action,
-        kind: 'shell',
-        plain_what: `Run \`${parsed.argv[0] ?? command}\` in your workspace.`,
-        parsed_command: command,
+      // Every allowlist entry is read-only by curation (no writes, no network), so a match
+      // that passed the checks above runs silently. Anything that failed them asked instead.
+      return tier1Decision({
         reason: 'shell_allowlist',
         reason_detail: `Ran allowlisted command \`${parsed.argv[0] ?? command}\`.`,
         sensitive_read: sensitiveReadHit(action.canonical_params),
-        shell_form: canonicalShellForm({
-          command,
-          cwd,
-          env,
-          allowlist: services.shell_allowlist,
-          workspace_cwd: ctx.workspace_cwd,
-        }),
       });
     }
   }
@@ -736,7 +733,6 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     reason: 'sandbox_write',
     reason_detail: `Sandbox file write to \`${target}\`.`,
     sensitive_read: isSensitivePath(target),
-    shell_form: null,
   });
 }
 
@@ -764,8 +760,8 @@ function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierD
 
 /**
  * Tier 2 asks unless the user relaxed its kind. An unrelaxed call carries a
- * single-use token (parsed form for shell, so dispatch re-verifies it) and
- * parks for approval; a relaxed one runs after the containment re-check.
+ * single-use token and parks for approval; a relaxed one runs after the
+ * containment re-check.
  */
 async function decideTier2(input: {
   ctx: ClassifyContext;
@@ -776,9 +772,8 @@ async function decideTier2(input: {
   reason: string;
   reason_detail: string;
   sensitive_read: boolean;
-  shell_form: CanonicalShellForm | null;
 }): Promise<TierDecision> {
-  const { ctx, action, shell_form } = input;
+  const { ctx, action } = input;
   const card = {
     plain_what: input.plain_what,
     plain_why: plainWhy(ctx.agent_intent),
@@ -799,14 +794,6 @@ async function decideTier2(input: {
   const relaxed = await ctx.services.tier2AutoAllow({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
   if (relaxed.has(input.kind)) {
     return tier2Decision(base);
-  }
-  if (shell_form !== null) {
-    const { token_id, binding } = mintShellToken({
-      services: ctx.services,
-      tool_name: action.tool_name,
-      form: shell_form,
-    });
-    return tier2Decision({ ...base, approval_token_id: token_id, shell_binding: binding });
   }
   return tier2Decision({
     ...base,

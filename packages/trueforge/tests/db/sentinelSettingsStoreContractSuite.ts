@@ -13,8 +13,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
 
   it('patch stores both fields and get reads them back', async () => {
     const store = getStore();
-    const saved = await store.patch({ ...alice, offline_mode: true, tier2_auto_allow: ['shell'] });
-    expect(saved).toEqual({ offline_mode: true, tier2_auto_allow: ['shell'] });
+    const saved = await store.patch({ ...alice, offline_mode: true, tier2_auto_allow: ['file_write'] });
+    expect(saved).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'] });
     expect(await store.get(alice)).toEqual(saved);
   });
 
@@ -22,13 +22,14 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
     const store = getStore();
     await store.patch({ ...alice, offline_mode: true, tier2_auto_allow: ['file_write'] });
 
-    expect(await store.patch({ ...alice, offline_mode: undefined, tier2_auto_allow: ['shell'] })).toEqual({
+    expect(await store.patch({ ...alice, offline_mode: undefined, tier2_auto_allow: [] })).toEqual({
       offline_mode: true,
-      tier2_auto_allow: ['shell'],
+      tier2_auto_allow: [],
     });
+    await store.patch({ ...alice, offline_mode: undefined, tier2_auto_allow: ['file_write'] });
     expect(await store.patch({ ...alice, offline_mode: false, tier2_auto_allow: undefined })).toEqual({
       offline_mode: false,
-      tier2_auto_allow: ['shell'],
+      tier2_auto_allow: ['file_write'],
     });
   });
 
@@ -42,26 +43,26 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
 
   it('an empty set clears the relaxed kinds', async () => {
     const store = getStore();
-    await store.patch({ ...alice, offline_mode: undefined, tier2_auto_allow: ['shell', 'file_write'] });
+    await store.patch({ ...alice, offline_mode: undefined, tier2_auto_allow: ['file_write'] });
     expect(await store.patch({ ...alice, offline_mode: undefined, tier2_auto_allow: [] })).toEqual({
       offline_mode: false,
       tier2_auto_allow: [],
     });
   });
 
-  it('stores kinds deduplicated in canonical order', async () => {
+  it('stores each kind once', async () => {
     const store = getStore();
     const saved = await store.patch({
       ...alice,
       offline_mode: undefined,
-      tier2_auto_allow: ['shell', 'file_write', 'shell'],
+      tier2_auto_allow: ['file_write', 'file_write'],
     });
-    expect(saved.tier2_auto_allow).toEqual(['file_write', 'shell']);
+    expect(saved.tier2_auto_allow).toEqual(['file_write']);
   });
 
   it('keeps users and tenants isolated', async () => {
     const store = getStore();
-    await store.patch({ ...alice, offline_mode: true, tier2_auto_allow: ['shell'] });
+    await store.patch({ ...alice, offline_mode: true, tier2_auto_allow: ['file_write'] });
 
     expect(await store.get({ tenant_id: 't1', created_by: 'bob' })).toEqual({
       offline_mode: false,

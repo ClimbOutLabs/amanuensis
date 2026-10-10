@@ -26,7 +26,7 @@ describe('parseToolTier', () => {
 describe('parseTier2ActionKind', () => {
   it('accepts the backend kinds and nothing else', () => {
     expect(parseTier2ActionKind('file_write')).toBe('file_write');
-    expect(parseTier2ActionKind('shell')).toBe('shell');
+    expect(parseTier2ActionKind('shell')).toBeUndefined();
     expect(parseTier2ActionKind('runner')).toBeUndefined();
     expect(parseTier2ActionKind('file.write')).toBeUndefined();
     expect(parseTier2ActionKind(undefined)).toBeUndefined();
@@ -300,12 +300,14 @@ describe('parseUserSettings', () => {
 
   it('reads the server envelope, keeping known kinds once', () => {
     expect(
-      parseUserSettings({ data: { offline_mode: true, tier2_auto_allow: ['shell', 'file_write', 'nope', 'shell'] } }),
-    ).toEqual({ offline_mode: true, tier2_auto_allow: ['shell', 'file_write'] });
+      parseUserSettings({
+        data: { offline_mode: true, tier2_auto_allow: ['shell', 'file_write', 'nope', 'file_write'] },
+      }),
+    ).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'] });
   });
 
   it('does not read a bare settings object', () => {
-    expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['shell'] })).toEqual({
+    expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['file_write'] })).toEqual({
       offline_mode: false,
       tier2_auto_allow: [],
     });

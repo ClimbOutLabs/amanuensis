@@ -497,7 +497,8 @@ async function verifySentinelPreDispatch(input: {
     return undefined;
   }
   const info = toolCall.tool_info;
-  if (info.tier !== 3 && info.tier !== 2) {
+  // A silent Tier 1 call only needs the dispatch re-check when it is a shell command.
+  if (info.tier === undefined || (info.tier === 1 && (info.mint_tool_name ?? info.original_tool_name) !== 'exec')) {
     return undefined;
   }
   const needsApproval = info.tier === 3 || (info.approval_token_id ?? null) !== null;

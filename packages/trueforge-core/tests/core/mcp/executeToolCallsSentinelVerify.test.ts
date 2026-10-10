@@ -8,6 +8,9 @@
  * the classifier would have used, then dispatches the approved Tier 3 call
  * through the real executeToolCalls verify path.
  */
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ApprovalDecision } from '../../../src/core/events/schema';
 import type { InternalEnrichedAssistantMessage, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import type { IToolSet } from '../../../src/core/mcp/IMCPServer';
@@ -60,6 +63,7 @@ function toolCall(input: {
 
 async function dispatchApproved(input: {
   services: SentinelServices;
+  workspaceCwd?: string | null | undefined;
   /** Defaults to allow; null supplies no decision at all. */
   decision?: ApprovalDecision | null | undefined;
   wireName: string;
@@ -92,7 +96,7 @@ async function dispatchApproved(input: {
         created_by: 'u1',
         conversation_id: 'conv-1',
         repository_id: null,
-        workspace_cwd: null,
+        workspace_cwd: input.workspaceCwd ?? null,
         agent_intent: null,
       },
     },
@@ -336,6 +340,48 @@ describe('executeToolCalls sentinel pre-dispatch: Tier 2', () => {
     expect(records.map(record => [record.tier, record.outcome, record.description])).toEqual([
       [2, 'ran', TIER2_CARD.plain_what],
     ]);
+  });
+});
+
+describe('executeToolCalls sentinel pre-dispatch: silent shell commands', () => {
+  const toolInfo = { original_tool_name: 'exec', tier: 1 as const, is_approval_required: false };
+
+  test('a silent shell command that now reaches outside the workspace is blocked', async () => {
+    const { services } = servicesWithAudit();
+    const workspace = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      const outcome = await dispatchApproved({
+        services,
+        decision: null,
+        workspaceCwd: workspace,
+        wireName: 'test_tool',
+        wireArgs: { command: 'ls', cwd: '/' },
+        toolInfo,
+      });
+      expect(outcome.disposition).toBe('policy_blocked');
+      expect(outcome.reasonCode).toBe('sentinel_verification_failed');
+      expect(outcome.executed).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('a silent shell command inside the workspace runs without any token', async () => {
+    const { services } = servicesWithAudit();
+    const workspace = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      const outcome = await dispatchApproved({
+        services,
+        decision: null,
+        workspaceCwd: workspace,
+        wireName: 'test_tool',
+        wireArgs: { command: 'ls', cwd: workspace },
+        toolInfo,
+      });
+      expect(outcome.executed).toBe(true);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 });
 

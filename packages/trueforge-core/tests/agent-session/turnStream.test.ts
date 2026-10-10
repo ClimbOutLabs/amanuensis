@@ -1955,13 +1955,13 @@ describe('TurnResourceResolver caches', () => {
 
   it.each([
     { source: { type: 'schedule' as const, id: 'sched-1', run_id: 'run-1' }, relaxed: [] },
-    { source: null, relaxed: ['shell'] },
+    { source: null, relaxed: ['file_write'] },
   ])('applies Tier 2 relaxations only to attended sessions (source: $source)', async ({ source, relaxed }) => {
     const sandbox = makeStubPublicSandbox();
     jest.spyOn(sandbox, 'close').mockResolvedValue(undefined);
     const sentinelServices = {
       ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
-      tier2AutoAllow: () => Promise.resolve(new Set<'shell'>(['shell'])),
+      tier2AutoAllow: () => Promise.resolve(new Set<'file_write'>(['file_write'])),
     };
     const received: SentinelHostContext[] = [];
     const resolver = new TurnResourceResolver({

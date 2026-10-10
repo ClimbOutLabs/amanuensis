@@ -17,10 +17,10 @@ describe('Tier2RelaxationToggle', () => {
 
   it('is on when the server relaxes the kind, and flipping off reports it', () => {
     const onChange = vi.fn(async (_input: { actionType: Tier2ActionKind; relaxed: boolean }) => {});
-    render(<Tier2RelaxationToggle actionType="shell" relaxed={true} onChange={onChange} />);
-    const toggle = screen.getByRole('switch', { name: 'Run without asking: shell' });
+    render(<Tier2RelaxationToggle actionType="file_write" relaxed={true} onChange={onChange} />);
+    const toggle = screen.getByRole('switch', { name: 'Run without asking: file_write' });
     expect(toggle).toBeChecked();
     fireEvent.click(toggle);
-    expect(onChange).toHaveBeenCalledWith({ actionType: 'shell', relaxed: false });
+    expect(onChange).toHaveBeenCalledWith({ actionType: 'file_write', relaxed: false });
   });
 });

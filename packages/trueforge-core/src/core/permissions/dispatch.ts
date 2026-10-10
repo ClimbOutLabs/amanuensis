@@ -89,8 +89,9 @@ function offlineViolation(call: VerifiableCall, ctx: DispatchCheckContext): stri
 }
 
 /**
- * Tier 2 decisions promise workspace containment whether or not they asked:
- * the classifier escalates out-of-workspace cwd and operands.
+ * Tier 2 decisions and silent (Tier 1) shell commands promise workspace
+ * containment whether or not they asked: the classifier escalates
+ * out-of-workspace cwd and operands.
  * Re-verify that containment against the current filesystem state, because a
  * symlinked parent repointed between classification and dispatch could
  * otherwise turn an in-workspace operation into an out-of-workspace one.
@@ -149,12 +150,21 @@ function verifyTier2Containment(input: { call: VerifiableCall; workspace_root: s
 /**
  * Returns an error message when the call must not execute, or undefined when
  * it is cleared to run. Tier 3 calls and Tier 2 calls that asked are verified
- * against their approval token; every Tier 2 call also gets a
- * workspace-containment re-check; Tier 1 and relaxed Tier 2 pass through.
+ * against their approval token; every Tier 2 call and every silent shell
+ * command also gets a workspace-containment re-check; other Tier 1 calls and
+ * relaxed Tier 2 pass through.
  */
 export function verifyPreDispatch(input: { call: VerifiableCall; ctx: DispatchCheckContext }): string | undefined {
   const { call, ctx } = input;
   const { services } = ctx;
+
+  if (call.tier === 1) {
+    // Only shell commands are silent because of a containment rule that can change underfoot.
+    const workspaceRoot = ctx.workspace_cwd;
+    return call.tool_name === 'exec' && workspaceRoot !== null
+      ? verifyTier2Containment({ call, workspace_root: workspaceRoot })
+      : undefined;
+  }
 
   if (call.tier === 2) {
     const workspaceRoot = ctx.workspace_cwd;
@@ -163,8 +173,6 @@ export function verifyPreDispatch(input: { call: VerifiableCall; ctx: DispatchCh
     if (containmentError !== undefined || call.approval_token_id === null) {
       return containmentError;
     }
-  } else if (call.tier !== 3) {
-    return undefined;
   }
 
   // Stale-context guard: offline since classification auto-denies.

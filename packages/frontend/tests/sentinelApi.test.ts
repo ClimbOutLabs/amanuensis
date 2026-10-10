@@ -58,15 +58,15 @@ test('audit entries list parses the envelope and pages by limit', async () => {
 });
 
 test('user settings read and patch the server envelope', async () => {
-  const { api, seen } = recordingApi(() => ({ data: { offline_mode: false, tier2_auto_allow: ['shell'] } }));
-  assert.deepEqual(await api.getUserSettings(), { offline_mode: false, tier2_auto_allow: ['shell'] });
+  const { api, seen } = recordingApi(() => ({ data: { offline_mode: false, tier2_auto_allow: ['file_write'] } }));
+  assert.deepEqual(await api.getUserSettings(), { offline_mode: false, tier2_auto_allow: ['file_write'] });
   assert.equal(seen[0]?.url, '/api/v1/user/settings/sentinel');
   assert.equal(seen[0]?.method, 'GET');
 
-  const updated = await api.updateUserSettings({ tier2_auto_allow: ['shell'] });
-  assert.deepEqual(updated.tier2_auto_allow, ['shell']);
+  const updated = await api.updateUserSettings({ tier2_auto_allow: ['file_write'] });
+  assert.deepEqual(updated.tier2_auto_allow, ['file_write']);
   assert.equal(seen[1]?.method, 'PATCH');
-  assert.deepEqual(seen[1]?.body, { tier2_auto_allow: ['shell'] });
+  assert.deepEqual(seen[1]?.body, { tier2_auto_allow: ['file_write'] });
 });
 
 test('a missing settings route surfaces an error instead of reading as defaults', async () => {

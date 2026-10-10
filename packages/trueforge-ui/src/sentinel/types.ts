@@ -24,14 +24,13 @@ export function parseToolTier(value: unknown): ToolTier | undefined {
 }
 
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the backend list. */
-export const TIER2_ACTION_KINDS = ['file_write', 'shell'] as const;
+export const TIER2_ACTION_KINDS = ['file_write'] as const;
 
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 
 /** Human-readable labels for Tier 2 action kinds. */
 export const TIER2_ACTION_LABELS: Record<Tier2ActionKind, string> = {
   file_write: 'Write files',
-  shell: 'Run shell commands',
 };
 
 export function parseTier2ActionKind(value: unknown): Tier2ActionKind | undefined {
