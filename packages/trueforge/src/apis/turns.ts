@@ -18,11 +18,8 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentHarnessError,
-  createSentinelHostContext,
-  DEFAULT_PINNED_PATH,
   existingSandboxIdForProvider,
   extractErrorLogFields,
-  getSharedSentinelServices,
   isAgentInputUserMessage,
   isFileContentPart,
   McpConnectionError,
@@ -398,7 +395,7 @@ function createTurnResolver(deps: {
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
-      sandboxProvider: async ({ spec, existingSandboxId, tracing }) => {
+      sandboxProvider: async ({ spec, existingSandboxId, tracing, sentinel }) => {
         const provider = await sandboxProviderResolver({
           tenant_id,
           store: sandboxProviderStore,
@@ -438,10 +435,6 @@ function createTurnResolver(deps: {
           spec,
           store: mcpServerStore,
         });
-        const sentinelSession = await sessionStore.getSession({
-          tenant_id,
-          session_id: sessionId,
-        });
         return buildTurnSandbox({
           provider,
           logger,
@@ -452,13 +445,7 @@ function createTurnResolver(deps: {
           fileDownloadEnabled: spec.config.sandbox.file_downloads,
           existingSandboxId: carriedSandboxId,
           boundRepository,
-          sentinel: createSentinelHostContext({
-            tenant_id,
-            created_by: userRef,
-            conversation_id: sessionId,
-            workspace_cwd: sentinelSession?.workspace_cwd ?? null,
-            services: getSharedSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
-          }),
+          sentinel,
           loadBoundRepository:
             boundRepository === undefined
               ? undefined

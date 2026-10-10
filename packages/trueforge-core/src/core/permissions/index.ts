@@ -15,8 +15,6 @@ export {
   classifyContextFor,
   createSentinelHostContext,
   defaultSentinelServices,
-  getSharedSentinelServices,
-  resetSharedSentinelServicesForTests,
   toDispatchSentinelContext,
 } from './context';
 export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './context';
