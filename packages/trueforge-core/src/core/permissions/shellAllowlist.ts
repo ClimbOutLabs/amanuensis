@@ -454,30 +454,73 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
   };
 }
 
-/**
- * Global git options the executor prepends to every allowlisted git command so
- * repository config cannot run code (fsmonitor, hooks, pager, external diff).
- */
-const GIT_HARDENING_GLOBAL_ARGS: readonly string[] = [
-  '--no-pager',
-  '--no-optional-locks',
-  '-c',
-  'core.fsmonitor=false',
-  '-c',
-  'core.hooksPath=/dev/null',
-  '-c',
-  'core.sshCommand=',
-  '-c',
-  'diff.external=',
-];
+/** Global git options that disable the known code-running config keys, as defence in depth. */
+function gitHardeningGlobalArgs(workspaceRoot: string): string[] {
+  return [
+    '--no-pager',
+    '--no-optional-locks',
+    '-c',
+    `safe.directory=${workspaceRoot}`,
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    'core.hooksPath=/dev/null',
+    '-c',
+    'core.sshCommand=',
+    '-c',
+    'diff.external=',
+  ];
+}
+
+/** Drops system and global git config so only the repository's own config is in play. */
+const GIT_HARDENING_ENV: Readonly<Record<string, string>> = {
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_ATTR_NOSYSTEM: '1',
+};
 
 /**
- * Rewrite an allowlisted git command into the argv the executor must run, or
+ * Local config keys an allowlisted git command may run under. Fail-closed:
+ * every other key (filters, includes, gpg, alternateRefsCommand, hooks, ...)
+ * can make git execute a program, so a repo that sets one is not allowlisted.
+ */
+const SAFE_GIT_LOCAL_CONFIG_KEYS: readonly RegExp[] = [
+  /^core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks)$/u,
+  /^remote\..+\.(url|fetch)$/u,
+  /^branch\..+\.(remote|merge)$/u,
+  /^user\.(name|email)$/u,
+  /^init\.defaultbranch$/u,
+];
+
+/** True when every key printed by `git config --local --list --name-only` is on the safe list. */
+export function gitLocalConfigIsSafe(nameOnlyOutput: string): boolean {
+  return nameOnlyOutput
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line !== '')
+    .every(key => SAFE_GIT_LOCAL_CONFIG_KEYS.some(pattern => pattern.test(key)));
+}
+
+export interface HardenedGitInvocation {
+  /** Argv to execute in place of the model's command. */
+  argv: string[];
+  /** Read-only probe listing the repository's local config key names. */
+  probe_argv: string[];
+  env: Record<string, string>;
+}
+
+/**
+ * Rewrite an allowlisted git command into what the executor must run, or
  * undefined when the command is not an allowlisted git invocation. Applied at
  * the execution site so the model's argv and the approval binding stay as
- * written.
+ * written. The caller must run `probe_argv` and require `gitLocalConfigIsSafe`
+ * on its output before running `argv`.
  */
-export function hardenAllowlistedGit(input: { command: string; config: ShellAllowlistConfig }): string[] | undefined {
+export function hardenAllowlistedGit(input: {
+  command: string;
+  config: ShellAllowlistConfig;
+  workspace_root: string;
+}): HardenedGitInvocation | undefined {
   const parsed = parseSimpleCommand(input.command);
   if (parsed === undefined || matchAllowlist(parsed, input.config) === undefined) {
     return undefined;
@@ -490,14 +533,19 @@ export function hardenAllowlistedGit(input: { command: string; config: ShellAllo
   if (policy === undefined) {
     return undefined;
   }
-  return [
-    ...(parsed.wrapper === null ? [] : [parsed.wrapper]),
-    name,
-    ...GIT_HARDENING_GLOBAL_ARGS,
-    subcommand,
-    ...policy.forced_args,
-    ...rest,
-  ];
+  const globalArgs = gitHardeningGlobalArgs(input.workspace_root);
+  return {
+    argv: [
+      ...(parsed.wrapper === null ? [] : [parsed.wrapper]),
+      name,
+      ...globalArgs,
+      subcommand,
+      ...policy.forced_args,
+      ...rest,
+    ],
+    probe_argv: [name, ...globalArgs, 'config', '--local', '--no-includes', '--list', '--name-only'],
+    env: { ...GIT_HARDENING_ENV },
+  };
 }
 
 /**

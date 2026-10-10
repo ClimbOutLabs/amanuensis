@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  gitLocalConfigIsSafe,
   hardenAllowlistedGit,
   hashArgv,
   matchAllowlist,
@@ -10,6 +11,7 @@ import {
   resolveOnPinnedPath,
   seedShellAllowlist,
   validateOfflineSubset,
+  type HardenedGitInvocation,
   type ShellAllowlistConfig,
 } from '../../../src/core/permissions/shellAllowlist';
 
@@ -294,6 +296,8 @@ describe('hardenAllowlistedGit', () => {
     '--no-pager',
     '--no-optional-locks',
     '-c',
+    'safe.directory=/ws',
+    '-c',
     'core.fsmonitor=false',
     '-c',
     'core.hooksPath=/dev/null',
@@ -303,18 +307,18 @@ describe('hardenAllowlistedGit', () => {
     'diff.external=',
   ];
 
-  function harden(command: string): string[] | undefined {
+  function harden(command: string): HardenedGitInvocation | undefined {
     const { dir, cleanup } = tempBin('git');
     try {
-      return hardenAllowlistedGit({ command, config: seedShellAllowlist(dir) });
+      return hardenAllowlistedGit({ command, config: seedShellAllowlist(dir), workspace_root: '/ws' });
     } finally {
       cleanup();
     }
   }
 
   test('prepends global overrides and the subcommand forced flags', () => {
-    expect(harden('git status --short')).toEqual(['git', ...hardening, 'status', '--short']);
-    expect(harden('git diff --cached src')).toEqual([
+    expect(harden('git status --short')?.argv).toEqual(['git', ...hardening, 'status', '--short']);
+    expect(harden('git diff --cached src')?.argv).toEqual([
       'git',
       ...hardening,
       'diff',
@@ -323,17 +327,78 @@ describe('hardenAllowlistedGit', () => {
       '--cached',
       'src',
     ]);
-    expect(harden('git blame f.txt')).toEqual(['git', ...hardening, 'blame', '--no-textconv', 'f.txt']);
+    expect(harden('git blame f.txt')?.argv).toEqual(['git', ...hardening, 'blame', '--no-textconv', 'f.txt']);
+  });
+
+  test('isolates system and global config and builds a local-config probe', () => {
+    const hardened = harden('git status');
+    expect(hardened?.env).toEqual({ GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ATTR_NOSYSTEM: '1' });
+    expect(hardened?.probe_argv).toEqual([
+      'git',
+      ...hardening,
+      'config',
+      '--local',
+      '--no-includes',
+      '--list',
+      '--name-only',
+    ]);
   });
 
   test('keeps the nice wrapper in front', () => {
-    expect(harden('nice git status')?.slice(0, 2)).toEqual(['nice', 'git']);
+    expect(harden('nice git status')?.argv.slice(0, 2)).toEqual(['nice', 'git']);
   });
 
   test('leaves non-allowlisted and non-git commands alone', () => {
     expect(harden('git push origin main')).toBeUndefined();
     expect(harden('git -c core.fsmonitor=x status')).toBeUndefined();
     expect(harden('ls -l')).toBeUndefined();
+  });
+});
+
+describe('gitLocalConfigIsSafe', () => {
+  test('accepts only the known-safe key set', () => {
+    const safe = [
+      'core.repositoryformatversion',
+      'core.filemode',
+      'core.bare',
+      'core.logallrefupdates',
+      'core.ignorecase',
+      'core.precomposeunicode',
+      'core.symlinks',
+      'remote.origin.url',
+      'remote.my.org.fetch',
+      'branch.main.remote',
+      'branch.feature/x.merge',
+      'user.name',
+      'user.email',
+      'init.defaultbranch',
+    ];
+    expect(gitLocalConfigIsSafe(safe.join('\n'))).toBe(true);
+    expect(gitLocalConfigIsSafe('')).toBe(true);
+  });
+
+  test.each([
+    'core.fsmonitor',
+    'core.pager',
+    'core.hookspath',
+    'core.alternaterefscommand',
+    'core.sshcommand',
+    'filter.x.clean',
+    'filter.x.smudge',
+    'filter.x.process',
+    'diff.external',
+    'diff.evil.textconv',
+    'gpg.program',
+    'log.showsignature',
+    'include.path',
+    'includeif.gitdir:/x.path',
+    'extensions.worktreeconfig',
+    'alias.x',
+    'remote.origin.vcs',
+    'remote.origin.pushurl',
+    'url.x.insteadof',
+  ])('rejects %s even among safe keys', key => {
+    expect(gitLocalConfigIsSafe(`core.filemode\n${key}\nuser.name`)).toBe(false);
   });
 });
 

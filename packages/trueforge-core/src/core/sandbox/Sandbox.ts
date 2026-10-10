@@ -46,7 +46,7 @@ import {
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
-import { hardenAllowlistedGit } from '../permissions/shellAllowlist';
+import { gitLocalConfigIsSafe, hardenAllowlistedGit } from '../permissions/shellAllowlist';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
 import {
   DEFERRED_TOOLS_SERVER_ID,
@@ -4268,12 +4268,52 @@ export class Sandbox extends LocalToolMCP {
     }
   }
 
-  /** Runs allowlisted git with config-driven code execution disabled; other commands are unchanged. */
-  private withHardenedGit(input: SandboxRuntimeExecInput): SandboxRuntimeExecInput {
+  /**
+   * Allowlisted git runs only under system/global config isolation and only
+   * when the repository's local config holds nothing but known-safe keys; any
+   * other config can make git execute a program. Other commands pass through.
+   */
+  private async prepareAllowlistedGit(input: {
+    sandboxId: string;
+    exec: SandboxRuntimeExecInput;
+  }): Promise<
+    | { status: 'ready'; exec: SandboxRuntimeExecInput; env: Record<string, string> }
+    | { status: 'refused'; message: string }
+  > {
     const allowlist = this.sentinelContext?.services.shell_allowlist;
-    const argv =
-      allowlist === undefined ? undefined : hardenAllowlistedGit({ command: input.command, config: allowlist });
-    return argv === undefined ? input : { ...input, command: argv.map(shellEscape).join(' ') };
+    const workspaceRoot = this.boundRepository?.workspace_cwd ?? input.exec.cwd;
+    const hardened =
+      allowlist === undefined || workspaceRoot === undefined
+        ? undefined
+        : hardenAllowlistedGit({ command: input.exec.command, config: allowlist, workspace_root: workspaceRoot });
+    if (hardened === undefined) {
+      return { status: 'ready', exec: input.exec, env: {} };
+    }
+    const probe = await this.provider.exec({
+      sandboxId: input.sandboxId,
+      command: hardened.probe_argv.map(shellEscape).join(' '),
+      cwd: input.exec.cwd,
+      env: hardened.env,
+    });
+    if (!probe.success || probe.response.exitCode !== 0) {
+      return {
+        status: 'refused',
+        message:
+          'Could not verify the Git repository config, so this Git command needs approval. Run it in an approval-requiring form.',
+      };
+    }
+    if (!gitLocalConfigIsSafe(probe.response.result)) {
+      return {
+        status: 'refused',
+        message:
+          'This repository config can make Git run programs, so this Git command needs approval. Run it in an approval-requiring form.',
+      };
+    }
+    return {
+      status: 'ready',
+      exec: { ...input.exec, command: hardened.argv.map(shellEscape).join(' ') },
+      env: hardened.env,
+    };
   }
 
   private async handleExec(
@@ -4349,8 +4389,12 @@ export class Sandbox extends LocalToolMCP {
       this.resolvedGitCredentialsContent !== null
         ? buildGitCredentialHelperEnv(this.provider.getGitCredentialsPath(rawId))
         : {};
-    const env = { ...mcpClientEnv, ...gitAuthEnv };
-    const execInput = this.withHardenedGit(resolvedInput);
+    const gitPrep = await this.prepareAllowlistedGit({ sandboxId: rawId, exec: resolvedInput });
+    if (gitPrep.status === 'refused') {
+      return hostRefusalResponse(gitPrep.message);
+    }
+    const env = { ...mcpClientEnv, ...gitAuthEnv, ...gitPrep.env };
+    const execInput = gitPrep.exec;
 
     const dispatchMarker = { dispatched: false };
     try {
@@ -4404,6 +4448,10 @@ export class Sandbox extends LocalToolMCP {
       await this.ensureSandboxInitialized();
       const recreatedRawId = this.providerSandboxId(recreated.sandboxInfo.sandbox_id);
       const retryCodeModeEnv = await this.ensureCodeModeStarted(recreatedRawId);
+      const retryGitPrep = await this.prepareAllowlistedGit({ sandboxId: recreatedRawId, exec: resolvedInput });
+      if (retryGitPrep.status === 'refused') {
+        return hostRefusalResponse(retryGitPrep.message);
+      }
       const retryEnv = {
         ...injectMCPClientEnv({
           env: input.env,
@@ -4414,11 +4462,12 @@ export class Sandbox extends LocalToolMCP {
         ...(this.resolvedGitCredentialsContent !== null
           ? buildGitCredentialHelperEnv(this.provider.getGitCredentialsPath(recreatedRawId))
           : {}),
+        ...retryGitPrep.env,
       };
       const retryDispatchMarker = { dispatched: false };
       const retryExecution = await this.runExecWithVerification(
         recreatedRawId,
-        execInput,
+        retryGitPrep.exec,
         retryEnv,
         effect,
         planScope === undefined ? undefined : { context, scope: planScope },
