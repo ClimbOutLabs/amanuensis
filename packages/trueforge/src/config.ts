@@ -316,8 +316,9 @@ function parseBoolean(options: { envKey: string; raw: string | undefined; defaul
 /**
  * Empty stays empty. Otherwise parse as a URL, store without a trailing slash
  * (callers join with `/`), and reject query/hash or `.` / `..` path segments.
+ * Standalone passes `allowPath: false`: auth cookies are scoped to `/`, so a path prefix is unsupported.
  */
-function parsePublicBaseUrl(raw: string | undefined): string {
+export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath: boolean }): string {
   if (raw === undefined || raw.trim() === '') {
     return '';
   }
@@ -333,6 +334,9 @@ function parsePublicBaseUrl(raw: string | undefined): string {
   const segments = parsed.pathname.split('/').filter(part => part.length > 0);
   if (segments.some(part => part === '.' || part === '..')) {
     throw new Error('PUBLIC_BASE_URL path must not contain "." or ".." segments');
+  }
+  if (segments.length > 0 && !options.allowPath) {
+    throw new Error('PUBLIC_BASE_URL must be an origin with no path when STANDALONE=true');
   }
   const path = segments.length === 0 ? '' : `/${segments.join('/')}`;
   return `${parsed.origin}${path}`;
@@ -494,6 +498,32 @@ function buildPostgresConnectionString(parts: {
   return connectionString;
 }
 
+/** An http issuer is accepted only on a loopback host; anything else must be https. */
+export function assertOidcIssuerTransportAllowed(issuerUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(issuerUrl);
+  } catch (error) {
+    throw new Error('OIDC_ISSUER_URL must be a valid URL', { cause: error });
+  }
+  if (parsed.protocol === 'https:') {
+    return;
+  }
+  if (parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname.replace(/^\[|\]$/g, ''))) {
+    return;
+  }
+  throw new Error('OIDC_ISSUER_URL must use https, except http on a loopback host (localhost, 127.0.0.1, ::1)');
+}
+
+/** Cookie-name-safe suffix appended to every auth cookie name so instances on one hostname stay apart. */
+function parseAuthCookieSuffix(raw: string | undefined): string {
+  const value = raw?.trim() ?? '';
+  if (!/^[A-Za-z0-9_-]{0,32}$/.test(value)) {
+    throw new Error('AUTH_COOKIE_SUFFIX must be at most 32 letters, digits, "_" or "-"');
+  }
+  return value;
+}
+
 function resolveOIDCConfig(): OIDCConfig | undefined {
   const issuerUrl = getEnv('OIDC_ISSUER_URL');
   const clientId = getEnv('OIDC_CLIENT_ID');
@@ -503,11 +533,18 @@ function resolveOIDCConfig(): OIDCConfig | undefined {
     return undefined;
   }
   if (!issuerUrl || !clientId || !clientSecret) {
+    const missing = [
+      ['OIDC_ISSUER_URL', issuerUrl],
+      ['OIDC_CLIENT_ID', clientId],
+      ['OIDC_CLIENT_SECRET', clientSecret],
+    ]
+      .filter(([, value]) => !value)
+      .map(([name]) => name);
     throw new Error(
-      'OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET must all be set together, or all left unset ' +
-        '(unset = fixed local admin identity, no IdP).',
+      `OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET must all be set together, or all left unset. Missing: ${missing.join(', ')}.`,
     );
   }
+  assertOidcIssuerTransportAllowed(issuerUrl);
   return {
     OIDC_ISSUER_URL: issuerUrl,
     OIDC_CLIENT_ID: clientId,
@@ -591,12 +628,22 @@ export interface SharedServerConfiguration {
   /** HTTP bind address. Env: `HOST`. Default `localhost`; production images use `0.0.0.0`. */
   HOST: string;
   /**
-   * Refuse startup when the server would listen on a non-loopback address without
-   * authentication (standalone mode grants every request the admin role). Env:
-   * `REQUIRE_AUTH`. Default `true`; set `false` to explicitly accept the risk, e.g.
-   * for the local-dev compose stack behind a loopback-published port.
+   * Distributed mode only: refuse startup when the server would listen on a non-loopback address
+   * without authentication. Env: `REQUIRE_AUTH`. Default `true`; set `false` to explicitly accept
+   * the risk, e.g. for the local-dev compose stack behind a loopback-published port.
+   * Standalone always requires OIDC and ignores this.
    */
   REQUIRE_AUTH: boolean;
+  /**
+   * OIDC configuration for server authentication, in both modes. Undefined means browser login
+   * is disabled, which standalone refuses at startup.
+   */
+  OIDC: OIDCConfig | undefined;
+  /**
+   * Suffix appended to every auth cookie name so instances sharing a hostname (cookies ignore
+   * ports) do not read each other's sessions. Env: `AUTH_COOKIE_SUFFIX`. Default empty.
+   */
+  AUTH_COOKIE_SUFFIX: string;
   /** Peering identity embedded in the turn ids this process mints; `local` in standalone mode. */
   EXECUTOR_ID: string;
   /**
@@ -813,8 +860,9 @@ export interface SharedServerConfiguration {
   /**
    * Public application URL (origin plus optional pathname). Used as the origin of
    * MCP OAuth and OIDC callbacks; the pathname is the UI/API public prefix when
-   * a reverse proxy strips it. Optional at boot; MCP OAuth and OIDC callback
-   * construction fail if empty outside standalone development. Env: `PUBLIC_BASE_URL`.
+   * a reverse proxy strips it. Standalone requires an origin with no path and defaults to
+   * `http://localhost:$PORT` when unset; elsewhere MCP OAuth and OIDC callback construction
+   * fail if empty. Env: `PUBLIC_BASE_URL`.
    */
   PUBLIC_BASE_URL: string;
   /**
@@ -1161,11 +1209,6 @@ export type DistributedServerConfiguration = SharedServerConfiguration & {
   /** Peering URL shared by all replicas. Env: `REDIS_URL`. Default `redis://localhost:6379`. */
   REDIS_URL: string;
   /**
-   * OIDC configuration for server authentication.
-   * Undefined means browser login is disabled.
-   */
-  OIDC: OIDCConfig | undefined;
-  /**
    * When set, models/MCP/agents are backed by the TrueFoundry ServiceFoundry server with the
    * caller's token. Unset = local Postgres stores. Mutually exclusive with OIDC.
    * Env: `TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL`.
@@ -1254,6 +1297,8 @@ const shared: SharedServerConfiguration = {
   PORT: port,
   HOST: host,
   REQUIRE_AUTH: parseBoolean({ envKey: 'REQUIRE_AUTH', raw: getEnv('REQUIRE_AUTH'), defaultValue: true }),
+  OIDC: resolveOIDCConfig(),
+  AUTH_COOKIE_SUFFIX: parseAuthCookieSuffix(getEnv('AUTH_COOKIE_SUFFIX')),
   EXECUTOR_ID: standalone ? LOCAL_EXECUTOR_ID : randomAlphanumeric(6),
   MODEL_CATALOG_PATH: resolveOptionalPathEnv('MODEL_CATALOG_PATH'),
   MCP_CATALOG_PATH: resolveOptionalPathEnv('MCP_CATALOG_PATH'),
@@ -1599,7 +1644,7 @@ const shared: SharedServerConfiguration = {
     defaultValue: 3_600_000,
   }),
   DOCUMENT_OCR_LANGUAGES: getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: 'eng hin mar' }) ?? 'eng hin mar',
-  PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' })),
+  PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),
   SERVER_URL:
     getEnv('SERVER_URL', { defaultValue: `http://localhost:${String(port)}` }) ?? `http://localhost:${String(port)}`,
   TRUEFORGE_API_KEY: standalone
@@ -1641,7 +1686,6 @@ const configuration: ServerConfiguration = standalone
         defaultValue: 60_000,
       }),
       REDIS_URL: resolveRedisUrl(),
-      OIDC: resolveOIDCConfig(),
       TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL: getEnv('TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL', { required: false }),
       TRUEFOUNDRY_API_KEY: getEnv('TRUEFOUNDRY_API_KEY', { required: false }),
       TRUEFOUNDRY_SERVICEFOUNDRY_HTTP_TIMEOUT_MS: parsePositiveInt({
@@ -1674,10 +1718,8 @@ const configuration: ServerConfiguration = standalone
       TRUEFOUNDRY_SANDBOX_SETTINGS: getEnv('TRUEFOUNDRY_SANDBOX_SETTINGS', { required: false }),
     };
 
-export function isOidcConfigured(
-  value: ServerConfiguration,
-): value is DistributedServerConfiguration & { OIDC: OIDCConfig } {
-  return !value.STANDALONE && value.OIDC !== undefined;
+export function isOidcConfigured(value: ServerConfiguration): value is ServerConfiguration & { OIDC: OIDCConfig } {
+  return value.OIDC !== undefined;
 }
 
 /**
@@ -1839,29 +1881,38 @@ export function isLoopbackHost(host: string): boolean {
 
 export interface NetworkAuthRequirement {
   authMode: TrueForgeAuthMode;
+  /** True for `STANDALONE=true`, which never starts without login. */
+  standalone: boolean;
   host: string;
   requireAuth: boolean;
 }
 
 /**
- * Refuse an unauthenticated network listener. In standalone mode the
- * authenticator grants every request the admin role, so a non-loopback bind
- * without OIDC or TrueFoundry would expose settings endpoints (model provider
- * keys, MCP secrets) to anyone who can reach the port. Throws with remediation
- * steps; main.ts calls this before listening.
+ * Refuse to start without login. A standalone server needs complete OIDC config whatever the
+ * bind address (any local process could otherwise act as admin). Distributed mode keeps the
+ * older rule: an unauthenticated non-loopback listener would expose settings endpoints (model
+ * provider keys, MCP secrets), unless `REQUIRE_AUTH=false`. Throws with remediation steps;
+ * main.ts calls this before anything is created.
  */
 export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement): void {
-  if (!requirement.requireAuth) {
+  if (requirement.authMode !== TrueForgeAuthMode.Standalone) {
     return;
   }
-  if (requirement.authMode !== TrueForgeAuthMode.Standalone) {
+  if (requirement.standalone) {
+    throw new Error(
+      'Refusing to start without login: standalone mode requires OIDC. ' +
+        'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET (REQUIRE_AUTH=false no longer opts out). ' +
+        'The installer sets up a bundled Dex login for you.',
+    );
+  }
+  if (!requirement.requireAuth) {
     return;
   }
   if (isLoopbackHost(requirement.host)) {
     return;
   }
   throw new Error(
-    `Refusing to listen on ${requirement.host} without authentication: in standalone mode every request has the admin role, ` +
+    `Refusing to listen on ${requirement.host} without authentication: without OIDC every request has the admin role, ` +
       'so settings endpoints (model provider keys, MCP secrets) would be reachable by anyone on the network. ' +
       'Configure OIDC (OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET), bind HOST=localhost for local-only use, ' +
       'or set REQUIRE_AUTH=false to explicitly accept this risk.',
@@ -1962,9 +2013,7 @@ if (!configuration.STANDALONE && configuration.TRUEFORGE_API_KEY.trim() === '') 
  * (callers that need a callback origin throw).
  */
 function effectivePublicBaseUrl(config: ServerConfiguration): string {
-  // Standalone production is one process on $PORT. Ignore a leftover Vite
-  // PUBLIC_BASE_URL (e.g. http://localhost:3000) from the shared .env.
-  if (config.STANDALONE && config.NODE_ENV !== 'development') {
+  if (config.STANDALONE && config.PUBLIC_BASE_URL === '') {
     return `http://localhost:${String(config.PORT)}`;
   }
   return config.PUBLIC_BASE_URL;
@@ -1972,8 +2021,8 @@ function effectivePublicBaseUrl(config: ServerConfiguration): string {
 
 /**
  * Public origin for OAuth callbacks.
- * Standalone (non-development) → `http://localhost:$PORT`; otherwise `PUBLIC_BASE_URL`
- * (required in development and distributed; throws if empty).
+ * `PUBLIC_BASE_URL` when set; standalone defaults to `http://localhost:$PORT`
+ * (distributed throws if empty).
  */
 export function getPublicBaseUrl(config: ServerConfiguration = configuration): string {
   const publicBaseUrl = effectivePublicBaseUrl(config);
@@ -1981,6 +2030,11 @@ export function getPublicBaseUrl(config: ServerConfiguration = configuration): s
     throw new Error('PUBLIC_BASE_URL is required for OIDC callbacks but was empty');
   }
   return publicBaseUrl;
+}
+
+/** Suffix appended to every auth cookie name; empty unless `AUTH_COOKIE_SUFFIX` is set. */
+export function getAuthCookieSuffix(config: ServerConfiguration = configuration): string {
+  return config.AUTH_COOKIE_SUFFIX;
 }
 
 /**
@@ -1994,7 +2048,7 @@ export function getRunCodeToolCallTimeoutMs(config: ServerConfiguration = config
   return (config.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS + config.SANDBOX_MAX_TIMEOUT_SECONDS) * 1000 + 60_000;
 }
 
-/** `/` or `/custom/proxy/path/` — trailing slash for asset URLs and the boot script. Empty / standalone non-dev → `/`. */
+/** `/` or `/custom/proxy/path/` — trailing slash for asset URLs and the boot script. Empty → `/`. */
 export function getPublicUiBasePath(config: ServerConfiguration = configuration): string {
   const publicBaseUrl = effectivePublicBaseUrl(config);
   if (publicBaseUrl === '') {

@@ -584,13 +584,6 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   let authenticator;
   let authorizer: Authorizer;
   const mode = getTrueForgeAuthMode(configuration);
-  // Fail closed before the authenticator is built: a non-loopback standalone
-  // listener would serve the admin API to the network with no login.
-  assertNetworkAuthRequirement({
-    authMode: mode,
-    host: configuration.HOST,
-    requireAuth: configuration.REQUIRE_AUTH,
-  });
   if (mode === TrueForgeAuthMode.TrueFoundry) {
     if (serviceFoundryClient === undefined) {
       throw new Error('TrueFoundry mode requires TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL');
@@ -691,6 +684,14 @@ try {
     level: configuration.LOG_LEVEL,
     standalone: configuration.STANDALONE,
     version: PACKAGE_VERSION,
+  });
+
+  // Fail closed before anything is created: standalone never starts without login.
+  assertNetworkAuthRequirement({
+    authMode: getTrueForgeAuthMode(configuration),
+    standalone: configuration.STANDALONE,
+    host: configuration.HOST,
+    requireAuth: configuration.REQUIRE_AUTH,
   });
 
   if (configuration.STANDALONE) {
