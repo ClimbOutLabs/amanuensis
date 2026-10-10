@@ -77,6 +77,21 @@ check: it dials the MCP endpoint through
 endpoint said. On a memory provider, run both: this one clears the MCP surface,
 the memory check clears the REST API.
 
+### First-party status
+
+Saving a connector as the memory provider, once the check above passes, also marks
+it first-party on the server. The mark lives on the stored connector, never in the
+manifest, and no request can set it. On a first-party connector a tool that
+declares itself read-only and explicitly closed-world (`readOnlyHint` true and
+`openWorldHint` false) runs without an approval card, and each run is recorded in
+the audit log. Everything else keeps asking.
+
+Saving the connector with a different URL, or without `memory_provider`, clears the
+mark. A save that keeps `memory_provider: true` at the same URL keeps it. To get it
+back after moving the connector, save it once without the flag and once more with
+it. Connectors saved before the mark existed start without it, so do the same for
+an existing memory provider to turn it on.
+
 ### Per-bank tuning in Settings > Memory
 
 Everything that shapes what the host reads from a bank is set on the bank's row in Settings >

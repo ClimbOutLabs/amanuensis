@@ -18,7 +18,9 @@ A standard integration framework for MCP servers with three guarantees: secrets 
 
 **Independent lifecycle.** Each integration has its own connect/disconnect, health check, and audit log. Disconnecting revokes tokens and stops all access immediately.
 
-**Tool hints never lower a connector's tier.** A user-added connector's own MCP annotations (`readOnlyHint`, `openWorldHint`, `destructiveHint`) can only make a call ask, never skip asking, so every tool on a user-added connector asks on first use. An absent `openWorldHint` counts as open-world, as the MCP spec defines it.
+**Tool hints never lower a user-added connector's tier.** A user-added connector's own MCP annotations (`readOnlyHint`, `openWorldHint`, `destructiveHint`) can only make a call ask, never skip asking, so every tool on a user-added connector asks on first use. An absent `openWorldHint` counts as open-world, as the MCP spec defines it.
+
+**First-party connectors (provisional).** The server marks a connector first-party only when the product's own setup provisions it: today the memory provider setup, once its connection check passes, and Gmail once it lands (the server mounts it itself, so the mark is set where it is mounted). The mark lives on the server's connector record, so no create or update request can set it, and a connector added by URL is never first-party. Saving the connector with a new URL, or without the memory provider designation, clears the mark; switching the designation off and on again sets it again. On a first-party connector a tool that declares `readOnlyHint: true` and an explicit `openWorldHint: false` runs without asking, so it needs no grant, and every run is recorded in the Sentinel audit log. Every escalation still wins: destructive hints, destructive or install names, sensitive reads, external-service actions, offline auto-deny, and an explicit require-approval selector. A tool that omits `openWorldHint` asks, as on any connector. This decision is revisited on 2026-10-15.
 
 **Always allow this tool.** On first use the approval offers Allow once, Allow in this chat, Always allow this tool, and Deny. Always allow is offered only for a tool that declares itself read-only and explicitly closed-world, and stores a grant for that user, connector, and tool, never wider. It is honored only while the tool still declares itself that way, and destructive hints, destructive or install names, sensitive reads, external-service actions, offline auto-deny, and an explicit require-approval selector all still ask or deny. Every call a grant runs is recorded in the Sentinel audit log. The connector's page in Settings lists the user's grants with Revoke; deleting a connector or changing its URL removes every user's grants for it.
 
@@ -44,6 +46,8 @@ A standard integration framework for MCP servers with three guarantees: secrets 
 - Verify: revoking access immediately stops the agent from using the integration
 - Verify: audit log records every access
 - Verify: a read-only connector tool asks on first use; Always allow skips the ask for that user, connector, and tool only, and Revoke restores it
+- Verify: on a first-party connector a tool that declares read-only and closed-world runs without asking and is audited, while the same tool without an explicit closed-world hint, a write tool, and the same tool on a user-added connector all ask
+- Verify: no create or update request can mark a connector first-party, and saving it with a new URL clears the mark
 
 ## Out of Scope
 

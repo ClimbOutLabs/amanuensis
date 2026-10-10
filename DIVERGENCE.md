@@ -55,9 +55,9 @@ Shared files carrying memory wiring:
 | packages/trueforge/src/schemas/mcpServer.ts                 | memory_provider manifest flag                                                      |
 | packages/trueforge/src/schemas/turn.ts                      | Widened list-events response                                                       |
 | packages/trueforge/src/config.ts                            | MEMORY_* settings                                                                  |
-| packages/trueforge/src/apis/mcpServers.ts                   | Single-provider 409, connector delete + OAuth purge                                |
+| packages/trueforge/src/apis/mcpServers.ts                   | Single-provider 409, connector delete + OAuth purge, first-party mark              |
 | packages/trueforge/src/routes/mcpServerRoutes.ts            | Delete route, 409 declarations                                                     |
-| packages/trueforge/src/db/mcpServerStore.ts + both backends | deleteServer                                                                       |
+| packages/trueforge/src/db/mcpServerStore.ts + both backends | deleteServer, first_party column                                                   |
 | packages/trueforge-core/src/core/runtime/AgentThread.ts     | Ambient current-date section with midnight refresh                                 |
 | packages/trueforge-ui/...connectorCatalog.ts                | Bearer prefix, memoryProvider mapping, deleteConnector                             |
 | packages/trueforge-ui/...ConnectorSettings.tsx              | Memory toggle, Delete control                                                      |
