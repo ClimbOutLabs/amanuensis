@@ -61,7 +61,10 @@ describe('classifyTier shell matrix', () => {
   test('allowlisted mycmd runs silently as Tier 1', async () => {
     const { services, cleanup } = servicesWithTempAllowlist();
     try {
-      const decision = await classifyTier(action('exec', { command: 'mycmd -l' }), makeCtx({ services }));
+      const decision = await classifyTier(
+        action('exec', { command: 'mycmd -l' }),
+        makeCtx({ services, workspace_cwd: tmpdir() }),
+      );
       expect(decision.tier).toBe(1);
       expect(decision.reason).toBe('shell_allowlist');
       expect(decision.card).toBeNull();
@@ -104,10 +107,16 @@ describe('classifyTier shell matrix', () => {
     const { services, cleanup } = servicesWithTempAllowlist();
     services.isOffline = async () => true;
     try {
-      const allowed = await classifyTier(action('exec', { command: 'ls' }), makeCtx({ services }));
+      const allowed = await classifyTier(
+        action('exec', { command: 'ls' }),
+        makeCtx({ services, workspace_cwd: tmpdir() }),
+      );
       expect(allowed.tier).toBe(1);
       expect(allowed.auto_deny).toBeNull();
-      const denied = await classifyTier(action('exec', { command: 'mycmd -l' }), makeCtx({ services }));
+      const denied = await classifyTier(
+        action('exec', { command: 'mycmd -l' }),
+        makeCtx({ services, workspace_cwd: tmpdir() }),
+      );
       expect(denied.tier).toBe(3);
       expect(denied.auto_deny).toBe('offline_mode');
     } finally {
@@ -266,6 +275,39 @@ describe('classifyTier read-only shell commands are Tier 1', () => {
     }
   });
 
+  test.each([
+    ['cat environ', '/proc/self'],
+    ['cat passwd', '/etc'],
+    ['ls', '/'],
+  ])('with no workspace, %s in %s asks instead of running silently', async (command, cwd) => {
+    const { services, cleanup } = seededWorkspace();
+    try {
+      const decision = await classifyTier(action('exec', { command, cwd }), makeCtx({ services, workspace_cwd: null }));
+      expect(decision.tier).toBe(3);
+      expect(decision.reason).toBe('workspace_unknown');
+      expect(decision.card).not.toBeNull();
+      expect(decision.approval_token_id).not.toBeNull();
+      expect(decision.shell_binding).not.toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('with no workspace, offline mode asks too', async () => {
+    const { services, cleanup } = seededWorkspace();
+    services.isOffline = () => Promise.resolve(true);
+    try {
+      const decision = await classifyTier(
+        action('exec', { command: 'cat passwd', cwd: '/etc' }),
+        makeCtx({ services, workspace_cwd: null }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.reason).toBe('workspace_unknown');
+    } finally {
+      cleanup();
+    }
+  });
+
   test('offline mode keeps the same containment check', async () => {
     const { services, workspace, cleanup } = seededWorkspace();
     services.isOffline = () => Promise.resolve(true);
@@ -414,6 +456,40 @@ describe('verifyPreDispatch', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test('a silent shell command is refused at dispatch when no workspace is set', async () => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const result = await verifyPreDispatch({
+      call: {
+        tool_name: 'exec',
+        tool_type: 'truefoundry-system',
+        canonical_params: { command: 'cat passwd', cwd: '/etc' },
+        tier: 1,
+        approval_token_id: null,
+        approval_binding: null,
+        shell_binding: null,
+      },
+      ctx: { ...makeCtx({ services, workspace_cwd: null }), offline: false },
+    });
+    expect(result).toMatch(/no workspace/i);
+  });
+
+  test('other silent calls still pass through without a workspace', async () => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const result = await verifyPreDispatch({
+      call: {
+        tool_name: 'read_file',
+        tool_type: 'truefoundry-system',
+        canonical_params: { path: 'a.txt' },
+        tier: 1,
+        approval_token_id: null,
+        approval_binding: null,
+        shell_binding: null,
+      },
+      ctx: { ...makeCtx({ services, workspace_cwd: null }), offline: false },
+    });
+    expect(result).toBeUndefined();
   });
 
   test('a Tier 2 call that asked is still contained to the workspace', async () => {

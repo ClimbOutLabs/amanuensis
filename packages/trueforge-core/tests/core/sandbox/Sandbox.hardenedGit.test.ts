@@ -209,7 +209,13 @@ function makeProvider(exec: (params: SandboxExecParams) => Promise<ExecResult>):
   };
 }
 
-function makeSandbox(input: { provider: SandboxProvider; fixture: Fixture; existingSandboxId?: string }): Sandbox {
+function makeSandbox(input: {
+  provider: SandboxProvider;
+  fixture: Fixture;
+  existingSandboxId?: string;
+  /** The session's workspace; defaults to the fixture repo, null models a session without one. */
+  workspaceCwd?: string | null;
+}): Sandbox {
   return new Sandbox({
     provider: input.provider,
     existingSandboxId: input.existingSandboxId,
@@ -222,7 +228,7 @@ function makeSandbox(input: { provider: SandboxProvider; fixture: Fixture; exist
       tenant_id: 't1',
       created_by: 'u1',
       conversation_id: 'conv-1',
-      workspace_cwd: input.fixture.repo,
+      workspace_cwd: input.workspaceCwd === undefined ? input.fixture.repo : input.workspaceCwd,
       services: defaultSentinelServices({ pinned_path: input.fixture.pinnedDir }),
     }),
   });
@@ -424,6 +430,57 @@ describe('silent (Tier 1) git in a nested repository whose config names a progra
       expect(result.isError).toBe(true);
       expect(result.text).toContain('needs your approval');
       expect(existsSync(fixture.marker)).toBe(false);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+});
+
+describe('silent shell commands need a workspace the call did not choose', () => {
+  async function classify(input: { workspaceCwd: string | null; command: string; cwd: string }) {
+    const fixture = repoFixture();
+    try {
+      const sandbox = makeSandbox({
+        fixture,
+        workspaceCwd: input.workspaceCwd,
+        provider: makeProvider(params => Promise.resolve(runForReal(params, params.cwd))),
+      });
+      const info = await sandbox.toolCallInfo({
+        name: SANDBOX_EXEC_TOOL_NAME,
+        arguments: { intent: 'inspect', purpose: 'inspect', command: input.command, cwd: input.cwd },
+      });
+      return { tier: info.tier, approval: info.is_approval_required };
+    } finally {
+      fixture.cleanup();
+    }
+  }
+
+  test('a session with no workspace asks even for a read-only command', async () => {
+    expect(await classify({ workspaceCwd: null, command: 'cat passwd', cwd: '/etc' })).toEqual({
+      tier: 3,
+      approval: true,
+    });
+  });
+
+  test('a cwd outside the session workspace does not become the workspace', async () => {
+    const fixture = repoFixture();
+    try {
+      expect(await classify({ workspaceCwd: fixture.repo, command: 'cat passwd', cwd: '/etc' })).toEqual({
+        tier: 3,
+        approval: true,
+      });
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the same read inside the session workspace stays silent', async () => {
+    const fixture = repoFixture();
+    try {
+      expect(await classify({ workspaceCwd: fixture.repo, command: 'git status', cwd: fixture.repo })).toEqual({
+        tier: 1,
+        approval: false,
+      });
     } finally {
       fixture.cleanup();
     }

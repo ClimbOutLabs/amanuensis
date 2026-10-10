@@ -164,10 +164,14 @@ export function verifyPreDispatch(input: { call: VerifiableCall; ctx: DispatchCh
 
   if (call.tier === 1) {
     // Only shell commands are silent because of a containment rule that can change underfoot.
+    if (call.tool_name !== 'exec') {
+      return undefined;
+    }
     const workspaceRoot = ctx.workspace_cwd;
-    return call.tool_name === 'exec' && workspaceRoot !== null
-      ? verifyTier2Containment({ call, workspace_root: workspaceRoot })
-      : undefined;
+    // Silent only because it was contained; with no workspace there is nothing to check against.
+    return workspaceRoot === null
+      ? 'No workspace is set for this shell command at dispatch; request approval again.'
+      : verifyTier2Containment({ call, workspace_root: workspaceRoot });
   }
 
   if (call.tier === 2) {

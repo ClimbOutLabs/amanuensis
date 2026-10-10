@@ -336,7 +336,10 @@ describe('Suite A - shell parser bypass attempts', () => {
   test('A4 GUARD: backslash-newline folds into a literal operand, still Tier 1', async () => {
     const { services, cleanup } = servicesWithTempAllowlist();
     try {
-      const decision = await classifyTier(action('exec', { command: 'ls \\\n-la' }), makeCtx({ services }));
+      const decision = await classifyTier(
+        action('exec', { command: 'ls \\\n-la' }),
+        makeCtx({ services, workspace_cwd: tmpdir() }),
+      );
       expect(decision.tier).toBe(1);
     } finally {
       cleanup();
@@ -346,7 +349,10 @@ describe('Suite A - shell parser bypass attempts', () => {
   test('A5 GUARD: env-style token after argv[0] is an inert operand', async () => {
     const { services, cleanup } = servicesWithTempAllowlist();
     try {
-      const decision = await classifyTier(action('exec', { command: 'ls FOO=bar' }), makeCtx({ services }));
+      const decision = await classifyTier(
+        action('exec', { command: 'ls FOO=bar' }),
+        makeCtx({ services, workspace_cwd: tmpdir() }),
+      );
       expect(decision.tier).toBe(1);
     } finally {
       cleanup();
@@ -836,7 +842,7 @@ describe('Suite F - tier boundary probes', () => {
   test('F2 GUARD: missing binary on the allowlist entry is Tier 3, exact version call is Tier 1', async () => {
     const { services, cleanup } = servicesWithSeededTools();
     try {
-      const ctx = makeCtx({ services });
+      const ctx = makeCtx({ services, workspace_cwd: tmpdir() });
       const noBin = await classifyTier(action('exec', { command: 'node script.js' }), ctx);
       expect(noBin.tier).toBe(3);
       const withBin = await classifyTier(action('exec', { command: 'node --version' }), ctx);
@@ -849,7 +855,7 @@ describe('Suite F - tier boundary probes', () => {
   test('F3 GUARD: `git status` is Tier 1, config-injection forms are Tier 3', async () => {
     const { services, cleanup } = servicesWithSeededTools();
     try {
-      const ctx = makeCtx({ services });
+      const ctx = makeCtx({ services, workspace_cwd: tmpdir() });
       expect((await classifyTier(action('exec', { command: 'git --config user.x y' }), ctx)).tier).toBe(3);
       expect((await classifyTier(action('exec', { command: 'git -c user.x=y status' }), ctx)).tier).toBe(3);
       expect((await classifyTier(action('exec', { command: 'git status' }), ctx)).tier).toBe(1);
@@ -861,7 +867,7 @@ describe('Suite F - tier boundary probes', () => {
   test('F3b GAP: git subcommands outside the read-only list are Tier 3', async () => {
     const { services, cleanup } = servicesWithSeededTools();
     try {
-      const ctx = makeCtx({ services });
+      const ctx = makeCtx({ services, workspace_cwd: tmpdir() });
       const bypasses = [
         'git push origin main',
         'git pull',

@@ -2171,7 +2171,9 @@ export class Sandbox extends LocalToolMCP {
       const sentinelDecision = await classifyHostToolCall({
         sentinel: sentinelHost,
         repository_id: this.boundRepository?.repository_id ?? null,
-        workspace_cwd: this.boundRepository?.workspace_cwd ?? cwd ?? null,
+        // Never the call's own cwd: a model-supplied cwd would make itself the workspace.
+        workspace_cwd:
+          this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null,
         action: {
           tool_name: params.name,
           canonical_params: effectiveArguments ?? {},

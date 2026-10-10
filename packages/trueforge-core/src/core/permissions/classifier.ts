@@ -575,44 +575,61 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       // The cwd and every file operand must resolve inside the workspace.
       // An agent-controlled cwd or a symlink escape must not run silently.
       const workspaceRoot = ctx.workspace_cwd;
-      if (workspaceRoot !== null) {
-        const cwdInside = isInsideWorkspace({ p: identityCwd, cwd: '/', workspace_root: workspaceRoot });
-        if (!cwdInside) {
-          return tier3Decision({
-            card: {
-              plain_what: `Run \`${command}\` from outside the workspace.`,
-              plain_why: plainWhy(ctx.agent_intent),
-              cannot_be_undone: 'Running outside the workspace can access system files.',
-              why_asked_again: null,
-              destination: null,
-              recipient: null,
-              amount: null,
-              parsed_command: command,
-            },
-            reason: 'cwd_outside_workspace',
-            reason_detail: 'The working directory is outside the workspace.',
-            sensitive_read: false,
-            ...mintShellApproval({ ctx, action, command, cwd, env }),
-          });
-        }
-        if (!shellOperandsInsideWorkspace({ parsed, cwd: identityCwd, workspace_root: workspaceRoot })) {
-          return tier3Decision({
-            card: {
-              plain_what: `Access a file outside the workspace with \`${command}\`.`,
-              plain_why: plainWhy(ctx.agent_intent),
-              cannot_be_undone: 'This file is outside the workspace boundary.',
-              why_asked_again: null,
-              destination: null,
-              recipient: null,
-              amount: null,
-              parsed_command: command,
-            },
-            reason: 'file_outside_workspace',
-            reason_detail: 'A file operand resolves outside the workspace.',
-            sensitive_read: false,
-            ...mintShellApproval({ ctx, action, command, cwd, env }),
-          });
-        }
+      if (workspaceRoot === null) {
+        // Without a workspace there is nothing to contain the command in, so it must ask.
+        return tier3Decision({
+          card: {
+            plain_what: `Run \`${command}\` where no workspace is set.`,
+            plain_why: plainWhy(ctx.agent_intent),
+            cannot_be_undone: 'Without a workspace, nothing limits which files the command can read.',
+            why_asked_again: null,
+            destination: null,
+            recipient: null,
+            amount: null,
+            parsed_command: command,
+          },
+          reason: 'workspace_unknown',
+          reason_detail: 'There is no workspace to keep the command inside.',
+          sensitive_read: false,
+          ...mintShellApproval({ ctx, action, command, cwd, env }),
+        });
+      }
+      const cwdInside = isInsideWorkspace({ p: identityCwd, cwd: '/', workspace_root: workspaceRoot });
+      if (!cwdInside) {
+        return tier3Decision({
+          card: {
+            plain_what: `Run \`${command}\` from outside the workspace.`,
+            plain_why: plainWhy(ctx.agent_intent),
+            cannot_be_undone: 'Running outside the workspace can access system files.',
+            why_asked_again: null,
+            destination: null,
+            recipient: null,
+            amount: null,
+            parsed_command: command,
+          },
+          reason: 'cwd_outside_workspace',
+          reason_detail: 'The working directory is outside the workspace.',
+          sensitive_read: false,
+          ...mintShellApproval({ ctx, action, command, cwd, env }),
+        });
+      }
+      if (!shellOperandsInsideWorkspace({ parsed, cwd: identityCwd, workspace_root: workspaceRoot })) {
+        return tier3Decision({
+          card: {
+            plain_what: `Access a file outside the workspace with \`${command}\`.`,
+            plain_why: plainWhy(ctx.agent_intent),
+            cannot_be_undone: 'This file is outside the workspace boundary.',
+            why_asked_again: null,
+            destination: null,
+            recipient: null,
+            amount: null,
+            parsed_command: command,
+          },
+          reason: 'file_outside_workspace',
+          reason_detail: 'A file operand resolves outside the workspace.',
+          sensitive_read: false,
+          ...mintShellApproval({ ctx, action, command, cwd, env }),
+        });
       }
       // Every allowlist entry is read-only by curation (no writes, no network), so a match
       // that passed the checks above runs silently. Anything that failed them asked instead.
