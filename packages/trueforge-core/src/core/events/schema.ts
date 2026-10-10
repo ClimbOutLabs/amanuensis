@@ -13,6 +13,7 @@ import {
   LLMUserMessageSchema,
   RegisteredCommandExecutionSchema,
 } from '../llm/LLMTypes';
+import { Tier3CardSchema, TierSchema } from '../permissions/tier';
 import { CurrentContextUsageSchema } from '../runtime/contextUsage';
 
 /**
@@ -618,13 +619,20 @@ export const ToolCallRefSchema = z
   })
   .openapi('ToolCallRef');
 
+export const ApprovalToolCallRefSchema = ToolCallRefSchema.extend({
+  tier: TierSchema.optional().describe('Permission tier of the call; absent when the call was not classified.'),
+  tier3_card: Tier3CardSchema.nullable()
+    .optional()
+    .describe('Plain-language approval card for a Tier 3 call, or null.'),
+}).openapi('ApprovalToolCallRef');
+
 export const ToolApprovalRequiredEventSchema = z
   .object({
     type: z.literal(EventType.TOOL_APPROVAL_REQUIRED).describe('One or more tool calls need human approval.'),
     id: EventIdSchema,
     created_at: z.string().describe('ISO 8601 event timestamp.'),
     thread_id: z.string().describe('Thread that owns the pending tool calls.'),
-    tool_calls: z.array(ToolCallRefSchema).describe('Tool calls waiting for approval.'),
+    tool_calls: z.array(ApprovalToolCallRefSchema).describe('Tool calls waiting for approval.'),
   })
   .openapi('ToolApprovalRequiredEvent');
 

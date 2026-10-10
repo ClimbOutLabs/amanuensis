@@ -3797,7 +3797,13 @@ export class AgentThread {
         id: newEventId(),
         created_at: new Date().toISOString(),
         thread_id: this.threadId,
-        tool_calls: pendingApprovalToolCalls.map(({ id }) => ({ id, source_event_id: modelMessageEventId })),
+        tool_calls: pendingApprovalToolCalls.map(({ id, tool_info }) => ({
+          id,
+          source_event_id: modelMessageEventId,
+          // Tier and card ride on the approval event because the wire tool_info omits them.
+          ...(tool_info.tier === undefined ? {} : { tier: tool_info.tier }),
+          ...(tool_info.tier3_card === undefined ? {} : { tier3_card: tool_info.tier3_card }),
+        })),
       };
       yield event;
     }
