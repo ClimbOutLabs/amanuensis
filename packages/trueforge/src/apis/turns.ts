@@ -1690,6 +1690,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       turnId,
       personalizationProfile: profile,
       personaContext: persona?.kind === 'persona' ? persona.context : undefined,
+      switchNotice: persona?.switchNotice,
       boundRepository,
       repositoryStore: deps.repositoryStore,
       sessionStore: deps.sessionStore,
@@ -1886,7 +1887,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           model_name: persona.kind === 'persona' ? persona.persona.model_name : null,
           source: persona.source,
         };
-        if (persona.selection === 'direct') {
+        // A no-op switch (the invocation named the already-active identity, or an ambiguous
+        // request failed closed onto the already-active default) changes no state, so the
+        // activation log records nothing while the turn still runs under that identity.
+        if (persona.skipActivationWrite === true) {
+          activationRecorded = true;
+        } else if (persona.selection === 'direct') {
           await deps.personaStore.recordPersonaActivation(activation);
           activationRecorded = true;
         } else {
