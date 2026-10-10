@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Amanuensis installer release manifest",
+  "description": "installer/release.json carries the pinned third-party images. The copy under release/ in the state directory also records the local builds. Values are flat strings so the installer can read them without a JSON tool.",
+  "type": "object",
+  "required": ["schema", "dex_image"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "1" },
+    "dex_image": {
+      "description": "Login service image, pinned by multi-arch index digest.",
+      "type": "string",
+      "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$"
+    },
+    "source_ref": {
+      "description": "Commit of the checkout the local images were built from.",
+      "type": "string"
+    },
+    "app_image": {
+      "description": "Local tag of the app image built from Dockerfile.dev, aman-app:<source id>.",
+      "type": "string"
+    },
+    "stt_image": {
+      "description": "Local tag of the speech-to-text image built from ops/aman-stt, aman-stt:<source id>.",
+      "type": "string"
+    },
+    "broker_image": {
+      "description": "Reserved for the sandbox broker, absent until it ships.",
+      "type": "string",
+      "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$"
+    },
+    "sandbox_image": {
+      "description": "Reserved for the sandbox run image, absent until it ships.",
+      "type": "string",
+      "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$"
+    },
+    "sandbox_key_fingerprint": {
+      "description": "Reserved for the sandbox signing key, absent until the broker ships.",
+      "type": "string"
+    }
+  }
+}
