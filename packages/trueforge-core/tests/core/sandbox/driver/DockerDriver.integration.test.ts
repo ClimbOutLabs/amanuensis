@@ -68,7 +68,7 @@ describe('DockerDriver integration (live daemon)', () => {
     const readiness = await driver.ensureReady();
     expect(readiness.ready).toBe(false);
     if (!readiness.ready) {
-      // A pullable-but-absent image is healable; RunCodeService provisions it before surfacing image_unavailable.
+      // An image absent locally is healable; RunCodeService provisions it before surfacing image_unavailable.
       expect(readiness.error_code).toBe('image_missing');
     }
   });

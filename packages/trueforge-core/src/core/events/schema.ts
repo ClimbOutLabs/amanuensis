@@ -619,12 +619,16 @@ export const ToolCallRefSchema = z
   })
   .openapi('ToolCallRef');
 
-export const ApprovalToolCallRefSchema = ToolCallRefSchema.extend({
-  tier: TierSchema.optional().describe('Permission tier of the call; absent when the call was not classified.'),
-  tier3_card: Tier3CardSchema.nullable()
-    .optional()
-    .describe('Plain-language approval card for a Tier 3 call, or null.'),
-}).openapi('ApprovalToolCallRef');
+export const ApprovalToolCallRefSchema = z
+  .object({
+    ...ToolCallRefSchema.shape,
+    tier: TierSchema.optional().describe('Permission tier of the call; absent when the call was not classified.'),
+    tier3_card: z
+      .union([Tier3CardSchema, z.null()])
+      .optional()
+      .describe('Plain-language approval card for a Tier 3 call, or null.'),
+  })
+  .openapi('ApprovalToolCallRef');
 
 export const ToolApprovalRequiredEventSchema = z
   .object({
