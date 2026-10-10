@@ -3,8 +3,10 @@
 import {
   MessagePartPrimitive,
   MessagePrimitive,
+  useAui,
   useAuiState,
   useToolCallElapsed,
+  type ThreadMessage,
   type ToolApprovalResponse,
   type ToolCallMessagePartComponent,
   type ToolCallMessagePartProps,
@@ -20,6 +22,7 @@ import {
   MCP_META_TOOLS,
   SANDBOX_TOOL_NAMES,
   SUB_AGENT_TOOL_NAME,
+  allowOnceOptionId,
   buildApprovalOptions,
   buildOutcomeText,
   formatDuration,
@@ -78,11 +81,25 @@ function NestedSubAgentAssistantMessage() {
   );
 }
 
+/** Single-use allow ids the server declared, by approval id, including sub-agent threads. */
+function collectAllowOnceIds(messages: readonly ThreadMessage[], into: Map<string, string>): void {
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    for (const part of message.content) {
+      if (part.type !== 'tool-call') continue;
+      const allowOnceId = allowOnceOptionId(part.approval?.options);
+      if (part.approval != null && allowOnceId !== undefined) into.set(part.approval.id, allowOnceId);
+      if (part.messages != null) collectAllowOnceIds(part.messages, into);
+    }
+  }
+}
+
 function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   const isNestedReadonly = useNestedApprovalBridge();
   const respondToNestedApproval = useTrueFoundryRespondToToolApproval();
   const { pending: pendingApprovals, respond: respondToApproval } = useTrueFoundryApprovals();
   const sentinel = useOptionalSentinelState();
+  const aui = useAui();
 
   const respond = (response: ToolApprovalResponse) => {
     if (part.approval == null) return;
@@ -99,6 +116,9 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
       optionId = response.optionId;
     }
     if (approved === undefined) return;
+    // A plain allow is still a single-use allow: name the declared option instead of leaving
+    // the scope to a default.
+    if (approved && optionId === undefined) optionId = allowOnceOptionId(part.approval.options);
 
     const normalizedResponse = {
       approvalId: part.approval.id,
@@ -142,7 +162,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     const options = buildApprovalOptions(part.approval?.options);
     // Approve is always a single-use allow: a declared chat-scoped grant can sort first,
     // and taking the first allow option would silently approve every later equivalent call.
-    const allowOnceId = part.approval?.options?.find(option => option.kind === 'allow-once')?.id ?? '__allow';
+    const allowOnceId = allowOnceOptionId(part.approval?.options) ?? '__allow';
     const denyOption = options.find(option => !option.isAllow);
     // Only Tier 2 calls batch, and only those asked by this same approval event on this
     // same thread: a sub-agent's calls never ride along with the parent's. Each call still
@@ -164,8 +184,15 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     const approveAll =
       tier2Batch.length > 1
         ? () => {
+            const declaredAllowOnce = new Map<string, string>();
+            collectAllowOnceIds(aui.thread().getState().messages, declaredAllowOnce);
             for (const pending of tier2Batch) {
-              respondToApproval({ approvalId: pending.approvalId, approved: true });
+              const optionId = declaredAllowOnce.get(pending.approvalId);
+              respondToApproval({
+                approvalId: pending.approvalId,
+                approved: true,
+                ...(optionId === undefined ? {} : { optionId }),
+              });
             }
           }
         : undefined;

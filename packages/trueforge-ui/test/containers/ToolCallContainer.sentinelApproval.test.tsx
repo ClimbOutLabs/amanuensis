@@ -142,9 +142,42 @@ describe('ToolCallContainer Sentinel approvals', () => {
     ]);
     fireEvent.click(firstButton('Approve all (3)'));
     expect(respondToApproval.mock.calls).toEqual([
+      [{ approvalId: 'a', approved: true, optionId: 'allow-once' }],
+      [{ approvalId: 'b', approved: true, optionId: 'allow-once' }],
+      [{ approvalId: 'c', approved: true, optionId: 'allow-once' }],
+    ]);
+  });
+
+  it('Approve all sends allow-once for each call even when allow-chat is declared first', () => {
+    const chatFirst: ApprovalOptions = [
+      { id: 'allow-chat', kind: 'allow-always', label: 'Allow in this chat' },
+      { id: 'allow-once', kind: 'allow-once' },
+      { id: 'deny', kind: 'reject-once', confirm: {} },
+    ];
+    renderPending([
+      { id: 'a', tier: 2, options: chatFirst },
+      { id: 'b', tier: 2, options: chatFirst },
+    ]);
+    fireEvent.click(firstButton('Approve all (2)'));
+    expect(respondToApproval.mock.calls).toEqual([
+      [{ approvalId: 'a', approved: true, optionId: 'allow-once' }],
+      [{ approvalId: 'b', approved: true, optionId: 'allow-once' }],
+    ]);
+  });
+
+  it('Approve all sends a plain allow for a call that declares no allow-once option', () => {
+    const chatOnly: ApprovalOptions = [
+      { id: 'allow-chat', kind: 'allow-always' },
+      { id: 'deny', kind: 'reject-once', confirm: {} },
+    ];
+    renderPending([
+      { id: 'a', tier: 2, options: chatOnly },
+      { id: 'b', tier: 2 },
+    ]);
+    fireEvent.click(firstButton('Approve all (2)'));
+    expect(respondToApproval.mock.calls).toEqual([
       [{ approvalId: 'a', approved: true }],
-      [{ approvalId: 'b', approved: true }],
-      [{ approvalId: 'c', approved: true }],
+      [{ approvalId: 'b', approved: true, optionId: 'allow-once' }],
     ]);
   });
 
