@@ -13,6 +13,7 @@ import type { IMcpServerWithAuthStore } from '../../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
 import {
@@ -119,6 +120,7 @@ describe('mcp-servers routers', () => {
   let mcpServersRouter: ReturnType<typeof createMcpServersRouter>;
   let mcpServerStore: IMcpServerWithAuthStore;
   let tokenStore: SqliteOAuthTokenStore;
+  let toolGrantStore: SqliteMcpToolGrantStore;
   let withTransaction: <T>(callback: (transaction: unknown) => Promise<T>) => Promise<T>;
   let logger: ReturnType<typeof winston.createLogger>;
   const originalFetch = globalThis.fetch;
@@ -142,6 +144,7 @@ describe('mcp-servers routers', () => {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     tokenStore = new SqliteOAuthTokenStore(db);
+    toolGrantStore = new SqliteMcpToolGrantStore(db);
     mcpServerStore = new McpServerWithAuthStore({
       store: new SqliteMcpServerStore(db),
       tokenStore,
@@ -152,6 +155,7 @@ describe('mcp-servers routers', () => {
     settingsRouter = createSettingsMcpServersRouter({
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
+      toolGrantStore,
       withTransaction,
       logger,
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
@@ -165,6 +169,7 @@ describe('mcp-servers routers', () => {
     mcpServersRouter = createMcpServersRouter({
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
+      toolGrantStore,
       withTransaction,
       logger,
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
@@ -919,6 +924,7 @@ describe('mcp-servers routers', () => {
     const otherRouter = createMcpServersRouter({
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
+      toolGrantStore,
       withTransaction,
       logger,
       resolveRequestContext: () => ({
@@ -1671,6 +1677,91 @@ describe('mcp-servers routers', () => {
       const list = await settingsRouter.request('/');
       const listBody = (await list.json()) as { data: { name: string }[] };
       expect(listBody.data.find(server => server.name === memoryProviderBody.name)).toBeUndefined();
+    });
+  });
+
+  describe('Always allow tool grants', () => {
+    const OTHER_USER = 'user:someone-else';
+    const notesBody = {
+      type: 'remote' as const,
+      name: 'grant-notes-mcp',
+      url: 'https://notes.example.com/mcp',
+      description: 'Notes connector used by the grant tests.',
+    };
+
+    function grantFor(input: { created_by: string; tool_name: string }) {
+      return { tenant_id: TENANT_ID, mcp_server_name: notesBody.name, ...input };
+    }
+
+    async function listedGrants(): Promise<string[]> {
+      const response = await mcpServersRouter.request(`/${notesBody.name}/tool-grants`);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { data: { tool_name: string; created_at: string }[] };
+      return body.data.map(grant => grant.tool_name);
+    }
+
+    beforeEach(async () => {
+      const put = await settingsRouter.request('/', putInit(wrapManifest(notesBody)));
+      expect(put.status).toBe(200);
+      await toolGrantStore.recordToolGrant(
+        grantFor({ created_by: STANDALONE_REQUEST_CONTEXT.subject.id, tool_name: 'lookup_note' }),
+      );
+      await toolGrantStore.recordToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }));
+    });
+
+    afterEach(async () => {
+      await settingsRouter.request(`/${notesBody.name}`, { method: 'DELETE' });
+    });
+
+    it("lists only the caller's grants", async () => {
+      await toolGrantStore.recordToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'list_notes' }));
+      expect(await listedGrants()).toEqual(['lookup_note']);
+    });
+
+    it("revokes one of the caller's grants and leaves other users' grants alone", async () => {
+      const response = await mcpServersRouter.request(`/${notesBody.name}/tool-grants/lookup_note`, {
+        method: 'DELETE',
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({});
+      expect(await listedGrants()).toEqual([]);
+      expect(await toolGrantStore.hasToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }))).toBe(
+        true,
+      );
+    });
+
+    it('404s for an unknown connector', async () => {
+      const list = await mcpServersRouter.request('/missing-grant-mcp/tool-grants');
+      expect(list.status).toBe(404);
+      const revoke = await mcpServersRouter.request('/missing-grant-mcp/tool-grants/lookup_note', { method: 'DELETE' });
+      expect(revoke.status).toBe(404);
+    });
+
+    it('drops the grants of every user when the connector URL changes, but not on an unrelated edit', async () => {
+      const described = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest({ ...notesBody, description: 'Same server, new words.' })),
+      );
+      expect(described.status).toBe(200);
+      expect(await listedGrants()).toEqual(['lookup_note']);
+
+      const moved = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest({ ...notesBody, url: 'https://elsewhere.example.com/mcp' })),
+      );
+      expect(moved.status).toBe(200);
+      expect(await listedGrants()).toEqual([]);
+      expect(await toolGrantStore.hasToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }))).toBe(
+        false,
+      );
+    });
+
+    it('drops the grants of every user when the connector is deleted', async () => {
+      const response = await settingsRouter.request(`/${notesBody.name}`, { method: 'DELETE' });
+      expect(response.status).toBe(200);
+      for (const created_by of [STANDALONE_REQUEST_CONTEXT.subject.id, OTHER_USER]) {
+        expect(await toolGrantStore.hasToolGrant(grantFor({ created_by, tool_name: 'lookup_note' }))).toBe(false);
+      }
     });
   });
 });

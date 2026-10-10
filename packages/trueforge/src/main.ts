@@ -75,6 +75,7 @@ import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerStore';
 import { McpServerWithAuthStore } from './db/McpServerWithAuthStore';
+import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
@@ -149,6 +150,7 @@ interface ServerPersistence<TTransaction> {
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
@@ -313,6 +315,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/repository-store/SqliteRepositoryStore'),
       import('./db/sqlite/turn-artifact-store/SqliteTurnArtifactStore'),
       import('./db/sqlite/global-settings-store/SqliteGlobalSettingsStore'),
+      import('./db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore'),
     ]),
   ]);
   const [
@@ -331,6 +334,7 @@ async function createStandalonePersistence(options: {
     { SqliteRepositoryStore },
     { SqliteTurnArtifactStore },
     { SqliteGlobalSettingsStore },
+    { SqliteMcpToolGrantStore },
   ] = sqliteStores;
 
   const db = createSqliteDb(sqlitePath);
@@ -364,6 +368,7 @@ async function createStandalonePersistence(options: {
     scheduleStore: new SqliteScheduleStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
+    mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
@@ -412,6 +417,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/repository-store/PostgresRepositoryStore'),
       import('./db/postgres/turn-artifact-store/PostgresTurnArtifactStore'),
       import('./db/postgres/global-settings-store/PostgresGlobalSettingsStore'),
+      import('./db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore'),
     ]),
   ]);
   const [
@@ -430,6 +436,7 @@ async function createDistributedPersistence(options: {
     { PostgresRepositoryStore },
     { PostgresTurnArtifactStore },
     { PostgresGlobalSettingsStore },
+    { PostgresMcpToolGrantStore },
   ] = postgresStores;
 
   const db = createDb({
@@ -511,6 +518,7 @@ async function createDistributedPersistence(options: {
     scheduleStore: new PostgresScheduleStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
+    mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     resolveModelProviderStore,
     resolveMcpServerStore,
@@ -543,6 +551,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     repositoryStore,
     turnArtifactStore,
     globalSettingsStore,
+    mcpToolGrantStore,
     sentinelAuditStore,
     destroyDb,
     redis,
@@ -570,6 +579,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const sentinelServices: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     audit: sentinelAuditStore,
+    tool_grants: mcpToolGrantStore,
   };
   const sessions = new Sessions({ sessionStore, sentinelServices });
 
@@ -648,6 +658,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     resolveSkillStore,
     withTransaction,
     tokenStore,
+    mcpToolGrantStore,
     scheduleStore,
     agentStore,
     skillStore,

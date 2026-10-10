@@ -4,9 +4,11 @@ import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
 import {
   classifyHostToolCall,
+  recordToolGrantRun,
   type SentinelHostContext,
   type TierDecision,
 } from '../permissions';
+import { TOOL_GRANT_REASON } from '../permissions/toolGrants';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -103,9 +105,10 @@ export class ToolSet implements IToolSet {
     preload: boolean | undefined;
     /**
      * Sentinel classification context. When present, every tool call the
-     * source has not already classified is classified here and the classifier
-     * result replaces the policy approval stamp. Absent, the source's own
-     * approval stamping is preserved and no classification runs.
+     * source has not already classified is classified here; the classifier
+     * result decides approval, and a require-approval selector can only add a
+     * gate. Absent, the source's own approval stamping is preserved and no
+     * classification runs.
      */
     sentinel?: SentinelHostContext | undefined;
   }) {
@@ -192,7 +195,7 @@ export class ToolSet implements IToolSet {
 
       await this.assertToolAllowed(params.name, tool?.annotations);
 
-      const tool_info = await this.buildToolCallInfo(params, tool);
+      const { info: tool_info, classification } = await this.buildToolCallInfo(params, tool);
       if (!decision && tool_info.is_approval_required) {
         return { approvalRequired: { tool_info } };
       }
@@ -201,6 +204,15 @@ export class ToolSet implements IToolSet {
         return toolResultResponse({
           text: deniedToolCallText(decision.reason),
           isError: true,
+        });
+      }
+
+      if (decision === undefined && classification?.reason === TOOL_GRANT_REASON && this.sentinel !== undefined) {
+        await recordToolGrantRun({
+          services: this.sentinel.services,
+          identity: this.sentinel,
+          tool_name: params.name,
+          description: classification.reason_detail ?? params.name,
         });
       }
     } catch (error) {
@@ -232,7 +244,7 @@ export class ToolSet implements IToolSet {
   ): Promise<InternalToolCallInfo> {
     try {
       const tool = await this.resolveTool(params.name);
-      return await this.buildToolCallInfo(params, tool, resolveUnderlyingTool);
+      return (await this.buildToolCallInfo(params, tool, resolveUnderlyingTool)).info;
     } catch (error) {
       if (error instanceof ToolPolicyBlockedError || error instanceof ToolPreDispatchError) {
         throw error;
@@ -255,7 +267,7 @@ export class ToolSet implements IToolSet {
     params: CallToolRequest['params'],
     tool: AgentToolSchema | undefined,
     resolveUnderlyingTool?: boolean,
-  ): Promise<InternalToolCallInfo> {
+  ): Promise<{ info: InternalToolCallInfo; classification: TierDecision | undefined }> {
     // Hints go under the source's info, not over it: a deferred call resolves to the
     // underlying tool's own hints, and `tool` here only describes the dispatch wrapper.
     const sourceInfo = await this.source.toolCallInfo(params, resolveUnderlyingTool);
@@ -263,18 +275,22 @@ export class ToolSet implements IToolSet {
       // Already classified by the source (the sandbox classifies its own
       // tools with normalized arguments): keep the classifier result, do not
       // re-classify or re-stamp.
-      return { ...toolEffectHints(tool), ...sourceInfo };
+      return { info: { ...toolEffectHints(tool), ...sourceInfo }, classification: undefined };
     }
     const sentinel = this.sentinel;
     if (sentinel === undefined) {
       // No Sentinel context wired by the host: preserve the legacy policy
       // approval stamping. Classification only runs when the host opts in.
       return {
-        ...toolEffectHints(tool),
-        ...sourceInfo,
-        is_approval_required: this.policy.requiresApproval(params.name, tool?.annotations),
+        info: {
+          ...toolEffectHints(tool),
+          ...sourceInfo,
+          is_approval_required: this.policy.requiresApproval(params.name, tool?.annotations),
+        },
+        classification: undefined,
       };
     }
+    const info = { ...toolEffectHints(tool), ...sourceInfo };
     const decision = await classifyHostToolCall({
       sentinel,
       repository_id: null,
@@ -282,18 +298,27 @@ export class ToolSet implements IToolSet {
       action: {
         tool_name: params.name,
         canonical_params: isRecord(params.arguments) ? params.arguments : {},
-        tool_type: sourceInfo.type,
+        tool_type: info.type,
+        mcp_server_name: info.mcp_server_name,
         mcp_hints: {
-          read_only_hint: sourceInfo.read_only_hint,
-          destructive_hint: sourceInfo.destructive_hint,
-          open_world_hint: sourceInfo.open_world_hint,
+          read_only_hint: info.read_only_hint,
+          destructive_hint: info.destructive_hint,
+          open_world_hint: info.open_world_hint,
         },
       },
     });
+    const stamp = stampSentinelDecision({ decision });
     return {
-      ...toolEffectHints(tool),
-      ...sourceInfo,
-      ...stampSentinelDecision({ decision }),
+      info: {
+        ...info,
+        ...stamp,
+        // An explicit require-approval selector adds a gate on top of any tier, including a
+        // standing grant, but never to a call that is auto-denied without a card.
+        is_approval_required:
+          stamp.is_approval_required === true ||
+          (decision.auto_deny === null && this.policy.requiresApproval(params.name, tool?.annotations)),
+      },
+      classification: decision,
     };
   }
 
@@ -312,20 +337,21 @@ function findTool(tools: AgentToolSchema[], toolName: string): AgentToolSchema |
 
 /**
  * Classifies an MCP tool as read-only inspection, which is the only category a
- * durable chat-scoped approval may cover.
+ * durable chat-scoped or always-allow approval may cover.
  *
  * Both conditions are required. `readOnlyHint` alone is not enough: a tool that
  * reads nothing but reaches off this machine can still carry data out in its
- * arguments, and an MCP chat grant is argument-blind, so one grant would
- * authorize every later call with any argument for the rest of the chat.
- * Requiring the tool to stay local bounds that to this machine.
+ * arguments, and an MCP grant is argument-blind, so one grant would authorize
+ * every later call with any argument. Requiring the tool to stay local bounds
+ * that to this machine.
  *
  * The claim is the hosting server's own, which is the only signal MCP offers.
  * Absence is never read as the reassuring answer: an unannotated tool is not
- * inspection.
+ * inspection, and a tool that omits `openWorldHint` is open-world, as the MCP
+ * spec defines the default.
  */
 function isReadOnlyLocalTool(annotations: ToolAnnotations | undefined): boolean {
-  return annotations?.readOnlyHint === true && annotations.openWorldHint !== true;
+  return annotations?.readOnlyHint === true && annotations.openWorldHint === false;
 }
 
 /**

@@ -70,3 +70,29 @@ export async function recordClassificationAudit(input: {
     auto_deny_reason: decision.auto_deny,
   });
 }
+
+/**
+ * Record a call a standing tool grant ran without asking. Written once, right before dispatch,
+ * because the same call is classified several times on its way there.
+ */
+export async function recordToolGrantRun(input: {
+  services: SentinelServices;
+  identity: Pick<SentinelCallIdentity, 'tenant_id' | 'created_by' | 'conversation_id'>;
+  tool_name: string;
+  description: string;
+}): Promise<void> {
+  const writer = input.services.audit;
+  if (writer === null) {
+    return;
+  }
+  await writer.record({
+    tenant_id: input.identity.tenant_id,
+    created_by: input.identity.created_by,
+    conversation_id: input.identity.conversation_id,
+    tier: 1,
+    tool_name: input.tool_name,
+    description: input.description,
+    outcome: 'logged',
+    auto_deny_reason: null,
+  });
+}

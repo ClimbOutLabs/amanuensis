@@ -28,6 +28,7 @@ import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore'
 import { createSqliteDb } from '../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteMcpToolGrantStore } from '../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
@@ -83,6 +84,7 @@ const app = createServerApp({
   sandboxProviderStore,
   agentStore,
   skillStore,
+  mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
   personalizationStore: new SqlitePersonalizationStore(db),
   personaStore: new SqlitePersonaStore(db),
   spaceStore: new SqliteSpaceStore(db),

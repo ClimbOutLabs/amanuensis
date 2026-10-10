@@ -6,7 +6,7 @@
  */
 export { InMemoryApprovalTokenStore } from './approvalTokens';
 export type { ApprovalTokenStore } from './approvalTokens';
-export { recordClassificationAudit } from './audit';
+export { recordClassificationAudit, recordToolGrantRun } from './audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './audit';
 export { canonicalShellForm, classifyHostToolCall, classifyTier, shellBindingFromForm } from './classifier';
 export type { ClassifyContext, SentinelAction } from './classifier';
@@ -38,6 +38,7 @@ export {
   tier3Decision,
 } from './tier';
 export type { AutoDenyReason, Tier, Tier2ActionKind, Tier3Card, TierDecision, TrackedExecutionBinding } from './tier';
+export type { ToolGrantKey, ToolGrantStore } from './toolGrants';
 export {
   InMemoryTrackedExecutableStore,
   canonicalFileIdentity,

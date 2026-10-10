@@ -12,7 +12,13 @@ import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import { ListSessionEventsResponseSchema, TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema, ListTurnsResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
-import { INERT_ECHO_TOOL, INERT_READ_TOOL, INERT_SERVER_NAME, INERT_WRITE_TOOL } from '../../fixtures/inertMcpServer';
+import {
+  INERT_ASK_MEMORY_TOOL,
+  INERT_ECHO_TOOL,
+  INERT_READ_TOOL,
+  INERT_SERVER_NAME,
+  INERT_WRITE_TOOL,
+} from '../../fixtures/inertMcpServer';
 import { RUN_DIRECTIVE_PREFIX } from '../../fixtures/scriptedModelServer';
 
 const TURN_TIMEOUT_MS = 60_000;
@@ -53,6 +59,20 @@ const AGENT_SPEC = {
   },
 };
 
+/** AGENT_SPEC without the literal that force-gates `inert_read`, so an Always allow grant can take effect. */
+const UNFORCED_AGENT_SPEC = {
+  ...AGENT_SPEC,
+  mcp_servers: [
+    { name: INERT_SERVER_NAME, preload: true, require_approval_for_tools: ['@write', '@destructive', '@unclassified'] },
+  ],
+};
+
+const ToolGrantsResponseSchema = z.object({ data: z.array(z.object({ tool_name: z.string() }).loose()) });
+
+const AuditLogResponseSchema = z.object({
+  entries: z.array(z.object({ tier: z.number(), tool_name: z.string(), outcome: z.string() }).loose()),
+});
+
 function jsonInit(body: unknown): RequestInit {
   return { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
@@ -68,13 +88,13 @@ function approvalInput({
 }: {
   thread_id: string;
   tool_call_id: string;
-  approval: { status: 'allow'; scope?: 'once' | 'chat' } | { status: 'deny'; reason?: string };
+  approval: { status: 'allow'; scope?: 'once' | 'chat' | 'always' } | { status: 'deny'; reason?: string };
 }): TurnInputItem[] {
   return [{ type: 'user.tool_approval', thread_id, tool_call_id, approval }];
 }
 
-async function createSession(server: ApprovalTestServer): Promise<string> {
-  const response = await server.request('/api/v1/sessions', jsonInit({ agent: { spec: AGENT_SPEC } }));
+async function createSession(server: ApprovalTestServer, spec: object = AGENT_SPEC): Promise<string> {
+  const response = await server.request('/api/v1/sessions', jsonInit({ agent: { spec } }));
   const body: unknown = await response.json();
   if (response.status !== 201) {
     throw new Error(`session create failed (${String(response.status)}): ${JSON.stringify(body)}`);
@@ -298,14 +318,17 @@ describe('approval gate over an inert connector', () => {
   });
 
   it(
-    'autoruns a read-only annotated tool without requiring an action',
+    'asks before a read-only tool on a user-added connector runs, whatever its hints claim',
     async () => {
-      const sessionId = await createSession(server);
-      const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ECHO_TOOL) });
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const echo = await runTurn({ server, sessionId, input: userMessage(INERT_ECHO_TOOL) });
+      expect(pendingApproval(echo)).toBeDefined();
+      expect(server.mcp.echoInvocations()).toBe(0);
 
-      expect(requiredActions(turn)).toEqual([]);
-      expect(server.mcp.echoInvocations()).toBe(1);
-      expect(server.mcp.writeInvocations()).toBe(0);
+      const otherSessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const read = await runTurn({ server, sessionId: otherSessionId, input: userMessage(INERT_READ_TOOL) });
+      expect(pendingApproval(read)).toBeDefined();
+      expect(server.mcp.readInvocations()).toBe(0);
     },
     TURN_TIMEOUT_MS,
   );
@@ -440,6 +463,135 @@ describe('approval gate over an inert connector', () => {
     },
     TURN_TIMEOUT_MS,
   );
+
+  describe('Always allow this tool', () => {
+    async function listToolGrants(): Promise<string[]> {
+      const response = await server.request(`/api/v1/mcp-servers/${INERT_SERVER_NAME}/tool-grants`);
+      expect(response.status).toBe(200);
+      return ToolGrantsResponseSchema.parse(await response.json()).data.map(grant => grant.tool_name);
+    }
+
+    async function revokeToolGrant(toolName: string): Promise<void> {
+      const response = await server.request(`/api/v1/mcp-servers/${INERT_SERVER_NAME}/tool-grants/${toolName}`, {
+        method: 'DELETE',
+      });
+      expect(response.status).toBe(200);
+    }
+
+    async function alwaysAllow(toolName: string): Promise<void> {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const paused = await runTurn({ server, sessionId, input: userMessage(toolName) });
+      const pending = pendingApproval(paused);
+      if (!pending) {
+        throw new Error(`expected ${toolName} to ask before its first run`);
+      }
+      const resumed = await runTurn({
+        server,
+        sessionId,
+        input: approvalInput({ ...pending, approval: { status: 'allow', scope: 'always' } }),
+      });
+      expect(requiredActions(resumed)).toEqual([]);
+    }
+
+    afterEach(async () => {
+      for (const toolName of await listToolGrants()) {
+        await revokeToolGrant(toolName);
+      }
+    });
+
+    it(
+      'runs the approved call, skips the card in a later chat, and records the auto-run in the audit log',
+      async () => {
+        await alwaysAllow(INERT_READ_TOOL);
+        expect(server.mcp.readInvocations()).toBe(1);
+        expect(await listToolGrants()).toEqual([INERT_READ_TOOL]);
+
+        const laterSessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        const later = await runTurn({ server, sessionId: laterSessionId, input: userMessage(INERT_READ_TOOL) });
+        expect(requiredActions(later)).toEqual([]);
+        expect(server.mcp.readInvocations()).toBe(2);
+
+        const audit = await server.request(`/api/v1/sessions/${laterSessionId}/audit-log`);
+        expect(audit.status).toBe(200);
+        expect(AuditLogResponseSchema.parse(await audit.json()).entries).toEqual([
+          expect.objectContaining({ tier: 1, tool_name: INERT_READ_TOOL, outcome: 'logged' }),
+        ]);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'covers only the approved tool on that connector',
+      async () => {
+        await alwaysAllow(INERT_READ_TOOL);
+
+        const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        const other = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+        expect(pendingApproval(other)).toBeDefined();
+        expect(server.mcp.askMemoryInvocations()).toBe(0);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'asks again once the grant is revoked from settings',
+      async () => {
+        await alwaysAllow(INERT_READ_TOOL);
+        await revokeToolGrant(INERT_READ_TOOL);
+        expect(await listToolGrants()).toEqual([]);
+
+        const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        const again = await runTurn({ server, sessionId, input: userMessage(INERT_READ_TOOL) });
+        expect(pendingApproval(again)).toBeDefined();
+        expect(server.mcp.readInvocations()).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'still asks when an explicit require-approval selector names the always-allowed tool',
+      async () => {
+        await alwaysAllow(INERT_READ_TOOL);
+
+        const sessionId = await createSession(server);
+        const gated = await runTurn({ server, sessionId, input: userMessage(INERT_READ_TOOL) });
+        expect(pendingApproval(gated)).toBeDefined();
+        expect(server.mcp.readInvocations()).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'refuses Always allow for a read-only tool that does not declare itself closed-world',
+      async () => {
+        const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ECHO_TOOL) });
+        const pending = pendingApproval(turn);
+        expect(pending).toBeDefined();
+        if (!pending) {
+          return;
+        }
+
+        const response = await server.request(
+          `/api/v1/sessions/${sessionId}/turns`,
+          jsonInit({
+            input: approvalInput({ ...pending, approval: { status: 'allow', scope: 'always' } }),
+            stream: false,
+          }),
+        );
+        expect(response.status).toBe(422);
+        const parsed = RequestErrorResponseSchema.safeParse(await response.json());
+        expect(parsed.success).toBe(true);
+        if (parsed.success) {
+          expect(parsed.data.error.message).toContain('always-allow approval is not available');
+        }
+        expect(server.mcp.echoInvocations()).toBe(0);
+        expect(await listToolGrants()).toEqual([]);
+        expect(pendingApproval(await getTurn({ server, sessionId, turnId: turn.id }))).toEqual(pending);
+      },
+      TURN_TIMEOUT_MS,
+    );
+  });
 
   it(
     'denies with a reason, runs nothing, and lets the model continue to a terminal state',

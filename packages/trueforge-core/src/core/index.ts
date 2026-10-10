@@ -399,3 +399,4 @@ export type {
   TierDecision,
   TrackedExecutionBinding,
 } from './permissions/tier';
+export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';

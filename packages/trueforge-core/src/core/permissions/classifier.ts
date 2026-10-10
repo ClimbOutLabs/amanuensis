@@ -4,9 +4,11 @@
  * Full action matrix, fail-closed on anything unrecognized. Ordering per the
  * spec: offline auto-deny first; write-then-execute check before allowlist
  * matching; allowlist before Tier 3; extractor fallback for external-service
- * actions; MCP hints escalate-only, never lower. Returns a TierDecision with
- * stable reason codes, the Tier 3 card when required, Tier 2 matched
- * files/kind, and the tracked-execution approval binding.
+ * actions; MCP hints only escalate a connector tool, never lower it. The one
+ * way a connector tool skips its card is the user's own standing grant, and
+ * every escalation is checked before it. Returns a TierDecision with stable
+ * reason codes, the Tier 3 card when required, Tier 2 matched files/kind, and
+ * the tracked-execution approval binding.
  */
 import { realpathSync } from 'fs';
 import path from 'path';
@@ -38,6 +40,7 @@ import {
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
+import { TOOL_GRANT_REASON } from './toolGrants';
 import {
   canonicalFileIdentity,
   canonicalWriteTarget,
@@ -58,6 +61,8 @@ export interface SentinelAction {
   tool_type: 'truefoundry-system' | 'mcp';
   /** Sandbox command effect when the action ran through the sandbox effect layer. */
   sandbox_effect?: string | undefined;
+  /** Connector serving an MCP tool; keys the user's standing tool grants. */
+  mcp_server_name?: string | undefined;
   mcp_hints: {
     read_only_hint?: boolean | undefined;
     destructive_hint?: boolean | undefined;
@@ -924,7 +929,30 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
-  // Local read-only first-party tools: Tier 1.
+  // A connector tool's own hints never lower it. The user's standing grant skips the card, but
+  // only after every escalation above, never for a sensitive read, and only while the tool still
+  // claims to be read-only and explicitly closed-world (an absent openWorldHint means open).
+  if (
+    action.tool_type === 'mcp' &&
+    action.mcp_server_name !== undefined &&
+    readOnlyHint &&
+    action.mcp_hints.open_world_hint === false &&
+    !sensitiveReadHit(action.canonical_params) &&
+    (await services.tool_grants.hasToolGrant({
+      tenant_id: ctx.tenant_id,
+      created_by: ctx.created_by,
+      mcp_server_name: action.mcp_server_name,
+      tool_name: action.tool_name,
+    }))
+  ) {
+    return tier1Decision({
+      reason: TOOL_GRANT_REASON,
+      reason_detail: `Always allowed: \`${action.tool_name}\` on ${action.mcp_server_name}.`,
+      sensitive_read: false,
+    });
+  }
+
+  // Host built-in read-only tools: Tier 1.
   if (action.tool_type === 'truefoundry-system' && readOnlyHint && !openWorldHint) {
     return tier1Decision({
       reason: 'local_read_only',
@@ -954,7 +982,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
 
 /**
  * The single authoritative tier classifier. Fail-closed on anything
- * unrecognized; MCP hints escalate-only.
+ * unrecognized; MCP hints only escalate.
  */
 export async function classifyTier(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const name = action.tool_name;

@@ -36,6 +36,7 @@ import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentSto
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteMcpToolGrantStore } from '../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
@@ -76,9 +77,11 @@ export interface ApprovalTestServer {
 function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): OpenAPIHono {
   const sessionStore = new SqliteSessionStore(db);
   const sentinelAuditStore = new SentinelAuditStore(db);
+  const mcpToolGrantStore = new SqliteMcpToolGrantStore(db);
   const sentinelServices: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     audit: sentinelAuditStore,
+    tool_grants: mcpToolGrantStore,
   };
   const tokenStore = new SqliteOAuthTokenStore(db);
   const agentStore = new SqliteAgentStore(db);
@@ -98,6 +101,7 @@ function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): O
     sandboxCatalog: SandboxCatalog.load(),
     withTransaction: callback => db.transaction().execute(callback),
     tokenStore,
+    mcpToolGrantStore,
     skillStore,
     sandboxProviderStore,
     sandboxProviderResolver: sandboxProvider === undefined ? undefined : () => Promise.resolve(sandboxProvider),

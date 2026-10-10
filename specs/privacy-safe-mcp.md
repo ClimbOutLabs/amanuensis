@@ -18,6 +18,10 @@ A standard integration framework for MCP servers with three guarantees: secrets 
 
 **Independent lifecycle.** Each integration has its own connect/disconnect, health check, and audit log. Disconnecting revokes tokens and stops all access immediately.
 
+**Tool hints never lower a connector's tier.** A user-added connector's own MCP annotations (`readOnlyHint`, `openWorldHint`, `destructiveHint`) can only make a call ask, never skip asking, so every tool on a user-added connector asks on first use. An absent `openWorldHint` counts as open-world, as the MCP spec defines it.
+
+**Always allow this tool.** On first use the approval offers Allow once, Allow in this chat, Always allow this tool, and Deny. Always allow is offered only for a tool that declares itself read-only and explicitly closed-world, and stores a grant for that user, connector, and tool, never wider. It is honored only while the tool still declares itself that way, and destructive hints, destructive or install names, sensitive reads, external-service actions, offline auto-deny, and an explicit require-approval selector all still ask or deny. Every call a grant runs is recorded in the Sentinel audit log. The connector's page in Settings lists the user's grants with Revoke; deleting a connector or changing its URL removes every user's grants for it.
+
 **Consistent UX.** All integrations live in Settings → Integrations with the same card layout: name, status, scopes granted, last sync, disconnect button.
 
 ## Scope
@@ -39,6 +43,7 @@ A standard integration framework for MCP servers with three guarantees: secrets 
 - Verify: secret values never appear in UI, logs, or API responses
 - Verify: revoking access immediately stops the agent from using the integration
 - Verify: audit log records every access
+- Verify: a read-only connector tool asks on first use; Always allow skips the ask for that user, connector, and tool only, and Revoke restores it
 
 ## Out of Scope
 

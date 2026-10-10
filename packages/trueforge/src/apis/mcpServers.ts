@@ -20,6 +20,7 @@ import {
   type IMcpServerWithAuthStore,
   type McpServerRecord,
 } from '../db/mcpServerStore';
+import type { IMcpToolGrantStore } from '../db/mcpToolGrantStore';
 import type { WithTransaction } from '../db/transaction';
 import { createMcpOAuthClient } from '../mcp/auth/mcpDcr';
 import { mcpOAuthCallbackUrl } from '../mcp/auth/mcpOAuthHelpers';
@@ -29,11 +30,13 @@ import {
   createMcpServerRoute,
   deleteAuthorizationMcpServerRoute,
   deleteMcpServerRoute,
+  deleteMcpToolGrantRoute,
   getAvailableMcpServerRoute,
   getMcpServerRoute,
   listAvailableMcpServersRoute,
   listMcpServersRoute,
   listMcpServerToolsRoute,
+  listMcpToolGrantsRoute,
   memoryCheckMcpServerRoute,
   putMcpServerRoute,
 } from '../routes/mcpServerRoutes';
@@ -54,6 +57,7 @@ import { isSecretReference } from '../utils/secretReferences';
 export interface McpServersRouterDeps<TTransaction> {
   resolveMcpServerStore: (c: Context) => IMcpServerWithAuthStore<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
+  toolGrantStore: IMcpToolGrantStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
@@ -628,6 +632,13 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
           await deps.tokenStore.deleteTokensForServer({ id: saved.id }, transaction);
           await deps.tokenStore.deletePendingAuthorizationsForServer({ id: saved.id }, transaction);
         }
+        if (existing !== undefined && existing.manifest.url !== manifest.url) {
+          // A new URL is a different server: Always allow was granted to the old one's tools.
+          await deps.toolGrantStore.revokeServerToolGrants(
+            { tenant_id: requestContext.tenant_id, mcp_server_name: manifest.name },
+            transaction,
+          );
+        }
         return saved;
       });
 
@@ -667,15 +678,19 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
     if (!record) {
       return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);
     }
-    // The connector row is shared, so deletion purges EVERY user's tokens and in-flight
-    // authorizations, not just the caller's, in one transaction with the row itself. The
-    // schema declares ON DELETE CASCADE, but SQLite only honors that with the foreign_keys
-    // pragma enabled; explicit cleanup is the house pattern (see the URL-change purge in
-    // putHandler). A session whose agent spec still names this server hits the existing
+    // The connector row is shared, so deletion purges EVERY user's tokens, in-flight
+    // authorizations, and Always allow grants, not just the caller's, in one transaction with
+    // the row itself. The schema declares ON DELETE CASCADE, but SQLite only honors that with
+    // the foreign_keys pragma enabled; explicit cleanup is the house pattern (see the URL-change
+    // purge in putHandler). A session whose agent spec still names this server hits the existing
     // 422 unregistered-server error on next use; that is intended.
     await deps.withTransaction(async transaction => {
       await deps.tokenStore.deleteTokensForServer({ id: record.id }, transaction);
       await deps.tokenStore.deletePendingAuthorizationsForServer({ id: record.id }, transaction);
+      await deps.toolGrantStore.revokeServerToolGrants(
+        { tenant_id: requestContext.tenant_id, mcp_server_name: name },
+        transaction,
+      );
       await deps.resolveMcpServerStore(c).deleteServer({ tenant_id: requestContext.tenant_id, name }, transaction);
     });
     return c.json({}, 200);
@@ -846,6 +861,37 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
     }
   };
 
+  const listToolGrantsHandler: RouteHandler<typeof listMcpToolGrantsRoute> = async c => {
+    const { name } = c.req.valid('param');
+    const requestContext = deps.resolveRequestContext(c);
+    const record = await deps.resolveMcpServerStore(c).getServer({ tenant_id: requestContext.tenant_id, name });
+    if (!record) {
+      return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);
+    }
+    const data = await deps.toolGrantStore.listToolGrants({
+      tenant_id: requestContext.tenant_id,
+      created_by: requestContext.subject.id,
+      mcp_server_name: name,
+    });
+    return c.json({ data }, 200);
+  };
+
+  const deleteToolGrantHandler: RouteHandler<typeof deleteMcpToolGrantRoute> = async c => {
+    const { name, tool_name } = c.req.valid('param');
+    const requestContext = deps.resolveRequestContext(c);
+    const record = await deps.resolveMcpServerStore(c).getServer({ tenant_id: requestContext.tenant_id, name });
+    if (!record) {
+      return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);
+    }
+    await deps.toolGrantStore.revokeToolGrant({
+      tenant_id: requestContext.tenant_id,
+      created_by: requestContext.subject.id,
+      mcp_server_name: name,
+      tool_name,
+    });
+    return c.json({}, 200);
+  };
+
   const getAvailableHandler: RouteHandler<typeof getAvailableMcpServerRoute> = async c => {
     const { name } = c.req.valid('param');
     const requestContext = deps.resolveRequestContext(c);
@@ -904,6 +950,8 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
     return c.json({ data }, 200);
   });
   router.openapi(listMcpServerToolsRoute, listToolsHandler);
+  router.openapi(listMcpToolGrantsRoute, listToolGrantsHandler);
+  router.openapi(deleteMcpToolGrantRoute, deleteToolGrantHandler);
   router.openapi(authorizeMcpServerRoute, authorizeHandler);
   router.openapi(memoryCheckMcpServerRoute, memoryCheckHandler);
   router.openapi(deleteAuthorizationMcpServerRoute, deleteAuthorizationHandler);

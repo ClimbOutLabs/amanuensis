@@ -52,6 +52,7 @@ import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
+import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
@@ -216,6 +217,8 @@ export interface ServerDeps<TTransaction> {
   resolveSkillStore: ResolveSkillStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
+  /** Per-user Always allow grants; the same store backs Sentinel classification. */
+  mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
   skillStore: ISkillStore<TTransaction>;
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
   /** Optional host override; the standard resolver remains the production default. */
@@ -350,6 +353,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createMcpServersRouter({
         resolveMcpServerStore: deps.resolveMcpServerStore,
         tokenStore: deps.tokenStore,
+        toolGrantStore: deps.mcpToolGrantStore,
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,
@@ -418,6 +422,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         tokenStore: deps.tokenStore,
+        toolGrantStore: deps.mcpToolGrantStore,
         resolveSkillStore: deps.resolveSkillStore,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,

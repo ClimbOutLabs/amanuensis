@@ -38,6 +38,7 @@ export const TABLES_TO_MOVE = [
   'persona_name_key',
   'session_persona',
   'mcp_server',
+  'mcp_tool_grant',
   'oauth_token',
   'oauth_pending_authorization',
   'repository',
