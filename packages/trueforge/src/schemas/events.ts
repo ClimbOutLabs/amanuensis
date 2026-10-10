@@ -114,6 +114,9 @@ export const TurnStreamingEventSchema = z
   ])
   .openapi('TurnStreamingEvent');
 
+/** Event ids are 26-character ULIDs; the bound only keeps an oversized cursor out of the query. */
+export const MAX_EVENT_ID_LENGTH = 128;
+
 export const ListSessionEventsRequestQuerySchema = z
   .object({
     page_token: z
@@ -142,12 +145,14 @@ export const ListSessionEventsRequestQuerySchema = z
       z
         .array(SessionEventTypeSchema)
         .min(1)
+        .max(SessionEventTypeSchema.options.length)
         .optional()
         .describe('Only list events of these types. Repeat the parameter to pass several. Omit to list every type.'),
     ),
     after_event_id: z
       .string()
       .min(1)
+      .max(MAX_EVENT_ID_LENGTH)
       .optional()
       .describe(
         'Only list events whose id sorts after this event id. Pass the newest event id already seen to fetch just the newer events.',

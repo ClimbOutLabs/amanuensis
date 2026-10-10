@@ -29,7 +29,11 @@ import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provi
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
-import { ListSessionEventsResponseSchema } from '../../../src/schemas/events';
+import {
+  ListSessionEventsResponseSchema,
+  MAX_EVENT_ID_LENGTH,
+  SessionEventTypeSchema,
+} from '../../../src/schemas/events';
 import { ProfileLearnedPersistedEventSchema } from '../../../src/schemas/profileLearningEvents';
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../../db/postgres/testDatabase';
 
@@ -298,5 +302,16 @@ describe.each(backends)('GET /sessions/{session_id}/events on $name', backend =>
   it('rejects a legacy offset page token', async () => {
     const legacy = Buffer.from(JSON.stringify({ last_turn_id: 't3', offset: 2 }), 'utf8').toString('base64url');
     expect((await listPage(app, `page_token=${legacy}`)).status).toBe(400);
+  });
+
+  it('bounds the types filter to one entry per type and the cursor to the event id length', async () => {
+    const repeatedTypes = (count: number) =>
+      new URLSearchParams(Array.from({ length: count }, (): [string, string] => ['types', 'turn.done'])).toString();
+    const typeCount = SessionEventTypeSchema.options.length;
+    expect((await listPage(app, repeatedTypes(typeCount))).status).toBe(200);
+    expect((await listPage(app, repeatedTypes(typeCount + 1))).status).toBe(400);
+
+    expect((await listPage(app, `after_event_id=${'0'.repeat(MAX_EVENT_ID_LENGTH)}`)).status).toBe(200);
+    expect((await listPage(app, `after_event_id=${'0'.repeat(MAX_EVENT_ID_LENGTH + 1)}`)).status).toBe(400);
   });
 });
