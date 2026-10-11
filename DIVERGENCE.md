@@ -83,6 +83,16 @@ old flat `compaction_threshold_tokens` field is gone. One leftover test
 with the old field name, updated it to the `trigger` shape; no other reference to the old field
 remains anywhere in the tree.
 
+## Compaction correctness (resolution: ours, upstream layered in)
+
+| Path                                                                                    | What we changed                                                                                                                                                                                                                                                                                                                |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| packages/trueforge/src/config.ts, packages/trueforge/.env.example                       | `CONTEXT_COMPACTION_THRESHOLD_TOKENS` is now `number \| undefined` (unset stays unset) instead of defaulting to 50000, so the context-length ratio in `resolveCompactionThresholdTokens` is reachable. An explicit env value still wins. Added `parseOptionalPositiveInt`.                                                     |
+| packages/trueforge-core/src/core/capabilities/builtins/ContextCompaction.ts             | Summarization transcript includes prior compaction summaries and tool calls (name, compact arguments) paired with results; the request is bounded to the model context by cutting the largest messages (marked as truncated); a throwing or oversized summarizer falls back to truncation, which now keeps the latest summary. |
+| packages/trueforge-core/src/core/events/schema.ts                                       | `ContextCompactionEvent.reason` gains `summarizer_failed` and `request_too_large` (outcome stays `truncated_fallback`). Generated OpenAPI and SDK copies follow from CI regeneration.                                                                                                                                          |
+| packages/trueforge-core/src/agent-session/schemas/agentSpec.ts                          | `CompactionConfig` description states the real default (ratio of context length, less reserved output, else 50000).                                                                                                                                                                                                            |
+| packages/trueforge-core/src/agent-session/builtinsFromSpec.ts, ITurnResourceResolver.ts | Comments only: an undefined host default now means the context-length ratio, not a fixed 50000.                                                                                                                                                                                                                                |
+
 ## Autonomy, sessions, rebrand (entries to be confirmed)
 
 First-sync conflict manifest hits these surfaces; annotate why and the

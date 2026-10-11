@@ -504,16 +504,23 @@ export const ContextCompactionEventSchema = z
       .describe(
         'applied: context was overwritten with the summary. skipped_invalid: the model produced a malformed ' +
           'summary and the attempt was discarded. skipped_blocked: the turn was cancelled before the attempt ' +
-          'could complete. truncated_fallback: the summary was invalid so old turns were truncated instead.',
+          'could complete. truncated_fallback: no usable summary was produced, so old turns were truncated instead.',
       ),
     reason: z
-      .enum(['missing_block', 'missing_section', 'duplicate_section', 'self_referential', 'over_length'])
+      .enum([
+        'missing_block',
+        'missing_section',
+        'duplicate_section',
+        'self_referential',
+        'over_length',
+        'summarizer_failed',
+        'request_too_large',
+      ])
       .optional()
       .describe(
-        'Rejection reason when outcome is skipped_invalid. missing_block: no complete <summary> block. ' +
-          'missing_section: a required section is absent. duplicate_section: a section appears more than once. ' +
-          'self_referential: the goal/user_goal describes the summarization request instead of the user objective. ' +
-          'over_length: summary exceeds bounded length.',
+        'Why no summary was applied. missing_block, missing_section, duplicate_section, self_referential, ' +
+          'over_length: the summary was invalid. summarizer_failed: the summarization call failed. ' +
+          'request_too_large: the summarization request could not fit the model context.',
       ),
   })
   .openapi('ContextCompactionEvent');
