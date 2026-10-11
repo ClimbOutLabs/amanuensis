@@ -96,7 +96,7 @@ import {
   isWebConnectorAttached,
   RepositoryBindingResolutionError,
   resolveBoundRepository,
-  resolveGithubGitCredentials,
+  resolveGithubGitToken,
   resolveGitSkills,
   resolveSandboxProvider,
   withGatewayMetadataHeaders,
@@ -431,7 +431,7 @@ function createTurnResolver(deps: {
           skills: spec.skills ?? [],
           store: skillStore,
         });
-        const resolvedGitCredentialsContent = await resolveGithubGitCredentials({
+        const githubGitToken = await resolveGithubGitToken({
           tenant_id,
           spec,
           store: mcpServerStore,
@@ -440,7 +440,7 @@ function createTurnResolver(deps: {
           provider,
           logger,
           gitSkills,
-          resolvedGitCredentialsContent,
+          githubGitToken,
           githubConnectorAttached: isGithubConnectorAttached(spec),
           webConnectorAttached: isWebConnectorAttached(spec),
           fileDownloadEnabled: spec.config.sandbox.file_downloads,

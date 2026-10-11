@@ -451,9 +451,9 @@ export interface SandboxProvider {
   /** Directory inside the sandbox where large tool responses are dumped. */
   getToolResultDumpDir(sandboxId: string): string;
   /**
-   * Git credential-store file (absolute, or cwd-relative when exec cwd is the jail).
-   * `GIT_CONFIG` `store --file` is relative to the git process cwd — providers that
-   * return a relative path must make it absolute in their own `exec`.
+   * Legacy credential-store location (absolute, or cwd-relative when exec cwd is the jail).
+   * Nothing writes it any more; the sandbox deletes it on init so sandboxes persisted by
+   * earlier releases do not keep a token.
    */
   getGitCredentialsPath(sandboxId: string): string;
   /** Directory for user-uploaded files (absolute, or cwd-relative when the provider has no global FS). */
