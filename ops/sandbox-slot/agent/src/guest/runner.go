@@ -189,7 +189,7 @@ func (r *Runner) Run(ctx context.Context, spec Spec, opts Options) Result {
 	var killOnce sync.Once
 	kill := func() {
 		killOnce.Do(func() {
-			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			reaper.KillGroup(pid)
 			r.deleteGuest(spec.ID)
 		})
 	}

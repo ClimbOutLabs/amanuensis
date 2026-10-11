@@ -2,6 +2,7 @@
 package guest
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -130,5 +131,12 @@ func BuildConfig(s Spec) ([]byte, error) {
 			{Type: "pid"}, {Type: "mount"}, {Type: "ipc"}, {Type: "uts"}, {Type: "network"},
 		}},
 	}
-	return json.Marshal(cfg)
+	var out bytes.Buffer
+	enc := json.NewEncoder(&out)
+	// Arguments are data; HTML escaping would only make the file harder to read.
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(cfg); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }

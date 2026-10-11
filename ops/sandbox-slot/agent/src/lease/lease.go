@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 )
 
 // Transport bounds. The server applies the model-facing policy again; these protect the slot.
@@ -113,6 +114,10 @@ func Create(parent, runID string, files []File) (Dirs, error) {
 
 // DecodeBase64 decodes standard base64 and rejects non-canonical input.
 func DecodeBase64(s string) ([]byte, error) {
+	// The decoder silently skips line breaks; canonical input has none.
+	if strings.ContainsAny(s, "\r\n") {
+		return nil, errors.New("lease: base64 contains line breaks")
+	}
 	b, err := base64.StdEncoding.Strict().DecodeString(s)
 	if err != nil {
 		return nil, err

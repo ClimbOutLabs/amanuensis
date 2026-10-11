@@ -31,8 +31,23 @@ func forbiddenEnv(name string) bool {
 	case "PATH", "BASH_ENV", "ENV", "HOME", "USER", "LOGNAME":
 		return true
 	}
-	return strings.HasPrefix(name, "LD_") || strings.HasPrefix(name, "GIT_")
+	if strings.HasPrefix(name, "GIT_") {
+		return !gitHardeningEnv(name)
+	}
+	return strings.HasPrefix(name, "LD_")
 }
+
+// gitHardeningEnv are the git variables the server's hardened-git wrapper sends: they only tighten git.
+func gitHardeningEnv(name string) bool {
+	switch name {
+	case "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_COUNT", "GIT_ATTR_NOSYSTEM",
+		"GIT_OPTIONAL_LOCKS", "GIT_PAGER", "GIT_TERMINAL_PROMPT":
+		return true
+	}
+	return gitConfigPair.MatchString(name)
+}
+
+var gitConfigPair = regexp.MustCompile(`^GIT_CONFIG_(KEY|VALUE)_[0-9]{1,3}$`)
 
 func validateEnv(env map[string]string) error {
 	if len(env) > maxEnvEntries {

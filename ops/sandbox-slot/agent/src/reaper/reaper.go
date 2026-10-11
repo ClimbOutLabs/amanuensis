@@ -84,11 +84,13 @@ func (r *Reaper) Spawn(path string, argv []string, attr *os.ProcAttr) (int, <-ch
 	if err != nil {
 		return 0, nil, err
 	}
+	// Release clears the handle's Pid, so read it first.
+	pid := proc.Pid
 	ch := make(chan syscall.WaitStatus, 1)
-	r.waiters[proc.Pid] = ch
+	r.waiters[pid] = ch
 	// The reaper, not this handle, collects the exit status.
 	_ = proc.Release()
-	return proc.Pid, ch, nil
+	return pid, ch, nil
 }
 
 // Output runs a short command and returns its combined stdout and stderr and exit code.
@@ -135,7 +137,7 @@ func (r *Reaper) Output(path string, argv []string, timeout time.Duration) ([]by
 	select {
 	case status = <-exited:
 	case <-time.After(timeout):
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		KillGroup(pid)
 		status = <-exited
 	}
 	<-done
@@ -143,4 +145,12 @@ func (r *Reaper) Output(path string, argv []string, timeout time.Duration) ([]by
 		return buf, status.ExitStatus(), nil
 	}
 	return buf, -1, nil
+}
+
+// KillGroup sends SIGKILL to the process group led by pid. A pid that is not a real child is ignored, so a
+// bad value can never signal everything (-1) or the agent itself (1).
+func KillGroup(pid int) {
+	if pid > 1 {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+	}
 }
