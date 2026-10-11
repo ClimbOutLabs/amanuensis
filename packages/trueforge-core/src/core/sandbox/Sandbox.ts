@@ -83,6 +83,7 @@ import { getGithubConnectorHint, type GithubConnectorState } from './githubConne
 import {
   buildHostAuthenticatedGit,
   buildHostAuthenticatedGitConfigProbe,
+  carriesHostAuthenticatedGitToken,
   isGitNetworkCommand,
   planHostAuthenticatedGit,
 } from './hostAuthenticatedGit';
@@ -1244,7 +1245,7 @@ type ReplaceTextDispatchOutcome =
 
 export const SANDBOX_EXEC_DESCRIPTION = `Execute shell commands in a persistent sandbox environment.
 Use the cwd argument for the checked-out repository. Setting HOME does not change the working directory.
-IMPORTANT: Never list, print, or expose environment variables or git credential files (~/.git-credentials).
+IMPORTANT: Never list, print, or expose environment variables.
 Use write_file to create a new file, apply_patch for source edits, and replace_text for one exact existing-text replacement. Do not bypass these primitives with sed, Perl, Python, heredocs, or temporary shell patch files.
 For large output, pass output.head_lines, output.tail_lines, and/or output.grep to bound the model-visible result.
 Declare purpose=verify for any command whose successful result should authorize a later commit. Use purpose=commit only for running a \`git commit\` command.
@@ -3400,6 +3401,10 @@ export class Sandbox extends LocalToolMCP {
     timeoutSeconds?: number | undefined;
     signal?: AbortSignal | undefined;
   }): Promise<ExecResult> {
+    // The in-sandbox lock wrapper resolves mkdir, flock, sh and others through PATH, which a
+    // model can shadow; a command carrying the token never runs inside it. The host-side
+    // workspace mutation lock already serialises it.
+    const useProviderLock = input.workspaceRoot !== undefined && !carriesHostAuthenticatedGitToken(input.env);
     const operation = this.provider.exec({
       sandboxId: input.sandboxId,
       command: input.command,
@@ -3407,7 +3412,9 @@ export class Sandbox extends LocalToolMCP {
       ...(input.env === undefined ? {} : { env: input.env }),
       ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
-      ...(input.workspaceRoot === undefined ? {} : { workspaceLock: { workspaceRoot: input.workspaceRoot } }),
+      ...(useProviderLock && input.workspaceRoot !== undefined
+        ? { workspaceLock: { workspaceRoot: input.workspaceRoot } }
+        : {}),
     });
     return input.signal === undefined ? operation : await awaitWithAbort({ operation, signal: input.signal });
   }
@@ -4370,8 +4377,14 @@ export class Sandbox extends LocalToolMCP {
             cwd: input.exec.cwd,
             env: { ...probeExec.env, LC_ALL: 'C' },
           });
-          if (!probe.success || probe.response.exitCode !== 0) {
+          if (!probe.success) {
             return HOST_GIT_CONFIG_UNREADABLE_REFUSAL;
+          }
+          if (probe.response.exitCode !== 0) {
+            // Outside a repository there is no local config for the command to read.
+            return plan.allowsMissingRepository && /not a git repository/iu.test(probe.response.result)
+              ? undefined
+              : HOST_GIT_CONFIG_UNREADABLE_REFUSAL;
           }
           return gitLocalConfigIsSafe(probe.response.result) ? undefined : HOST_GIT_CONFIG_UNSAFE_REFUSAL;
         }

@@ -61,6 +61,12 @@ describe('planHostAuthenticatedGit', () => {
     expect(planHostAuthenticatedGit({ command })).toBeUndefined();
   });
 
+  test('ls-remote reads the checkout config but tolerates running outside a repository', () => {
+    const plan = planHostAuthenticatedGit({ command: 'git ls-remote https://github.com/o/r' });
+    expect(plan).toMatchObject({ readsRepositoryConfig: true, allowsMissingRepository: true });
+    expect(planHostAuthenticatedGit({ command: 'git push' })?.allowsMissingRepository).toBe(false);
+  });
+
   test('marks only commands that read the checkout config', () => {
     expect(planHostAuthenticatedGit({ command: 'git push' })?.readsRepositoryConfig).toBe(true);
     expect(planHostAuthenticatedGit({ command: 'git clone https://github.com/a/b' })?.readsRepositoryConfig).toBe(
@@ -89,7 +95,10 @@ describe('buildHostAuthenticatedGit', () => {
   const built = buildHostAuthenticatedGit({ plan, token: TOKEN, workspaceRoot: '/work/repo' });
 
   test('uses the pinned git binary and never puts the token in the command', () => {
-    expect(built.command.startsWith(`'${HOST_AUTHENTICATED_GIT_BINARY}' '--no-pager'`)).toBe(true);
+    expect(built.command.startsWith("'/usr/bin/env' '-u' ")).toBe(true);
+    expect(built.command).toContain(`'${HOST_AUTHENTICATED_GIT_BINARY}' '--no-pager'`);
+    expect(built.command).toContain("'-u' 'GIT_TRACE_CURL'");
+    expect(built.command).toContain("'-u' 'LD_PRELOAD'");
     expect(built.command).not.toContain(TOKEN);
   });
 
@@ -117,6 +126,18 @@ describe('buildHostAuthenticatedGit', () => {
     expect(pairs.get('protocol.allow')).toBe('never');
     expect(pairs.get('protocol.https.allow')).toBe('always');
     expect(pairs.get('safe.directory')).toBe('/work/repo');
+    for (const scope of ['http.', 'http.https://github.com/.']) {
+      expect(pairs.get(`${scope}sslVerify`)).toBe('true');
+      expect(pairs.get(`${scope}extraHeader`)).toBe('');
+      expect(pairs.get(`${scope}sslCAInfo`)).toBe('');
+      expect(pairs.get(`${scope}sslCAPath`)).toBe('');
+      expect(pairs.get(`${scope}curloptResolve`)).toBe('');
+      expect(pairs.get(`${scope}followRedirects`)).toBe('false');
+    }
+    expect(pairs.get('fetch.recurseSubmodules')).toBe('false');
+    expect(pairs.get('diff.external')).toBe('');
+    expect(pairs.get('status.submoduleSummary')).toBe('false');
+    expect(built.env).toMatchObject({ HOME: '/nonexistent', XDG_CONFIG_HOME: '/nonexistent' });
   });
 
   test('the probe is token-free and read-only', () => {

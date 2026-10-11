@@ -177,7 +177,8 @@ describe('host-authenticated git keeps the token out of the sandbox', () => {
     const brokered = recorder.execs.filter(isBrokered);
     expect(brokered).toHaveLength(4);
     for (const params of brokered) {
-      expect(params.command.startsWith("'/usr/bin/git'")).toBe(true);
+      expect(params.command).toContain("'/usr/bin/git' '--no-pager'");
+      expect(params.command.startsWith("'/usr/bin/env'")).toBe(true);
       expect(containsToken(params.command)).toBe(false);
       expect(Object.entries(params.env ?? {}).filter(([, value]) => value.includes(TOKEN))).toEqual([
         [TOKEN_ENV_KEY, TOKEN],
@@ -199,6 +200,24 @@ describe('host-authenticated git keeps the token out of the sandbox', () => {
     const probes = recorder.execs.filter(isProbe);
     expect(probes).toHaveLength(1);
     expect(containsToken(probes)).toBe(false);
+  });
+
+  test('ls-remote outside a repository is authenticated, but fetch there is refused', async () => {
+    const recorder: Recorder = { execs: [], uploads: [] };
+    const base = makeProvider({ recorder });
+    const provider: SandboxProvider = {
+      ...base,
+      exec: params =>
+        isProbe(params)
+          ? Promise.resolve({ success: true, response: { exitCode: 128, result: 'fatal: not a git repository' } })
+          : base.exec(params),
+    };
+    const sandbox = makeSandbox({ provider, token: TOKEN });
+    await run({ sandbox, command: 'git ls-remote https://github.com/acme/widgets', purpose: 'inspect' });
+    expect(recorder.execs.filter(isBrokered)).toHaveLength(1);
+    const refused = await run({ sandbox, command: 'git fetch origin' });
+    expect(refused.isError).toBe(true);
+    expect(recorder.execs.filter(isBrokered)).toHaveLength(1);
   });
 
   test('a repository config that can run programs gets no token and no git process', async () => {

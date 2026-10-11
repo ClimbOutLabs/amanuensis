@@ -111,7 +111,7 @@ export async function resolveBoundRepository(input: {
 
 /**
  * Whether the agent spec has a GitHub MCP connector configured, regardless of
- * whether {@link resolveGithubGitToken} could resolve usable
+ * whether `resolveGithubGitToken` could resolve usable
  * credentials from it. Used to distinguish "no connector attached" from
  * "connector attached but credentials were refused" in sandbox remediation.
  */
@@ -134,7 +134,7 @@ export function isWebConnectorAttached(spec: AgentSpec): boolean {
  *
  * The credential is admitted only when the agent explicitly enables the GitHub
  * connector and that connector points at a GitHub-owned host. The token stays on
- * the host: {@link Sandbox} injects it into the environment of a single
+ * the host: the sandbox injects it into the environment of a single
  * validated network git process and never writes it to the sandbox.
  */
 export async function resolveGithubGitToken({
