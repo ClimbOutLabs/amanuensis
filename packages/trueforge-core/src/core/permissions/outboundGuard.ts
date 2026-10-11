@@ -3,9 +3,9 @@
  * call would send off this machine. No model judgment and no network; the same arguments always
  * give the same verdict. Search uses it first; maps and URL fetch are meant to reuse it.
  *
- * It is a tripwire for accidental or injected leaks, not a proof of absence: a secret the model
- * re-encodes, or splits across separate arguments, past every rule below is outside what a
- * deterministic scan can see.
+ * It is a tripwire for accidental or injected leaks, not a proof of absence: text is normalized,
+ * percent-decoded once, and read together with the turn's earlier searches, but a secret the model
+ * encodes some other way past every rule below is outside what a deterministic scan can see.
  */
 
 /** Most characters of text, summed over every string in the arguments, a silent call may carry. */
@@ -80,13 +80,79 @@ export function collectOutboundStrings(value: unknown): OutboundStrings | undefi
   return visit(value, 0) ? found : undefined;
 }
 
-/** NFKC folds look-alike forms (full-width digits, ligatures); invisible joiners cannot split a token. */
+/** Cyrillic and Greek letters that read as Latin ones; NFKC leaves them apart. A small table, not a full confusables map. */
+const CONFUSABLES: Readonly<Record<string, string>> = {
+  '\u0430': 'a',
+  '\u0435': 'e',
+  '\u043E': 'o',
+  '\u0440': 'p',
+  '\u0441': 'c',
+  '\u0445': 'x',
+  '\u0443': 'y',
+  '\u0456': 'i',
+  '\u0455': 's',
+  '\u03BF': 'o',
+  '\u03C1': 'p',
+  '\u03BD': 'v',
+  '\u0410': 'A',
+  '\u0412': 'B',
+  '\u0415': 'E',
+  '\u041A': 'K',
+  '\u041C': 'M',
+  '\u041D': 'H',
+  '\u041E': 'O',
+  '\u0420': 'P',
+  '\u0421': 'C',
+  '\u0422': 'T',
+  '\u0425': 'X',
+  '\u0391': 'A',
+  '\u0392': 'B',
+  '\u0395': 'E',
+  '\u0397': 'H',
+  '\u0399': 'I',
+  '\u039A': 'K',
+  '\u039C': 'M',
+  '\u039D': 'N',
+  '\u039F': 'O',
+  '\u03A1': 'P',
+  '\u03A4': 'T',
+  '\u03A7': 'X',
+};
+const CONFUSABLE_CHARS = new RegExp(`[${Object.keys(CONFUSABLES).join('')}]`, 'g');
+
+/**
+ * Folds the spellings a tripwire would otherwise miss: look-alike forms (full-width digits,
+ * ligatures), combining marks, format characters (zero-width joiners, bidi controls, tag characters)
+ * that split a token invisibly, and a few look-alike letters.
+ */
 function normalizeForScan(text: string): string {
-  return text.normalize('NFKC').replace(/[\u00AD\u200B-\u200D\u2060\uFEFF]/g, '');
+  return text
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .normalize('NFKC')
+    .replace(/\p{Cf}/gu, '')
+    .replace(CONFUSABLE_CHARS, char => CONFUSABLES[char] ?? char);
 }
 
-function stripWhitespace(text: string): string {
-  return text.replace(/\s+/g, '');
+/** Percent-escapes decoded once; an escape that does not decode (a stray `%`) stays as written. */
+function decodeOnce(text: string): string {
+  return text.replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run;
+    }
+  });
+}
+
+/** A URL without its scheme and host, so a secret split between a query and a link reads as one run. */
+function withoutUrlOrigin(text: string): string {
+  return text.replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/\s]*\/?/, '');
+}
+
+/** Letters and digits only, lower-cased: spacing, punctuation and case cannot hide a secret. */
+function compactForm(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 const PRIVATE_KEY_BLOCK = /-{3,}\s*BEGIN[\sA-Z0-9]*PRIVATE\s+KEY/i;
@@ -106,7 +172,8 @@ const KEY_PREFIXES: readonly RegExp[] = [
   // Slack.
   /\bxox[abprso]-[A-Za-z0-9-]{10,}/,
   /\bxapp-[A-Za-z0-9-]{10,}/,
-  // Nebius IAM and Token Factory keys.
+  // Nebius IAM and Token Factory keys, by an assumed `v1.` shape: no setting or provider code in this
+  // repository fixes the format, so an exact match on the configured key is what really covers it.
   /\bv1\.[A-Za-z0-9_-]{30,}/,
   // Google, Stripe, Hugging Face, npm, GitLab, SendGrid, Twilio.
   /\bAIza[0-9A-Za-z_-]{35}/,
@@ -124,6 +191,35 @@ const KEY_PREFIXES: readonly RegExp[] = [
 const PASSWORD_LABEL = /\b(?:pass(?:word|wd|code|phrase)|pwd)s?["']?\s*[:=]\s*["'`]?[^\s"'`]{3,}/i;
 /** `passcode 123456`: the label may take its value after a space when the value contains a digit. */
 const PASSCODE_THEN_DIGITS = /\bpass(?:code|phrase)\s+["'`]?\S*\d\S*/i;
+/**
+ * Other credential labels need a longer value with a digit in it, so `api key: 2024 changes` and
+ * `token: the movie` pass while `token=ab12cd34ef` does not.
+ */
+const CREDENTIAL_LABEL =
+  /\b(?:secret|token|api[\s_-]?key|access[\s_-]?key|auth(?:orization)?)s?["']?\s*[:=]\s*["'`]?(?=[^\s"'`]*\d)[^\s"'`]{8,}/i;
+
+/** Digit and symbol stand-ins for letters (`passw0rd`, `p@ssword`), undone before the label rules run. */
+const LEET: Readonly<Record<string, string>> = {
+  '0': 'o',
+  '1': 'l',
+  '3': 'e',
+  '4': 'a',
+  '5': 's',
+  '7': 't',
+  '@': 'a',
+  $: 's',
+};
+
+function unLeet(text: string): string {
+  return text.replace(/[013457@$]/g, char => LEET[char] ?? char);
+}
+
+function hasCredentialLabel(text: string): boolean {
+  return [text, unLeet(text)].some(
+    candidate =>
+      PASSWORD_LABEL.test(candidate) || PASSCODE_THEN_DIGITS.test(candidate) || CREDENTIAL_LABEL.test(candidate),
+  );
+}
 
 const HEX_RUN = /[0-9A-Fa-f]{20,}/;
 const BASE64_RUN = /[A-Za-z0-9+/_=-]{20,}/g;
@@ -181,19 +277,19 @@ function passesLuhn(digits: string): boolean {
 
 /**
  * Card-shaped digit groups only: a bare 13-19 digit run, or the 4-4-4-n and 4-6-5 groupings with a
- * space or dash. Dates, date ranges and phone numbers do not have those shapes. A candidate must also
+ * space, dot or dash. Dates, date ranges and phone numbers do not have those shapes. A candidate must also
  * lead with a card network digit (2 to 6) and pass Luhn.
  */
 const CARD_CANDIDATES: readonly RegExp[] = [
   /(?<!\d)\d{13,19}(?!\d)/g,
-  /(?<!\d)\d{4}[ -]\d{4}[ -]\d{4}[ -]\d{1,7}(?!\d)/g,
-  /(?<!\d)\d{4}[ -]\d{6}[ -]\d{5}(?!\d)/g,
+  /(?<!\d)\d{4}[ .-]\d{4}[ .-]\d{4}[ .-]\d{1,7}(?!\d)/g,
+  /(?<!\d)\d{4}[ .-]\d{6}[ .-]\d{5}(?!\d)/g,
 ];
 
 function hasCardNumber(text: string): boolean {
   for (const pattern of CARD_CANDIDATES) {
     for (const match of text.matchAll(pattern)) {
-      const digits = match[0].replace(/[ -]/g, '');
+      const digits = match[0].replace(/[ .-]/g, '');
       if (digits.length >= 13 && digits.length <= 19 && /^[2-6]/.test(digits) && passesLuhn(digits)) {
         return true;
       }
@@ -202,15 +298,33 @@ function hasCardNumber(text: string): boolean {
   return false;
 }
 
-function containsServerSecret(input: { text: string; secrets: readonly string[] }): boolean {
-  const compactText = stripWhitespace(input.text);
+/** Spellings of a secret a query could carry: as stored, URL-escaped, base64 (both alphabets) and hex. */
+function secretSpellings(secret: string): string[] {
+  const normalized = normalizeForScan(secret);
+  const bytes = Buffer.from(normalized, 'utf8');
+  return [
+    normalized,
+    encodeURIComponent(normalized),
+    bytes.toString('base64'),
+    bytes.toString('base64url'),
+    bytes.toString('hex'),
+  ];
+}
+
+/**
+ * Compared in compact form, so spacing, punctuation and case cannot hide a secret. A secret shorter
+ * than {@link OUTBOUND_MIN_SECRET_LENGTH} is skipped: real keys and tokens are far longer, and a
+ * short value would flag ordinary words.
+ */
+function containsServerSecret(input: { texts: readonly string[]; secrets: readonly string[] }): boolean {
+  const haystacks = input.texts.map(compactForm);
   for (const secret of input.secrets) {
-    const normalized = normalizeForScan(secret);
-    if (normalized.length < OUTBOUND_MIN_SECRET_LENGTH) {
+    if (normalizeForScan(secret).length < OUTBOUND_MIN_SECRET_LENGTH) {
       continue;
     }
-    for (const variant of [normalized, encodeURIComponent(normalized)]) {
-      if (input.text.includes(variant) || compactText.includes(stripWhitespace(variant))) {
+    for (const spelling of secretSpellings(secret)) {
+      const needle = compactForm(spelling);
+      if (needle.length >= OUTBOUND_MIN_SECRET_LENGTH && haystacks.some(haystack => haystack.includes(needle))) {
         return true;
       }
     }
@@ -218,46 +332,71 @@ function containsServerSecret(input: { text: string; secrets: readonly string[] 
   return false;
 }
 
+/** Most characters of earlier outbound text kept to catch a secret sent in pieces across calls. */
+export const OUTBOUND_EARLIER_MAX_CHARS = 1024;
+
+function scannedValues(strings: OutboundStrings): { raw: string[]; decoded: string[] } {
+  const raw = [...strings.values, ...strings.scalars].map(normalizeForScan);
+  return { raw, decoded: raw.map(decodeOnce) };
+}
+
+/**
+ * The normalized text of one call, to be remembered and passed back as `earlier` on the next call
+ * so a secret split over two searches is still seen whole.
+ */
+export function outboundTrace(strings: OutboundStrings): string {
+  return scannedValues(strings).decoded.join('');
+}
+
+/** Appends a call's text to the remembered tail, keeping only the most recent characters. */
+export function appendOutboundTrace(input: { earlier: string; strings: OutboundStrings }): string {
+  return (input.earlier + outboundTrace(input.strings)).slice(-OUTBOUND_EARLIER_MAX_CHARS);
+}
+
 /**
  * Checks the strings of one outbound call. `secrets` are the exact values the server holds
  * (provider keys, OAuth tokens and client secrets, the API key, other configured secrets); a query
- * containing one verbatim is blocked. Everything else is pattern based.
+ * containing one is blocked. `earlier` is the text of the calls that already went out this turn
+ * without asking: a secret that straddles the boundary is still seen. Everything else is pattern
+ * based. Text is normalized and percent-decoded once before the rules run; the original spelling is
+ * scanned as well.
  */
 export function checkOutboundStrings(input: {
   strings: OutboundStrings;
   secrets: readonly string[];
+  earlier?: string | undefined;
 }): OutboundGuardVerdict {
-  const values = [...input.strings.values, ...input.strings.scalars].map(normalizeForScan);
+  const { raw, decoded } = scannedValues(input.strings);
   const keys = input.strings.keys.map(normalizeForScan);
-  const text = [...values, ...keys].join('\n');
-  // Adjacent values glued together: a key split across array items still shows its prefix.
-  const glued = values.join('');
+  const text = [...raw, ...decoded, ...keys, ...keys.map(decodeOnce)].join('\n');
+  // Adjacent values glued together, on either side of the earlier calls' text: a key split across
+  // array items or across searches shows its prefix, whichever of the parallel calls was read first.
+  const earlier = input.earlier ?? '';
+  const joined = [raw.join(''), decoded.join(''), decoded.map(withoutUrlOrigin).join('')];
+  const glued = joined.flatMap(candidate => [earlier + candidate, candidate + earlier]);
 
-  if (
-    containsServerSecret({ text, secrets: input.secrets }) ||
-    containsServerSecret({ text: glued, secrets: input.secrets })
-  ) {
+  if (containsServerSecret({ texts: [text, ...glued], secrets: input.secrets })) {
     return { ok: false, rule: 'server_secret' };
   }
-  if (PRIVATE_KEY_BLOCK.test(text) || PRIVATE_KEY_BLOCK.test(glued)) {
+  if (PRIVATE_KEY_BLOCK.test(text) || glued.some(candidate => PRIVATE_KEY_BLOCK.test(candidate))) {
     return { ok: false, rule: 'private_key' };
   }
-  if (JWT.test(text) || JWT.test(glued)) {
+  if (JWT.test(text) || glued.some(candidate => JWT.test(candidate))) {
     return { ok: false, rule: 'jwt' };
   }
-  if (KEY_PREFIXES.some(pattern => pattern.test(text) || pattern.test(glued))) {
+  if (KEY_PREFIXES.some(pattern => pattern.test(text) || glued.some(candidate => pattern.test(candidate)))) {
     return { ok: false, rule: 'key_prefix' };
   }
   if (isEncodedRun(text)) {
     return { ok: false, rule: 'encoded_run' };
   }
-  if (PASSWORD_LABEL.test(text) || PASSCODE_THEN_DIGITS.test(text)) {
+  if (hasCredentialLabel(text)) {
     return { ok: false, rule: 'password_label' };
   }
   if (hasCardNumber(text)) {
     return { ok: false, rule: 'card_number' };
   }
-  if (values.reduce((total, value) => total + value.length, 0) > OUTBOUND_MAX_CHARS) {
+  if (raw.reduce((total, value) => total + value.length, 0) > OUTBOUND_MAX_CHARS) {
     return { ok: false, rule: 'too_long' };
   }
   return { ok: true };

@@ -27,7 +27,7 @@ Everything is enforced by the server (classifier, tool executor, host state). No
 - an exact match of any server-held secret: model provider API keys, connector OAuth tokens and client secrets, `TRUEFORGE_API_KEY`, and other configured secret values;
 - a private key block, a JWT, or a common key prefix (AWS, GitHub, OpenAI, Anthropic, Slack, Nebius, and similar);
 - a base64 or hex run of 20 characters or more;
-- a password label pattern (`password:`, `pwd=`, `passcode`, and similar) followed by a value;
+- a password or credential label (`password:`, `pwd=`, `passw0rd`, `token=`, `api key:`, and similar) followed by a value;
 - a payment card number that passes Luhn;
 - more than 200 characters in total.
 
@@ -35,7 +35,7 @@ The guard is tuned so ordinary queries with numbers, dates, and names pass.
 
 **Guard trip behavior depends on who is watching.** In an interactive chat the call asks, and the approval card shows the exact query. In a scheduled run the call is denied before it runs, an audit row records the denial and the rule that fired (never the query text), and the run continues.
 
-**Loop breaker.** After 20 silent searches in one turn, the next one asks (or is denied in a scheduled run). The count lives in host state for the turn.
+**Loop breaker.** After 20 silent searches in one turn, the next one asks (or is denied in a scheduled run). The count lives in host state for the turn. An approval resumes the conversation as a new turn with a fresh count, which is accepted: each resume needs a person to approve a call, and the guard still reads every query.
 
 **Links.** A URL fetch through the designated provider is silent only when the URL exactly matches one returned by a search result in this turn. The host keeps that set from the provider's results. Any model-composed or modified URL asks. The same rule means a search query that carries a URL also asks.
 
@@ -43,12 +43,14 @@ The guard is tuned so ordinary queries with numbers, dates, and names pass.
 
 **Silent means audited.** The audit row is written once, at dispatch, like the other standing-trust runs.
 
-**The role replaces missing hints, not declared ones.** On the designated connector a tool with no annotations is treated as a search tool, because the user designated the connector. A tool that declares itself destructive or not read-only, or whose name falls in an existing escalation class (delete, install, send, post, and similar), still asks. The connection to the provider refuses redirects, so a silent search cannot be forwarded to another host.
+**The role never replaces a missing hint on its own.** A tool on the designated connector runs without asking only when the server declares it `readOnlyHint: true`, or when the connector's catalog preset lists it in `search_tools`. The server fills that list from the shipped catalog by the connector's address whenever the connector is saved as the provider, and replaces any value a client sends, so only the operator's catalog can widen it. Every other tool on the connector follows the normal Sentinel path, so designating a connector that can write (GitHub, say) leaves its unannotated and write tools asking. A tool that declares itself destructive or not read-only, or whose name falls in an existing escalation class (delete, install, send, post, and similar), still asks even when listed. The approval selectors the user set on the agent still apply on top; the default selectors' gate on missing annotations is waived only for a listed tool, and only while the list is the default. The connection to the provider refuses redirects, so a silent search cannot be forwarded to another host.
+
+**The guard reads normalized text.** Before any rule runs, text is folded (NFKC, combining marks, zero-width and other format characters, a few look-alike letters) and percent-decoded once; the original spelling is scanned as well. A server-held secret is compared in compact form (letters and digits, any case) in its stored, URL-escaped, base64 and hex spellings. Server secrets shorter than 8 characters are ignored, since they would flag ordinary words. The guard also reads the text of the turn's earlier silent searches, so a secret split over searches is seen whole; searches of one batch are admitted one at a time so they cannot slip past each other.
 
 ## Scope
 
 - `search_provider` role on the remote MCP connector manifest, with the single-holder rule, across core, server, and UI (the SDK and OpenAPI follow from the Generate SDK workflow)
-- The Parallel keyless catalog preset marked as the search provider
+- The Parallel keyless catalog preset marked as the search provider, and a `search_tools` list on the Parallel, Tavily and Exa presets naming their real search tools
 - Per-user "Searches: Run without asking / Ask" setting (default Run without asking), in the Sentinel settings API, store, and settings UI
 - The outbound secret guard module in core, with a host-supplied secret source
 - Classifier path for the designated provider, the per-turn host state (silent count, search-result URL set), and scheduled-run denial with an audit row
@@ -67,7 +69,7 @@ The guard is tuned so ordinary queries with numbers, dates, and names pass.
 
 - All tests use synthetic data: fake keys, fake tokens, and test card numbers built for the test. No real credentials or user data.
 - Each guard rule, including the false positives that must pass (ordinary queries with numbers, dates, names, version strings, and file paths).
-- Silent search for the designated provider only; a non-designated search tool still asks.
+- Silent search for the designated provider only; a non-designated search tool still asks, and so does every unannotated or write tool of a write-capable connector designated as the provider.
 - A scheduled run denies on a guard trip, writes the audit row, and the run continues.
 - The loop breaker at 20, interactive and scheduled.
 - Exact-URL fetch is silent while a modified URL asks.

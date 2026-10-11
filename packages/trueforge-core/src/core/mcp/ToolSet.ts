@@ -9,13 +9,13 @@ import {
   type TierDecision,
 } from '../permissions';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
-import { collectOutboundStrings } from '../permissions/outboundGuard';
+import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import {
   isSearchAskReason,
   namesUrl,
   recordResultUrls,
+  runOneAtATime,
   SEARCH_SILENT_REASON,
-  SILENT_SEARCH_LIMIT,
 } from '../permissions/webSearch';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
@@ -93,10 +93,10 @@ export function stampSentinelDecision(input: {
   };
 }
 
-function searchNotRunText(decision: TierDecision): string {
-  return JSON.stringify({
-    error: `The web search was not run: ${decision.reason_detail ?? 'it needs approval'} Ask again; it will be sent for approval.`,
-  });
+/** Result for a search that was settled as silent before dispatch and may no longer run. */
+function searchNotRunText(input: { detail: string; unattended: boolean }): string {
+  const next = input.unattended ? 'Continue without it.' : 'Try again; it will be sent for approval.';
+  return JSON.stringify({ error: `The web search was not run. ${input.detail} ${next}` });
 }
 
 /** Text a search result carries: its text blocks and its structured content. */
@@ -143,6 +143,7 @@ export class ToolSet implements IToolSet {
   private readonly sentinel: SentinelHostContext | undefined;
   private readonly firstParty: boolean;
   private readonly searchProvider: boolean;
+  private readonly searchTools: ReadonlySet<string>;
 
   constructor(params: {
     source: ToolSource;
@@ -163,11 +164,12 @@ export class ToolSet implements IToolSet {
      */
     firstParty?: boolean | undefined;
     /**
-     * The user designated this connector as their search provider. Set by the host from the
-     * connector record only, never from a connector URL, client input, or tool metadata. Has no
-     * effect without `sentinel`.
+     * The user designated this connector as their search provider; `tools` are the host's own
+     * list of its search tools. Set by the host from the connector record only, never from a
+     * connector URL, client input, or tool metadata. A tool runs silently only when the server
+     * declares it read-only or this list names it. Has no effect without `sentinel`.
      */
-    searchProvider?: boolean | undefined;
+    searchProvider?: { tools: readonly string[] } | undefined;
   }) {
     this.source = params.source;
     this.name = params.source.name;
@@ -179,7 +181,8 @@ export class ToolSet implements IToolSet {
     });
     this.sentinel = params.sentinel;
     this.firstParty = params.firstParty === true;
-    this.searchProvider = params.searchProvider === true;
+    this.searchProvider = params.searchProvider !== undefined;
+    this.searchTools = new Set(params.searchProvider?.tools);
   }
 
   // True when every exposed tool is eager. Tracks the policy live: for an auto-preload server
@@ -254,46 +257,9 @@ export class ToolSet implements IToolSet {
 
       await this.assertToolAllowed(params.name, tool?.annotations);
 
-      const { info: tool_info, classification } = await this.buildToolCallInfo(params, tool);
-      if (decision === undefined && classification !== undefined && isSearchAskReason(classification.reason)) {
-        // The turn settled this call as silent before dispatch, and a count, setting, or secret
-        // changed since. The turn loop cannot take an approval request at dispatch, so the call
-        // does not run; the next attempt is classified afresh and asks.
-        return toolResultResponse({ text: searchNotRunText(classification), isError: true });
-      }
-      if (!decision && tool_info.is_approval_required) {
-        return { approvalRequired: { tool_info } };
-      }
-
-      if (decision?.status === 'deny') {
-        return toolResultResponse({
-          text: deniedToolCallText(decision.reason),
-          isError: true,
-        });
-      }
-
-      if (decision === undefined && classification?.reason === SEARCH_SILENT_REASON && this.sentinel !== undefined) {
-        // Checked and counted with no await between, so concurrent calls of one batch cannot
-        // all pass on the same count.
-        const turn = this.sentinel.web_search;
-        if (turn.silentSearches >= SILENT_SEARCH_LIMIT) {
-          return toolResultResponse({ text: searchNotRunText(classification), isError: true });
-        }
-        turn.silentSearches += 1;
-      }
-
-      if (
-        decision === undefined &&
-        classification !== undefined &&
-        isStandingTrustDecision(classification) &&
-        this.sentinel !== undefined
-      ) {
-        await recordStandingTrustRun({
-          services: this.sentinel.services,
-          identity: this.sentinel,
-          tool_name: params.name,
-          description: classification.reason_detail ?? params.name,
-        });
+      const refusal = await this.admit({ params, tool, decision });
+      if (refusal !== undefined) {
+        return refusal;
       }
     } catch (error) {
       if (error instanceof ToolPolicyBlockedError || error instanceof ToolPreDispatchError) {
@@ -324,6 +290,87 @@ export class ToolSet implements IToolSet {
       return { ...response, wasInitialized: listed.wasInitialized };
     }
     return response;
+  }
+
+  /**
+   * Classifies the call and settles whether it may be dispatched now: a response means it must not
+   * be (approval needed, denied, or a silent search that can no longer run), undefined means go.
+   * For the search provider the whole step runs one call at a time per turn, so the silent count and
+   * the text already sent are read and updated without another call of the batch slipping between.
+   */
+  private async admit(input: {
+    params: CallToolRequest['params'];
+    tool: AgentToolSchema | undefined;
+    decision: ApprovalDecision | undefined;
+  }): Promise<CallToolResponse | undefined> {
+    const work = () => this.admitNow(input);
+    return this.searchProvider && this.sentinel !== undefined
+      ? runOneAtATime({ state: this.sentinel.web_search, work })
+      : work();
+  }
+
+  private async admitNow({
+    params,
+    tool,
+    decision,
+  }: {
+    params: CallToolRequest['params'];
+    tool: AgentToolSchema | undefined;
+    decision: ApprovalDecision | undefined;
+  }): Promise<CallToolResponse | undefined> {
+    const { info: tool_info, classification } = await this.buildToolCallInfo(params, tool);
+    if (tool_info.pre_dispatch_failure !== undefined) {
+      // The turn loop refuses these before it gets here; a caller that skips that step still cannot
+      // run a call the host auto-denied, such as a search the outbound guard held in a scheduled run.
+      return toolResultResponse({ text: JSON.stringify({ error: tool_info.pre_dispatch_failure.message }), isError: true });
+    }
+    if (decision === undefined && classification !== undefined && isSearchAskReason(classification.reason)) {
+      // The turn settled this call as silent before dispatch, and a count, setting, or secret
+      // changed since. The turn loop cannot take an approval request at dispatch, so the call
+      // does not run; the next attempt is classified afresh and asks.
+      return toolResultResponse({
+        text: searchNotRunText({
+          detail: classification.reason_detail ?? 'It needs approval.',
+          unattended: this.sentinel?.services.unattended === true,
+        }),
+        isError: true,
+      });
+    }
+    if (!decision && tool_info.is_approval_required) {
+      return { approvalRequired: { tool_info } };
+    }
+
+    if (decision?.status === 'deny') {
+      return toolResultResponse({
+        text: deniedToolCallText(decision.reason),
+        isError: true,
+      });
+    }
+
+    if (decision === undefined && classification?.reason === SEARCH_SILENT_REASON && this.sentinel !== undefined) {
+      // Classified as silent a moment ago inside this one-at-a-time step, so the count is current.
+      const turn = this.sentinel.web_search;
+      turn.silentSearches += 1;
+      const sent = collectOutboundStrings(params.arguments ?? {});
+      if (sent !== undefined) {
+        turn.sentText = appendOutboundTrace({ earlier: turn.sentText, strings: sent });
+      }
+    }
+
+    if (
+      decision === undefined &&
+      classification !== undefined &&
+      isStandingTrustDecision(classification) &&
+      this.sentinel !== undefined
+    ) {
+      await recordStandingTrustRun({
+        services: this.sentinel.services,
+        identity: this.sentinel,
+        tool_name: params.name,
+        description: classification.reason_detail ?? params.name,
+      });
+    }
+    return undefined;
   }
 
   async toolCallInfo(
@@ -390,6 +437,7 @@ export class ToolSet implements IToolSet {
         mcp_server_name: info.mcp_server_name,
         mcp_first_party: this.firstParty,
         mcp_search_provider: this.searchProvider,
+        mcp_search_tool: this.searchTools.has(params.name),
         mcp_hints: {
           read_only_hint: info.read_only_hint,
           destructive_hint: info.destructive_hint,

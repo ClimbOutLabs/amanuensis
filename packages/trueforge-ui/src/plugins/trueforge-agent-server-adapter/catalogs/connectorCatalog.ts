@@ -16,11 +16,7 @@ import {
 
 import { parseToolGrants, type ConnectorToolGrants } from '../../../server/connectorToolGrants.js';
 import type { MemoryProviderFields } from '../../../server/memoryProviderTypes.js';
-import {
-  readSearchProviderFlag,
-  type SearchProviderFields,
-  type SearchProviderWireFields,
-} from '../../../server/searchProviderTypes.js';
+import type { SearchProviderFields } from '../../../server/searchProviderTypes.js';
 import type {
   ConnectorAuth,
   ConnectorAuthPublic,
@@ -73,7 +69,7 @@ export function memoryProviderWriteRequestOptions(memoryProvider: boolean | unde
  * `memory_provider` / `memory_settings` wire names via its serializer). Widen locally so this
  * package never edits the generated SDK package to add a field.
  */
-type HarnessManifestWithMemory = TrueForgeApi.McpServerManifest & MemoryProviderFields & SearchProviderWireFields;
+type HarnessManifestWithMemory = TrueForgeApi.McpServerManifest & MemoryProviderFields;
 type ConfiguredMcpServerWithMemory = TrueForgeApi.ConfiguredMcpServer & {
   manifest: HarnessManifestWithMemory;
 };
@@ -218,7 +214,6 @@ export function toHarnessAuth(auth: ConnectorAuth): TrueForgeApi.McpServerManife
 }
 
 export function toUiCatalogEntry(server: TrueForgeApi.CatalogMcpServer): UiConnectorCatalogEntry {
-  const searchProvider = readSearchProviderFlag(server);
   return {
     id: server.name,
     name: server.name,
@@ -226,7 +221,7 @@ export function toUiCatalogEntry(server: TrueForgeApi.CatalogMcpServer): UiConne
     description: server.description,
     ...(server.logo === undefined ? {} : { logo: server.logo }),
     auth: toUiAuthPublic(server.auth),
-    ...(searchProvider === undefined ? {} : { searchProvider }),
+    ...(server.searchProvider === undefined ? {} : { searchProvider: server.searchProvider }),
   };
 }
 
@@ -256,7 +251,7 @@ export function toUiTool(tool: Record<string, unknown>): ToolBase & { annotation
 export function toUiConnector(server: TrueForgeApi.ConfiguredMcpServer): UiConnector {
   const manifest = (server as ConfiguredMcpServerWithMemory).manifest;
   const auth = toUiAuthPublic(manifest.auth);
-  const searchProvider = readSearchProviderFlag(manifest);
+  const searchProvider = server.manifest.type === 'remote' ? server.manifest.searchProvider : undefined;
   return {
     id: server.name,
     name: server.name,
@@ -303,7 +298,7 @@ export function toHarnessManifest(
     ...(auth === undefined ? {} : { auth }),
     ...(req.memoryProvider === undefined ? {} : { memoryProvider: req.memoryProvider }),
     ...(req.memorySettings === undefined ? {} : { memorySettings: req.memorySettings }),
-    ...(req.searchProvider === undefined ? {} : { search_provider: req.searchProvider }),
+    ...(req.searchProvider === undefined ? {} : { searchProvider: req.searchProvider }),
   };
   return manifest;
 }

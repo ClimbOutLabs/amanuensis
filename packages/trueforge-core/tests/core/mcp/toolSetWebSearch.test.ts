@@ -60,11 +60,13 @@ interface Harness {
 function harness(options: {
   serverName?: string;
   searchProvider?: boolean;
+  /** The host's list of the designated connector's search tools. */
+  searchTools?: readonly string[];
   unattended?: boolean;
   searchWithoutAsking?: boolean;
   secrets?: readonly string[];
   result?: (name: string) => string;
-  requireApprovalForTools?: string[];
+  requireApprovalForTools?: string[] | undefined;
   tools?: ToolSchema[];
 }): Harness {
   const audit: AuditRecordInput[] = [];
@@ -126,7 +128,7 @@ function harness(options: {
     },
     preload: false,
     sentinel: host,
-    searchProvider: options.searchProvider,
+    searchProvider: options.searchProvider === true ? { tools: options.searchTools ?? [] } : undefined,
   });
   return { toolSet, host, audit, dispatched };
 }
@@ -161,12 +163,21 @@ describe('the designated search provider', () => {
     ]);
   });
 
-  it('runs a tool that publishes no hints, because the user designated the connector', async () => {
-    const h = harness({ searchProvider: true });
-    const info = await h.toolSet.toolCallInfo({ name: 'read_page', arguments: { query: 'weather in Oslo' } });
+  it('runs an unannotated tool only when the host lists it as a search tool', async () => {
+    const listed = harness({ searchProvider: true, searchTools: ['read_page'] });
+    const info = await listed.toolSet.toolCallInfo({ name: 'read_page', arguments: { query: 'weather in Oslo' } });
     expect(info.tier).toBe(1);
-    // The default approval selectors would gate an unannotated tool; the designation waives that.
+    // The default approval selectors would gate an unannotated tool; the host's list waives that.
     expect(info.is_approval_required).toBe(false);
+
+    const unlisted = harness({ searchProvider: true });
+    const held = await unlisted.toolSet.toolCallInfo({ name: 'read_page', arguments: { query: 'weather in Oslo' } });
+    expect(held.tier).toBe(3);
+    expect(held.is_approval_required).toBe(true);
+    expect(isApprovalRequiredResponse(await unlisted.toolSet.callTool({ name: 'read_page', arguments: {} }))).toBe(
+      true,
+    );
+    expect(unlisted.dispatched).toEqual([]);
   });
 
   it('still honors a selector that names the tool', async () => {
@@ -176,8 +187,8 @@ describe('the designated search provider', () => {
     expect(info.is_approval_required).toBe(true);
   });
 
-  it('never lowers a tool that declares itself destructive or not read-only', async () => {
-    const h = harness({ searchProvider: true });
+  it('never lowers a tool that declares itself destructive or not read-only, even when listed', async () => {
+    const h = harness({ searchProvider: true, searchTools: ['annotate', 'lookup_and_log'] });
     expect((await h.toolSet.toolCallInfo({ name: 'annotate', arguments: { query: 'weather' } })).tier).toBe(3);
     expect((await h.toolSet.toolCallInfo({ name: 'lookup_and_log', arguments: { query: 'weather' } })).tier).toBe(3);
   });
@@ -318,7 +329,7 @@ describe('links', () => {
   }
 
   it('is silent only for a URL that a search result of this turn returned, exactly', async () => {
-    const h = harness({ searchProvider: true, result: results });
+    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
     expect((await fetchTier(h, page)).tier).toBe(3);
 
     await runSearch(h, 'oslo weather');
@@ -330,7 +341,7 @@ describe('links', () => {
   });
 
   it('asks for any modified or composed URL', async () => {
-    const h = harness({ searchProvider: true, result: results });
+    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
     await runSearch(h, 'oslo weather');
     for (const url of [
       `${page}?x=1`,
@@ -340,13 +351,21 @@ describe('links', () => {
       'https://other.example.org/page',
       'news.example.org/2024/06/oslo-weather',
       'news.example.org',
+      // Spellings that reach the same page but are not the string the result returned.
+      page.replace('https://news.example.org', 'HTTPS://NEWS.EXAMPLE.ORG'),
+      `${page}#top`,
+      page.replace('oslo', 'os%6Co'),
+      page.replace('//news.example.org', '//news.example.org:443'),
+      page.replace('//news.example.org', '//news.example.org@evil.test'),
+      page.replace('//news.example.org', '//evil.test\\@news.example.org'),
+      `${page}\u200B`,
     ]) {
       expect((await fetchTier(h, url)).tier).toBe(3);
     }
   });
 
   it('asks for a search query that carries a link no result returned', async () => {
-    const h = harness({ searchProvider: true, result: results });
+    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
     const info = await h.toolSet.toolCallInfo({
       name: 'lookup',
       arguments: { query: 'summarize https://evil.example/x' },
@@ -355,7 +374,7 @@ describe('links', () => {
   });
 
   it('denies a composed URL in a scheduled run', async () => {
-    const h = harness({ searchProvider: true, result: results, unattended: true });
+    const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results, unattended: true });
     await runSearch(h, 'oslo weather');
     const info = await fetchTier(h, `${page}?x=1`);
     expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
@@ -366,9 +385,9 @@ describe('links', () => {
     await runSearch(other, 'oslo weather');
     expect(other.host.web_search.resultUrls.size).toBe(0);
 
-    const first = harness({ searchProvider: true, result: results });
+    const first = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
     await runSearch(first, 'oslo weather');
-    const nextTurn = harness({ searchProvider: true, result: results });
+    const nextTurn = harness({ searchProvider: true, searchTools: ['read_page'], result: results });
     expect((await fetchTier(nextTurn, page)).tier).toBe(3);
   });
 
@@ -376,6 +395,7 @@ describe('links', () => {
     const linked = 'https://news.example.org/2024/06/related';
     const h = harness({
       searchProvider: true,
+      searchTools: ['read_page'],
       result: name => (name === 'lookup' ? JSON.stringify({ url: page }) : `read more at ${linked}`),
     });
     await runSearch(h, 'oslo weather');
@@ -388,6 +408,7 @@ describe('links', () => {
   it('reads URLs out of prose and markdown results as well', async () => {
     const h = harness({
       searchProvider: true,
+      searchTools: ['read_page'],
       result: () => `See [the report](${page}) or visit https://docs.example.net/guide.`,
     });
     await runSearch(h, 'oslo weather');
@@ -397,25 +418,19 @@ describe('links', () => {
 });
 
 describe('Tavily as the designated search provider', () => {
-  const tavilySearch: ToolSchema = {
-    name: 'tavily_search',
-    description: 'Search the web.',
-    inputSchema: schema,
-    annotations: { readOnlyHint: true, openWorldHint: true },
-  };
-  // Left unannotated on purpose: the role must not depend on what the connector declares.
-  const tavilyExtract: ToolSchema = {
-    name: 'tavily_extract',
-    description: 'Extract page content.',
-    inputSchema: schema,
-  };
-  const tools = [tavilySearch, tavilyExtract];
+  // The open-source Tavily server publishes no annotations on any tool, so only the host's list
+  // lets its search run silently.
+  const named = (name: string): ToolSchema => ({ name, description: name, inputSchema: schema });
+  const tools = ['tavily_search', 'tavily_extract', 'tavily_crawl', 'tavily_map', 'tavily_research', 'tavily_feedback'].map(
+    named,
+  );
+  const searchTools = ['tavily_search', 'tavily_extract'];
   const page = 'https://docs.example.net/guides/oslo';
   const results = (name: string): string =>
     name === 'tavily_search' ? JSON.stringify({ results: [{ title: 'Oslo', url: page }] }) : 'page body';
 
   it('runs tavily_search silently behind the guard, and holds a query that carries a key', async () => {
-    const h = harness({ serverName: 'tavily', searchProvider: true, tools, result: results });
+    const h = harness({ serverName: 'tavily', searchProvider: true, searchTools, tools, result: results });
     const silent = await h.toolSet.toolCallInfo({ name: 'tavily_search', arguments: { query: 'oslo weather' } });
     expect(silent.tier).toBe(1);
     expect(silent.is_approval_required).toBe(false);
@@ -428,7 +443,7 @@ describe('Tavily as the designated search provider', () => {
   });
 
   it('runs tavily_extract silently only on an exact URL this turn’s results returned', async () => {
-    const h = harness({ serverName: 'tavily', searchProvider: true, tools, result: results });
+    const h = harness({ serverName: 'tavily', searchProvider: true, searchTools, tools, result: results });
     const extract = (urls: string[]) => h.toolSet.toolCallInfo({ name: 'tavily_extract', arguments: { urls } });
 
     expect((await extract([page])).tier).toBe(3);
@@ -438,8 +453,190 @@ describe('Tavily as the designated search provider', () => {
     expect((await extract([page, 'https://evil.example/collect'])).tier).toBe(3);
   });
 
+  it('keeps asking for the Tavily tools its preset does not list', async () => {
+    const h = harness({ serverName: 'tavily', searchProvider: true, searchTools, tools, result: results });
+    for (const name of ['tavily_crawl', 'tavily_map', 'tavily_research', 'tavily_feedback']) {
+      const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
+      expect(info.tier).toBe(3);
+      expect(info.is_approval_required).toBe(true);
+    }
+  });
+
   it('asks for the same tools when Tavily does not hold the role', async () => {
-    const h = harness({ serverName: 'tavily', searchProvider: false, tools, result: results });
+    const h = harness({ serverName: 'tavily', searchProvider: false, searchTools, tools, result: results });
     expect((await h.toolSet.toolCallInfo({ name: 'tavily_search', arguments: { query: 'oslo' } })).tier).toBe(3);
+  });
+});
+
+describe('a write-capable connector designated as the search provider', () => {
+  const named = (name: string, annotations?: ToolSchema['annotations']): ToolSchema => ({
+    name,
+    description: name,
+    inputSchema: schema,
+    ...(annotations === undefined ? {} : { annotations }),
+  });
+  // A GitHub-shaped server: some tools say they only read, the rest say nothing or say they write.
+  const tools = [
+    named('get_file_contents', { readOnlyHint: true }),
+    named('search_code', { readOnlyHint: true }),
+    named('create_issue'),
+    named('add_issue_comment'),
+    named('merge_pull_request'),
+    named('push_files'),
+    named('create_or_update_file', { readOnlyHint: false }),
+    named('fork_repository', { readOnlyHint: false, destructiveHint: false }),
+    named('run_workflow', { destructiveHint: true }),
+  ];
+
+  it('runs only the tools the server declares read-only without asking', async () => {
+    const h = harness({ serverName: 'github', searchProvider: true, tools });
+    for (const name of ['get_file_contents', 'search_code']) {
+      const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
+      expect(info.tier).toBe(1);
+      expect(info.is_approval_required).toBe(false);
+    }
+  });
+
+  it('keeps every unannotated or write tool on the normal approval path', async () => {
+    const h = harness({ serverName: 'github', searchProvider: true, tools });
+    for (const name of [
+      'create_issue',
+      'add_issue_comment',
+      'merge_pull_request',
+      'push_files',
+      'create_or_update_file',
+      'fork_repository',
+      'run_workflow',
+    ]) {
+      const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
+      expect(info.tier).toBe(3);
+      expect(info.is_approval_required).toBe(true);
+      expect(info.silent_search_query).toBeUndefined();
+      const response = await h.toolSet.callTool({ name, arguments: { query: 'oslo' } });
+      expect(isApprovalRequiredResponse(response)).toBe(true);
+    }
+    expect(h.dispatched).toEqual([]);
+    expect(h.audit).toEqual([]);
+  });
+
+  it('does not let a server claim read-only on a tool whose name says it writes or deletes', async () => {
+    const h = harness({
+      serverName: 'github',
+      searchProvider: true,
+      tools: [named('delete_branch', { readOnlyHint: true }), named('install_app', { readOnlyHint: true })],
+    });
+    expect((await h.toolSet.toolCallInfo({ name: 'delete_branch', arguments: { ref: 'main' } })).tier).toBe(3);
+    expect((await h.toolSet.toolCallInfo({ name: 'install_app', arguments: { app: 'x' } })).tier).toBe(3);
+  });
+});
+
+describe('explicit approval selectors on the designated provider', () => {
+  const unannotated = (name: string): ToolSchema => ({ name, description: name, inputSchema: schema });
+  const tools = [unannotated('find'), searchTool];
+
+  async function approvalFor(requireApprovalForTools: string[] | undefined, name: string): Promise<boolean> {
+    const h = harness({ searchProvider: true, searchTools: ['find'], tools, requireApprovalForTools });
+    const info = await h.toolSet.toolCallInfo({ name, arguments: { query: 'oslo' } });
+    expect(info.tier).toBe(1);
+    return info.is_approval_required === true;
+  }
+
+  it('waives only the default list’s gate on missing annotations for a listed tool', async () => {
+    expect(await approvalFor(undefined, 'find')).toBe(false);
+    expect(await approvalFor(['@write', '@destructive', '@unclassified'], 'find')).toBe(false);
+  });
+
+  it('gates when the user changed the list in any way that still names the tool or its class', async () => {
+    expect(await approvalFor(['@all'], 'find')).toBe(true);
+    expect(await approvalFor(['@all'], 'lookup')).toBe(true);
+    expect(await approvalFor(['find'], 'find')).toBe(true);
+    expect(await approvalFor(['@unclassified'], 'find')).toBe(true);
+    expect(await approvalFor(['@write', '@destructive', '@unclassified', 'lookup'], 'lookup')).toBe(true);
+  });
+
+  it('runs a listed tool when the user turned the selectors off or narrowed them past it', async () => {
+    expect(await approvalFor([], 'find')).toBe(false);
+    expect(await approvalFor(['@destructive'], 'find')).toBe(false);
+  });
+});
+
+describe('admission of a batch of searches', () => {
+  it('runs exactly the allowance when the whole batch is dispatched at once', async () => {
+    const h = harness({ searchProvider: true });
+    const responses = await Promise.all(
+      Array.from({ length: SILENT_SEARCH_LIMIT + 5 }, (_, i) => runSearch(h, `topic ${String(i)}`)),
+    );
+    expect(h.dispatched).toHaveLength(SILENT_SEARCH_LIMIT);
+    expect(h.host.web_search.silentSearches).toBe(SILENT_SEARCH_LIMIT);
+    const refused = responses.filter(response => isCallToolResponseResult(response) && response.result.isError === true);
+    expect(refused).toHaveLength(5);
+    expect(h.audit).toHaveLength(SILENT_SEARCH_LIMIT);
+    const text = JSON.stringify(refused[0]);
+    expect(text).toContain('not run');
+    expect(text).toContain('sent for approval');
+  });
+
+  it('tells a scheduled run to continue without the search rather than to ask', async () => {
+    const h = harness({ searchProvider: true, unattended: true });
+    h.host.web_search.silentSearches = SILENT_SEARCH_LIMIT;
+    const response = await runSearch(h, 'one more');
+    expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
+    expect(h.dispatched).toEqual([]);
+  });
+
+  it('sees a key split between two searches of one batch', async () => {
+    const h = harness({ searchProvider: true });
+    const key = ['AKI', 'A', 'ABCDEFGH', 'IJKLMNOP'].join('');
+    const [first, second] = await Promise.all([runSearch(h, key.slice(0, 9)), runSearch(h, key.slice(9))]);
+    // Which of the two went first is up to the connection, so only that one of them was held matters.
+    const held = [first, second].filter(response => isCallToolResponseResult(response) && response.result.isError === true);
+    expect(held).toHaveLength(1);
+    expect(h.dispatched).toHaveLength(1);
+  });
+});
+
+describe('a secret sent in pieces over several searches', () => {
+  const secret = 'synthetic-provider-key-000111';
+
+  it('is held on the search that completes it, in a chat and in a scheduled run', async () => {
+    const chat = harness({ searchProvider: true, secrets: [secret] });
+    await runSearch(chat, secret.slice(0, 14));
+    const info = await chat.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card?.why_asked_again).toContain('secret this server holds');
+
+    const scheduled = harness({ searchProvider: true, secrets: [secret], unattended: true });
+    await runSearch(scheduled, secret.slice(0, 14));
+    const denied = await scheduled.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
+    expect(denied.pre_dispatch_failure?.kind).toBe('policy_blocked');
+  });
+
+  it('is not remembered from a search the user approved, so one approval does not hold the rest of the turn', async () => {
+    const h = harness({ searchProvider: true, secrets: [secret] });
+    await h.toolSet.callTool({ name: 'lookup', arguments: { query: `debug ${secret}` } }, { status: 'allow' });
+    const next = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'weather in Oslo' } });
+    expect(next.tier).toBe(1);
+  });
+
+  it('starts over with the next turn', async () => {
+    const first = harness({ searchProvider: true, secrets: [secret] });
+    await runSearch(first, secret.slice(0, 14));
+    const nextTurn = harness({ searchProvider: true, secrets: [secret] });
+    const info = await nextTurn.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
+    expect(info.tier).toBe(1);
+  });
+});
+
+describe('a call the host auto-denied', () => {
+  const secret = 'synthetic-provider-key-000111';
+
+  it('never runs, even when a caller dispatches it without first reading its tool info', async () => {
+    const h = harness({ searchProvider: true, secrets: [secret], unattended: true });
+    const response = await runSearch(h, `debug ${secret}`);
+    expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
+    expect(JSON.stringify(response)).not.toContain(secret);
+    expect(h.dispatched).toEqual([]);
+    expect(h.audit.every(row => row.outcome === 'auto_denied')).toBe(true);
+    expect(JSON.stringify(h.audit)).not.toContain(secret);
   });
 });

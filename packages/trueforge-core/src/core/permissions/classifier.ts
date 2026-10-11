@@ -90,6 +90,8 @@ export interface SentinelAction {
   mcp_first_party?: boolean | undefined;
   /** The user designated this connector as their search provider. Set by the host from the connector record only. */
   mcp_search_provider?: boolean | undefined;
+  /** The host's own list for the designated provider names this tool as a search tool. Never from tool metadata. */
+  mcp_search_tool?: boolean | undefined;
   mcp_hints: {
     read_only_hint?: boolean | undefined;
     destructive_hint?: boolean | undefined;
@@ -977,8 +979,10 @@ async function holdSearchCall(input: {
  * The designated search provider's call. Runs without asking unless the user switched searches to
  * ask, the outbound secret guard trips, the turn already ran its allowance of silent searches, or
  * the call names a URL no search result of this turn returned. Returns undefined, leaving the call
- * to the ordinary rules, for a tool that declares itself destructive or not read-only, falls in a
- * name-based escalation class, or touches a sensitive path: the role never lowers those.
+ * to the ordinary rules, for a tool that the server did not declare read-only and the host's list
+ * does not name as a search tool, that declares itself destructive or not read-only, falls in a
+ * name-based escalation class, or touches a sensitive path: the role never lowers those, so
+ * designating a connector that can write does not make its unannotated tools silent.
  */
 async function classifySearchProviderTool(input: {
   action: SentinelAction;
@@ -988,6 +992,7 @@ async function classifySearchProviderTool(input: {
   const { action, ctx, extraction } = input;
   const name = action.tool_name.toLowerCase();
   if (
+    (action.mcp_hints.read_only_hint !== true && action.mcp_search_tool !== true) ||
     action.mcp_hints.destructive_hint === true ||
     action.mcp_hints.read_only_hint === false ||
     extraction.external_service ||
@@ -1009,7 +1014,11 @@ async function classifySearchProviderTool(input: {
   const verdict =
     strings === undefined
       ? ({ ok: false, rule: 'uninspectable' } as const)
-      : checkOutboundStrings({ strings, secrets: await ctx.services.outboundSecrets(owner) });
+      : checkOutboundStrings({
+          strings,
+          secrets: await ctx.services.outboundSecrets(owner),
+          earlier: ctx.web_search.sentText,
+        });
   if (!verdict.ok) {
     return held('mcp_search_guard', describeOutboundRule(verdict.rule));
   }

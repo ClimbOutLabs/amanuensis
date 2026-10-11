@@ -1,4 +1,4 @@
-import { TrueForge, type TrueForgeApi } from '@truefoundry/trueforge-sdk';
+import { serialization, TrueForge, type TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import assert from 'node:assert/strict';
 import { afterEach, describe, it, vi } from 'vitest';
 
@@ -185,50 +185,67 @@ describe('connectorCatalog mappers', () => {
     );
   });
 
-  it('maps the search provider role from the manifest, whichever spelling the SDK delivers', () => {
+  it('maps the search provider role from the manifest the SDK delivers', () => {
     const base = {
       type: 'remote' as const,
       name: 'finder',
       url: 'https://finder.example/mcp',
       description: 'Finder.',
     };
-    // The generated SDK passes a key it does not declare through unchanged, so the wire name arrives as is.
-    const fromWire: TrueForgeApi.McpServerManifest & { search_provider: boolean } = { ...base, search_provider: true };
-    // Once the SDK declares the field it camel-cases it.
-    const fromSdk: TrueForgeApi.McpServerManifest & { searchProvider: boolean } = { ...base, searchProvider: true };
-    for (const manifest of [fromWire, fromSdk]) {
-      assert.equal(
-        toUiConnector({ name: 'finder', manifest, authStatus: { status: 'not_required' } }).searchProvider,
-        true,
-      );
-    }
+    const on: TrueForgeApi.McpServerManifest = { ...base, searchProvider: true };
+    assert.equal(
+      toUiConnector({ name: 'finder', manifest: on, authStatus: { status: 'not_required' } }).searchProvider,
+      true,
+    );
     assert.equal(
       'searchProvider' in toUiConnector({ name: 'finder', manifest: base, authStatus: { status: 'not_required' } }),
       false,
     );
   });
 
-  it('sends the search provider role under its wire name and omits it when unset', () => {
+  it('sends the search provider role through the SDK as the snake_case field and omits it when unset', () => {
     const request = { name: 'finder', url: 'https://finder.example/mcp', auth: { type: 'none' as const } };
-    assert.deepEqual(toHarnessManifest({ ...request, searchProvider: true }), {
+    const wire = serialization.McpServerManifest.jsonOrThrow(toHarnessManifest({ ...request, searchProvider: true }));
+    assert.deepEqual(wire, {
       type: 'remote',
       name: 'finder',
       url: 'https://finder.example/mcp',
       description: 'finder MCP server',
       search_provider: true,
     });
-    assert.equal('search_provider' in toHarnessManifest(request), false);
+    assert.equal('search_provider' in serialization.McpServerManifest.jsonOrThrow(toHarnessManifest(request)), false);
   });
 
-  it('carries a catalog preset’s offer to be the search provider', () => {
-    const preset: TrueForgeApi.CatalogMcpServer & { search_provider: boolean } = {
+  it('reads the search provider role and the server’s search tools back from the wire', () => {
+    const manifest = serialization.McpServerManifest.parseOrThrow({
+      type: 'remote',
+      name: 'finder',
+      url: 'https://finder.example/mcp',
+      description: 'Finder.',
+      search_provider: true,
+      search_tools: ['web_search'],
+    });
+    assert.equal(
+      toUiConnector({ name: 'finder', manifest, authStatus: { status: 'not_required' } }).searchProvider,
+      true,
+    );
+  });
+
+  it('carries a catalog preset’s offer to be the search provider, read from the wire', () => {
+    const preset = serialization.CatalogMcpServer.parseOrThrow({
       type: 'remote',
       name: 'parallel-web',
       url: 'https://search.parallel.ai/mcp',
       description: 'Search the web.',
       search_provider: true,
-    };
+      search_tools: ['web_search', 'web_fetch'],
+    });
     assert.equal(toUiCatalogEntry(preset).searchProvider, true);
+    assert.equal(
+      'searchProvider' in
+        toUiCatalogEntry({ type: 'remote', name: 'x', url: 'https://x.example/mcp', description: 'X.' }),
+      false,
+    );
   });
 
   it('omits memoryProvider when the manifest does not set it', () => {

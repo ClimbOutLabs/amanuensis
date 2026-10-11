@@ -5,7 +5,7 @@
  * holder, so the flag moves in two steps: turn it off on the holder, then on for another connector.
  */
 import type { MemoryProviderUpdateRequest } from '@/server/memoryProviderTypes.js';
-import { isSearchProvider, type SearchProviderFields } from '@/server/searchProviderTypes.js';
+import { isSearchProvider, offersSearchProvider, type SearchProviderFields } from '@/server/searchProviderTypes.js';
 import type { ConnectorBase, ConnectorCatalogEntry } from '@/server/types.js';
 import { isMemoryProvider, memoryProviderUpdateRequest } from './memoryProvider.js';
 
@@ -25,6 +25,5 @@ export function searchProviderForNewConnector({
   entry: ConnectorCatalogEntry;
   configured: readonly ConnectorBase[];
 }): SearchProviderFields {
-  const offered = Reflect.get(entry, 'searchProvider') === true;
-  return offered && !configured.some(isSearchProvider) ? { searchProvider: true } : {};
+  return offersSearchProvider(entry) && !configured.some(isSearchProvider) ? { searchProvider: true } : {};
 }

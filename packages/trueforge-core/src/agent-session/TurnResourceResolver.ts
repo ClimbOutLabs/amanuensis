@@ -84,8 +84,8 @@ export class TurnResourceResolver<
   readonly #sources = new Map<string, Promise<ToolSource>>();
   /** MCP servers the host reported as first-party when it resolved their connection this turn. */
   readonly #firstPartyServers = new Set<string>();
-  /** MCP servers the user designated as their search provider, as the host reported when it resolved them. */
-  readonly #searchProviderServers = new Set<string>();
+  /** MCP servers the user designated as their search provider, with the host's list of their search tools. */
+  readonly #searchProviderServers = new Map<string, { tools: readonly string[] }>();
   /** The turn's silent-search state, shared by the root thread and every sub-agent thread. */
   readonly #webSearch = createWebSearchTurnState();
   readonly #models = new Map<string, Promise<ResolvedModel>>();
@@ -111,13 +111,17 @@ export class TurnResourceResolver<
        * turn. Throw for unknown names. `headers` supports the async resolver form.
        * `first_party` is true only for a connector the host itself vouches for, never one a user,
        * a request or the model described: it lets that server's read-only, explicitly
-       * closed-world tools run without a card. `search_provider` is true only for the connector the
-       * user designated as their search provider; its search runs without a card behind the outbound
-       * secret guard.
+       * closed-world tools run without a card. `search_provider` is set only for the connector the
+       * user designated as their search provider, with the host's list of its search tools: such a
+       * tool runs without a card behind the outbound secret guard when the server declares it
+       * read-only or the list names it.
        */
-      mcp: (
-        name: string,
-      ) => Promise<{ url: string; headers?: RemoteMcpHeaders; first_party?: boolean; search_provider?: boolean }>;
+      mcp: (name: string) => Promise<{
+        url: string;
+        headers?: RemoteMcpHeaders;
+        first_party?: boolean;
+        search_provider?: { tools: readonly string[] } | undefined;
+      }>;
       mcpRequestTimeoutMs: number;
       mcpConnectTimeoutMs: number;
       /** One sandbox type per runtime. Omit = no sandbox support. */
@@ -351,8 +355,8 @@ export class TurnResourceResolver<
             if (first_party === true) {
               this.#firstPartyServers.add(entry.name);
             }
-            if (search_provider === true) {
-              this.#searchProviderServers.add(entry.name);
+            if (search_provider !== undefined) {
+              this.#searchProviderServers.set(entry.name, search_provider);
             }
             return new RemoteMCP({
               id: entry.name,
@@ -363,7 +367,7 @@ export class TurnResourceResolver<
               requestTimeoutMs: this.deps.mcpRequestTimeoutMs,
               connectTimeoutMs: this.deps.mcpConnectTimeoutMs,
               // A vouched-for or designated connector must not hand its trust to wherever it redirects.
-              refuseRedirects: first_party === true || search_provider === true,
+              refuseRedirects: first_party === true || search_provider !== undefined,
               logger: this.deps.logger,
               tracing,
               signal,
@@ -376,7 +380,7 @@ export class TurnResourceResolver<
           preload: entry.preload,
           sentinel,
           firstParty: this.#firstPartyServers.has(entry.name),
-          searchProvider: this.#searchProviderServers.has(entry.name),
+          searchProvider: this.#searchProviderServers.get(entry.name),
         });
       }),
     );

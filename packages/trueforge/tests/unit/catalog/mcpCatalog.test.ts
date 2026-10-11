@@ -1,5 +1,6 @@
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { parseMemoryProviderUrl } from '../../../src/runtime/memory/memoryProvider';
+import { McpCatalogFileSchema } from '../../../src/schemas/mcpCatalog';
 
 describe('shipped MCP catalog', () => {
   it('loads and validates every shipped preset', () => {
@@ -48,5 +49,59 @@ describe('shipped MCP catalog', () => {
       .find(server => server.name === 'tavily');
     expect(tavily?.url).toBe('https://mcp.tavily.com/mcp');
     expect(tavily?.search_provider).toBeUndefined();
+  });
+
+  it('lists the real search tools of Parallel, Tavily and Exa, and none for a server that cannot search', () => {
+    const catalog = McpCatalog.load();
+    const searchTools = (name: string) => catalog.list().find(server => server.name === name)?.search_tools;
+    expect(searchTools('parallel-web')).toEqual(['web_search', 'web_fetch']);
+    // Tavily's crawl, map, research and feedback tools are left out: they walk sites or write back.
+    expect(searchTools('tavily')).toEqual(['tavily_search', 'tavily_extract']);
+    expect(searchTools('exa')).toEqual(['web_search_exa', 'web_fetch_exa', 'web_search_advanced_exa']);
+    expect(searchTools('github')).toBeUndefined();
+    expect(searchTools('stripe')).toBeUndefined();
+  });
+
+  it('looks up the search tools by endpoint, ignoring a key in the query string or a trailing slash', () => {
+    const catalog = McpCatalog.load();
+    expect(catalog.searchToolsForUrl('https://mcp.tavily.com/mcp')).toEqual(['tavily_search', 'tavily_extract']);
+    expect(catalog.searchToolsForUrl('https://mcp.tavily.com/mcp/?tavilyApiKey=synthetic')).toEqual([
+      'tavily_search',
+      'tavily_extract',
+    ]);
+    expect(catalog.searchToolsForUrl('https://MCP.TAVILY.COM/mcp#frag')).toEqual(['tavily_search', 'tavily_extract']);
+  });
+
+  it('gives no search tools to another host, another path, another scheme, or something that is not a URL', () => {
+    const catalog = McpCatalog.load();
+    for (const url of [
+      'https://mcp.tavily.com.evil.test/mcp',
+      'https://evil.test/https://mcp.tavily.com/mcp',
+      'https://mcp.tavily.com/other',
+      'http://mcp.tavily.com/mcp',
+      'https://api.githubcopilot.com/mcp/',
+      'not a url',
+    ]) {
+      expect(catalog.searchToolsForUrl(url)).toEqual([]);
+    }
+  });
+
+  it('rejects a preset whose search tools are not a short list of names', () => {
+    const accepts = (search_tools: unknown) =>
+      McpCatalogFileSchema.safeParse({
+        mcp_servers: [
+          {
+            type: 'remote',
+            name: 'example-search',
+            url: 'https://example.test/mcp',
+            description: 'An example search server.',
+            search_tools,
+          },
+        ],
+      }).success;
+    expect(accepts(['web_search'])).toBe(true);
+    expect(accepts([''])).toBe(false);
+    expect(accepts('web_search')).toBe(false);
+    expect(accepts(Array.from({ length: 17 }, (_, i) => `tool_${String(i)}`))).toBe(false);
   });
 });

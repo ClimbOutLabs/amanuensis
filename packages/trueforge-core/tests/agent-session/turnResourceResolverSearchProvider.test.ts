@@ -6,6 +6,7 @@ import { AgentSpecSchema, type AgentSpec } from '../../src/agent-session/schemas
 import { TurnResourceResolver } from '../../src/agent-session/TurnResourceResolver';
 import type { IToolSet } from '../../src/core/mcp/IMCPServer';
 import { connectRemoteMcp } from '../../src/core/mcp/remoteMcpClient';
+import { SILENT_SEARCH_LIMIT } from '../../src/core/permissions/webSearch';
 import { NOOP_AGENT_TRACING } from '../../src/core/tracing/NoopAgentTracing';
 import { makeMockILLM, makeSilentLogger } from './testHelpers';
 
@@ -25,12 +26,19 @@ const searchTool = {
   annotations: { readOnlyHint: true, openWorldHint: true },
 };
 
-function makeResolver(searchProviders: readonly string[]) {
+const unannotatedTool = {
+  name: 'fetch_page',
+  description: 'Reads a page.',
+  inputSchema: { type: 'object' as const, properties: {} },
+};
+
+/** `searchProviders` maps each connector the host designates to the host's list of its search tools. */
+function makeResolver(searchProviders: Readonly<Record<string, readonly string[]>>) {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
       transportType: 'streamable-http' as const,
       sessionId: null,
-      listTools: () => Promise.resolve({ tools: [searchTool] }),
+      listTools: () => Promise.resolve({ tools: [searchTool, unannotatedTool] }),
       callTool: () =>
         Promise.resolve({ content: [{ type: 'text', text: 'see https://results.example.org/oslo for details' }] }),
       close: () => Promise.resolve(),
@@ -45,7 +53,10 @@ function makeResolver(searchProviders: readonly string[]) {
         modelSupportsVision: false,
       }),
     mcp: name =>
-      Promise.resolve({ url: `https://${name}.example.com/mcp`, search_provider: searchProviders.includes(name) }),
+      Promise.resolve({
+        url: `https://${name}.example.com/mcp`,
+        search_provider: name in searchProviders ? { tools: searchProviders[name] ?? [] } : undefined,
+      }),
     mcpRequestTimeoutMs: 1_000,
     mcpConnectTimeoutMs: 1_000,
     logger: makeSilentLogger(),
@@ -92,7 +103,7 @@ describe('TurnResourceResolver search provider', () => {
   });
 
   it('runs a search silently only on the connector the host reports as the search provider', async () => {
-    const toolSets = await resolveToolSets(makeResolver(['finder']));
+    const toolSets = await resolveToolSets(makeResolver({ finder: [] }));
 
     const finder = await toolSetNamed(toolSets, 'finder').toolCallInfo({
       name: 'lookup',
@@ -104,8 +115,22 @@ describe('TurnResourceResolver search provider', () => {
     expect(other.tier).toBe(3);
   });
 
+  it('runs a tool without annotations silently only when the host’s list for the provider names it', async () => {
+    const unlisted = toolSetNamed(await resolveToolSets(makeResolver({ finder: [] })), 'finder');
+    const held = await unlisted.toolCallInfo({ name: 'fetch_page', arguments: { query: 'oslo' } });
+    expect(held.tier).toBe(3);
+
+    const listed = toolSetNamed(await resolveToolSets(makeResolver({ finder: ['fetch_page'] })), 'finder');
+    const silent = await listed.toolCallInfo({ name: 'fetch_page', arguments: { query: 'oslo' } });
+    expect(silent.tier).toBe(1);
+
+    // A list the host holds for one connector never reaches another.
+    const other = toolSetNamed(await resolveToolSets(makeResolver({ finder: ['fetch_page'] })), 'other');
+    expect((await other.toolCallInfo({ name: 'fetch_page', arguments: { query: 'oslo' } })).tier).toBe(3);
+  });
+
   it('treats every connector as an ordinary one when the host reports no provider', async () => {
-    const toolSets = await resolveToolSets(makeResolver([]));
+    const toolSets = await resolveToolSets(makeResolver({}));
     const finder = await toolSetNamed(toolSets, 'finder').toolCallInfo({
       name: 'lookup',
       arguments: { query: 'oslo' },
@@ -114,7 +139,7 @@ describe('TurnResourceResolver search provider', () => {
   });
 
   it('connects the provider without following redirects', async () => {
-    const toolSets = await resolveToolSets(makeResolver(['finder']));
+    const toolSets = await resolveToolSets(makeResolver({ finder: [] }));
     await toolSetNamed(toolSets, 'finder').toolCallInfo({ name: 'lookup', arguments: { query: 'oslo' } });
     await toolSetNamed(toolSets, 'other').toolCallInfo({ name: 'lookup', arguments: { query: 'oslo' } });
     const refusesRedirects = new Map(mockConnect.mock.calls.map(([params]) => [params.url, params.refuseRedirects]));
@@ -123,7 +148,7 @@ describe('TurnResourceResolver search provider', () => {
   });
 
   it('shares one search state across every thread of the turn, and gives the next turn its own', async () => {
-    const resolver = makeResolver(['finder']);
+    const resolver = makeResolver({ finder: [] });
     const first = await resolveToolSets(resolver);
     const second = await resolveToolSets(resolver);
     await toolSetNamed(first, 'finder').callTool({ name: 'lookup', arguments: { query: 'oslo' } });
@@ -135,11 +160,24 @@ describe('TurnResourceResolver search provider', () => {
     });
     expect(sameTurn.tier).toBe(1);
 
-    const nextTurn = await resolveToolSets(makeResolver(['finder']));
+    const nextTurn = await resolveToolSets(makeResolver({ finder: [] }));
     const fresh = await toolSetNamed(nextTurn, 'finder').toolCallInfo({
       name: 'lookup',
       arguments: { query: 'https://results.example.org/oslo' },
     });
     expect(fresh.tier).toBe(3);
+  });
+
+  it('gives a resumed turn a fresh allowance, so only a person’s approval of something else extends a run', async () => {
+    const turn = toolSetNamed(await resolveToolSets(makeResolver({ finder: [] })), 'finder');
+    for (let i = 0; i < SILENT_SEARCH_LIMIT; i += 1) {
+      await turn.callTool({ name: 'lookup', arguments: { query: `topic ${String(i)}` } });
+    }
+    const over = await turn.toolCallInfo({ name: 'lookup', arguments: { query: 'one more' } });
+    expect(over.tier).toBe(3);
+
+    // An approval resumes the conversation as a new turn, which builds a new resolver.
+    const resumed = toolSetNamed(await resolveToolSets(makeResolver({ finder: [] })), 'finder');
+    expect((await resumed.toolCallInfo({ name: 'lookup', arguments: { query: 'one more' } })).tier).toBe(1);
   });
 });

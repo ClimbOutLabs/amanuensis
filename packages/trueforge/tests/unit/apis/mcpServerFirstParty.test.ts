@@ -9,6 +9,7 @@ import winston from 'winston';
 import { createSettingsMcpServersRouter } from '../../../src/apis/mcpServers';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import configuration from '../../../src/config';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import type { IMcpServerWithAuthStore } from '../../../src/db/mcpServerStore';
@@ -73,6 +74,7 @@ describe('first-party marker on stored connectors', () => {
       clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
     });
     router = createSettingsMcpServersRouter({
+      mcpCatalog: McpCatalog.load(),
       resolveMcpServerStore: () => store,
       tokenStore,
       toolGrantStore: new SqliteMcpToolGrantStore(db),

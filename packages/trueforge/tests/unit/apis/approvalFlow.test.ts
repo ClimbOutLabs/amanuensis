@@ -1189,6 +1189,23 @@ describe('web search provider over an inert connector', () => {
     TURN_TIMEOUT_MS,
   );
 
+  it.each([
+    ['an unannotated tool', INERT_UNANNOTATED_TOOL, 'unannotatedInvocations'],
+    ['a write tool', INERT_WRITE_TOOL, 'writeInvocations'],
+  ] as const)(
+    'still asks for %s on the designated connector, because the role does not make a connector’s other tools silent',
+    async (_label, tool, counter) => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: userMessage(tool) });
+
+      expect(pendingApproval(turn)).toBeDefined();
+      expect(server.mcp[counter]()).toBe(0);
+      expect(await stampedQueries(sessionId)).toEqual([]);
+      expect(await auditEntries({ server, sessionId })).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
   it(
     'asks when the user switched searches to Ask, and runs again once they switch back',
     async () => {

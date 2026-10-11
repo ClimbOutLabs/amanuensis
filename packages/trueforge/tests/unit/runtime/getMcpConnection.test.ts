@@ -269,12 +269,18 @@ describe('getMcpConnection', () => {
       return connection;
     }
 
-    it('reports the role only for the connector the user designated, for plain and OAuth connectors alike', async () => {
+    it('reports the role, with its search tools, only for the connector the user designated, plain or OAuth', async () => {
       const base = { type: 'remote' as const, description: 'Search.' };
       await mcpServerStore.upsertServer({
         tenant_id: 'default',
         name: 'finder-mcp',
-        manifest: { ...base, name: 'finder-mcp', url: 'https://finder.example/mcp', search_provider: true },
+        manifest: {
+          ...base,
+          name: 'finder-mcp',
+          url: 'https://finder.example/mcp',
+          search_provider: true,
+          search_tools: ['find_pages'],
+        },
         first_party: false,
       });
       await mcpServerStore.upsertServer({
@@ -292,13 +298,19 @@ describe('getMcpConnection', () => {
       await mcpServerStore.upsertServer({
         tenant_id: 'default',
         name: 'other-search-mcp',
-        manifest: { ...base, name: 'other-search-mcp', url: 'https://other-search.example/mcp' },
+        manifest: {
+          ...base,
+          name: 'other-search-mcp',
+          url: 'https://other-search.example/mcp',
+          // Not designated: a leftover list means nothing without the role.
+          search_tools: ['find_pages'],
+        },
         first_party: false,
       });
 
-      expect((await connectionFor('finder-mcp')).search_provider).toBe(true);
-      expect((await connectionFor('finder-oauth-mcp')).search_provider).toBe(true);
-      expect((await connectionFor('other-search-mcp')).search_provider).toBe(false);
+      expect((await connectionFor('finder-mcp')).search_provider).toEqual({ tools: ['find_pages'] });
+      expect((await connectionFor('finder-oauth-mcp')).search_provider).toEqual({ tools: [] });
+      expect((await connectionFor('other-search-mcp')).search_provider).toBeUndefined();
     });
   });
 

@@ -33,12 +33,19 @@ mcp_servers:
     logo: https://assets.production.truefoundry.com/exa.svg
     url: https://mcp.exa.ai/mcp
     description: Search the web, fetch page contents, and find similar pages.
+    search_tools:
+      - web_search_exa
+      - web_fetch_exa
+      - web_search_advanced_exa
   - type: remote
     name: parallel-web
     logo: https://assets.production.truefoundry.com/parallel-web.svg
     url: https://search.parallel.ai/mcp
     description: Free web search and page fetch. No API key needed. Added as your web search provider.
     search_provider: true
+    search_tools:
+      - web_search
+      - web_fetch
   - type: remote
     name: github
     logo: https://assets.production.truefoundry.com/github.svg
@@ -53,6 +60,9 @@ mcp_servers:
     logo: https://assets.production.truefoundry.com/tavily.svg
     url: https://mcp.tavily.com/mcp
     description: Search the web, extract page content, and crawl sites.
+    search_tools:
+      - tavily_search
+      - tavily_extract
     auth:
       type: header
       headers:

@@ -1,4 +1,5 @@
 import {
+  appendOutboundTrace,
   checkOutboundStrings,
   collectOutboundStrings,
   describeOutboundRule,
@@ -25,13 +26,22 @@ const base64Url = (value: unknown): string => Buffer.from(JSON.stringify(value))
 const jwt = [base64Url({ alg: 'HS256', typ: 'JWT' }), base64Url({ sub: 'synthetic-user' }), 'c2lnbmF0dXJl'].join('.');
 const serverSecret = 'synthetic-server-secret-value-0001';
 
-function ruleFor(args: unknown, secrets: readonly string[] = []): OutboundGuardRule | undefined {
+function ruleFor(args: unknown, secrets: readonly string[] = [], earlier = ''): OutboundGuardRule | undefined {
   const strings = collectOutboundStrings(args);
   if (strings === undefined) {
     return 'uninspectable';
   }
-  const verdict = checkOutboundStrings({ strings, secrets });
+  const verdict = checkOutboundStrings({ strings, secrets, earlier });
   return verdict.ok ? undefined : verdict.rule;
+}
+
+/** What the guard remembers after a call ran, to be passed as `earlier` to the next. */
+function traceOf(args: unknown, earlier = ''): string {
+  const strings = collectOutboundStrings(args);
+  if (strings === undefined) {
+    throw new Error('test arguments must be inspectable');
+  }
+  return appendOutboundTrace({ earlier, strings });
 }
 
 describe('outbound guard: rules that trip', () => {
@@ -139,6 +149,146 @@ describe('outbound guard: rules that trip', () => {
     for (const rule of OUTBOUND_GUARD_RULES) {
       expect(describeOutboundRule(rule).length).toBeGreaterThan(5);
     }
+  });
+});
+
+describe('outbound guard: re-encoded and disguised secrets', () => {
+  const zeroWidthSpace = '\u200B';
+  const encode = (text: string) => encodeURIComponent(text);
+
+  test('zero-width, soft-hyphen and bidi characters cannot split a key or a label', () => {
+    expect(ruleFor({ query: awsKeyId.replace('AKIA', `AK${zeroWidthSpace}IA`) })).toBe('key_prefix');
+    expect(ruleFor({ query: `${awsKeyId.slice(0, 6)}\u00AD${awsKeyId.slice(6)}` })).toBe('key_prefix');
+    expect(ruleFor({ query: `pass\u200Dword: hunter2xx` })).toBe('password_label');
+    expect(ruleFor({ query: `\u202Epassword: hunter2xx` })).toBe('password_label');
+    expect(ruleFor({ query: serverSecret.replace('-', `${zeroWidthSpace}-`) }, [serverSecret])).toBe('server_secret');
+  });
+
+  test('combining marks and compatibility forms fold to the plain spelling', () => {
+    expect(ruleFor({ query: 'pa\u0301ssword: hunter2xx' })).toBe('password_label');
+    expect(ruleFor({ query: '\uFF50\uFF41\uFF53\uFF53\uFF57\uFF4F\uFF52\uFF44: hunter2xx' })).toBe('password_label');
+  });
+
+  test('look-alike Cyrillic and Greek letters fold to Latin ones', () => {
+    expect(ruleFor({ query: '\u0440\u0430ssword: hunter2xx' })).toBe('password_label');
+    expect(ruleFor({ query: awsKeyId.replace('AKIA', '\u0410KIA') })).toBe('key_prefix');
+    expect(ruleFor({ query: awsKeyId.replace('AKIA', '\u0391K\u0399A') })).toBe('key_prefix');
+  });
+
+  test('a percent-encoded key, label or card is decoded once before the rules run', () => {
+    expect(ruleFor({ query: encode(`debug ${awsKeyId}`) })).toBe('key_prefix');
+    expect(ruleFor({ query: awsKeyId.replace('A', '%41') })).toBe('key_prefix');
+    expect(ruleFor({ query: encode('password: hunter2xx') })).toBe('password_label');
+    expect(ruleFor({ query: encode('charge 4242 4242 4242 4242') })).toBe('card_number');
+    expect(ruleFor({ url: `https://example.test/?q=${encode(privateKeyHeader)}` })).toBe('private_key');
+  });
+
+  test('a percent sign that is not an escape stays as written and a decoded query still counts toward length', () => {
+    expect(ruleFor({ query: '100% of 50% off sale' })).toBeUndefined();
+    expect(ruleFor({ query: 'bad escape %E0%A4%A' })).toBeUndefined();
+    expect(ruleFor({ query: 'x'.repeat(OUTBOUND_MAX_CHARS + 1) })).toBe('too_long');
+  });
+
+  test('a server secret in base64, base64url or hex, and in any case or spacing', () => {
+    const awkward = 'p@ss/word+with=chars&more';
+    for (const bytes of [Buffer.from(awkward), Buffer.from(serverSecret)]) {
+      const secret = bytes.toString();
+      for (const form of [bytes.toString('base64'), bytes.toString('base64url'), bytes.toString('hex')]) {
+        expect(ruleFor({ query: `see ${form}` }, [secret])).toBe('server_secret');
+      }
+    }
+    expect(ruleFor({ query: serverSecret.toUpperCase() }, [serverSecret])).toBe('server_secret');
+    expect(ruleFor({ query: serverSecret.replaceAll('-', ' / ') }, [serverSecret])).toBe('server_secret');
+  });
+
+  test('the shortest secret that is matched is eight characters', () => {
+    expect(ruleFor({ query: 'use abcd1234 here' }, ['abcd1234'])).toBe('server_secret');
+    expect(ruleFor({ query: 'use abcd123 here' }, ['abcd123'])).toBeUndefined();
+  });
+
+  test.each([
+    'passw0rd: hunter2xx',
+    'p@ssw0rd=abc12345',
+    'Pa55w0rd = "correct horse"',
+    'PwD: abc12345',
+    'p4ssc0de 482913',
+    'token=ab12cd34ef56',
+    'API_KEY: 9f8e7d6c5b',
+    'api key = ab12cd34ef56',
+    'secret: ab12cd34ef56',
+  ])('a disguised credential label: %s', query => {
+    expect(ruleFor({ query })).toBe('password_label');
+  });
+
+  test.each([
+    'api key: 2024 changes',
+    'secret: 12 monkeys',
+    'token: the movie',
+    'secret santa gift ideas',
+    'how to rotate an api key',
+    'access token expiry best practice',
+    'authorization header format',
+  ])('an ordinary mention of a credential word passes: %s', query => {
+    expect(ruleFor({ query })).toBeUndefined();
+  });
+
+  test('a card number with dot separators', () => {
+    expect(ruleFor({ query: 'charge 4242.4242.4242.4242' })).toBe('card_number');
+    expect(ruleFor({ query: 'version 2024.1.15.3 released' })).toBeUndefined();
+  });
+
+  test('a key split between a query and a link, or across array items around one', () => {
+    expect(ruleFor({ query: awsKeyId.slice(0, 9), url: `https://example.test/${awsKeyId.slice(9)}` })).toBe(
+      'key_prefix',
+    );
+    expect(
+      ruleFor({ query: serverSecret.slice(0, 12), url: `https://example.test/${serverSecret.slice(12)}` }, [
+        serverSecret,
+      ]),
+    ).toBe('server_secret');
+  });
+});
+
+describe('outbound guard: a secret sent in pieces over several calls', () => {
+  test('is seen once the later piece arrives, in either order', () => {
+    const first = awsKeyId.slice(0, 9);
+    const rest = awsKeyId.slice(9);
+    expect(ruleFor({ query: first })).toBeUndefined();
+    expect(ruleFor({ query: rest }, [], traceOf({ query: first }))).toBe('key_prefix');
+    expect(ruleFor({ query: first }, [], traceOf({ query: rest }))).toBe('key_prefix');
+  });
+
+  test('works for a server secret and across three calls', () => {
+    const parts = [serverSecret.slice(0, 10), serverSecret.slice(10, 20), serverSecret.slice(20)];
+    let earlier = '';
+    const rules: (OutboundGuardRule | undefined)[] = [];
+    for (const part of parts) {
+      rules.push(ruleFor({ query: part }, [serverSecret], earlier));
+      earlier = traceOf({ query: part }, earlier);
+    }
+    expect(rules).toEqual([undefined, undefined, 'server_secret']);
+  });
+
+  test('ordinary consecutive searches do not trip each other', () => {
+    let earlier = '';
+    for (const query of [
+      'best restaurants in Lisbon 2024',
+      'Python 3.12 release date',
+      'weather in New York on 2024-06-15',
+      'node.js vs deno performance',
+      'order 12345678 shipping status',
+    ]) {
+      expect(ruleFor({ query }, [serverSecret], earlier)).toBeUndefined();
+      earlier = traceOf({ query }, earlier);
+    }
+  });
+
+  test('remembers only the most recent text, so an old piece is forgotten', () => {
+    let earlier = traceOf({ query: awsKeyId.slice(0, 9) });
+    for (let i = 0; i < 40; i += 1) {
+      earlier = traceOf({ query: 'filler words that are long enough to push the first piece out of memory' }, earlier);
+    }
+    expect(ruleFor({ query: awsKeyId.slice(9) }, [], earlier)).toBeUndefined();
   });
 });
 

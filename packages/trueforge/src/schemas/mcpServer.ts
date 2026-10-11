@@ -178,6 +178,9 @@ export const MemoryProviderSettingsSchema = z
 
 export type MemoryProviderSettings = z.infer<typeof MemoryProviderSettingsSchema>;
 
+/** Names of the tools of a web search provider that may run without asking. */
+export const McpSearchToolsSchema = z.array(z.string().min(1).max(128)).max(16);
+
 /** User-configured remote MCP endpoint. */
 const RemoteMcpServerManifestSchema = z
   .object({
@@ -197,8 +200,11 @@ const RemoteMcpServerManifestSchema = z
       .boolean()
       .optional()
       .describe(
-        'When true, this connector is the web search provider: its tools run without asking, behind an outbound secret check, unless the user switched searches to Ask. At most one connector holds it.',
+        'When true, this connector is the web search provider: its read-only tools run without asking, behind an outbound secret check, unless the user switched searches to Ask. At most one connector holds it.',
       ),
+    search_tools: McpSearchToolsSchema.optional().describe(
+      'Tools that run without asking as the web search provider even when the server does not declare them read-only. Set by the server for a known provider; a value sent is replaced.',
+    ),
   })
   .strict()
   .openapi('RemoteMCPServerManifest');

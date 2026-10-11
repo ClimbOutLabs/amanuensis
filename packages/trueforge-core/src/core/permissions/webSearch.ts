@@ -31,10 +31,28 @@ export interface WebSearchTurnState {
   silentSearches: number;
   /** URLs the designated provider returned this turn, exactly as returned. */
   resultUrls: Set<string>;
+  /** Tail of the text those searches sent, so a secret split across two searches is seen whole. */
+  sentText: string;
+  /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
+  admission: Promise<void>;
 }
 
 export function createWebSearchTurnState(): WebSearchTurnState {
-  return { silentSearches: 0, resultUrls: new Set() };
+  return { silentSearches: 0, resultUrls: new Set(), sentText: '', admission: Promise.resolve() };
+}
+
+/**
+ * Runs the work after every earlier call of this turn finished its own, whether it succeeded or not.
+ * The silent count and the text already sent are then read and updated by one call at a time, so
+ * the parallel calls of one batch cannot all pass on the same count or split a secret between them.
+ */
+export function runOneAtATime<T>(input: { state: WebSearchTurnState; work: () => Promise<T> }): Promise<T> {
+  const run = input.state.admission.then(input.work);
+  input.state.admission = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
