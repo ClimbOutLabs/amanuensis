@@ -20,6 +20,10 @@ const (
 	SlotUID         = 65532
 	SlotGID         = 65532
 	AppArmorProfile = "aman-sandbox-slot"
+	// ExpectedMemoryBytes and ExpectedPidsLimit are the limits the slot compose file sets; any other value
+	// means the slot was started with different settings than the ones the guest caps were sized for.
+	ExpectedMemoryBytes = 2 << 30
+	ExpectedPidsLimit   = 512
 )
 
 // Check names. The server requires exactly this set.
@@ -296,9 +300,15 @@ func (c *Collector) checkCgroupLimits() (string, Check) {
 	if memWhy != "" || mem <= 0 || mem >= unlimitedBytes {
 		return version, fail(CheckCgroupLimits, "memory limit is not set ("+orDefault(memWhy, strconv.FormatInt(mem, 10))+")")
 	}
+	if mem != ExpectedMemoryBytes {
+		return version, fail(CheckCgroupLimits, fmt.Sprintf("memory limit is %d MiB, want %d MiB", mem>>20, int64(ExpectedMemoryBytes)>>20))
+	}
 	pids, pidsWhy := numeric(pidsPath)
 	if pidsWhy != "" || pids <= 0 {
 		return version, fail(CheckCgroupLimits, "pids limit is not set ("+orDefault(pidsWhy, strconv.FormatInt(pids, 10))+")")
+	}
+	if pids != ExpectedPidsLimit {
+		return version, fail(CheckCgroupLimits, fmt.Sprintf("pids limit is %d, want %d", pids, ExpectedPidsLimit))
 	}
 	return version, pass(CheckCgroupLimits, fmt.Sprintf("cgroup %s memory %d MiB, pids %d", version, mem>>20, pids))
 }

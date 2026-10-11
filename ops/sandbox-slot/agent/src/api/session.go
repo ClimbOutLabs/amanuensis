@@ -24,30 +24,23 @@ const (
 
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 
-// forbiddenEnv are names a caller may never set: they would change which programs run or undo the
-// image's git hardening.
-func forbiddenEnv(name string) bool {
-	switch name {
-	case "PATH", "BASH_ENV", "ENV", "HOME", "USER", "LOGNAME":
-		return true
-	}
-	if strings.HasPrefix(name, "GIT_") {
-		return !gitHardeningEnv(name)
-	}
-	return strings.HasPrefix(name, "LD_")
+// allowedEnv are the only names a caller may set. The guest's PATH, HOME and library paths stay under the
+// agent's control, and git configuration only arrives as the hardening the server's wrapper sends.
+var allowedEnv = map[string]bool{
+	"LANG": true, "TZ": true, "TERM": true, "COLUMNS": true, "LINES": true, "NO_COLOR": true,
+	"FORCE_COLOR": true, "CI": true, "DEBUG": true, "NODE_ENV": true,
+	"PYTHONUNBUFFERED": true, "PYTHONIOENCODING": true, "PYTHONUTF8": true, "PYTHONHASHSEED": true,
+	"PYTHONPATH": true, "NODE_PATH": true,
+	"GIT_CONFIG_NOSYSTEM": true, "GIT_CONFIG_GLOBAL": true, "GIT_CONFIG_COUNT": true,
+	"GIT_CONFIG_PARAMETERS": true, "GIT_ATTR_NOSYSTEM": true, "GIT_OPTIONAL_LOCKS": true,
+	"GIT_PAGER": true, "GIT_TERMINAL_PROMPT": true,
+	"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true, "GIT_AUTHOR_DATE": true,
+	"GIT_COMMITTER_NAME": true, "GIT_COMMITTER_EMAIL": true, "GIT_COMMITTER_DATE": true,
 }
 
-// gitHardeningEnv are the git variables the server's hardened-git wrapper sends: they only tighten git.
-func gitHardeningEnv(name string) bool {
-	switch name {
-	case "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_COUNT", "GIT_ATTR_NOSYSTEM",
-		"GIT_OPTIONAL_LOCKS", "GIT_PAGER", "GIT_TERMINAL_PROMPT":
-		return true
-	}
-	return gitConfigPair.MatchString(name)
-}
+var allowedEnvPattern = regexp.MustCompile(`^(LC_[A-Z_]{1,32}|GIT_CONFIG_(KEY|VALUE)_[0-9]{1,3})$`)
 
-var gitConfigPair = regexp.MustCompile(`^GIT_CONFIG_(KEY|VALUE)_[0-9]{1,3}$`)
+func envNameAllowed(name string) bool { return allowedEnv[name] || allowedEnvPattern.MatchString(name) }
 
 func validateEnv(env map[string]string) error {
 	if len(env) > maxEnvEntries {
@@ -58,7 +51,7 @@ func validateEnv(env map[string]string) error {
 		if !envNamePattern.MatchString(name) {
 			return fmt.Errorf("env name %q is not allowed", name)
 		}
-		if forbiddenEnv(name) {
+		if !envNameAllowed(name) {
 			denied = append(denied, name)
 		}
 		if len(value) > maxEnvValueLen || strings.IndexByte(value, 0) >= 0 {
@@ -137,7 +130,7 @@ func (s *Server) attestOrRefuse(w http.ResponseWriter) bool {
 
 func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 	var req execRequest
-	if err := decodeStrict(r, w, &req); err != nil {
+	if err := decodeStrict(r, w, &req, execBodyBytes); err != nil {
 		writeError(w, http.StatusBadRequest, ErrInvalidRequest, err.Error())
 		return
 	}
@@ -152,6 +145,10 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 	if !s.attestOrRefuse(w) {
 		return
 	}
+	if !s.lockSession(w, req.SessionID) {
+		return
+	}
+	defer s.sessions.unlock(req.SessionID)
 	root, err := tree.Ensure(s.TreeDir, req.SessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
@@ -235,10 +232,14 @@ func fsError(w http.ResponseWriter, err error) {
 
 func (s *Server) fsRead(w http.ResponseWriter, r *http.Request) {
 	var req fsReadRequest
-	if err := decodeStrict(r, w, &req); err != nil || !tree.ValidSessionID(req.SessionID) {
+	if err := decodeStrict(r, w, &req, smallBodyBytes); err != nil || !tree.ValidSessionID(req.SessionID) {
 		writeError(w, http.StatusBadRequest, ErrInvalidRequest, "session_id and path are required")
 		return
 	}
+	if !s.lockSession(w, req.SessionID) {
+		return
+	}
+	defer s.sessions.unlock(req.SessionID)
 	b, err := tree.Read(tree.Root(s.TreeDir, req.SessionID), req.Path)
 	if err != nil {
 		fsError(w, err)
@@ -249,7 +250,7 @@ func (s *Server) fsRead(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) fsWrite(w http.ResponseWriter, r *http.Request) {
 	var req fsWriteRequest
-	if err := decodeStrict(r, w, &req); err != nil || !tree.ValidSessionID(req.SessionID) {
+	if err := decodeStrict(r, w, &req, fsWriteBodyBytes); err != nil || !tree.ValidSessionID(req.SessionID) {
 		writeError(w, http.StatusBadRequest, ErrInvalidRequest, "session_id, path and content_base64 are required")
 		return
 	}
@@ -262,6 +263,10 @@ func (s *Server) fsWrite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ErrInvalidRequest, "content_base64 is not canonical base64")
 		return
 	}
+	if !s.lockSession(w, req.SessionID) {
+		return
+	}
+	defer s.sessions.unlock(req.SessionID)
 	root, err := tree.Ensure(s.TreeDir, req.SessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
@@ -276,7 +281,7 @@ func (s *Server) fsWrite(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) destroySession(w http.ResponseWriter, r *http.Request) {
 	var req destroyRequest
-	if err := decodeStrict(r, w, &req); err != nil || !tree.ValidSessionID(req.SessionID) {
+	if err := decodeStrict(r, w, &req, smallBodyBytes); err != nil || !tree.ValidSessionID(req.SessionID) {
 		writeError(w, http.StatusBadRequest, ErrInvalidRequest, "session_id is required")
 		return
 	}
@@ -285,6 +290,10 @@ func (s *Server) destroySession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { <-s.sem }()
+	if !s.lockSession(w, req.SessionID) {
+		return
+	}
+	defer s.sessions.unlock(req.SessionID)
 	if err := tree.Destroy(s.TreeDir, req.SessionID); err != nil {
 		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be removed")
 		return

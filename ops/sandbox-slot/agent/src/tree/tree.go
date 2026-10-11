@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"aman/slotagent/src/lease"
 )
@@ -69,6 +70,9 @@ func Ensure(parent, sessionID string) (string, error) {
 	if err := os.Mkdir(root, 0o755); err != nil && !os.IsExist(err) {
 		return "", err
 	}
+	// The root's mtime is the tree's last use, which the idle sweep reads.
+	now := time.Now()
+	_ = os.Chtimes(root, now, now)
 	return root, nil
 }
 
@@ -224,4 +228,22 @@ func Count(parent string) int {
 		}
 	}
 	return n
+}
+
+// IdleSessions lists trees whose last use is before cutoff.
+func IdleSessions(parent string, cutoff time.Time) []string {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return nil
+	}
+	var ids []string
+	for _, e := range entries {
+		if !e.IsDir() || !ValidSessionID(e.Name()) {
+			continue
+		}
+		if info, err := e.Info(); err == nil && info.ModTime().Before(cutoff) {
+			ids = append(ids, e.Name())
+		}
+	}
+	return ids
 }

@@ -122,6 +122,8 @@ func TestEachMissingGuaranteeFailsClosed(t *testing.T) {
 		}},
 		{"docker socket", attest.CheckNoDockerSocket, func(w *world, _ *attest.Collector) { w.write("docker.sock", "") }},
 		{"memory unlimited", attest.CheckCgroupLimits, func(w *world, _ *attest.Collector) { w.write("cgroup/memory.max", "max\n") }},
+		{"memory differs from the compose limit", attest.CheckCgroupLimits, func(w *world, _ *attest.Collector) { w.write("cgroup/memory.max", "4294967296\n") }},
+		{"pids differ from the compose limit", attest.CheckCgroupLimits, func(w *world, _ *attest.Collector) { w.write("cgroup/pids.max", "4096\n") }},
 		{"pids unlimited", attest.CheckCgroupLimits, func(w *world, _ *attest.Collector) { w.write("cgroup/pids.max", "max\n") }},
 		{"limits missing", attest.CheckCgroupLimits, func(w *world, _ *attest.Collector) {
 			_ = os.Remove(filepath.Join(w.root, "cgroup/pids.max"))

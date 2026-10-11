@@ -21,8 +21,8 @@ const (
 	MaxInputFiles     = 256
 	MaxInputBytes     = 128 << 20
 	MaxFileBytes      = 25 << 20
-	MaxOutputFiles    = 256
-	MaxOutputBytes    = 128 << 20
+	MaxOutputFiles    = 64
+	MaxOutputBytes    = 100 << 20
 	MaxTreeEntries    = 100_000
 	maxNameBytes      = 255
 	maxHarvestWarning = 32

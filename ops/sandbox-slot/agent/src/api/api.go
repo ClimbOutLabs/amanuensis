@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,7 +24,6 @@ import (
 
 // Limits on a request.
 const (
-	MaxBodyBytes   = 192 << 20
 	MinTimeoutMS   = 1_000
 	MaxTimeoutMS   = 600_000
 	MaxDiskMB      = 8_192
@@ -88,10 +86,11 @@ type Server struct {
 	// OOMKills returns the slot cgroup's cumulative OOM kill count.
 	OOMKills func() int64
 
-	sem  chan struct{}
-	once sync.Once
-	mu   sync.Mutex
-	last attest.Report
+	sem      chan struct{}
+	sessions sessionLocks
+	once     sync.Once
+	mu       sync.Mutex
+	last     attest.Report
 }
 
 func (s *Server) init() { s.once.Do(func() { s.sem = make(chan struct{}, 1) }) }
@@ -126,19 +125,6 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	var b errorBody
 	b.Error.Code, b.Error.Message = code, message
 	writeJSON(w, status, b)
-}
-
-func decodeStrict(r *http.Request, w http.ResponseWriter, dst any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
-		return err
-	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return errors.New("trailing data after the JSON body")
-	}
-	return nil
 }
 
 type healthResponse struct {
@@ -264,7 +250,7 @@ func failedChecks(r attest.Report) string {
 
 func (s *Server) runCode(w http.ResponseWriter, r *http.Request) {
 	var req runCodeRequest
-	if err := decodeStrict(r, w, &req); err != nil {
+	if err := decodeStrict(r, w, &req, runCodeBodyBytes); err != nil {
 		writeError(w, http.StatusBadRequest, ErrInvalidRequest, err.Error())
 		return
 	}

@@ -33,6 +33,9 @@ const (
 	bundleDir    = "/tmp/aman-bundles"
 	cgroupRoot   = "/sys/fs/cgroup"
 	canaryEvery  = 10 * time.Minute
+	// A session tree the server never deleted is removed after this long unused.
+	sessionIdleTTL   = 30 * 24 * time.Hour
+	sessionSweepEach = 6 * time.Hour
 )
 
 func main() {
@@ -125,7 +128,12 @@ func run() error {
 	httpSrv := &http.Server{
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
-		BaseContext:       func(net.Listener) context.Context { return baseCtx },
+		// The longest legitimate body is a 128 MiB transfer over a local socket; a call may run for
+		// MaxTimeoutMS before its reply is written.
+		ReadTimeout:  5 * time.Minute,
+		WriteTimeout: 15 * time.Minute,
+		IdleTimeout:  2 * time.Minute,
+		BaseContext:  func(net.Listener) context.Context { return baseCtx },
 	}
 
 	// Attest once at start so a refused slot is visible in the logs before any call arrives.
@@ -138,6 +146,19 @@ func run() error {
 		for _, c := range report.Checks {
 			if !c.OK {
 				log.Printf("attestation FAILED %s: %s", c.Name, c.Detail)
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			if n := srv.SweepIdleSessions(sessionIdleTTL); n > 0 {
+				log.Printf("removed %d idle session trees", n)
+			}
+			select {
+			case <-baseCtx.Done():
+				return
+			case <-time.After(sessionSweepEach):
 			}
 		}
 	}()

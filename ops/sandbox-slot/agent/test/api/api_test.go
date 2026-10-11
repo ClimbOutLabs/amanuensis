@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"aman/slotagent/src/api"
 	"aman/slotagent/src/attest"
@@ -290,7 +291,7 @@ func TestTerminationsMapOntoReportedCauses(t *testing.T) {
 func execBody(mod func(map[string]any)) map[string]any {
 	m := map[string]any{
 		"session_id": sessionID, "argv": []string{"bash", "-c", "echo hi"}, "cwd": "/workspace/sub",
-		"env": map[string]string{"FOO": "bar"}, "timeout_ms": 5000, "disk_mb": 10,
+		"env": map[string]string{"DEBUG": "1"}, "timeout_ms": 5000, "disk_mb": 10,
 	}
 	if mod != nil {
 		mod(m)
@@ -322,6 +323,8 @@ func TestExecRejectsUnsafeInput(t *testing.T) {
 		"path override":         func(m map[string]any) { m["env"] = map[string]string{"PATH": "/tmp"} },
 		"preload":               func(m map[string]any) { m["env"] = map[string]string{"LD_PRELOAD": "/x.so"} },
 		"git exec path":         func(m map[string]any) { m["env"] = map[string]string{"GIT_EXEC_PATH": "/x"} },
+		"unlisted name":         func(m map[string]any) { m["env"] = map[string]string{"MY_TOKEN": "x"} },
+		"node options":          func(m map[string]any) { m["env"] = map[string]string{"NODE_OPTIONS": "--require /x"} },
 		"bad env name":          func(m map[string]any) { m["env"] = map[string]string{"A=B": "x"} },
 	}
 	for name, mod := range cases {
@@ -440,5 +443,90 @@ func TestCallsAreRefusedWhenTheVolumeIsAlmostFull(t *testing.T) {
 	}
 	if e.runner.spec.ID != "" {
 		t.Fatal("no guest may start on a full volume")
+	}
+}
+
+func TestRequestsWithDuplicateKeysAreRefused(t *testing.T) {
+	e := newEnv(t, true)
+	cases := map[string]string{
+		"top level": `{"session_id":"` + sessionID + `","session_id":"` + strings.Repeat("a", 32) + `","argv":["true"],"cwd":"/workspace","env":{},"timeout_ms":5000,"disk_mb":10}`,
+		"env":       `{"session_id":"` + sessionID + `","argv":["true"],"cwd":"/workspace","env":{"DEBUG":"1","DEBUG":"2"},"timeout_ms":5000,"disk_mb":10}`,
+		"escaped":   `{"session_id":"` + sessionID + `","argv":["true"],"cwd":"/workspace","env":{"DEBUG":"1","DEB\u0055G":"2"},"timeout_ms":5000,"disk_mb":10}`,
+	}
+	for name, body := range cases {
+		if rec := e.do("POST", "/v1/exec", body); rec.Code != 400 || !strings.Contains(rec.Body.String(), "duplicate key") {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	// The same key in sibling objects and a value that looks like a key are fine.
+	ok := `{"session_id":"` + sessionID + `","argv":["a","a"],"cwd":"/workspace","env":{"DEBUG":"DEBUG"},"timeout_ms":5000,"disk_mb":10}`
+	if rec := e.do("POST", "/v1/exec", ok); rec.Code != 200 {
+		t.Errorf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestOversizedBodiesAreRefusedPerEndpoint(t *testing.T) {
+	e := newEnv(t, true)
+	big := strings.Repeat("a", 100<<10)
+	if rec := e.do("POST", "/v1/fs_read", map[string]any{"session_id": sessionID, "path": "/workspace/" + big}); rec.Code != 400 {
+		t.Fatalf("%d", rec.Code)
+	}
+	if rec := e.do("POST", "/v1/destroy_session", map[string]any{"session_id": sessionID, "padding": big}); rec.Code != 400 {
+		t.Fatalf("%d", rec.Code)
+	}
+}
+
+func TestSessionInUseAnswersBusyForFilesAndDestroy(t *testing.T) {
+	e := newEnv(t, true)
+	e.runner.hold = make(chan struct{})
+	done := make(chan struct{})
+	go func() { e.do("POST", "/v1/exec", execBody(nil)); close(done) }()
+	for {
+		e.runner.mu.Lock()
+		started := e.runner.spec.ID != ""
+		e.runner.mu.Unlock()
+		if started {
+			break
+		}
+	}
+	content := base64.StdEncoding.EncodeToString([]byte("x"))
+	calls := map[string]map[string]any{
+		"/v1/fs_read":         {"session_id": sessionID, "path": "/workspace/a"},
+		"/v1/fs_write":        {"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644},
+		"/v1/destroy_session": {"session_id": sessionID},
+	}
+	for path, body := range calls {
+		if rec := e.do("POST", path, body); rec.Code != 429 || errCode(t, rec) != "busy" {
+			t.Errorf("%s: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	// A different session on the same slot can still move files while the lease runs.
+	other := strings.Repeat("b", 32)
+	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": other, "path": "/workspace/a", "content_base64": content, "mode": 0o644}); rec.Code != 204 {
+		t.Errorf("other session: %d %s", rec.Code, rec.Body.String())
+	}
+	close(e.runner.hold)
+	<-done
+}
+
+func TestIdleSessionsAreSweptAndBusyOnesKept(t *testing.T) {
+	e := newEnv(t, true)
+	content := base64.StdEncoding.EncodeToString([]byte("x"))
+	old, fresh := strings.Repeat("c", 32), strings.Repeat("d", 32)
+	for _, id := range []string{old, fresh} {
+		e.do("POST", "/v1/fs_write", map[string]any{"session_id": id, "path": "/workspace/a", "content_base64": content, "mode": 0o644})
+	}
+	past := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(filepath.Join(e.srv.TreeDir, old), past, past); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.srv.SweepIdleSessions(24 * time.Hour); n != 1 {
+		t.Fatalf("removed %d", n)
+	}
+	if _, err := os.Stat(filepath.Join(e.srv.TreeDir, old)); !os.IsNotExist(err) {
+		t.Fatal("the idle tree must be gone")
+	}
+	if _, err := os.Stat(filepath.Join(e.srv.TreeDir, fresh)); err != nil {
+		t.Fatal("a recent tree must stay")
 	}
 }
