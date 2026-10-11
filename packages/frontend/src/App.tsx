@@ -72,9 +72,6 @@ const AMAN_AVATAR_MOTION_SOURCES: AmanAvatarMotionSources = {
   error: apiPath('/aman-avatar/error.mp4'),
   poster: apiPath('/aman-avatar/poster.jpg'),
 };
-const upgradeSandboxRuntime = async (providerId: string) => {
-  await bootClient.settings.sandboxProviders.upgradeImage(providerId);
-};
 
 const AMAN_THEME: ThemeConfig = {
   defaultMode: 'light',
@@ -161,7 +158,6 @@ function AmanShell({
           server={{ type: 'trueforge', baseUrl: API_BASE_URL, fetch: authAwareFetch }}
           chatFolders={chatFolders}
           spaces={spaces}
-          upgradeSandboxRuntime={upgradeSandboxRuntime}
           theme={AMAN_THEME}
           layout="sidebar"
           withRouter

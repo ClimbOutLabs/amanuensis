@@ -10,13 +10,16 @@ import { useServerCapabilities } from '@/server/ServerContext.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 
 import {
-  formatMebibytes,
+  formatCheckedAgo,
+  formatMegabytes,
   formatSeconds,
   presentRunCodeStatus,
-  type Check,
+  shortImageName,
   type StatusTone,
 } from './runCodeStatusPresentation.js';
 import { readSandboxLimits, type SandboxLimits } from './sandboxIsolationCapability.js';
+
+const CLOCK_TICK_MS = 30_000;
 
 const TONE_TEXT: Record<StatusTone, string> = {
   success: 'text-success-bg',
@@ -29,7 +32,7 @@ const TONE_DOT: Record<StatusTone, string> = {
   success: 'bg-success-bg',
   warning: 'bg-warning-bg',
   failure: 'bg-failure-bg',
-  neutral: 'bg-border',
+  neutral: 'bg-text-secondary',
 };
 
 function StatusPill({ tone, text }: { tone: StatusTone; text: string }) {
@@ -67,31 +70,27 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function CheckValue({ check }: { check: Check }) {
+function ChecksValue({ tone, text }: { tone: StatusTone; text: string }) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', TONE_DOT[check.tone])} aria-hidden />
-      {check.text}
+      <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', TONE_DOT[tone])} aria-hidden />
+      {text}
     </span>
   );
 }
 
 function ImageCard({ status, limits }: { status: RunCodeStatus; limits: SandboxLimits | null }) {
-  const { image, signature } = presentRunCodeStatus(status);
+  const { checks } = presentRunCodeStatus(status);
+  if ((limits === null || limits.image === '') && checks.length === 0) return null;
   return (
     <Card headingId="sandbox-image-heading" title="Image">
       <dl className="mt-2 divide-y divide-border text-sm">
-        {limits !== null && limits.image !== '' ? (
-          <Row label="Version">
-            <span className="break-all font-mono text-[0.8125rem]">{limits.image}</span>
+        {limits !== null && limits.image !== '' ? <Row label="Version">{shortImageName(limits.image)}</Row> : null}
+        {checks.map(check => (
+          <Row key={check.label} label={check.label}>
+            <ChecksValue tone={check.tone} text={check.text} />
           </Row>
-        ) : null}
-        <Row label="Download">
-          <CheckValue check={image} />
-        </Row>
-        <Row label="Signature">
-          <CheckValue check={signature} />
-        </Row>
+        ))}
       </dl>
     </Card>
   );
@@ -105,24 +104,34 @@ function LimitsCard({ limits }: { limits: SandboxLimits | null }) {
           The server did not report its limits. Check that it is up to date.
         </p>
       ) : (
-        <>
-          <dl className="mt-2 divide-y divide-border text-sm">
-            <Row label="Time">
-              {formatSeconds(limits.defaultTimeoutSeconds)} by default, at most{' '}
-              {formatSeconds(limits.maxTimeoutSeconds)}
-            </Row>
-            <Row label="Memory">{formatMebibytes(limits.memoryMb)}</Row>
-            <Row label="Disk space">{formatMebibytes(limits.diskMb)} for files the code writes</Row>
-            <Row label="Network">
-              {limits.networkEgress ? 'On' : 'Off. Code cannot reach the internet or your network.'}
-            </Row>
-          </dl>
-          <p className="mt-2 border-t border-border pt-3 text-xs text-text-secondary">
-            Set by the server configuration. Changing them takes a restart.
-          </p>
-        </>
+        <dl className="mt-2 divide-y divide-border text-sm">
+          <Row label="Time">
+            {formatSeconds(limits.defaultTimeoutSeconds)} by default, at most {formatSeconds(limits.maxTimeoutSeconds)}
+          </Row>
+          <Row label="Memory">{formatMegabytes(limits.memoryMb)}</Row>
+          <Row label="Disk space">{formatMegabytes(limits.diskMb)} for files the code writes</Row>
+          <Row label="Network">
+            {limits.networkEgress ? 'On' : 'Off. Code cannot reach the internet or your network.'}
+          </Row>
+        </dl>
       )}
     </Card>
+  );
+}
+
+function TechnicalDetails({ lines }: { lines: Array<{ label: string; value: string }> }) {
+  return (
+    <details className="mt-3 text-xs text-text-secondary">
+      <summary className="cursor-pointer select-none">Technical details</summary>
+      <dl className="mt-1.5 space-y-1.5">
+        {lines.map(line => (
+          <div key={line.label}>
+            <dt className="inline">{line.label}: </dt>
+            <dd className="inline whitespace-pre-wrap break-words font-mono">{line.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }
 
@@ -135,21 +144,40 @@ function RecheckButton({ checking, onClick }: { checking: boolean; onClick: () =
   );
 }
 
+const LIMIT_SETTINGS =
+  'SANDBOX_DEFAULT_TIMEOUT_SECONDS, SANDBOX_MAX_TIMEOUT_SECONDS, SANDBOX_MEMORY_MB, SANDBOX_DISK_MB (change only with a restart)';
+
 function StatusCard({
   status,
+  limits,
+  checkedAt,
   checking,
   onRecheck,
 }: {
   status: RunCodeStatus;
+  limits: SandboxLimits | null;
+  checkedAt: number | null;
   checking: boolean;
   onRecheck: () => void;
 }) {
   const presentation = presentRunCodeStatus(status);
+  const now = useNow();
+  const lines = [
+    ...(limits !== null && limits.image !== '' ? [{ label: 'Image', value: limits.image }] : []),
+    ...(presentation.settings === undefined ? [] : [{ label: 'Server settings', value: presentation.settings }]),
+    { label: 'Limits set by', value: LIMIT_SETTINGS },
+    ...(status.detail === undefined ? [] : [{ label: 'Details', value: status.detail }]),
+  ];
   return (
     <Card headingId="sandbox-status-heading" title="Status">
       <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <StatusPill tone={presentation.tone} text={presentation.pill} />
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill tone={presentation.tone} text={presentation.pill} />
+            {checkedAt === null ? null : (
+              <span className="text-xs text-text-secondary">Last checked {formatCheckedAgo({ checkedAt, now })}</span>
+            )}
+          </div>
           <p className="mt-2 text-sm font-medium text-text-primary">{presentation.headline}</p>
           <p className="mt-0.5 text-sm text-text-secondary">{presentation.summary}</p>
         </div>
@@ -161,14 +189,23 @@ function StatusCard({
           <p className="mt-0.5 text-text-secondary">{presentation.fix}</p>
         </div>
       )}
-      {status.detail === undefined ? null : (
-        <details className="mt-3 text-xs text-text-secondary">
-          <summary className="cursor-pointer select-none">Technical details</summary>
-          <p className="mt-1.5 whitespace-pre-wrap break-words font-mono">{status.detail}</p>
-        </details>
-      )}
+      <TechnicalDetails lines={lines} />
     </Card>
   );
+}
+
+/** Wall-clock time that re-renders every half minute so "Last checked" stays honest. */
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, CLOCK_TICK_MS);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+  return now;
 }
 
 function CheckingCard() {
@@ -189,7 +226,7 @@ function ErrorCard({ message, checking, onRetry }: { message: string; checking: 
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-failure-bg">Could not check the sandbox status</p>
           <p className="mt-0.5 text-sm text-text-secondary">
-            The server did not answer the status check ({message}). Nothing about the sandbox has changed. Try again in
+            The status check did not get an answer from the server. Nothing about the sandbox has changed. Try again in
             a moment.
           </p>
         </div>
@@ -197,6 +234,7 @@ function ErrorCard({ message, checking, onRetry }: { message: string; checking: 
           {checking ? 'Trying…' : 'Try again'}
         </Button.Secondary>
       </div>
+      <TechnicalDetails lines={[{ label: 'Error', value: message }]} />
     </Card>
   );
 }
@@ -207,6 +245,7 @@ const SandboxSettings = () => {
   const limits = readSandboxLimits(useServerCapabilities());
   const [status, setStatus] = useState<RunCodeStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [checking, setChecking] = useState(true);
   // Only the latest check may write state, so a slow earlier answer cannot overwrite a newer one.
   const latestCheck = useRef(0);
@@ -219,7 +258,10 @@ const SandboxSettings = () => {
     setError(null);
     try {
       const next = await api.getRunCodeStatus();
-      if (current === latestCheck.current) setStatus(next);
+      if (current === latestCheck.current) {
+        setStatus(next);
+        setCheckedAt(Date.now());
+      }
     } catch (err) {
       if (current === latestCheck.current) {
         setStatus(null);
@@ -250,6 +292,8 @@ const SandboxSettings = () => {
         <>
           <StatusCard
             status={status}
+            limits={limits}
+            checkedAt={checkedAt}
             checking={checking}
             onRecheck={() => {
               void check();

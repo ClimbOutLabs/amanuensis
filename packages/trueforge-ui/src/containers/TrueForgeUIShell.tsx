@@ -9,7 +9,6 @@ import { DraftCatalogProvider } from '../atoms/draft/DraftCatalogProvider.js';
 import { DraftSpecPreferenceBridge } from '../atoms/draft/DraftSpecPreferenceBridge.js';
 import { cn } from '../atoms/lib/cn.js';
 import { IS_CREATE_AGENT_METADATA_KEY, isCreateAgentMetadataValue } from '../atoms/lib/sessionCreateAgent.js';
-import { SandboxRuntimeUpgradeProvider } from '../components/SandboxRuntimeUpgradeContext.js';
 import { CurrentUserProvider, type CurrentUser } from '../contexts/CurrentUserContext.js';
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { WidgetVisibilityProvider } from '../layouts/WidgetVisibilityContext.js';
@@ -92,8 +91,6 @@ export type TrueForgeUIProps = {
   chatFolders?: ChatFolderStore;
   /** Optional host persistence for spaces the model creates and updates through tools. */
   spaces?: SpaceStore;
-  /** Optional host-owned action for explicitly applying a newer sandbox runtime to future sandboxes. */
-  upgradeSandboxRuntime?: (providerId: string) => Promise<void>;
 };
 
 export type TrueForgeUIShellProps = Omit<TrueForgeUIProps, 'withRouter'> & { resolvedRoutes?: ResolvedRoutes };
@@ -309,7 +306,6 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
     routes: _routes,
     chatFolders,
     spaces,
-    upgradeSandboxRuntime,
     onActiveSessionChange,
     ...providerRest
   } = props;
@@ -378,17 +374,15 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
         <CustomActionRenderersProvider renderers={customActionRenderers}>
           <ServerProvider server={server}>
             <AgentDetailsPreferenceProvider>
-              <SandboxRuntimeUpgradeProvider upgrade={upgradeSandboxRuntime}>
-                <ChatFolderProvider store={chatFolders}>
-                  <SpaceProvider store={spaces}>
-                    {resolvedRoutes != null ? (
-                      <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
-                    ) : (
-                      visibilityTree
-                    )}
-                  </SpaceProvider>
-                </ChatFolderProvider>
-              </SandboxRuntimeUpgradeProvider>
+              <ChatFolderProvider store={chatFolders}>
+                <SpaceProvider store={spaces}>
+                  {resolvedRoutes != null ? (
+                    <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
+                  ) : (
+                    visibilityTree
+                  )}
+                </SpaceProvider>
+              </ChatFolderProvider>
             </AgentDetailsPreferenceProvider>
           </ServerProvider>
         </CustomActionRenderersProvider>
