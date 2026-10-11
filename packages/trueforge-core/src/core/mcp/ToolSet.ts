@@ -15,12 +15,12 @@ import {
   isCallToolResponseResult,
   toolResultResponse,
   type AgentToolSchema,
-  type ToolSchema,
   type AuthRequiredResponse,
   type CallToolResponse,
   type IToolSet,
   type ListToolsResponse,
   type ToolInvocationContext,
+  type ToolSchema,
   type ToolSource,
 } from './IMCPServer';
 import { ToolSelectorPolicy, type ToolSelectorConfig } from './ToolSelectorPolicy';
@@ -44,9 +44,9 @@ export function deniedToolCallText(reason: string | undefined): string {
 
 /**
  * Stamp a TierDecision onto host-only InternalToolCallInfo fields. The
- * classifier result replaces the policy approval stamp: only Tier 3 carded
- * actions require approval; auto-denied actions surface as a
- * pre-dispatch failure instead of a card.
+ * classifier result replaces the policy approval stamp: Tier 3 actions and
+ * Tier 2 actions carrying an approval token require approval; auto-denied
+ * actions surface as a pre-dispatch failure instead of a card.
  */
 export function stampSentinelDecision(input: {
   decision: TierDecision;
@@ -55,7 +55,6 @@ export function stampSentinelDecision(input: {
   | 'tier'
   | 'tier3_card'
   | 'tier2_kind'
-  | 'tier2_files'
   | 'approval_token_id'
   | 'approval_binding'
   | 'shell_binding'
@@ -67,11 +66,12 @@ export function stampSentinelDecision(input: {
     tier: decision.tier,
     tier3_card: decision.card,
     tier2_kind: decision.tier2_kind,
-    tier2_files: decision.tier2_files,
     approval_token_id: decision.approval_token_id,
     approval_binding: decision.approval_binding,
     shell_binding: decision.shell_binding,
-    is_approval_required: decision.tier === 3 && decision.auto_deny === null,
+    is_approval_required:
+      decision.auto_deny === null &&
+      (decision.tier === 3 || (decision.tier === 2 && decision.approval_token_id !== null)),
     ...(decision.auto_deny === null
       ? {}
       : {

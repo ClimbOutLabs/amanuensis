@@ -30,6 +30,7 @@ export type TurnSandboxFactory = (input: {
   turn_id: string;
   signal: AbortSignal;
   tracing: AgentTracing;
+  sentinel: SentinelHostContext;
 }) => Promise<Sandbox>;
 
 function specWantsSandbox(spec: AgentSpec): boolean {
@@ -230,6 +231,7 @@ export class TurnResourceResolver<
     turn_id: string;
     signal: AbortSignal;
     tracing: AgentTracing;
+    sentinel: SentinelHostContext;
   }): Promise<Sandbox | undefined> {
     if (!this.deps.sandboxProvider || !specWantsSandbox(input.spec)) {
       return undefined;
@@ -243,6 +245,7 @@ export class TurnResourceResolver<
       turn_id: input.turn_id,
       signal: input.signal,
       tracing: input.tracing,
+      sentinel: input.sentinel,
     });
     return this.#sandbox;
   }

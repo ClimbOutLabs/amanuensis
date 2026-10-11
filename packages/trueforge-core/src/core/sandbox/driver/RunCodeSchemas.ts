@@ -8,6 +8,10 @@ export const RUN_CODE_ERROR_CODES = [
   'output_exceeded',
   'image_unavailable',
   'daemon_unavailable',
+  /** Docker socket not detected: user-actionable install message, surfaced verbatim. */
+  'docker_unavailable',
+  /** Created container failed isolation verification: refused, surfaced verbatim. */
+  'isolation_refused',
   'concurrency_exceeded',
   'invalid_input',
   'internal',
@@ -16,18 +20,41 @@ export const RUN_CODE_ERROR_CODES = [
 export type RunCodeErrorCode = (typeof RUN_CODE_ERROR_CODES)[number];
 
 /**
- * Basename-only: no separators, no traversal, 1-256 chars.
- * The three alternatives enumerate the `.`/`..` rejection without lookahead:
- * xgrammar (vLLM's grammar compiler) cannot compile lookahead assertions,
- * so `(?!.{1,2}$)` would crash EngineCore. Each branch carries its own tail
- * bound so the total length never exceeds 256.
+ * Failures where the sandbox could not start, so no code ran. Their `error` text is written for
+ * the user (what to install or repair), unlike the model-directed text of the other codes, and
+ * must be shown to the user verbatim.
  */
-export const FILE_BASENAME_PATTERN = /^([^./\\][^/\\]{0,255}|\.[^./\\][^/\\]{0,254}|\.\.[^/\\][^/\\]{0,253})$/;
+export const RUN_CODE_SETUP_ERROR_CODES = [
+  'image_unavailable',
+  'daemon_unavailable',
+  'docker_unavailable',
+  'isolation_refused',
+] as const satisfies readonly RunCodeErrorCode[];
+
+/**
+ * Length caps are enforced with `refine`, which the emitted JSON Schema omits: xgrammar (vLLM's
+ * grammar compiler) asserts on any bounded repetition above 128, and `.max()` on a string is
+ * emitted as `maxLength`, which compiles to one.
+ */
+const FILE_NAME_MAX_LENGTH = 256;
+const CODE_MAX_LENGTH = 512 * 1024;
+
+/**
+ * Basename-only: no separators, no `.`/`..`. The alternatives reject `.`/`..` without
+ * lookahead, which xgrammar cannot compile, and carry no length bound for the reason above.
+ */
+const FILE_BASENAME_PATTERN = /^([^./\\][^/\\]*|\.[^./\\][^/\\]*|\.\.[^/\\][^/\\]*)$/;
+
+export const RunCodeFileNameSchema = z
+  .string()
+  .min(1)
+  .regex(FILE_BASENAME_PATTERN, 'must be a basename (no separators or traversal)')
+  .refine(name => name.length <= FILE_NAME_MAX_LENGTH, `must be at most ${String(FILE_NAME_MAX_LENGTH)} characters`);
 
 export const RunCodeLanguageSchema = z.enum(['python', 'node']);
 
 const RunCodeFileInSchema = z.object({
-  name: z.string().min(1).max(256).regex(FILE_BASENAME_PATTERN, 'must be a basename (no separators or traversal)'),
+  name: RunCodeFileNameSchema,
   content_base64: z.string().min(1),
 });
 
@@ -36,7 +63,7 @@ export const RunCodeInputSchema = z.object({
   code: z
     .string()
     .min(1)
-    .max(512 * 1024),
+    .refine(code => code.length <= CODE_MAX_LENGTH, `must be at most ${String(CODE_MAX_LENGTH)} characters`),
   // Model-authored content only (e.g. CSV text the model composes). Conversation
   // attachments are staged into ingress automatically by the harness and
   // advertised in the tool description — the model never base64-encodes them.
@@ -72,3 +99,12 @@ export const RunCodeResultSchema = z.discriminatedUnion('status', [
 ]);
 
 export type RunCodeResult = z.infer<typeof RunCodeResultSchema>;
+
+/** The part of a failed result that identifies a setup failure, for readers of persisted tool output. */
+export const RunCodeSetupFailureSchema = z.object({
+  status: z.literal('failed'),
+  error_code: z.enum(RUN_CODE_SETUP_ERROR_CODES),
+  error: z.string().min(1),
+});
+
+export type RunCodeSetupFailure = z.infer<typeof RunCodeSetupFailureSchema>;

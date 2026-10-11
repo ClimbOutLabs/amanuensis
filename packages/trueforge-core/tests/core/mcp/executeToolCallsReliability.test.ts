@@ -218,7 +218,9 @@ describe('turn-scoped tool-call reliability', () => {
     const documents = toolSet({ name: 'documents', resultText: envelope, isError: true });
     const result = await executeToolCalls({
       assistantMessage: assistantCall({ id: 'report-call', name: 'create_document_report', arguments: {} }),
-      toolMapping: new Map([['create_document_report', { toolSet: documents, originalToolName: 'create_document_report' }]]),
+      toolMapping: new Map([
+        ['create_document_report', { toolSet: documents, originalToolName: 'create_document_report' }],
+      ]),
       threadId: 'main',
       approvalDecisions: new Map(),
       memoState: createToolCallMemoState(),

@@ -35,6 +35,7 @@ import { SqlitePersonalizationStore } from '../src/db/sqlite/personalization-sto
 import { SqliteRepositoryStore } from '../src/db/sqlite/repository-store/SqliteRepositoryStore';
 import { SqliteSandboxProviderStore } from '../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteScheduleStore } from '../src/db/sqlite/schedule-store/SqliteScheduleStore';
+import { SqliteSentinelSettingsStore } from '../src/db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore';
 import { SqliteSessionMetricsStore } from '../src/db/sqlite/session-metrics/SqliteSessionMetricsStore';
 import { SqliteSessionStore } from '../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSkillStore } from '../src/db/sqlite/skill-store/SqliteSkillStore';
@@ -108,6 +109,7 @@ const app = createServerApp({
   sessionStore,
   sessionMetricsStore: new SqliteSessionMetricsStore(db),
   sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
+  sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
   sessions: new Sessions({ sessionStore }),
   activeTurns: new ActiveTurnRegistry(),
   turnDrains: new TurnDrainRegistry(),

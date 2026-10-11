@@ -350,6 +350,11 @@ export function hasPendingToolApproval(
   return approval != null && approval.approved === undefined && approval.resolution === undefined;
 }
 
+/** The id of the single-use allow the server declared, if any. */
+export function allowOnceOptionId(options: readonly AuiToolApprovalOption[] | undefined): string | undefined {
+  return options?.find(option => option.kind === 'allow-once')?.id;
+}
+
 export function buildApprovalOptions(options: readonly AuiToolApprovalOption[] | undefined): ApprovalOptionView[] {
   const declared = options?.filter(o => Object.hasOwn(APPROVAL_OPTION_DEFAULT_LABELS, o.kind));
   if (declared && declared.length > 0) {

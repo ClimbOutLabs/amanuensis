@@ -13,11 +13,14 @@ import { FIRST_PARTY_TOOL_REASON, isStandingTrustDecision } from '../../../src/c
 import {
   createSentinelHostContext,
   defaultSentinelServices,
+  withoutTier2Relaxations,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
-import type { ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
+import { seedShellAllowlist, type ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
+import type { Tier2ActionKind } from '../../../src/core/permissions/tier';
 import { TOOL_GRANT_REASON, type ToolGrantKey, type ToolGrantStore } from '../../../src/core/permissions/toolGrants';
+import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';
 
 /**
  * Environment-independent allowlist: a temp dir with one fake `mycmd`
@@ -30,8 +33,8 @@ function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () 
   const shell_allowlist: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
-      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
+      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
+      ls: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
     },
   };
   const services = defaultSentinelServices({ pinned_path: dir });
@@ -66,12 +69,16 @@ function action(tool_name: string, canonical_params: Record<string, unknown>): S
 }
 
 describe('classifyTier shell matrix', () => {
-  test('allowlisted mycmd is Tier 2 shell', async () => {
+  test('allowlisted mycmd runs silently as Tier 1', async () => {
     const { services, cleanup } = servicesWithTempAllowlist();
     try {
-      const decision = await classifyTier(action('exec', { command: 'mycmd -l' }), makeCtx({ services }));
-      expect(decision.tier).toBe(2);
-      expect(decision.tier2_kind).toBe('shell');
+      const decision = await classifyTier(
+        action('exec', { command: 'mycmd -l' }),
+        makeCtx({ services, workspace_cwd: tmpdir() }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.reason).toBe('shell_allowlist');
+      expect(decision.card).toBeNull();
       expect(decision.approval_token_id).toBeNull();
     } finally {
       cleanup();
@@ -107,16 +114,241 @@ describe('classifyTier shell matrix', () => {
     expect(decision.auto_deny).toBe('offline_mode');
   });
 
-  test('offline allows the offline subset as Tier 2', async () => {
+  test('offline allows the offline subset silently as Tier 1', async () => {
     const { services, cleanup } = servicesWithTempAllowlist();
     services.isOffline = async () => true;
     try {
-      const allowed = await classifyTier(action('exec', { command: 'ls' }), makeCtx({ services }));
-      expect(allowed.tier).toBe(2);
+      const allowed = await classifyTier(
+        action('exec', { command: 'ls' }),
+        makeCtx({ services, workspace_cwd: tmpdir() }),
+      );
+      expect(allowed.tier).toBe(1);
       expect(allowed.auto_deny).toBeNull();
-      const denied = await classifyTier(action('exec', { command: 'mycmd -l' }), makeCtx({ services }));
+      const denied = await classifyTier(
+        action('exec', { command: 'mycmd -l' }),
+        makeCtx({ services, workspace_cwd: tmpdir() }),
+      );
       expect(denied.tier).toBe(3);
       expect(denied.auto_deny).toBe('offline_mode');
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+function relaxing(services: SentinelServices, kinds: Tier2ActionKind[]): SentinelServices {
+  return { ...services, tier2AutoAllow: () => Promise.resolve(new Set(kinds)) };
+}
+
+describe('classifyTier Tier 2 asks by default', () => {
+  test('an unrelaxed workspace write requires approval with a plain token', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      const decision = await classifyTier(
+        action('write_file', { path: join(dir, 'notes.md'), content: 'x' }),
+        makeCtx({ workspace_cwd: dir }),
+      );
+      expect(decision.tier).toBe(2);
+      expect(decision.tier2_kind).toBe('file_write');
+      expect(decision.card).not.toBeNull();
+      expect(decision.approval_token_id).not.toBeNull();
+      expect(decision.shell_binding).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a scheduled session ignores relaxations', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      const unattended = withoutTier2Relaxations(
+        relaxing(defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), ['file_write']),
+      );
+      const decision = await classifyTier(
+        action('write_file', { path: join(dir, 'notes.md'), content: 'x' }),
+        makeCtx({ services: unattended, workspace_cwd: dir }),
+      );
+      expect(decision.tier).toBe(2);
+      expect(decision.approval_token_id).not.toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a relaxation never lowers Tier 3', async () => {
+    const decision = await classifyTier(
+      action('exec', { command: 'curl https://example.com' }),
+      makeCtx({ services: relaxing(defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), ['file_write']) }),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+
+  test('offline mode is read for the calling user', async () => {
+    const { services, cleanup } = servicesWithTempAllowlist();
+    const seen: string[] = [];
+    services.isOffline = ({ created_by }) => {
+      seen.push(created_by);
+      return Promise.resolve(created_by === 'u1');
+    };
+    try {
+      const offline = await classifyTier(
+        action('exec', { command: 'curl https://example.com' }),
+        makeCtx({ services }),
+      );
+      expect(offline.auto_deny).toBe('offline_mode');
+      expect(seen).toEqual(['u1']);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+/** The seeded allowlist over a temp PATH holding a stub for each seeded command, inside a temp workspace. */
+function seededWorkspace(): { services: SentinelServices; workspace: string; cleanup: () => void } {
+  const bin = mkdtempSync(join(tmpdir(), 'sentinel-bin-'));
+  const workspace = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+  for (const name of ['ls', 'cat', 'pwd', 'git', 'node', 'python3', 'touch']) {
+    writeFileSync(join(bin, name), '#!/bin/sh\n');
+  }
+  writeFileSync(join(workspace, 'notes.txt'), 'hello');
+  const services = { ...defaultSentinelServices({ pinned_path: bin }), shell_allowlist: seedShellAllowlist(bin) };
+  return {
+    services,
+    workspace,
+    cleanup: () => {
+      rmSync(bin, { recursive: true, force: true });
+      rmSync(workspace, { recursive: true, force: true });
+    },
+  };
+}
+
+describe('classifyTier read-only shell commands are Tier 1', () => {
+  test.each([
+    'ls',
+    'ls -la',
+    'cat notes.txt',
+    'pwd',
+    'git status',
+    'git log --oneline',
+    'git diff --cached',
+    'git show --no-patch HEAD',
+    'git rev-parse --show-toplevel',
+  ])('%s runs silently with no card or token', async command => {
+    const { services, workspace, cleanup } = seededWorkspace();
+    try {
+      const decision = await classifyTier(
+        action('exec', { command, cwd: workspace }),
+        makeCtx({ services, workspace_cwd: workspace }),
+      );
+      expect(decision.tier).toBe(1);
+      expect(decision.card).toBeNull();
+      expect(decision.approval_token_id).toBeNull();
+      expect(decision.auto_deny).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('a scheduled session also runs them silently', async () => {
+    const { services, workspace, cleanup } = seededWorkspace();
+    try {
+      const decision = await classifyTier(
+        action('exec', { command: 'git status', cwd: workspace }),
+        makeCtx({ services: withoutTier2Relaxations(services), workspace_cwd: workspace }),
+      );
+      expect(decision.tier).toBe(1);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test.each([
+    ['a working directory outside the workspace', { command: 'ls', cwd: '/' }],
+    ['an operand that escapes the workspace', { command: 'cat ../outside.txt' }],
+    ['model-supplied environment', { command: 'ls', env: { LD_PRELOAD: '/tmp/x.so' } }],
+    ['a flag that is not on the allowlist', { command: 'ls --color=auto' }],
+    ['a git config override', { command: 'git -c core.pager=sh status' }],
+  ])('falls back to asking for %s', async (_label, params) => {
+    const { services, workspace, cleanup } = seededWorkspace();
+    try {
+      const decision = await classifyTier(
+        action('exec', { cwd: workspace, ...params }),
+        makeCtx({ services, workspace_cwd: workspace }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.card).not.toBeNull();
+      // Asking must be answerable: the token and parsed binding let dispatch accept an approval.
+      expect(decision.approval_token_id).not.toBeNull();
+      expect(decision.shell_binding).not.toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test.each([
+    ['cat environ', '/proc/self'],
+    ['cat passwd', '/etc'],
+    ['ls', '/'],
+  ])('with no workspace, %s in %s asks instead of running silently', async (command, cwd) => {
+    const { services, cleanup } = seededWorkspace();
+    try {
+      const decision = await classifyTier(action('exec', { command, cwd }), makeCtx({ services, workspace_cwd: null }));
+      expect(decision.tier).toBe(3);
+      expect(decision.reason).toBe('workspace_unknown');
+      expect(decision.card).not.toBeNull();
+      expect(decision.approval_token_id).not.toBeNull();
+      expect(decision.shell_binding).not.toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('with no workspace, offline mode asks too', async () => {
+    const { services, cleanup } = seededWorkspace();
+    services.isOffline = () => Promise.resolve(true);
+    try {
+      const decision = await classifyTier(
+        action('exec', { command: 'cat passwd', cwd: '/etc' }),
+        makeCtx({ services, workspace_cwd: null }),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.reason).toBe('workspace_unknown');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('offline mode keeps the same containment check', async () => {
+    const { services, workspace, cleanup } = seededWorkspace();
+    services.isOffline = () => Promise.resolve(true);
+    try {
+      const inside = await classifyTier(
+        action('exec', { command: 'ls', cwd: workspace }),
+        makeCtx({ services, workspace_cwd: workspace }),
+      );
+      expect(inside.tier).toBe(1);
+      const outside = await classifyTier(
+        action('exec', { command: 'ls', cwd: '/' }),
+        makeCtx({ services, workspace_cwd: workspace }),
+      );
+      expect(outside.tier).toBe(3);
+      expect(outside.reason).toBe('cwd_outside_workspace');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('writes still ask: a shell write is Tier 3 and a file write is Tier 2', async () => {
+    const { services, workspace, cleanup } = seededWorkspace();
+    try {
+      const ctx = makeCtx({ services, workspace_cwd: workspace });
+      const touch = await classifyTier(action('exec', { command: 'touch new.txt', cwd: workspace }), ctx);
+      expect(touch.tier).toBe(3);
+      expect(touch.approval_token_id).not.toBeNull();
+      const write = await classifyTier(action('write_file', { path: join(workspace, 'new.txt'), content: 'x' }), ctx);
+      expect(write.tier).toBe(2);
+      expect(write.approval_token_id).not.toBeNull();
     } finally {
       cleanup();
     }
@@ -354,7 +586,6 @@ describe('classifyTier connector tools and standing grants', () => {
         recorded.push(input);
         return Promise.resolve();
       },
-      updateOutcome: () => Promise.resolve(),
     };
     const sentinel = createSentinelHostContext({ tenant_id: 't1', created_by: 'u1', conversation_id: 'c1', services });
 
@@ -495,7 +726,6 @@ describe('classifyTier first-party connector tools', () => {
         recorded.push(input);
         return Promise.resolve();
       },
-      updateOutcome: () => Promise.resolve(),
     };
     const sentinel = createSentinelHostContext({ tenant_id: 't1', created_by: 'u1', conversation_id: 'c1', services });
 
@@ -512,7 +742,7 @@ describe('classifyTier first-party connector tools', () => {
 });
 
 describe('verifyPreDispatch', () => {
-  test('Tier 1/2 pass through without verification', async () => {
+  test('Tier 1 and a relaxed Tier 2 call pass through without verification', async () => {
     const ctx = makeCtx();
     const result = await verifyPreDispatch({
       call: {
@@ -527,6 +757,192 @@ describe('verifyPreDispatch', () => {
       ctx: { ...ctx, offline: false },
     });
     expect(result).toBeUndefined();
+  });
+
+  test('a Tier 2 call that asked redeems its token once', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+      const params = { path: join(dir, 'notes.md'), content: 'x' };
+      const decision = await classifyTier(action('write_file', params), makeCtx({ services, workspace_cwd: dir }));
+      const call = {
+        tool_name: 'write_file',
+        tool_type: 'truefoundry-system' as const,
+        canonical_params: params,
+        tier: 2 as const,
+        approval_token_id: decision.approval_token_id,
+        approval_binding: null,
+        shell_binding: null,
+      };
+      const ctx = { ...makeCtx({ services, workspace_cwd: dir }), offline: false };
+      expect(await verifyPreDispatch({ call, ctx })).toBeUndefined();
+      expect(await verifyPreDispatch({ call, ctx })).toMatch(/already used|invalid/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a Tier 2 token minted for other params is rejected', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+      const decision = await classifyTier(
+        action('write_file', { path: join(dir, 'notes.md'), content: 'x' }),
+        makeCtx({ services, workspace_cwd: dir }),
+      );
+      const result = await verifyPreDispatch({
+        call: {
+          tool_name: 'write_file',
+          tool_type: 'truefoundry-system',
+          canonical_params: { path: join(dir, 'notes.md'), content: 'different' },
+          tier: 2,
+          approval_token_id: decision.approval_token_id,
+          approval_binding: null,
+          shell_binding: null,
+        },
+        ctx: { ...makeCtx({ services, workspace_cwd: dir }), offline: false },
+      });
+      expect(result).toMatch(/changed|invalid/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    {
+      ask: 'model-supplied environment',
+      approved: (ws: string) => ({ command: 'ls', cwd: ws, env: { LD_PRELOAD: '/tmp/a.so' } }),
+      changed: (ws: string) => ({ command: 'ls', cwd: ws, env: { LD_PRELOAD: '/tmp/b.so' } }),
+    },
+    {
+      ask: 'a working directory outside the workspace',
+      approved: () => ({ command: 'ls', cwd: '/' }),
+      changed: () => ({ command: 'ls', cwd: '/usr' }),
+    },
+    {
+      ask: 'an operand outside the workspace',
+      approved: (ws: string) => ({ command: 'cat ../a.txt', cwd: ws }),
+      changed: (ws: string) => ({ command: 'cat ../b.txt', cwd: ws }),
+    },
+  ])('the token for $ask binds the arguments it was minted for', async ({ approved, changed }) => {
+    const { services, workspace, cleanup } = seededWorkspace();
+    try {
+      const ctx = makeCtx({ services, workspace_cwd: workspace });
+      const asked = approved(workspace);
+      const decision = await classifyTier(action('exec', asked), ctx);
+      expect(decision.tier).toBe(3);
+      const callFor = (canonical_params: Record<string, unknown>) => ({
+        tool_name: 'exec',
+        tool_type: 'truefoundry-system' as const,
+        canonical_params,
+        tier: 3 as const,
+        approval_token_id: decision.approval_token_id,
+        approval_binding: null,
+        shell_binding: decision.shell_binding,
+      });
+      const verifyCtx = { ...ctx, offline: false };
+
+      // A token minted for other arguments is rejected, and the failed try spends it.
+      expect(await verifyPreDispatch({ call: callFor(changed(workspace)), ctx: verifyCtx })).toMatch(
+        /changed|invalid/i,
+      );
+      expect(await verifyPreDispatch({ call: callFor(asked), ctx: verifyCtx })).toMatch(/already used|invalid/i);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test.each([
+    {
+      ask: 'model-supplied environment',
+      params: (ws: string) => ({ command: 'ls', cwd: ws, env: { LD_PRELOAD: '/tmp/a.so' } }),
+    },
+    { ask: 'a working directory outside the workspace', params: () => ({ command: 'ls', cwd: '/' }) },
+    { ask: 'an operand outside the workspace', params: (ws: string) => ({ command: 'cat ../a.txt', cwd: ws }) },
+  ])('the token for $ask verifies for the same arguments exactly once', async ({ params }) => {
+    const { services, workspace, cleanup } = seededWorkspace();
+    try {
+      const ctx = makeCtx({ services, workspace_cwd: workspace });
+      const asked = params(workspace);
+      const decision = await classifyTier(action('exec', asked), ctx);
+      const call = {
+        tool_name: 'exec',
+        tool_type: 'truefoundry-system' as const,
+        canonical_params: asked,
+        tier: 3 as const,
+        approval_token_id: decision.approval_token_id,
+        approval_binding: null,
+        shell_binding: decision.shell_binding,
+      };
+      const verifyCtx = { ...ctx, offline: false };
+      expect(await verifyPreDispatch({ call, ctx: verifyCtx })).toBeUndefined();
+      expect(await verifyPreDispatch({ call, ctx: verifyCtx })).toMatch(/already used|invalid/i);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('a silent shell command is refused at dispatch when no workspace is set', async () => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const result = await verifyPreDispatch({
+      call: {
+        tool_name: 'exec',
+        tool_type: 'truefoundry-system',
+        canonical_params: { command: 'cat passwd', cwd: '/etc' },
+        tier: 1,
+        approval_token_id: null,
+        approval_binding: null,
+        shell_binding: null,
+      },
+      ctx: { ...makeCtx({ services, workspace_cwd: null }), offline: false },
+    });
+    expect(result).toMatch(/no workspace/i);
+  });
+
+  test('other silent calls still pass through without a workspace', async () => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const result = await verifyPreDispatch({
+      call: {
+        tool_name: 'read_file',
+        tool_type: 'truefoundry-system',
+        canonical_params: { path: 'a.txt' },
+        tier: 1,
+        approval_token_id: null,
+        approval_binding: null,
+        shell_binding: null,
+      },
+      ctx: { ...makeCtx({ services, workspace_cwd: null }), offline: false },
+    });
+    expect(result).toBeUndefined();
+  });
+
+  test('a Tier 2 call that asked is still contained to the workspace', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      const params = { path: '/etc/passwd', content: 'x' };
+      const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+      const token = await services.token_store.mint({
+        ...testApprovalOwner(),
+        action_id: actionIdFor({ tool_name: 'write_file', canonical_params: params }),
+        canonical_params: params,
+      });
+      const result = await verifyPreDispatch({
+        call: {
+          tool_name: 'write_file',
+          tool_type: 'truefoundry-system',
+          canonical_params: params,
+          tier: 2,
+          approval_token_id: token.token_id,
+          approval_binding: null,
+          shell_binding: null,
+        },
+        ctx: { ...makeCtx({ services, workspace_cwd: dir }), offline: false },
+      });
+      expect(result).toMatch(/outside the workspace/i);
+      expect(await services.token_store.peek({ ...TEST_TOKEN_SCOPE, token_id: token.token_id })).toBeDefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('missing token on a Tier 3 call fails closed', async () => {
@@ -549,7 +965,8 @@ describe('verifyPreDispatch', () => {
   test('a redeemed token cannot verify twice', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const params = { command: 'curl https://example.com' };
-    const token = services.token_store.mint({
+    const token = await services.token_store.mint({
+      ...testApprovalOwner(),
       action_id: actionIdFor({ tool_name: 'exec', canonical_params: params }),
       canonical_params: params,
     });
@@ -571,7 +988,8 @@ describe('verifyPreDispatch', () => {
   test('stale offline context blocks an approved shell call', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const params = { command: 'curl https://example.com' };
-    const token = services.token_store.mint({
+    const token = await services.token_store.mint({
+      ...testApprovalOwner(),
       action_id: actionIdFor({ tool_name: 'exec', canonical_params: params }),
       canonical_params: params,
     });
@@ -593,7 +1011,8 @@ describe('verifyPreDispatch', () => {
   test('changed params invalidate the token', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const params = { command: 'ls -la' };
-    const token = services.token_store.mint({
+    const token = await services.token_store.mint({
+      ...testApprovalOwner(),
       action_id: actionIdFor({ tool_name: 'exec', canonical_params: params }),
       canonical_params: params,
     });

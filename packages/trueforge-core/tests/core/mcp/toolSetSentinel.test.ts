@@ -123,7 +123,6 @@ describe('ToolSet Sentinel classification of connector tools', () => {
         recorded.push(input);
         return Promise.resolve();
       },
-      updateOutcome: () => Promise.resolve(),
     };
     const toolSet = makeToolSet({ tools: [closedWorldRead], services });
 
@@ -148,7 +147,6 @@ describe('ToolSet Sentinel classification of connector tools', () => {
         recorded.push(input);
         return Promise.resolve();
       },
-      updateOutcome: () => Promise.resolve(),
     };
     const response = await makeToolSet({ tools: [closedWorldRead], services }).callTool({
       name: 'lookup_note',
@@ -219,7 +217,6 @@ describe('ToolSet Sentinel classification of first-party connector tools', () =>
         recorded.push(input);
         return Promise.resolve();
       },
-      updateOutcome: () => Promise.resolve(),
     };
     return { services, recorded };
   }

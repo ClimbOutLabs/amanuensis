@@ -717,6 +717,12 @@ export interface SharedServerConfiguration {
    */
   SANDBOX_RUNS_DIR: string;
   /**
+   * Directory where the Docker driver remembers its last successful image
+   * signature verification, so readiness works offline.
+   * Derived: `{env-paths data}/sandbox-state`.
+   */
+  SANDBOX_STATE_DIR: string;
+  /**
    * Default per-run timeout for run_code, seconds. Env: `SANDBOX_DEFAULT_TIMEOUT_SECONDS`. Default 60.
    */
   SANDBOX_DEFAULT_TIMEOUT_SECONDS: number;
@@ -1333,6 +1339,7 @@ const shared: SharedServerConfiguration = {
   }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
+  SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
   SANDBOX_DEFAULT_TIMEOUT_SECONDS: parsePositiveInt({
     envKey: 'SANDBOX_DEFAULT_TIMEOUT_SECONDS',
     raw: getEnv('SANDBOX_DEFAULT_TIMEOUT_SECONDS'),
