@@ -53,6 +53,11 @@ interface MapCardProps {
 const TILE_ERROR_THRESHOLD = 3;
 /** Ms to wait for the first tile before declaring the map unloadable. */
 const TILE_LOAD_TIMEOUT_MS = 10_000;
+/**
+ * Two coordinates closer than this (degrees) are the same spot on the map.
+ * A POI result that coincides with the place itself draws one pin, not two.
+ */
+const SAME_SPOT_EPSILON = 1e-7;
 
 /**
  * Decode a precision-5 encoded polyline to [lat, lng] pairs.
@@ -175,6 +180,10 @@ export function MapCard({ data, state, cardId, blockedMessage, onRetry }: MapCar
         const mainMarker = L.circleMarker([data.lat, data.lng], pinStyle).addTo(map);
         bindTextPopup(mainMarker, data.resolved_name);
         for (const pin of data.pins) {
+          // A POI at the place itself would stack exactly on the main pin.
+          if (Math.abs(pin.lat - data.lat) < SAME_SPOT_EPSILON && Math.abs(pin.lng - data.lng) < SAME_SPOT_EPSILON) {
+            continue;
+          }
           const marker = L.circleMarker([pin.lat, pin.lng], pinStyle).addTo(map);
           bindTextPopup(marker, pin.name);
         }
@@ -208,7 +217,7 @@ export function MapCard({ data, state, cardId, blockedMessage, onRetry }: MapCar
   const panelTitle = state === 'blocked' && !tilesFailed ? 'Map unavailable' : 'Map tiles unavailable';
   const panelBody =
     tilesFailed || state === 'unavailable'
-      ? (blockedMessage ?? 'The map tiles could not be loaded.')
+      ? (blockedMessage ?? 'The map tiles could not be loaded. Your place search was not sent again.')
       : (blockedMessage ??
         'This map is blocked right now. Tiles are unavailable while offline or over the rate limit.');
 

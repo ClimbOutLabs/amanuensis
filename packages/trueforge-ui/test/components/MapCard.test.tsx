@@ -192,4 +192,50 @@ describe('MapCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
+
+  it('draws exactly one pin for render_map without poi', async () => {
+    renderCard({ data: { ...placeData, pins: [] }, state: 'ready', cardId: 'call-6' });
+    await waitFor(() => expect(vi.mocked(leaflet.circleMarker).mock.calls.length).toBe(1));
+    expect(vi.mocked(leaflet.circleMarker)).toHaveBeenCalledWith([48.858844, 2.294481], expect.anything());
+  });
+
+  it('draws the place pin plus one marker per distinct poi pin', async () => {
+    renderCard({
+      data: {
+        ...placeData,
+        pins: [
+          { name: 'Cafe Paris', lat: 48.86, lng: 2.295 },
+          { name: 'Louvre', lat: 48.8611, lng: 2.3364 },
+        ],
+      },
+      state: 'ready',
+      cardId: 'call-7',
+    });
+    await waitFor(() => expect(vi.mocked(leaflet.circleMarker).mock.calls.length).toBe(3));
+  });
+
+  it('does not stack a poi pin on the place pin', async () => {
+    renderCard({
+      data: {
+        ...placeData,
+        pins: [{ name: 'Eiffel Tower', lat: 48.858844, lng: 2.294481 }],
+      },
+      state: 'ready',
+      cardId: 'call-8',
+    });
+    await waitFor(() => expect(vi.mocked(leaflet.circleMarker).mock.calls.length).toBeGreaterThan(0));
+    // One marker total: the coincident poi pin is not drawn twice.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(vi.mocked(leaflet.circleMarker).mock.calls.length).toBe(1);
+  });
+
+  it('tells the user the place search is not sent again when tiles fail', async () => {
+    renderCard({ data: { ...placeData, pins: [] }, state: 'ready', cardId: 'call-9' });
+    await failTiles();
+    await waitFor(() =>
+      expect(
+        screen.getByText('The map tiles could not be loaded. Your place search was not sent again.'),
+      ).toBeInTheDocument(),
+    );
+  });
 });
