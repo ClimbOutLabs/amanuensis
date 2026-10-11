@@ -8,6 +8,7 @@ import { cn } from '@/atoms/lib/cn.js';
 import { useCompactLayout } from '@/atoms/lib/CompactLayoutContext.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
+import { useOptionalRunCodeStatus } from '@/components/RunCodeStatusContext.js';
 import { Icon } from '@/icons/Icon.js';
 import { useOptionalSentinelApiState } from '@/sentinel/SentinelApiContext.js';
 import { useOptionalCatalogServer, useOptionalRefreshServerCapabilities } from '@/server/ServerContext.js';
@@ -50,7 +51,7 @@ const TruefoundrySettingsBuilder = () => {
   // dock/widget panels are ~mobile width even on a wide viewport — keep Settings stacked.
   const compact = useCompactLayout();
   const hasSkills = catalog?.skillCatalog != null;
-  const hasSandbox = catalog?.sandboxCatalog != null;
+  const hasSandbox = useOptionalRunCodeStatus() != null;
   const hasPersonalization = useOptionalPersonalization() != null;
   const hasSentinel = useOptionalSentinelApiState() != null;
 
@@ -119,7 +120,7 @@ const TruefoundrySettingsBuilder = () => {
       baseSections.push({ id: 'skills', label: 'Skills', icon: 'lightbulb' });
     }
     if (hasSandbox) {
-      baseSections.push({ id: 'sandbox', label: 'Sandbox providers', icon: 'cube' });
+      baseSections.push({ id: 'sandbox', label: 'Sandbox', icon: 'cube' });
     }
     if (hasPersonalization) {
       baseSections.push({ id: 'personalization', label: 'Personalization', icon: 'robot' });
