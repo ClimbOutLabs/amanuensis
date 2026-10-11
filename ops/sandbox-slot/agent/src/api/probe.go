@@ -7,11 +7,13 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"aman/slotagent/src/attest"
 )
 
-// Probe asks a running agent for its attestation over its socket and reports whether it passed. It is
-// what the container health check runs.
-func Probe(socket string) error {
+// Probe asks a running agent for its attestation over its socket. The report is returned even when it
+// failed, so the container health check can print every check; the error says whether it passed.
+func Probe(socket string) (attest.Report, error) {
 	client := &http.Client{
 		Timeout: 90 * time.Second,
 		Transport: &http.Transport{
@@ -23,15 +25,15 @@ func Probe(socket string) error {
 	}
 	resp, err := client.Get("http://agent/v1/health")
 	if err != nil {
-		return err
+		return attest.Report{}, err
 	}
 	defer resp.Body.Close()
 	var body healthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return err
+		return attest.Report{}, err
 	}
 	if !body.Attestation.OK {
-		return errors.New("attestation failed: " + failedChecks(body.Attestation))
+		return body.Attestation, errors.New("attestation failed: " + failedChecks(body.Attestation))
 	}
-	return nil
+	return body.Attestation, nil
 }

@@ -17,6 +17,8 @@ import {
 
 /** Larger than the agent's biggest legitimate reply (two 4 MiB streams plus 128 MiB of base64 files). */
 const MAX_RESPONSE_BYTES = 256 * 1024 * 1024;
+/** An agent that stays silent this long after the call's own time limit is treated as lost. */
+const CALL_GRACE_MS = 30_000;
 
 export type SlotCallError =
   | { kind: 'unreachable'; message: string }
@@ -63,7 +65,7 @@ export class SlotClient {
       body: input.request,
       schema: SlotRunCodeResponseSchema,
       signal: input.signal,
-      timeoutMs: undefined,
+      timeoutMs: input.request.timeout_ms + CALL_GRACE_MS,
     });
   }
 
@@ -77,7 +79,7 @@ export class SlotClient {
       body: input.request,
       schema: SlotExecResponseSchema,
       signal: input.signal,
-      timeoutMs: undefined,
+      timeoutMs: input.request.timeout_ms + CALL_GRACE_MS,
     });
   }
 

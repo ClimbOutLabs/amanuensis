@@ -37,7 +37,15 @@ const (
 func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC)
 	if len(os.Args) == 2 && os.Args[1] == "healthcheck" {
-		if err := api.Probe(socketPath); err != nil {
+		report, err := api.Probe(socketPath)
+		for _, c := range report.Checks {
+			status := "ok  "
+			if !c.OK {
+				status = "FAIL"
+			}
+			fmt.Printf("%s %s: %s\n", status, c.Name, c.Detail)
+		}
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

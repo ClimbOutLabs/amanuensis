@@ -89,6 +89,15 @@ describe('SlotClient', () => {
     expect(result.ok).toBe(false);
   });
 
+  test('a call that outlives its limit plus the grace is treated as lost', async () => {
+    const client = await clientFor(() => ({ status: 200, body: {}, delayMs: 3000 }));
+    const result = await client.runCode({
+      request: { run_id: 'a'.repeat(32), argv: ['x'], files_in: [], timeout_ms: -29_950, disk_mb: 1 },
+      signal: undefined,
+    });
+    expect(result.ok).toBe(false);
+  });
+
   test('fsWrite succeeds on 204 and sends base64 content', async () => {
     const client = await clientFor(() => ({ status: 204, body: undefined }));
     const result = await client.fsWrite({
