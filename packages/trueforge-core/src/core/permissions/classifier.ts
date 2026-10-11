@@ -141,9 +141,10 @@ function firstSentence(text: string): string {
   return (match !== null ? match[0] : trimmed).trim().slice(0, 280);
 }
 
-function plainWhy(agentIntent: string | null): string {
+/** Null when the agent gave no reason, so the card shows no line instead of an empty one. */
+function plainWhy(agentIntent: string | null): string | null {
   if (agentIntent === null || agentIntent.trim() === '') {
-    return 'The agent did not state a reason.';
+    return null;
   }
   return firstSentence(agentIntent);
 }

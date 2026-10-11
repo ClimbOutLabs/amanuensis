@@ -255,34 +255,31 @@ const DESTRUCTIVE_AND_INSTALL_WORDS = ['delete', 'remove', 'uninstall', 'drop', 
 const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   {
     match: words => hasPhrase(words, 'gist'),
-    describe: ({ tool_name, where }) => `Publish a gist with \`${tool_name}\`${where}.`,
+    describe: ({ tool_name, where }) => `Publish a gist with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'push_files', 'create_or_update_file', 'create_repository'),
     describe: ({ tool_name, where, params }) => {
       const repo = repositoryLabel(params);
-      return `Write to ${repo === null ? 'a repository' : `repository ${repo}`} with \`${tool_name}\`${where}.`;
+      return `Write to ${repo === null ? 'a repository' : `repository ${repo}`} with ${tool_name}${where}.`;
     },
     destination: repositoryLabel,
   },
   {
     match: words => hasPhrase(words, 'send_draft'),
-    describe: ({ tool_name, where, fields }) =>
-      `Send a saved draft${toRecipient(fields)} with \`${tool_name}\`${where}.`,
+    describe: ({ tool_name, where, fields }) => `Send a saved draft${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'forward'),
-    describe: ({ tool_name, where, fields }) =>
-      `Forward a message${toRecipient(fields)} with \`${tool_name}\`${where}.`,
+    describe: ({ tool_name, where, fields }) => `Forward a message${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'reply'),
-    describe: ({ tool_name, where, fields }) => `Send a reply${toRecipient(fields)} with \`${tool_name}\`${where}.`,
+    describe: ({ tool_name, where, fields }) => `Send a reply${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'create_draft', 'draft_email', 'update_draft', 'gmail_draft'),
-    describe: ({ tool_name, where, fields }) =>
-      `Save a message draft${toRecipient(fields)} with \`${tool_name}\`${where}.`,
+    describe: ({ tool_name, where, fields }) => `Save a message draft${toRecipient(fields)} with ${tool_name}${where}.`,
   },
   {
     match: words =>
@@ -300,12 +297,12 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
         'tavily_extract',
         'extract_url',
       ),
-    describe: ({ tool_name, where }) => `Fetch a web page with \`${tool_name}\`${where}.`,
+    describe: ({ tool_name, where }) => `Fetch a web page with ${tool_name}${where}.`,
   },
   {
     match: words => hasPhrase(words, 'search'),
     describe: ({ tool_name, where, words }) =>
-      `${hasPhrase(words, 'web', 'tavily', 'exa', 'engine') ? 'Search the web' : 'Run a search'} with \`${tool_name}\`${where}.`,
+      `${hasPhrase(words, 'web', 'tavily', 'exa', 'engine') ? 'Search the web' : 'Run a search'} with ${tool_name}${where}.`,
   },
 ];
 

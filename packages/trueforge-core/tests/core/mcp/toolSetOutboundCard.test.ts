@@ -68,7 +68,7 @@ describe('approval card for connector calls', () => {
     expect(info.tier).toBe(3);
     expect(info.is_approval_required).toBe(true);
     expect(info.tier3_card).toMatchObject({
-      plain_what: 'Search the web with `web_search` on exa.',
+      plain_what: 'Search the web with web_search on exa.',
       destination_host: 'mcp.exa.ai',
       outbound_text: 'query: my salary history',
     });
@@ -91,7 +91,7 @@ describe('approval card for connector calls', () => {
     expect(info.is_deferred).toBe(true);
     expect(info.tier).toBe(3);
     expect(info.tier3_card).toMatchObject({
-      plain_what: 'Search the web with `web_search` on exa.',
+      plain_what: 'Search the web with web_search on exa.',
       destination_host: 'mcp.exa.ai',
       outbound_text: 'query: my salary history',
     });
