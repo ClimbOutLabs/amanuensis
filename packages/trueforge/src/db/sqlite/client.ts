@@ -147,6 +147,7 @@ const JSON_RESULT_COLUMNS = new Set([
   'auth_data',
   'pinned_preferences',
   'tier2_auto_allow',
+  'shell_binding',
   'approval_grants',
   'task_checklist',
   'aliases',

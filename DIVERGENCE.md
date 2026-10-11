@@ -388,3 +388,17 @@ passed once its `pretest` build ran. Fixed at the root rather than per test:
   comment: "avoid adding an extra leading newline at file start"). Updated the two expectations.
 
 default mark, no custom icon or logo image).
+
+## Durable Sentinel approval tokens (resolution: merge)
+
+Approval tokens persist in an `approval_token` table (SQLite and Postgres) so a pending approval survives a restart and is redeemable on any replica. The Sentinel modules themselves are fork-only; these are the upstream-owned files that carry the wiring. Each edit is additive, so on a sync conflict keep upstream's side and re-apply the listed lines.
+
+| Path                                                         | What we added                                                                                                                          |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| packages/trueforge/src/main.ts                               | `approvalTokenStore` on `ServerPersistence` (SQLite and Postgres), and `createSentinelServices` replacing the inline services          |
+| packages/trueforge/src/db/sqlite/types.ts, postgres/types.ts | `ApprovalTokenTable` and its `Database` entry                                                                                          |
+| packages/trueforge/src/db/sqlite/client.ts                   | `shell_binding` in `JSON_RESULT_COLUMNS`                                                                                               |
+| packages/trueforge/src/db/postgres/schema.ts                 | `approval_token` in `TABLES_TO_MOVE`                                                                                                   |
+| packages/trueforge-core/src/core/index.ts                    | Exports for the approval token store contract and helpers                                                                              |
+| packages/trueforge-core/src/core/mcp/executeToolCalls.ts     | Awaits `verifyPreDispatch`, which is async now that redeem hits the database                                                           |
+| packages/trueforge/tests/fixtures/approvalTestServer.ts      | Builds the Sentinel services with `createSentinelServices` over the SQLite token store, so tokens are shared across turns and restarts |

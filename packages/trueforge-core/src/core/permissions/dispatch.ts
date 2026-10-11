@@ -158,7 +158,10 @@ function verifyTier2Containment(input: { call: VerifiableCall; workspace_root: s
  * command also gets a workspace-containment re-check; other Tier 1 calls and
  * relaxed Tier 2 pass through.
  */
-export function verifyPreDispatch(input: { call: VerifiableCall; ctx: DispatchCheckContext }): string | undefined {
+export async function verifyPreDispatch(input: {
+  call: VerifiableCall;
+  ctx: DispatchCheckContext;
+}): Promise<string | undefined> {
   const { call, ctx } = input;
   const { services } = ctx;
 
@@ -197,7 +200,11 @@ export function verifyPreDispatch(input: { call: VerifiableCall; ctx: DispatchCh
     // approval, so a missing token is a host bug. Fail closed.
     return 'Approval token missing for a Tier 3 action; request approval again.';
   }
-  const token: ApprovalToken | undefined = services.token_store.redeem({ token_id: tokenId });
+  const token: ApprovalToken | undefined = await services.token_store.redeem({
+    token_id: tokenId,
+    tenant_id: ctx.tenant_id,
+    created_by: ctx.created_by,
+  });
   if (token === undefined) {
     return 'Approval token is invalid or was already used; request approval again.';
   }

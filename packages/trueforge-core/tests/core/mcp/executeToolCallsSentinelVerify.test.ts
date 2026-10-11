@@ -19,6 +19,7 @@ import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp
 import { actionIdFor, toJsonSafeParams } from '../../../src/core/permissions/approvalTokens';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
+import { TEST_TOKEN_SCOPE, testApprovalOwner } from '../permissions/approvalTokenFixtures';
 
 function mockToolSet(): { toolSet: IToolSet; callTool: jest.Mock } {
   const callTool = jest.fn(() => Promise.resolve(toolResultResponse({ text: 'ok' })));
@@ -113,15 +114,17 @@ async function dispatchApproved(input: {
   };
 }
 
-function mintToken(input: {
+async function mintToken(input: {
   services: SentinelServices;
   tool_name: string;
   canonical_params: Record<string, unknown>;
-}): string {
-  return input.services.token_store.mint({
+}): Promise<string> {
+  const token = await input.services.token_store.mint({
+    ...testApprovalOwner(),
     action_id: actionIdFor({ tool_name: input.tool_name, canonical_params: input.canonical_params }),
     canonical_params: input.canonical_params,
-  }).token_id;
+  });
+  return token.token_id;
 }
 
 describe('executeToolCalls sentinel pre-dispatch: mint identity', () => {
@@ -130,7 +133,7 @@ describe('executeToolCalls sentinel pre-dispatch: mint identity', () => {
     const params = { command: 'ls -la' };
     // The sandbox mints over the invoked name ('exec') while
     // original_tool_name is remapped for display ('sandbox:exec').
-    const tokenId = mintToken({ services, tool_name: 'exec', canonical_params: params });
+    const tokenId = await mintToken({ services, tool_name: 'exec', canonical_params: params });
     const outcome = await dispatchApproved({
       services,
       wireName: 'test_tool',
@@ -148,7 +151,7 @@ describe('executeToolCalls sentinel pre-dispatch: mint identity', () => {
   test('falls back to original_tool_name when mint_tool_name is absent', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const params = { command: 'ls -la' };
-    const tokenId = mintToken({ services, tool_name: 'exec', canonical_params: params });
+    const tokenId = await mintToken({ services, tool_name: 'exec', canonical_params: params });
     const outcome = await dispatchApproved({
       services,
       wireName: 'test_tool',
@@ -165,7 +168,7 @@ describe('executeToolCalls sentinel pre-dispatch: mint identity', () => {
   test('fails closed when mint_tool_name does not match the minted identity', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const params = { command: 'ls -la' };
-    const tokenId = mintToken({ services, tool_name: 'exec', canonical_params: params });
+    const tokenId = await mintToken({ services, tool_name: 'exec', canonical_params: params });
     const outcome = await dispatchApproved({
       services,
       wireName: 'test_tool',
@@ -196,7 +199,7 @@ describe('executeToolCalls sentinel pre-dispatch: mint_canonical_params', () => 
     };
     const liveRecord: Record<string, unknown> = { ...liveParams };
     const normalized = toJsonSafeParams(liveRecord);
-    const tokenId = mintToken({ services, tool_name: 'apply_patch', canonical_params: normalized });
+    const tokenId = await mintToken({ services, tool_name: 'apply_patch', canonical_params: normalized });
     const wireForm: Record<string, unknown> = JSON.parse(JSON.stringify(liveParams));
     const outcome = await dispatchApproved({
       services,
@@ -216,7 +219,7 @@ describe('executeToolCalls sentinel pre-dispatch: mint_canonical_params', () => 
   test('mint_canonical_params takes precedence over the wire arguments', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const params = { path: '/a' };
-    const tokenId = mintToken({ services, tool_name: 'apply_patch', canonical_params: params });
+    const tokenId = await mintToken({ services, tool_name: 'apply_patch', canonical_params: params });
     // The recorded mint params differ from both the token and the wire
     // args: verification must hash the recorded values and fail.
     const outcome = await dispatchApproved({
@@ -263,7 +266,7 @@ describe('executeToolCalls sentinel pre-dispatch: Tier 2', () => {
 
   test('an approved Tier 2 call redeems its token and runs', async () => {
     const { services, records } = servicesWithAudit();
-    const tokenId = mintToken({ services, tool_name: 'write_file', canonical_params: params });
+    const tokenId = await mintToken({ services, tool_name: 'write_file', canonical_params: params });
     const outcome = await dispatchApproved({
       services,
       wireName: 'test_tool',
@@ -271,13 +274,17 @@ describe('executeToolCalls sentinel pre-dispatch: Tier 2', () => {
       toolInfo: { original_tool_name: 'write_file', tier: 2, tier3_card: TIER2_CARD, approval_token_id: tokenId },
     });
     expect(outcome.executed).toBe(true);
-    expect(services.token_store.redeem({ token_id: tokenId })).toBeUndefined();
+    expect(await services.token_store.redeem({ ...TEST_TOKEN_SCOPE, token_id: tokenId })).toBeUndefined();
     expect(records.map(record => [record.tier, record.outcome])).toEqual([[2, 'approved']]);
   });
 
   test('a token minted for other params is rejected', async () => {
     const { services } = servicesWithAudit();
-    const tokenId = mintToken({ services, tool_name: 'write_file', canonical_params: { ...params, content: 'y' } });
+    const tokenId = await mintToken({
+      services,
+      tool_name: 'write_file',
+      canonical_params: { ...params, content: 'y' },
+    });
     const outcome = await dispatchApproved({
       services,
       wireName: 'test_tool',
@@ -291,7 +298,7 @@ describe('executeToolCalls sentinel pre-dispatch: Tier 2', () => {
 
   test('a reused token is rejected', async () => {
     const { services } = servicesWithAudit();
-    const tokenId = mintToken({ services, tool_name: 'write_file', canonical_params: params });
+    const tokenId = await mintToken({ services, tool_name: 'write_file', canonical_params: params });
     const toolInfo = {
       original_tool_name: 'write_file',
       tier: 2 as const,
@@ -307,7 +314,7 @@ describe('executeToolCalls sentinel pre-dispatch: Tier 2', () => {
 
   test('a denied Tier 2 call does not run and keeps its token unredeemed', async () => {
     const { services, records } = servicesWithAudit();
-    const tokenId = mintToken({ services, tool_name: 'write_file', canonical_params: params });
+    const tokenId = await mintToken({ services, tool_name: 'write_file', canonical_params: params });
     const outcome = await dispatchApproved({
       services,
       decision: { status: 'deny', reason: 'no' },
@@ -317,7 +324,7 @@ describe('executeToolCalls sentinel pre-dispatch: Tier 2', () => {
     });
     expect(outcome.disposition).toBe('denied');
     expect(outcome.executed).toBe(false);
-    expect(services.token_store.peek({ token_id: tokenId })).toBeDefined();
+    expect(await services.token_store.peek({ ...TEST_TOKEN_SCOPE, token_id: tokenId })).toBeDefined();
     expect(records.map(record => [record.tier, record.outcome])).toEqual([[2, 'denied']]);
   });
 
@@ -391,7 +398,7 @@ describe('executeToolCalls sentinel pre-dispatch: deferred call_tool', () => {
     const innerInput = { path: '/etc/hosts' };
     // Mint classified the underlying tool (DeferredTool.toolCallInfo
     // unwraps call_tool), so the token covers the inner input.
-    const tokenId = mintToken({ services, tool_name: 'read_file', canonical_params: innerInput });
+    const tokenId = await mintToken({ services, tool_name: 'read_file', canonical_params: innerInput });
     const outcome = await dispatchApproved({
       services,
       wireName: 'test_tool',
@@ -411,7 +418,7 @@ describe('executeToolCalls sentinel pre-dispatch: deferred call_tool', () => {
     const wrapperArgs = { mcp_server: 'fs', tool_name: 'read_file', input: { path: '/etc/hosts' } };
     // When the wrapper did not parse at mint, classification covered
     // call_tool itself; the verifier must not unwrap.
-    const tokenId = mintToken({ services, tool_name: 'call_tool', canonical_params: wrapperArgs });
+    const tokenId = await mintToken({ services, tool_name: 'call_tool', canonical_params: wrapperArgs });
     const outcome = await dispatchApproved({
       services,
       wireName: 'test_tool',
@@ -431,7 +438,7 @@ describe('executeToolCalls sentinel pre-dispatch: deferred call_tool', () => {
     // Mint unwrapped to the underlying tool, but the wire args no longer
     // parse as a wrapper: tryUnwrapCallToolInput returns undefined and the
     // verifier hashes the wrapper, which must not match the minted token.
-    const tokenId = mintToken({ services, tool_name: 'read_file', canonical_params: { path: '/x' } });
+    const tokenId = await mintToken({ services, tool_name: 'read_file', canonical_params: { path: '/x' } });
     const outcome = await dispatchApproved({
       services,
       wireName: 'test_tool',
