@@ -1757,6 +1757,27 @@
         ],
         "type": "object"
       },
+      "CreateKnowledgeDocumentRequest": {
+        "discriminator": {
+          "mapping": {
+            "text": "#/components/schemas/KnowledgeDocumentTextRequest",
+            "upload": "#/components/schemas/KnowledgeDocumentUploadRequest",
+            "url": "#/components/schemas/KnowledgeDocumentUrlRequest"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/KnowledgeDocumentUploadRequest"
+          },
+          {
+            "$ref": "#/components/schemas/KnowledgeDocumentUrlRequest"
+          },
+          {
+            "$ref": "#/components/schemas/KnowledgeDocumentTextRequest"
+          }
+        ]
+      },
       "CreateMCPServerRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2102,6 +2123,10 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteKnowledgeDocumentResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteMCPServerResponse": {
         "properties": {},
         "type": "object"
@@ -2416,6 +2441,28 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CapabilitiesData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetKnowledgeDocumentResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PersonaKnowledgeDocument"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetKnowledgeEmbeddingModelResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/KnowledgeEmbeddingModel"
           }
         },
         "required": [
@@ -2966,18 +3013,15 @@
         "additionalProperties": false,
         "properties": {
           "approach": {
-            "maxLength": 4000,
             "minLength": 1,
             "type": "string"
           },
           "branch": {
-            "maxLength": 512,
             "minLength": 1,
             "type": "string"
           },
           "file_globs": {
             "items": {
-              "maxLength": 512,
               "minLength": 1,
               "type": "string"
             },
@@ -2991,7 +3035,6 @@
             "type": "string"
           },
           "repository_id": {
-            "maxLength": 256,
             "minLength": 1,
             "type": "string"
           },
@@ -3001,7 +3044,6 @@
           },
           "verify_command_ids": {
             "items": {
-              "maxLength": 256,
               "minLength": 1,
               "type": "string"
             },
@@ -3537,6 +3579,143 @@
         ],
         "type": "object"
       },
+      "KnowledgeDocumentStatus": {
+        "description": "Where the document is in the background indexing pipeline.",
+        "enum": [
+          "pending",
+          "parsing",
+          "indexing",
+          "ready",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "KnowledgeDocumentTextRequest": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "text"
+            ],
+            "type": "string"
+          },
+          "text": {
+            "description": "Text pasted directly into the library.",
+            "maxLength": 1000000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "description": "Title for the pasted text.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "text"
+        ],
+        "type": "object"
+      },
+      "KnowledgeDocumentUploadRequest": {
+        "properties": {
+          "content_base64": {
+            "description": "File bytes as base64 (max 15 MB decoded).",
+            "maxLength": 20971520,
+            "minLength": 1,
+            "type": "string"
+          },
+          "filename": {
+            "description": "Original file name, used to detect PDF, Word, text, or Markdown.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "upload"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "Shown instead of the file name.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "filename",
+          "content_base64"
+        ],
+        "type": "object"
+      },
+      "KnowledgeDocumentUrlRequest": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "url"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "Shown instead of the page title.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "description": "Public web page or PDF link; the page text is snapshotted at save time.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url"
+        ],
+        "type": "object"
+      },
+      "KnowledgeEmbeddingModel": {
+        "properties": {
+          "message": {
+            "description": "Plain-English explanation of the current state.",
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/KnowledgeEmbeddingPhase"
+          }
+        },
+        "required": [
+          "phase",
+          "message"
+        ],
+        "type": "object"
+      },
+      "KnowledgeEmbeddingPhase": {
+        "description": "State of the one-time search model download.",
+        "enum": [
+          "idle",
+          "loading",
+          "downloading",
+          "ready",
+          "unavailable"
+        ],
+        "type": "string"
+      },
+      "KnowledgeSourceKind": {
+        "description": "How the document entered the library: file upload, saved link, or pasted text.",
+        "enum": [
+          "upload",
+          "url",
+          "text"
+        ],
+        "type": "string"
+      },
       "LargeToolResponseConfig": {
         "default": {
           "enabled": true
@@ -3615,6 +3794,20 @@
           "data": {
             "items": {
               "$ref": "#/components/schemas/ImplementationPlanGrant"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ListKnowledgeDocumentsResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PersonaKnowledgeDocument"
             },
             "type": "array"
           }
@@ -6031,6 +6224,83 @@
           "persona_name",
           "model_name",
           "injected_context"
+        ],
+        "type": "object"
+      },
+      "PersonaKnowledgeDocument": {
+        "properties": {
+          "chunk_count": {
+            "description": "Searchable chunks once the document is ready.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": {
+            "description": "When the document was added (ISO 8601).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Stable knowledge document identifier.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/KnowledgeSourceKind"
+          },
+          "source_label": {
+            "description": "Human-readable origin: file name, link text, or \"Pasted text\".",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_url": {
+            "description": "Final link address, for saved links.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/KnowledgeDocumentStatus"
+          },
+          "status_message": {
+            "description": "Plain-English explanation when the document is paused or failed.",
+            "maxLength": 1024,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "description": "Title shown in the library and cited in answers.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title_explicit": {
+            "description": "True when the user supplied the title; false when it was defaulted from the source.",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "description": "Last status change (ISO 8601).",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "title_explicit",
+          "source_kind",
+          "source_label",
+          "source_url",
+          "status",
+          "status_message",
+          "chunk_count",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -8459,6 +8729,20 @@
               "null"
             ]
           },
+          "destination_host": {
+            "description": "Host of the connector server that receives the call, or null when it is not a remote server.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outbound_text": {
+            "description": "Exact arguments sent to a connector, one \"name: value\" line each, cut at 20000 characters, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "parsed_command": {
             "description": "Server-parsed command structure for shell actions, or null.",
             "type": [
@@ -8500,7 +8784,9 @@
           "destination",
           "recipient",
           "amount",
-          "parsed_command"
+          "parsed_command",
+          "outbound_text",
+          "destination_host"
         ],
         "type": "object"
       },
@@ -13869,6 +14155,16 @@
               }
             },
             "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such persona for this user."
           }
         },
         "summary": "Delete a persona",
@@ -14035,6 +14331,302 @@
           "personas"
         ],
         "x-fern-sdk-method-name": "get_context"
+      }
+    },
+    "/api/v1/personas/{persona_id}/knowledge": {
+      "get": {
+        "description": "Returns the documents in the persona’s knowledge library with their indexing status.",
+        "parameters": [
+          {
+            "description": "Stable persona identifier.",
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "description": "Stable persona identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListKnowledgeDocumentsResponse"
+                }
+              }
+            },
+            "description": "Knowledge documents."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such persona for this user."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The knowledge library storage is unavailable; the message is safe to show."
+          }
+        },
+        "summary": "List persona knowledge documents",
+        "tags": [
+          "Personas"
+        ],
+        "x-fern-sdk-group-name": [
+          "personas"
+        ],
+        "x-fern-sdk-method-name": "list_knowledge"
+      },
+      "post": {
+        "description": "Adds a file, saved link, or pasted text to the persona’s knowledge library. Indexing runs in the background; the document reports its status until it is searchable.",
+        "parameters": [
+          {
+            "description": "Stable persona identifier.",
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "description": "Stable persona identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateKnowledgeDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetKnowledgeDocumentResponse"
+                }
+              }
+            },
+            "description": "Created knowledge document."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid document: unsupported file type, bad link, or oversized payload."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such persona for this user."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The knowledge library storage is unavailable; the message is safe to show."
+          }
+        },
+        "summary": "Add a knowledge document",
+        "tags": [
+          "Personas"
+        ],
+        "x-fern-sdk-group-name": [
+          "personas"
+        ],
+        "x-fern-sdk-method-name": "create_knowledge"
+      }
+    },
+    "/api/v1/personas/{persona_id}/knowledge/embedding-model": {
+      "get": {
+        "description": "Reports the one-time search model download in plain English.",
+        "parameters": [
+          {
+            "description": "Stable persona identifier.",
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "description": "Stable persona identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetKnowledgeEmbeddingModelResponse"
+                }
+              }
+            },
+            "description": "Search model status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such persona for this user."
+          }
+        },
+        "summary": "Get the knowledge search model status",
+        "tags": [
+          "Personas"
+        ],
+        "x-fern-sdk-group-name": [
+          "personas"
+        ],
+        "x-fern-sdk-method-name": "get_knowledge_embedding_model"
+      }
+    },
+    "/api/v1/personas/{persona_id}/knowledge/{document_id}": {
+      "delete": {
+        "description": "Removes the document and all of its indexed chunks from the persona’s library.",
+        "parameters": [
+          {
+            "description": "Stable persona identifier.",
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "description": "Stable persona identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable knowledge document identifier.",
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "description": "Stable knowledge document identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteKnowledgeDocumentResponse"
+                }
+              }
+            },
+            "description": "Deleted."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such persona for this user."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The knowledge library storage is unavailable; the message is safe to show."
+          }
+        },
+        "summary": "Delete a knowledge document",
+        "tags": [
+          "Personas"
+        ],
+        "x-fern-sdk-group-name": [
+          "personas"
+        ],
+        "x-fern-sdk-method-name": "delete_knowledge"
       }
     },
     "/api/v1/repositories": {

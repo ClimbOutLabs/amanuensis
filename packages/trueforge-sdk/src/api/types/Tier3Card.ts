@@ -7,6 +7,10 @@ export interface Tier3Card {
     cannotBeUndone: string | null;
     /** Verifiable destination (URL, service name), or null. */
     destination: string | null;
+    /** Host of the connector server that receives the call, or null when it is not a remote server. */
+    destinationHost: string | null;
+    /** Exact arguments sent to a connector, one "name: value" line each, cut at 20000 characters, or null. */
+    outboundText: string | null;
     /** Server-parsed command structure for shell actions, or null. */
     parsedCommand: string | null;
     /** One plain-language sentence describing what will happen. No jargon. */

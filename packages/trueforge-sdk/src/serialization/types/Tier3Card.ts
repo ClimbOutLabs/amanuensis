@@ -8,6 +8,8 @@ export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Ra
         "amount": core.serialization.string().nullable(),
         "cannotBeUndone": core.serialization.property("cannot_be_undone", core.serialization.string().nullable()),
         "destination": core.serialization.string().nullable(),
+        "destinationHost": core.serialization.property("destination_host", core.serialization.string().nullable()),
+        "outboundText": core.serialization.property("outbound_text", core.serialization.string().nullable()),
         "parsedCommand": core.serialization.property("parsed_command", core.serialization.string().nullable()),
         "plainWhat": core.serialization.property("plain_what", core.serialization.string()),
         "plainWhy": core.serialization.property("plain_why", core.serialization.string().nullable()),
@@ -20,6 +22,8 @@ export declare namespace Tier3Card {
         amount?: string | null;
         cannot_be_undone?: string | null;
         destination?: string | null;
+        destination_host?: string | null;
+        outbound_text?: string | null;
         parsed_command?: string | null;
         plain_what: string;
         plain_why?: string | null;
