@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type {
@@ -55,6 +55,16 @@ class FakeDriver implements IsolationDriver {
   reapStale(): Promise<void> {
     this.reaped += 1;
     return Promise.resolve();
+  }
+
+  /** What isRunGone confirms; tests set false for a run whose container may still be alive. */
+  runsGone = true;
+
+  goneChecks: string[] = [];
+
+  isRunGone(runId: string): Promise<boolean> {
+    this.goneChecks.push(runId);
+    return Promise.resolve(this.runsGone);
   }
 
   dispose(): Promise<void> {
@@ -163,6 +173,42 @@ describe('RunCodeService', () => {
     }
   });
 
+  it('maps docker_unavailable readiness onto docker_unavailable with the exact message', async () => {
+    const message =
+      "I can't run code on this machine because Docker isn't available. To enable code execution, install Docker from https://docs.docker.com/engine/install/ and restart Aman.";
+    driver.readiness = { ready: false, error_code: 'docker_unavailable', error: message };
+    const result = await service.runCode(VALID_INPUT);
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error_code).toBe('docker_unavailable');
+      expect(result.error).toBe(message);
+    } else {
+      throw new Error('expected failure');
+    }
+    expect(driver.runs).toHaveLength(0);
+  });
+
+  it('maps the isolation-refused marker onto isolation_refused with the exact message', async () => {
+    const message = "I can't run this safely, the sandbox couldn't apply all isolation guarantees.";
+    driver.runBehavior = () =>
+      Promise.resolve({
+        exitCode: -1,
+        stdout: '',
+        stderr: '',
+        terminatedBy: 'internal' as const,
+        internalError: `isolation_refused:${message}`,
+        harvestWarnings: [],
+      });
+    const result = await service.runCode(VALID_INPUT);
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.error_code).toBe('isolation_refused');
+      expect(result.error).toBe(message);
+    } else {
+      throw new Error('expected failure');
+    }
+  });
+
   it('rejects with concurrency_exceeded when all slots are busy', async () => {
     const single = new RunCodeService({
       driver,
@@ -224,8 +270,162 @@ describe('RunCodeService', () => {
       PATH: '/usr/local/bin:/usr/bin:/bin',
       LANG: 'C.UTF-8',
       HOME: '/scratch',
+      USER: 'sandbox',
+      LOGNAME: 'sandbox',
       PIP_NO_INDEX: '1',
       npm_config_registry: 'http://127.0.0.1:1/',
+    });
+  });
+
+  describe('sandbox identity', () => {
+    const fsPromises: typeof import('node:fs/promises') = jest.requireActual('node:fs/promises');
+    let chownSpy: jest.SpyInstance;
+    let geteuidSpy: jest.SpyInstance;
+    let getegidSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      chownSpy = jest.spyOn(fsPromises, 'chown').mockResolvedValue(undefined);
+      geteuidSpy = jest.spyOn(process, 'geteuid');
+      getegidSpy = jest.spyOn(process, 'getegid');
+    });
+
+    afterEach(() => {
+      chownSpy.mockRestore();
+      geteuidSpy.mockRestore();
+      getegidSpy.mockRestore();
+    });
+
+    it('runs a non-root server as its own uid:gid without chowning anything', async () => {
+      geteuidSpy.mockReturnValue(4242);
+      getegidSpy.mockReturnValue(4343);
+      const result = await service.runCode(VALID_INPUT);
+      expect(result.status).toBe('ok');
+      expect(driver.runs[0]?.sandboxIdentity).toEqual({ uid: 4242, gid: 4343, chownRunDirs: false });
+      expect(chownSpy).not.toHaveBeenCalled();
+    });
+
+    it('hands every staged dir and file to the image sandbox uid when the server is root', async () => {
+      geteuidSpy.mockReturnValue(0);
+      getegidSpy.mockReturnValue(0);
+      const result = await service.runCode({
+        ...VALID_INPUT,
+        files_in: [{ name: 'data.csv', content_base64: Buffer.from('a,b').toString('base64') }],
+      });
+      expect(result.status).toBe('ok');
+      expect(driver.runs[0]?.sandboxIdentity).toEqual({ uid: 65532, gid: 65532, chownRunDirs: true });
+      const chowned = chownSpy.mock.calls.map(call => ({
+        name: basename(String(call[0])),
+        uid: call[1],
+        gid: call[2],
+      }));
+      expect(chowned.every(call => call.uid === 65532 && call.gid === 65532)).toBe(true);
+      expect(chowned.map(call => call.name)).toEqual(
+        expect.arrayContaining(['ingress', 'scratch', 'egress', 'data.csv', '__runcode_main.py']),
+      );
+    });
+
+    it('refuses to run a non-root server in group 0', async () => {
+      geteuidSpy.mockReturnValue(4242);
+      getegidSpy.mockReturnValue(0);
+      const result = await service.runCode(VALID_INPUT);
+      expect(result.status).toBe('failed');
+      if (result.status === 'failed') {
+        expect(result.error).toMatch(/gid 0/);
+      }
+      expect(driver.runs).toHaveLength(0);
+    });
+
+    it('fails the run before the container starts when the root handoff fails', async () => {
+      geteuidSpy.mockReturnValue(0);
+      getegidSpy.mockReturnValue(0);
+      chownSpy.mockRejectedValue(new Error(`EPERM: operation not permitted, chown '${dataDir}/sandbox-runs/x'`));
+      const result = await service.runCode(VALID_INPUT);
+      expect(result.status).toBe('failed');
+      if (result.status === 'failed') {
+        expect(result.error_code).toBe('internal');
+        expect(result.error).toMatch(/could not hand the run directories to sandbox uid 65532:65532/);
+        expect(result.error).not.toContain(dataDir);
+      }
+      expect(driver.runs).toHaveLength(0);
+      expect(await readdir(join(dataDir, 'sandbox-runs'))).toEqual([]);
+    });
+  });
+
+  it('removes the run root even when the program stripped its own permissions', async () => {
+    driver.runBehavior = async params => {
+      await mkdir(join(params.scratchDir, 'locked', 'inner'), { recursive: true });
+      await writeFile(join(params.scratchDir, 'locked', 'inner', 'f'), 'x');
+      await mkdir(join(params.egressDir, 'sealed'));
+      await writeFile(join(params.egressDir, 'sealed', 'g'), 'y');
+      await chmod(join(params.scratchDir, 'locked', 'inner'), 0o000);
+      await chmod(join(params.scratchDir, 'locked'), 0o000);
+      await chmod(join(params.egressDir, 'sealed'), 0o000);
+      return { ...OK_RESULT };
+    };
+    const result = await service.runCode(VALID_INPUT);
+    expect(result.status).toBe('ok');
+    expect(await readdir(join(dataDir, 'sandbox-runs'))).toEqual([]);
+  });
+
+  describe('restoring permissions before the run root is deleted', () => {
+    const fsPromises: typeof import('node:fs/promises') = jest.requireActual('node:fs/promises');
+    let chmodSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      chmodSpy = jest.spyOn(fsPromises, 'chmod');
+    });
+
+    afterEach(() => {
+      chmodSpy.mockRestore();
+    });
+
+    const stageStaleRun = async (): Promise<string> => {
+      const staleRun = join(dataDir, 'sandbox-runs', 'stalerun');
+      await mkdir(join(staleRun, 'scratch'), { recursive: true });
+      const twoHoursAgo = new Date(Date.now() - 2 * 3600 * 1000);
+      await utimes(staleRun, twoHoursAgo, twoHoursAgo);
+      return staleRun;
+    };
+
+    it('restores them once the driver confirms the run is gone', async () => {
+      const result = await service.runCode(VALID_INPUT);
+      expect(result.status).toBe('ok');
+      expect(chmodSpy).toHaveBeenCalled();
+      expect(await readdir(join(dataDir, 'sandbox-runs'))).toEqual([]);
+    });
+
+    it('leaves them alone, but still deletes, while the run may be alive', async () => {
+      driver.runsGone = false;
+      const result = await service.runCode(VALID_INPUT);
+      expect(result.status).toBe('ok');
+      expect(chmodSpy).not.toHaveBeenCalled();
+      expect(await readdir(join(dataDir, 'sandbox-runs'))).toEqual([]);
+    });
+
+    it('asks the driver about the run it is cleaning up', async () => {
+      await service.runCode(VALID_INPUT);
+      expect(driver.goneChecks).toEqual([driver.runs[0]?.runId]);
+    });
+
+    it('treats a driver that cannot answer as not gone', async () => {
+      driver.isRunGone = () => Promise.reject(new Error('daemon down'));
+      const result = await service.runCode(VALID_INPUT);
+      expect(result.status).toBe('ok');
+      expect(chmodSpy).not.toHaveBeenCalled();
+    });
+
+    it('sweeps a stale run dir without restoring while the run may be alive', async () => {
+      const staleRun = await stageStaleRun();
+      driver.runsGone = false;
+      await service.reap();
+      expect(chmodSpy).not.toHaveBeenCalled();
+      await expect(readdir(staleRun)).rejects.toThrow();
+    });
+
+    it('sweeps a stale run dir with restoring once the run is gone', async () => {
+      const staleRun = await stageStaleRun();
+      await service.reap();
+      expect(chmodSpy).toHaveBeenCalledWith(staleRun, expect.anything());
     });
   });
 

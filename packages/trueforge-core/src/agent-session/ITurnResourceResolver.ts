@@ -3,6 +3,7 @@ import type { AgentCapability } from '../core/capabilities/AgentCapability';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
 import type { ModelMessageEvent } from '../core/events/schema';
 import type { ILLM } from '../core/llm/ILLM';
+import type { SentinelHostContext } from '../core/permissions';
 import type { AgentDefinition, ModelParams } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
 import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
@@ -107,6 +108,8 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
     turn_id: string;
     signal: AbortSignal;
     tracing: AgentTracing;
+    /** Session-scoped Sentinel context; sandbox approvals must use the session's services. */
+    sentinel: SentinelHostContext;
   }): Promise<Sandbox | undefined>;
   /**
    * Called once per thread (rebuild or live sub-agent spawn); calls for different

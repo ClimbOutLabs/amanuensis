@@ -92,7 +92,7 @@ async function resolveWithJudge(judge: KnowledgeRelevanceJudge | undefined) {
     { text: 'Negotiations took three months.', title: 'Exit story' },
   ]);
   const sourceState = createInternalSourceState();
-  const block = await resolvePersonaKnowledgeBlock({
+  const result = await resolvePersonaKnowledgeBlock({
     personaId: 'zara',
     tenantId: 'default',
     turnInput: [userMessage(QUESTION)],
@@ -102,7 +102,7 @@ async function resolveWithJudge(judge: KnowledgeRelevanceJudge | undefined) {
     judge,
     sourceState,
   });
-  return { block, sourceState };
+  return { block: result?.block, sourceState };
 }
 
 describe('resolvePersonaKnowledgeBlock near-miss wiring', () => {

@@ -1,8 +1,13 @@
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   extractExecutedFileOperand,
   InMemoryTrackedExecutableStore,
+  isGitControlPath,
   observeShellCreatedFiles,
   skipWrapperPrefix,
+  writeTargetTouchesGitControl,
 } from '../../../src/core/permissions/trackedExecutables';
 
 const SCOPE = {
@@ -82,5 +87,46 @@ describe('observeShellCreatedFiles', () => {
 
   test('returns nothing for read-only commands', () => {
     expect(observeShellCreatedFiles({ command: 'ls -la' })).toEqual([]);
+  });
+});
+
+describe('isGitControlPath', () => {
+  test.each([
+    '.git/config',
+    'sub/.git/hooks/pre-commit',
+    '.GIT/config',
+    '.git./config',
+    'GIT~1/config',
+    'GITMOD~1',
+    'sub/gitatt~1',
+    '.gitattributes',
+    'a/b/.gitattributes',
+    '.gitmodules',
+    '.GitModules',
+  ])('flags %s', p => {
+    expect(isGitControlPath(p)).toBe(true);
+  });
+
+  test.each(['src/index.ts', '.gitignore', 'git/notes.md', 'a.git/x', '.github/workflows/ci.yml'])('allows %s', p => {
+    expect(isGitControlPath(p)).toBe(false);
+  });
+});
+
+describe('writeTargetTouchesGitControl', () => {
+  test('follows a symlinked directory or file into .git', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sentinel-gitctl-'));
+    try {
+      mkdirSync(join(ws, '.git'));
+      symlinkSync(join(ws, '.git'), join(ws, 'link'));
+      writeFileSync(join(ws, '.git', 'config'), '');
+      symlinkSync(join(ws, '.git', 'config'), join(ws, 'notes.txt'));
+      symlinkSync(join(ws, 'missing-target'), join(ws, 'dangling.txt'));
+      expect(writeTargetTouchesGitControl({ p: 'link/config', cwd: ws })).toBe(true);
+      expect(writeTargetTouchesGitControl({ p: 'notes.txt', cwd: ws })).toBe(true);
+      expect(writeTargetTouchesGitControl({ p: 'dangling.txt', cwd: ws })).toBe(true);
+      expect(writeTargetTouchesGitControl({ p: 'plain.txt', cwd: ws })).toBe(false);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
   });
 });

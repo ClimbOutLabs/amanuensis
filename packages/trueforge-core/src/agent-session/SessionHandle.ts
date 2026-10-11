@@ -330,6 +330,7 @@ export class SessionHandle<
         turn_id: input.turn_id,
         signal: input.signal,
         tracing,
+        sentinel: this.createSentinelContext(),
       });
 
       const definitionsByThreadId = await this.resolveAgentDefinitions({

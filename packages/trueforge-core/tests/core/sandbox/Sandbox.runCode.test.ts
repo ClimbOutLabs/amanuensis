@@ -3,7 +3,12 @@ import { createToolCallMemoState, executeToolCalls, type ToolCallResult } from '
 import type { RunCodeResult } from '../../../src/core/sandbox/driver/RunCodeSchemas';
 import type { RunCodeBackend, RunCodeCallOptions } from '../../../src/core/sandbox/driver/RunCodeService';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
-import { Sandbox, SANDBOX_EXEC_TOOL_NAME, SANDBOX_RUN_CODE_TOOL_NAME } from '../../../src/core/sandbox/Sandbox';
+import {
+  Sandbox,
+  SANDBOX_EXEC_TOOL_NAME,
+  SANDBOX_RUN_CODE_DESCRIPTION,
+  SANDBOX_RUN_CODE_TOOL_NAME,
+} from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 
@@ -142,6 +147,12 @@ function okRunCodeResult(): RunCodeResult {
 }
 
 describe('Sandbox run_code tool', () => {
+  it('words the failure guidance in plain punctuation, with no em dashes', () => {
+    const guidance = SANDBOX_RUN_CODE_DESCRIPTION.split('\n').find(line => line.startsWith('If run_code fails'));
+    expect(guidance).toBeDefined();
+    expect(guidance).not.toContain('\u2014');
+  });
+
   it('registers run_code and dispatches to the RunCodeService', async () => {
     const { service, runCode } = makeRunCodeService(async () => okRunCodeResult());
     const sandbox = makeSandbox(makeProvider(), service);
@@ -227,6 +238,16 @@ describe('Sandbox run_code tool', () => {
     expect(runCodeTool?.description).toContain('/ingress');
     expect(runCodeTool?.description).toContain('- notes.txt (5 bytes)');
     expect(runCodeTool?.description).toContain('do NOT re-upload via files_in');
+  });
+
+  it('tells the model to relay a failure verbatim with its links and never predict output', () => {
+    const { service } = makeRunCodeService();
+    const sandbox = makeSandbox(makeProvider(), service);
+
+    const runCodeTool = sandbox.listToolsForTest().find(tool => tool.name === SANDBOX_RUN_CODE_TOOL_NAME);
+
+    expect(runCodeTool?.description).toContain('quote the error text exactly as returned, including any links');
+    expect(runCodeTool?.description).toContain('NEVER state or predict what it would have printed');
   });
 
   it('removes the attachment from the ingress list when the upload is rolled back', async () => {

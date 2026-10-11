@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  gitLocalConfigIsSafe,
+  hardenAllowlistedGit,
   hashArgv,
   matchAllowlist,
   OFFLINE_SHELL_COMMANDS,
@@ -9,6 +11,7 @@ import {
   resolveOnPinnedPath,
   seedShellAllowlist,
   validateOfflineSubset,
+  type HardenedGitInvocation,
   type ShellAllowlistConfig,
 } from '../../../src/core/permissions/shellAllowlist';
 
@@ -26,7 +29,7 @@ function tempConfig(): { config: ShellAllowlistConfig; cleanup: () => void } {
   const config: ShellAllowlistConfig = {
     pinned_path: dir,
     commands: {
-      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true },
+      mycmd: { args: ['-l'], operands: 'workspace_relative', offline_ok: true, subcommands: null },
     },
   };
   return { config, cleanup };
@@ -199,6 +202,222 @@ describe('matchAllowlist', () => {
     } finally {
       cleanup();
     }
+  });
+});
+
+describe('matchAllowlist for seeded git', () => {
+  const allowed = [
+    'git status',
+    'git status --short --branch',
+    'git log --oneline -n 5',
+    'git log --oneline -- src/index.ts',
+    'git diff',
+    'git diff --cached --stat',
+    'git diff --no-ext-diff HEAD',
+    'git show HEAD',
+    'git show --no-patch HEAD',
+    'git branch',
+    'git branch --list',
+    'git branch -a -v',
+    'git rev-parse --show-toplevel',
+    'git rev-parse HEAD',
+    'git ls-files',
+    'git ls-files --others --exclude-standard',
+    'git blame src/index.ts',
+  ];
+  const rejected = [
+    'git push origin main',
+    'git pull',
+    'git fetch',
+    'git clone https://example.com/r.git',
+    'git remote add origin https://example.com/r.git',
+    'git remote -v',
+    'git submodule update --init',
+    'git config core.fsmonitor "sh x.sh"',
+    'git config alias.x "!sh x.sh"',
+    'git config --get user.name',
+    'git x',
+    'git constructor',
+    'git __proto__',
+    'git "!sh x.sh"',
+    'git status "!sh x.sh"',
+    'git -c alias.x=!sh status',
+    'git -c core.fsmonitor=x status',
+    'git -calias.x=!sh x',
+    'git --config-env=alias.x=VAR x',
+    'git --exec-path=. status',
+    'git --exec-path status',
+    'git -C . status',
+    'git --git-dir=.git status',
+    'git --no-pager status',
+    'git',
+    'git branch newbranch',
+    'git branch -D main',
+    'git branch --delete main',
+    'git branch -m old new',
+    'git checkout main',
+    'git commit -m x',
+    'git reset --hard',
+    'git ls-remote',
+    'git diff --output=out.txt',
+    'git diff --ext-diff',
+    'git log --output=out.txt',
+    'git show --textconv HEAD',
+    'git ls-files --exclude-from=x',
+    'git status --upload-pack=x',
+  ];
+
+  function matches(command: string, config: ShellAllowlistConfig): boolean {
+    const parsed = parseSimpleCommand(command);
+    return parsed !== undefined && matchAllowlist(parsed, config) !== undefined;
+  }
+
+  test.each(allowed)('accepts %s', command => {
+    const { dir, cleanup } = tempBin('git');
+    try {
+      expect(matches(command, seedShellAllowlist(dir))).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test.each(rejected)('rejects %s', command => {
+    const { dir, cleanup } = tempBin('git');
+    try {
+      expect(matches(command, seedShellAllowlist(dir))).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe('hardenAllowlistedGit', () => {
+  const hardening = [
+    '--no-pager',
+    '--no-optional-locks',
+    '-c',
+    'safe.directory=/ws',
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    'core.hooksPath=/dev/null',
+    '-c',
+    'core.sshCommand=',
+    '-c',
+    'diff.external=',
+    '-c',
+    'diff.ignoreSubmodules=all',
+    '-c',
+    'submodule.recurse=false',
+    '-c',
+    'status.submoduleSummary=false',
+  ];
+
+  function harden(command: string): HardenedGitInvocation | undefined {
+    const { dir, cleanup } = tempBin('git');
+    try {
+      return hardenAllowlistedGit({ command, config: seedShellAllowlist(dir), workspace_root: '/ws' });
+    } finally {
+      cleanup();
+    }
+  }
+
+  test('prepends global overrides and the subcommand forced flags', () => {
+    expect(harden('git status --short')?.argv).toEqual([
+      'git',
+      ...hardening,
+      'status',
+      '--ignore-submodules=all',
+      '--short',
+    ]);
+    expect(harden('git diff --cached src')?.argv).toEqual([
+      'git',
+      ...hardening,
+      'diff',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--ignore-submodules=all',
+      '--cached',
+      'src',
+    ]);
+    expect(harden('git blame f.txt')?.argv).toEqual(['git', ...hardening, 'blame', '--no-textconv', 'f.txt']);
+  });
+
+  test('isolates system and global config and builds a local-config probe', () => {
+    const hardened = harden('git status');
+    expect(hardened?.env).toEqual({
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_COUNT: '0',
+      GIT_CONFIG_PARAMETERS: '',
+      GIT_ATTR_NOSYSTEM: '1',
+    });
+    expect(hardened?.probe_argv).toEqual([
+      'git',
+      ...hardening,
+      'config',
+      '--local',
+      '--no-includes',
+      '--list',
+      '--name-only',
+    ]);
+  });
+
+  test('keeps the nice wrapper in front', () => {
+    expect(harden('nice git status')?.argv.slice(0, 2)).toEqual(['nice', 'git']);
+  });
+
+  test('leaves non-allowlisted and non-git commands alone', () => {
+    expect(harden('git push origin main')).toBeUndefined();
+    expect(harden('git -c core.fsmonitor=x status')).toBeUndefined();
+    expect(harden('ls -l')).toBeUndefined();
+  });
+});
+
+describe('gitLocalConfigIsSafe', () => {
+  test('accepts only the known-safe key set', () => {
+    const safe = [
+      'core.repositoryformatversion',
+      'core.filemode',
+      'core.bare',
+      'core.logallrefupdates',
+      'core.ignorecase',
+      'core.precomposeunicode',
+      'core.symlinks',
+      'remote.origin.url',
+      'remote.my.org.fetch',
+      'branch.main.remote',
+      'branch.feature/x.merge',
+      'user.name',
+      'user.email',
+      'init.defaultbranch',
+    ];
+    expect(gitLocalConfigIsSafe(safe.join('\n'))).toBe(true);
+    expect(gitLocalConfigIsSafe('')).toBe(true);
+  });
+
+  test.each([
+    'core.fsmonitor',
+    'core.pager',
+    'core.hookspath',
+    'core.alternaterefscommand',
+    'core.sshcommand',
+    'filter.x.clean',
+    'filter.x.smudge',
+    'filter.x.process',
+    'diff.external',
+    'diff.evil.textconv',
+    'gpg.program',
+    'log.showsignature',
+    'include.path',
+    'includeif.gitdir:/x.path',
+    'extensions.worktreeconfig',
+    'alias.x',
+    'remote.origin.vcs',
+    'remote.origin.pushurl',
+    'url.x.insteadof',
+  ])('rejects %s even among safe keys', key => {
+    expect(gitLocalConfigIsSafe(`core.filemode\n${key}\nuser.name`)).toBe(false);
   });
 });
 

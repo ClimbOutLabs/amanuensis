@@ -14,6 +14,11 @@ import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '
 import { getEmptyUsage } from '../../src/core/llm/LLMTypes';
 import { toolResultResponse } from '../../src/core/mcp/IMCPServer';
 import { RemoteMCP } from '../../src/core/mcp/RemoteMCP';
+import {
+  DEFAULT_PINNED_PATH,
+  defaultSentinelServices,
+  type SentinelHostContext,
+} from '../../src/core/permissions/context';
 import { InternalEventType } from '../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../src/core/runtime/contextUsage';
 import { withTimeout } from '../../src/core/util/promiseUtils';
@@ -1894,5 +1899,57 @@ describe('TurnResourceResolver caches', () => {
     expect(constructionRefresh).toBeLessThan(requestRefresh);
     const stored = await store.getTurn({ session_id: 's', turn_id: turn.id });
     expect(stored?.snapshot.sandbox_info).toEqual({ sandbox_id: 'v1:test:bound-sandbox' });
+  });
+
+  it('hands the session Sentinel services to the sandbox factory', async () => {
+    // Approval tokens are minted and verified against these services; a sandbox
+    // built with any other instance rejects every approved call.
+    const sandbox = makeStubPublicSandbox();
+    jest.spyOn(sandbox, 'close').mockResolvedValue(undefined);
+    const sentinelServices = defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH });
+    const received: SentinelHostContext[] = [];
+    const resolver = new TurnResourceResolver({
+      llm: () =>
+        Promise.resolve({
+          modelClient: makeMockILLM({ create: jest.fn().mockImplementation(() => emptyLlmStream()) }),
+          defaultModelParams: {},
+          modelId: undefined,
+          modelSupportsVision: false,
+        }),
+      mcp: () => Promise.resolve({ url: 'http://localhost' }),
+      mcpRequestTimeoutMs: 60_000,
+      mcpConnectTimeoutMs: 5_000,
+      sandboxProvider: input => {
+        received.push(input.sentinel);
+        return Promise.resolve(sandbox);
+      },
+      logger: makeSilentLogger(),
+    });
+    const sessions = new Sessions({ sessionStore: new InMemorySessionStore(), sentinelServices });
+    const session = await sessions.create({
+      tenant_id: 't',
+      session_id: 's',
+      created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+      agent: {
+        type: 'inline',
+        spec: makeAgentSpec({ config: { sandbox: { enabled: true, file_downloads: true } } }),
+      },
+      external_id: null,
+    });
+    const turn = await session.createTurn({
+      turn_id: mintTestTurnId(),
+      input: [{ type: EventType.USER_MESSAGE, content: 'hi' }],
+      previous_turn_id: 'none',
+      signal: new AbortController().signal,
+      resolver,
+    });
+    for await (const event of turn.stream()) {
+      void event;
+    }
+    expect(received).toHaveLength(1);
+    expect(received[0]?.services).toBe(sentinelServices);
+    expect(received[0]?.tenant_id).toBe('t');
+    expect(received[0]?.created_by).toBe('user-1');
+    expect(received[0]?.conversation_id).toBe('s');
   });
 });
