@@ -1,5 +1,6 @@
 'use client';
 
+import { toolInvocationRawId } from '@truefoundry/assistant-ui-runtime';
 import {
   createContext,
   useCallback,
@@ -84,10 +85,11 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
   const undoNotice = useCallback(
     async (toolCallId: string) => {
       if (api == null || sessionId == null) return;
-      const notice = notices.get(toolCallId);
+      const rawId = toolInvocationRawId(toolCallId);
+      const notice = notices.get(rawId);
       await api.undoTier2Action({
         sessionId,
-        noticeId: notice?.notice_id ?? toolCallId,
+        noticeId: notice?.notice_id ?? rawId,
       });
     },
     [api, sessionId, notices],
@@ -96,10 +98,11 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
   const stopNotice = useCallback(
     async (toolCallId: string) => {
       if (api == null || sessionId == null) return;
-      const notice = notices.get(toolCallId);
+      const rawId = toolInvocationRawId(toolCallId);
+      const notice = notices.get(rawId);
       await api.stopTier2Action({
         sessionId,
-        noticeId: notice?.notice_id ?? toolCallId,
+        noticeId: notice?.notice_id ?? rawId,
       });
     },
     [api, sessionId, notices],
@@ -107,8 +110,9 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
 
   const state = useMemo<SentinelState>(
     () => ({
-      approvalFor: toolCallId => approvals.get(toolCallId),
-      noticeFor: toolCallId => notices.get(toolCallId),
+      // Entries are keyed by the server tool call id; chat parts pass the runtime's invocation key.
+      approvalFor: toolCallId => approvals.get(toolInvocationRawId(toolCallId)),
+      noticeFor: toolCallId => notices.get(toolInvocationRawId(toolCallId)),
       undoNotice,
       stopNotice,
     }),

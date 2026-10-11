@@ -1,0 +1,9 @@
+{
+  "title": "Docker unavailable message test",
+  "turns": [
+    {
+      "user": "Use the run_code tool to run this Python code: print('hello-docker-test')"
+    }
+  ],
+  "shots": 2
+}

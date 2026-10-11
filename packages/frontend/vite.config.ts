@@ -77,6 +77,8 @@ export default defineConfig(({ command }) => ({
     port: PORT,
     // Fail if FRONTEND_PORT is taken — never silently hop to 3001/3010/etc.
     strictPort: true,
+    // Allow forcing IPv4 bind via VITE_HOST (buildbox needs 127.0.0.1).
+    host: process.env.VITE_HOST ?? 'localhost',
     // Proxy API routes (including /api/internal) to the Harness.
     proxy: { '/api': apiProxy },
   },
