@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import ConnectorDetails from '@/containers/SettingsBuilder/ConnectorDetails.js';
+import type { ConnectorToolGrants } from '@/server/connectorToolGrants.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { ConnectorBase, ToolBase } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
@@ -269,5 +270,79 @@ describe('ConnectorDetails OAuth connection', () => {
     expect(getToolsByConnectorId).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument();
+  });
+});
+
+describe('ConnectorDetails always-allowed tools', () => {
+  function renderWithGrants(grants: Partial<ConnectorToolGrants>) {
+    const server = createMockAgentUIServer({
+      catalog: createMockCatalog({
+        connectorCatalog: {
+          getConnectorCatalog: async () => [],
+          listConnectors: async () => [],
+          getConnector: async () => connector,
+          getToolsByConnectorId: async () => [{ id: 'tool-1', name: 'list_issues', description: 'Lists issues' }],
+          createConnector: async () => connector,
+          updateConnector: async () => connector,
+          authenticateConnector: async () => ({ authorization_endpoint: '' }),
+          disconnectConnector: async () => connector,
+          ...grants,
+        },
+      }),
+    });
+    return render(
+      <ServerProvider server={server}>
+        <ConnectorDetails
+          connector={connector}
+          onBack={() => {}}
+          onConnectorRefreshed={() => {}}
+          onEdit={() => {}}
+          onDisconnect={() => {}}
+        />
+      </ServerProvider>,
+    );
+  }
+
+  it('lists the always-allowed tools and revokes one', async () => {
+    const listToolGrants = vi.fn(async () => ['list_issues', 'get_issue']);
+    const revokeToolGrant = vi.fn(async () => {});
+    renderWithGrants({ listToolGrants, revokeToolGrant });
+
+    const revoke = await screen.findByRole('button', { name: 'Stop always allowing list_issues' });
+    expect(screen.getByRole('heading', { name: /Always allowed/ })).toBeInTheDocument();
+    expect(listToolGrants).toHaveBeenCalledWith({ id: connector.id });
+
+    fireEvent.click(revoke);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Stop always allowing list_issues' })).not.toBeInTheDocument();
+    });
+    expect(revokeToolGrant).toHaveBeenCalledWith({ id: connector.id, toolName: 'list_issues' });
+    expect(screen.getByRole('button', { name: 'Stop always allowing get_issue' })).toBeInTheDocument();
+  });
+
+  it('keeps the grant and shows why when revoking fails', async () => {
+    renderWithGrants({
+      listToolGrants: async () => ['list_issues'],
+      revokeToolGrant: async () => {
+        throw new Error('MCP server not found: Linear');
+      },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop always allowing list_issues' }));
+
+    expect(await screen.findByText('MCP server not found: Linear')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop always allowing list_issues' })).toBeInTheDocument();
+  });
+
+  it('shows no grant section when the catalog cannot report grants or none exist', async () => {
+    const { unmount } = renderWithGrants({});
+    expect(await screen.findByText('list_issues')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Always allowed/ })).not.toBeInTheDocument();
+    unmount();
+
+    renderWithGrants({ listToolGrants: async () => [], revokeToolGrant: async () => {} });
+    expect(await screen.findByText('list_issues')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Always allowed/ })).not.toBeInTheDocument();
   });
 });

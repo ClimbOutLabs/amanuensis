@@ -5,6 +5,12 @@
  *
  * The database lives in a temp directory rather than `:memory:` so `restart()` can
  * drop every in-process registry and reopen the same durable state.
+ *
+ * The `inert` connector is stored directly, like one a user added by URL. The first-party
+ * memory connector, when asked for, is registered through the real memory-provider setup
+ * (`POST /api/v1/settings/mcp-servers` with `memory_provider`), so the server itself marks it, and
+ * only because the fixture lists the inert server's origin as the operator would in
+ * `FIRST_PARTY_MCP_ORIGINS`. Without that option the list is empty and nothing is first-party.
  */
 import type { OpenAPIHono } from '@hono/zod-openapi';
 import { Sessions, type TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
@@ -23,7 +29,7 @@ import { McpCatalog } from '../../src/catalog/McpCatalog';
 import { ModelCatalog } from '../../src/catalog/ModelCatalog';
 import { SandboxCatalog } from '../../src/catalog/SandboxCatalog';
 import { SkillCatalog } from '../../src/catalog/SkillCatalog';
-import { TrueForgeAuthMode } from '../../src/config';
+import configuration, { TrueForgeAuthMode } from '../../src/config';
 import { McpServerWithAuthStore } from '../../src/db/McpServerWithAuthStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
@@ -33,6 +39,7 @@ import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-sto
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteMcpToolGrantStore } from '../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
@@ -57,6 +64,8 @@ export const MODEL_PROVIDER_NAME = 'scripted';
 export const MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-model`;
 /** A second configured model, so a test can prove which one a turn actually used. */
 export const ALT_MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-alt-model`;
+/** The inert server registered as the memory provider, when a test asks for it. */
+export const INERT_MEMORY_SERVER_NAME = 'inert-memory';
 
 type SqliteDb = ReturnType<typeof createSqliteDb>;
 
@@ -69,6 +78,8 @@ export interface ApprovalTestServer {
   model: ScriptedModelServer;
   /** A store bound to the current database — call fresh after `restart()`, never cache. */
   mcpServerStore: () => IMcpServerStore;
+  /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
+  setFirstPartyOrigins: (origins: string[]) => void;
   close: () => Promise<void>;
 }
 
@@ -92,11 +103,13 @@ function buildApp(input: {
   const globalSettingsStore = new SqliteGlobalSettingsStore(db);
   const sentinelAuditStore = new SentinelAuditStore(db);
   const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
+  const mcpToolGrantStore = new SqliteMcpToolGrantStore(db);
   // Same composition as main.ts, so approval tokens are durable and shared across turns.
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
+    toolGrants: mcpToolGrantStore,
   });
   return createServerApp({
     modelCatalog: ModelCatalog.load(),
@@ -105,6 +118,7 @@ function buildApp(input: {
     sandboxCatalog: SandboxCatalog.load(),
     withTransaction: callback => db.transaction().execute(callback),
     tokenStore,
+    mcpToolGrantStore,
     skillStore,
     sandboxProviderStore,
     sandboxProviderResolver: sandboxProvider === undefined ? undefined : () => Promise.resolve(sandboxProvider),
@@ -138,8 +152,30 @@ function buildApp(input: {
   });
 }
 
+/** Registers the inert server as the memory provider through the settings API, as a user would. */
+async function registerMemoryProvider({ app, mcp }: { app: OpenAPIHono; mcp: InertMcpServer }): Promise<void> {
+  const response = await app.request('/api/v1/settings/mcp-servers', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      manifest: {
+        type: 'remote',
+        name: INERT_MEMORY_SERVER_NAME,
+        url: mcp.memoryProviderUrl,
+        description: 'Inert connector registered as the memory provider.',
+        memory_provider: true,
+      },
+    }),
+  });
+  if (response.status !== 201) {
+    throw new Error(`memory provider setup failed (${String(response.status)}): ${await response.text()}`);
+  }
+}
+
 export async function startApprovalTestServer(options?: {
   sandboxProvider?: SandboxProvider | undefined;
+  /** Also register the inert server as the memory provider, which makes that connector first-party. */
+  memoryProvider?: boolean | undefined;
   /** Replaces the standalone authenticator, for tests that need distinct or unauthenticated callers. */
   authenticator?: Authenticator | undefined;
 }): Promise<ApprovalTestServer> {
@@ -202,9 +238,16 @@ export async function startApprovalTestServer(options?: {
       url: mcp.url,
       description: 'Inert connector used by approval-flow tests.',
     },
+    first_party: false,
   });
 
+  const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+  configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
+
   let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator });
+  if (options?.memoryProvider === true) {
+    await registerMemoryProvider({ app, mcp });
+  }
 
   return {
     // Hono's request() is sync-or-async depending on the route; the fixture
@@ -218,7 +261,11 @@ export async function startApprovalTestServer(options?: {
     mcp,
     model,
     mcpServerStore: () => new SqliteMcpServerStore(db),
+    setFirstPartyOrigins: origins => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = origins;
+    },
     close: async () => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
       await db.destroy();
       await model.close();
       await mcp.close();

@@ -14,6 +14,7 @@ import type { IModelProviderStore } from '../../../src/db/modelProviderStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
@@ -105,6 +106,7 @@ async function createRouters(): Promise<{
           clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
         }),
       tokenStore,
+      toolGrantStore: new SqliteMcpToolGrantStore(db),
       resolveSkillStore: () => new SqliteSkillStore(db),
       resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
