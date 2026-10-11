@@ -39,6 +39,12 @@ export function runCodeProgramPath(language: RunCodeLanguage): string {
   return `/ingress/${runCodeProgramName(language)}`;
 }
 
+/** The command that runs the staged program; the program is read from ingress, so argv size never limits it. */
+export function runCodeArgv(language: RunCodeLanguage): string[] {
+  const program = runCodeProgramPath(language);
+  return language === 'python' ? ['python3', program] : ['node', program];
+}
+
 /** Uid:gid the container runs as, plus whether staged run dirs must be handed to it. */
 export interface SandboxIdentity {
   uid: number;
@@ -48,7 +54,7 @@ export interface SandboxIdentity {
 }
 
 /** How a driver run ended, before the wrapper maps it onto the error taxonomy. */
-export type DriverTermination = 'completed' | 'timeout' | 'oom' | 'killed' | 'internal';
+export type DriverTermination = 'completed' | 'timeout' | 'oom' | 'killed' | 'disk' | 'internal';
 
 /** Finer cause behind a failure whose `error_code` is shared with other causes. */
 export type DriverReadinessReason = 'signature_unverified' | 'isolation_refused';
@@ -130,7 +136,7 @@ export interface DriverRunResult {
 }
 
 export interface IsolationDriver {
-  readonly kind: 'docker' | 'firecracker';
+  readonly kind: 'docker' | 'firecracker' | 'slots';
   /**
    * Idempotent readiness: image present and verified, daemon/KVM reachable. Never pulls the
    * image, but it is neither quick nor read-only: the Docker driver also creates and removes
