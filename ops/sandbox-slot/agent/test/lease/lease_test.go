@@ -123,9 +123,12 @@ func TestReclaimRemovesTheLargestFilesUntilWithinTheLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	files, freed := lease.Reclaim(dir, 250_000)
-	if files != 1 || freed < 400_000 {
-		t.Fatalf("removed %d files, %d bytes", files, freed)
+	got := lease.Reclaim(dir, 250_000)
+	if got.Files != 1 || got.Bytes < 400_000 || len(got.Paths) != 1 || got.Paths[0] != "big" {
+		t.Fatalf("removed %+v", got)
+	}
+	if notice := got.Notice(2048); !strings.Contains(notice, "2048 MB limit") || !strings.Contains(notice, "big") {
+		t.Fatalf("the notice must name the limit and the file: %q", notice)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "big")); !os.IsNotExist(err) {
 		t.Fatal("the largest file should go first")
@@ -133,7 +136,7 @@ func TestReclaimRemovesTheLargestFilesUntilWithinTheLimit(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "small")); err != nil {
 		t.Fatal("small files within the limit must stay")
 	}
-	if files, _ := lease.Reclaim(dir, 1<<30); files != 0 {
+	if got := lease.Reclaim(dir, 1<<30); got.Files != 0 || got.Notice(1) != "" {
 		t.Fatal("nothing to reclaim under the limit")
 	}
 }

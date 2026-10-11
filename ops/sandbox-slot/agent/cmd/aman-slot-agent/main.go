@@ -66,6 +66,10 @@ func main() {
 // platform has none.
 const quotaEnv = "AMAN_WORKSPACE_QUOTA_BYTES"
 
+// diskModeEnv says "vm" when Docker runs in a virtual machine whose disk bounds the workspaces, and "none"
+// otherwise; the quota variable above takes precedence.
+const diskModeEnv = "AMAN_WORKSPACE_DISK_MODE"
+
 func workspaceQuota() (int64, error) {
 	raw := os.Getenv(quotaEnv)
 	if raw == "" {
@@ -99,6 +103,7 @@ func run() error {
 		Workspace:    volumeDir,
 
 		WorkspaceQuotaBytes: quota,
+		ConfiguredDiskMode:  os.Getenv(diskModeEnv),
 		CanaryEvery:         canaryEvery,
 		Runsc: func() (string, error) {
 			out, code, err := rp.Output(runscPath, []string{runscPath, "--version"}, 10*time.Second)

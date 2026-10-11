@@ -64,6 +64,23 @@ function parseSandboxId(sandboxId: string): { slot: number; sessionId: string } 
   return { slot: Number.parseInt(slot, 10) - 1, sessionId };
 }
 
+/** Notices from the slot, set apart from the command's own output. */
+function noticeText(notices: readonly string[]): string {
+  return notices.length === 0 ? '' : `\n${notices.map(notice => `[sandbox] ${notice}`).join('\n')}\n`;
+}
+
+/** How many chats' full quotas a slot's own disk holds, keeping 1 GiB free; undefined when the disk is not the slot's own. */
+export function chatCapacity(input: {
+  facts: { disk_mode: string; workspace_bytes: number };
+  treeDiskMb: number;
+}): number | undefined {
+  if (input.facts.disk_mode !== 'hard' || input.facts.workspace_bytes <= 0) {
+    return undefined;
+  }
+  const usable = input.facts.workspace_bytes - 1024 * 1024 * 1024;
+  return Math.max(1, Math.floor(usable / (input.treeDiskMb * 1024 * 1024)));
+}
+
 const STORAGE_FULL_MESSAGE =
   'The sandbox storage is almost full, so nothing was run. Free some disk space on this machine, then try again.';
 
@@ -406,6 +423,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       })),
     );
     const problems: string[] = [];
+    const full: string[] = [];
     const usable: { index: number; sessions: number }[] = [];
     for (const { index, health } of probes) {
       if (!health.ok) {
@@ -414,7 +432,13 @@ export class SlotSandboxProvider implements SandboxProvider {
       }
       const problem = attestationProblem(health.value.attestation, Date.now());
       if (problem === undefined) {
-        usable.push({ index, sessions: health.value.sessions });
+        // On a slot with its own fixed disk the chats' quotas must fit, or one slot filling up fails for all its chats.
+        const capacity = chatCapacity({ facts: health.value.attestation.facts, treeDiskMb: this.treeDiskMb });
+        if (capacity !== undefined && health.value.sessions >= capacity) {
+          full.push(`slot ${String(index + 1)} holds ${String(capacity)} chats`);
+        } else {
+          usable.push({ index, sessions: health.value.sessions });
+        }
       } else {
         problems.push(`slot ${String(index + 1)} failed its checks (${problem})`);
       }
@@ -424,6 +448,12 @@ export class SlotSandboxProvider implements SandboxProvider {
     const chosen = emptiest[Math.floor(Math.random() * emptiest.length)];
     if (chosen !== undefined) {
       return { ok: true, index: chosen.index };
+    }
+    if (problems.length === 0 && full.length > 0) {
+      return {
+        ok: false,
+        reason: `The sandbox is full: every slot already holds as many chats as its disk fits (${full.join('; ')}). Delete old chats, then try again.`,
+      };
     }
     return {
       ok: false,
@@ -437,7 +467,10 @@ export class SlotSandboxProvider implements SandboxProvider {
     const withTail = (message: string): string => (tail === '' ? message : `${message}\nOutput so far:\n${tail}`);
     switch (response.terminated_by) {
       case 'completed':
-        return { success: true, response: { exitCode: response.exit_code, result: response.output } };
+        return {
+          success: true,
+          response: { exitCode: response.exit_code, result: `${response.output}${noticeText(response.notices)}` },
+        };
       case 'timeout':
         return {
           success: false,
@@ -448,7 +481,10 @@ export class SlotSandboxProvider implements SandboxProvider {
       case 'oom':
         return { success: false, error: withTail('The command ran out of memory and was stopped.') };
       case 'disk_exceeded':
-        return { success: false, error: withTail('The workspace reached its disk limit and the command was stopped.') };
+        return {
+          success: false,
+          error: `${withTail('The workspace reached its disk limit and the command was stopped.')}${noticeText(response.notices)}`,
+        };
       case 'output_exceeded':
         return { success: false, error: 'The command wrote too much output and was stopped. Narrow what it prints.' };
       case 'killed':

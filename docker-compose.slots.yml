@@ -29,6 +29,9 @@ x-sandbox-slot: &sandbox-slot
   pids_limit: 512
   cgroup: private
   ipc: private
+  environment:
+    # Declared by pnpm sandbox:slots: vm when Docker's virtual machine bounds the disk, otherwise none.
+    AMAN_WORKSPACE_DISK_MODE: ${AMAN_SLOTS_DISK_MODE:-none}
   healthcheck:
     test: ['CMD', '/usr/local/bin/aman-slot-agent', 'healthcheck']
     interval: 30s

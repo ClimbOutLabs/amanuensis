@@ -106,6 +106,7 @@ export class SlotDriver implements IsolationDriver {
   private readonly downUntil: number[];
   private readonly inFlight = new Set<AbortController>();
   private cursor = 0;
+  private readonly warnedNoDisk = new Set<number>();
 
   constructor(options: SlotDriverOptions) {
     this.clients = options.socketPaths.map(path => new SlotClient(path));
@@ -196,6 +197,14 @@ export class SlotDriver implements IsolationDriver {
       return { index: input.index, state: 'unreachable', detail: result.error.message };
     }
     const problem = attestationProblem(result.value.attestation, this.now());
+    if (
+      problem === undefined &&
+      result.value.attestation.facts.disk_mode === 'none' &&
+      !this.warnedNoDisk.has(input.index)
+    ) {
+      this.warnedNoDisk.add(input.index);
+      this.logger.warn('sandbox slot has no disk limit of its own', { slot: input.index + 1 });
+    }
     return problem === undefined
       ? { index: input.index, state: 'ok', detail: '' }
       : { index: input.index, state: 'refused', detail: problem };

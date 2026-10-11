@@ -276,3 +276,31 @@ func TestWorkspaceQuotaRequiresTheConfiguredDisk(t *testing.T) {
 		t.Fatalf("an unreadable workspace must fail: %+v", got)
 	}
 }
+
+func TestDiskModeIsReportedAndOnlyAHardLimitIsCalledHard(t *testing.T) {
+	w := newWorld(t)
+	c := w.collector()
+	c.Workspace = "/workspace"
+	c.Statfs = func(string) (int64, int64, error) { return 0xEF53, 5 * gib, nil }
+	cases := []struct {
+		name       string
+		quota      int64
+		configured string
+		want       string
+	}{
+		{"nothing declared", 0, "", "none"},
+		{"a virtual machine", 0, "vm", "vm"},
+		{"an unknown declaration is none", 0, "bogus", "none"},
+		{"a per-slot disk wins", 5 * gib, "vm", "hard"},
+	}
+	for _, tc := range cases {
+		c.WorkspaceQuotaBytes, c.ConfiguredDiskMode = tc.quota, tc.configured
+		r := c.Collect()
+		if r.Facts.DiskMode != tc.want {
+			t.Errorf("%s: disk_mode = %q, want %q", tc.name, r.Facts.DiskMode, tc.want)
+		}
+		if r.Facts.WorkspaceBytes != 5*gib {
+			t.Errorf("%s: workspace_bytes = %d", tc.name, r.Facts.WorkspaceBytes)
+		}
+	}
+}

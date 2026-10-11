@@ -259,3 +259,35 @@ describe('SlotDriver', () => {
     await expect(driver.provision()).rejects.toThrow('aman doctor sandbox --fix');
   });
 });
+
+describe('SlotDriver disk mode', () => {
+  const agents: FakeAgent[] = [];
+  afterEach(async () => {
+    await Promise.all(agents.splice(0).map(agent => agent.stop()));
+  });
+
+  async function readyWith(diskMode: 'hard' | 'vm' | 'none'): Promise<string[]> {
+    const logger = makeSilentLogger();
+    const warn = jest.spyOn(logger, 'warn');
+    const agent = new FakeAgent(() => ({
+      status: 200,
+      body: { busy: false, sessions: 0, attestation: attestation({ diskMode, workspaceBytes: 1024 }) },
+    }));
+    agents.push(agent);
+    const driver = new SlotDriver({
+      socketPaths: [await agent.start()],
+      logger,
+      now: undefined,
+      sleepMs: undefined,
+    });
+    await driver.ensureReady();
+    await driver.ensureReady();
+    return warn.mock.calls.map(call => String(call[0]));
+  }
+
+  test('warns once about a slot with no disk limit of its own, and not about a limited or VM-bounded one', async () => {
+    expect(await readyWith('none')).toEqual(['sandbox slot has no disk limit of its own']);
+    expect(await readyWith('hard')).toEqual([]);
+    expect(await readyWith('vm')).toEqual([]);
+  });
+});

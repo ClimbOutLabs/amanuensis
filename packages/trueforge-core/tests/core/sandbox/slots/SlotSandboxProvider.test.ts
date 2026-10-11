@@ -6,7 +6,7 @@ import {
   SandboxNotAvailableError,
   SandboxPathIsDirectoryError,
 } from '../../../../src/core/sandbox/SandboxErrors';
-import { SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
+import { chatCapacity, SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
 import { makeSilentLogger } from '../../harnessMocks';
 import { attestation, bodyOf, errorBody, FakeAgent, type FakeHandler } from './fakeAgent';
 
@@ -232,6 +232,65 @@ describe('SlotSandboxProvider', () => {
       'Failed to remove the sandbox workspace',
     );
     await expect(provider.destroySandbox({ sandboxId: 'tenant.1' })).rejects.toBeInstanceOf(SandboxNotAvailableError);
+  });
+
+  test('files the slot deleted to stay within the limit are reported in the command output', async () => {
+    const { provider } = await providerFor([
+      () => ({
+        status: 200,
+        body: execResponse({
+          output: 'built\n',
+          notices: ['The workspace went over its 2048 MB limit, so 1 file (3000 MB) were deleted: big.bin.'],
+        }),
+      }),
+    ]);
+    const result = await provider.exec({ sandboxId: `s1-${'f'.repeat(32)}`, command: 'make' });
+    expect(result).toEqual({
+      success: true,
+      response: {
+        exitCode: 0,
+        result:
+          'built\n\n[sandbox] The workspace went over its 2048 MB limit, so 1 file (3000 MB) were deleted: big.bin.\n',
+      },
+    });
+  });
+
+  describe('chats per slot with a disk of its own', () => {
+    const GIB = 1024 ** 3;
+    const hard =
+      (sessions: number, gib = 5): FakeHandler =>
+      () => ({
+        status: 200,
+        body: { busy: false, sessions, attestation: attestation({ diskMode: 'hard', workspaceBytes: gib * GIB }) },
+      });
+
+    test('a slot stops taking new chats when their quotas would no longer fit its disk', async () => {
+      // 5 GiB disk, 1 GiB kept free, 2 GiB per chat: two chats fit.
+      const { provider } = await providerFor([hard(2), hard(1)]);
+      expect((await provider.createSandbox()).sandboxId).toMatch(/^s2-/);
+    });
+
+    test('when every slot is at capacity the answer says to delete chats, not to run the doctor command', async () => {
+      const { provider } = await providerFor([hard(2), hard(2)]);
+      await expect(provider.createSandbox()).rejects.toThrow(/sandbox is full.*Delete old chats/);
+    });
+
+    test('a shared disk (Docker VM or none) is not capped by chats', async () => {
+      const shared =
+        (diskMode: 'vm' | 'none'): FakeHandler =>
+        () => ({
+          status: 200,
+          body: { busy: false, sessions: 50, attestation: attestation({ diskMode, workspaceBytes: 250 * GIB }) },
+        });
+      const { provider } = await providerFor([shared('vm'), shared('none')]);
+      await expect(provider.createSandbox()).resolves.toMatchObject({ sandboxId: expect.stringMatching(/^s[12]-/) });
+    });
+
+    test('capacity keeps 1 GiB free and never drops below one chat', () => {
+      expect(chatCapacity({ facts: { disk_mode: 'hard', workspace_bytes: 17 * GIB }, treeDiskMb: 2048 })).toBe(8);
+      expect(chatCapacity({ facts: { disk_mode: 'hard', workspace_bytes: 1 * GIB }, treeDiskMb: 2048 })).toBe(1);
+      expect(chatCapacity({ facts: { disk_mode: 'vm', workspace_bytes: 17 * GIB }, treeDiskMb: 2048 })).toBeUndefined();
+    });
   });
 
   test('Code Mode is refused', async () => {

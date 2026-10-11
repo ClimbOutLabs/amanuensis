@@ -71,6 +71,8 @@ export type SlotsResult =
       app_compose_file: string;
       disk: { mode: DiskMode; bytes: number | undefined };
       packs: PackName[];
+      /** Things that work but weaken the setup, to be shown to the person. */
+      warnings: string[];
     }
   | { ok: false; checks: SlotsCheck[]; step: SlotsStep; error: string; fix: string };
 
@@ -149,6 +151,7 @@ class Slots {
     const env: Record<string, string> = {
       [INSTANCE_ENV]: this.options.instance,
       AMAN_SLOTS_PACKS: this.packs.join(','),
+      AMAN_SLOTS_DISK_MODE: this.diskMode === 'vm' ? 'vm' : 'none',
     };
     if (this.disksReady && this.diskBytes !== undefined) {
       env['AMAN_SLOTS_DISK_DIR'] = diskRoot(this.options.instance);
@@ -199,6 +202,7 @@ class Slots {
       app_compose_file: join(this.options.repoRoot, APP_COMPOSE_FILE),
       disk: { mode: this.diskMode, bytes: this.diskBytes },
       packs: this.packs,
+      warnings: this.warnings(),
     };
   }
 
@@ -251,6 +255,15 @@ class Slots {
   }
 
   /** Linux with a native Docker engine can give each slot its own disk; a Docker VM already bounds the disk. */
+  private warnings(): string[] {
+    if (this.options.platform === 'linux' && this.diskMode === 'off') {
+      return [
+        "The slots have no disk of their own, so a runaway program could fill this machine's disk. Run pnpm sandbox:slots --fix to give each slot a fixed-size disk.",
+      ];
+    }
+    return [];
+  }
+
   private async detectDiskMode(): Promise<DiskMode> {
     if (!this.options.hardDiskLimit) {
       this.record({

@@ -26,7 +26,14 @@ export function bodyOf<T>(request: { body: unknown } | undefined, schema: z.ZodT
 }
 
 export function attestation(
-  overrides: { failing?: string[]; omitted?: string[]; checkedAt?: Date; duplicated?: string } = {},
+  overrides: {
+    failing?: string[];
+    omitted?: string[];
+    checkedAt?: Date;
+    duplicated?: string;
+    diskMode?: 'hard' | 'vm' | 'none';
+    workspaceBytes?: number;
+  } = {},
 ): SlotAttestation {
   const failing = new Set(overrides.failing ?? []);
   const omitted = new Set(overrides.omitted ?? []);
@@ -50,6 +57,8 @@ export function attestation(
       apparmor: 'none',
       runsc_version: SLOT_RUNSC_VERSION,
       platform: SLOT_PLATFORM,
+      disk_mode: overrides.diskMode ?? 'none',
+      workspace_bytes: overrides.workspaceBytes ?? 0,
     },
   };
 }

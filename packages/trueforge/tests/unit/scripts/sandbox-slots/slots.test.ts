@@ -134,7 +134,7 @@ describe('runSandboxSlots', () => {
     expect(compose.length).toBeGreaterThan(0);
     for (const entry of compose) {
       expect(entry.args).toEqual(expect.arrayContaining(['-p', 'lab-slots']));
-      expect(entry.env).toEqual({ AMAN_SLOTS_INSTANCE: 'lab', AMAN_SLOTS_PACKS: '' });
+      expect(entry.env).toEqual({ AMAN_SLOTS_INSTANCE: 'lab', AMAN_SLOTS_PACKS: '', AMAN_SLOTS_DISK_MODE: 'none' });
     }
   });
 
@@ -393,15 +393,19 @@ describe('the per-slot disks on a native Linux host', () => {
       true,
       linux,
     );
-    expect(wsl.result).toMatchObject({ ok: true, disk: { mode: 'vm' } });
+    expect(wsl.result).toMatchObject({ ok: true, disk: { mode: 'vm' }, warnings: [] });
+    expect(desktop.result).toMatchObject({ warnings: [] });
     for (const { calls } of [desktop, wsl]) {
       expect(calls.some(call => call.command === 'sudo' || call.command === 'findmnt')).toBe(false);
+      // The agents are told the VM bounds the disk, so their attestation reports it.
+      expect(calls.find(call => joined(call).includes('up -d'))?.env['AMAN_SLOTS_DISK_MODE']).toBe('vm');
     }
   });
 
-  test('--no-hard-disk-limit skips the disks', async () => {
+  test('--no-hard-disk-limit skips the disks and warns that the machine is unprotected', async () => {
     const { result, calls } = await run(host({ disks: false }), false, { ...linux, hardDiskLimit: false });
     expect(result).toMatchObject({ ok: true, disk: { mode: 'off' } });
+    expect(result.ok && result.warnings.join(' ')).toContain('pnpm sandbox:slots --fix');
     expect(calls.some(call => call.command === 'findmnt')).toBe(false);
   });
 

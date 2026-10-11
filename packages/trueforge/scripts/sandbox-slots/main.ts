@@ -215,6 +215,9 @@ async function main(): Promise<number> {
   if (json) {
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } else if (result.ok) {
+    for (const warning of result.warnings) {
+      process.stdout.write(`[warn] ${warning}\n`);
+    }
     const size = result.image_size_mb === undefined ? '' : ` Image size: ${String(result.image_size_mb)} MB.`;
     process.stdout.write(
       `\nThe sandbox slots are running.${size}\nNext: add this file to your deploy's compose command with -f, then restart the app:\n  -f ${result.app_compose_file}\n${instance === DEFAULT_INSTANCE ? '' : `This install is named "${instance}": run the deploy's compose command with ${INSTANCE_ENV}=${instance} set.\n`}`,

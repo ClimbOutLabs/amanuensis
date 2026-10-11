@@ -170,9 +170,39 @@ func FilesystemUsedBytes(path string) (used, free int64, err error) {
 	return (int64(st.Blocks) - int64(st.Bfree)) * block, int64(st.Bavail) * block, nil
 }
 
+// Reclaimed describes what Reclaim removed.
+type Reclaimed struct {
+	Files int
+	Bytes int64
+	// Paths are the removed files relative to the tree, largest first, at most maxReclaimedNames of them.
+	Paths []string
+}
+
+const maxReclaimedNames = 8
+
+// Notice is a sentence for the person reading the call's output, or empty when nothing was removed.
+func (r Reclaimed) Notice(limitMB int) string {
+	if r.Files == 0 {
+		return ""
+	}
+	names := strings.Join(r.Paths, ", ")
+	if r.Files > len(r.Paths) {
+		names += fmt.Sprintf(" and %d more", r.Files-len(r.Paths))
+	}
+	return fmt.Sprintf("The workspace went over its %d MB limit, so %d file%s (%d MB) were deleted, largest first: %s.",
+		limitMB, r.Files, plural(r.Files), r.Bytes>>20, names)
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
 // Reclaim deletes regular files, largest first, until the tree is within limit bytes. It runs only when
-// no guest is alive, and returns how many files and bytes it removed.
-func Reclaim(root string, limit int64) (files int, bytes int64) {
+// no guest is alive.
+func Reclaim(root string, limit int64) Reclaimed {
 	type entry struct {
 		path string
 		size int64
@@ -190,8 +220,9 @@ func Reclaim(root string, limit int64) (files int, bytes int64) {
 		}
 		return nil
 	})
+	var out Reclaimed
 	if total <= limit {
-		return 0, 0
+		return out
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].size > all[j].size })
 	for _, e := range all {
@@ -200,11 +231,18 @@ func Reclaim(root string, limit int64) (files int, bytes int64) {
 		}
 		if os.Remove(e.path) == nil {
 			total -= e.size
-			files++
-			bytes += e.size
+			out.Files++
+			out.Bytes += e.size
+			if len(out.Paths) < maxReclaimedNames {
+				rel, err := filepath.Rel(root, e.path)
+				if err != nil {
+					rel = filepath.Base(e.path)
+				}
+				out.Paths = append(out.Paths, rel)
+			}
 		}
 	}
-	return files, bytes
+	return out
 }
 
 // Output is one collected result file.

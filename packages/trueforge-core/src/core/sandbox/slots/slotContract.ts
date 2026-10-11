@@ -59,6 +59,10 @@ export const SlotAttestationSchema = z.object({
     apparmor: z.string(),
     runsc_version: z.string(),
     platform: z.string(),
+    /** What bounds the workspace disk: this slot's own fixed-size disk, the Docker VM, or nothing. */
+    disk_mode: z.enum(['hard', 'vm', 'none']),
+    /** Size of the filesystem the workspace is on, bytes. */
+    workspace_bytes: z.number().int().nonnegative(),
   }),
 });
 export type SlotAttestation = z.infer<typeof SlotAttestationSchema>;
@@ -119,6 +123,8 @@ export const SlotExecResponseSchema = z.object({
   output: z.string(),
   terminated_by: SlotTerminationSchema,
   internal_error: z.string(),
+  /** Things worth telling the person, such as files deleted to keep the workspace within its limit. */
+  notices: z.array(z.string()).default([]),
   duration_ms: z.number().int(),
 });
 export type SlotExecResponse = z.infer<typeof SlotExecResponseSchema>;

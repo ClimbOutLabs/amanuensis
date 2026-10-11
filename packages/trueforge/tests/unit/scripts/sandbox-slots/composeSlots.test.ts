@@ -30,7 +30,7 @@ const ServiceSchema = z.object({
   ports: z.never().optional(),
   pid: z.never().optional(),
   env_file: z.never().optional(),
-  environment: z.never().optional(),
+  environment: z.object({ AMAN_WORKSPACE_DISK_MODE: z.string() }).strict(),
 });
 
 const ComposeSchema = z.object({

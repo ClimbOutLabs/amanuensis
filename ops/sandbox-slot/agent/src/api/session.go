@@ -81,7 +81,9 @@ type execResponse struct {
 	Output        string `json:"output"`
 	TerminatedBy  string `json:"terminated_by"`
 	InternalError string `json:"internal_error"`
-	DurationMS    int64  `json:"duration_ms"`
+	// Notices are things the server should tell the person, such as files deleted to stay within the limit.
+	Notices    []string `json:"notices"`
+	DurationMS int64    `json:"duration_ms"`
 }
 
 func (r *execRequest) validate() error {
@@ -176,7 +178,7 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 	spec.MaxFileBytes = limit
 	spec.MaxProcesses = guestMaxProcesses
 	// A tree left over its limit by an earlier overshoot is trimmed before anything new runs in it.
-	lease.Reclaim(root, limit)
+	notices := reclaimNotice(lease.Reclaim(root, limit), req.DiskMB, nil)
 	watch, err := newDiskWatch(s.VolumeDir, s.MinFreeBytes, limit, root)
 	if err != nil {
 		writeStorageError(w, err)
@@ -192,14 +194,26 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		GuardInterval: guardIntervalMS * time.Millisecond,
 	})
 	// Whatever a fast writer got in before the kill is removed, largest files first, so the overshoot never stays.
-	lease.Reclaim(root, limit)
+	notices = reclaimNotice(lease.Reclaim(root, limit), req.DiskMB, notices)
 	writeJSON(w, http.StatusOK, execResponse{
 		ExitCode:      res.ExitCode,
 		Output:        string(res.Stdout),
 		TerminatedBy:  terminationFor(res, s.OOMKills() > oomBefore),
 		InternalError: res.InternalError,
+		Notices:       notices,
 		DurationMS:    time.Since(started).Milliseconds(),
 	})
+}
+
+// reclaimNotice appends the sentence about deleted files, if any, to the call's notices; never nil.
+func reclaimNotice(r lease.Reclaimed, limitMB int, notices []string) []string {
+	if notices == nil {
+		notices = []string{}
+	}
+	if text := r.Notice(limitMB); text != "" {
+		notices = append(notices, text)
+	}
+	return notices
 }
 
 type fsReadRequest struct {

@@ -538,3 +538,31 @@ func TestIdleSessionsAreSweptAndBusyOnesKept(t *testing.T) {
 		t.Fatal("a recent tree must stay")
 	}
 }
+
+func TestExecTellsTheCallerWhichFilesWereDeletedToStayWithinTheLimit(t *testing.T) {
+	e := newEnv(t, true)
+	tree := filepath.Join(e.srv.TreeDir, sessionID)
+	if err := os.MkdirAll(tree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree, "huge.bin"), make([]byte, 3<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.do("POST", "/v1/exec", execBody(func(m map[string]any) { m["disk_mb"] = 1 }))
+	var resp struct {
+		Notices []string `json:"notices"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Notices) != 1 || !strings.Contains(resp.Notices[0], "huge.bin") || !strings.Contains(resp.Notices[0], "1 MB limit") {
+		t.Fatalf("notices = %q", resp.Notices)
+	}
+	if _, err := os.Stat(filepath.Join(tree, "huge.bin")); !os.IsNotExist(err) {
+		t.Fatal("the file must have been deleted")
+	}
+	rec = e.do("POST", "/v1/exec", execBody(nil))
+	if !strings.Contains(rec.Body.String(), `"notices":[]`) {
+		t.Fatalf("an ordinary call has an empty list, not null: %s", rec.Body.String())
+	}
+}

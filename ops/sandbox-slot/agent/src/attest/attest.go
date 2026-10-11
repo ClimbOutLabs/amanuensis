@@ -59,6 +59,11 @@ type Facts struct {
 	AppArmor     string `json:"apparmor"`
 	RunscVersion string `json:"runsc_version"`
 	Platform     string `json:"platform"`
+	// DiskMode says what bounds the workspace disk: "hard" (a fixed-size disk of this slot's own), "vm" (the
+	// Docker virtual machine's disk) or "none" (nothing but the host filesystem).
+	DiskMode string `json:"disk_mode"`
+	// WorkspaceBytes is the size of the filesystem the workspace is on; for "hard" it is the slot's whole disk.
+	WorkspaceBytes int64 `json:"workspace_bytes"`
 }
 
 // Report is the agent's attestation.
@@ -89,6 +94,8 @@ type Collector struct {
 	// backed it with; zero means this platform has no per-slot disk (the Docker VM's disk bounds it).
 	Workspace           string
 	WorkspaceQuotaBytes int64
+	// ConfiguredDiskMode is what the operator declared when there is no per-slot disk: "vm" or "none".
+	ConfiguredDiskMode string
 	// Statfs returns the filesystem type and size in bytes of a path; nil reads them from the kernel.
 	Statfs func(path string) (fsType int64, sizeBytes int64, err error)
 	// Canary starts a real guest running a trivial program.
@@ -158,6 +165,7 @@ func (c *Collector) Collect() Report {
 		Facts: Facts{
 			Kernel: kernel, Arch: runtime.GOARCH, PageSize: os.Getpagesize(),
 			Cgroup: cg, AppArmor: aa, RunscVersion: version, Platform: c.Platform,
+			DiskMode: c.diskMode(), WorkspaceBytes: c.workspaceBytes(),
 		},
 	}
 }
@@ -435,4 +443,26 @@ func (c *Collector) statfs(path string) (int64, int64, error) {
 		return 0, 0, err
 	}
 	return int64(st.Type), int64(st.Blocks) * int64(st.Bsize), nil
+}
+
+func (c *Collector) diskMode() string {
+	switch {
+	case c.WorkspaceQuotaBytes > 0:
+		return "hard"
+	case c.ConfiguredDiskMode == "vm":
+		return "vm"
+	default:
+		return "none"
+	}
+}
+
+func (c *Collector) workspaceBytes() int64 {
+	if c.Workspace == "" {
+		return 0
+	}
+	_, size, err := c.statfs(c.Workspace)
+	if err != nil {
+		return 0
+	}
+	return size
 }
