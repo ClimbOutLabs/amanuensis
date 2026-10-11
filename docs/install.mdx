@@ -113,15 +113,15 @@ The command exits 0 when nothing fails, 1 when anything fails, and 2 on a usage 
 
 Common checks and what they mean:
 
-| Check | Fails when | Fix |
-| --- | --- | --- |
-| docker | Engine not answering, Compose v2 missing | Start the daemon; on Linux, accept the installer's Docker offer |
-| images | A pinned image is missing locally | Rerun the installer |
-| service | An instance's containers are unhealthy | The check prints the start command |
-| login | The login server is unreachable | Wait a few seconds on first start, then check the proxy hints |
-| database | SQLite is not writable or migrations are behind | The check prints the start command |
-| disk | Under 2 GB free is a fail | Free space or prune unused images |
-| clock skew | Machine clock disagrees with the containers | Enable automatic time sync |
+| Check      | Fails when                                      | Fix                                                             |
+| ---------- | ----------------------------------------------- | --------------------------------------------------------------- |
+| docker     | Engine not answering, Compose v2 missing        | Start the daemon; on Linux, accept the installer's Docker offer |
+| images     | A pinned image is missing locally               | Rerun the installer                                             |
+| service    | An instance's containers are unhealthy          | The check prints the start command                              |
+| login      | The login server is unreachable                 | Wait a few seconds on first start, then check the proxy hints   |
+| database   | SQLite is not writable or migrations are behind | The check prints the start command                              |
+| disk       | Under 2 GB free is a fail                       | Free space or prune unused images                               |
+| clock skew | Machine clock disagrees with the containers     | Enable automatic time sync                                      |
 
 A fresh install never warns about backups until the first backup exists.
 
