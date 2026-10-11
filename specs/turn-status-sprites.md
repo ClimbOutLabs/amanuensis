@@ -1,85 +1,67 @@
 # Spec: Turn-Status Sprites (v1)
 
-**Status:** draft
+**Status:** implemented
 
 ## Problem
 
-The wait-queue indicator shows a small CSS blob for four stations, but six panda sprite images exist and are not yet used. Two of them, "found memories" and "still writing", have no state to attach to.
+The wait-queue indicator showed a small CSS blob for four stations. Six turn states exist, but the visuals did not tell them apart, so the indicator could not show found memories or still writing.
 
 ## Solution
 
-Replace the CSS-only `StateSprite` visuals with six WebP panda images, one per state, selected from signals that already reach the UI. No new runtime or stream events.
+Show a panda per turn state, drawn in code as an inline SVG and selected by the pure `spriteStateFor` mapping. Fills come from theme tokens; motion is CSS only. No new runtime or stream events.
 
 ## State model
 
-Six sprite states. `WaitStationId` (4 stations, `waitQueueJourney.ts:12`) is unchanged; the sprite id is a new, wider type.
+Six sprite states. `WaitStationId` (four stations) is unchanged; `TurnSpriteId` is the wider type owned by `waitQueueJourney.ts`.
 
-| Sprite         | Enters when                                                                                                                                                                                                        | Leaves when                                       |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
-| listening      | `activeStation === 'listening'` (turn running, no parts, no recall yet; `:225-234`)                                                                                                                                | any part or recall lands                          |
-| remembering    | the fallback when no station is active (`WaitQueueIndicator.tsx:27-32`): thinking gaps before recall lands, after recall with 0 items, timeout or error, in later gaps after tools, and when memory is unavailable | recall lands, a tool starts, or text starts       |
-| found-memories | recall landed with outcome ok and items > 0 (same test as the "Found N memories" tick, `waitQueueJourney.ts:164-168`) and no tool or text part exists yet                                                          | first tool (doing) or text (writing) part appears |
-| doing          | `activeStation === 'doing'`: a tool is running or approval is pending (`:225-229`)                                                                                                                                 | tools settle                                      |
-| writing        | `activeStation === 'writing'`: a text part is streaming (`:182`) and elapsed < `LONG_WAIT_MS`                                                                                                                      | text settles, or the long-wait threshold passes   |
-| still-writing  | `activeStation === 'writing'` and `elapsedMs >= LONG_WAIT_MS` (`waitQueueJourney.ts:24`)                                                                                                                           | text settles                                      |
+| Sprite         | Enters when                                                                                                               | Leaves when                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| listening      | `activeStation === 'listening'` (turn running, no parts, no recall yet)                                                   | any part or recall lands                        |
+| remembering    | no station is active: thinking gaps before recall lands, after recall with 0 items, timeout, error, or memory unavailable | recall lands, a tool starts, or text starts     |
+| found-memories | recall landed with outcome ok and items > 0, and no tool or text part exists yet                                          | first tool (doing) or text (writing) part       |
+| doing          | `activeStation === 'doing'`: a tool is running or approval is pending                                                     | tools settle                                    |
+| writing        | `activeStation === 'writing'`: a text part is streaming and elapsed < `LONG_WAIT_MS`                                      | text settles, or the long-wait threshold passes |
+| still-writing  | `activeStation === 'writing'` and `elapsedMs >= LONG_WAIT_MS`                                                             | text settles                                    |
 
-Signal sources:
+Signal sources are the existing ones: recall is polled every 2 s while a turn runs, so found-memories may be brief or skipped; the sprite never claims a recall before it lands. Long wait uses the per-turn clock already behind the "Still writing" note, so sprite and text agree.
 
-- Recall: `listMemoryTurnContext` polled every 2 s while running (`MemoryTurnContextProvider.tsx:12,89,113`), read in `useWaitQueue.ts:95-101` as `WaitQueueMemory`. Landing can lag the event by up to one poll interval, so found-memories is bounded by the 2 s poll and may be brief or skipped; that is expected, and the sprite never claims a recall before it lands.
-- Long wait: per-turn clock in `useWaitQueue.ts:47-120`, already exposed as `elapsedMs`/`longWait` (`:134`). The existing note reads "Still writing - Ns so far" in this same condition (`buildLongWaitNote`), so sprite and text agree. A turn that spends 20 s in tools and then starts writing shows still-writing at once; the text says the same.
-- `remembering` stays event-sourced only: it is never "active" because no signal says recall is running (`waitQueueJourney.ts:222-224`). Found-memories is the only recall-aware sprite.
-- Zero-item, empty, timeout, and error recalls keep the remembering sprite, matching the calm tick policy (`:157-173`).
+## Design Decisions
 
-Implementation shape: `deriveWaitQueue` adds `recallJustLanded: boolean` to `WaitQueueSnapshot`. A pure exported `spriteStateFor({ activeStation, recallJustLanded, longWait })` in `waitQueueJourney.ts` is the canonical owner of the mapping and of the `TurnSpriteId` type. `StateSprite` imports it; the private copy in `WaitQueueIndicator.tsx` is deleted, and `StateSpriteState` (`StateSprite.tsx:6`) is deleted in favor of `TurnSpriteId` (`StateSprite` is not exported from `index.ts`, so no re-export is needed).
-
-New event types are not needed, so no change to trueforge-core, frontend, trueforge, or patches. If a future need adds a recall-started event, its canonical owner is `@truefoundry/assistant-ui-runtime` (`src/server/events.ts`), with all four layers updated together.
+- Drawn in code, not raster images. An inline SVG follows the theme, needs no image loader, data URIs, CSP change, or asset pipeline.
+- Theme tokens: `--sprite-face`, `--sprite-dark`, `--sprite-accent` are defined on `.aui-theme-root` (light) and `.aui-theme-root.dark`. The dark face is muted cream, not white, so it does not glow.
+- One 2rem box for all six states, so the row never shifts. Per-state accents (sparkle for found-memories, pencil for writing and still-writing) are SVG groups shown by the state class.
+- Motion runs only under `@media (prefers-reduced-motion: no-preference)` and `.aui-wait-queue:not(.aui-wait-queue--static)`. Otherwise the panda holds a static pose; the remembering pupils look up as a fixed offset.
+- `spriteStateFor({ activeStation, recallJustLanded, longWait })` in `waitQueueJourney.ts` is the one owner of the mapping and of `TurnSpriteId`.
+- The sprite is decorative (`aria-hidden`). The `role="status"` microcopy line remains the accessible signal.
 
 ## Rendering
 
-- `StateSprite` keeps its contract: root `span` with `data-testid="state-sprite"`, `aria-hidden="true"`, class `aui-state-sprite--<state>`, optional `className`. Body and fx spans become one `<img alt="" draggable={false}>`.
-- Size 2rem square (source 128 px, 4x for dense displays), replacing the 1.25rem blob. `.aui-wait-queue__line` has `min-height: 1.25rem` (`styles.css:744-749`), so the row grows to 2rem; the indicator is slightly taller in the thread, and the layout must not shift between states (all sprites share one box).
-- Inlined data URIs need `img-src data:` if the hosting app sets a CSP. `alt=""` keeps a failed image invisible.
-- Reduced motion: motion comes only from a CSS hop on the root under `prefers-reduced-motion: no-preference` and `:not(.aui-wait-queue--static)`. Otherwise the image is the static frame. The old body, fx, and keyframe CSS (`styles.css:807-1151`, from the sprite comment block to the end of the file) is removed in the same change.
-- Assets live in `packages/trueforge-ui/src/assets/turn-status/` (`listening`, `remembering`, `found-memories`, `doing`, `writing`, `still-writing`, `.webp`). The library cannot import from `packages/frontend`, so only the downscaled files ship; the 1600 px originals (about 1.55 MB, currently under `packages/frontend/src/assets/turn-status/`) are not kept as a second copy (one canonical owner, no dead copies).
-- Downscale to 128 px max, WebP, each under 15 KB (about 90 KB total, down from about 1.55 MB). A repeatable root script (e.g. `sprites:build`) does the resize so it is not an ad hoc command.
-- Bundling: the ui build has no image loader, and fonts are inlined as data URIs because relative URLs break in a host document. Add a `.webp` dataurl loader to `tsup.config.ts`, plus a `*.webp` module declaration. Vite handles the import in tests.
-- Provenance: the source WebPs carry an XMP tag (IPTC `DigitalSourceType=trainedAlgorithmicMedia`). The resize script must keep it. Add one line to `packages/trueforge-ui/NOTICE`: "Turn-status panda sprites are AI-generated project artwork, licensed with this package."
-
-## Accessibility
-
-The visible `role="status"` microcopy line stays the accessible signal. Sprites are decorative (`aria-hidden`, empty `alt`). No new copy: found-memories is already announced by the "Found N memories" tick, and still-writing by the existing long-wait announcement. The sprite never changes what is announced.
+- `StateSprite` keeps its contract: root `span` with `data-testid="state-sprite"`, `aria-hidden="true"`, class `aui-state-sprite--<state>`, optional `className`. The body is one `svg` (viewBox `0 0 64 64`).
+- Motion per state: head tilt and ear perk (listening), head sway (remembering), sparkle pop (found-memories), paw tap (doing), pencil bob (writing, still-writing), eye blink (still-writing).
 
 ## Scope
 
-- Six sprites, one pure mapping function, asset pipeline, CSS cleanup, test updates.
+- Six states, the pure mapping, the inline SVG panda, theme tokens, and CSS animation.
+- Removal of the earlier raster sprites, their build script and loader, and their NOTICE line.
 
 ## Non-goals
 
 - New stream or runtime events, or a "recall running" state.
-- Changing station track, microcopy, ticks, or `LONG_WAIT_MS`.
+- Changing the station track, microcopy, ticks, or `LONG_WAIT_MS`.
 - Per-persona mascots or user-selectable sprite sets.
-- Minimum-dwell timers for found-memories (they would delay real progress).
+- Minimum-dwell timers for found-memories.
 
 ## Privacy
 
-No user data is involved. Sprites are static bundled images; the mapping reads only existing in-memory turn state (part statuses, recall counts, elapsed time). Nothing new is stored, logged, or sent, and no network fetch is added (images are inlined).
+No user data is involved. The panda is a static inline SVG in the bundle. The mapping reads only existing in-memory turn state. Nothing new is stored, logged, or sent, and no network fetch is added.
 
 ## Testing
 
-All tests use synthetic parts, recall stats, and elapsed values; no real user data.
+All tests use synthetic parts, recall stats, and elapsed values.
 
-- `test/atoms/StateSprite.test.tsx` (updated, not deleted): each of the 6 states renders an `img` with `alt=""` under the `--<state>` class and `aria-hidden`; extra className; modifier swap on rerender. The body/fx assertions become image assertions.
-- `test/utils/waitQueueJourney.test.ts`: `spriteStateFor` and `recallJustLanded` cases: listening; thinking gap with no recall (remembering); recall items 2 before any part (found-memories); items 0, empty, timeout (remembering); recall then tool (doing); recall then text (writing); writing at 14_999 vs 15_000 ms (writing, still-writing); approval pending keeps doing.
-- `test/atoms/WaitQueueIndicator.test.tsx`: transitions remembering -> found-memories -> doing/writing via rerender; writing -> still-writing when `elapsedMs` crosses `LONG_WAIT_MS`; reducedMotion adds `--static` and the sprite stays an image; status line text unchanged per state.
-- `WaitQueueIndicator` row-height test: the `.aui-wait-queue__line` sprite box is the same size in all six states.
-- Transition test: a recall landing after a first tool or text part exists stays out of found-memories.
-- New asset test (reads the files via `fs`): all six files exist, each is WebP, is at most 15 KB, is at most 128 px wide, and contains the `trainedAlgorithmicMedia` XMP tag.
-- `AssistantMessageContainer.test.tsx` stays green with the new sprite markup.
+- `test/atoms/StateSprite.test.tsx`: each of the six states renders one SVG under the state class with `data-testid="state-sprite"` and no `img`; extra className; modifier swap on rerender; the `.aui-state-sprite` rule is 2rem by 2rem with no per-state size; every sprite animation sits inside the `prefers-reduced-motion: no-preference` block and under `.aui-wait-queue:not(.aui-wait-queue--static)`; state accents show only for their states.
+- `test/atoms/WaitQueueIndicator.test.tsx`: reduced motion sets `aui-wait-queue--static` and the sprite stays an SVG; the sprite box is the same in every state.
 
-## Upstream impact
+## Out of Scope
 
-The wait-queue files (`StateSprite.tsx`, `WaitQueueIndicator.tsx`, `waitQueueJourney.ts`, `useWaitQueue.ts`) are fork-owned (not in `DIVERGENCE.md`). `trueforge-ui` is ESM-only, so the packed CJS/ESM consumer rule applies to core and the SDK, not here. The shared surfaces are `styles.css` (a contiguous block is deleted) and `tsup.config.ts` (one loader line). Keep the diff contained: no edits to upstream-originated components, a single contiguous CSS deletion, and the new images under a new directory. If the styles or tsup edits conflict on a sync, add rows to `DIVERGENCE.md` in the same PR.
-
-## Decisions
-
-- Memories are recalled once, before the first part of a turn, so found-memories shows only before the first tool or text part and never in later gaps.
+- Stream or runtime events, a recall-running state, minimum-dwell timers, per-persona mascots, and any change to the station track, microcopy, ticks, or `LONG_WAIT_MS`.
