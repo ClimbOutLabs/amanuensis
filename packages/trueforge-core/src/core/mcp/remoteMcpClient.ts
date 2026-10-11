@@ -217,8 +217,8 @@ export async function connectRemoteMcp(params: {
   connectTimeoutMs: number;
   signal: AbortSignal;
   /**
-   * Answer a redirect with an error instead of following it. Set for a connection the host marked
-   * first-party; every other connection keeps the default of following redirects.
+   * Answer any redirect with an error. Set for a connection the host marked first-party; every other
+   * connection keeps the SDK default, which follows redirects only within the server's own origin.
    */
   refuseRedirects?: boolean | undefined;
   onClose?: (() => void) | undefined;
