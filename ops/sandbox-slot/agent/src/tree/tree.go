@@ -26,6 +26,29 @@ const MaxReadBytes = 10 << 20
 // MaxWriteBytes caps one file write.
 const MaxWriteBytes = 25 << 20
 
+// TransferDir holds repository tars and bundles the server moves in and out; they may be larger than
+// ordinary files.
+const TransferDir = GuestRoot + "/.aman/transfer/"
+
+// MaxTransferBytes caps one file read or written below TransferDir.
+const MaxTransferBytes = 128 << 20
+
+// ReadLimit is the largest file Read accepts at guestPath.
+func ReadLimit(guestPath string) int {
+	if strings.HasPrefix(path.Clean(guestPath)+"/", TransferDir) {
+		return MaxTransferBytes
+	}
+	return MaxReadBytes
+}
+
+// WriteLimit is the largest content Write accepts at guestPath.
+func WriteLimit(guestPath string) int {
+	if strings.HasPrefix(path.Clean(guestPath)+"/", TransferDir) {
+		return MaxTransferBytes
+	}
+	return MaxWriteBytes
+}
+
 var sessionIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // ValidSessionID reports whether id is a 32-character lowercase hex session id.
@@ -131,14 +154,15 @@ func Read(root, guestPath string) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, errors.New("tree: not a regular file")
 	}
-	if info.Size() > MaxReadBytes {
+	limit := ReadLimit(guestPath)
+	if info.Size() > int64(limit) {
 		return nil, errors.New("tree: file is larger than the read cap")
 	}
-	b, err := io.ReadAll(io.LimitReader(f, MaxReadBytes+1))
+	b, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > MaxReadBytes {
+	if len(b) > limit {
 		return nil, errors.New("tree: file is larger than the read cap")
 	}
 	return b, nil
@@ -153,7 +177,7 @@ func Write(root, guestPath string, content []byte, mode os.FileMode) error {
 	if len(parts) == 0 {
 		return errors.New("tree: path is a directory")
 	}
-	if len(content) > MaxWriteBytes {
+	if len(content) > WriteLimit(guestPath) {
 		return errors.New("tree: content is larger than the write cap")
 	}
 	dir, err := openDir(root, parts[:len(parts)-1], true)

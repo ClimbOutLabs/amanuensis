@@ -29,6 +29,7 @@ describe('a session with connectors on the sandbox slots', () => {
       fileMaxBytesForDownload: 1024,
       logger: makeSilentLogger(),
       sleepMs: undefined,
+      gitBridge: undefined,
     });
     const sandbox = new Sandbox({
       provider,

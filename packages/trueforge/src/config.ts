@@ -766,6 +766,11 @@ export interface SharedServerConfiguration {
    */
   SANDBOX_STATE_DIR: string;
   /**
+   * Scratch directory for the server's own git work on behalf of sandbox slots (clone, fetch, push). Every
+   * operation uses a fresh subdirectory and removes it. Derived: `{env-paths data}/git-bridge`.
+   */
+  SANDBOX_GIT_BRIDGE_DIR: string;
+  /**
    * Default per-run timeout for run_code, seconds. Env: `SANDBOX_DEFAULT_TIMEOUT_SECONDS`. Default 60.
    */
   SANDBOX_DEFAULT_TIMEOUT_SECONDS: number;
@@ -1412,6 +1417,7 @@ const shared: SharedServerConfiguration = {
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
+  SANDBOX_GIT_BRIDGE_DIR: path.join(appDataDir, 'git-bridge'),
   SANDBOX_DEFAULT_TIMEOUT_SECONDS: parsePositiveInt({
     envKey: 'SANDBOX_DEFAULT_TIMEOUT_SECONDS',
     raw: getEnv('SANDBOX_DEFAULT_TIMEOUT_SECONDS'),

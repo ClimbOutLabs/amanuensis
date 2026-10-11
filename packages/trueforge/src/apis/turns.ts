@@ -437,15 +437,12 @@ function createTurnResolver(deps: {
           skills: spec.skills ?? [],
           store: skillStore,
         });
-        // Sandbox slots are offline: a token placed in their environment could never be used and must not be.
-        const githubGitToken =
-          provider.type === 'slots'
-            ? undefined
-            : await resolveGithubGitToken({
-                tenant_id,
-                spec,
-                store: mcpServerStore,
-              });
+        // Sandbox slots are offline; their provider keeps the token on the host and runs git there.
+        const githubGitToken = await resolveGithubGitToken({
+          tenant_id,
+          spec,
+          store: mcpServerStore,
+        });
         return buildTurnSandbox({
           provider,
           logger,

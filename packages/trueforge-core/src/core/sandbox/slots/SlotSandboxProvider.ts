@@ -12,6 +12,7 @@ import type { CodeModeTransport } from '../codeMode/CodeModeTransport';
 import {
   executeVerifiedWorkspaceCommit,
   type ExecResult,
+  type HostGitCapability,
   type SandboxBuild,
   type SandboxCreateParams,
   type SandboxDownloadFileParams,
@@ -23,6 +24,7 @@ import {
 } from '../provider/Provider';
 import { SlotClient, type SlotCallError } from './SlotClient';
 import { attestationProblem, SLOT_FIX_COMMAND } from './SlotDriver';
+import { GitBridge, type BridgeGuest } from './git/gitBridge';
 import type { SlotExecResponse } from './slotContract';
 
 const WORKSPACE_DIR = '/workspace';
@@ -46,6 +48,8 @@ export interface SlotSandboxProviderOptions {
   fileMaxBytesForDownload: number;
   logger: Logger;
   sleepMs: ((ms: number) => Promise<void>) | undefined;
+  /** Carries out network git on the host; without it, git commands that need the network simply fail offline. */
+  gitBridge: GitBridge | undefined;
 }
 
 function parseSandboxId(sandboxId: string): { slot: number; sessionId: string } | undefined {
@@ -89,6 +93,9 @@ export class SlotSandboxProvider implements SandboxProvider {
   private readonly fileMaxBytesForDownload: number;
   private readonly logger: Logger;
   private readonly sleepMs: (ms: number) => Promise<void>;
+  private readonly gitBridge: GitBridge | undefined;
+  private gitToken: string | null = null;
+  readonly hostGit: HostGitCapability | undefined;
 
   constructor(options: SlotSandboxProviderOptions) {
     this.clients = options.socketPaths.map(path => new SlotClient(path));
@@ -97,6 +104,8 @@ export class SlotSandboxProvider implements SandboxProvider {
     this.fileMaxBytesForDownload = options.fileMaxBytesForDownload;
     this.logger = options.logger.child({ module: 'SlotSandboxProvider' });
     this.sleepMs = options.sleepMs ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
+    this.gitBridge = options.gitBridge;
+    this.hostGit = options.gitBridge === undefined ? undefined : this.createHostGit(options.gitBridge);
   }
 
   async buildImage(): Promise<SandboxBuild> {
@@ -124,6 +133,14 @@ export class SlotSandboxProvider implements SandboxProvider {
 
   async exec(params: SandboxExecParams): Promise<ExecResult> {
     throwIfSignalAborted(params.signal);
+    const bridged = this.bridgedGit(params);
+    if (bridged !== undefined) {
+      return bridged;
+    }
+    return this.execInGuest(params);
+  }
+
+  private async execInGuest(params: SandboxExecParams): Promise<ExecResult> {
     const target = this.resolve(params.sandboxId);
     const timeoutMs = Math.min(
       MAX_TIMEOUT_MS,
@@ -244,6 +261,89 @@ export class SlotSandboxProvider implements SandboxProvider {
 
   getSkillDownloaderPath(): string {
     return `${STATE_DIR}/skill_downloader.py`;
+  }
+
+  /** Network git as one plain command is done by the host; everything else runs in the guest. */
+  private bridgedGit(params: SandboxExecParams): Promise<ExecResult> | undefined {
+    const bridge = this.gitBridge;
+    const plan = bridge?.plan(params.command);
+    if (bridge === undefined || plan === undefined || Object.keys(params.env ?? {}).length > 0) {
+      return undefined;
+    }
+    return bridge.run({
+      command: params.command,
+      plan,
+      token: this.gitToken,
+      guest: this.guestFor(params.sandboxId),
+      sandboxId: params.sandboxId,
+      cwd: params.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, params.cwd),
+      timeoutSeconds: params.timeoutSeconds,
+      signal: params.signal,
+    });
+  }
+
+  private createHostGit(bridge: GitBridge): HostGitCapability {
+    return {
+      setToken: token => {
+        this.gitToken = token;
+      },
+      isPush: command => bridge.plan(command)?.subcommand === 'push',
+      previewPush: async input => {
+        const plan = bridge.plan(input.command);
+        if (plan === undefined) {
+          return { status: 'refused', message: 'This is not a push the sandbox can carry out.' };
+        }
+        return bridge.previewPush({
+          command: input.command,
+          plan,
+          token: this.gitToken,
+          guest: this.guestFor(input.sandboxId),
+          sandboxId: input.sandboxId,
+          cwd: input.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, input.cwd),
+          timeoutSeconds: undefined,
+          signal: input.signal,
+        });
+      },
+    };
+  }
+
+  /** The bridge's view of one sandbox; transfers use the agent's larger limits, not the download cap. */
+  private guestFor(sandboxId: string): BridgeGuest {
+    return {
+      exec: input =>
+        this.execInGuest({
+          sandboxId,
+          command: input.command,
+          cwd: input.cwd,
+          ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
+          signal: input.signal,
+        }),
+      putFile: async input => {
+        const target = this.resolve(sandboxId);
+        const written = await target.client.fsWrite({
+          sessionId: target.sessionId,
+          path: input.path,
+          content: input.content,
+          mode: 0o644,
+          signal: input.signal,
+        });
+        if (!written.ok) {
+          throw new Error(`Failed to move a file into the sandbox: ${describeAgentError(written.error)}`);
+        }
+      },
+      getFile: async input => {
+        const target = this.resolve(sandboxId);
+        const read = await target.client.fsRead({
+          sessionId: target.sessionId,
+          path: input.path,
+          signal: input.signal,
+        });
+        if (!read.ok) {
+          throw new Error(`Failed to read a file from the sandbox: ${describeAgentError(read.error)}`);
+        }
+        return Buffer.from(read.value.content_base64, 'base64');
+      },
+    };
   }
 
   private resolve(sandboxId: string): { client: SlotClient; sessionId: string } {

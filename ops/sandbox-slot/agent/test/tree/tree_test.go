@@ -119,3 +119,15 @@ func TestDestroyRemovesTree(t *testing.T) {
 		t.Error("bad session id must be rejected")
 	}
 }
+
+func TestTransferDirAllowsLargerFiles(t *testing.T) {
+	if tree.ReadLimit("/workspace/.aman/transfer/x/out.bundle") != tree.MaxTransferBytes || tree.WriteLimit("/workspace/.aman/transfer/x/repo.tar") != tree.MaxTransferBytes {
+		t.Fatal("transfer files get the larger cap")
+	}
+	if tree.ReadLimit("/workspace/.aman/transfer-evil/x") != tree.MaxReadBytes || tree.WriteLimit("/workspace/a") != tree.MaxWriteBytes {
+		t.Fatal("everything else keeps the ordinary caps")
+	}
+	if tree.ReadLimit("/workspace/.aman/transfer/../../x") != tree.MaxReadBytes {
+		t.Fatal("a path that only looks like the transfer dir gets the ordinary cap")
+	}
+}

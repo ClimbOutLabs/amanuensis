@@ -86,8 +86,8 @@ interface SubcommandPolicy {
 }
 
 const POSITIVE_INTEGER = /^[1-9][0-9]{0,5}$/u;
-const BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/u;
-const GITHUB_REPOSITORY_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?(?:\.git)?\/?$/u;
+export const BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/u;
+export const GITHUB_REPOSITORY_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?(?:\.git)?\/?$/u;
 const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const REFSPEC = /^\+?[A-Za-z0-9._/@:^~{}*-]{1,255}$/u;
 
@@ -296,7 +296,7 @@ function hardeningEntries(workspaceRoot: string | undefined): GitConfigEntry[] {
 }
 
 /** Every binary is absolute: nothing here may be resolved through a model-writable PATH entry. */
-function pinnedGitCommand(gitArguments: readonly string[]): string {
+function pinnedGitArgv(gitArguments: readonly string[]): string[] {
   return [
     ENV_BINARY,
     ...SCRUBBED_ENV_KEYS.flatMap(key => ['-u', key]),
@@ -304,9 +304,48 @@ function pinnedGitCommand(gitArguments: readonly string[]): string {
     '--no-pager',
     '--no-optional-locks',
     ...gitArguments,
-  ]
-    .map(shellEscape)
-    .join(' ');
+  ];
+}
+
+function pinnedGitCommand(gitArguments: readonly string[]): string {
+  return pinnedGitArgv(gitArguments).map(shellEscape).join(' ');
+}
+
+const CREDENTIAL_ENTRIES: readonly GitConfigEntry[] = [
+  ['credential.helper', ''],
+  ['credential.https://github.com.helper', CREDENTIAL_HELPER],
+];
+
+export interface HostGitInvocation {
+  /** Absolute program first; run it with `execFile`, never through a shell. */
+  argv: string[];
+  /** The complete environment of the process; nothing is inherited from the server. */
+  env: Record<string, string>;
+}
+
+/**
+ * Git run by the server itself for the sandbox slots, whose guests are offline. Same pinned binary, scrubbed
+ * environment and hardening config as the in-sandbox form; the token, when given, is only in this process's
+ * environment and only offered to https://github.com.
+ */
+export function buildHostGitInvocation(input: {
+  gitArguments: readonly string[];
+  token: string | undefined;
+  networkEntries?: readonly GitConfigEntry[] | undefined;
+  extraEntries?: readonly GitConfigEntry[] | undefined;
+}): HostGitInvocation {
+  const env = gitConfigEnv({
+    entries: [
+      ...gitHardeningConfigEntries({ workspaceRoot: undefined }),
+      ...(input.networkEntries ?? gitNetworkHardeningConfigEntries()),
+      ...(input.extraEntries ?? []),
+      ...(input.token === undefined ? [] : CREDENTIAL_ENTRIES),
+    ],
+  });
+  return {
+    argv: pinnedGitArgv(input.gitArguments),
+    env: input.token === undefined ? env : { ...env, [TOKEN_ENV_KEY]: input.token },
+  };
 }
 
 export interface HostAuthenticatedGitExec {
@@ -326,13 +365,7 @@ export function buildHostAuthenticatedGit(input: {
   workspaceRoot: string | undefined;
 }): HostAuthenticatedGitExec {
   const command = pinnedGitCommand([input.plan.subcommand, ...input.plan.args]);
-  const env = gitConfigEnv({
-    entries: [
-      ...hardeningEntries(input.workspaceRoot),
-      ['credential.helper', ''],
-      ['credential.https://github.com.helper', CREDENTIAL_HELPER],
-    ],
-  });
+  const env = gitConfigEnv({ entries: [...hardeningEntries(input.workspaceRoot), ...CREDENTIAL_ENTRIES] });
   return { command, env: { ...env, [TOKEN_ENV_KEY]: input.token } };
 }
 

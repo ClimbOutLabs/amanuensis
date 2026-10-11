@@ -98,6 +98,11 @@ FROM base AS runner
 ENV NODE_ENV=production \
     HOST=0.0.0.0
 
+# git and CA certificates: the server runs git itself for the sandbox slots, whose guests have no network.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 # Production dependency tree (pnpm workspace symlinks preserved).
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=prod-deps /app/packages/trueforge-core/node_modules ./packages/trueforge-core/node_modules

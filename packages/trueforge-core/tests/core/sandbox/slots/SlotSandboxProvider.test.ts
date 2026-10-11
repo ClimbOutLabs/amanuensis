@@ -37,6 +37,7 @@ describe('SlotSandboxProvider', () => {
         fileMaxBytesForDownload: 1024,
         logger: makeSilentLogger(),
         sleepMs: () => Promise.resolve(),
+        gitBridge: undefined,
       }),
       agents: started,
     };
@@ -91,6 +92,7 @@ describe('SlotSandboxProvider', () => {
       fileMaxBytesForDownload: 1024,
       logger: makeSilentLogger(),
       sleepMs: undefined,
+      gitBridge: undefined,
     });
     await expect(provider.createSandbox()).rejects.toThrow('aman doctor sandbox --fix');
     expect((await provider.getImageBuildStatus()).status).toBe('failed');

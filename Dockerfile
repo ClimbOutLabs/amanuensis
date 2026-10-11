@@ -16,6 +16,11 @@ ENV NODE_ENV=production \
     STANDALONE=false \
     HOST=0.0.0.0
 
+# git and CA certificates: the server runs git itself for the sandbox slots, whose guests have no network.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 ARG APP_VERSION
 RUN test -n "$APP_VERSION" || (echo "APP_VERSION build-arg is required" >&2 && exit 1)
 

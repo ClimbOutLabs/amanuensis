@@ -39,7 +39,8 @@ A second backend runs `run_code` and the shell and file tools in four hardened s
 - Join an existing Compose deploy by adding `-f docker-compose.slots-app.yml` to its command. That file sets `SANDBOX_BACKEND=slots`, `SANDBOX_SLOTS_DIR` and mounts the control volumes. The default backend stays `docker`.
 - The guest image has Python 3 with pypdf, pdfplumber, reportlab, python-docx, openpyxl, pandas, matplotlib and Pillow; Node.js with TypeScript; bash and coreutils; git; and gcc, g++ and make. Packages cannot be downloaded.
 - Files in a chat's `/workspace` persist between commands. Processes do not: a background process ends when its command returns.
-- Skills and git over the network are not available on slots yet, and no token is ever placed in a slot.
+- Skills are not available on slots yet.
+- Git works through the server. `git clone`, `fetch`, `pull`, `ls-remote` and `push` of github.com repositories run as one plain command; the server does the network part with your GitHub connector's token and hands the result to the sandbox as files. The token is never placed in a slot and a slot never contacts GitHub. A push shows an approval card naming the repository, the branch and the commits first, and then sends only those commits as a fast-forward: forced pushes, deleting branches, pushing tags and changes to submodules or `.gitmodules` are refused. Repositories over 100 MB are refused; use `git clone --depth 1`.
 
 ## Enabling the sandbox on an agent
 

@@ -3,13 +3,17 @@
  * directory per slot (`<dir>/1/agent.sock`, ...), for example after `pnpm sandbox:slots`. Without it every
  * test returns early, so the suite stays green on machines without slots.
  */
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { InternalEnrichedAssistantMessage } from '../../../../src/core/llm/LLMTypes';
 import { createToolCallMemoState, executeToolCalls } from '../../../../src/core/mcp/executeToolCalls';
+import { gitLocalImportHardeningConfigEntries } from '../../../../src/core/permissions/gitHardening';
 import { RunCodeService } from '../../../../src/core/sandbox/driver/RunCodeService';
 import { Sandbox, SANDBOX_EXEC_TOOL_NAME, SANDBOX_RUN_CODE_TOOL_NAME } from '../../../../src/core/sandbox/Sandbox';
+import { GitBridge } from '../../../../src/core/sandbox/slots/git/gitBridge';
+import { execFileRunner } from '../../../../src/core/sandbox/slots/git/hostCommand';
 import { SLOT_AGENT_SOCKET_NAME } from '../../../../src/core/sandbox/slots/slotContract';
 import { SlotDriver } from '../../../../src/core/sandbox/slots/SlotDriver';
 import { SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
@@ -125,6 +129,7 @@ describe('sandbox slots (live agents)', () => {
       fileMaxBytesForDownload: 1024 * 1024,
       logger: makeSilentLogger(),
       sleepMs: undefined,
+      gitBridge: undefined,
     });
     const { sandboxId } = await provider.createSandbox();
     const written = await provider.exec({ sandboxId, command: 'echo kept > note.txt && pwd' });
@@ -157,6 +162,7 @@ describe('sandbox slots (live agents)', () => {
       fileMaxBytesForDownload: 1024 * 1024,
       logger: makeSilentLogger(),
       sleepMs: undefined,
+      gitBridge: undefined,
     });
     const sandbox = new Sandbox({
       provider,
@@ -214,6 +220,7 @@ describe('sandbox slots (live agents)', () => {
       fileMaxBytesForDownload: 1024 * 1024,
       logger: makeSilentLogger(),
       sleepMs: undefined,
+      gitBridge: undefined,
     });
     const { sandboxId } = await provider.createSandbox();
     // Writes to many files that are deleted while still open, so no directory walk can see them.
@@ -238,5 +245,69 @@ describe('sandbox slots (live agents)', () => {
 
     const after = await provider.exec({ sandboxId, command: 'du -sk /workspace | cut -f1' });
     expect(after.success && Number.parseInt(after.response.result, 10)).toBeLessThan(64 * 1024 + 1024);
+  });
+
+  test('git through the host: clone, commit, review, push and fetch with a sandbox that has no network', async () => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const base = await mkdtemp(join(tmpdir(), 'slots-git-'));
+    try {
+      const remote = join(base, 'remote.git');
+      const identity = ['-c', 'user.name=t', '-c', 'user.email=t@example.com'];
+      execFileSync('git', ['init', '--bare', '-b', 'main', remote]);
+      const seed = join(base, 'seed');
+      execFileSync('git', ['init', '-b', 'main', seed]);
+      execFileSync('git', [...identity, '-C', seed, 'commit', '--allow-empty', '-m', 'seed']);
+      execFileSync('git', ['-C', seed, 'push', remote, 'main']);
+
+      const provider = new SlotSandboxProvider({
+        socketPaths: socketPaths(),
+        defaultExecTimeoutSeconds: 60,
+        treeDiskMb: 200,
+        fileMaxBytesForDownload: 1024 * 1024,
+        logger: makeSilentLogger(),
+        sleepMs: undefined,
+        gitBridge: new GitBridge({
+          scratchRoot: join(base, 'scratch'),
+          runner: execFileRunner,
+          logger: makeSilentLogger(),
+          remoteUrl: () => `file://${remote}`,
+          networkEntries: gitLocalImportHardeningConfigEntries(),
+          now: undefined,
+        }),
+      });
+      provider.hostGit?.setToken('fake-host-token');
+      const { sandboxId } = await provider.createSandbox();
+      const run = async (command: string, cwd?: string): Promise<string> => {
+        const result = await provider.exec({ sandboxId, command, ...(cwd === undefined ? {} : { cwd }) });
+        if (!result.success) {
+          throw new Error(result.error);
+        }
+        return result.response.result;
+      };
+
+      expect(await run('git clone https://github.com/acme/widgets')).toContain('widgets');
+      await run(
+        'echo hello > hello.txt && git add hello.txt && git -c user.name=t -c user.email=t@e.x commit -qm "add hello"',
+        'widgets',
+      );
+      const preview = await provider.hostGit?.previewPush({
+        sandboxId,
+        command: 'git push origin main',
+        cwd: 'widgets',
+        signal: undefined,
+      });
+      expect(preview).toMatchObject({ status: 'ok', preview: { commit_count: 1, repository: 'acme/widgets' } });
+      expect(await run('git push origin main', 'widgets')).toContain('main -> main');
+      expect(execFileSync('git', ['-C', remote, 'log', '--format=%s', '-1', 'main'], { encoding: 'utf8' }).trim()).toBe(
+        'add hello',
+      );
+
+      const offline = await run('git ls-remote https://example.com/a/b 2>&1 | head -2 || true');
+      expect(offline).not.toContain('refs/');
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
   });
 });
