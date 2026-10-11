@@ -47,8 +47,10 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
           return merged;
         });
       })
-      .catch(() => {
-        // Best-effort history load: live events still populate the map.
+      .catch((error: unknown) => {
+        // Best-effort: live events still populate the map, but a failed read leaves a reloaded tab
+        // with the generic approval bar, so it must not fail silently.
+        console.error('Sentinel approval history could not be loaded', error);
       });
     return () => {
       cancelled = true;

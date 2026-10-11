@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createSentinelApi, type SentinelApiDeps } from '../src/sentinelApi';
+import {
+  createSentinelApi,
+  readAllSessionEvents,
+  SESSION_EVENTS_PAGE_SIZE,
+  type SentinelApiDeps,
+} from '../src/sentinelApi';
 
 const tier2ApprovalEvent = {
   type: 'tool.approval_required',
@@ -95,4 +100,27 @@ test('a failed audit request surfaces the server error', async () => {
     listSessionEvents: async () => [],
   });
   await assert.rejects(api.listAuditEntries({ sessionId: 'session-1' }), /Audit log unavailable/);
+});
+
+test('readAllSessionEvents pages through every event without asking for more than the server serves', async () => {
+  const requested: { limit: number; pageToken: string | undefined }[] = [];
+  const pages = new Map<string | undefined, { data: { event: unknown }[]; nextPageToken: string | undefined }>([
+    [undefined, { data: [{ event: 'a' }, { event: 'b' }], nextPageToken: 'p2' }],
+    ['p2', { data: [{ event: 'c' }], nextPageToken: undefined }],
+  ]);
+
+  const events = await readAllSessionEvents(async input => {
+    requested.push({ limit: input.limit, pageToken: input.pageToken });
+    const page = pages.get(input.pageToken);
+    if (page === undefined) throw new Error('unexpected page');
+    return page;
+  });
+
+  assert.deepEqual(events, ['a', 'b', 'c']);
+  assert.deepEqual(
+    requested.map(request => request.pageToken),
+    [undefined, 'p2'],
+  );
+  assert.ok(requested.every(request => request.limit <= SESSION_EVENTS_PAGE_SIZE));
+  assert.equal(SESSION_EVENTS_PAGE_SIZE, 100);
 });
