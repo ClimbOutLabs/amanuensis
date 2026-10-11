@@ -118,6 +118,7 @@ import { TrueFoundryModelProviderStore } from './truefoundry/TrueFoundryModelPro
 import { TrueFoundrySandboxProviderStore } from './truefoundry/TrueFoundrySandboxProviderStore';
 import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundryServiceFoundryServerClient';
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
+import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
 
 /** Persistence + optional Redis wired for the selected topology. */
@@ -723,6 +724,21 @@ try {
     standalone: configuration.STANDALONE,
     version: PACKAGE_VERSION,
   });
+
+  // Fail fast on unwritable data directories: the persona knowledge library and
+  // (with the markdown backend) the memory store write here at query time, and
+  // a bare EACCES mid-request is a silent production outage. This throws a
+  // configuration-shaped error naming the env var instead.
+  await ensureWritableDataDir({
+    dir: configuration.PERSONA_KNOWLEDGE_DIR,
+    envVar: 'PERSONA_KNOWLEDGE_DIR',
+  });
+  if (configuration.MEMORY_BACKEND === 'markdown') {
+    await ensureWritableDataDir({
+      dir: configuration.MEMORY_MARKDOWN_DIR,
+      envVar: 'MEMORY_MARKDOWN_DIR',
+    });
+  }
 
   if (configuration.STANDALONE) {
     printStandaloneStartupBanner({ version: PACKAGE_VERSION, color: shouldColorize() });
