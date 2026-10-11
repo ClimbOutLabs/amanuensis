@@ -21,6 +21,8 @@ import {
   useMemoryTurnContextStatus,
 } from '@/containers/MemoryTurnContextProvider.js';
 
+import { stubVisibility } from './stubVisibility.js';
+
 function Probe({ turnId }: { turnId: string }) {
   const context = useMemoryTurnContext(turnId);
   const { hasError, retry } = useMemoryTurnContextStatus();
@@ -142,5 +144,51 @@ describe('MemoryTurnContextProvider', () => {
       await Promise.resolve();
     });
     expect(screen.getByTestId('has-error')).toHaveTextContent('false');
+  });
+
+  it('does not poll while the tab is hidden', async () => {
+    const visibility = stubVisibility();
+    try {
+      useThreadIsRunning.mockReturnValue(true);
+      visibility.hide();
+      const listMemoryTurnContext = vi.fn().mockResolvedValue([]);
+      renderProvider({ listMemoryTurnContext });
+
+      // The mount refresh fires once; hidden poll ticks fire nothing.
+      expect(listMemoryTurnContext).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(listMemoryTurnContext).toHaveBeenCalledTimes(1);
+    } finally {
+      visibility.restore();
+    }
+  });
+
+  it('refreshes once when the tab becomes visible again, then resumes polling', async () => {
+    const visibility = stubVisibility();
+    try {
+      useThreadIsRunning.mockReturnValue(true);
+      visibility.hide();
+      const listMemoryTurnContext = vi.fn().mockResolvedValue([]);
+      renderProvider({ listMemoryTurnContext });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6_000);
+      });
+      expect(listMemoryTurnContext).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        visibility.show();
+      });
+      expect(listMemoryTurnContext).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(listMemoryTurnContext).toHaveBeenCalledTimes(3);
+    } finally {
+      visibility.restore();
+    }
   });
 });

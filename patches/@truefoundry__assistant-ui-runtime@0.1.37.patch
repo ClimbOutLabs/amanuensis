@@ -1044,26 +1044,27 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
  }
  /**
   * SDK-owned agent definition — fields the FE reads/writes.
-@@ -345,6 +371,10 @@ interface AgentSpec<TModel extends Model = Model, TSkill extends SkillMount = Sk
+@@ -345,6 +371,11 @@ interface AgentSpec<TModel extends Model = Model, TSkill extends SkillMount = Sk
      skills?: TSkill[];
      mcpServers?: TMcp[];
      config?: TConfig;
 +    auxiliaryModels?: {
 +        compaction?: TModel;
 +        delegation?: TModel;
++        summarization?: TModel;
 +    };
      instructions?: string;
      variables?: Record<string, string>;
  }
-@@ -406,6 +436,7 @@ interface UserMessage {
+@@ -406,6 +437,7 @@ interface UserMessage {
  }
  type ApprovalDecision = {
      status: "allow";
-+    scope?: "once" | "chat";
++    scope?: "once" | "chat" | "always";
  } | {
      status: "deny";
      reason?: string;
-@@ -671,7 +702,7 @@ interface ToolBase {
+@@ -671,7 +703,7 @@ interface ToolBase {
      description: string;
  }
  /** Strict auth type id. Hosts widen branches via intersection + re-union. */
@@ -1072,7 +1073,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
  type ConnectorAuthOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -684,7 +715,13 @@ type ConnectorAuthApiKey = {
+@@ -684,7 +716,13 @@ type ConnectorAuthApiKey = {
  type ConnectorAuthNone = {
      type: "none";
  };
@@ -1087,7 +1088,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
  type ConnectorAuthPublicOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -696,7 +733,12 @@ type ConnectorAuthPublicApiKey = {
+@@ -696,7 +734,12 @@ type ConnectorAuthPublicApiKey = {
  type ConnectorAuthPublicNone = {
      type: "none";
  };
@@ -2145,23 +2146,24 @@ diff --git a/src/server/types.ts b/src/server/types.ts
 index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..849419c5726fc1495e4a1d94f0ea0eea7030ff8b 100644
 --- a/src/server/types.ts
 +++ b/src/server/types.ts
-@@ -168,6 +168,10 @@ export interface AgentSpec<
+@@ -168,6 +168,11 @@ export interface AgentSpec<
    skills?: TSkill[];
    mcpServers?: TMcp[];
    config?: TConfig;
 +  auxiliaryModels?: {
 +    compaction?: TModel;
 +    delegation?: TModel;
++    summarization?: TModel;
 +  };
    instructions?: string;
    variables?: Record<string, string>;
  }
-@@ -249,7 +253,7 @@ export interface UserMessage {
+@@ -249,7 +254,7 @@ export interface UserMessage {
  }
  
  export type ApprovalDecision =
 -  | { status: "allow" }
-+  | { status: "allow"; scope?: "once" | "chat" }
++  | { status: "allow"; scope?: "once" | "chat" | "always" }
    | { status: "deny"; reason?: string };
  
  export interface UserToolApprovalEvent {

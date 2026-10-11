@@ -17,6 +17,15 @@ const DEFAULT_CALL_TOOL_SERVER = 'inert';
 export const FINAL_TEXT = 'inert connector work is finished.';
 export const VERIFY_THEN_COMMIT_DIRECTIVE = 'verify_then_commit';
 export const COMMIT_ONLY_DIRECTIVE = 'commit_only';
+/** Calls the write tool, then `web_search` for `WEB_SEARCH_QUERY`, then answers. */
+export const WRITE_THEN_SEARCH_DIRECTIVE = 'write_then_search';
+export const WEB_SEARCH_QUERY = 'Lantern Row bakery';
+/**
+ * A question carrying this marker makes the knowledge relevance judge keep no
+ * passage, so a library lookup for it is a near-miss.
+ */
+export const JUDGE_REJECT_MARKER = 'judge_reject';
+const RELEVANCE_JUDGE_TAG = '<knowledge-relevance-judge';
 
 export interface ScriptedModelServer {
   /** Value for a `custom` model provider `base_url`. */
@@ -308,6 +317,11 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       requestedTool = { match: 'exec', argumentsJson: sandboxArgumentsJson(purpose) };
     } else if (progress.directive === COMMIT_ONLY_DIRECTIVE && progress.toolResults === 0) {
       requestedTool = { match: 'exec', argumentsJson: sandboxArgumentsJson('commit') };
+    } else if (progress.directive === WRITE_THEN_SEARCH_DIRECTIVE && progress.toolResults < 2) {
+      requestedTool =
+        progress.toolResults === 0
+          ? { match: 'inert_write', argumentsJson: '{"text":"inert"}' }
+          : { match: 'web_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
     } else if (pending !== undefined) {
       requestedTool = { match: pending, argumentsJson: '' };
     }
@@ -328,9 +342,14 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       };
     }
 
+    const rejectingJudge =
+      parsed.messages.some(message => messageText(message.content).includes(RELEVANCE_JUDGE_TAG)) &&
+      parsed.messages.some(message => messageText(message.content).includes(JUDGE_REJECT_MARKER));
+    const replyText = rejectingJudge ? '{"helpful":[]}' : FINAL_TEXT;
+
     if (!parsed.stream) {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(completionBody({ text: toolCall ? null : FINAL_TEXT, toolCall })));
+      res.end(JSON.stringify(completionBody({ text: toolCall ? null : replyText, toolCall })));
       return;
     }
 
@@ -339,7 +358,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     });
-    const chunks = toolCall ? toolCallChunks(toolCall) : textChunks(FINAL_TEXT);
+    const chunks = toolCall ? toolCallChunks(toolCall) : textChunks(replyText);
     for (const chunk of chunks) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }

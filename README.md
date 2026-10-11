@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="docs/quickstart.mdx"><strong>Quickstart</strong></a> &nbsp;·&nbsp;
+  <a href="docs/install.mdx">Install</a> &nbsp;·&nbsp;
   <a href="docs/introduction.mdx">Introduction</a> &nbsp;·&nbsp;
   <a href="docs/deployment-security.mdx">Deployment security</a> &nbsp;·&nbsp;
   <a href="CONTRIBUTING.md">Contributing</a>

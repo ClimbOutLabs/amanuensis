@@ -1,22 +1,7 @@
 'use client';
 
-import doingSprite from '../assets/turn-status/doing.webp';
-import foundMemoriesSprite from '../assets/turn-status/found-memories.webp';
-import listeningSprite from '../assets/turn-status/listening.webp';
-import rememberingSprite from '../assets/turn-status/remembering.webp';
-import stillWritingSprite from '../assets/turn-status/still-writing.webp';
-import writingSprite from '../assets/turn-status/writing.webp';
 import type { TurnSpriteId } from '../utils/waitQueueJourney.js';
 import { cn } from './lib/cn.js';
-
-const SPRITE_IMAGES: Record<TurnSpriteId, string> = {
-  listening: listeningSprite,
-  remembering: rememberingSprite,
-  'found-memories': foundMemoriesSprite,
-  doing: doingSprite,
-  writing: writingSprite,
-  'still-writing': stillWritingSprite,
-};
 
 export type StateSpriteProps = {
   /** The turn-status sprite to show. */
@@ -25,9 +10,15 @@ export type StateSpriteProps = {
 };
 
 /**
- * The turn-status panda: one inlined image per state, selected by the pure
- * `spriteStateFor` mapping. All six states share a 2rem box so the row never
- * shifts between them.
+ * The turn-status panda, drawn in code: one inline SVG whose per-state pose
+ * and accents are toggled by the state modifier class. All six states share
+ * a 2rem box so the row never shifts between them.
+ *
+ * Flat shapes, theme-token colors, transparent background. The panda is a
+ * minimal icon: balanced proportions, sleek angled eye patches, calm eyes,
+ * a small nose and a subtle mouth. Motion lives in the stylesheet, gated on
+ * `prefers-reduced-motion: no-preference` and off under
+ * `.aui-wait-queue--static`; without motion the panda holds its static pose.
  *
  * Decorative by design: the station track and the role="status" microcopy
  * line already communicate state to assistive tech, so the sprite stays
@@ -40,7 +31,47 @@ export function StateSprite({ state, className }: StateSpriteProps) {
       className={cn('aui-state-sprite', `aui-state-sprite--${state}`, className)}
       aria-hidden="true"
     >
-      <img src={SPRITE_IMAGES[state]} alt="" draggable={false} />
+      <svg viewBox="0 0 64 64" role="presentation" focusable="false">
+        <g className="panda-head">
+          <circle className="panda-dark panda-ear panda-ear-l" cx="18" cy="18" r="7.5" />
+          <circle className="panda-dark panda-ear panda-ear-r" cx="46" cy="18" r="7.5" />
+          <circle className="panda-face" cx="32" cy="34" r="19" />
+          <ellipse className="panda-dark" cx="24.5" cy="32.5" rx="5.2" ry="6.5" transform="rotate(-15 24.5 32.5)" />
+          <ellipse className="panda-dark" cx="39.5" cy="32.5" rx="5.2" ry="6.5" transform="rotate(15 39.5 32.5)" />
+          <g className="panda-eyes">
+            <ellipse className="panda-face" cx="25" cy="31" rx="1.6" ry="1.9" />
+            <ellipse className="panda-face" cx="39" cy="31" rx="1.6" ry="1.9" />
+            <g className="panda-pupils">
+              <circle className="panda-dark" cx="25" cy="31.2" r="1.05" />
+              <circle className="panda-dark" cx="39" cy="31.2" r="1.05" />
+              <circle className="panda-face" cx="25.5" cy="30.6" r="0.3" />
+              <circle className="panda-face" cx="39.5" cy="30.6" r="0.3" />
+            </g>
+          </g>
+          <ellipse className="panda-dark" cx="32" cy="40.5" rx="2.2" ry="1.4" />
+          <path
+            className="panda-mouth"
+            d="M29.5 44.2 Q32 45.6 34.5 44.2"
+            fill="none"
+            strokeWidth="1.2"
+            strokeLinecap="round"
+          />
+        </g>
+        <g className="panda-paws">
+          <ellipse className="panda-dark panda-paw panda-paw-l" cx="19" cy="56" rx="5" ry="3.6" />
+          <ellipse className="panda-dark panda-paw panda-paw-r" cx="45" cy="56" rx="5" ry="3.6" />
+        </g>
+        <g className="panda-sparkle" aria-hidden="true">
+          <path className="panda-accent" d="M52 6 L53.6 11.4 L59 13 L53.6 14.6 L52 20 L50.4 14.6 L45 13 L50.4 11.4 Z" />
+        </g>
+        <g className="panda-pencil" aria-hidden="true">
+          <g transform="rotate(24 50 52)">
+            <rect className="panda-accent" x="48.2" y="42" width="3.6" height="12" rx="1" />
+            <path className="panda-face" d="M48.2 54 L50 58.4 L51.8 54 Z" />
+            <path className="panda-dark" d="M49.4 56.6 L50 58.4 L50.6 56.6 Z" />
+          </g>
+        </g>
+      </svg>
     </span>
   );
 }
