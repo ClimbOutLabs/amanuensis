@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -72,6 +73,53 @@ describe('extractSentinelFromEvent', () => {
     expect(first?.card.amount).toBe('$250');
     expect(first?.card.why_asked_again).toBeNull();
     expect(first?.card.parsed_command).toBeNull();
+  });
+
+  it('parses an approval event after the SDK deserializes it', () => {
+    // Live and reloaded events reach the UI through the SDK, which camel-cases known keys.
+    const parsed = ToolApprovalRequiredEvent.parseOrThrow(
+      {
+        type: 'tool.approval_required',
+        id: 'evt-1',
+        created_at: '2026-01-01T00:00:00.000Z',
+        thread_id: 'main',
+        tool_calls: [
+          {
+            id: 'call-9',
+            source_event_id: 'evt-0',
+            tier: 3,
+            tier3_card: { plain_what: 'Run code in the sandbox', plain_why: null, cannot_be_undone: 'Runs once.' },
+          },
+        ],
+      },
+      { unrecognizedObjectKeys: 'passthrough', allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true },
+    );
+    const { approvals } = extractSentinelFromEvent(parsed);
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]?.toolCallId).toBe('call-9');
+    expect(approvals[0]?.tier).toBe(3);
+    expect(approvals[0]?.card.plain_what).toBe('Run code in the sandbox');
+    expect(approvals[0]?.card.cannot_be_undone).toBe('Runs once.');
+  });
+
+  it('reads a camel-cased card from a regenerated SDK shape', () => {
+    const { approvals } = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      toolCalls: [
+        {
+          id: 'call-10',
+          tier: 3,
+          tier3Card: {
+            plainWhat: 'Run code in the sandbox',
+            plainWhy: 'Asked to compute a total.',
+            parsedCommand: null,
+          },
+        },
+      ],
+    });
+    expect(approvals[0]?.card.plain_what).toBe('Run code in the sandbox');
+    expect(approvals[0]?.card.plain_why).toBe('Asked to compute a total.');
+    expect(approvals[0]?.card.parsed_command).toBeNull();
   });
 
   it('accepts the provisional `card` field name', () => {

@@ -1,5 +1,5 @@
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 6c2f1b9..3607b93 100644
+index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..b0fbcd3184c250330266b2c440e1d540ef8d99b4 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -78,6 +78,8 @@ type PendingResponseRef = {
@@ -54,14 +54,17 @@ index 6c2f1b9..3607b93 100644
  /** Returns a function to reset (re-submit) a user turn from any render context. */
  declare const useTrueFoundryResetFromTurn: () => (turnId: string) => Promise<void>;
  /** Current draft agent spec and sync state (draft mode only). */
-@@ -381,4 +392,4 @@ declare function getSession(server: AgentChatServer, sessionId: string): Promise
+@@ -381,4 +392,7 @@ declare function getSession(server: AgentChatServer, sessionId: string): Promise
   */
  declare const trueFoundryAttachmentAdapter: AttachmentAdapter;
  
 -export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
-+export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryTerminalError, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
++/** Server tool call id inside a tool invocation key; the input is returned unchanged when it is not a key. */
++declare function toolInvocationRawId(toolCallId: string): string;
++
++export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, toolInvocationRawId, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryTerminalError, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
 diff --git a/dist/index.js b/dist/index.js
-index 7931deb..9d904a0 100644
+index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c2531044cd729ab 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -158,6 +158,7 @@ function applyApprovalDecisionsToContent(content, decisions) {
@@ -131,8 +134,21 @@ index 7931deb..9d904a0 100644
  function parseToolArgs(argsText) {
    if (!argsText) {
      return {};
-@@ -429,10 +449,15 @@ function parseToolArgs(argsText) {
+@@ -427,12 +447,28 @@ function parseToolArgs(argsText) {
+     return {};
+   }
  }
++function toolCallArtifact(toolInfo) {
++  const hostObservedTargetSummary = toolInfo?.hostObservedTargetSummary;
++  const builtInToolName = toolInfo?.type === "truefoundry-system" && typeof toolInfo.name === "string" ? toolInfo.name : void 0;
++  if (hostObservedTargetSummary === void 0 && builtInToolName === void 0) {
++    return void 0;
++  }
++  return {
++    ...hostObservedTargetSummary === void 0 ? {} : { hostObservedTargetSummary },
++    ...builtInToolName === void 0 ? {} : { builtInToolName }
++  };
++}
  function toolCallToPart(toolCall, context) {
    const argsText = toolCall.function.arguments ?? "";
 -  const toolResult = context?.toolResults?.get(toolCall.id);
@@ -151,7 +167,7 @@ index 7931deb..9d904a0 100644
    let interrupt;
    if (pendingResponse != null && toolResult === void 0) {
      interrupt = {
-@@ -448,10 +473,20 @@ function toolCallToPart(toolCall, context) {
+@@ -448,10 +484,20 @@ function toolCallToPart(toolCall, context) {
      approval = {
        id: approvalDecision.id,
        approved: approvalDecision.approved,
@@ -173,19 +189,22 @@ index 7931deb..9d904a0 100644
    }
    let result;
    let isError = false;
-@@ -467,6 +502,11 @@ function toolCallToPart(toolCall, context) {
+@@ -461,12 +507,14 @@ function toolCallToPart(toolCall, context) {
+     result = { error: approvalDecision.reason || "Tool approval denied" };
+     isError = true;
+   }
++  const artifact = toolCallArtifact(toolCall.toolInfo);
+   return {
+     type: "tool-call",
+     toolCallId: toolCall.id,
      toolName: toolCall.function.name,
      argsText,
      args: parseToolArgs(argsText),
-+    ...toolCall.toolInfo?.hostObservedTargetSummary === void 0 ? {} : {
-+      artifact: {
-+        hostObservedTargetSummary: toolCall.toolInfo.hostObservedTargetSummary
-+      }
-+    },
++    ...artifact === void 0 ? {} : { artifact },
      ...result !== void 0 ? { result } : {},
      ...isError ? { isError: true } : {},
      ...approval != null ? { approval } : {},
-@@ -508,6 +548,15 @@ function buildAssistantContent(message, context) {
+@@ -508,6 +556,15 @@ function buildAssistantContent(message, context) {
  }
  
  // src/foldPeerThreads.ts
@@ -201,7 +220,7 @@ index 7931deb..9d904a0 100644
  var isDev = typeof process !== "undefined" && typeof process.env !== "undefined" && process.env.NODE_ENV !== "production";
  function warnUnexpectedRootThread(threadId, eventType) {
    if (!isDev) {
-@@ -541,6 +590,7 @@ var PeerThreadFoldState = class {
+@@ -541,6 +598,7 @@ var PeerThreadFoldState = class {
          pendingApprovals: /* @__PURE__ */ new Map(),
          approvalDecisions: /* @__PURE__ */ new Map(),
          pendingResponses: /* @__PURE__ */ new Map(),
@@ -209,7 +228,7 @@ index 7931deb..9d904a0 100644
          done: false
        };
        this.threads.set(threadId, bucket);
-@@ -559,6 +609,9 @@ function ingestEventIntoBucket(bucket, message) {
+@@ -559,6 +617,9 @@ function ingestEventIntoBucket(bucket, message) {
      const base = bucket.events.get(message.id);
      if (base != null) {
        mergeStreamEventDelta(base, message);
@@ -219,7 +238,7 @@ index 7931deb..9d904a0 100644
      }
      return;
    }
-@@ -567,28 +620,44 @@ function ingestEventIntoBucket(bucket, message) {
+@@ -567,28 +628,44 @@ function ingestEventIntoBucket(bucket, message) {
      if (!bucket.modelMessageIds.includes(message.id)) {
        bucket.modelMessageIds.push(message.id);
      }
@@ -274,7 +293,7 @@ index 7931deb..9d904a0 100644
      }
      return;
    }
-@@ -600,7 +669,7 @@ function ingestEventIntoBucket(bucket, message) {
+@@ -600,7 +677,7 @@ function ingestEventIntoBucket(bucket, message) {
    }
  }
  function isContentAffectingEvent(message) {
@@ -283,7 +302,7 @@ index 7931deb..9d904a0 100644
  }
  function ingestStreamEvent(state, message) {
    if (message.type === "mcp.auth_required" || isTurnScopedEvent(message)) {
-@@ -689,7 +758,7 @@ function childSubThreadIds(state, parentThreadId, toolCallId) {
+@@ -689,7 +766,7 @@ function childSubThreadIds(state, parentThreadId, toolCallId) {
    return ids;
  }
  function bucketHasUnresolvedPendingResponses(bucket) {
@@ -292,7 +311,7 @@ index 7931deb..9d904a0 100644
      if (!bucket.toolResults.has(id)) {
        return true;
      }
-@@ -724,11 +793,12 @@ function attachSubAgentMessages(state, parentThreadId, parts) {
+@@ -724,11 +801,12 @@ function attachSubAgentMessages(state, parentThreadId, parts) {
      if (part.type !== "tool-call" || parentBucket == null) {
        return part;
      }
@@ -307,7 +326,7 @@ index 7931deb..9d904a0 100644
      if (childIds.length === 0) {
        return part;
      }
-@@ -775,17 +845,19 @@ function buildThreadAssistantParts(state, threadId, modelMessageIds) {
+@@ -775,17 +853,19 @@ function buildThreadAssistantParts(state, threadId, modelMessageIds) {
        toolResults: bucket.toolResults,
        pendingApprovals: bucket.pendingApprovals,
        approvalDecisions: bucket.approvalDecisions,
@@ -333,7 +352,7 @@ index 7931deb..9d904a0 100644
      }
    }
    return attachSubAgentMessages(state, threadId, parts);
-@@ -847,40 +919,83 @@ function recordToolApprovalInFold(fold, decision) {
+@@ -847,40 +927,83 @@ function recordToolApprovalInFold(fold, decision) {
    const record = {
      id: decision.toolCallId,
      approved: decision.approved,
@@ -433,7 +452,7 @@ index 7931deb..9d904a0 100644
  
  // src/toolResponse.ts
  var TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY = "toolResponseThreadId";
-@@ -966,7 +1081,7 @@ function collectResponseInputs(message, threadId) {
+@@ -966,7 +1089,7 @@ function collectResponseInputs(message, threadId) {
        events.push({
          type: "user.tool_response",
          threadId: scopedThreadId,
@@ -442,7 +461,7 @@ index 7931deb..9d904a0 100644
          content: String(part.result)
        });
      }
-@@ -983,7 +1098,7 @@ function applyStagedResponsesToContentMap(content, staged) {
+@@ -983,7 +1106,7 @@ function applyStagedResponsesToContentMap(content, staged) {
      if (part.type !== "tool-call") {
        return part;
      }
@@ -451,7 +470,7 @@ index 7931deb..9d904a0 100644
      let nextPart = part;
      if (contentValue != null && hasPendingToolResponse(part)) {
        nextPart = applyToolResponseToToolCall(part, contentValue);
-@@ -1019,12 +1134,15 @@ function applyUserToolResponsesToFold(fold, inputs) {
+@@ -1019,12 +1142,15 @@ function applyUserToolResponsesToFold(fold, inputs) {
      if (item.type === "user.tool_response") {
        recordToolResponseInFold(fold, {
          toolCallId: item.toolCallId,
@@ -468,7 +487,7 @@ index 7931deb..9d904a0 100644
          ...item.approval.status === "deny" && item.approval.reason != null ? { reason: item.approval.reason } : {}
        });
      }
-@@ -1282,6 +1400,13 @@ function appendMcpAuthToTurnContent(content, turn) {
+@@ -1282,6 +1408,13 @@ function appendMcpAuthToTurnContent(content, turn) {
  }
  
  // src/sessionSnapshot.ts
@@ -482,7 +501,7 @@ index 7931deb..9d904a0 100644
  function emptyRequiredActionsOverlay() {
    return {
      approvals: /* @__PURE__ */ new Map(),
-@@ -1351,7 +1476,7 @@ function oldestCompleteTurnGroupState(itemsAsc) {
+@@ -1351,7 +1484,7 @@ function oldestCompleteTurnGroupState(itemsAsc) {
    if (!hasDone) {
      return "incomplete";
    }
@@ -491,7 +510,7 @@ index 7931deb..9d904a0 100644
  }
  async function fetchSessionEventsPage(server, sessionId, options) {
    const page = await server.listEvents({
-@@ -1422,6 +1547,12 @@ function cloneThreadBucket(bucket) {
+@@ -1422,6 +1555,12 @@ function cloneThreadBucket(bucket) {
      pendingApprovals: new Map(bucket.pendingApprovals),
      approvalDecisions: new Map(bucket.approvalDecisions),
      pendingResponses: new Map(bucket.pendingResponses),
@@ -504,7 +523,7 @@ index 7931deb..9d904a0 100644
      done: bucket.done,
      ...bucket.title != null ? { title: bucket.title } : {},
      ...bucket.agentInfo != null ? { agentInfo: bucket.agentInfo } : {}
-@@ -1466,6 +1597,17 @@ function prependFoldState(older, newer) {
+@@ -1466,6 +1605,17 @@ function prependFoldState(older, newer) {
          ...olderBucket.pendingResponses,
          ...newerBucket.pendingResponses
        ]),
@@ -522,7 +541,7 @@ index 7931deb..9d904a0 100644
        done: newerBucket.done || olderBucket.done,
        ...newerBucket.title != null || olderBucket.title != null ? { title: newerBucket.title ?? olderBucket.title } : {},
        ...newerBucket.agentInfo != null || olderBucket.agentInfo != null ? { agentInfo: newerBucket.agentInfo ?? olderBucket.agentInfo } : {}
-@@ -1491,6 +1633,7 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
+@@ -1491,6 +1641,7 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
        currentCreatedEvent = event;
        currentContentEvents = [];
        beforeCount = snapshot.fold.threads.get(ROOT_THREAD_ID)?.modelMessageIds.length ?? 0;
@@ -530,7 +549,7 @@ index 7931deb..9d904a0 100644
      } else if (event.type === "turn.done") {
        if (currentTurnId == null || currentCreatedEvent == null) {
          continue;
-@@ -1502,10 +1645,6 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
+@@ -1502,10 +1653,6 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
        const sandboxEvent = currentContentEvents.find(
          (ev) => ev.type === "sandbox.created"
        );
@@ -541,7 +560,7 @@ index 7931deb..9d904a0 100644
        snapshot.turns.push(
          sessionEventsToSessionRecord(
            currentTurnId,
-@@ -2066,6 +2205,12 @@ function projectSessionMessages(snapshot, options) {
+@@ -2066,6 +2213,12 @@ function projectSessionMessages(snapshot, options) {
      const resolvedUpdate = streamComplete === true ? projectActiveStreamUpdate(snapshot) : update;
      const last = messages.at(-1);
      const existingAssistant = isContinuation && last?.role === "assistant" ? last : void 0;
@@ -554,7 +573,7 @@ index 7931deb..9d904a0 100644
      let assistantMessage = turnStreamUpdateToAssistantMessage(
        turnId,
        resolvedUpdate,
-@@ -2096,8 +2241,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
+@@ -2096,8 +2249,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
      const turn = turns[i];
      const rootBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
      const beforeCount = rootBucket?.modelMessageIds.length ?? 0;
@@ -564,7 +583,7 @@ index 7931deb..9d904a0 100644
      const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
      const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
        beforeCount
-@@ -2166,6 +2311,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
+@@ -2166,6 +2319,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
    return {
      messages,
      foldState: snapshot.fold,
@@ -572,7 +591,7 @@ index 7931deb..9d904a0 100644
      ...snapshot.runningTurn != null ? {
        runningTurn: snapshot.runningTurn,
        unstable_resume: true
-@@ -2336,7 +2482,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
+@@ -2336,7 +2490,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
      }
      if (event.type === "turn.done") {
        if (event.state.status === "error") {
@@ -585,7 +604,7 @@ index 7931deb..9d904a0 100644
        }
        break;
      }
-@@ -3039,19 +3189,7 @@ function buildTurnInput(options) {
+@@ -3039,19 +3197,7 @@ function buildTurnInput(options) {
    }
    return [{ type: "user.message", content: options.userMessage ?? "" }];
  }
@@ -605,7 +624,7 @@ index 7931deb..9d904a0 100644
    if (abortSignal.aborted) {
      return;
    }
-@@ -3083,22 +3221,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
+@@ -3083,22 +3229,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
        return;
      }
      throw error;
@@ -628,7 +647,7 @@ index 7931deb..9d904a0 100644
    try {
      yield* streamTurnEvents(
        server.subscribeToTurn({
-@@ -3115,8 +3246,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
+@@ -3115,8 +3254,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
        return;
      }
      throw error;
@@ -637,7 +656,7 @@ index 7931deb..9d904a0 100644
    }
  }
  
-@@ -3176,20 +3305,49 @@ function appendTurnInputs(base, continuationInputs) {
+@@ -3176,20 +3313,49 @@ function appendTurnInputs(base, continuationInputs) {
    }
    return [...base, ...continuationInputs];
  }
@@ -690,7 +709,7 @@ index 7931deb..9d904a0 100644
    );
    const lastTurn = snapshot.turns.at(-1);
    if (lastTurn?.id === active.turnId) {
-@@ -3273,6 +3431,10 @@ function useTrueFoundryAgentMessages({
+@@ -3273,6 +3439,10 @@ function useTrueFoundryAgentMessages({
    const createdAtByMessageIdRef = useRef2(/* @__PURE__ */ new Map());
    const abortControllerRef = useRef2(null);
    const activeRunRef = useRef2(null);
@@ -701,7 +720,7 @@ index 7931deb..9d904a0 100644
    const resumeUnavailableRef = useRef2(false);
    const runningTurnRef = useRef2(void 0);
    const loadGenerationRef = useRef2(0);
-@@ -3302,6 +3464,7 @@ function useTrueFoundryAgentMessages({
+@@ -3302,6 +3472,7 @@ function useTrueFoundryAgentMessages({
      () => projectSessionMessages(snapshot, projectOptions),
      [snapshot, projectOptions]
    );
@@ -709,7 +728,7 @@ index 7931deb..9d904a0 100644
    const runStream = useCallback3(
      (createStream, turnIdRef, isContinuation) => {
        const streamGeneration = ++streamGenerationRef.current;
-@@ -3310,9 +3473,11 @@ function useTrueFoundryAgentMessages({
+@@ -3310,9 +3481,11 @@ function useTrueFoundryAgentMessages({
        abortControllerRef.current = abortController;
        setIsRunning(true);
        markResumeUnavailable(false);
@@ -721,7 +740,7 @@ index 7931deb..9d904a0 100644
          const flushPendingStreamUpdate = () => {
            streamUpdateRaf = null;
            const pending = pendingStreamUpdate;
-@@ -3347,6 +3512,7 @@ function useTrueFoundryAgentMessages({
+@@ -3347,6 +3520,7 @@ function useTrueFoundryAgentMessages({
              }
              applyStreamUpdate(update);
            }
@@ -729,7 +748,7 @@ index 7931deb..9d904a0 100644
          } catch (error) {
            if (error instanceof Error && error.name === "AbortError") {
              return;
-@@ -3366,22 +3532,37 @@ function useTrueFoundryAgentMessages({
+@@ -3366,22 +3540,37 @@ function useTrueFoundryAgentMessages({
              abortControllerRef.current = null;
            }
            setIsRunning(false);
@@ -745,23 +764,20 @@ index 7931deb..9d904a0 100644
 -              requiredActions: {
 -                approvals: /* @__PURE__ */ new Map(),
 -                toolResponses: /* @__PURE__ */ new Map()
--              }
 +          if (isContinuation && !completedWithoutAbort) {
 +            const restored = replaceSessionSnapshot(snapshotBeforeRun, {
 +              requiredActions: mergeRequiredActions(
 +                snapshotBeforeRun.requiredActions,
 +                snapshotRef.current.requiredActions
 +              )
-             });
--            return commitActiveStream(marked);
--          });
++            });
 +            snapshotRef.current = restored;
 +            setSnapshot(restored);
 +          } else {
 +            setSnapshot((prev) => {
 +              if (prev.activeStream == null) {
 +                return prev;
-+              }
+               }
 +              const marked = replaceSessionSnapshot(prev, {
 +                activeStream: {
 +                  ...prev.activeStream,
@@ -777,12 +793,14 @@ index 7931deb..9d904a0 100644
 +              const committed = commitActiveStream(marked);
 +              snapshotRef.current = committed;
 +              return committed;
-+            });
+             });
+-            return commitActiveStream(marked);
+-          });
 +          }
          }
        })();
        activeRunRef.current = run;
-@@ -3447,6 +3628,7 @@ function useTrueFoundryAgentMessages({
+@@ -3447,6 +3636,7 @@ function useTrueFoundryAgentMessages({
          return;
        }
        createdAtByMessageIdRef.current = /* @__PURE__ */ new Map();
@@ -790,7 +808,7 @@ index 7931deb..9d904a0 100644
        setSnapshot(loadedSnapshot);
        runningTurnRef.current = loadedSnapshot.runningTurn;
        setIsLoading(false);
-@@ -3662,12 +3844,13 @@ function useTrueFoundryAgentMessages({
+@@ -3662,12 +3852,13 @@ function useTrueFoundryAgentMessages({
      [server, runStream, sessionId]
    );
    const cancel = useCallback3(async () => {
@@ -806,7 +824,7 @@ index 7931deb..9d904a0 100644
        resolveConversationSessionIdRef.current
      );
      await server.cancelSession({ sessionId: conversationSessionId }).catch(() => void 0);
-@@ -3677,11 +3860,26 @@ function useTrueFoundryAgentMessages({
+@@ -3677,11 +3868,26 @@ function useTrueFoundryAgentMessages({
        setIsRunning(false);
      }
    }, [server, sessionId, markResumeUnavailable]);
@@ -836,7 +854,7 @@ index 7931deb..9d904a0 100644
          return;
        }
        const projected = projectSessionMessages(nextSnapshot, projectOptions);
-@@ -3690,18 +3888,29 @@ function useTrueFoundryAgentMessages({
+@@ -3690,18 +3896,29 @@ function useTrueFoundryAgentMessages({
          return;
        }
        const inputs = collectRequiredActionInputs(paused);
@@ -868,7 +886,7 @@ index 7931deb..9d904a0 100644
          ...response.reason != null ? { reason: response.reason } : {}
        });
        const nextSnapshot = replaceSessionSnapshot(prev, {
-@@ -3710,6 +3919,7 @@ function useTrueFoundryAgentMessages({
+@@ -3710,6 +3927,7 @@ function useTrueFoundryAgentMessages({
            approvals
          }
        });
@@ -876,7 +894,7 @@ index 7931deb..9d904a0 100644
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3726,6 +3936,7 @@ function useTrueFoundryAgentMessages({
+@@ -3726,6 +3944,7 @@ function useTrueFoundryAgentMessages({
            toolResponses
          }
        });
@@ -884,7 +902,7 @@ index 7931deb..9d904a0 100644
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3880,6 +4091,7 @@ function useTrueFoundryAgentMessages({
+@@ -3880,6 +4099,7 @@ function useTrueFoundryAgentMessages({
    }, [server, isMain, sessionId]);
    return {
      messages,
@@ -892,7 +910,7 @@ index 7931deb..9d904a0 100644
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -3958,6 +4170,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -3958,6 +4178,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
    const [toolStatuses, setToolStatuses] = useState3({});
    const {
      messages,
@@ -900,7 +918,7 @@ index 7931deb..9d904a0 100644
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -4047,6 +4260,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -4047,6 +4268,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
        pendingToolResponses,
        pendingMcpAuth,
        resumeUnavailable,
@@ -908,7 +926,7 @@ index 7931deb..9d904a0 100644
        sandboxId,
        respondToToolApproval,
        respondToToolResponse,
-@@ -4249,8 +4463,13 @@ var useTrueFoundryMcpAuth = () => {
+@@ -4249,8 +4471,13 @@ var useTrueFoundryMcpAuth = () => {
    );
  };
  var useTrueFoundryRespondToToolApproval = () => {
@@ -924,7 +942,7 @@ index 7931deb..9d904a0 100644
  };
  var useTrueFoundryRespondToToolResponse = () => {
    const aui = useAui3();
-@@ -4298,6 +4517,7 @@ var useTrueFoundryHistoryPagination = () => {
+@@ -4298,6 +4525,7 @@ var useTrueFoundryHistoryPagination = () => {
    );
  };
  var useTrueFoundryResumeUnavailable = () => useTrueFoundryRuntimeExtras()?.resumeUnavailable ?? false;
@@ -932,7 +950,15 @@ index 7931deb..9d904a0 100644
  var useTrueFoundryResetFromTurn = () => {
    const aui = useAui3();
    return (turnId) => getTrueFoundryExtras(aui).resetFromTurn(turnId);
-@@ -4427,6 +4647,7 @@ export {
+@@ -4408,6 +4636,7 @@ export {
+   parseTurnIdFromMessageId,
+   repositoryItemsFromMessages,
+   toTrueFoundryApprovalInputs,
++  toolInvocationRawId,
+   trueFoundryAttachmentAdapter,
+   trueFoundryExtras,
+   tryGetTrueFoundryExtras,
+@@ -4427,6 +4656,7 @@ export {
    useTrueFoundryResumeMcpAuth,
    useTrueFoundryResumeUnavailable,
    useTrueFoundrySandboxId,
@@ -941,7 +967,7 @@ index 7931deb..9d904a0 100644
    useTrueFoundryTurnId,
    useTrueFoundryUpdateAgentSpec
 diff --git a/dist/types-hS8TQqBP.d.ts b/dist/types-hS8TQqBP.d.ts
-index bddf93d..fe1ee2c 100644
+index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955ec97c5c8 100644
 --- a/dist/types-hS8TQqBP.d.ts
 +++ b/dist/types-hS8TQqBP.d.ts
 @@ -9,7 +9,11 @@ interface ToolCallFunction {
@@ -1076,7 +1102,7 @@ index bddf93d..fe1ee2c 100644
   * MCP / connector create-edit config. Host extends for extra fields, etc.
   */
 diff --git a/src/convertTurnMessages.test.ts b/src/convertTurnMessages.test.ts
-index a67eaed..9e46b7f 100644
+index a67eaed30cdf64df8b21030ad9df53ed938c99c3..9e46b7fce8541db691f7d51308858fbeaf0547d7 100644
 --- a/src/convertTurnMessages.test.ts
 +++ b/src/convertTurnMessages.test.ts
 @@ -2879,6 +2879,99 @@ describe("buildSnapshotFromSessionEvents", () => {
@@ -1185,7 +1211,7 @@ index a67eaed..9e46b7f 100644
  });
 -
 diff --git a/src/convertTurnMessages.ts b/src/convertTurnMessages.ts
-index b918b3e..11b2901 100644
+index b918b3e7eceff2af3c032ee032ad09ba77f14975..11b29014e0c1542d6487e86bdd71c8602b6263e5 100644
 --- a/src/convertTurnMessages.ts
 +++ b/src/convertTurnMessages.ts
 @@ -46,6 +46,7 @@ import {
@@ -1312,7 +1338,7 @@ index b918b3e..11b2901 100644
              // The turn is logically complete once `turn.done` is observed. The
              // resumed-turn transport (`subscribeToTurn`) is a reconnectable live
 diff --git a/src/foldPeerThreads.test.ts b/src/foldPeerThreads.test.ts
-index 9002dd5..1f88591 100644
+index 9002dd54c7e8dc88b56f46c9b145105a4f23963b..1f88591c1a7ee6e9db76ba4aff4f2617dcf2bb41 100644
 --- a/src/foldPeerThreads.test.ts
 +++ b/src/foldPeerThreads.test.ts
 @@ -365,6 +365,46 @@ describe("foldPeerThreads", () => {
@@ -1388,7 +1414,7 @@ index 9002dd5..1f88591 100644
          const state = seedPendingApproval();
  
 diff --git a/src/foldPeerThreads.ts b/src/foldPeerThreads.ts
-index da98ad2..5d2157f 100644
+index da98ad2a961107a173b4206b159b736136496a01..5d2157f2fb0d901527558f1aac9f2c885373016d 100644
 --- a/src/foldPeerThreads.ts
 +++ b/src/foldPeerThreads.ts
 @@ -1,6 +1,7 @@
@@ -1717,7 +1743,7 @@ index da98ad2..5d2157f 100644
 +    };
 +}
 diff --git a/src/hooks.ts b/src/hooks.ts
-index 4db1a0c..b340708 100644
+index 4db1a0c316be15f58b922ca15d223dd0cd948a1a..b340708463be4791811d32098dd24aee78561e4a 100644
 --- a/src/hooks.ts
 +++ b/src/hooks.ts
 @@ -66,9 +66,13 @@ export const useTrueFoundryMcpAuth = () => {
@@ -1748,10 +1774,10 @@ index 4db1a0c..b340708 100644
  export const useTrueFoundryResetFromTurn = () => {
      const aui = useAui();
 diff --git a/src/index.ts b/src/index.ts
-index b5873bc..2f571ad 100644
+index b5873bc07df150d1d74d240acd50a4a1681523d9..bc9bb32562213be287c70e9d069bcb7da731b99e 100644
 --- a/src/index.ts
 +++ b/src/index.ts
-@@ -62,6 +62,7 @@ export {
+@@ -62,12 +62,14 @@ export {
      useTrueFoundryReload,
      useTrueFoundryHistoryPagination,
      useTrueFoundryResumeUnavailable,
@@ -1759,12 +1785,19 @@ index b5873bc..2f571ad 100644
  } from "./hooks.js";
  export {
      collectApprovalInputs,
+     messageHasPendingApprovals,
+     toTrueFoundryApprovalInputs,
+ } from "./toolApproval.js";
++export { toolInvocationRawId } from "./modelMessageContent.js";
+ export {
+     collectResponseInputs,
+     messageHasPendingResponses,
 diff --git a/src/modelMessageContent.test.ts b/src/modelMessageContent.test.ts
 new file mode 100644
-index 0000000..921673d
+index 0000000000000000000000000000000000000000..0c732d1ab2a05603aeba408686ec8c6db35c4aa0
 --- /dev/null
 +++ b/src/modelMessageContent.test.ts
-@@ -0,0 +1,74 @@
+@@ -0,0 +1,136 @@
 +import { describe, expect, it } from "vitest";
 +
 +import { buildAssistantContent } from "./modelMessageContent.js";
@@ -1839,8 +1872,70 @@ index 0000000..921673d
 +        });
 +    });
 +});
++
++describe("modelMessageContent built-in tool marker", () => {
++    function callMessage({
++        name,
++        toolInfo,
++    }: {
++        name: string;
++        toolInfo: NonNullable<ModelMessageEvent["toolCalls"]>[number]["toolInfo"];
++    }): ModelMessageEvent {
++        const message = approvalMessage(toolInfo);
++        const [call] = message.toolCalls ?? [];
++        return {
++            ...message,
++            toolCalls: call === undefined ? [] : [{ ...call, function: { name, arguments: "{}" } }],
++        };
++    }
++
++    it("names the built-in tool the host identified", () => {
++        const [part] = buildAssistantContent(
++            callMessage({ name: "run_code", toolInfo: { type: "truefoundry-system", name: "run_code" } }),
++        );
++
++        expect(part).toMatchObject({ artifact: { builtInToolName: "run_code" } });
++    });
++
++    it("does not name an MCP tool that shares the name of a built-in", () => {
++        const [part] = buildAssistantContent(
++            callMessage({
++                name: "run_code",
++                toolInfo: { type: "mcp", serverId: "untrusted", serverName: "Untrusted", name: "run_code" },
++            }),
++        );
++
++        expect(part).not.toHaveProperty("artifact");
++    });
++
++    it("does not name a call that carries no tool info", () => {
++        const [part] = buildAssistantContent(callMessage({ name: "run_code", toolInfo: undefined }));
++
++        expect(part).not.toHaveProperty("artifact");
++    });
++
++    it("keeps the target summary beside the built-in name", () => {
++        const [part] = buildAssistantContent(
++            callMessage({
++                name: "apply_patch",
++                toolInfo: {
++                    type: "truefoundry-system",
++                    name: "apply_patch",
++                    hostObservedTargetSummary: "Host observed trusted target bytes.",
++                },
++            }),
++        );
++
++        expect(part).toMatchObject({
++            artifact: {
++                builtInToolName: "apply_patch",
++                hostObservedTargetSummary: "Host observed trusted target bytes.",
++            },
++        });
++    });
++});
 diff --git a/src/modelMessageContent.ts b/src/modelMessageContent.ts
-index 300935a..f7a7225 100644
+index 300935acab3bc155897c9705e3c441e773f2c1c2..453f8705389cac0c9956e5b6372d22d99b6e519a 100644
 --- a/src/modelMessageContent.ts
 +++ b/src/modelMessageContent.ts
 @@ -10,11 +10,27 @@ export type ToolCallContext = {
@@ -1872,7 +1967,37 @@ index 300935a..f7a7225 100644
  export type SdkToolCall = NonNullable<ModelMessageEvent["toolCalls"]>[number];
  
  function parseToolArgs(argsText: string): Record<string, string | number | boolean | null> {
-@@ -39,10 +55,21 @@ function toolCallToPart(
+@@ -34,15 +50,51 @@ function parseToolArgs(argsText: string): Record<string, string | number | boole
+ 
+ type ToolCallPart = Extract<AssistantContentPart, { type: "tool-call" }>;
+ 
++/**
++ * Facts the host set on a call's tool info, which the model cannot forge: the
++ * structured-edit target summary, and the name of a built-in tool (an MCP tool
++ * with the same name is not one). Undefined when there are none.
++ */
++function toolCallArtifact(
++    toolInfo: SdkToolCall["toolInfo"],
++): { hostObservedTargetSummary?: string; builtInToolName?: string } | undefined {
++    const hostObservedTargetSummary = toolInfo?.hostObservedTargetSummary;
++    const builtInToolName =
++        toolInfo?.type === "truefoundry-system" &&
++        typeof toolInfo.name === "string"
++            ? toolInfo.name
++            : undefined;
++    if (hostObservedTargetSummary === undefined && builtInToolName === undefined) {
++        return undefined;
++    }
++    return {
++        ...(hostObservedTargetSummary === undefined
++            ? {}
++            : { hostObservedTargetSummary }),
++        ...(builtInToolName === undefined ? {} : { builtInToolName }),
++    };
++}
++
+ function toolCallToPart(
+     toolCall: SdkToolCall,
      context?: ToolCallContext,
  ): ToolCallPart {
      const argsText = toolCall.function.arguments ?? "";
@@ -1898,7 +2023,7 @@ index 300935a..f7a7225 100644
  
      let interrupt: ToolCallPart["interrupt"];
      if (pendingResponse != null && toolResult === undefined) {
-@@ -64,12 +91,31 @@ function toolCallToPart(
+@@ -64,12 +116,31 @@ function toolCallToPart(
          approval = {
              id: approvalDecision.id,
              approved: approvalDecision.approved,
@@ -1931,23 +2056,23 @@ index 300935a..f7a7225 100644
      }
  
      let result: ToolCallPart["result"];
-@@ -87,6 +133,14 @@ function toolCallToPart(
+@@ -81,12 +152,14 @@ function toolCallToPart(
+         isError = true;
+     }
+ 
++    const artifact = toolCallArtifact(toolCall.toolInfo);
+     return {
+         type: "tool-call",
+         toolCallId: toolCall.id,
          toolName: toolCall.function.name,
          argsText,
          args: parseToolArgs(argsText),
-+        ...(toolCall.toolInfo?.hostObservedTargetSummary === undefined
-+            ? {}
-+            : {
-+                  artifact: {
-+                      hostObservedTargetSummary:
-+                          toolCall.toolInfo.hostObservedTargetSummary,
-+                  },
-+              }),
++        ...(artifact === undefined ? {} : { artifact }),
          ...(result !== undefined ? { result } : {}),
          ...(isError ? { isError: true } : {}),
          ...(approval != null ? { approval } : {}),
 diff --git a/src/server/events.ts b/src/server/events.ts
-index 677d5b7..59127f8 100644
+index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..59127f8c232a94e973f18b865cc59dae524a7f5a 100644
 --- a/src/server/events.ts
 +++ b/src/server/events.ts
 @@ -16,10 +16,16 @@ export interface ToolCallFunction {
@@ -2017,7 +2142,7 @@ index 677d5b7..59127f8 100644
      | ThreadDoneEvent
      | McpAuthRequiredEvent
 diff --git a/src/server/types.ts b/src/server/types.ts
-index 68b20cb..849419c 100644
+index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..849419c5726fc1495e4a1d94f0ea0eea7030ff8b 100644
 --- a/src/server/types.ts
 +++ b/src/server/types.ts
 @@ -168,6 +168,10 @@ export interface AgentSpec<
@@ -2041,7 +2166,7 @@ index 68b20cb..849419c 100644
  
  export interface UserToolApprovalEvent {
 diff --git a/src/sessionSnapshot.ts b/src/sessionSnapshot.ts
-index 026d9d4..e4b5770 100644
+index 026d9d47c492304ecc7cfe8d7d29be85c76fc816..e4b5770819d0a2beaec8069383b6704ac508bc5e 100644
 --- a/src/sessionSnapshot.ts
 +++ b/src/sessionSnapshot.ts
 @@ -39,6 +39,21 @@ export type SessionTurnRecord = Pick<
@@ -2067,7 +2192,7 @@ index 026d9d4..e4b5770 100644
      approvals: Map<string, StoredApprovalDecision>;
      toolResponses: Map<string, StoredToolResponse>;
 diff --git a/src/streamTurn.test.ts b/src/streamTurn.test.ts
-index 1891a23..4b2d31a 100644
+index 1891a231eea56ea1f8b3993e775e4016998fa52d..4b2d31ab238a4d2f8b729c28d4d2424659084f2e 100644
 --- a/src/streamTurn.test.ts
 +++ b/src/streamTurn.test.ts
 @@ -182,7 +182,7 @@ describe("streamTurn", () => {
@@ -2166,7 +2291,7 @@ index 1891a23..4b2d31a 100644
      });
  });
 diff --git a/src/streamTurn.ts b/src/streamTurn.ts
-index 7d09601..53dc0d2 100644
+index 7d09601fe67f4a76b394dbca71fb91a352b6fc15..53dc0d2559f44cb2cc82b4f2989df16e34176d85 100644
 --- a/src/streamTurn.ts
 +++ b/src/streamTurn.ts
 @@ -36,22 +36,6 @@ function buildTurnInput(options: StreamTurnOptions): TurnInputItem[] {
@@ -2233,7 +2358,7 @@ index 7d09601..53dc0d2 100644
      }
  }
 diff --git a/src/toolApproval.test.ts b/src/toolApproval.test.ts
-index 43835a0..244a58a 100644
+index 43835a0e54cfa1045440625f7cc909e8c2b6ff6a..244a58adefa7fc9d3bb0d13ee476ffdde2202df5 100644
 --- a/src/toolApproval.test.ts
 +++ b/src/toolApproval.test.ts
 @@ -1,7 +1,9 @@
@@ -2324,7 +2449,7 @@ index 43835a0..244a58a 100644
          const pending = {
              id: "turn-1-assistant",
 diff --git a/src/toolApproval.ts b/src/toolApproval.ts
-index 6ed4a4c..e205e45 100644
+index 6ed4a4cc74b0bc3b81f00f76df3f7cf0f81b1453..e205e45fdc3610183063c3c23e88c19111d592de 100644
 --- a/src/toolApproval.ts
 +++ b/src/toolApproval.ts
 @@ -19,6 +19,7 @@ export { ROOT_THREAD_ID } from "./constants.js";
@@ -2407,7 +2532,7 @@ index 6ed4a4c..e205e45 100644
          }
          if (part.messages != null) {
 diff --git a/src/toolResponse.ts b/src/toolResponse.ts
-index aedff3a..057b009 100644
+index aedff3a8c5e841cf2ce82a1ac4cc2c8bbf20021a..057b0091dde69128cee3da4c998a7fd1edce6993 100644
 --- a/src/toolResponse.ts
 +++ b/src/toolResponse.ts
 @@ -17,6 +17,7 @@ import {
@@ -2465,7 +2590,7 @@ index aedff3a..057b009 100644
                      ? { reason: item.approval.reason }
                      : {}),
 diff --git a/src/truefoundryExtras.ts b/src/truefoundryExtras.ts
-index 67f99f7..ea88c70 100644
+index 67f99f7bf8c7621197626ee7ab3f3363f3fd36bf..ea88c704186e464f462a14b144c15f9ed7c59214 100644
 --- a/src/truefoundryExtras.ts
 +++ b/src/truefoundryExtras.ts
 @@ -33,6 +33,7 @@ export type TrueFoundryRuntimeExtras = {
@@ -2477,7 +2602,7 @@ index 67f99f7..ea88c70 100644
      respondToToolApproval: (response: RespondToToolApprovalOptions) => void;
      respondToToolResponse: (response: RespondToToolResponseOptions) => void;
 diff --git a/src/turnStreamUpdate.ts b/src/turnStreamUpdate.ts
-index e8cddc1..7709a18 100644
+index e8cddc102ec384f0962a06033fc22879a2f1ae14..7709a189d5a1b88ec92283e2c85caaf73fe70631 100644
 --- a/src/turnStreamUpdate.ts
 +++ b/src/turnStreamUpdate.ts
 @@ -4,6 +4,7 @@ import type { AssistantContentPart } from "./modelMessageContent.js";
@@ -2489,7 +2614,7 @@ index e8cddc1..7709a18 100644
      metadata?: {
          custom?: Record<string, unknown>;
 diff --git a/src/useTrueFoundryAgentMessages.test.tsx b/src/useTrueFoundryAgentMessages.test.tsx
-index 979a49f..62e899b 100644
+index 979a49f6b7d89068628ff53fb93ef268b032dc58..62e899b8c614b1d4b00026a3f60dc06c44458b9f 100644
 --- a/src/useTrueFoundryAgentMessages.test.tsx
 +++ b/src/useTrueFoundryAgentMessages.test.tsx
 @@ -507,6 +507,38 @@ describe("useTrueFoundryAgentMessages", () => {
@@ -2822,7 +2947,7 @@ index 979a49f..62e899b 100644
          it("reports and restores a user message when initializeSession fails", async () => {
              const onError = vi.fn();
 diff --git a/src/useTrueFoundryAgentMessages.ts b/src/useTrueFoundryAgentMessages.ts
-index 81d2f7e..801c9d7 100644
+index 81d2f7e9f072a6763ed744291dd6fdae8f21ce6a..801c9d7fff73887bf11dedbff4ea00334c1bfe91 100644
 --- a/src/useTrueFoundryAgentMessages.ts
 +++ b/src/useTrueFoundryAgentMessages.ts
 @@ -38,8 +38,10 @@ import {
@@ -3148,7 +3273,7 @@ index 81d2f7e..801c9d7 100644
          resumeUnavailable,
          isLoading,
 diff --git a/src/useTrueFoundryAgentRuntime.ts b/src/useTrueFoundryAgentRuntime.ts
-index c052c5e..cd953d2 100644
+index c052c5ebca99422738d44fa380ca28743c2e592a..cd953d2fbcbad2a29a8fc3a009f62f46c8c85086 100644
 --- a/src/useTrueFoundryAgentRuntime.ts
 +++ b/src/useTrueFoundryAgentRuntime.ts
 @@ -130,6 +130,7 @@ function useTrueFoundryAgentRuntimeImpl(

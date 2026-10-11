@@ -323,6 +323,24 @@ describe('approval gate over an inert connector', () => {
   );
 
   it(
+    'carries the Tier 3 tier and plain-language card on the pending approval',
+    async () => {
+      // The approval UI renders its Tier 3 card from these fields; the wire tool_info omits them.
+      const { turn } = await pauseOnWrite(server);
+      if (turn.state.status !== 'done') {
+        throw new Error(`turn is not done: ${JSON.stringify(turn.state)}`);
+      }
+      const action = turn.state.required_actions.find(entry => entry.type === 'tool.approval_required');
+      const ref = action?.type === 'tool.approval_required' ? action.tool_calls[0] : undefined;
+
+      expect(ref?.tier).toBe(3);
+      expect(ref?.tier3_card?.plain_what).toEqual(expect.any(String));
+      expect(ref?.tier3_card?.plain_what).not.toBe('');
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
     'allow once executes exactly once and prompts again for an equivalent later call',
     async () => {
       const { sessionId, turn } = await pauseOnWrite(server);
