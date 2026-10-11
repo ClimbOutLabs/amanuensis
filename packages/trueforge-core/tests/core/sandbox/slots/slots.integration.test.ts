@@ -326,6 +326,8 @@ describe('sandbox slots (live agents)', () => {
           logger: makeSilentLogger(),
           remoteUrl: () => `file://${remote}`,
           networkEntries: gitLocalImportHardeningConfigEntries(),
+          networkEnv: undefined,
+          scratchCapBytes: undefined,
           now: undefined,
         }),
       });

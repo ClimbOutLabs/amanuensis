@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Logger } from 'winston';
 import {
@@ -10,7 +10,9 @@ import {
 import {
   BRANCH_NAME,
   buildHostGitInvocation,
+  parseGithubRepository,
   planHostAuthenticatedGit,
+  REMOTE_NAME,
   type HostAuthenticatedGitPlan,
 } from '../../hostAuthenticatedGit';
 import {
@@ -20,7 +22,8 @@ import {
   type HostGitPushPreviewResult as PushPreviewResult,
 } from '../../provider/Provider';
 import { parseBundleHeader } from './bundleHeader';
-import type { HostCommandResult, HostCommandRunner } from './hostCommand';
+import { replaceControlCharacters, OBJECT_ID as SHA } from './gitText';
+import type { HostCommandLimits, HostCommandResult, HostCommandRunner } from './hostCommand';
 import { pushDiffProblem } from './pushChecks';
 
 /** Where repository tars and bundles cross between the server and a guest. */
@@ -32,9 +35,14 @@ const PREVIEW_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 300_000;
 const MAX_TIMEOUT_MS = 600_000;
 const MAX_HOST_OUTPUT_BYTES = 8 * 1024 * 1024;
-const SHA = /^[0-9a-f]{40}$/u;
-const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
-const REPOSITORY = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/u;
+/** The most one operation may leave in its scratch directory: a pack or delta bomb is stopped here. */
+const MAX_SCRATCH_BYTES = 1024 * 1024 * 1024;
+const SCRATCH_POLL_MS = 1_000;
+const HOST_GIT_LIMITS: HostCommandLimits = {
+  addressSpaceBytes: 8 * 1024 * 1024 * 1024,
+  cpuSeconds: 300,
+  fileBytes: MAX_SCRATCH_BYTES,
+};
 const TAR_BINARY = '/usr/bin/tar';
 const HOST_PATH_ENV = { PATH: '/usr/bin:/bin' };
 
@@ -60,6 +68,10 @@ export interface GitBridgeOptions {
   /** Replaces the network hardening for operations that contact the remote; tests allow `file`. */
   networkEntries: readonly GitConfigEntry[] | undefined;
   now: (() => number) | undefined;
+  /** Largest scratch directory one operation may leave behind, bytes; default 1 GiB. */
+  scratchCapBytes: number | undefined;
+  /** Proxy and certificate settings handed to host git (see pickGitNetworkEnv); empty where none are needed. */
+  networkEnv: Readonly<Record<string, string>> | undefined;
 }
 
 interface RunInput {
@@ -125,22 +137,8 @@ function depthFlags(args: readonly string[]): string[] {
   return inline === undefined ? [] : [inline];
 }
 
-function repositoryOf(url: string): { slug: string; canonical: string } | undefined {
-  const match = REPOSITORY.exec(url);
-  const owner = match?.[1];
-  const name = match?.[2];
-  return owner === undefined || name === undefined
-    ? undefined
-    : { slug: `${owner}/${name}`, canonical: `https://github.com/${owner}/${name}.git` };
-}
-
-const CONTROL_CHARACTERS = new RegExp(
-  `[${String.fromCharCode(0)}-${String.fromCharCode(31)}${String.fromCharCode(127)}]`,
-  'gu',
-);
-
 function plainSubject(subject: string): string {
-  return subject.replace(CONTROL_CHARACTERS, ' ').replace(/\s+/gu, ' ').trim().slice(0, 100);
+  return replaceControlCharacters(subject).replace(/\s+/gu, ' ').trim().slice(0, 100);
 }
 
 /**
@@ -151,10 +149,18 @@ function plainSubject(subject: string): string {
  */
 export class GitBridge {
   private readonly previews = new Map<string, { preview: PushPreview; expiresAt: number }>();
+  /** Lets the scratch-size watcher cancel the operation that owns an input. */
+  private readonly cancellers = new WeakMap<RunInput, AbortController>();
+  private readonly overflowed = new WeakSet<RunInput>();
   private readonly now: () => number;
 
   constructor(private readonly options: GitBridgeOptions) {
     this.now = options.now ?? Date.now;
+  }
+
+  /** Reviews of pushes that are waiting to be carried out. */
+  get openReviews(): number {
+    return this.previews.size;
   }
 
   /** The plan when `command` is one plain network git command this bridge carries out. */
@@ -162,7 +168,17 @@ export class GitBridge {
     return planHostAuthenticatedGit({ command });
   }
 
-  async run(input: RunInput): Promise<ExecResult> {
+  /** The input with a signal that also fires when the operation's scratch directory outgrows its cap. */
+  private bound(input: RunInput): RunInput {
+    const canceller = new AbortController();
+    const signal = input.signal === undefined ? canceller.signal : AbortSignal.any([input.signal, canceller.signal]);
+    const bounded = { ...input, signal };
+    this.cancellers.set(bounded, canceller);
+    return bounded;
+  }
+
+  async run(unbounded: RunInput): Promise<ExecResult> {
+    const input = this.bound(unbounded);
     try {
       switch (input.plan.subcommand) {
         case 'clone':
@@ -176,6 +192,11 @@ export class GitBridge {
           return await this.lsRemote(input);
       }
     } catch (error) {
+      if (this.overflowed.has(input)) {
+        return failed(
+          'fatal: this repository is too large for the server to handle on behalf of the sandbox (over 1 GB once unpacked). Try git clone --depth 1 --single-branch <url>.',
+        );
+      }
       if (error instanceof Refusal) {
         return failed(error.message);
       }
@@ -188,15 +209,20 @@ export class GitBridge {
   private async clone(input: RunInput): Promise<ExecResult> {
     const operands = operandsOf({ args: input.plan.args, valued: new Set(['--depth', '--branch', '-b']) });
     const rawUrl = operands[0];
-    const repo = rawUrl === undefined ? undefined : repositoryOf(rawUrl);
+    const repo = rawUrl === undefined ? undefined : parseGithubRepository(rawUrl);
     if (rawUrl === undefined || repo === undefined) {
       throw new Refusal('Only https://github.com repositories can be cloned from the sandbox.');
     }
     const flags = flagsOf({ args: input.plan.args, valued: new Set(['--depth', '--branch', '-b']) });
-    return this.withScratch(async scratch => {
+    // Full history of a large repository is the easiest way to exhaust the server, so the default is shallow;
+    // `git fetch --unshallow` in the sandbox brings the rest.
+    const bounded = flags.some(flag => flag === '--depth' || flag.startsWith('--depth='))
+      ? flags
+      : ['--depth', '1', ...flags];
+    return this.withScratch(input, async scratch => {
       const repoPath = join(scratch, 'repo.git');
       const cloned = await this.hostGit({
-        args: ['clone', '--bare', '--quiet', ...flags, '--', this.contact(repo.canonical), repoPath],
+        args: ['clone', '--bare', '--quiet', ...bounded, '--', this.contact(repo.canonical), repoPath],
         token: input.token,
         network: true,
         cwd: scratch,
@@ -213,12 +239,12 @@ export class GitBridge {
     const operands = operandsOf({ args: input.plan.args, valued: new Set(['--depth']) });
     const remote = operands[0] ?? 'origin';
     const rawUrl = await this.remoteUrlInGuest({ remote, input });
-    const repo = repositoryOf(rawUrl);
+    const repo = parseGithubRepository(rawUrl);
     if (repo === undefined) {
       throw new Refusal('Only https://github.com remotes can be fetched from the sandbox.');
     }
     const noTags = input.plan.args.includes('--no-tags');
-    return this.withScratch(async scratch => {
+    return this.withScratch(input, async scratch => {
       const repoPath = join(scratch, 'repo.git');
       const init = await this.hostGit({
         args: ['init', '--bare', '--quiet', '--template=', repoPath],
@@ -288,9 +314,10 @@ export class GitBridge {
       timeoutMs: 120_000,
       signal,
       maxStdoutBytes: MAX_HOST_OUTPUT_BYTES,
+      limits: HOST_GIT_LIMITS,
     });
     if (packed.exitCode !== 0) {
-      throw new Refusal(`fatal: could not package the repository: ${hostFailure(packed.stderr)}`);
+      throw new Refusal(`fatal: could not package the repository: ${hostFailure(this.clean(packed.stderr))}`);
     }
     const tar = await readFile(tarPath);
     if (tar.byteLength > MAX_TRANSFER_BYTES) {
@@ -338,18 +365,14 @@ export class GitBridge {
 
   private async lsRemote(input: RunInput): Promise<ExecResult> {
     const url = input.plan.args.find(token => token.startsWith('https://'));
-    const repo = url === undefined ? undefined : repositoryOf(url);
+    const repo = url === undefined ? undefined : parseGithubRepository(url);
     if (url === undefined || repo === undefined) {
       throw new Refusal('Only https://github.com repositories can be listed from the sandbox.');
     }
     const args = input.plan.args.map(token => (token === url ? this.contact(repo.canonical) : token));
-    const listed = await this.hostGit({
-      args: ['ls-remote', ...args],
-      token: input.token,
-      network: true,
-      cwd: undefined,
-      input,
-    });
+    const listed = await this.withScratch(input, scratch =>
+      this.hostGit({ args: ['ls-remote', ...args], token: input.token, network: true, cwd: scratch, input }),
+    );
     return listed.exitCode === 0 ? ok(listed.stdout.toString('utf8')) : failed(`fatal: ${hostFailure(listed.stderr)}`);
   }
 
@@ -366,6 +389,11 @@ export class GitBridge {
       // The first review stays on record until it is used or expires: if the commits change before the push
       // runs, the push is refused instead of quietly adopting the newer list.
       const key = this.previewKey(input);
+      for (const [other, entry] of this.previews) {
+        if (entry.expiresAt < this.now()) {
+          this.previews.delete(other);
+        }
+      }
       const existing = this.previews.get(key);
       if (existing === undefined || existing.expiresAt < this.now()) {
         this.previews.set(key, { preview, expiresAt: this.now() + PREVIEW_TTL_MS });
@@ -385,8 +413,12 @@ export class GitBridge {
 
   private async describePush(input: RunInput): Promise<PushPreview> {
     const { flags, remote, source, destination } = this.parsePushArguments(input.plan.args);
+    // Everything the repository controls (its remote address, branch names, commit subjects) is base64 on a line
+    // that starts with a one-time marker, so no text in the repository can add or alter a fact.
+    const marker = `aman-${randomBytes(12).toString('hex')}`;
     const script = [
       'set -u',
+      `emit() { printf '%s:%s=%s\\n' ${shellEscape(marker)} "$1" "$(printf %s "$2" | base64 -w0)"; }`,
       'cur=$(git symbolic-ref -q --short HEAD || true)',
       `remote=${shellEscape(remote)}`,
       'if [ -z "$remote" ]; then remote=$(git config --get "branch.$cur.remote" 2>/dev/null || true); fi',
@@ -399,15 +431,15 @@ export class GitBridge {
       'case "$remote" in https://*) url=$remote; trackname=origin ;; *) url=$(git remote get-url --push "$remote" 2>/dev/null || true); trackname=$remote ;; esac',
       'tip=$(git rev-parse --verify -q "refs/heads/$src^{commit}" || true)',
       'base=$(git rev-parse --verify -q "refs/remotes/$trackname/$dst^{commit}" || true)',
-      'printf "remote=%s\\nurl=%s\\nsrc=%s\\ndst=%s\\ntip=%s\\nbase=%s\\n" "$trackname" "$url" "$src" "$dst" "$tip" "$base"',
+      'emit remote "$trackname"; emit url "$url"; emit src "$src"; emit dst "$dst"; emit tip "$tip"; emit base "$base"',
       'if [ -n "$tip" ]; then',
       '  if [ -n "$base" ]; then range="$base..$tip"; else',
       '    # A new branch: only commits the remote default branch does not have are new.',
       '    hb=$(git rev-parse --verify -q "refs/remotes/$trackname/HEAD^{commit}" || true)',
       '    if [ -n "$hb" ]; then range="$tip ^$hb"; else range="$tip"; fi',
       '  fi',
-      '  printf "count=%s\\n" "$(git rev-list --count $range)"',
-      `  git log --format='commit=%H%x1f%s' -n ${String(PREVIEW_COMMITS)} $range`,
+      '  emit count "$(git rev-list --count $range)"',
+      `  git log --format='%H%x1f%s' -n ${String(PREVIEW_COMMITS)} $range | while IFS= read -r line; do emit commit "$line"; done`,
       'fi',
     ].join('\n');
     const result = await input.guest.exec({
@@ -425,23 +457,27 @@ export class GitBridge {
     const facts = new Map<string, string>();
     const commits: { sha: string; subject: string }[] = [];
     for (const line of result.response.result.split('\n')) {
-      const eq = line.indexOf('=');
+      if (!line.startsWith(`${marker}:`)) {
+        continue;
+      }
+      const field = line.slice(marker.length + 1);
+      const eq = field.indexOf('=');
       if (eq === -1) {
         continue;
       }
-      const key = line.slice(0, eq);
-      const value = line.slice(eq + 1);
+      const key = field.slice(0, eq);
+      const value = Buffer.from(field.slice(eq + 1), 'base64').toString('utf8');
       if (key === 'commit') {
         const [sha = '', subject = ''] = value.split('\u001f');
         if (SHA.test(sha)) {
           commits.push({ sha, subject: plainSubject(subject) });
         }
-      } else {
+      } else if (!facts.has(key)) {
         facts.set(key, value);
       }
     }
     const url = facts.get('url') ?? '';
-    const repo = repositoryOf(url);
+    const repo = parseGithubRepository(url);
     const branch = facts.get('dst') ?? '';
     const sourceBranch = facts.get('src') ?? '';
     const tip = facts.get('tip') ?? '';
@@ -559,7 +595,7 @@ export class GitBridge {
         'fatal: no GitHub connector with a token is attached, so nothing can be pushed. Attach the GitHub connector and try again.',
       );
     }
-    return this.withScratch(async scratch => {
+    return this.withScratch(input, async scratch => {
       const dir = `${TRANSFER_ROOT}/${randomBytes(8).toString('hex')}`;
       try {
         const bundle = await this.bundleInGuest({ input, preview: approved, dir });
@@ -846,14 +882,31 @@ export class GitBridge {
     return this.options.remoteUrl === undefined ? githubUrl : this.options.remoteUrl(githubUrl);
   }
 
-  private async withScratch<T>(work: (scratch: string) => Promise<T>): Promise<T> {
+  /** A fresh scratch directory that is removed afterwards and cancels the operation if it outgrows its cap. */
+  private async withScratch<T>(input: RunInput, work: (scratch: string) => Promise<T>): Promise<T> {
     await mkdir(this.options.scratchRoot, { recursive: true, mode: 0o700 });
     const scratch = await mkdtemp(join(this.options.scratchRoot, 'op-'));
+    const watcher = setInterval(() => {
+      void directoryBytes(scratch).then(bytes => {
+        if (bytes > (this.options.scratchCapBytes ?? MAX_SCRATCH_BYTES)) {
+          this.overflowed.add(input);
+          this.cancellers.get(input)?.abort();
+        }
+      });
+    }, SCRATCH_POLL_MS);
+    watcher.unref();
     try {
       return await work(scratch);
     } finally {
+      clearInterval(watcher);
       await rm(scratch, { recursive: true, force: true });
     }
+  }
+
+  /** Messages for the model never carry the server's scratch paths. */
+  private clean(text: string): string {
+    const root = this.options.scratchRoot.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+    return text.replace(new RegExp(`${root}/op-[A-Za-z0-9]+`, 'gu'), '<scratch>');
   }
 
   private async hostGit(input: {
@@ -869,6 +922,8 @@ export class GitBridge {
       token,
       networkEntries: input.network ? this.options.networkEntries : gitLocalImportHardeningConfigEntries(),
       extraEntries: gitObjectCheckConfigEntries(),
+      networkEnv: input.network ? this.options.networkEnv : undefined,
+      ceilingDirectory: this.options.scratchRoot,
     });
     const timeoutMs = Math.min(MAX_TIMEOUT_MS, (input.input.timeoutSeconds ?? 0) * 1000 || DEFAULT_TIMEOUT_MS);
     const result = await this.options.runner.run({
@@ -878,7 +933,28 @@ export class GitBridge {
       timeoutMs,
       signal: input.input.signal,
       maxStdoutBytes: MAX_HOST_OUTPUT_BYTES,
+      limits: HOST_GIT_LIMITS,
     });
-    return token === undefined ? result : { ...result, stderr: result.stderr.split(token).join('***') };
+    const stderr = this.clean(token === undefined ? result.stderr : result.stderr.split(token).join('***'));
+    return { ...result, stderr };
   }
+}
+
+/** Disk space an operation's scratch directory really holds, counting allocated blocks so sparse files cannot hide. */
+async function directoryBytes(dir: string): Promise<number> {
+  let total = 0;
+  try {
+    for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
+      if (entry.isFile()) {
+        try {
+          total += (await lstat(join(entry.parentPath, entry.name))).blocks * 512;
+        } catch {
+          // Removed while counting.
+        }
+      }
+    }
+  } catch {
+    // The directory is gone: nothing left to count.
+  }
+  return total;
 }

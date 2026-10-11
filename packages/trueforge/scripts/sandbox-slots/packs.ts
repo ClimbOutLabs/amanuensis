@@ -53,7 +53,7 @@ interface PackFile {
   url: string;
 }
 
-/** Files a pack needs for one CPU. The Go toolchain module is verified by the Go checksum database as well. */
+/** Files a pack needs for one CPU. What is trusted is the sha256 pinned in SHA256SUMS, not where the file came from. */
 function packFiles({ pack, arch }: { pack: PackName; arch: PackArch }): PackFile[] {
   switch (pack) {
     case 'go': {
@@ -102,7 +102,7 @@ export type Download = (input: { url: string; destination: string }) => Promise<
 async function sha256Of(path: string): Promise<string> {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) {
-    hash.update(chunk as Uint8Array);
+    hash.update(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
   }
   return hash.digest('hex');
 }

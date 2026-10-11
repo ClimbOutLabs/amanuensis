@@ -25,6 +25,8 @@ function gitBridge({ logger }: { logger: Logger }): GitBridge {
     logger: logger.child({ module: 'git-bridge' }),
     remoteUrl: undefined,
     networkEntries: undefined,
+    networkEnv: configuration.SANDBOX_GIT_NETWORK_ENV,
+    scratchCapBytes: undefined,
     now: undefined,
   });
   return sharedGitBridge;

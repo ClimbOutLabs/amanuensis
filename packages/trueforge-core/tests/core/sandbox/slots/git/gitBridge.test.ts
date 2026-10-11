@@ -33,7 +33,12 @@ describe('GitBridge (real git on both sides)', () => {
   let base: string;
   let remote: string;
   let guest: LocalGuest;
-  let calls: { argv: readonly string[]; env: Readonly<Record<string, string>> }[];
+  let calls: {
+    argv: readonly string[];
+    env: Readonly<Record<string, string>>;
+    cwd: string | undefined;
+    limits: unknown;
+  }[];
   let bridge: GitBridge;
 
   beforeEach(async () => {
@@ -54,7 +59,7 @@ describe('GitBridge (real git on both sides)', () => {
     calls = [];
     const spying: HostCommandRunner = {
       run: input => {
-        calls.push({ argv: input.argv, env: input.env });
+        calls.push({ argv: input.argv, env: input.env, cwd: input.cwd, limits: input.limits });
         return execFileRunner.run(input);
       },
     };
@@ -64,6 +69,8 @@ describe('GitBridge (real git on both sides)', () => {
       logger: makeSilentLogger(),
       remoteUrl: () => `file://${remote}`,
       networkEntries: gitLocalImportHardeningConfigEntries(),
+      networkEnv: undefined,
+      scratchCapBytes: undefined,
       now: undefined,
     });
   });
@@ -109,7 +116,8 @@ describe('GitBridge (real git on both sides)', () => {
     const dir = await cloned();
     expect(await readFile(join(dir, 'README.md'), 'utf8')).toBe('hello\n');
     expect(git(dir, 'remote', 'get-url', 'origin')).toBe(URL);
-    expect(git(dir, 'log', '--format=%s')).toBe('second\nfirst');
+    // Clones are shallow unless the command asks for more.
+    expect(git(dir, 'log', '--format=%s')).toBe('second');
     expect(git(dir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
   });
 

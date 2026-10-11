@@ -1,3 +1,5 @@
+import { hasControlCharacter, OBJECT_ID as OID } from './gitText';
+
 /** What a git bundle claims to contain, read from its text header before any object is unpacked. */
 export interface BundleHeader {
   /** Object ids the receiver must already have. */
@@ -7,17 +9,6 @@ export interface BundleHeader {
 }
 
 const HEADER_LINE_LIMIT = 64 * 1024;
-const OID = /^[0-9a-f]{40}$/u;
-
-/** ASCII control characters, built from code points so the pattern itself holds none. */
-const CONTROL_CHARACTERS = new RegExp(
-  `[${String.fromCharCode(0)}-${String.fromCharCode(31)}${String.fromCharCode(127)}]`,
-  'u',
-);
-
-function hasControlCharacter(text: string): boolean {
-  return CONTROL_CHARACTERS.test(text);
-}
 
 export type BundleHeaderResult = { ok: true; header: BundleHeader } | { ok: false; reason: string };
 

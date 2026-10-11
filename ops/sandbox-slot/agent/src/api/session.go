@@ -31,6 +31,8 @@ var allowedEnv = map[string]bool{
 	"FORCE_COLOR": true, "CI": true, "DEBUG": true, "NODE_ENV": true,
 	"PYTHONUNBUFFERED": true, "PYTHONIOENCODING": true, "PYTHONUTF8": true, "PYTHONHASHSEED": true,
 	"PYTHONPATH": true, "NODE_PATH": true,
+	// The host asks for plain output with PAGER=cat, as it does with GIT_PAGER.
+	"PAGER":               true,
 	"GIT_CONFIG_NOSYSTEM": true, "GIT_CONFIG_GLOBAL": true, "GIT_CONFIG_COUNT": true,
 	"GIT_CONFIG_PARAMETERS": true, "GIT_ATTR_NOSYSTEM": true, "GIT_OPTIONAL_LOCKS": true,
 	"GIT_PAGER": true, "GIT_TERMINAL_PROMPT": true,

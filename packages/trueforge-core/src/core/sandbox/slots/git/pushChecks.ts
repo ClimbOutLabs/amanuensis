@@ -1,4 +1,6 @@
-const RAW_ENTRY = /^\n?:([0-7]{6}) ([0-7]{6}) [0-9a-f]{40} [0-9a-f]{40} [A-Z][0-9]*$/u;
+import { OBJECT_ID_PATTERN } from './gitText';
+
+const RAW_ENTRY = new RegExp(`^\\n?:([0-7]{6}) ([0-7]{6}) ${OBJECT_ID_PATTERN} ${OBJECT_ID_PATTERN} [A-Z][0-9]*$`, 'u');
 
 /**
  * A reason new commits must not be pushed from the sandbox, or undefined when they pass.

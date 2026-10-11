@@ -347,7 +347,7 @@ func TestExecRejectsUnsafeInput(t *testing.T) {
 func TestExecAllowsGitHardeningEnv(t *testing.T) {
 	e := newEnv(t, true)
 	rec := e.do("POST", "/v1/exec", execBody(func(m map[string]any) {
-		m["env"] = map[string]string{"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/dev/null", "GIT_PAGER": "cat"}
+		m["env"] = map[string]string{"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/dev/null", "GIT_PAGER": "cat", "PAGER": "cat", "GIT_OPTIONAL_LOCKS": "0"}
 	}))
 	if rec.Code != 200 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())

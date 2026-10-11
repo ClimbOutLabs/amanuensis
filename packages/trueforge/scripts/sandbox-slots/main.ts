@@ -38,12 +38,37 @@ function isMissingBinary(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
+const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
+const MAX_REDIRECTS = 5;
+
+/** Follows redirects by hand so none can leave https, and stops at a size no pack comes near. */
 const download: Download = async ({ url, destination }) => {
-  const response = await fetch(url, { redirect: 'follow' });
-  if (!response.ok) {
-    throw new Error(`HTTP ${String(response.status)} from ${new URL(url).host}`);
+  let current = url;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    if (!current.startsWith('https://')) {
+      throw new Error(`refusing a non-https address (${new URL(current).protocol})`);
+    }
+    const response = await fetch(current, { redirect: 'manual' });
+    const location = response.headers.get('location');
+    if (response.status >= 300 && response.status < 400 && location !== null) {
+      current = new URL(location, current).toString();
+      continue;
+    }
+    if (!response.ok) {
+      throw new Error(`HTTP ${String(response.status)} from ${new URL(current).host}`);
+    }
+    const declared = Number(response.headers.get('content-length') ?? 0);
+    if (declared > MAX_DOWNLOAD_BYTES) {
+      throw new Error('the file is larger than any pack');
+    }
+    const body = Buffer.from(await response.arrayBuffer());
+    if (body.byteLength > MAX_DOWNLOAD_BYTES) {
+      throw new Error('the file is larger than any pack');
+    }
+    await writeFile(destination, body);
+    return;
   }
-  await writeFile(destination, Buffer.from(await response.arrayBuffer()));
+  throw new Error('too many redirects');
 };
 
 /** Asks on the terminal; without a terminal the answer is no unless `--yes` was given. */

@@ -6,6 +6,7 @@ import {
 } from '../permissions/gitHardening';
 import { parseSimpleCommand } from '../permissions/shellAllowlist';
 import { shellEscape } from './provider/Provider';
+import { hasControlCharacter } from './slots/git/gitText';
 
 /** Absolute so a model-writable PATH entry (venv, mcp-client/bin) cannot shadow the binary that receives the token. */
 export const HOST_AUTHENTICATED_GIT_BINARY = '/usr/bin/git';
@@ -87,8 +88,8 @@ interface SubcommandPolicy {
 
 const POSITIVE_INTEGER = /^[1-9][0-9]{0,5}$/u;
 export const BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/u;
-export const GITHUB_REPOSITORY_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?(?:\.git)?\/?$/u;
-const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+const GITHUB_REPOSITORY = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/u;
+export const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const REFSPEC = /^\+?[A-Za-z0-9._/@:^~{}*-]{1,255}$/u;
 
 const POLICIES: Readonly<Record<HostAuthenticatedGitSubcommand, SubcommandPolicy>> = {
@@ -171,6 +172,20 @@ const POLICIES: Readonly<Record<HostAuthenticatedGitSubcommand, SubcommandPolicy
   },
 };
 
+/** The owner/name and canonical address of a plain github.com repository URL, or undefined for anything else. */
+export function parseGithubRepository(url: string): { slug: string; canonical: string } | undefined {
+  const match = GITHUB_REPOSITORY.exec(url);
+  const owner = match?.[1];
+  const name = match?.[2];
+  return owner === undefined || name === undefined
+    ? undefined
+    : { slug: `${owner}/${name}`, canonical: `https://github.com/${owner}/${name}.git` };
+}
+
+function isGithubRepositoryUrl(value: string): boolean {
+  return parseGithubRepository(value) !== undefined;
+}
+
 function isHostAuthenticatedSubcommand(value: string): value is HostAuthenticatedGitSubcommand {
   return Object.hasOwn(POLICIES, value);
 }
@@ -195,17 +210,14 @@ function operandsAreValid(input: { shape: OperandShape; operands: readonly strin
   switch (input.shape) {
     case 'clone':
       return (
-        first !== undefined &&
-        GITHUB_REPOSITORY_URL.test(first) &&
-        rest.length <= 1 &&
-        rest.every(isSafeRelativeDirectory)
+        first !== undefined && isGithubRepositoryUrl(first) && rest.length <= 1 && rest.every(isSafeRelativeDirectory)
       );
     case 'ls_remote':
-      return first !== undefined && GITHUB_REPOSITORY_URL.test(first) && rest.every(item => REFSPEC.test(item));
+      return first !== undefined && isGithubRepositoryUrl(first) && rest.every(item => REFSPEC.test(item));
     case 'remote_and_refspecs':
       return (
         first === undefined ||
-        ((REMOTE_NAME.test(first) || GITHUB_REPOSITORY_URL.test(first)) && rest.every(item => REFSPEC.test(item)))
+        ((REMOTE_NAME.test(first) || isGithubRepositoryUrl(first)) && rest.every(item => REFSPEC.test(item)))
       );
   }
 }
@@ -316,6 +328,34 @@ const CREDENTIAL_ENTRIES: readonly GitConfigEntry[] = [
   ['credential.https://github.com.helper', CREDENTIAL_HELPER],
 ];
 
+/**
+ * The only variables of the server's own environment that reach host git, so a deployment behind a proxy or
+ * with its own certificate authority still works. They configure how git reaches the network and nothing else.
+ */
+export const GIT_NETWORK_ENV_NAMES: readonly string[] = [
+  'HTTPS_PROXY',
+  'https_proxy',
+  'NO_PROXY',
+  'no_proxy',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'GIT_SSL_CAINFO',
+  'GIT_SSL_CAPATH',
+  'CURL_CA_BUNDLE',
+];
+
+/** Keeps the allowlisted names with plain values; anything else is dropped. */
+export function pickGitNetworkEnv(source: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const picked: Record<string, string> = {};
+  for (const name of GIT_NETWORK_ENV_NAMES) {
+    const value = source[name];
+    if (value !== undefined && value !== '' && !hasControlCharacter(value)) {
+      picked[name] = value;
+    }
+  }
+  return picked;
+}
+
 export interface HostGitInvocation {
   /** Absolute program first; run it with `execFile`, never through a shell. */
   argv: string[];
@@ -333,6 +373,10 @@ export function buildHostGitInvocation(input: {
   token: string | undefined;
   networkEntries?: readonly GitConfigEntry[] | undefined;
   extraEntries?: readonly GitConfigEntry[] | undefined;
+  /** Network settings picked by pickGitNetworkEnv; applied first, so nothing here can override the pinned values. */
+  networkEnv?: Readonly<Record<string, string>> | undefined;
+  /** Directory git must not search above for a repository. */
+  ceilingDirectory?: string | undefined;
 }): HostGitInvocation {
   const env = gitConfigEnv({
     entries: [
@@ -342,9 +386,14 @@ export function buildHostGitInvocation(input: {
       ...(input.token === undefined ? [] : CREDENTIAL_ENTRIES),
     ],
   });
+  const complete = {
+    ...(input.networkEnv ?? {}),
+    ...env,
+    ...(input.ceilingDirectory === undefined ? {} : { GIT_CEILING_DIRECTORIES: input.ceilingDirectory }),
+  };
   return {
     argv: pinnedGitArgv(input.gitArguments),
-    env: input.token === undefined ? env : { ...env, [TOKEN_ENV_KEY]: input.token },
+    env: input.token === undefined ? complete : { ...complete, [TOKEN_ENV_KEY]: input.token },
   };
 }
 
