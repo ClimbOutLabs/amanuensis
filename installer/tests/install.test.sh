@@ -37,6 +37,7 @@ test_dry_run_without_docker_reports_blocker() {
   assert_contains "$OUT" "[root]"
   assert_contains "$OUT" "Install Docker Engine"
   assert_contains "$OUT" "Docker Engine, Compose and Buildx packages"
+  assert_eq "$(printf '%s\n' "$OUT" | grep -c 'Whisper small speech model weights')" 1 "each download is listed once"
   assert_log_lacks "sudo "
   sandbox_drop
 }

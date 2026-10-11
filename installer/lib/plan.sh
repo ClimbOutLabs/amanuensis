@@ -219,7 +219,6 @@ plan_build() {
 
   if ! docker_available_for_probes; then
     plan_add todo "Start the shared speech-to-text service (one container, no CPU pinning)"
-    dl_add stt-weights
   elif machine_running; then
     plan_add have "Shared speech-to-text service is running"
   else

@@ -24,8 +24,8 @@ case "$cmd" in
     if [ "${1:-}" = "--format" ]; then
       secopts=$(printf '[name=seccomp,profile=builtin%s]' "${STUB_ROOTLESS:+ name=rootless}")
       case "${2:-}" in
-        *DockerRootDir*) printf '%s\n' "${STUB_DOCKER_ROOT:-}" ;;
         *ServerVersion*) printf '27.1.1|x86_64|%s|/nonexistent|%s|Docker Engine\n' "$secopts" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ;;
+        *DockerRootDir*) printf '%s\n' "${STUB_DOCKER_ROOT:-}" ;;
         *) printf '%s\n' "$secopts" ;;
       esac
       exit 0
