@@ -512,6 +512,28 @@ describe('DockerDriver.ensureReady', () => {
     }
   });
 
+  test('a canary container that fails isolation verification is reported as isolation_refused', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const ready = runner.runHandler;
+    runner.runHandler = (binary, args) => {
+      if (binary === 'docker' && args[0] === 'inspect' && args.length === 2) {
+        const entry = goodInspectEntry();
+        (entry['HostConfig'] as Record<string, unknown>)['NetworkMode'] = 'bridge';
+        return { ...okResult, stdout: JSON.stringify([entry]) };
+      }
+      return ready(binary, args);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const readiness = await driver.ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('daemon_unavailable');
+      expect(readiness.reason).toBe('isolation_refused');
+      expect(readiness.error).toContain(ISOLATION_REFUSED_MESSAGE);
+    }
+  });
+
   test('docker info failure is daemon_unavailable', async () => {
     const runner = new FakeRunner();
     runner.runHandler = (_binary, args) => {
@@ -617,6 +639,7 @@ describe('DockerDriver.ensureReady', () => {
     if (!readiness.ready) {
       expect(readiness.error_code).toBe('image_unavailable');
       expect(readiness.error).toContain('cosign');
+      expect(readiness.reason).toBe('signature_unverified');
     }
     // The create probe never runs when verification fails.
     expect(runner.callsFor('create')).toHaveLength(0);
