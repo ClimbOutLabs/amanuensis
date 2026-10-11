@@ -2,9 +2,8 @@
 
 /** Reflect effort. Default MEMORY_REFLECT_BUDGET. */
 export const MemoryProviderSettingsReflectBudget = {
-    Low: "low",
-    Mid: "mid",
-    High: "high",
-} as const;
-export type MemoryProviderSettingsReflectBudget =
-    (typeof MemoryProviderSettingsReflectBudget)[keyof typeof MemoryProviderSettingsReflectBudget];
+        Low: "low",
+        Mid: "mid",
+        High: "high"
+    } as const;
+export type MemoryProviderSettingsReflectBudget = typeof MemoryProviderSettingsReflectBudget[keyof typeof MemoryProviderSettingsReflectBudget];

@@ -3,16 +3,8 @@
  * redacted writebacks so clients can keep stored secrets without resending them.
  */
 
+/** Fixed response mask: carries no key material, not even the secret's length. */
 export const SECRET_REDACTION = '***REDACTED***';
-const MIN_LENGTH_FOR_PREFIX_SUFFIX = 10;
-
-/** Response mask: prefix/suffix for longer secrets; full mask when too short to hide. */
-export function toRedactedSecretValue(secret: string): string {
-  if (secret.length < MIN_LENGTH_FOR_PREFIX_SUFFIX) {
-    return SECRET_REDACTION;
-  }
-  return `${secret.slice(0, 3)}-${SECRET_REDACTION}-${secret.slice(-3)}`;
-}
 
 /**
  * True when the client sent a redacted stand-in from a prior GET.

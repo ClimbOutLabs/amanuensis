@@ -25,7 +25,7 @@ export const UpdateMemoryScreenRequestSchema = z
       .nullable()
       .describe('Persisted override: `true`/`false`. `null` clears the override back to the env default.'),
   })
-  .openapi('UpdateMemoryScreenRequest');
+  .openapi('UpdateMemoryScreenRequest', { example: { enabled: true } });
 
 export const GetMemoryScreenResponseSchema = z
   .object({

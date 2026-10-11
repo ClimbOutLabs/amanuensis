@@ -17,6 +17,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { GIT_HARDENING_ENV, gitHardeningConfigEntries } from './gitHardening';
 
 /** Result of parsing a command that is a single simple command. */
 export interface ParsedSimpleCommand {
@@ -459,37 +460,9 @@ function gitHardeningGlobalArgs(workspaceRoot: string): string[] {
   return [
     '--no-pager',
     '--no-optional-locks',
-    '-c',
-    `safe.directory=${workspaceRoot}`,
-    '-c',
-    'core.fsmonitor=false',
-    '-c',
-    'core.hooksPath=/dev/null',
-    '-c',
-    'core.sshCommand=',
-    '-c',
-    'diff.external=',
-    '-c',
-    'diff.ignoreSubmodules=all',
-    '-c',
-    'submodule.recurse=false',
-    '-c',
-    'status.submoduleSummary=false',
+    ...gitHardeningConfigEntries({ workspaceRoot }).flatMap(([key, value]) => ['-c', `${key}=${value}`]),
   ];
 }
-
-/**
- * Drops system, global and inherited env-injected git config so only the
- * repository's own config is in play. A zero count also ignores any inherited
- * GIT_CONFIG_KEY_* / GIT_CONFIG_VALUE_* pairs.
- */
-const GIT_HARDENING_ENV: Readonly<Record<string, string>> = {
-  GIT_CONFIG_NOSYSTEM: '1',
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_COUNT: '0',
-  GIT_CONFIG_PARAMETERS: '',
-  GIT_ATTR_NOSYSTEM: '1',
-};
 
 /**
  * Local config keys an allowlisted git command may run under. Fail-closed:

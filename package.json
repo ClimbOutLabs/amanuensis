@@ -45,7 +45,6 @@
     "smoke:npx:amanuensis": "pnpm build && node scripts/npx-smoke-amanuensis.mjs",
     "smoke:npx": "pnpm build && node scripts/npx-smoke.mjs",
     "smoke": "docker compose up --build --wait && node -e \"Promise.all([fetch('http://127.0.0.1:8791/healthz'), fetch('http://127.0.0.1:8791/')]).then(async ([health, ui]) => { if (!health.ok) throw new Error('healthz returned ' + health.status); const html = await ui.text(); if (!ui.ok || !html.includes('id=\\\"root\\\"')) throw new Error('UI did not return its app shell'); console.log('healthz and UI OK'); })\"",
-    "sprites:build": "python3 scripts/build-sprites.py",
     "standalone:dev:no-watch": "cross-env STANDALONE=true NODE_ENV=development pnpm --parallel --filter @truefoundry/trueforge --filter frontend dev:no-watch",
     "standalone:dev": "pnpm run standalone:dev:no-watch",
     "standalone:start": "cross-env STANDALONE=true NODE_ENV=production pnpm --filter @truefoundry/trueforge start",

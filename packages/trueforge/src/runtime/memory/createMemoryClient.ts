@@ -11,6 +11,7 @@ import type { MemoryBackend } from '../../config';
 import { getEmbeddingSubsystem } from './embeddingRetrieval';
 import { HindsightClient } from './hindsightClient';
 import { MarkdownMemoryClient } from './markdownMemoryClient';
+import type { VaultScope } from './markdownMemoryFiles';
 import type { MemoryClient } from './memoryClient';
 
 export interface EmbeddingClientOptions {
@@ -26,6 +27,8 @@ export function createMemoryClient(input: {
   backend: MemoryBackend;
   markdownDir: string;
   namespace: string;
+  /** Markdown backend only: the persona vault to write and recall from; omitted means the shared vault. */
+  vaultScope?: VaultScope | undefined;
   hindsight: { apiBase: string; bank: string; headers: RemoteMcpHeaders } | undefined;
   /** Present → meaning-based recall is on for the markdown backend. */
   embeddings?: EmbeddingClientOptions | undefined;
@@ -40,15 +43,22 @@ export function createMemoryClient(input: {
       headers: input.hindsight.headers,
     });
   }
-  const embeddings =
-    input.embeddings === undefined
-      ? undefined
-      : getEmbeddingSubsystem({
-          baseDir: input.markdownDir,
-          namespace: input.namespace,
-          modelDir: input.embeddings.modelDir,
-          batchSize: input.embeddings.batchSize,
-          log: input.embeddings.log,
-        });
-  return new MarkdownMemoryClient({ baseDir: input.markdownDir, namespace: input.namespace, embeddings });
+  const embeddingOptions = input.embeddings;
+  return new MarkdownMemoryClient({
+    baseDir: input.markdownDir,
+    namespace: input.namespace,
+    vaultScope: input.vaultScope,
+    // One subsystem per vault: each namespace keeps its own embedding store.
+    embeddings:
+      embeddingOptions === undefined
+        ? undefined
+        : namespace =>
+            getEmbeddingSubsystem({
+              baseDir: input.markdownDir,
+              namespace,
+              modelDir: embeddingOptions.modelDir,
+              batchSize: embeddingOptions.batchSize,
+              log: embeddingOptions.log,
+            }),
+  });
 }

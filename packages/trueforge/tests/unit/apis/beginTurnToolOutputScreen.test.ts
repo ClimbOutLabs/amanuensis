@@ -241,4 +241,23 @@ describe('beginTurnExecution tool-output screen wiring', () => {
     expect(config.enabled).toBe(false);
     expect(toolOutputScreenCapability({ config })).toBeUndefined();
   });
+
+  it('hands the configured first-response bound and the internal-source tool policy to the resolver', async () => {
+    const originalTimeout = configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS;
+    configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS = 123_456;
+    try {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const store = new CountingGlobalSettingsStore(new SqliteGlobalSettingsStore(db));
+
+      const { ctorArgs } = await beginTurnWithStore(store);
+
+      const [deps] = ctorArgs;
+      expect(deps).toEqual(
+        expect.objectContaining({ modelFirstResponseTimeoutMs: 123_456, toolCallPolicy: expect.any(Function) }),
+      );
+    } finally {
+      configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS = originalTimeout;
+    }
+  });
 });
