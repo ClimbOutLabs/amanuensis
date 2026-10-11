@@ -1,7 +1,6 @@
 'use client';
 
 import type { Map as LeafletMap, TileLayer } from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef, useState } from 'react';
 
 import { useTheme } from '../theme/ThemeProvider.js';

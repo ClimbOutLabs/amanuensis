@@ -18,6 +18,8 @@
  * CSS variables to the SDK ThemeProvider mode (class + data-theme).
  */
 @import 'github-markdown-css/github-markdown.css';
+/* Leaflet's stylesheet ships inside dist/styles.css: a bare .css import in the ESM bundle breaks Node consumers. */
+@import 'leaflet/dist/leaflet.css';
 @import './github-markdown-bridge.css';
 @import './fonts.css';
 
