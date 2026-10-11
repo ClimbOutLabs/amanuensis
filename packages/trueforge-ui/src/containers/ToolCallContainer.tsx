@@ -19,6 +19,7 @@ import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import {
   ASK_USER_TOOL_NAME,
+  MAPS_TOOL_NAMES,
   MCP_META_TOOLS,
   SANDBOX_TOOL_NAMES,
   SUB_AGENT_TOOL_NAME,
@@ -34,6 +35,7 @@ import {
   hasPendingToolApproval,
   mcpDisplayName,
   parseAskUserQuestionArgs,
+  parseMapsResult,
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
@@ -44,6 +46,7 @@ import {
 } from '../utils/toolCallParsing.js';
 import { useRegisterApprovalExpand } from './approvalFocus.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
+import { MapCard } from '../components/MapCard.js';
 import { NestedApprovalBridgeContext, useNestedApprovalBridge } from './nestedApprovalBridge.js';
 import { SandboxToolCallContainer } from './SandboxToolCallContainer.js';
 import { ToolApprovalContainer } from './ToolApprovalContainer.js';
@@ -256,6 +259,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const approvalPart = approval === part.approval ? part : { ...part, approval };
   const isSubAgent = part.toolName === SUB_AGENT_TOOL_NAME;
   const isSandbox = SANDBOX_TOOL_NAMES.has(part.toolName);
+  const isMaps = MAPS_TOOL_NAMES.has(part.toolName);
   const [expanded, setExpanded] = useState(isRequiresAction);
   const [prevRequiresAction, setPrevRequiresAction] = useState(isRequiresAction);
   if (isRequiresAction !== prevRequiresAction) {
@@ -363,6 +367,21 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
         approvalId={showApproval ? approval?.id : undefined}
       />
+    );
+  }
+
+  if (isMaps) {
+    const mapsResult = parseMapsResult(resultString, part.toolName);
+    return (
+      <div data-slot="tool-call-card" data-variant="map" className="w-full">
+        {showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+        <MapCard
+          data={mapsResult.data}
+          state={mapsResult.state}
+          cardId={part.toolCallId}
+          blockedMessage={mapsResult.blockedMessage}
+        />
+      </div>
     );
   }
 

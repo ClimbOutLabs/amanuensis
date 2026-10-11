@@ -27,6 +27,7 @@ import { createPersonasRouter, createSessionPersonasRouter } from './apis/person
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
+import { createMapsRouter } from './apis/maps';
 import { createSessionFolderAssignmentsRouter, createSessionFoldersRouter } from './apis/sessionFolders';
 import { createInternalMetricsRouter } from './apis/sessionMetrics';
 import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessions';
@@ -503,6 +504,19 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createSentinelSettingsRouter({
         sentinelSettingsStore: deps.sentinelSettingsStore,
         resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  // Same-origin tile proxy for embedded maps. UI session auth only; the agent
+  // and sandbox contexts cannot reach it.
+  app.route(
+    '/api/maps',
+    withAuth(
+      createMapsRouter({
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        resolveRequestContext,
+        logger: deps.logger,
       }),
       authMiddleware,
     ),

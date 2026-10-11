@@ -840,3 +840,83 @@
     transform: translateY(-0.25rem);
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Embedded maps card. All lengths in rem; colors from theme tokens.
+ * ──────────────────────────────────────────────────────────────────── */
+.maps-card {
+  width: 100%;
+  max-width: 40rem;
+  border: 1px solid var(--aui-color-border, #e5e7eb);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background: var(--aui-color-surface, #ffffff);
+}
+
+.maps-card-map {
+  width: 100%;
+  height: 20rem;
+  background: var(--aui-color-surface-muted, #f3f4f6);
+}
+
+/* Dark-mode tiles: dim the raster tiles so the map does not glare. */
+.maps-tiles-dark {
+  filter: brightness(0.85) contrast(1.05);
+}
+
+.maps-card-footer {
+  padding: 0.75rem 1rem;
+}
+
+.maps-card-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--aui-color-text, #111827);
+}
+
+.maps-card-subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  color: var(--aui-color-text-muted, #6b7280);
+}
+
+.maps-card-attribution {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--aui-color-text-muted, #6b7280);
+}
+
+.maps-card-blocked {
+  padding: 1.5rem 1rem;
+  text-align: center;
+}
+
+.maps-card-blocked-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--aui-color-text, #111827);
+}
+
+.maps-card-blocked-body {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+  color: var(--aui-color-text-muted, #6b7280);
+}
+
+/* Phone layout: the map fills the card width with a shorter viewport. */
+@media (max-width: 40rem) {
+  .maps-card {
+    max-width: 100%;
+    border-radius: 0.5rem;
+  }
+
+  .maps-card-map {
+    height: 14rem;
+  }
+
+  .maps-card-footer {
+    padding: 0.5rem 0.75rem;
+  }
+}

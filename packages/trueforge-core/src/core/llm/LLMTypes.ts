@@ -80,6 +80,14 @@ const ToolEffectHintsSchema = z.object({
     .describe('Server-classified effect of this tool call.'),
 });
 
+export const MapsHostsSchema = z
+  .object({
+    geocoder: z.string(),
+    router: z.string(),
+    tile: z.string(),
+  })
+  .describe('Configured maps upstream URLs for the approval card destination.');
+
 export const InternalToolCallInfoSchema = z.object({
   type: z.enum(['truefoundry-system', 'mcp']).describe('Whether the tool is a system tool or MCP tool.'),
   mcp_server_id: z.string().describe('Internal MCP server id (empty for system tools).'),
@@ -123,6 +131,9 @@ export const InternalToolCallInfoSchema = z.object({
   ),
   structured_edit_precondition: StructuredEditPreconditionSchema.optional().describe(
     'Host-observed structured-edit target state captured before approval. Never model-authored or client supplied.',
+  ),
+  maps_hosts: MapsHostsSchema.optional().describe(
+    'Host-derived configured maps upstream hosts for the approval card destination. Never model-authored or client supplied.',
   ),
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.

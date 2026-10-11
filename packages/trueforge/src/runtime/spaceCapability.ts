@@ -15,7 +15,7 @@ import { defineTool, LocalToolMCP, toolResultResponse, type ToolDefinition } fro
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
-import {
+import { mapsCapability } from './mapsCapability';import {
   SpaceAggregateRevisionConflictError,
   SpaceNotFoundError,
   SpaceRevisionConflictError,
@@ -1272,6 +1272,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       extraCapabilities: [
         ...(resolved.extraCapabilities ?? []),
         spaceCapability({ ...this.#space, tracing: input.tracing }),
+        mapsCapability({ tracing: input.tracing, logger: this.#space.logger }),
       ],
     };
   }

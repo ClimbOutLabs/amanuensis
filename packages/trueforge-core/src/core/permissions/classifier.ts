@@ -80,10 +80,81 @@ export interface SentinelAction {
     destructive_hint?: boolean | undefined;
     open_world_hint?: boolean | undefined;
   };
+  /**
+   * Configured maps upstream hosts for the approval card destination. Set by the
+   * server-owned maps tool from server config, never from model params.
+   */
+  maps_hosts?:
+    | {
+        geocoder: string;
+        router: string;
+        tile: string;
+      }
+    | undefined;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {
   services: SentinelServices;
+}
+
+/** Tool names for the embedded maps feature. */
+export const MAPS_TOOL_NAMES = ['render_map', 'render_route'] as const;
+
+/**
+ * Single predicate owning the maps approval policy. Both maps tools are Tier 3
+ * for now; when the policy changes (e.g. approved providers run without asking),
+ * only this predicate changes.
+ */
+export function isMapsToolAlwaysTier3(tool_name: string): boolean {
+  return (MAPS_TOOL_NAMES as readonly string[]).includes(tool_name);
+}
+
+/** Host part of a URL for card display; falls back to the raw value. */
+function mapsHost(url: string | undefined): string {
+  if (url === undefined || url === '') {
+    return 'the configured maps host';
+  }
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+/** Card destination: the configured hosts, comma separated, never from params. */
+function mapsDestination(action: SentinelAction): string | null {
+  const hosts = action.maps_hosts;
+  if (hosts === undefined) {
+    return null;
+  }
+  const parts = [mapsHost(hosts.geocoder), mapsHost(hosts.router), mapsHost(hosts.tile)];
+  return [...new Set(parts)].join(', ');
+}
+
+/** Card plain_what naming the place strings verbatim and the configured hosts. */
+function mapsPlainWhat(action: SentinelAction): string {
+  const params = action.canonical_params;
+  const hosts = action.maps_hosts;
+  const geocoder = mapsHost(hosts?.geocoder);
+  const router = mapsHost(hosts?.router);
+  const tile = mapsHost(hosts?.tile);
+  const placeName = typeof params['place_name'] === 'string' ? params['place_name'] : '';
+  const poi = typeof params['poi'] === 'string' && params['poi'] !== '' ? params['poi'] : null;
+  if (action.tool_name === 'render_route') {
+    const fromPlace = typeof params['from_place'] === 'string' ? params['from_place'] : '';
+    const toPlace = typeof params['to_place'] === 'string' ? params['to_place'] : '';
+    return (
+      `Send "${fromPlace}" and "${toPlace}" to ${geocoder}, ask ${router} for a driving route ` +
+      `between them, then load map tiles for that area from ${tile}.`
+    );
+  }
+  if (poi !== null) {
+    return (
+      `Send "${placeName}" and "${poi}" to ${geocoder} to find ${poi} near it, ` +
+      `then load map tiles for that area from ${tile}.`
+    );
+  }
+  return `Send "${placeName}" to ${geocoder} to find it, then load map tiles for that area from ${tile}.`;
 }
 
 const SENSITIVE_PATH_PATTERNS = [
@@ -1111,6 +1182,31 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         },
         reason: name === 'run_code' ? 'arbitrary_code_execution' : 'plan_submission',
         reason_detail: 'Always Tier 3 by policy.',
+        sensitive_read: false,
+        approval_token_id: await mintPlainToken({
+          ctx,
+          tool_name: action.tool_name,
+          params: action.canonical_params,
+        }),
+      });
+    }
+    // Embedded maps: always Tier 3, whatever hints the tool declares. The card
+    // names the place strings verbatim and the configured hosts from server
+    // config; the destination never comes from model params.
+    if (isMapsToolAlwaysTier3(name)) {
+      return tier3Decision({
+        card: {
+          plain_what: mapsPlainWhat(action),
+          plain_why: plainWhy(ctx.agent_intent),
+          cannot_be_undone: 'Once the place names leave this machine they cannot be taken back.',
+          why_asked_again: null,
+          destination: mapsDestination(action),
+          recipient: null,
+          amount: null,
+          parsed_command: null,
+        },
+        reason: 'maps_tool',
+        reason_detail: 'Maps tools are always Tier 3 by policy.',
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,

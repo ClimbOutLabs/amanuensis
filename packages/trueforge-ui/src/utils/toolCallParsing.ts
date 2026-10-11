@@ -42,6 +42,9 @@ export const SANDBOX_TOOL_NAMES = new Set([
   'submit_implementation_plan',
 ]);
 
+/** Tool names that render an embedded map card. */
+export const MAPS_TOOL_NAMES = new Set(['render_map', 'render_route']);
+
 /** MCP meta-tools that wrap actual tool calls. */
 export const MCP_META_TOOLS = new Set(['call_tool', 'list_tools', 'get_tool_info']);
 
@@ -570,4 +573,93 @@ export function mcpDisplayName(
     return `get_tool_info: ${innerToolName} (${mcpServer})`;
   }
   return toolName;
+}
+
+export interface ParsedMapsResult {
+  state: 'ready' | 'blocked' | 'unavailable';
+  data: import('../components/MapCard.js').MapCardData | null;
+  blockedMessage?: string;
+}
+
+/**
+ * Parse a render_map / render_route tool result into map card data.
+ * Error results map to blocked/unavailable states; no card renders raw errors.
+ */
+export function parseMapsResult(resultString: string | undefined, toolName: string): ParsedMapsResult {
+  if (resultString === undefined || resultString === '') {
+    return { state: 'unavailable', data: null, blockedMessage: 'The map result is not available yet.' };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(resultString);
+  } catch {
+    return { state: 'unavailable', data: null };
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return { state: 'unavailable', data: null };
+  }
+  const body = parsed as Record<string, unknown>;
+  if (body['status'] === 'error') {
+    const code = typeof body['code'] === 'string' ? body['code'] : 'service_unavailable';
+    if (code === 'not_found') {
+      return { state: 'unavailable', data: null, blockedMessage: 'The place could not be found.' };
+    }
+    if (code === 'no_route') {
+      return { state: 'unavailable', data: null, blockedMessage: 'No driving route was found between the two places.' };
+    }
+    if (code === 'rate_limited') {
+      return { state: 'blocked', data: null, blockedMessage: 'The map service rate limit was reached. Try again shortly.' };
+    }
+    return { state: 'blocked', data: null, blockedMessage: 'The map service is unavailable right now.' };
+  }
+  if (body['status'] !== 'ok') {
+    return { state: 'unavailable', data: null };
+  }
+  if (toolName === 'render_route') {
+    const from = body['from'] as { resolved_name?: string; lat?: number; lng?: number } | undefined;
+    const to = body['to'] as { resolved_name?: string; lat?: number; lng?: number } | undefined;
+    if (from === undefined || to === undefined) {
+      return { state: 'unavailable', data: null };
+    }
+    return {
+      state: 'ready',
+      data: {
+        kind: 'route',
+        lat: (from.lat ?? 0) / 1 + ((to.lat ?? 0) - (from.lat ?? 0)) / 2,
+        lng: (from.lng ?? 0) / 1 + ((to.lng ?? 0) - (from.lng ?? 0)) / 2,
+        zoom: 6,
+        resolved_name: `${from.resolved_name ?? ''} to ${to.resolved_name ?? ''}`,
+        address: null,
+        pins: [],
+        from_name: from.resolved_name,
+        to_name: to.resolved_name,
+        from_lat: from.lat,
+        from_lng: from.lng,
+        to_lat: to.lat,
+        to_lng: to.lng,
+        distance_km: typeof body['distance_km'] === 'number' ? body['distance_km'] : undefined,
+        duration_min: typeof body['duration_min'] === 'number' ? body['duration_min'] : undefined,
+        route_geometry: typeof body['route_geometry'] === 'string' ? body['route_geometry'] : undefined,
+        attribution: typeof body['attribution'] === 'string' ? body['attribution'] : '© OpenStreetMap contributors',
+      },
+    };
+  }
+  const pins = Array.isArray(body['pins'])
+    ? (body['pins'] as Array<{ name?: string; lat?: number; lng?: number }>)
+        .filter(p => typeof p.name === 'string' && typeof p.lat === 'number' && typeof p.lng === 'number')
+        .map(p => ({ name: p.name as string, lat: p.lat as number, lng: p.lng as number }))
+    : [];
+  return {
+    state: 'ready',
+    data: {
+      kind: 'place',
+      lat: typeof body['lat'] === 'number' ? body['lat'] : 0,
+      lng: typeof body['lng'] === 'number' ? body['lng'] : 0,
+      zoom: typeof body['zoom'] === 'number' ? body['zoom'] : 13,
+      resolved_name: typeof body['resolved_name'] === 'string' ? body['resolved_name'] : '',
+      address: typeof body['address'] === 'string' ? body['address'] : null,
+      pins,
+      attribution: typeof body['attribution'] === 'string' ? body['attribution'] : '© OpenStreetMap contributors',
+    },
+  };
 }
