@@ -332,10 +332,11 @@
       "ApprovalAllow": {
         "properties": {
           "scope": {
-            "description": "Omitted or once allows only this invocation; chat grants this exact tool for the current session.",
+            "description": "Omitted or once allows only this invocation; chat grants this exact tool for the current session; always allows this read-only connector tool for the caller until revoked.",
             "enum": [
               "once",
-              "chat"
+              "chat",
+              "always"
             ],
             "type": "string"
           },
@@ -385,6 +386,57 @@
         },
         "required": [
           "status"
+        ],
+        "type": "object"
+      },
+      "ApprovalToolCallRef": {
+        "properties": {
+          "id": {
+            "description": "Tool call id awaiting action.",
+            "type": "string"
+          },
+          "source_event_id": {
+            "description": "Event id of the model.message that requested the tool call.",
+            "type": "string"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "enum": [
+                  1
+                ],
+                "type": "number"
+              },
+              {
+                "enum": [
+                  2
+                ],
+                "type": "number"
+              },
+              {
+                "enum": [
+                  3
+                ],
+                "type": "number"
+              }
+            ],
+            "description": "Permission tier of the call; absent when the call was not classified."
+          },
+          "tier3_card": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tier3Card"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Plain-language approval card for a Tier 2 or Tier 3 call, or null."
+          }
+        },
+        "required": [
+          "id",
+          "source_event_id"
         ],
         "type": "object"
       },
@@ -1036,6 +1088,9 @@
           "sandbox": {
             "$ref": "#/components/schemas/SandboxCapability"
           },
+          "sandbox_isolation": {
+            "$ref": "#/components/schemas/SandboxIsolationCapability"
+          },
           "settings": {
             "$ref": "#/components/schemas/SettingsCapability"
           },
@@ -1044,15 +1099,20 @@
           },
           "tool_output_screen": {
             "$ref": "#/components/schemas/ToolOutputScreenCapability"
+          },
+          "voice": {
+            "$ref": "#/components/schemas/VoiceCapability"
           }
         },
         "required": [
           "sandbox",
           "skill",
           "settings",
+          "voice",
           "memory_screen",
           "memory_defaults",
           "memory_embeddings",
+          "sandbox_isolation",
           "build"
         ],
         "type": "object"
@@ -1289,7 +1349,8 @@
           "zai",
           "moonshot",
           "alibaba",
-          "together"
+          "together",
+          "tokenfactory"
         ],
         "type": "string"
       },
@@ -1418,7 +1479,7 @@
         "default": {
           "enabled": true
         },
-        "description": "Uses 80% of the model context length when the explicit trigger is omitted, or 50000 tokens if unknown.",
+        "description": "Without an explicit trigger, compaction starts at 80% of the model context length, lowered so input plus the configured max output tokens fit (never below 4000), or at 50000 tokens when the context length is unknown.",
         "properties": {
           "enabled": {
             "default": true,
@@ -1574,22 +1635,25 @@
             "type": "string"
           },
           "outcome": {
-            "description": "applied: context was overwritten with the summary. skipped_invalid: the model produced a malformed summary and the attempt was discarded. skipped_blocked: the turn was cancelled before the attempt could complete.",
+            "description": "applied: context was overwritten with the summary. skipped_invalid: the model produced a malformed summary and the attempt was discarded. skipped_blocked: the turn was cancelled before the attempt could complete. truncated_fallback: no usable summary was produced, so old turns were truncated instead.",
             "enum": [
               "applied",
               "skipped_invalid",
-              "skipped_blocked"
+              "skipped_blocked",
+              "truncated_fallback"
             ],
             "type": "string"
           },
           "reason": {
-            "description": "Rejection reason when outcome is skipped_invalid. missing_block: no complete <summary> block. missing_section: a required section is absent. duplicate_section: a section appears more than once. self_referential: the goal/user_goal describes the summarization request instead of the user objective. over_length: summary exceeds bounded length.",
+            "description": "Why no summary was applied. missing_block, missing_section, duplicate_section, self_referential, over_length: the summary was invalid. summarizer_failed: the summarization call failed. request_too_large: the summarization request could not fit the model context.",
             "enum": [
               "missing_block",
               "missing_section",
               "duplicate_section",
               "self_referential",
-              "over_length"
+              "over_length",
+              "summarizer_failed",
+              "request_too_large"
             ],
             "type": "string"
           },
@@ -2069,6 +2133,14 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteMCPToolGrantResponse": {
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteMemoryVaultEntryResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteModelProviderResponse": {
         "properties": {},
         "type": "object"
@@ -2204,6 +2276,17 @@
         },
         "required": [
           "schedule_run_id"
+        ],
+        "type": "object"
+      },
+      "ExportMemoryVaultResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryVaultExport"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -2469,6 +2552,28 @@
         ],
         "type": "object"
       },
+      "GetMemoryVaultEntryResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryVaultEntry"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetMemoryVaultSharingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryVaultSharing"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetModelProviderCatalogResponse": {
         "properties": {
           "data": {
@@ -2571,6 +2676,41 @@
         ],
         "type": "object"
       },
+      "GetRunCodeStatusResponse": {
+        "properties": {
+          "data": {
+            "properties": {
+              "detail": {
+                "description": "Technical detail from the sandbox check. Absent when the state says it all.",
+                "type": "string"
+              },
+              "state": {
+                "description": "Whether run_code can execute code, or the reason it cannot.",
+                "enum": [
+                  "ready",
+                  "not_configured",
+                  "docker_unavailable",
+                  "daemon_unavailable",
+                  "image_missing",
+                  "signature_unverified",
+                  "image_unavailable",
+                  "isolation_refused",
+                  "unsupported_platform"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetSandboxProviderCatalogResponse": {
         "properties": {
           "data": {
@@ -2600,6 +2740,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/Schedule"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetSentinelUserSettingsResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SentinelUserSettings"
           }
         },
         "required": [
@@ -2864,18 +3015,15 @@
         "additionalProperties": false,
         "properties": {
           "approach": {
-            "maxLength": 4000,
             "minLength": 1,
             "type": "string"
           },
           "branch": {
-            "maxLength": 512,
             "minLength": 1,
             "type": "string"
           },
           "file_globs": {
             "items": {
-              "maxLength": 512,
               "minLength": 1,
               "type": "string"
             },
@@ -2889,7 +3037,6 @@
             "type": "string"
           },
           "repository_id": {
-            "maxLength": 256,
             "minLength": 1,
             "type": "string"
           },
@@ -2899,7 +3046,6 @@
           },
           "verify_command_ids": {
             "items": {
-              "maxLength": 256,
               "minLength": 1,
               "type": "string"
             },
@@ -3090,6 +3236,39 @@
         },
         "required": [
           "results"
+        ],
+        "type": "object"
+      },
+      "ImportMemoryVaultRequest": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryVaultImportEntry"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array"
+          },
+          "namespace": {
+            "description": "Target vault namespace; omit for the shared vault.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "type": "object"
+      },
+      "ImportMemoryVaultResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryVaultImportResult"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -3670,6 +3849,35 @@
         ],
         "type": "object"
       },
+      "ListMCPToolGrantsResponse": {
+        "properties": {
+          "data": {
+            "description": "Tools the caller always allows on this MCP server, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/MCPToolGrant"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ListMemoryVaultEntriesResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryVaultEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListModelProvidersResponse": {
         "properties": {
           "data": {
@@ -3801,6 +4009,20 @@
         ],
         "type": "object"
       },
+      "ListSessionAuditLogResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/SentinelAuditRecord"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "type": "object"
+      },
       "ListSessionEventsResponse": {
         "properties": {
           "data": {
@@ -3922,6 +4144,21 @@
         "required": [
           "data",
           "pagination"
+        ],
+        "type": "object"
+      },
+      "ListTurnArtifactsResponse": {
+        "properties": {
+          "data": {
+            "description": "Persisted artifact rows for the turn, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/TurnArtifact"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -4389,6 +4626,24 @@
             "type": "string"
           }
         ]
+      },
+      "MCPToolGrant": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "description": "When the caller chose Always allow, as an ISO 8601 UTC instant.",
+            "type": "string"
+          },
+          "tool_name": {
+            "description": "Tool name on the MCP server.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_name",
+          "created_at"
+        ],
+        "type": "object"
       },
       "MCPToolInfo": {
         "properties": {
@@ -5185,6 +5440,103 @@
         ],
         "type": "object"
       },
+      "MemoryVaultEntry": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "persona": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "timestamp",
+          "persona"
+        ],
+        "type": "object"
+      },
+      "MemoryVaultExport": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryVaultEntry"
+            },
+            "type": "array"
+          },
+          "exported_at": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "exported_at",
+          "entries"
+        ],
+        "type": "object"
+      },
+      "MemoryVaultImportEntry": {
+        "properties": {
+          "text": {
+            "maxLength": 32768,
+            "minLength": 1,
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "MemoryVaultImportResult": {
+        "properties": {
+          "imported": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "imported"
+        ],
+        "type": "object"
+      },
+      "MemoryVaultSharing": {
+        "properties": {
+          "shares": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "shares"
+        ],
+        "type": "object"
+      },
       "MetricsUnit": {
         "enum": [
           "count",
@@ -5521,6 +5873,7 @@
             "moonshot": "#/components/schemas/MoonshotModelProvider",
             "openai": "#/components/schemas/OpenAIModelProvider",
             "together": "#/components/schemas/TogetherAIModelProvider",
+            "tokenfactory": "#/components/schemas/TokenFactoryModelProvider",
             "truefoundry": "#/components/schemas/TrueFoundryModelProvider",
             "zai": "#/components/schemas/ZaiModelProvider"
           },
@@ -5550,6 +5903,9 @@
           },
           {
             "$ref": "#/components/schemas/AlibabaModelProvider"
+          },
+          {
+            "$ref": "#/components/schemas/TokenFactoryModelProvider"
           },
           {
             "$ref": "#/components/schemas/TrueFoundryModelProvider"
@@ -6248,6 +6604,49 @@
         ],
         "type": "object"
       },
+      "ProvisioningPersistedEvent": {
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 event timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier for the event (monotonic ULID).",
+            "type": "string"
+          },
+          "messages": {
+            "description": "Ordered driver progress messages, oldest first (capped).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "succeeded": {
+            "description": "Whether the provisioning step completed and the image verified.",
+            "type": "boolean"
+          },
+          "truncated_count": {
+            "description": "Progress messages dropped from `messages` by the cap; 0 when nothing was dropped.",
+            "type": "number"
+          },
+          "type": {
+            "description": "Emitted when run_code provisions (pulls) its sandbox image.",
+            "enum": [
+              "aman.sandbox.provisioning"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "succeeded",
+          "messages",
+          "truncated_count",
+          "id",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "RawToolCall": {
         "allOf": [
           {
@@ -6759,6 +7158,67 @@
         ],
         "type": "object"
       },
+      "SandboxIsolationCapability": {
+        "properties": {
+          "cosign_key_configured": {
+            "description": "Whether a cosign public key is configured for image signature verification (path never exposed).",
+            "type": "boolean"
+          },
+          "default_timeout_seconds": {
+            "description": "Default per-run timeout for run_code, seconds (`SANDBOX_DEFAULT_TIMEOUT_SECONDS`).",
+            "type": "integer"
+          },
+          "disk_mb": {
+            "description": "Scratch+egress disk quota for run_code, MiB (`SANDBOX_DISK_MB`).",
+            "type": "integer"
+          },
+          "image": {
+            "description": "Expected sandbox image as <tag>@sha256:<digest> (`SANDBOX_IMAGE`); empty when run_code is not configured.",
+            "type": "string"
+          },
+          "image_pull_timeout_seconds": {
+            "description": "Bound for the first-run image pull, seconds (`SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS`).",
+            "type": "integer"
+          },
+          "isolation_driver": {
+            "description": "Process-isolation backend behind the run_code tool (`SANDBOX_ISOLATION_DRIVER`).",
+            "enum": [
+              "docker",
+              "firecracker"
+            ],
+            "type": "string"
+          },
+          "max_timeout_seconds": {
+            "description": "Max per-run timeout for run_code, seconds (`SANDBOX_MAX_TIMEOUT_SECONDS`).",
+            "type": "integer"
+          },
+          "memory_mb": {
+            "description": "Container memory limit for run_code, MiB (`SANDBOX_MEMORY_MB`).",
+            "type": "integer"
+          },
+          "network_egress": {
+            "description": "Reserved for a future version; always false in v1 (`SANDBOX_NETWORK_EGRESS`).",
+            "type": "boolean"
+          },
+          "stdout_stderr_cap_kb": {
+            "description": "Per-stream stdout/stderr cap for run_code, KiB (`SANDBOX_STDOUT_STDERR_CAP_KB`).",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "isolation_driver",
+          "image",
+          "default_timeout_seconds",
+          "max_timeout_seconds",
+          "memory_mb",
+          "disk_mb",
+          "stdout_stderr_cap_kb",
+          "image_pull_timeout_seconds",
+          "network_egress",
+          "cosign_key_configured"
+        ],
+        "type": "object"
+      },
       "SandboxProviderManifest": {
         "additionalProperties": false,
         "properties": {
@@ -6943,6 +7403,80 @@
           "paused"
         ],
         "type": "string"
+      },
+      "SentinelAuditRecord": {
+        "properties": {
+          "auto_deny_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "conversation_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "logged",
+              "ran",
+              "approved",
+              "denied",
+              "auto_denied"
+            ],
+            "type": "string"
+          },
+          "tier": {
+            "maximum": 3,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "tool_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "tier",
+          "tool_name",
+          "description",
+          "outcome",
+          "auto_deny_reason",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "SentinelUserSettings": {
+        "properties": {
+          "offline_mode": {
+            "description": "While on, actions that reach outside this machine are denied automatically.",
+            "type": "boolean"
+          },
+          "tier2_auto_allow": {
+            "description": "Tier 2 action kinds that run without asking. Kinds not listed ask for approval.",
+            "items": {
+              "enum": [
+                "file_write"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "offline_mode",
+          "tier2_auto_allow"
+        ],
+        "type": "object"
       },
       "Session": {
         "properties": {
@@ -7300,6 +7834,9 @@
           },
           {
             "$ref": "#/components/schemas/SkillUsedPersistedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ProvisioningPersistedEvent"
           }
         ]
       },
@@ -8171,6 +8708,74 @@
         ],
         "type": "object"
       },
+      "Tier3Card": {
+        "properties": {
+          "amount": {
+            "description": "Verifiable amount, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cannot_be_undone": {
+            "description": "What cannot be undone, or null when fully reversible.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "destination": {
+            "description": "Verifiable destination (URL, service name), or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parsed_command": {
+            "description": "Server-parsed command structure for shell actions, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "plain_what": {
+            "description": "One plain-language sentence describing what will happen. No jargon.",
+            "type": "string"
+          },
+          "plain_why": {
+            "description": "One sentence on why the agent wants this, from agent intent when available.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recipient": {
+            "description": "Verifiable recipient (address, handle), or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "why_asked_again": {
+            "description": "Actual cause of re-escalation, or null on first ask.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "plain_what",
+          "plain_why",
+          "cannot_be_undone",
+          "why_asked_again",
+          "destination",
+          "recipient",
+          "amount",
+          "parsed_command"
+        ],
+        "type": "object"
+      },
       "Timezone": {
         "default": "UTC",
         "description": "IANA time zone the cron expression is evaluated in.",
@@ -8203,6 +8808,43 @@
           "type": {
             "enum": [
               "together"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "auth",
+          "models",
+          "type"
+        ],
+        "type": "object"
+      },
+      "TokenFactoryModelProvider": {
+        "additionalProperties": false,
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/ModelProviderAuth"
+          },
+          "base_url": {
+            "default": "https://api.tokenfactory.nebius.com/v1",
+            "description": "Override of the provider's default API base URL.",
+            "format": "uri",
+            "type": "string"
+          },
+          "models": {
+            "description": "Models exposed by this provider (at least one).",
+            "items": {
+              "$ref": "#/components/schemas/ConfiguredModel"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "stream_timeout": {
+            "$ref": "#/components/schemas/ModelProviderStreamTimeout"
+          },
+          "type": {
+            "enum": [
+              "tokenfactory"
             ],
             "type": "string"
           }
@@ -8264,7 +8906,8 @@
               "scope": {
                 "enum": [
                   "once",
-                  "chat"
+                  "chat",
+                  "always"
                 ],
                 "type": "string"
               },
@@ -8365,7 +9008,7 @@
           "tool_calls": {
             "description": "Tool calls waiting for approval.",
             "items": {
-              "$ref": "#/components/schemas/ToolCallRef"
+              "$ref": "#/components/schemas/ApprovalToolCallRef"
             },
             "type": "array"
           },
@@ -9130,6 +9773,62 @@
         ],
         "type": "object"
       },
+      "TurnArtifact": {
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 timestamp when the artifact row was recorded.",
+            "type": "string"
+          },
+          "mime": {
+            "description": "Stored MIME type when the bytes were kept.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "Display name of the file.",
+            "type": "string"
+          },
+          "path": {
+            "description": "Artifact path, as passed to the download-sandbox-file route.",
+            "type": "string"
+          },
+          "size": {
+            "description": "File size in bytes when known.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "skip_reason": {
+            "description": "Why the file was not kept, when it was not.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "description": "Whether the bytes were kept, and why not when they were not.",
+            "enum": [
+              "stored",
+              "skipped_size",
+              "skipped_missing"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "name",
+          "status",
+          "size",
+          "mime",
+          "skip_reason",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "TurnCreatedEvent": {
         "properties": {
           "created_at": {
@@ -9347,6 +10046,7 @@
                   "iteration_limit",
                   "fatal_error",
                   "model_stream_fault",
+                  "model_response_timeout",
                   "loop_detected"
                 ],
                 "type": "string"
@@ -9601,6 +10301,7 @@
                   "iteration_limit",
                   "fatal_error",
                   "model_stream_fault",
+                  "model_response_timeout",
                   "loop_detected"
                 ],
                 "type": "string"
@@ -9807,6 +10508,7 @@
             "agent.context.compaction": "#/components/schemas/ContextCompactionEvent",
             "aman.memory.recall": "#/components/schemas/MemoryRecallPersistedEvent",
             "aman.profile.learned": "#/components/schemas/ProfileLearnedPersistedEvent",
+            "aman.sandbox.provisioning": "#/components/schemas/ProvisioningPersistedEvent",
             "aman.skill.used": "#/components/schemas/SkillUsedPersistedEvent",
             "document.ingestion": "#/components/schemas/DocumentIngestionEvent",
             "mcp.auth_required": "#/components/schemas/MCPAuthRequiredEvent",
@@ -9879,6 +10581,9 @@
             "$ref": "#/components/schemas/SkillUsedPersistedEvent"
           },
           {
+            "$ref": "#/components/schemas/ProvisioningPersistedEvent"
+          },
+          {
             "$ref": "#/components/schemas/ContextCompactionEvent"
           },
           {
@@ -9916,6 +10621,9 @@
         "type": "object"
       },
       "UpdateMemoryScreenRequest": {
+        "example": {
+          "enabled": true
+        },
         "properties": {
           "enabled": {
             "description": "Persisted override: `true`/`false`. `null` clears the override back to the env default.",
@@ -9931,6 +10639,9 @@
         "type": "object"
       },
       "UpdateMemorySummarizeRequest": {
+        "example": {
+          "enabled": true
+        },
         "properties": {
           "enabled": {
             "description": "Persisted override: `true`/`false`. `null` clears the override back to the env default.",
@@ -9942,6 +10653,36 @@
         },
         "required": [
           "enabled"
+        ],
+        "type": "object"
+      },
+      "UpdateMemoryVaultEntryRequest": {
+        "properties": {
+          "text": {
+            "maxLength": 32768,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "UpdateMemoryVaultSharingRequest": {
+        "properties": {
+          "shares": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "shares"
         ],
         "type": "object"
       },
@@ -10020,6 +10761,25 @@
           "name",
           "manifest"
         ],
+        "type": "object"
+      },
+      "UpdateSentinelUserSettingsRequest": {
+        "properties": {
+          "offline_mode": {
+            "description": "New offline mode value; omitted keeps the current value.",
+            "type": "boolean"
+          },
+          "tier2_auto_allow": {
+            "description": "Replaces the relaxed Tier 2 kinds; omitted keeps the current set.",
+            "items": {
+              "enum": [
+                "file_write"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
         "type": "object"
       },
       "UpdateSessionFolderRequest": {
@@ -10104,6 +10864,9 @@
         "type": "object"
       },
       "UpdateToolOutputScreenRequest": {
+        "example": {
+          "enabled": true
+        },
         "properties": {
           "enabled": {
             "description": "Persisted override: `true`/`false`. `null` clears the override back to the env default.",
@@ -10442,6 +11205,85 @@
         "required": [
           "commands",
           "repository_revision"
+        ],
+        "type": "object"
+      },
+      "VoiceCapability": {
+        "properties": {
+          "enabled": {
+            "description": "Whether local voice input is available (STT sidecar healthy).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "VoiceStatus": {
+        "properties": {
+          "model": {
+            "description": "STT model label, empty when the sidecar is unreachable.",
+            "type": "string"
+          },
+          "stt_available": {
+            "description": "Whether the STT sidecar answered its health probe.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "stt_available",
+          "model"
+        ],
+        "type": "object"
+      },
+      "VoiceStatusResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/VoiceStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "VoiceTranscription": {
+        "properties": {
+          "duration_ms": {
+            "description": "Sidecar transcription time in milliseconds.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "language": {
+            "description": "Detected language code, e.g. `en`.",
+            "type": "string"
+          },
+          "model": {
+            "description": "STT model label, e.g. `whisper-small-int8`.",
+            "type": "string"
+          },
+          "text": {
+            "description": "Transcribed utterance text.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "language",
+          "duration_ms",
+          "model"
+        ],
+        "type": "object"
+      },
+      "VoiceTranscriptionResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/VoiceTranscription"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -12206,6 +13048,133 @@
         "x-fern-sdk-method-name": "memory_check"
       }
     },
+    "/api/v1/mcp-servers/{name}/tool-grants": {
+      "get": {
+        "description": "Tools on this MCP server the caller chose Always allow for. Their calls run without an approval prompt unless a safety rule asks again.",
+        "parameters": [
+          {
+            "description": "MCP server name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "MCP server name.",
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMCPToolGrantsResponse"
+                }
+              }
+            },
+            "description": "The caller's always-allowed tools on this MCP server."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "MCP server not found."
+          }
+        },
+        "summary": "List always-allowed tools of an MCP server",
+        "tags": [
+          "MCP Servers"
+        ],
+        "x-fern-sdk-group-name": [
+          "mcpServers"
+        ],
+        "x-fern-sdk-method-name": "list_tool_grants"
+      }
+    },
+    "/api/v1/mcp-servers/{name}/tool-grants/{tool_name}": {
+      "delete": {
+        "description": "Revokes the caller's Always allow for one tool, so its next call asks for approval again. A no-op when the tool is not always allowed.",
+        "parameters": [
+          {
+            "description": "MCP server name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "MCP server name.",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tool name on the MCP server.",
+            "in": "path",
+            "name": "tool_name",
+            "required": true,
+            "schema": {
+              "description": "Tool name on the MCP server.",
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMCPToolGrantResponse"
+                }
+              }
+            },
+            "description": "The tool is no longer always allowed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "MCP server not found."
+          }
+        },
+        "summary": "Stop always allowing a tool of an MCP server",
+        "tags": [
+          "MCP Servers"
+        ],
+        "x-fern-sdk-group-name": [
+          "mcpServers"
+        ],
+        "x-fern-sdk-method-name": "delete_tool_grant"
+      }
+    },
     "/api/v1/mcp-servers/{name}/tools": {
       "get": {
         "description": "All tools exposed by the given MCP server (non-paginated), as returned by the MCP `tools/list` call.",
@@ -12282,6 +13251,558 @@
           "mcpServers"
         ],
         "x-fern-sdk-method-name": "list_tools"
+      }
+    },
+    "/api/v1/memory/vault": {
+      "get": {
+        "description": "List the effective entries of one vault namespace. Vault edits and deletes are applied.",
+        "parameters": [
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault, else a topic name.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault, else a topic name.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMemoryVaultEntriesResponse"
+                }
+              }
+            },
+            "description": "Vault entries for the namespace."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid namespace."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "List memory vault entries",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/memory/vault/export": {
+      "get": {
+        "description": "Export one vault namespace as JSON: the namespace, the export time, and every effective entry.",
+        "parameters": [
+          {
+            "description": "Vault namespace to export: omit for the shared vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace to export: omit for the shared vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportMemoryVaultResponse"
+                }
+              }
+            },
+            "description": "The vault export."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid namespace."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "Export a memory vault",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "export_entries"
+      }
+    },
+    "/api/v1/memory/vault/import": {
+      "post": {
+        "description": "Append imported entries to one vault namespace as new daily-log entries.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportMemoryVaultRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportMemoryVaultResponse"
+                }
+              }
+            },
+            "description": "Entries imported."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid import payload."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "Import into a memory vault",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "import_entries"
+      }
+    },
+    "/api/v1/memory/vault/sharing": {
+      "get": {
+        "description": "Get the per-persona sharing config: which vault namespaces each persona may read.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryVaultSharingResponse"
+                }
+              }
+            },
+            "description": "The stored sharing config."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "Get memory vault sharing",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "get_sharing"
+      },
+      "put": {
+        "description": "Replace the whole per-persona sharing config. An omitted persona loses its shares.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryVaultSharingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryVaultSharingResponse"
+                }
+              }
+            },
+            "description": "The stored sharing config after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid sharing config."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "Replace memory vault sharing",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "update_sharing"
+      }
+    },
+    "/api/v1/memory/vault/{entry_id}": {
+      "delete": {
+        "description": "Delete one entry. The daily log is append-only, so the old entry stays and a delete marker hides it from listings and recall.",
+        "parameters": [
+          {
+            "description": "URL-encoded vault entry id (`md:{namespace}:{file}#{index}`).",
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "description": "URL-encoded vault entry id (`md:{namespace}:{file}#{index}`).",
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMemoryVaultEntryResponse"
+                }
+              }
+            },
+            "description": "Entry deleted."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid entry id."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No vault entry with that id."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "Delete a memory vault entry",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "delete"
+      },
+      "put": {
+        "description": "Replace one entry’s text. The daily log is append-only, so the old entry stays and a supersede marker records the new text.",
+        "parameters": [
+          {
+            "description": "URL-encoded vault entry id (`md:{namespace}:{file}#{index}`).",
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "description": "URL-encoded vault entry id (`md:{namespace}:{file}#{index}`).",
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryVaultEntryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryVaultEntryResponse"
+                }
+              }
+            },
+            "description": "The entry with its replacement text."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid entry id or text."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No vault entry with that id."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "Update a memory vault entry",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "update"
       }
     },
     "/api/v1/models": {
@@ -12620,6 +14141,16 @@
               }
             },
             "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such persona for this user."
           }
         },
         "summary": "Delete a persona",
@@ -14819,6 +16350,99 @@
         "x-fern-sdk-method-name": "update"
       }
     },
+    "/api/v1/sessions/{session_id}/audit-log": {
+      "get": {
+        "description": "List the Sentinel permission audit log for a session (newest first): tiered tool-call decisions with outcomes. Only the session creator may list it.",
+        "parameters": [
+          {
+            "description": "Session identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "description": "Session identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSessionAuditLogResponse"
+                }
+              }
+            },
+            "description": "Audit log entries."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid query parameters."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Caller is not the session creator."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Session not found."
+          }
+        },
+        "summary": "List Sentinel audit log for a session",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "sessions"
+        ],
+        "x-fern-sdk-method-name": "get_audit_log"
+      }
+    },
     "/api/v1/sessions/{session_id}/bug-report": {
       "post": {
         "description": "Assembles a redacted diagnostic bundle for this session: build identity, a structural per-turn event trace (event types, tool names/effects/outcomes, durations, counts), recent errors, non-secret config flags, and the optional description supplied in the request body, included verbatim. Message text, memory-recall content, learned-profile text, tool-call arguments/results, and any credential or token value are never included — see the response `redaction` field — unless the request sets `include_chat`, which adds the user and assistant message text under `chat` at the reporter's request. Only the session creator (`created_by`) may generate it.",
@@ -16112,9 +17736,79 @@
         "x-fern-sdk-method-name": "get_turn"
       }
     },
+    "/api/v1/sessions/{session_id}/turns/{turn_id}/artifacts": {
+      "get": {
+        "description": "List files the turn persisted for download: exec-sandbox `sandbox_artifacts` rows and run_code harvested files (`run_code/<name>` paths). Deterministic — no assistant prose parsing. Only the session creator may list.",
+        "parameters": [
+          {
+            "description": "Session identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "description": "Session identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Turn identifier.",
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "description": "Turn identifier.",
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTurnArtifactsResponse"
+                }
+              }
+            },
+            "description": "Persisted artifact rows, newest first."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Caller is not the session creator."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Session or turn not found."
+          }
+        },
+        "summary": "List persisted files for a turn",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "sessions"
+        ],
+        "x-fern-sdk-method-name": "list_turn_artifacts"
+      }
+    },
     "/api/v1/sessions/{session_id}/turns/{turn_id}/download-sandbox-file": {
       "get": {
-        "description": "Download a file from the sandbox this turn ran in. Paths come from the assistant's `sandbox_artifacts` block. Only the session creator may download.",
+        "description": "Download a file from the sandbox this turn ran in. Paths come from the turn's persisted artifacts: exec-sandbox `sandbox_artifacts` rows and run_code harvested files (`run_code/<name>` paths). List them via the artifacts route. Only the session creator may download.",
         "parameters": [
           {
             "description": "Session identifier.",
@@ -16140,12 +17834,12 @@
             }
           },
           {
-            "description": "Absolute or sandbox-working-directory-relative file path, as listed in the assistant's `sandbox_artifacts` block.",
+            "description": "Artifact path as listed by the list-turn-artifacts route: exec-sandbox `sandbox_artifacts` rows and run_code harvested files (`run_code/<name>` paths).",
             "in": "query",
             "name": "path",
             "required": true,
             "schema": {
-              "description": "Absolute or sandbox-working-directory-relative file path, as listed in the assistant's `sandbox_artifacts` block.",
+              "description": "Artifact path as listed by the list-turn-artifacts route: exec-sandbox `sandbox_artifacts` rows and run_code harvested files (`run_code/<name>` paths).",
               "minLength": 1,
               "type": "string"
             }
@@ -17198,6 +18892,42 @@
         "x-fern-sdk-method-name": "delete"
       }
     },
+    "/api/v1/settings/run-code/status": {
+      "get": {
+        "description": "Checks live whether the run_code sandbox can execute code, and if not, why. Runs a short readiness probe, so it can take a few seconds.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetRunCodeStatusResponse"
+                }
+              }
+            },
+            "description": "The sandbox status."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The readiness probe failed unexpectedly."
+          }
+        },
+        "summary": "Get the code execution sandbox status",
+        "tags": [
+          "Sandboxes"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "runCode"
+        ],
+        "x-fern-sdk-method-name": "get_status"
+      }
+    },
     "/api/v1/settings/sandbox-providers": {
       "get": {
         "description": "The single configured sandbox provider for this tenant. `auth.api_key` is redacted.",
@@ -18239,6 +19969,195 @@
           "spaces"
         ],
         "x-fern-sdk-method-name": "revert"
+      }
+    },
+    "/api/v1/user/settings/sentinel": {
+      "get": {
+        "description": "Returns the authenticated user’s offline mode and the Tier 2 action kinds that run without asking.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSentinelUserSettingsResponse"
+                }
+              }
+            },
+            "description": "Settings; defaults when nothing was saved."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Get Sentinel permission settings",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization"
+        ],
+        "x-fern-sdk-method-name": "get_sentinel_settings"
+      },
+      "patch": {
+        "description": "Changes only the provided fields of the authenticated user’s Sentinel settings.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSentinelUserSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSentinelUserSettingsResponse"
+                }
+              }
+            },
+            "description": "Saved settings."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid settings."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Update Sentinel permission settings",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "personalization"
+        ],
+        "x-fern-sdk-method-name": "update_sentinel_settings"
+      }
+    },
+    "/api/v1/voice/status": {
+      "get": {
+        "description": "Probes the local STT sidecar; the chat composer hides voice input when it is unavailable.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceStatusResponse"
+                }
+              }
+            },
+            "description": "STT availability."
+          }
+        },
+        "summary": "Check voice input availability",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "voice"
+        ],
+        "x-fern-sdk-method-name": "get_status"
+      }
+    },
+    "/api/v1/voice/transcribe": {
+      "post": {
+        "description": "Accepts 16 kHz mono 16-bit PCM WAV audio and returns the transcript produced by the local STT sidecar. Audio bodies over 30 MB are rejected.",
+        "requestBody": {
+          "content": {
+            "audio/wav": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTranscriptionResponse"
+                }
+              }
+            },
+            "description": "Transcript produced by the local STT sidecar."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Malformed audio."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Audio body over the 30 MB limit."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "STT sidecar returned an unexpected response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "STT sidecar unreachable or not warm."
+          }
+        },
+        "summary": "Transcribe a voice recording",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "voice"
+        ],
+        "x-fern-sdk-method-name": "transcribe"
       }
     }
   },

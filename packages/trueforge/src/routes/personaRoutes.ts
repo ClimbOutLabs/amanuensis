@@ -116,6 +116,7 @@ export const deletePersonaRoute = createRoute({
   request: { params: PersonaIdParamsSchema },
   responses: {
     200: { content: { 'application/json': { schema: DeletePersonaResponseSchema } }, description: 'Persona removed.' },
+    ...notFoundResponse,
     ...protectedResponses,
   },
 });

@@ -8,6 +8,7 @@ import { ToolSet } from '../core/mcp/ToolSet';
 import { createSentinelHostContext, type SentinelHostContext, type SentinelServices } from '../core/permissions';
 import type { AgentDefinition, ConfiguredModelSummary, ModelParams } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
+import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../core/tracing/NoopAgentTracing';
@@ -137,6 +138,15 @@ export class TurnResourceResolver<
        * See ITurnResourceResolver.runCodeToolCallTimeoutMs.
        */
       runCodeToolCallTimeoutMs?: number | undefined;
+      /**
+       * Host instance-wide bound in milliseconds on waiting for a model call's
+       * first output. See ITurnResourceResolver.modelFirstResponseTimeoutMs.
+       */
+      modelFirstResponseTimeoutMs?: number | undefined;
+      /**
+       * Per-run host policy over tool calls. See ITurnResourceResolver.toolCallPolicy.
+       */
+      toolCallPolicy?: HostToolCallPolicy | undefined;
       /** Resolved T2 binding, independent of whether this turn enables a sandbox. */
       boundRepository?: BoundRepository | undefined;
       /** IANA timezone name the client sent with this turn. See ITurnResourceResolver.clientTimezone. */
@@ -188,6 +198,14 @@ export class TurnResourceResolver<
 
   get runCodeToolCallTimeoutMs(): number | undefined {
     return this.deps.runCodeToolCallTimeoutMs;
+  }
+
+  get modelFirstResponseTimeoutMs(): number | undefined {
+    return this.deps.modelFirstResponseTimeoutMs;
+  }
+
+  get toolCallPolicy(): HostToolCallPolicy | undefined {
+    return this.deps.toolCallPolicy;
   }
 
   get boundRepository(): BoundRepository | undefined {
@@ -380,6 +398,7 @@ export class TurnResourceResolver<
       ? await this.getModel(compactionSetting.name).then(resolved => ({
           modelClient: resolved.modelClient,
           modelParams: { ...resolved.defaultModelParams, ...compactionSetting.params },
+          modelProperties: resolved.modelProperties,
         }))
       : undefined;
 

@@ -1,89 +1,108 @@
-# Sandbox Rethink: Cheap, Fast, Fully Local
+# Spec: Sandbox Is Docker Only
 
-**Status:** draft
-**Date:** 2026-09-28
+**Status:** draft (not approved; no implementation beyond the settings page below starts until the owner approves)
+
+**Date:** 2026-10-11
 
 ## Problem
 
-Aman's needs a code execution sandbox.
+Code execution (`run_code`) now runs in a local, offline Docker container, but the Settings > Sandbox page still describes the older world. It mixed two unrelated things without explaining either: the `run_code` sandbox and a "Sandbox providers" section (Daytona or Nightona) with an "Upgrade runtime" card that belonged to the provider. On a Compose deployment whose server cannot reach Docker, the page showed "Isolation status unavailable." and nothing else.
 
-## Goals
+Two causes sat behind that line:
 
-1. **Cheap:** near-zero idle footprint. No always-on platform services for the sandbox itself.
-2. **Fast:** cold start in the low hundreds of milliseconds, not seconds. No VM boot on the hot path.
-3. **Local:** Should run locally and no network calls to stand up a sandbox.
-4. **Safe:** untrusted code cannot read the host filesystem, exfiltrate credentials, or escape to the host. Network egress off by default, allowlisted when needed.
+1. The server only reports configuration (`sandbox_isolation` in the capabilities response). It never reports whether Docker, the image and its signature actually work, so the page had nothing live to show.
+2. A server with no sandbox image configured reports an empty image. The UI parser rejected an empty image and discarded the whole payload, which is the "unavailable" text.
 
-## Non-goals
+The owner has decided to offer one sandbox option, Docker. Daytona and Nightona are no longer options.
 
-- Replacing Docker for the Aman deployment itself (the app containers stay as they are).
-- Supporting multi-tenant hosted sandboxes (this is single-user, local-first).
-- Windows/macOS parity
+## Solution
 
-## Proposed architecture
+Settings > Sandbox shows only the Docker sandbox:
 
-A single local sandbox daemon (or library) that spawns one micro-sandbox per execution using OS-level isolation. No always-on services beyond the daemon itself.
+- what it is, in one line: it runs the Python and Node.js code the assistant writes, in an isolated Docker container with no network access;
+- a live status: ready, or off with a plain reason and what to do about it;
+- the image and its signature check (downloaded or not, verified or not);
+- the limits that matter to a user: time per run, memory, disk space, network off;
+- a Re-check action, and a clear error with Try again when the status cannot be fetched.
 
-### Isolation technology: gVisor (runsc)
+The Sandbox providers section and the Upgrade runtime card are removed from the page. The settings tab is renamed from "Sandbox providers" to "Sandbox".
 
-**Recommendation: gVisor's runsc runtime.**
+A new admin-only route, `GET /api/v1/settings/run-code/status`, runs the isolation driver's readiness probe and returns `{ data: { state, detail? } }`. The page calls it on open and on Re-check.
 
-- It is a Docker runtime flag (`--runtime=runsc`), not a new orchestrator. Existing container images work unchanged.
-- No VM boot, no KVM requirement. Firecracker and Kata need /dev/kvm, which is unavailable on most hosts and never inside containers; runsc works everywhere Docker works.
-- Syscall interception in userspace: the sandbox kernel is gVisor's Sentry, so a container escape must beat gVisor, not just Linux namespaces.
-- Cold start is container start plus gVisor init: hundreds of milliseconds, versus seconds for a MicroVM.
+States, taken from the driver's readiness result and the server configuration:
 
-Alternatives considered and rejected:
+| State                  | Meaning for the owner                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| `ready`                | Code execution is on.                                                                       |
+| `not_configured`       | No sandbox image is configured, so code execution is off. Docker is not probed.             |
+| `docker_unavailable`   | Docker is not available to the server (for example a server in a container without Docker). |
+| `daemon_unavailable`   | Docker is installed but not responding or cannot create containers.                         |
+| `image_missing`        | The image is not downloaded yet. It downloads on first use and needs internet access once.  |
+| `signature_unverified` | The image signature could not be verified, so the image is not trusted.                     |
+| `image_unavailable`    | The image on the machine does not match the configured pinned image.                        |
+| `isolation_refused`    | A test sandbox lacked a required protection, so the server refuses to run code.             |
+| `unsupported_platform` | The host is not a supported Linux container host.                                           |
 
-- **Firecracker:** fastest MicroVM, but needs /dev/kvm and a guest kernel + rootfs per sandbox. Heavy plumbing for a single-user box.
-- **Kata Containers:** same KVM requirement, plus a full shim stack. Built for multi-tenant clouds, not for a single-user local box.
-- **Plain namespaces (bubblewrap/nsjail):** lightest, but the security boundary is the host kernel's syscall surface. Fine for trusted-ish code, not for running arbitrary model-generated code.
-- **Keeping a full platform:** a multi-service sandbox platform works, but it is heavyweight for a single primitive. The goal is one daemon, not a platform.
+Each state has a one-sentence headline, a one-sentence explanation and, where action is needed, a "What to do" line. `detail` carries the driver's own text for states where it adds information, shown under "Technical details".
 
-### Design
+## Design Decisions
 
-- One `sandboxd` daemon process. A sandbox crash must not take down the backend, so the daemon is a separate process, not an in-process library.
-- API: `run(code, language, timeout, network_policy, mounts) -> { stdout, stderr, exit_code, timed_out }`. Synchronous with a timeout; no SSH, no persistent workspaces in v1.
-- Each execution gets a fresh gVisor container from a pre-pulled language image (python, node, bash). Images are cached locally; no registry service needed (plain `docker pull` at install time).
-- Filesystem: read-only root, a tmpfs scratch dir for the run, no host mounts by default. Explicit allowlist for the rare case Aman needs to hand a file in.
-- Network: none by default. An egress proxy allowlist (package registries, specific APIs) can be added per-run when the task needs it; default-deny otherwise.
-- Resource limits: CPU shares, memory cap, pids limit, and a hard wall-clock timeout enforced by the daemon (kill -9 past deadline, no grace period games).
-- Cold start every time. No warm container pooling in v1; the 1s cold-start target must be met without it.
-- Concurrency: N parallel sandboxes, bounded by config. Queue with backpressure when full; never silently drop.
+- **Docker is the only sandbox option.** The page offers no provider choice. The provider backend and its APIs are left in place in this change (see Out of Scope).
+- **Live status comes from a dedicated route, not from capabilities.** The readiness probe creates and removes containers and runs a canary, so it can take seconds. Capabilities is read at app boot and polled, so it must stay cheap. Configuration (limits, image reference) keeps coming from the existing capabilities field.
+- **State is decided on the server.** The driver result gains one optional field, `reason`, so that a signature failure and an isolation refusal are told apart from other failures that share an error code. The mapping lives in one place in `trueforge-core`, next to the status schema, and the UI imports that schema.
+- **The host supplies the status call.** The UI package defines a small `RunCodeStatusApi` context, like the other host APIs. The generated SDK and OpenAPI are regenerated elsewhere, so the frontend host calls the route directly and validates the response with the shared schema. The Sandbox tab is shown only when the host provides this API.
+- **Advice stays plain; names go under Technical details.** The "What to do" line never names server settings. The full image reference with its digest, the setting names, the limit settings and the driver's own text sit under Technical details. The Image card shows the short name and tag only, and is a list of checks (download, signature) so future sandbox health rows can be added without a redesign. Those rows are not built here.
+- **An empty image is valid.** It means no image is configured and is shown as such, not as a parse failure.
+- **Never a bare "unavailable".** Every state, and the failed-fetch case, says what happened and what to do.
+- **Wire shapes use snake_case**, in line with the rest of the API.
 
-### Footprint
+## What Breaks Without a Sandbox Provider
 
-One daemon plus ephemeral per-run containers. No always-on platform services: no separate auth, storage, registry, or observability stack for the sandbox itself.
+This is read from the current code and is unchanged by this spec. The sandbox the agent sees (shell, files, skills, code mode, and `run_code` itself) is built from a configured provider. `run_code` is a tool of that sandbox, so it is only reachable when a provider resolves.
 
-## Security model
+On a Compose deployment (`STANDALONE=false`, no local fallback) with no provider configured:
 
-- Threat: arbitrary code generated by the model (or pasted by the user) attempting host escape, credential theft, or network exfiltration.
-- Boundary 1: gVisor syscall filtering (Sentry). Boundary 2: no network by default. Boundary 3: read-only rootfs, no host mounts, no secrets in the image. Boundary 4: resource limits and hard timeouts.
-- Secrets (API keys, tokens) never enter the sandbox environment. If a tool needs a credential, the call happens outside the sandbox and only the result goes in.
-- Audit: every run logs image, timeout, network policy, exit code, and duration. No code contents in the log by default (they may contain user data).
+- The capabilities response reports the sandbox as disabled, so new default agents start with the sandbox off, and skills are reported unavailable with the reason "Skills run in a sandbox, which is not configured."
+- Saving or validating an agent that turns the sandbox on, or that attaches skills, is rejected with a 422 ("sandbox is enabled but no sandbox provider is configured" or "skills require a sandbox provider").
+- Starting a turn that needs a sandbox fails with a 422 ("no sandbox provider configured").
+- As a result, a working Docker `run_code` sandbox does not make code execution available on its own: no agent can enable it.
+- The composer no longer links to a provider form. When the sandbox is unavailable it says so ("The sandbox is not available on this server") and offers no settings link.
 
-## Performance targets
+On a standalone install, a supported local runtime acts as a built-in provider, so shell and file tools run on the host through it. That path is unaffected.
 
-- Cold start (no warm container): under 1 second from API call to code executing.
-- Warm start (pooled): under 200 ms.
-- Idle footprint: the daemon alone, under 100 MB RSS. Zero per-sandbox cost when idle.
-- Per-run overhead vs native Docker: acceptable up to 2x syscall-heavy workloads; the sandbox runs snippets, not servers.
+Resolving this is the point of the follow-up below. Until it lands, an owner who removes the provider option from the page has no way to enable agent sandboxes on Compose.
 
-## Plan
+## Scope
 
-Build `sandboxd` as a new sandbox provider: a local daemon that spawns one gVisor-isolated micro-sandbox per execution. When it is ready and tested, remove the old sandbox backend entirely. No feature flag, no dual-backend parity period, no gradual migration. The old stack gets deleted.
+In this change:
 
-## Decided
+- Rewrite Settings > Sandbox as described above, with the status route, the shared status schema, the `reason` field on the driver readiness result, the host API and the tests.
+- Rename the settings tab to "Sandbox".
+- Remove the code the page no longer uses (the provider form, the runtime-upgrade context and its shell and host props), fix the composer hint, and update `docs/sandbox.mdx`.
 
-- **Daemon, not in-process:** `sandboxd` is a separate process so a sandbox crash cannot take down the backend.
-- **Cold start, no pooling:** every run starts fresh; no warm container pool in v1. The 1s cold-start target must be met without pooling.
-- **Image digests pinned:** pin image digests at build time, verify on pull. No `latest` tags anywhere.
-- **Egress via tool manifest:** a tool declares the network egress it needs in its manifest (e.g. allowed domains); the sandbox grants it for that run without prompting. No per-run user prompts.
+Follow-up, not in this change: the shell, file and coding tools move into Docker through a broker, so they no longer need a sandbox provider and `run_code` no longer depends on one. That work removes the dependency described in the previous section. It needs its own spec.
 
-## Success criteria
+## Privacy
 
-- A sandbox run is one daemon plus one ephemeral container.
-- Existing sandbox tests pass unchanged against the new backend.
-- Cold start under 1s, idle footprint under 100 MB.
-- No hosted dependency: works on a fresh machine with no network beyond the initial image pull.
-- The old sandbox backend and its infrastructure are deleted.
+- Nothing about user content is involved. The status route returns a state and, for some failures, the driver's diagnostic text (for example cosign or canary output). The cosign key path and host run paths are already redacted by the driver before the text leaves it.
+- The route is admin-only, under the settings mount.
+- Code still runs locally in Docker with no network access, and nothing is sent to a hosted sandbox. Configuration values shown (image reference, limits) are non-secret.
+- The readiness probe stages and deletes a throwaway canary run on the server; it never touches user files.
+
+## Testing (synthetic data)
+
+All tests use synthetic data and fake drivers or fetchers; none needs Docker or the user's real data.
+
+- Core: the readiness-to-status mapping for every state, and the driver's `reason` for a signature failure and an isolation refusal.
+- Server: the status route for not configured (Docker not probed), ready, Docker unavailable, signature failure, and a probe that throws (500).
+- UI: the page's text for each state, image and signature rows, limits, Re-check, the loading state, and the failed-fetch error with Try again; the Sandbox tab shown only when the host provides the status API; the capability reader accepting an empty image.
+- Frontend host: the status client reads the route, surfaces server errors, and rejects an unknown state.
+- Screenshots in dark and light themes for Docker unavailable, ready and signature not verified.
+
+## Out of Scope
+
+- The broker that moves shell, file and coding tools into Docker, and any change to how agents obtain a sandbox.
+- Deleting the provider backend, its settings and catalog APIs, the upgrade-image route and the UI provider catalog adapter. They stay for now and go in a separate provider removal change.
+- Docs outside `docs/sandbox.mdx` that still describe configuring a provider (the quickstart and initial setup pages). They go with the provider removal change.
+- Changing sandbox limits from the page. They stay server configuration and need a restart.
+- A "download image now" action, Windows support, and the Firecracker driver.

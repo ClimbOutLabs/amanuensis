@@ -18,12 +18,6 @@ export default defineConfig({
   // wipe that stylesheet here. Watch mode also keeps dist/styles.css from the CSS watcher.
   clean: false,
   target: 'es2022',
-  // Sprite images ship inlined as data URIs (same as fonts): relative URLs
-  // would resolve against the host document and break, and `img-src data:`
-  // fits the hosting app's image Content-Security-Policy.
-  loader: {
-    '.webp': 'dataurl',
-  },
   esbuildPlugins: [
     embedCssPlugin(),
     svgr({

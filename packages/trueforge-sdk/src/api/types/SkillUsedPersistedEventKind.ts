@@ -2,8 +2,7 @@
 
 /** 'skill_read': an exec referenced <skillsDir>/<name>/SKILL.md. 'skill_dir_exec': an exec ran with a skill directory as cwd. */
 export const SkillUsedPersistedEventKind = {
-    SkillRead: "skill_read",
-    SkillDirExec: "skill_dir_exec",
-} as const;
-export type SkillUsedPersistedEventKind =
-    (typeof SkillUsedPersistedEventKind)[keyof typeof SkillUsedPersistedEventKind];
+        SkillRead: "skill_read",
+        SkillDirExec: "skill_dir_exec"
+    } as const;
+export type SkillUsedPersistedEventKind = typeof SkillUsedPersistedEventKind[keyof typeof SkillUsedPersistedEventKind];

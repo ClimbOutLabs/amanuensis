@@ -42,8 +42,8 @@ const putBodyWithDcr = {
 };
 
 const HEADER_TOKEN = 'Bearer test-token';
-/** Wire form of HEADER_TOKEN for length ≥ 10: first 3 + SECRET_REDACTION + last 3. */
-const HEADER_TOKEN_REDACTED = 'Bea-***REDACTED***-ken';
+/** Wire form of HEADER_TOKEN: the fixed mask, with no prefix or suffix of the secret. */
+const HEADER_TOKEN_REDACTED = '***REDACTED***';
 
 const putBodyWithHeaderAuth = {
   type: 'remote' as const,
@@ -634,7 +634,7 @@ describe('mcp-servers routers', () => {
   it('PUT with a different redacted header value still keeps the stored secret', async () => {
     await settingsRouter.request('/', putInit(wrapManifest(putBodyWithHeaderAuth)));
 
-    // Any value containing ***REDACTED*** is treated as keep, not only the exact GET mask.
+    // Any value containing ***REDACTED*** is treated as keep, so masks from older GETs still round-trip.
     const keep = {
       ...putBodyWithHeaderAuth,
       url: 'https://mcp.example.com/v3/mcp',
@@ -670,7 +670,7 @@ describe('mcp-servers routers', () => {
     await settingsRouter.request('/', putInit(wrapManifest(putBodyWithHeaderAuth)));
 
     const rotatedToken = 'Bearer rotated-token';
-    const rotatedTokenRedacted = 'Bea-***REDACTED***-ken';
+    const rotatedTokenRedacted = '***REDACTED***';
     const rotated = {
       ...putBodyWithHeaderAuth,
       auth: {

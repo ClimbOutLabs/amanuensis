@@ -59,11 +59,8 @@ export interface PersonasRouterDeps {
   personaStore: IPersonaStore;
   resolveModelProviderStore: (c: Context) => IModelProviderStore;
   resolveRequestContext: ResolveRequestContext;
-  /**
-   * When set, deleting a persona also removes its knowledge library database
-   * and pending upload blobs. Optional so existing callers keep compiling.
-   */
-  knowledgeDir?: string;
+  /** Deleting a persona also removes its knowledge library database and pending upload blobs. */
+  knowledgeDir: string;
 }
 
 /** Persona CRUD (mounted at /api/v1/personas). */
@@ -146,33 +143,30 @@ export function createPersonasRouter(deps: PersonasRouterDeps) {
   const deleteHandler: RouteHandler<typeof deletePersonaRoute> = async c => {
     const requestContext = deps.resolveRequestContext(c);
     const { persona_id: personaId } = c.req.valid('param');
-    await deps.personaStore.deletePersona({
-      tenant_id: TENANT_ID,
-      created_by: requestContext.subject.id,
-      id: personaId,
-    });
+    const owned = { tenant_id: TENANT_ID, created_by: requestContext.subject.id, id: personaId };
+    // The store's owner-scoped delete silently matches nothing for another
+    // user, while the library is keyed by persona id alone: confirm ownership
+    // first so a non-owner can never reach the cleanup below.
+    if ((await deps.personaStore.getPersona(owned)) === undefined) {
+      return c.json({ error: { message: `Persona not found: ${personaId}` } }, 404);
+    }
+    await deps.personaStore.deletePersona(owned);
     // A deleted persona's library must not linger: drop its database (plus the
     // SQLite -wal/-shm sidecars, which would otherwise resurrect content),
     // and any blobs waiting for the background indexer. Best-effort — the
     // persona row is already gone, so a failed cleanup only wastes disk,
     // never leaks.
-    if (deps.knowledgeDir !== undefined) {
-      const { dbPath } = personaKnowledgeLocation({
-        knowledgeDir: deps.knowledgeDir,
-        tenantId: TENANT_ID,
-        personaId,
-      });
-      // Evict the process-wide cached handle first: otherwise it would keep
-      // writing to the unlinked file after the rm below.
-      closePersonaKnowledgeRepository({ dbPath });
-      for (const sidecar of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
-        await rm(sidecar, { force: true }).catch(() => undefined);
-      }
-      await rm(path.resolve(deps.knowledgeDir, TENANT_ID, `${personaId}.blobs`), {
-        force: true,
-        recursive: true,
-      }).catch(() => undefined);
+    const { dbPath } = personaKnowledgeLocation({ knowledgeDir: deps.knowledgeDir, tenantId: TENANT_ID, personaId });
+    // Evict the process-wide cached handle first: otherwise it would keep
+    // writing to the unlinked file after the rm below.
+    closePersonaKnowledgeRepository({ dbPath });
+    for (const sidecar of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+      await rm(sidecar, { force: true }).catch(() => undefined);
     }
+    await rm(path.resolve(deps.knowledgeDir, TENANT_ID, `${personaId}.blobs`), {
+      force: true,
+      recursive: true,
+    }).catch(() => undefined);
     return c.json({}, 200);
   };
 

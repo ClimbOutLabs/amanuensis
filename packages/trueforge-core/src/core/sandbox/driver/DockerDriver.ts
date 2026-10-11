@@ -581,7 +581,12 @@ export class DockerDriver implements IsolationDriver {
       signal,
     });
     if (!verification.ok) {
-      return { ready: false, error_code: 'image_unavailable', error: verification.error };
+      return {
+        ready: false,
+        error_code: 'image_unavailable',
+        error: verification.error,
+        reason: 'signature_unverified',
+      };
     }
     // Wedged-daemon escalation (plan §2.8): dockerd answers `docker info` but
     // `docker create` never returns → daemon_unavailable, manual remediation.
@@ -615,7 +620,7 @@ export class DockerDriver implements IsolationDriver {
     // is a clear capability error here, not a permission failure mid-run.
     const ownership = await this.probeBindMountOwnership(signal);
     if (!ownership.ok) {
-      return { ready: false, error_code: 'daemon_unavailable', error: ownership.error };
+      return { ready: false, error_code: 'daemon_unavailable', error: ownership.error, reason: ownership.reason };
     }
     return { ready: true };
   }
@@ -1088,12 +1093,12 @@ export class DockerDriver implements IsolationDriver {
    */
   private async probeBindMountOwnership(
     signal: AbortSignal | undefined,
-  ): Promise<{ ok: true } | { ok: false; error: string }> {
+  ): Promise<{ ok: true } | { ok: false; error: string; reason: 'isolation_refused' | undefined }> {
     let identity;
     try {
       identity = resolveSandboxIdentity();
     } catch (error: unknown) {
-      return { ok: false, error: `sandbox canary run not started: ${errorText(error)}` };
+      return { ok: false, error: `sandbox canary run not started: ${errorText(error)}`, reason: undefined };
     }
     const token = randomUUID();
     const runId = `canary-${token}`;
@@ -1109,6 +1114,7 @@ export class DockerDriver implements IsolationDriver {
     return {
       ok: false,
       error: `sandbox canary run failed as ${sandboxUser}: ${problem.split(runRoot).join('<canary>')}`,
+      reason: problem.includes(ISOLATION_REFUSED_MARKER) ? 'isolation_refused' : undefined,
     };
   }
 

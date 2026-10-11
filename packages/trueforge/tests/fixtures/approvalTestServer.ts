@@ -78,6 +78,8 @@ export interface ApprovalTestServer {
   model: ScriptedModelServer;
   /** A store bound to the current database — call fresh after `restart()`, never cache. */
   mcpServerStore: () => IMcpServerStore;
+  /** Same contract as `mcpServerStore`: reads private turn metadata the HTTP surface does not expose. */
+  sessionStore: () => SqliteSessionStore;
   /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
   setFirstPartyOrigins: (origins: string[]) => void;
   close: () => Promise<void>;
@@ -178,9 +180,11 @@ export async function startApprovalTestServer(options?: {
   memoryProvider?: boolean | undefined;
   /** Replaces the standalone authenticator, for tests that need distinct or unauthenticated callers. */
   authenticator?: Authenticator | undefined;
+  /** Adds the inert connector's opt-in `web_search` tool. */
+  inertWebSearch?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
   const authenticator = options?.authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
-  const mcp = await startInertMcpServer();
+  const mcp = await startInertMcpServer({ webSearch: options?.inertWebSearch === true });
   const model = await startScriptedModelServer();
   const directory = await mkdtemp(join(tmpdir(), 'tfy-approval-'));
   const databaseFile = join(directory, 'approvals.sqlite');
@@ -261,6 +265,7 @@ export async function startApprovalTestServer(options?: {
     mcp,
     model,
     mcpServerStore: () => new SqliteMcpServerStore(db),
+    sessionStore: () => new SqliteSessionStore(db),
     setFirstPartyOrigins: origins => {
       configuration.FIRST_PARTY_MCP_ORIGINS = origins;
     },

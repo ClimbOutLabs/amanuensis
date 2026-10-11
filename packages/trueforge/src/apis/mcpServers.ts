@@ -52,7 +52,7 @@ import type {
   UpdateMcpServerRequest,
 } from '../schemas/mcpServer';
 import type { MemoryProviderCheckResult } from '../schemas/memoryProvider';
-import { MissingStoredSecretError, resolveStoredSecretValue, toRedactedSecretValue } from '../utils/secretRedaction';
+import { MissingStoredSecretError, resolveStoredSecretValue, SECRET_REDACTION } from '../utils/secretRedaction';
 import { isSecretReference } from '../utils/secretReferences';
 
 export interface McpServersRouterDeps<TTransaction> {
@@ -85,7 +85,7 @@ function redactMcpServerManifest(manifest: McpServerManifest): McpServerManifest
   if (manifest.auth?.type === 'header') {
     const headers: Record<string, string> = {};
     for (const [name, value] of Object.entries(manifest.auth.headers)) {
-      headers[name] = isSecretReference(value) ? value : toRedactedSecretValue(value);
+      headers[name] = isSecretReference(value) ? value : SECRET_REDACTION;
     }
     return {
       ...manifest,
@@ -95,7 +95,7 @@ function redactMcpServerManifest(manifest: McpServerManifest): McpServerManifest
   if (manifest.auth?.type === 'oauth_client') {
     const clientSecret = isSecretReference(manifest.auth.client_secret)
       ? manifest.auth.client_secret
-      : toRedactedSecretValue(manifest.auth.client_secret);
+      : SECRET_REDACTION;
     return {
       ...manifest,
       auth: {

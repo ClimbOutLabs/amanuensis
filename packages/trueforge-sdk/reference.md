@@ -951,6 +951,140 @@ await client.mcpServers.memoryCheck("name");
 </dl>
 </details>
 
+<details><summary><code>client.mcpServers.<a href="/src/api/resources/mcpServers/client/Client.ts">listToolGrants</a>(name) -> TrueForge.ListMcpToolGrantsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Tools on this MCP server the caller chose Always allow for. Their calls run without an approval prompt unless a safety rule asks again.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.mcpServers.listToolGrants("name");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**name:** `string` — MCP server name.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `McpServersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.mcpServers.<a href="/src/api/resources/mcpServers/client/Client.ts">deleteToolGrant</a>(name, tool_name) -> TrueForge.DeleteMcpToolGrantResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Revokes the caller's Always allow for one tool, so its next call asks for approval again. A no-op when the tool is not always allowed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.mcpServers.deleteToolGrant("name", "tool_name");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**name:** `string` — MCP server name.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**tool_name:** `string` — Tool name on the MCP server.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `McpServersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.mcpServers.<a href="/src/api/resources/mcpServers/client/Client.ts">listTools</a>(name) -> TrueForge.ListMcpServerToolsResponse</code></summary>
 <dl>
 <dd>
@@ -1308,6 +1442,124 @@ await client.personalization.deleteProfile();
 </dl>
 </details>
 
+<details><summary><code>client.personalization.<a href="/src/api/resources/personalization/client/Client.ts">getSentinelSettings</a>() -> TrueForge.GetSentinelUserSettingsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Returns the authenticated user’s offline mode and the Tier 2 action kinds that run without asking.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personalization.getSentinelSettings();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `PersonalizationClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personalization.<a href="/src/api/resources/personalization/client/Client.ts">updateSentinelSettings</a>({ ...params }) -> TrueForge.GetSentinelUserSettingsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Changes only the provided fields of the authenticated user’s Sentinel settings.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personalization.updateSentinelSettings();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.UpdateSentinelUserSettingsRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PersonalizationClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Personas
 <details><summary><code>client.personas.<a href="/src/api/resources/personas/client/Client.ts">list</a>() -> TrueForge.ListPersonasResponse</code></summary>
 <dl>
@@ -1619,6 +1871,278 @@ await client.personas.getContext("persona_id");
 <dd>
 
 **persona_id:** `string` — Stable persona identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PersonasClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personas.<a href="/src/api/resources/personas/client/Client.ts">listKnowledge</a>(persona_id) -> TrueForge.ListKnowledgeDocumentsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Returns the documents in the persona’s knowledge library with their indexing status.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personas.listKnowledge("persona_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**persona_id:** `string` — Stable persona identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PersonasClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personas.<a href="/src/api/resources/personas/client/Client.ts">createKnowledge</a>(persona_id, { ...params }) -> TrueForge.GetKnowledgeDocumentResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Adds a file, saved link, or pasted text to the persona’s knowledge library. Indexing runs in the background; the document reports its status until it is searchable.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personas.createKnowledge("persona_id", {
+    kind: "text",
+    text: "text",
+    title: "title"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**persona_id:** `string` — Stable persona identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.CreateKnowledgeDocumentRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PersonasClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personas.<a href="/src/api/resources/personas/client/Client.ts">getKnowledgeEmbeddingModel</a>(persona_id) -> TrueForge.GetKnowledgeEmbeddingModelResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Reports the one-time search model download in plain English.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personas.getKnowledgeEmbeddingModel("persona_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**persona_id:** `string` — Stable persona identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PersonasClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personas.<a href="/src/api/resources/personas/client/Client.ts">deleteKnowledge</a>(persona_id, document_id) -> TrueForge.DeleteKnowledgeDocumentResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Removes the document and all of its indexed chunks from the persona’s library.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personas.deleteKnowledge("persona_id", "document_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**persona_id:** `string` — Stable persona identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**document_id:** `string` — Stable knowledge document identifier.
 
 </dd>
 </dl>
@@ -3186,6 +3710,77 @@ await client.sessions.update("session_id");
 </dl>
 </details>
 
+<details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">getAuditLog</a>(session_id, { ...params }) -> TrueForge.ListSessionAuditLogResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+List the Sentinel permission audit log for a session (newest first): tiered tool-call decisions with outcomes. Only the session creator may list it.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.getAuditLog("session_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.GetAuditLogSessionsRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">createBugReport</a>(session_id, { ...params }) -> TrueForge.CreateSessionBugReportResponse</code></summary>
 <dl>
 <dd>
@@ -3936,6 +4531,77 @@ await client.sessions.getTurn("session_id", "turn_id");
 </dl>
 </details>
 
+<details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">listTurnArtifacts</a>(session_id, turn_id) -> TrueForge.ListTurnArtifactsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+List files the turn persisted for download: exec-sandbox `sandbox_artifacts` rows and run_code harvested files (`run_code/<name>` paths). Deterministic — no assistant prose parsing. Only the session creator may list.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.listTurnArtifacts("session_id", "turn_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**turn_id:** `string` — Turn identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">downloadSandboxFile</a>(session_id, turn_id, { ...params }) -> core.BinaryResponse</code></summary>
 <dl>
 <dd>
@@ -3948,7 +4614,7 @@ await client.sessions.getTurn("session_id", "turn_id");
 <dl>
 <dd>
 
-Download a file from the sandbox this turn ran in. Paths come from the assistant's `sandbox_artifacts` block. Only the session creator may download.
+Download a file from the sandbox this turn ran in. Paths come from the turn's persisted artifacts: exec-sandbox `sandbox_artifacts` rows and run_code harvested files (`run_code/<name>` paths). List them via the artifacts route. Only the session creator may download.
 </dd>
 </dl>
 </dd>
@@ -4790,9 +5456,23 @@ await client.spaces.create({
 </dl>
 </details>
 
-<details><summary><code>client.spaces.<a href="/src/api/resources/spaces/client/Client.ts">get</a>(space_id) -> TrueForge.GetSpaceResponse</code></summary>
+<details><summary><code>client.spaces.<a href="/src/api/resources/spaces/client/Client.ts">get</a>(space_id, { ...params }) -> TrueForge.GetSpaceResponse</code></summary>
 <dl>
 <dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Returns one space. Pass `revision` to read a retained historical revision instead of the current one.
+</dd>
+</dl>
+</dd>
+</dl>
 
 #### 🔌 Usage
 
@@ -4803,7 +5483,9 @@ await client.spaces.create({
 <dd>
 
 ```typescript
-await client.spaces.get("space_id");
+await client.spaces.get("space_id", {
+    revision: 18
+});
 
 ```
 </dd>
@@ -4820,6 +5502,14 @@ await client.spaces.get("space_id");
 <dd>
 
 **space_id:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.GetSpacesRequest`
 
 </dd>
 </dl>
@@ -4967,6 +5657,137 @@ await client.spaces.delete("space_id", {
 <dd>
 
 **requestOptions:** `SpacesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.spaces.<a href="/src/api/resources/spaces/client/Client.ts">revert</a>(space_id, { ...params }) -> TrueForge.RevertSpaceResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Restores a historical revision’s content as a new current revision. The pre-revert content stays recoverable, and stale revision guards return 409 like PUT.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.spaces.revert("space_id", {
+    expectedAggregateRevision: 0,
+    expectedRevision: 0,
+    revision: 18
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**space_id:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.RevertSpaceRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SpacesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Voice
+<details><summary><code>client.voice.<a href="/src/api/resources/voice/client/Client.ts">getStatus</a>() -> TrueForge.VoiceStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Probes the local STT sidecar; the chat composer hides voice input when it is unavailable.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.voice.getStatus();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `VoiceClient.RequestOptions`
 
 </dd>
 </dl>
@@ -5600,6 +6421,458 @@ await client.internal.agents.getCodeSnippets("agent_id");
 </dl>
 </details>
 
+## Memory Vault
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">list</a>({ ...params }) -> TrueForge.ListMemoryVaultEntriesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+List the effective entries of one vault namespace. Vault edits and deletes are applied.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.list();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.ListVaultRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">exportEntries</a>({ ...params }) -> TrueForge.ExportMemoryVaultResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Export one vault namespace as JSON: the namespace, the export time, and every effective entry.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.exportEntries();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.ExportEntriesVaultRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">importEntries</a>({ ...params }) -> TrueForge.ImportMemoryVaultResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Append imported entries to one vault namespace as new daily-log entries.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.importEntries({
+    entries: [{
+            text: "text"
+        }]
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.ImportMemoryVaultRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">getSharing</a>() -> TrueForge.GetMemoryVaultSharingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Get the per-persona sharing config: which vault namespaces each persona may read.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.getSharing();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">updateSharing</a>({ ...params }) -> TrueForge.GetMemoryVaultSharingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Replace the whole per-persona sharing config. An omitted persona loses its shares.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.updateSharing({
+    shares: {
+        "key": ["value"]
+    }
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.UpdateMemoryVaultSharingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">update</a>(entry_id, { ...params }) -> TrueForge.GetMemoryVaultEntryResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Replace one entry’s text. The daily log is append-only, so the old entry stays and a supersede marker records the new text.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.update("entry_id", {
+    text: "text"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**entry_id:** `string` — URL-encoded vault entry id (`md:{namespace}:{file}#{index}`).
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.UpdateMemoryVaultEntryRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.memory.vault.<a href="/src/api/resources/memory/resources/vault/client/Client.ts">delete</a>(entry_id) -> TrueForge.DeleteMemoryVaultEntryResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Delete one entry. The daily log is append-only, so the old entry stays and a delete marker hides it from listings and recall.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.vault.delete("entry_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**entry_id:** `string` — URL-encoded vault entry id (`md:{namespace}:{file}#{index}`).
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VaultClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings McpServers
 <details><summary><code>client.settings.mcpServers.<a href="/src/api/resources/settings/resources/mcpServers/client/Client.ts">list</a>() -> TrueForge.ListMcpServersResponse</code></summary>
 <dl>
@@ -5922,6 +7195,248 @@ await client.settings.mcpServers.delete("name");
 </dl>
 </details>
 
+## Settings MemoryScreens
+<details><summary><code>client.settings.memoryScreens.<a href="/src/api/resources/settings/resources/memoryScreens/client/Client.ts">get</a>() -> TrueForge.GetMemoryScreenResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The persisted override for the recall screen, or the `MEMORY_SCREEN_ENABLED` env default when none is stored.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryScreens.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryScreensClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memoryScreens.<a href="/src/api/resources/settings/resources/memoryScreens/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetMemoryScreenResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Persists the recall screen override. `true`/`false` turns recall screening on/off; `null` clears back to the `MEMORY_SCREEN_ENABLED` env default. `true` is rejected with 409 while `MEMORY_SCREEN_URL` is unset; `false` and `null` are always allowed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryScreens.createOrUpdate({
+    enabled: true
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateMemoryScreenRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryScreensClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings MemorySummarize
+<details><summary><code>client.settings.memorySummarize.<a href="/src/api/resources/settings/resources/memorySummarize/client/Client.ts">get</a>() -> TrueForge.GetMemorySummarizeResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored, plus the effective state with the markdown-only gate applied.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memorySummarize.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemorySummarizeClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memorySummarize.<a href="/src/api/resources/settings/resources/memorySummarize/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetMemorySummarizeResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default. The response carries the effective state.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memorySummarize.createOrUpdate({
+    enabled: true
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateMemorySummarizeRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemorySummarizeClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings ModelProviders
 <details><summary><code>client.settings.modelProviders.<a href="/src/api/resources/settings/resources/modelProviders/client/Client.ts">list</a>() -> TrueForge.ListModelProvidersResponse</code></summary>
 <dl>
@@ -6166,6 +7681,62 @@ await client.settings.modelProviders.delete("name");
 <dd>
 
 **requestOptions:** `ModelProvidersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings RunCode
+<details><summary><code>client.settings.runCode.<a href="/src/api/resources/settings/resources/runCode/client/Client.ts">getStatus</a>() -> TrueForge.GetRunCodeStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks live whether the run_code sandbox can execute code, and if not, why. Runs a short readiness probe, so it can take a few seconds.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.runCode.getStatus();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `RunCodeClient.RequestOptions`
 
 </dd>
 </dl>
@@ -6606,6 +8177,127 @@ await client.settings.skills.delete("name");
 <dd>
 
 **requestOptions:** `SkillsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings ToolOutputScreens
+<details><summary><code>client.settings.toolOutputScreens.<a href="/src/api/resources/settings/resources/toolOutputScreens/client/Client.ts">get</a>() -> TrueForge.GetToolOutputScreenResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+The persisted override for the live tool-output screen, or the `TOOL_OUTPUT_SCREEN_ENABLED` env default when none is stored.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.toolOutputScreens.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `ToolOutputScreensClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.toolOutputScreens.<a href="/src/api/resources/settings/resources/toolOutputScreens/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetToolOutputScreenResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Persists the live tool-output screen override: `true`/`false` turns screening on/off; `null` clears the override back to the `TOOL_OUTPUT_SCREEN_ENABLED` env default. `true`/`false` is rejected with 409 while no screening service is configured (`MEMORY_SCREEN_URL` unset); `null` is always allowed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.toolOutputScreens.createOrUpdate({
+    enabled: true
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateToolOutputScreenRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `ToolOutputScreensClient.RequestOptions`
 
 </dd>
 </dl>

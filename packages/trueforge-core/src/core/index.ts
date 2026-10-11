@@ -72,7 +72,6 @@ export type {
 export { askUserQuestion } from './capabilities/builtins/AskUserQuestion';
 export {
   CONVERSATION_COMPACTION_TEMPLATE,
-  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
   HOST_COMPACTION_TEMPLATE,
   HOST_SUMMARY_PREFACE,
   contextCompaction,
@@ -276,8 +275,13 @@ export type {
   RunCodeLanguage,
   SandboxIdentity,
 } from './sandbox/driver/IsolationDriver';
-export { RUN_CODE_ERROR_CODES, RunCodeInputSchema, RunCodeResultSchema } from './sandbox/driver/RunCodeSchemas';
-export type { RunCodeErrorCode, RunCodeInput, RunCodeResult } from './sandbox/driver/RunCodeSchemas';
+export {
+  RUN_CODE_ERROR_CODES,
+  RunCodeInputSchema,
+  RunCodeResultSchema,
+  RunCodeStatusSchema,
+} from './sandbox/driver/RunCodeSchemas';
+export type { RunCodeErrorCode, RunCodeInput, RunCodeResult, RunCodeStatus } from './sandbox/driver/RunCodeSchemas';
 export { RunCodeService, validateRunCodeStartupConfig } from './sandbox/driver/RunCodeService';
 export type {
   HarvestedFile,
@@ -285,6 +289,7 @@ export type {
   RunCodeServiceOptions,
   TurnAttachment,
 } from './sandbox/driver/RunCodeService';
+export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DaytonaSandboxProvider } from './sandbox/provider/DaytonaProvider';
 export type { DaytonaSandboxProviderOptions } from './sandbox/provider/DaytonaProvider';
 export { absolutizeRelativeExecEnv } from './sandbox/provider/execEnv';

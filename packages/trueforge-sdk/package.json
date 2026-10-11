@@ -242,6 +242,17 @@
             },
             "default": "./dist/cjs/api/resources/spaces/exports.js"
         },
+        "./voice": {
+            "import": {
+                "types": "./dist/esm/api/resources/voice/exports.d.mts",
+                "default": "./dist/esm/api/resources/voice/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/voice/exports.d.ts",
+                "default": "./dist/cjs/api/resources/voice/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/voice/exports.js"
+        },
         "./catalogs": {
             "import": {
                 "types": "./dist/esm/api/resources/catalogs/exports.d.mts",
@@ -341,6 +352,28 @@
             },
             "default": "./dist/cjs/api/resources/internal/resources/agents/exports.js"
         },
+        "./memory": {
+            "import": {
+                "types": "./dist/esm/api/resources/memory/exports.d.mts",
+                "default": "./dist/esm/api/resources/memory/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/memory/exports.d.ts",
+                "default": "./dist/cjs/api/resources/memory/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/memory/exports.js"
+        },
+        "./memory/vault": {
+            "import": {
+                "types": "./dist/esm/api/resources/memory/resources/vault/exports.d.mts",
+                "default": "./dist/esm/api/resources/memory/resources/vault/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/memory/resources/vault/exports.d.ts",
+                "default": "./dist/cjs/api/resources/memory/resources/vault/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/memory/resources/vault/exports.js"
+        },
         "./settings": {
             "import": {
                 "types": "./dist/esm/api/resources/settings/exports.d.mts",
@@ -363,6 +396,28 @@
             },
             "default": "./dist/cjs/api/resources/settings/resources/mcpServers/exports.js"
         },
+        "./settings/memoryScreens": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/memoryScreens/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/memoryScreens/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/memoryScreens/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/memoryScreens/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/memoryScreens/exports.js"
+        },
+        "./settings/memorySummarize": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/memorySummarize/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/memorySummarize/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/memorySummarize/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/memorySummarize/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/memorySummarize/exports.js"
+        },
         "./settings/modelProviders": {
             "import": {
                 "types": "./dist/esm/api/resources/settings/resources/modelProviders/exports.d.mts",
@@ -373,6 +428,17 @@
                 "default": "./dist/cjs/api/resources/settings/resources/modelProviders/exports.js"
             },
             "default": "./dist/cjs/api/resources/settings/resources/modelProviders/exports.js"
+        },
+        "./settings/runCode": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/runCode/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/runCode/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/runCode/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/runCode/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/runCode/exports.js"
         },
         "./settings/sandboxProviders": {
             "import": {
@@ -395,6 +461,17 @@
                 "default": "./dist/cjs/api/resources/settings/resources/skills/exports.js"
             },
             "default": "./dist/cjs/api/resources/settings/resources/skills/exports.js"
+        },
+        "./settings/toolOutputScreens": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/toolOutputScreens/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/toolOutputScreens/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/toolOutputScreens/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/toolOutputScreens/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/toolOutputScreens/exports.js"
         },
         "./package.json": "./package.json"
     },

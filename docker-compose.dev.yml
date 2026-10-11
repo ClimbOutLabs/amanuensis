@@ -35,3 +35,31 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+
+  # Local speech-to-text sidecar for host `pnpm dev`; same build, image tag,
+  # memory limit and thread count as docker-compose.yml (the image's own
+  # HEALTHCHECK applies in both). The host-run server reaches it through the
+  # published port via STT_URL in packages/trueforge/.env. Unlike the smoke
+  # stack it has no cpuset pin: the host-run server cannot be pinned to a
+  # disjoint core set, and a fixed range would stop `dev:infra` on hosts with
+  # fewer than 20 cores.
+  aman-stt:
+    build:
+      context: ops/aman-stt
+    image: amanuensis-aman-stt:latest
+    # Loopback-only: the sidecar has no authentication.
+    ports:
+      - '127.0.0.1:8001:8001'
+    mem_limit: 2g
+    environment:
+      AMAN_STT_CPU_THREADS: '4'
+      AMAN_STT_MODEL_DIR: /data/stt-cache
+    volumes:
+      # Project-scoped volume: this stack caches its own copy of the ~464 MB
+      # model, separate from the smoke stack's.
+      - stt-model-cache:/data/stt-cache
+    restart: unless-stopped
+
+volumes:
+  # Persistent Whisper model weights for the aman-stt sidecar.
+  stt-model-cache:
