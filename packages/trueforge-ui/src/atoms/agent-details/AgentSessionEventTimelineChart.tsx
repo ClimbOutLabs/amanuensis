@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import { Chart } from 'react-chartjs-2';
 
 import { useThemeMode } from '../../theme/SlotsProvider.js';
-import { CHART_CHROME_FALLBACKS, readThemeColor } from '../../utils/chartThemeColors.js';
+import { readThemeToken } from '../../utils/chartThemeColors.js';
 import { roundDurationMsToSecond } from '../../utils/sessionDisplayFormat.js';
 import {
   getSessionEventLabel,
@@ -99,22 +99,10 @@ export function AgentSessionEventTimelineChart({
 }: AgentSessionEventTimelineChartProps) {
   const mode = useThemeMode();
   const isDark = mode === 'dark';
-  const axis = readThemeColor(
-    '--text-secondary',
-    isDark ? CHART_CHROME_FALLBACKS.axis.dark : CHART_CHROME_FALLBACKS.axis.light,
-  );
-  const grid = readThemeColor(
-    '--border',
-    isDark ? CHART_CHROME_FALLBACKS.grid.dark : CHART_CHROME_FALLBACKS.grid.light,
-  );
-  const turnFill = readThemeColor(
-    '--secondary-bg',
-    isDark ? CHART_CHROME_FALLBACKS.turnFill.dark : CHART_CHROME_FALLBACKS.turnFill.light,
-  );
-  const turnHover = readThemeColor(
-    '--secondary-bg',
-    isDark ? CHART_CHROME_FALLBACKS.turnHover.dark : CHART_CHROME_FALLBACKS.turnHover.light,
-  );
+  const axis = readThemeToken({ token: 'textSecondary', mode });
+  const grid = readThemeToken({ token: 'border', mode });
+  const turnFill = readThemeToken({ token: 'secondaryBg', mode });
+  const turnHover = turnFill;
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [widthPx, setWidthPx] = useState(0);
   const [overheadPx, setOverheadPx] = useState(OVERHEAD_PX);

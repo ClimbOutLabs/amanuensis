@@ -122,8 +122,8 @@ body {
   place-items: center;
   padding: 2rem;
   /* Match ThemeProvider mode so ThinkingOrb ink stays visible (body stays white). */
-  color: var(--text-secondary, #71717a);
-  background: var(--primary-bg, #fff);
+  color: var(--text-secondary);
+  background: var(--primary-bg);
 }
 
 .boot-spinner {
@@ -143,7 +143,7 @@ body {
 }
 
 .boot-screen[data-error='true'] {
-  color: var(--failure-bg, #ef4444);
+  color: var(--failure-bg);
 }
 
 .harness-logout {

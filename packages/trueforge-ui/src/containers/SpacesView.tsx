@@ -12,9 +12,11 @@ import { DropdownMenu, DropdownMenuItem } from '@/atoms/primitives/DropdownMenu.
 import { Icon } from '@/icons/Icon.js';
 import { useShellMode } from '@/server/ShellModeContext.js';
 import { useOptionalSpaces, type Space, type SpaceStatus } from '@/server/SpaceContext.js';
+import { resolvePresetTokens } from '@/theme/presets/index.js';
 import { useThemeMode } from '@/theme/SlotsProvider.js';
+import { TOKEN_CSS_VARS } from '@/theme/types.js';
 
-import { SPACE_PAGE_BASE_STYLE } from './spacePageBase.js';
+import { SPACE_PAGE_BASE_STYLE, spaceThemeDeclarations } from './spacePageBase.js';
 
 /** Strips a leading H1 that repeats the space name (the model echoes it in the body). Markdown only. */
 function bodyWithoutRepeatedTitle(space: Pick<Space, 'name' | 'body'>): string {
@@ -186,40 +188,12 @@ function SpaceHtmlFrame({ html }: { html: string }) {
 
   const srcDoc = useMemo(() => {
     const style = typeof window === 'undefined' ? undefined : getComputedStyle(document.documentElement);
-    const read = (cssVar: string, darkFallback: string, lightFallback: string): string =>
-      style?.getPropertyValue(cssVar).trim() || (mode === 'dark' ? darkFallback : lightFallback);
-
-    const bg = read('--primary-bg', '#1a1a1a', '#ffffff');
-    const text = read('--text-primary', '#f5f5f5', '#1a1a1a');
-    const muted = read('--text-secondary', '#a1a1aa', '#62626a');
-    const cardBg = read('--card-bg', '#18181b', '#ffffff');
-    const border = read('--border', '#343439', '#e4e4e7');
-    const theadBg = read('--secondary-bg', '#27272a', '#f4f4f5');
-    const accent = read('--primary-button-bg', '#6366f1', '#6366f1');
-    const accentText = read('--primary-button-text', '#ffffff', '#ffffff');
-    const successBg = read('--success-bg', '#4ade80', '#16a34a');
-    const successText = read('--success-text', '#052e16', '#ffffff');
-    const warningBg = read('--warning-bg', '#fbbf24', '#d97706');
-    const warningText = read('--warning-text', '#422006', '#ffffff');
-    const radius = read('--radius', '0.5rem', '0.5rem');
-
+    const presetTokens = resolvePresetTokens(undefined, mode);
     // Real app theme values, derived once per render. Placed after SPACE_PAGE_BASE_STYLE so the
-    // cascade lets these override that module's own light/dark fallback palette.
-    const themeVars = [
-      `--space-bg:${bg};`,
-      `--space-text:${text};`,
-      `--space-muted:${muted};`,
-      `--space-card-bg:${cardBg};`,
-      `--space-border:${border};`,
-      `--space-thead-bg:${theadBg};`,
-      `--space-accent:${accent};`,
-      `--space-accent-text:${accentText};`,
-      `--space-success-bg:${successBg};`,
-      `--space-success-text:${successText};`,
-      `--space-warning-bg:${warningBg};`,
-      `--space-warning-text:${warningText};`,
-      `--space-radius:${radius};`,
-    ].join('');
+    // cascade lets these override that module's own preset-derived fallbacks.
+    const themeVars = spaceThemeDeclarations(
+      token => style?.getPropertyValue(TOKEN_CSS_VARS[token]).trim() || presetTokens[token],
+    );
 
     return [
       '<!doctype html>',

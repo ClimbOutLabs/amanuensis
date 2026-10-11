@@ -4,7 +4,7 @@
  * themes (Settings > Themes), never from fixed values.
  *
  * Scans packages/trueforge-ui/src and packages/frontend/src and fails on:
- * - hex color literals (#fff, #1a1a1a) — except fully-transparent #00000000
+ * - hex color literals (#fff, #1a1a1a), except fully-transparent #00000000
  * - rgb(), rgba(), hsl(), hsla() literals
  * - named CSS colors used as values (white, black, ...)
  * - Tailwind built-in palette classes (bg-white, text-gray-500, ...)
@@ -12,10 +12,12 @@
  * Allowed: theme definition files (packages/trueforge-ui/src/theme/** and
  * src/styles.css, where the tokens live), test files, the values
  * `transparent` / `currentColor` / `inherit`, `var(--*)` references, and
- * explicit allowlist entries in scripts/theme-token-allowlist.txt
- * (one `path :: reason` per line).
+ * explicit allowlist entries in scripts/theme-token-allowlist.txt, one per
+ * line: `path :: reason` exempts a whole file, `path | text :: reason` exempts
+ * only lines containing `text`. A line-scoped entry that matches no
+ * violation is stale and fails the run.
  *
- * Usage: node scripts/check-theme-tokens.mjs [--root <repo root>]
+ * Usage: node scripts/check-theme-tokens.mjs [--root <repo root>] [--allowlist <file>]
  * Exit 0 when clean, 1 with a violation list otherwise.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -27,6 +29,8 @@ const root = resolve(here, '..');
 const args = process.argv.slice(2);
 const rootFlag = args.indexOf('--root');
 const scanRoot = rootFlag === -1 ? root : resolve(args[rootFlag + 1]);
+const allowlistFlag = args.indexOf('--allowlist');
+const allowlistPath = allowlistFlag === -1 ? join(here, 'theme-token-allowlist.txt') : resolve(args[allowlistFlag + 1]);
 
 const SCAN_DIRS = ['packages/trueforge-ui/src', 'packages/frontend/src'];
 const SCAN_EXTS = new Set(['.tsx', '.ts', '.jsx', '.js', '.css']);
@@ -36,18 +40,24 @@ const SCAN_EXTS = new Set(['.tsx', '.ts', '.jsx', '.js', '.css']);
 const THEME_DEFINITION_RES = [/packages\/trueforge-ui\/src\/theme\//, /packages\/trueforge-ui\/src\/styles\.css$/];
 
 function loadAllowlist() {
-  const path = join(here, 'theme-token-allowlist.txt');
   const entries = [];
-  if (!existsSync(path)) {
+  if (!existsSync(allowlistPath)) {
     return entries;
   }
-  for (const raw of readFileSync(path, 'utf8').split('\n')) {
+  for (const raw of readFileSync(allowlistPath, 'utf8').split('\n')) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) {
       continue;
     }
-    const [file, ...reasonParts] = line.split('::').map(s => s.trim());
-    entries.push({ file, reason: reasonParts.join(':: ') });
+    const [location, ...reasonParts] = line.split('::').map(s => s.trim());
+    const reason = reasonParts.join(':: ');
+    if (!reason) {
+      throw new Error(`theme-token-allowlist: entry has no reason: ${line}`);
+    }
+    const sep = location.indexOf('|');
+    const file = sep === -1 ? location : location.slice(0, sep).trim();
+    const text = sep === -1 ? null : location.slice(sep + 1).trim();
+    entries.push({ file, text: text || null, reason, used: false });
   }
   return entries;
 }
@@ -171,7 +181,8 @@ function* walk(dir) {
 
 function main() {
   const allowlist = loadAllowlist();
-  const allowSet = new Set(allowlist.map(e => e.file));
+  const wholeFile = new Set(allowlist.filter(e => e.text === null).map(e => e.file));
+  const scoped = allowlist.filter(e => e.text !== null);
   const violations = [];
   let scanned = 0;
 
@@ -182,7 +193,7 @@ function main() {
     }
     for (const full of walk(abs)) {
       const rel = relative(scanRoot, full).replace(/\\/g, '/');
-      if (isTestFile(rel) || isThemeDefinition(rel) || allowSet.has(rel)) {
+      if (isTestFile(rel) || isThemeDefinition(rel) || wholeFile.has(rel)) {
         continue;
       }
       scanned++;
@@ -193,11 +204,24 @@ function main() {
         if (stripped.startsWith('//') || stripped.startsWith('*') || stripped.startsWith('/*')) {
           return;
         }
-        for (const v of checkLine(line)) {
+        const found = checkLine(line);
+        if (found.length === 0) {
+          return;
+        }
+        const exemption = scoped.find(e => e.file === rel && stripped.includes(e.text));
+        if (exemption) {
+          exemption.used = true;
+          return;
+        }
+        for (const v of found) {
           violations.push(`${rel}:${i + 1}: ${v} :: ${stripped.slice(0, 120)}`);
         }
       });
     }
+  }
+
+  for (const entry of scoped.filter(e => !e.used)) {
+    violations.push(`stale allowlist entry (matches no violation): ${entry.file} | ${entry.text}`);
   }
 
   if (violations.length > 0) {
@@ -207,7 +231,7 @@ function main() {
     }
     console.error(
       `\nFix by using a theme token (e.g. bg-card-bg, text-text-secondary) or var(--token).\n` +
-        `Genuine exceptions go in scripts/theme-token-allowlist.txt as "path :: reason".`,
+        `Genuine exceptions go in scripts/theme-token-allowlist.txt as "path | line text :: reason".`,
     );
     process.exit(1);
   }

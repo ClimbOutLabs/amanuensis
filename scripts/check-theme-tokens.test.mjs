@@ -3,7 +3,8 @@
  * Run: node --test scripts/check-theme-tokens.test.mjs
  *
  * Verifies the guard fails on fixed colors (hex + palette class) and passes
- * on theme-token-only source.
+ * on theme-token-only source, and that line-scoped allowlist entries exempt
+ * only their own line.
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -26,9 +27,13 @@ function fixtureRoot(files) {
   return dir;
 }
 
-function runCheck(dir) {
+function runCheck(dir, allowlist = '') {
+  // Fixtures never read the repo allowlist, or its line-scoped entries would read as stale.
+  writeFileSync(join(dir, 'allowlist.txt'), allowlist);
   try {
-    execFileSync(process.execPath, [checker, '--root', dir], { stdio: 'pipe' });
+    execFileSync(process.execPath, [checker, '--root', dir, '--allowlist', join(dir, 'allowlist.txt')], {
+      stdio: 'pipe',
+    });
     return 0;
   } catch (error) {
     return error.status ?? 1;
@@ -66,6 +71,40 @@ test('fails on rgb() literals and named colors', () => {
   });
   try {
     assert.equal(runCheck(dir), 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const MATTE_FILE = {
+  'packages/trueforge-ui/src/server/matte.ts': "context.fillStyle = '#ffffff';\nconst other = '#123456';\n",
+};
+
+test('a line-scoped allowlist entry exempts only the matching line', () => {
+  const dir = fixtureRoot(MATTE_FILE);
+  try {
+    const entry = "packages/trueforge-ui/src/server/matte.ts | context.fillStyle = '#ffffff' :: matte\n";
+    assert.equal(runCheck(dir, entry), 1);
+    const both = `${entry}packages/trueforge-ui/src/server/matte.ts | const other = '#123456' :: second\n`;
+    assert.equal(runCheck(dir, both), 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a line-scoped allowlist entry that matches nothing is stale and fails', () => {
+  const dir = fixtureRoot({ 'packages/trueforge-ui/src/server/clean.ts': 'export const ok = 1;\n' });
+  try {
+    assert.equal(runCheck(dir, 'packages/trueforge-ui/src/server/clean.ts | #ffffff :: gone\n'), 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a whole-file allowlist entry exempts every line of that file', () => {
+  const dir = fixtureRoot(MATTE_FILE);
+  try {
+    assert.equal(runCheck(dir, 'packages/trueforge-ui/src/server/matte.ts :: vendored\n'), 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

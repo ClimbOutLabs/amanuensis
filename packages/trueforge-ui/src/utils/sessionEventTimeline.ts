@@ -6,7 +6,8 @@
  * correlation out of the chart component and makes atoms easy to override.
  */
 
-import { TIMELINE_EVENT_FALLBACKS } from './chartThemeColors.js';
+import { resolvePresetTokens } from '../theme/presets/index.js';
+import type { SemanticTokens } from '../theme/types.js';
 
 /** Events without a thread id belong to the root agent conversation. */
 export const MAIN_THREAD_ID = 'main';
@@ -41,21 +42,36 @@ export type SessionEventTimelineSegment = {
   isMarker?: boolean;
 };
 
+const DEFAULT_LIGHT_TOKENS = resolvePresetTokens(undefined, 'light');
+const DEFAULT_DARK_TOKENS = resolvePresetTokens(undefined, 'dark');
+
+/** Legend order; event type N maps to `--chart-N`, so themes recolor the timeline through the chart tokens. */
+const SESSION_EVENT_LEGEND: ReadonlyArray<{
+  id: SessionEventType;
+  label: string;
+  token: keyof SemanticTokens;
+}> = [
+  { id: 'system', label: 'System', token: 'chart1' },
+  { id: 'user', label: 'User', token: 'chart2' },
+  { id: 'model', label: 'Model', token: 'chart3' },
+  { id: 'tool_call', label: 'Tool call', token: 'chart4' },
+  { id: 'approval', label: 'Approval / HITL', token: 'chart5' },
+  { id: 'sub_agent', label: 'Sub-agent', token: 'chart6' },
+  { id: 'waiting_on_human', label: 'Waiting on human', token: 'chart7' },
+  { id: 'error', label: 'Error', token: 'chart8' },
+];
+
 /**
- * Canonical legend order, labels, and base colours for timeline event types.
- * The hex values are fallbacks for SSR/tests; the themed colors come from
+ * Canonical legend order, labels, and fallback colors for timeline event types.
+ * The colors come from the default preset for SSR/tests; the live colors are read from
  * --chart-N via getSessionEventChartVar / resolveSessionEventColor.
  */
-export const SESSION_EVENT_TYPES: SessionEventTypeDefinition[] = [
-  { id: 'system', label: 'System', ...TIMELINE_EVENT_FALLBACKS.system },
-  { id: 'user', label: 'User', ...TIMELINE_EVENT_FALLBACKS.user },
-  { id: 'model', label: 'Model', ...TIMELINE_EVENT_FALLBACKS.model },
-  { id: 'tool_call', label: 'Tool call', ...TIMELINE_EVENT_FALLBACKS.tool_call },
-  { id: 'approval', label: 'Approval / HITL', ...TIMELINE_EVENT_FALLBACKS.approval },
-  { id: 'sub_agent', label: 'Sub-agent', ...TIMELINE_EVENT_FALLBACKS.sub_agent },
-  { id: 'waiting_on_human', label: 'Waiting on human', ...TIMELINE_EVENT_FALLBACKS.waiting_on_human },
-  { id: 'error', label: 'Error', ...TIMELINE_EVENT_FALLBACKS.error },
-];
+export const SESSION_EVENT_TYPES: SessionEventTypeDefinition[] = SESSION_EVENT_LEGEND.map(({ id, label, token }) => ({
+  id,
+  label,
+  color: DEFAULT_LIGHT_TOKENS[token],
+  darkColor: DEFAULT_DARK_TOKENS[token],
+}));
 
 /**
  * The `--chart-N` variable carrying this event type's themed color. Event
@@ -99,7 +115,7 @@ export function formatTimelineDuration(durationMs: number): string {
 /** Resolve a segment's color from the same registry used to build the legend. */
 export function getSessionEventColor(type: SessionEventType, isDarkMode = false): string {
   const eventType = SESSION_EVENT_TYPES.find(eventType => eventType.id === type);
-  return (isDarkMode ? eventType?.darkColor : undefined) ?? eventType?.color ?? TIMELINE_EVENT_FALLBACKS.system.color;
+  return (isDarkMode ? eventType?.darkColor : undefined) ?? eventType?.color ?? DEFAULT_LIGHT_TOKENS.chart1;
 }
 
 /** Darken the base color by 10% so hover remains recognizable in either theme. */

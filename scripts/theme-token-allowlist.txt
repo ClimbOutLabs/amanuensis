@@ -1,12 +1,14 @@
 # Theme-token guard allowlist.
-# One entry per line: <repo-relative path> :: <one-line reason>.
-# A path here is exempt from the fixed-color check. Keep entries minimal;
-# prefer switching to a theme token wherever one exists.
+# One entry per line, with a reason:
+#   <path> :: <reason>                 exempts the whole file
+#   <path> | <line text> :: <reason>   exempts only lines containing <line text>
+# Prefer a theme token; a line-scoped entry that stops matching fails the guard.
 
-packages/trueforge-ui/src/github-markdown-bridge.css :: vendored github-markdown-css theme variables with light/dark variants (the markdown theme definition)
-packages/trueforge-ui/src/containers/spacePageBase.ts :: documented fallback palette for standalone space pages; live values come from the app theme tokens via the getComputedStyle cascade
-packages/trueforge-ui/src/containers/SpacesView.tsx :: getComputedStyle fallback values used when reading the app theme tokens for space pages
-packages/trueforge-ui/src/utils/chartThemeColors.ts :: getComputedStyle fallback values used when reading the --chart-N theme tokens for canvas charts
-packages/trueforge-ui/src/server/imageAttachmentAdapter.ts :: white matte for JPEG export compositing (file has no transparency); not UI chrome and must stay neutral white regardless of theme
-packages/frontend/src/App.tsx :: host ThemeConfig token overrides; values flow through the theme token system
-packages/frontend/src/index.css :: pre-hydration body paint, host brand gradient, and boot-screen var() fallbacks
+packages/trueforge-ui/src/github-markdown-bridge.css :: vendored github-markdown-css theme variables with light and dark variants
+packages/trueforge-ui/src/server/imageAttachmentAdapter.ts | context.fillStyle = '#ffffff' :: white matte for JPEG export compositing; the output file has no transparency and must not follow the theme
+packages/frontend/src/App.tsx | primaryButtonBg: '#6366F1' :: host brand override passed to ThemeProvider as a token
+packages/frontend/src/App.tsx | primaryButtonHover: '#3d2dd4' :: host brand override passed to ThemeProvider as a token
+packages/frontend/src/index.css | color: #2c2a26; :: pre-hydration body paint; theme variables are not mounted yet
+packages/frontend/src/index.css | background: #f7f2e8; :: pre-hydration body paint; theme variables are not mounted yet
+packages/frontend/src/index.css | radial-gradient( :: host brand gradient for the primary button; not expressible as a color token
+packages/frontend/src/index.css | color-mix(in oklab, #4f39f6 :: host brand glow paired with the primary button gradient

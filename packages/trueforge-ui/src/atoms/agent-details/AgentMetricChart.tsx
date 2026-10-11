@@ -15,13 +15,7 @@ import { useMemo, type ComponentType } from 'react';
 import { Line } from 'react-chartjs-2';
 
 import { useThemeMode } from '../../theme/SlotsProvider.js';
-import {
-  CHART_CHROME_FALLBACKS,
-  CHART_COLOR_FALLBACKS_DARK,
-  CHART_COLOR_FALLBACKS_LIGHT,
-  readChartThemeColors,
-  readThemeColor,
-} from '../../utils/chartThemeColors.js';
+import { readChartThemeColors, readThemeToken } from '../../utils/chartThemeColors.js';
 import { formatCostUsd, formatDurationMs } from '../../utils/sessionDisplayFormat.js';
 import type { AgentMetricChartProps } from './types.js';
 
@@ -47,21 +41,10 @@ function formatTimestamp(timestamp: string): string {
 
 export function AgentMetricChart({ graph, definition, error, colorIndex = 0 }: AgentMetricChartProps) {
   const mode = useThemeMode();
-  const isDark = mode === 'dark';
-  // Series colors come from the theme (--chart-1 …); the fallbacks match the
-  // default theme so the chart renders before themes load or in tests.
-  const colors = readChartThemeColors({
-    count: 8,
-    fallbacks: isDark ? CHART_COLOR_FALLBACKS_DARK : CHART_COLOR_FALLBACKS_LIGHT,
-  });
-  const axisColor = readThemeColor(
-    '--text-secondary',
-    isDark ? CHART_CHROME_FALLBACKS.axis.dark : CHART_CHROME_FALLBACKS.axis.light,
-  );
-  const gridColor = readThemeColor(
-    '--border',
-    isDark ? CHART_CHROME_FALLBACKS.grid.dark : CHART_CHROME_FALLBACKS.grid.light,
-  );
+  // Series colors come from the theme (--chart-1 …); the default preset covers tests and pre-theme renders.
+  const colors = readChartThemeColors({ mode });
+  const axisColor = readThemeToken({ token: 'textSecondary', mode });
+  const gridColor = readThemeToken({ token: 'border', mode });
   const labels = useMemo(
     () =>
       graph == null
