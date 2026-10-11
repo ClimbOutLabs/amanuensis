@@ -52,13 +52,7 @@ export function readThemeColor(varName: string, fallback: string): string {
  * `--chart-{n}`; entries the theme does not define fall back to the matching
  * `fallbacks` value so charts render even before themes load.
  */
-export function readChartThemeColors({
-  count,
-  fallbacks,
-}: {
-  count: number;
-  fallbacks: string[];
-}): string[] {
+export function readChartThemeColors({ count, fallbacks }: { count: number; fallbacks: string[] }): string[] {
   return Array.from({ length: count }, (_, index) => {
     return readThemeVar(`--chart-${index + 1}`) ?? fallbacks[index] ?? '#94a3b8';
   });

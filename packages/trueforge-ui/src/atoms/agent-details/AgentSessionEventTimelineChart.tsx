@@ -21,9 +21,9 @@ import { CHART_CHROME_FALLBACKS, readThemeColor } from '../../utils/chartThemeCo
 import { roundDurationMsToSecond } from '../../utils/sessionDisplayFormat.js';
 import {
   getSessionEventLabel,
+  MAIN_THREAD_ID,
   resolveSessionEventColor,
   resolveSessionEventHoverColor,
-  MAIN_THREAD_ID,
   type SessionEventTimelineSegment,
 } from '../../utils/sessionEventTimeline.js';
 import {
@@ -99,10 +99,22 @@ export function AgentSessionEventTimelineChart({
 }: AgentSessionEventTimelineChartProps) {
   const mode = useThemeMode();
   const isDark = mode === 'dark';
-  const axis = readThemeColor('--text-secondary', isDark ? CHART_CHROME_FALLBACKS.axis.dark : CHART_CHROME_FALLBACKS.axis.light);
-  const grid = readThemeColor('--border', isDark ? CHART_CHROME_FALLBACKS.grid.dark : CHART_CHROME_FALLBACKS.grid.light);
-  const turnFill = readThemeColor('--secondary-bg', isDark ? CHART_CHROME_FALLBACKS.turnFill.dark : CHART_CHROME_FALLBACKS.turnFill.light);
-  const turnHover = readThemeColor('--secondary-bg', isDark ? CHART_CHROME_FALLBACKS.turnHover.dark : CHART_CHROME_FALLBACKS.turnHover.light);
+  const axis = readThemeColor(
+    '--text-secondary',
+    isDark ? CHART_CHROME_FALLBACKS.axis.dark : CHART_CHROME_FALLBACKS.axis.light,
+  );
+  const grid = readThemeColor(
+    '--border',
+    isDark ? CHART_CHROME_FALLBACKS.grid.dark : CHART_CHROME_FALLBACKS.grid.light,
+  );
+  const turnFill = readThemeColor(
+    '--secondary-bg',
+    isDark ? CHART_CHROME_FALLBACKS.turnFill.dark : CHART_CHROME_FALLBACKS.turnFill.light,
+  );
+  const turnHover = readThemeColor(
+    '--secondary-bg',
+    isDark ? CHART_CHROME_FALLBACKS.turnHover.dark : CHART_CHROME_FALLBACKS.turnHover.light,
+  );
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [widthPx, setWidthPx] = useState(0);
   const [overheadPx, setOverheadPx] = useState(OVERHEAD_PX);

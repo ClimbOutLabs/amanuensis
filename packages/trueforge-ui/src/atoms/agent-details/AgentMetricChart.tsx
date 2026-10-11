@@ -54,8 +54,14 @@ export function AgentMetricChart({ graph, definition, error, colorIndex = 0 }: A
     count: 8,
     fallbacks: isDark ? CHART_COLOR_FALLBACKS_DARK : CHART_COLOR_FALLBACKS_LIGHT,
   });
-  const axisColor = readThemeColor('--text-secondary', isDark ? CHART_CHROME_FALLBACKS.axis.dark : CHART_CHROME_FALLBACKS.axis.light);
-  const gridColor = readThemeColor('--border', isDark ? CHART_CHROME_FALLBACKS.grid.dark : CHART_CHROME_FALLBACKS.grid.light);
+  const axisColor = readThemeColor(
+    '--text-secondary',
+    isDark ? CHART_CHROME_FALLBACKS.axis.dark : CHART_CHROME_FALLBACKS.axis.light,
+  );
+  const gridColor = readThemeColor(
+    '--border',
+    isDark ? CHART_CHROME_FALLBACKS.grid.dark : CHART_CHROME_FALLBACKS.grid.light,
+  );
   const labels = useMemo(
     () =>
       graph == null
