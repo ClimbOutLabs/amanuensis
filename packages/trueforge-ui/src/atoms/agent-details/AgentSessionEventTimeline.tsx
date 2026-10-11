@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState, type ComponentType } from 'react';
 
-import { useSlot, useThemeMode } from '../../theme/SlotsProvider.js';
+import { useSlot } from '../../theme/SlotsProvider.js';
 import {
   getSessionEventChartVar,
   SESSION_EVENT_TYPES,
@@ -13,7 +13,6 @@ import type { AgentSessionEventTimelineProps } from './types.js';
 
 export function AgentSessionEventTimeline({ turns, segments, onSelectTurn }: AgentSessionEventTimelineProps) {
   const AgentSessionEventTimelineChart = useSlot('AgentSessionEventTimelineChart');
-  const isDark = useThemeMode() === 'dark';
   const [hiddenTypes, setHiddenTypes] = useState<Set<SessionEventType>>(() => new Set());
 
   const availableEventTypes = useMemo(() => {

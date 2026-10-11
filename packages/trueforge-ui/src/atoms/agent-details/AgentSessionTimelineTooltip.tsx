@@ -1,6 +1,5 @@
 'use client';
 
-import { useThemeMode } from '../../theme/SlotsProvider.js';
 import { formatCostUsd, formatDurationMs, formatTokenCount } from '../../utils/sessionDisplayFormat.js';
 import {
   formatTimelineDuration,
@@ -67,7 +66,6 @@ export function SessionTurnTooltip({
   durationMs: number;
   segments: SessionEventTimelineSegment[];
 }) {
-  const isDark = useThemeMode() === 'dark';
   return (
     <div className="max-h-72 w-72 max-w-full overflow-auto text-xs text-text-primary">
       <div className="flex items-center justify-between gap-3">
@@ -126,7 +124,6 @@ export function SessionToolCallGroupTooltip({ group }: { group: TimelineToolCall
 }
 
 export function SessionMarkerGroupTooltip({ group }: { group: TimelineMarkerGroup }) {
-  const isDark = useThemeMode() === 'dark';
   const singleSegment = group.segments.length === 1 ? group.segments[0] : undefined;
   if (singleSegment != null) return <SessionEventTooltip segment={singleSegment} />;
 
