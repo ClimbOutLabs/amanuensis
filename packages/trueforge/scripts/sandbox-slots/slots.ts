@@ -19,6 +19,8 @@ export type CommandRunner = (input: {
   echo: boolean;
   /** Give the command the terminal, for a password prompt. */
   interactive: boolean;
+  /** Added to the command's environment. */
+  env: Record<string, string>;
 }) => Promise<CommandResult>;
 
 export class CommandNotFoundError extends Error {}
@@ -26,7 +28,14 @@ export class CommandNotFoundError extends Error {}
 export const SLOT_COUNT = 4;
 export const SLOT_IMAGE = 'amanuensis-sandbox-slot:local';
 export const APPARMOR_PROFILE = 'aman-sandbox-slot';
-const SLOTS_PROJECT = 'aman-slots';
+/** Names the Compose project and volumes, so two installs on one Docker host never share slots. */
+export const DEFAULT_INSTANCE = 'aman';
+export const INSTANCE_PATTERN = /^[a-z][a-z0-9]{0,15}$/;
+/** The variable the compose files read their project and volume names from. */
+export const INSTANCE_ENV = 'AMAN_SLOTS_INSTANCE';
+export function slotsProject(instance: string): string {
+  return `${instance}-slots`;
+}
 const SLOTS_COMPOSE_FILE = 'docker-compose.slots.yml';
 const APP_COMPOSE_FILE = 'docker-compose.slots-app.yml';
 const PROFILE_PATH = join('ops', 'sandbox-slot', 'apparmor', APPARMOR_PROFILE);
@@ -54,6 +63,8 @@ export interface SlotsOptions {
   run: CommandRunner;
   /** Allow the one `sudo` step that loads the AppArmor profile. */
   fix: boolean;
+  /** Which install's slots to manage. */
+  instance: string;
   onCheck: ((check: SlotsCheck) => void) | undefined;
 }
 
@@ -62,8 +73,9 @@ class StepFailure extends Error {
     readonly step: SlotsStep,
     message: string,
     readonly fix: string,
+    cause?: unknown,
   ) {
-    super(message);
+    super(message, cause === undefined ? undefined : { cause });
   }
 }
 
@@ -93,6 +105,7 @@ class Slots {
       cwd: this.options.repoRoot,
       echo: input.echo ?? false,
       interactive: input.interactive ?? false,
+      env: { [INSTANCE_ENV]: this.options.instance },
     });
   }
 
@@ -102,7 +115,7 @@ class Slots {
       '--project-directory',
       this.options.repoRoot,
       '-p',
-      SLOTS_PROJECT,
+      slotsProject(this.options.instance),
       '-f',
       join(this.options.repoRoot, SLOTS_COMPOSE_FILE),
       ...tail,
@@ -143,6 +156,7 @@ class Slots {
           'docker',
           'Docker is not installed.',
           'Install Docker Engine 23 or newer (Docker Desktop on Mac or Windows), then run this again.',
+          error,
         );
       }
       throw error;
@@ -292,6 +306,7 @@ export async function stopSandboxSlots(options: {
   repoRoot: string;
   run: CommandRunner;
   purge: boolean;
+  instance: string;
 }): Promise<CommandResult> {
   return options.run({
     command: 'docker',
@@ -300,7 +315,7 @@ export async function stopSandboxSlots(options: {
       '--project-directory',
       options.repoRoot,
       '-p',
-      SLOTS_PROJECT,
+      slotsProject(options.instance),
       '-f',
       join(options.repoRoot, SLOTS_COMPOSE_FILE),
       'down',
@@ -309,5 +324,6 @@ export async function stopSandboxSlots(options: {
     cwd: options.repoRoot,
     echo: true,
     interactive: false,
+    env: { [INSTANCE_ENV]: options.instance },
   });
 }

@@ -1,7 +1,8 @@
 /**
  * `pnpm sandbox:slots`: builds the sandbox slot image and starts the slots.
  * Flags: `--fix` (allow the one sudo step that loads the AppArmor profile), `--down` (stop the slots),
- * `--purge` (with `--down`, also delete their workspace volumes), `--json`.
+ * `--purge` (with `--down`, also delete their workspace volumes), `--instance <name>` (manage a second
+ * install's slots on the same Docker host; default `aman`), `--json`.
  * Exit code 0 when every check passes, 1 when a check fails, 2 on a usage error.
  */
 import { spawn } from 'node:child_process';
@@ -11,6 +12,9 @@ import { parseArgs } from 'node:util';
 
 import {
   CommandNotFoundError,
+  DEFAULT_INSTANCE,
+  INSTANCE_ENV,
+  INSTANCE_PATTERN,
   runSandboxSlots,
   stopSandboxSlots,
   type CommandResult,
@@ -25,9 +29,13 @@ function isMissingBinary(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
-const runCommand: CommandRunner = ({ command, args, cwd, echo, interactive }) =>
+const runCommand: CommandRunner = ({ command, args, cwd, echo, interactive, env }) =>
   new Promise<CommandResult>((resolvePromise, reject) => {
-    const child = spawn(command, args, { cwd, stdio: interactive ? 'inherit' : ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, {
+      cwd,
+      env: { ...process.env, ...env },
+      stdio: interactive ? 'inherit' : ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
     child.stdout?.on('data', (chunk: Buffer | string) => {
@@ -64,6 +72,7 @@ async function main(): Promise<number> {
     down?: boolean | undefined;
     purge?: boolean | undefined;
     json?: boolean | undefined;
+    instance?: string | undefined;
   };
   try {
     ({ values } = parseArgs({
@@ -72,13 +81,19 @@ async function main(): Promise<number> {
         down: { type: 'boolean' },
         purge: { type: 'boolean' },
         json: { type: 'boolean' },
+        instance: { type: 'string' },
       },
       strict: true,
     }));
   } catch (error: unknown) {
     process.stderr.write(
-      `${error instanceof Error ? error.message : String(error)}\nUsage: pnpm sandbox:slots [--fix] [--json] | --down [--purge]\n`,
+      `${error instanceof Error ? error.message : String(error)}\nUsage: pnpm sandbox:slots [--fix] [--json] [--instance <name>] | --down [--purge] [--instance <name>]\n`,
     );
+    return 2;
+  }
+  const instance = values.instance ?? DEFAULT_INSTANCE;
+  if (!INSTANCE_PATTERN.test(instance)) {
+    process.stderr.write('--instance must be 1 to 16 lowercase letters or digits, starting with a letter.\n');
     return 2;
   }
   if (values.purge === true && values.down !== true) {
@@ -86,7 +101,12 @@ async function main(): Promise<number> {
     return 2;
   }
   if (values.down === true) {
-    const stopped = await stopSandboxSlots({ repoRoot: REPO_ROOT, run: runCommand, purge: values.purge === true });
+    const stopped = await stopSandboxSlots({
+      repoRoot: REPO_ROOT,
+      run: runCommand,
+      purge: values.purge === true,
+      instance,
+    });
     return stopped.exitCode === 0 ? 0 : 1;
   }
   const json = values.json === true;
@@ -94,6 +114,7 @@ async function main(): Promise<number> {
     repoRoot: REPO_ROOT,
     run: runCommand,
     fix: values.fix === true,
+    instance,
     onCheck: json
       ? undefined
       : check => {
@@ -105,7 +126,7 @@ async function main(): Promise<number> {
   } else if (result.ok) {
     const size = result.image_size_mb === undefined ? '' : ` Image size: ${String(result.image_size_mb)} MB.`;
     process.stdout.write(
-      `\nThe sandbox slots are running.${size}\nNext: add this file to your deploy's compose command with -f, then restart the app:\n  -f ${result.app_compose_file}\n`,
+      `\nThe sandbox slots are running.${size}\nNext: add this file to your deploy's compose command with -f, then restart the app:\n  -f ${result.app_compose_file}\n${instance === DEFAULT_INSTANCE ? '' : `This install is named "${instance}": run the deploy's compose command with ${INSTANCE_ENV}=${instance} set.\n`}`,
     );
   } else {
     process.stdout.write(`\n${formatFailure(result)}`);

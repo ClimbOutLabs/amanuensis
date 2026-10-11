@@ -16,14 +16,14 @@ services:
 
 volumes:
   slot_ctl_1:
-    name: aman_slot_ctl_1
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_1
     external: true
   slot_ctl_2:
-    name: aman_slot_ctl_2
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_2
     external: true
   slot_ctl_3:
-    name: aman_slot_ctl_3
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_3
     external: true
   slot_ctl_4:
-    name: aman_slot_ctl_4
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_4
     external: true

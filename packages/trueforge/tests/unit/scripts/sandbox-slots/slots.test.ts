@@ -61,7 +61,7 @@ async function run(
   calls: Call[];
 }> {
   const { run: runner, calls } = fakeRunner(call => respond(call) ?? defaultAnswers(call));
-  const result = await runSandboxSlots({ repoRoot: '/repo', run: runner, fix, onCheck: undefined });
+  const result = await runSandboxSlots({ repoRoot: '/repo', run: runner, fix, instance: 'aman', onCheck: undefined });
   return { result, calls };
 }
 
@@ -93,6 +93,28 @@ describe('runSandboxSlots', () => {
           '/repo/docker-compose.slots.yml',
         ]),
       );
+    }
+  });
+
+  test('a named install gets its own project and tells compose its name', async () => {
+    const seen: { args: string[]; env: Record<string, string> }[] = [];
+    const runner: CommandRunner = input => {
+      seen.push({ args: input.args, env: input.env });
+      return Promise.resolve({ ...OK, ...defaultAnswers({ command: input.command, args: input.args }) });
+    };
+    const result = await runSandboxSlots({
+      repoRoot: '/repo',
+      run: runner,
+      fix: false,
+      instance: 'lab',
+      onCheck: undefined,
+    });
+    expect(result.ok).toBe(true);
+    const compose = seen.filter(entry => entry.args[0] === 'compose' && entry.args[1] !== 'version');
+    expect(compose.length).toBeGreaterThan(0);
+    for (const entry of compose) {
+      expect(entry.args).toEqual(expect.arrayContaining(['-p', 'lab-slots']));
+      expect(entry.env).toEqual({ AMAN_SLOTS_INSTANCE: 'lab' });
     }
   });
 

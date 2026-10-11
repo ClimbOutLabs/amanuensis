@@ -69,20 +69,27 @@ describe('docker-compose.slots.yml', () => {
     }
   });
 
-  test('the slot volumes have fixed names the app file can join', () => {
+  test('the project, volumes and containers are named by the install, so two installs never share slots', () => {
+    expect(compose.name).toBe('${AMAN_SLOTS_INSTANCE:-aman}-slots');
+    for (const raw of Object.values(compose.services)) {
+      expect(JSON.stringify(raw)).toContain('"com.amanuensis.instance":"${AMAN_SLOTS_INSTANCE:-aman}"');
+    }
+  });
+
+  test('the slot volumes have names the app file can join', () => {
     expect(
       Object.values(compose.volumes)
         .map(volume => volume.name)
         .sort(),
     ).toEqual([
-      'aman_slot_ctl_1',
-      'aman_slot_ctl_2',
-      'aman_slot_ctl_3',
-      'aman_slot_ctl_4',
-      'aman_slot_ws_1',
-      'aman_slot_ws_2',
-      'aman_slot_ws_3',
-      'aman_slot_ws_4',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_1',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_2',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_3',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_4',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_1',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_2',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_3',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_4',
     ]);
   });
 });
@@ -114,10 +121,10 @@ describe('docker-compose.slots-app.yml', () => {
 
   test('only the control volumes are shared, never a workspace volume', () => {
     expect(Object.values(app.volumes).map(volume => volume.name)).toEqual([
-      'aman_slot_ctl_1',
-      'aman_slot_ctl_2',
-      'aman_slot_ctl_3',
-      'aman_slot_ctl_4',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_1',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_2',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_3',
+      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_4',
     ]);
   });
 });

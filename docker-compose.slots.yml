@@ -1,9 +1,10 @@
 # Sandbox slots: four hardened services, each with a PID 1 agent that starts every call in a fresh gVisor
-# guest with no network. They form their own Compose project (aman-slots), so this file is run from this
+# guest with no network. They form their own Compose project (aman-slots, or <instance>-slots when a second install
+# on the same Docker host sets AMAN_SLOTS_INSTANCE), so this file is run from this
 # checkout with `pnpm sandbox:slots`, which also builds the image (the services never pull). An app deploy
 # joins them with docker-compose.slots-app.yml. There is no Docker socket anywhere; the hardening below is
 # verified at run time by the agent's attestation and in tests by composeSlots.test.ts.
-name: aman-slots
+name: ${AMAN_SLOTS_INSTANCE:-aman}-slots
 
 x-sandbox-slot: &sandbox-slot
   image: amanuensis-sandbox-slot:local
@@ -37,6 +38,7 @@ x-sandbox-slot: &sandbox-slot
   restart: unless-stopped
   labels:
     com.amanuensis.role: slot
+    com.amanuensis.instance: ${AMAN_SLOTS_INSTANCE:-aman}
 
 services:
   sandbox-1:
@@ -65,18 +67,18 @@ services:
 
 volumes:
   slot_ws_1:
-    name: aman_slot_ws_1
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_1
   slot_ws_2:
-    name: aman_slot_ws_2
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_2
   slot_ws_3:
-    name: aman_slot_ws_3
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_3
   slot_ws_4:
-    name: aman_slot_ws_4
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_4
   slot_ctl_1:
-    name: aman_slot_ctl_1
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_1
   slot_ctl_2:
-    name: aman_slot_ctl_2
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_2
   slot_ctl_3:
-    name: aman_slot_ctl_3
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_3
   slot_ctl_4:
-    name: aman_slot_ctl_4
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_4
