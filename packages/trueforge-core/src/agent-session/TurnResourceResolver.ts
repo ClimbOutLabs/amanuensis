@@ -416,6 +416,7 @@ export class TurnResourceResolver<
       ? await this.getModel(compactionSetting.name).then(resolved => ({
           modelClient: resolved.modelClient,
           modelParams: { ...resolved.defaultModelParams, ...compactionSetting.params },
+          modelProperties: resolved.modelProperties,
         }))
       : undefined;
 

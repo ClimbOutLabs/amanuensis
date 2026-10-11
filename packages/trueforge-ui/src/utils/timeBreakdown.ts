@@ -1,5 +1,5 @@
 import type { SessionMetricBarDatum } from './buildSessionMetrics.js';
-import { getSessionEventColor, type SessionEventTimelineSegment } from './sessionEventTimeline.js';
+import { resolveSessionEventColor, type SessionEventTimelineSegment } from './sessionEventTimeline.js';
 
 /**
  * Shared "where the time went" buckets for session and turn scopes.
@@ -27,9 +27,9 @@ export function buildTimeBreakdown({
   const overheadMs = Math.max(0, wallTimeMs - modelMs - toolMs - waitingMs);
 
   return [
-    { label: 'model', value: modelMs, color: getSessionEventColor('model') },
-    { label: 'tools', value: toolMs, color: getSessionEventColor('tool_call') },
-    { label: 'waiting on human', value: waitingMs, color: getSessionEventColor('approval') },
-    { label: 'overhead', value: overheadMs, color: getSessionEventColor('system') },
+    { label: 'model', value: modelMs, color: resolveSessionEventColor('model') },
+    { label: 'tools', value: toolMs, color: resolveSessionEventColor('tool_call') },
+    { label: 'waiting on human', value: waitingMs, color: resolveSessionEventColor('approval') },
+    { label: 'overhead', value: overheadMs, color: resolveSessionEventColor('system') },
   ];
 }

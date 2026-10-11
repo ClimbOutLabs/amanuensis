@@ -166,7 +166,7 @@ function ToolOutputScreenToggle(props: { status: ToolOutputScreenStatus | null }
           </button>
         ) : null}
         {setting.error === null ? null : (
-          <p className="mt-1.5 text-xs text-red-600" role="alert">
+          <p className="mt-1.5 text-xs text-danger" role="alert">
             {setting.error}
           </p>
         )}
@@ -249,7 +249,7 @@ function MemoryScreenToggle(props: { status: MemoryScreenStatus | null }) {
           </button>
         ) : null}
         {setting.error === null ? null : (
-          <p className="mt-1.5 text-xs text-red-600" role="alert">
+          <p className="mt-1.5 text-xs text-danger" role="alert">
             {setting.error}
           </p>
         )}
@@ -327,7 +327,7 @@ function MemorySummarizeToggle({ setting }: { setting: MemorySummarizeSettingSta
           </button>
         ) : null}
         {setting.error === null ? null : (
-          <p className="mt-1.5 text-xs text-red-600" role="alert">
+          <p className="mt-1.5 text-xs text-danger" role="alert">
             {setting.error}
           </p>
         )}

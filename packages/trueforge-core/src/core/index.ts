@@ -72,7 +72,6 @@ export type {
 export { askUserQuestion } from './capabilities/builtins/AskUserQuestion';
 export {
   CONVERSATION_COMPACTION_TEMPLATE,
-  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
   HOST_COMPACTION_TEMPLATE,
   HOST_SUMMARY_PREFACE,
   contextCompaction,
