@@ -12,7 +12,6 @@ import type {
   PreSendContextProcessor,
 } from '../capabilities/AgentContextProcessor';
 import { ASK_USER_QUESTION_TOOL_NAME } from '../capabilities/builtins/AskUserQuestion';
-import { resolveMaxOutputTokens } from '../capabilities/builtins/ContextCompaction';
 import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTools';
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
@@ -66,6 +65,7 @@ import {
   type RegisteredCommandExecution,
   type ThinkingBlock,
 } from '../llm/LLMTypes';
+import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
