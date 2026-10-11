@@ -133,6 +133,8 @@ describe('extractSentinelFromEvent', () => {
               amount: null,
               parsed_command: null,
               why_asked_again: null,
+              outbound_text: 'query: tides',
+              destination_host: 'mcp.exa.ai',
             },
           },
         ],
@@ -145,6 +147,8 @@ describe('extractSentinelFromEvent', () => {
     expect(approvals[0]?.tier).toBe(3);
     expect(approvals[0]?.card.plain_what).toBe('Run code in the sandbox');
     expect(approvals[0]?.card.cannot_be_undone).toBe('Runs once.');
+    expect(approvals[0]?.card.outbound_text).toBe('query: tides');
+    expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
   });
 
   it('reads a camel-cased card from a regenerated SDK shape', () => {
