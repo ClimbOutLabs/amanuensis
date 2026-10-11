@@ -118,7 +118,7 @@ function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): O
     requestReplyRouter: new RequestReplyRouter(),
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
-    oidcClient: undefined,
+    oidcDiscovery: undefined,
     authenticator: createAuthenticator({ mode: TrueForgeAuthMode.Standalone }),
     authorizer: new TrueForgeAuthorizer(),
     resolveModelProviderStore: () => modelProviderStore,

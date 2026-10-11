@@ -7,7 +7,6 @@ import type { RequestReplyRouter } from '@truefoundry/trueforge-core/request-rep
 import type { Context, ErrorHandler, MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
-import type { Configuration } from 'openid-client';
 import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 import { createAgentImportRouter } from './apis/agentImport';
@@ -43,11 +42,18 @@ import {
   createAuthMiddleware,
   truefoundryAdminMiddleware,
 } from './auth/middleware';
+import type { OidcDiscoveryHandle } from './auth/oidc';
+import { createRequestGuardMiddleware } from './auth/requestGuard';
 import type { McpCatalog } from './catalog/McpCatalog';
 import type { ModelCatalog } from './catalog/ModelCatalog';
 import type { SandboxCatalog } from './catalog/SandboxCatalog';
 import type { SkillCatalog } from './catalog/SkillCatalog';
-import configuration, { getPublicUiBasePath, getTrueForgeAuthMode, TrueForgeAuthMode } from './config';
+import configuration, {
+  getPublicBaseUrl,
+  getPublicUiBasePath,
+  getTrueForgeAuthMode,
+  TrueForgeAuthMode,
+} from './config';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
@@ -244,8 +250,8 @@ export interface ServerDeps<TTransaction> {
   /** Hands out each turn's resumable event stream to the create and subscribe handlers. */
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
   logger: Logger;
-  /** Discovered openid-client configuration; undefined when browser login is disabled. */
-  oidcClient: Configuration | undefined;
+  /** Background OIDC discovery; undefined when browser login is disabled. */
+  oidcDiscovery: OidcDiscoveryHandle | undefined;
   /** Startup-selected authenticator; middleware is built from this once per app. */
   authenticator: Authenticator;
   /** Startup-selected agent authorization policy. */
@@ -285,6 +291,10 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   if (!configuration.STANDALONE && configuration.TRUEFORGE_MTLS_ENABLED) {
     app.use('*', createClientCertificateMiddleware(deps.logger));
   }
+  // Standalone sessions are cookies, so reject foreign Hosts and cross-origin writes before any router.
+  if (configuration.STANDALONE && authEnabled) {
+    app.use('*', createRequestGuardMiddleware({ port: configuration.PORT, publicBaseUrl: getPublicBaseUrl() }));
+  }
   app.use('*', createRequestBodyLimitMiddleware(configuration.MAX_REQUEST_BODY_BYTES));
 
   app.get('/healthz', c => c.json({ status: 'ok', version: PACKAGE_VERSION }));
@@ -292,7 +302,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/v1/auth',
     createAuthRouter({
-      oidcClient: deps.oidcClient,
+      oidcDiscovery: deps.oidcDiscovery,
       logger: deps.logger,
       authMiddleware,
     }),

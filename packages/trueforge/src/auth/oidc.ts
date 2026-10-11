@@ -1,6 +1,8 @@
+import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { createRemoteJWKSet, type JWTVerifyGetKey } from 'jose';
 import {
+  allowInsecureRequests,
   authorizationCodeGrant,
   buildAuthorizationUrl,
   calculatePKCECodeChallenge,
@@ -9,6 +11,7 @@ import {
   randomPKCECodeVerifier,
   randomState,
 } from 'openid-client';
+import type { Logger } from 'winston';
 import { getPublicBaseUrl, type OIDCConfig } from '../config';
 import { buildAuthorizationRequestParams, type IdTokenClaims } from './claims';
 import { ID_TOKEN_COOKIE, OAUTH_STATE_COOKIE, setAuthCookie } from './cookies';
@@ -62,9 +65,73 @@ export async function initOidc(oidc: OIDCConfig | undefined): Promise<Configurat
     return undefined;
   }
 
-  const client = await discovery(new URL(oidc.OIDC_ISSUER_URL), oidc.OIDC_CLIENT_ID, oidc.OIDC_CLIENT_SECRET);
+  const issuer = new URL(oidc.OIDC_ISSUER_URL);
+  // Config load already limited http issuers to loopback hosts; every other issuer stays https-only.
+  const client = await discovery(
+    issuer,
+    oidc.OIDC_CLIENT_ID,
+    oidc.OIDC_CLIENT_SECRET,
+    undefined,
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- the only opt-in for a loopback http issuer
+    issuer.protocol === 'http:' ? { execute: [allowInsecureRequests] } : undefined,
+  );
   enableOidcAuth({ client, oidcConfig: oidc });
   return client;
+}
+
+const DISCOVERY_INITIAL_DELAY_MS = 2_000;
+const DISCOVERY_MAX_DELAY_MS = 60_000;
+
+/** Wait before retry number `attempt` (1-based): 2 s, doubling, capped at 60 s. */
+export function discoveryRetryDelayMs(attempt: number): number {
+  return Math.min(DISCOVERY_INITIAL_DELAY_MS * 2 ** Math.max(0, attempt - 1), DISCOVERY_MAX_DELAY_MS);
+}
+
+/** Background discovery state: the client is undefined until discovery succeeds. */
+export interface OidcDiscoveryHandle {
+  client(): Configuration | undefined;
+  stop(): void;
+}
+
+/**
+ * Discover the IdP without blocking boot, retrying with capped backoff until it answers.
+ * Until then protected routes stay 401 (no verifier) and login serves a retry page.
+ */
+export function startOidcDiscovery(params: { oidc: OIDCConfig; logger: Logger }): OidcDiscoveryHandle {
+  const { oidc, logger } = params;
+  let discovered: Configuration | undefined;
+  let timer: NodeJS.Timeout | undefined;
+  let stopped = false;
+  let attempt = 0;
+
+  const attemptDiscovery = async (): Promise<void> => {
+    attempt += 1;
+    try {
+      discovered = await initOidc(oidc);
+      logger.info('OIDC discovery succeeded', { issuer: oidc.OIDC_ISSUER_URL, attempt });
+    } catch (error) {
+      const retryInMs = discoveryRetryDelayMs(attempt);
+      logger.warn('OIDC discovery failed; retrying', {
+        issuer: oidc.OIDC_ISSUER_URL,
+        attempt,
+        retry_in_ms: retryInMs,
+        ...extractErrorLogFields(error),
+      });
+      if (!stopped) {
+        timer = setTimeout(() => void attemptDiscovery(), retryInMs);
+        timer.unref();
+      }
+    }
+  };
+  void attemptDiscovery();
+
+  return {
+    client: () => discovered,
+    stop: () => {
+      stopped = true;
+      clearTimeout(timer);
+    },
+  };
 }
 
 function authCallbackUrl(): string {

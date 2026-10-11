@@ -61,7 +61,7 @@ There are two dev topologies. Both serve the UI on [http://localhost:3000](http:
 
 ### Standalone (zero infra)
 
-SQLite only - good for most day-to-day development. Standalone mode is intended for local use; it is not a production-safe topology (no login by default, local SQLite). Please do not expose it beyond localhost.
+SQLite only - good for most day-to-day development. Standalone mode is intended for local use; it is not a production-safe topology (local SQLite). Please do not expose it beyond localhost. Login is mandatory: run `pnpm dev:login` in a second terminal (needs Docker), add the `OIDC_*` lines it prints and `PUBLIC_BASE_URL=http://localhost:3000` to `packages/trueforge/.env`, then:
 
 ```bash
 pnpm standalone:dev
@@ -130,7 +130,8 @@ See [`packages/trueforge/.env.example`](packages/trueforge/.env.example) for eve
 - `PORT` - API port (default `8790`)
 - `FRONTEND_PORT` - Vite UI port in dev (default `3000`); see [`packages/frontend/README.md`](packages/frontend/README.md)
 - `VITE_SERVER_URL` - point the Vite proxy at a different API
-- `PUBLIC_BASE_URL` - public application URL for MCP OAuth / OIDC callbacks. Required for `pnpm standalone:dev` / `pnpm dev` and for distributed mode (e.g. `http://localhost:3000` for Vite). Non-development standalone falls back to `http://localhost:$PORT`.
+- `PUBLIC_BASE_URL` - public application URL for MCP OAuth / OIDC callbacks. Required for distributed mode and for `pnpm dev` (e.g. `http://localhost:3000` for Vite). Standalone takes an origin with no path and falls back to `http://localhost:$PORT` when unset.
+- `AUTH_COOKIE_SUFFIX` - suffix on every auth cookie name; set a distinct value per instance sharing a hostname
 - `FRONTEND_DIR` - directory of a built UI for the server to serve
 - `SQLITE_PATH` - SQLite file location in standalone mode
 - `REDIS_URL` / `POSTGRES_*` - used when `STANDALONE=false`

@@ -81,17 +81,19 @@ flowchart TB
 
 > **Install from a release, not from main.** The commands below pin the latest stable release. For the newest stable release, see [Releases](https://github.com/ClimbOutLabs/amanuensis/releases). The `main` branch is active development and may be unstable.
 
-The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no Docker, no login screen. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these from [WSL](https://learn.microsoft.com/windows/wsl/install) or [Git Bash](https://git-scm.com/downloads/win):
+The fastest path to a working chat is standalone mode: one process on your own machine, SQLite storage, no database server. Login is mandatory: `pnpm dev:login` runs a local Dex identity provider in Docker, or point it at any OIDC provider. You need [Node.js](https://nodejs.org/en/download) 22.14 or newer and pnpm 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) (the exact version is pinned in `package.json`); on Windows, run these from [WSL](https://learn.microsoft.com/windows/wsl/install) or [Git Bash](https://git-scm.com/downloads/win):
 
 ```bash
 git clone --branch v0.1.0 https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
 corepack enable
 pnpm install --frozen-lockfile
 cp packages/trueforge/.env.example packages/trueforge/.env
+pnpm dev:login   # second terminal; prints the OIDC_* lines for .env
+# add those lines and PUBLIC_BASE_URL=http://localhost:3000 to packages/trueforge/.env, then:
 pnpm standalone:dev
 ```
 
-Open `http://localhost:3000`. The app ships with no model configured — connect one under **Settings → Models** before starting a chat.
+Open `http://localhost:3000` and sign in with the account `pnpm dev:login` prints. The app ships with no model configured — connect one under **Settings → Models** before starting a chat.
 
 The server runs without a file watcher (on some Windows machines the watcher stalls before the server starts), so restart `pnpm standalone:dev` to pick up backend changes — the UI itself still hot-reloads.
 
@@ -154,7 +156,7 @@ The untracked `packages/trueforge/.env` file created during setup is required by
 
 ## Security boundaries and limitations
 
-- Standalone mode has no login and ignores OIDC configuration. Keep it bound to localhost.
+- Standalone mode requires OIDC login and refuses to start without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`. An http issuer is accepted only on a loopback host.
 - Hosted mode also uses a shared admin identity when OIDC is unset. Configure OIDC (the Compose `login` profile, or your own identity provider) and appropriate network controls before any shared or internet-facing deployment.
 - Tool approval and sandboxing reduce risk; they are not an unlimited safety boundary. Review enabled capabilities, provider trust, egress policy, and approval requests.
 - Model credentials stay in the harness. Built-in MCP access from Code Mode is bridged back through the harness so its stored MCP tokens do not enter the sandbox; do not assume the same boundary for arbitrary custom code, tools, or integrations. Administrators remain responsible for secret storage, transport security, and provider configuration.

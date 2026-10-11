@@ -40,6 +40,7 @@
     "sdk:types": "pnpm --filter @truefoundry/trueforge-sdk exec tsc --project ./tsconfig.cjs.json --emitDeclarationOnly --noCheck",
     "sync:check": "node scripts/sync-upstream.mjs --check",
     "sync:start": "node scripts/sync-upstream.mjs --start",
+    "dev:login": "node scripts/dev-login.mjs",
     "smoke:down": "docker compose down",
     "smoke:npx:amanuensis": "pnpm build && node scripts/npx-smoke-amanuensis.mjs",
     "smoke:npx": "pnpm build && node scripts/npx-smoke.mjs",
