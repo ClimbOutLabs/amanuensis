@@ -346,7 +346,8 @@ function parseBoolean(options: { envKey: string; raw: string | undefined; defaul
  * Empty stays empty. Otherwise parse as a URL, store without a trailing slash
  * (callers join with `/`), and reject query/hash or `.` / `..` path segments.
  */
-function parsePublicBaseUrl(raw: string | undefined): string {  if (raw === undefined || raw.trim() === '') {
+function parsePublicBaseUrl(raw: string | undefined): string {
+  if (raw === undefined || raw.trim() === '') {
     return '';
   }
   let parsed: URL;
@@ -1570,10 +1571,18 @@ const shared: SharedServerConfiguration = {
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
   STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
-  MAPS_GEOCODER_URL: parseMapsUrl('MAPS_GEOCODER_URL', getEnv('MAPS_GEOCODER_URL'), 'https://nominatim.openstreetmap.org'),
+  MAPS_GEOCODER_URL: parseMapsUrl(
+    'MAPS_GEOCODER_URL',
+    getEnv('MAPS_GEOCODER_URL'),
+    'https://nominatim.openstreetmap.org',
+  ),
   MAPS_ROUTER_PROVIDER: parseMapsRouterProvider(getEnv('MAPS_ROUTER_PROVIDER', { required: false })),
   MAPS_ROUTER_URL: parseMapsUrl('MAPS_ROUTER_URL', getEnv('MAPS_ROUTER_URL'), 'https://router.project-osrm.org'),
-  MAPS_TILE_URL: parseMapsUrl('MAPS_TILE_URL', getEnv('MAPS_TILE_URL'), 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
+  MAPS_TILE_URL: parseMapsUrl(
+    'MAPS_TILE_URL',
+    getEnv('MAPS_TILE_URL'),
+    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  ),
   MAPS_USER_AGENT:
     getEnv('MAPS_USER_AGENT', { required: false }) ??
     `Amanuensis/${PACKAGE_VERSION} (+https://github.com/ClimbOutLabs/amanuensis)`,

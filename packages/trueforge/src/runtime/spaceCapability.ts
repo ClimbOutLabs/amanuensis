@@ -15,7 +15,7 @@ import { defineTool, LocalToolMCP, toolResultResponse, type ToolDefinition } fro
 import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
-import { mapsCapability } from './mapsCapability';import {
+import {
   SpaceAggregateRevisionConflictError,
   SpaceNotFoundError,
   SpaceRevisionConflictError,
@@ -31,6 +31,7 @@ import {
   SpaceFormatSchema,
   SpaceSchema,
 } from '../schemas/space';
+import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 
 export const SPACE_SERVER_ID = 'space';

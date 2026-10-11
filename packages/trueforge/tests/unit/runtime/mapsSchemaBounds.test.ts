@@ -1,5 +1,5 @@
-import { mapsCapability } from '../../../src/runtime/mapsCapability';
 import type { AgentTracing } from '@truefoundry/trueforge-core/core';
+import { mapsCapability } from '../../../src/runtime/mapsCapability';
 
 /**
  * The inference engine crashes on tool JSON schema bounds over 128

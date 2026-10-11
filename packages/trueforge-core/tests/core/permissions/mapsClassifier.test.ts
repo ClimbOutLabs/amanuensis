@@ -4,10 +4,7 @@ import {
   type ClassifyContext,
   type SentinelAction,
 } from '../../../src/core/permissions/classifier';
-import {
-  defaultSentinelServices,
-  type SentinelServices,
-} from '../../../src/core/permissions/context';
+import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
 
 function makeCtx(services?: SentinelServices): ClassifyContext {
   return {
@@ -102,9 +99,7 @@ describe('maps classifier branch', () => {
 
   it('sets cannot_be_undone and null recipient/amount/parsed_command', async () => {
     const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx());
-    expect(decision.card?.cannot_be_undone).toBe(
-      'Once the place names leave this machine they cannot be taken back.',
-    );
+    expect(decision.card?.cannot_be_undone).toBe('Once the place names leave this machine they cannot be taken back.');
     expect(decision.card?.recipient).toBeNull();
     expect(decision.card?.amount).toBeNull();
     expect(decision.card?.parsed_command).toBeNull();

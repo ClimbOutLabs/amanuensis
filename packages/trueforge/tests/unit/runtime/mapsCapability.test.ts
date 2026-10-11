@@ -31,7 +31,7 @@ describe('polyline helpers', () => {
   it('round-trips through encode and decode', () => {
     const points: Array<[number, number]> = [
       [48.858844, 2.294481],
-      [48.860, 2.296],
+      [48.86, 2.296],
       [48.862, 2.3],
     ];
     const encoded = encodePolyline(points);
@@ -100,7 +100,9 @@ describe('GeocodeCache', () => {
   it('returns cached entries and expires them after 24h', () => {
     let now = 0;
     const cache = new GeocodeCache(() => now);
-    const places = [{ resolved_name: 'Paris, France', address: 'Paris, France', lat: 48.85, lng: 2.35, bounding_box: null as never }];
+    const places = [
+      { resolved_name: 'Paris, France', address: 'Paris, France', lat: 48.85, lng: 2.35, bounding_box: null as never },
+    ];
     cache.set('search:Paris', places);
     expect(cache.get('search:Paris')).toEqual(places);
     now = 24 * 60 * 60 * 1000 + 1;
@@ -145,9 +147,9 @@ describe('OsrmRoutingProvider', () => {
       router_url: 'https://router.example',
       fetch_limited: () => Promise.resolve(jsonResponse({ code: 'NoRoute', routes: [] })),
     });
-    await expect(
-      provider.route({ from_lat: 0, from_lng: 0, to_lat: 1, to_lng: 1 }),
-    ).rejects.toMatchObject({ code: 'no_route' });
+    await expect(provider.route({ from_lat: 0, from_lng: 0, to_lat: 1, to_lng: 1 })).rejects.toMatchObject({
+      code: 'no_route',
+    });
   });
 
   it('maps 429 to rate_limited', async () => {
@@ -156,14 +158,21 @@ describe('OsrmRoutingProvider', () => {
       router_url: 'https://router.example',
       fetch_limited: () => Promise.resolve(new Response('slow down', { status: 429 })),
     });
-    await expect(
-      provider.route({ from_lat: 0, from_lng: 0, to_lat: 1, to_lng: 1 }),
-    ).rejects.toMatchObject({ code: 'rate_limited', service: 'router' });
+    await expect(provider.route({ from_lat: 0, from_lng: 0, to_lat: 1, to_lng: 1 })).rejects.toMatchObject({
+      code: 'rate_limited',
+      service: 'router',
+    });
   });
 
   it('rejects unknown provider ids', () => {
     expect(() =>
-      createMapsRoutingProvider({ provider_id: 'trafficorp', router_url: 'https://x', fetch_limited: () => { throw new Error('no'); } }),
+      createMapsRoutingProvider({
+        provider_id: 'trafficorp',
+        router_url: 'https://x',
+        fetch_limited: () => {
+          throw new Error('no');
+        },
+      }),
     ).toThrow('Unknown maps routing provider');
   });
 });

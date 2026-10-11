@@ -80,12 +80,12 @@ Routing provider. Traffic-aware routing comes from a provider still being chosen
 
 Errors. Returned as error tool results with a JSON body { status: "error", code, field?, service? }. No map card renders for any error; the model explains in plain text.
 
-| code | when | extra field |
-|------|------|-------------|
-| not_found | geocoder returned no match | field: from_place or to_place on render_route |
-| no_route | both endpoints geocoded, router answered NoRoute | |
-| service_unavailable | upstream unreachable, timed out, or answered a non-2xx other than 429 | service: geocoder or router |
-| rate_limited | upstream answered 429, or the local queue could not run the call in 10 s | service: geocoder or router |
+| code                | when                                                                     | extra field                                   |
+| ------------------- | ------------------------------------------------------------------------ | --------------------------------------------- |
+| not_found           | geocoder returned no match                                               | field: from_place or to_place on render_route |
+| no_route            | both endpoints geocoded, router answered NoRoute                         |                                               |
+| service_unavailable | upstream unreachable, timed out, or answered a non-2xx other than 429    | service: geocoder or router                   |
+| rate_limited        | upstream answered 429, or the local queue could not run the call in 10 s | service: geocoder or router                   |
 
 POI zero-match is not an error: the tool returns the place with pins: [], the card renders with the place pin, and the model says it found the place but no matching POIs nearby.
 

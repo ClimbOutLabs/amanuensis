@@ -168,7 +168,10 @@ export class MapsUpstreamError extends Error {
   readonly service: 'geocoder' | 'router' | undefined;
 
   constructor(code: MapsErrorCode, service?: 'geocoder' | 'router', cause?: unknown) {
-    super(`Maps upstream failure: ${code}${service ? ` (${service})` : ''}`, cause === undefined ? undefined : { cause });
+    super(
+      `Maps upstream failure: ${code}${service ? ` (${service})` : ''}`,
+      cause === undefined ? undefined : { cause },
+    );
     this.name = 'MapsUpstreamError';
     this.code = code;
     this.service = service;
@@ -312,7 +315,9 @@ export class UpstreamLimiter {
       }
       this.lastStart = this.now();
       const controller = new AbortController();
-      const timeout = setTimeout(() => { controller.abort(); }, UPSTREAM_TIMEOUT_MS);
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, UPSTREAM_TIMEOUT_MS);
       try {
         return await work();
       } finally {
@@ -558,8 +563,7 @@ class MapsTool extends LocalToolMCP {
       if (place === null) {
         return mapsErrorResult(new MapsUpstreamError('not_found'));
       }
-      const pins =
-        input.poi === undefined ? [] : await this.service.searchPoi(place, input.poi);
+      const pins = input.poi === undefined ? [] : await this.service.searchPoi(place, input.poi);
       return toolResultResponse({
         text: JSON.stringify({
           status: 'ok',

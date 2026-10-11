@@ -30,9 +30,7 @@ describe('safeRedirectTarget', () => {
   const upstream = 'https://tile.openstreetmap.org/13/4096/4096.png';
 
   it('allows same-host redirects', () => {
-    expect(safeRedirectTarget(upstream, '/13/4096/4097.png')).toBe(
-      'https://tile.openstreetmap.org/13/4096/4097.png',
-    );
+    expect(safeRedirectTarget(upstream, '/13/4096/4097.png')).toBe('https://tile.openstreetmap.org/13/4096/4097.png');
     expect(safeRedirectTarget(upstream, 'https://tile.openstreetmap.org/other.png')).toBe(
       'https://tile.openstreetmap.org/other.png',
     );
