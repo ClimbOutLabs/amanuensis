@@ -134,7 +134,7 @@ describe('runSandboxSlots', () => {
     expect(compose.length).toBeGreaterThan(0);
     for (const entry of compose) {
       expect(entry.args).toEqual(expect.arrayContaining(['-p', 'lab-slots']));
-      expect(entry.env).toEqual({ AMAN_SLOTS_INSTANCE: 'lab', AMAN_SLOTS_PACKS: '', AMAN_SLOTS_DISK_MODE: 'none' });
+      expect(entry.env).toEqual({ AMAN_SLOTS_INSTANCE: 'lab', AMAN_SLOTS_PACKS: '', AMAN_SLOTS_DISK_MODE: 'vm' });
     }
   });
 
