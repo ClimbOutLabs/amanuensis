@@ -32,25 +32,27 @@ export function StateSprite({ state, className }: StateSpriteProps) {
     >
       <svg viewBox="0 0 64 64" role="presentation" focusable="false">
         <g className="panda-head">
-          <circle className="panda-dark panda-ear panda-ear-l" cx="17" cy="17" r="8.5" />
-          <circle className="panda-dark panda-ear panda-ear-r" cx="47" cy="17" r="8.5" />
+          <circle className="panda-dark panda-ear panda-ear-l" cx="18" cy="18" r="8" />
+          <circle className="panda-dark panda-ear panda-ear-r" cx="46" cy="18" r="8" />
           <circle className="panda-face" cx="32" cy="34" r="19" />
-          <ellipse className="panda-dark" cx="24" cy="30" rx="5.5" ry="7" transform="rotate(-14 24 30)" />
-          <ellipse className="panda-dark" cx="40" cy="30" rx="5.5" ry="7" transform="rotate(14 40 30)" />
+          <ellipse className="panda-dark" cx="24.5" cy="31.5" rx="4" ry="5" transform="rotate(-8 24.5 31.5)" />
+          <ellipse className="panda-dark" cx="39.5" cy="31.5" rx="4" ry="5" transform="rotate(8 39.5 31.5)" />
           <g className="panda-eyes">
-            <circle className="panda-face" cx="25" cy="29" r="2.6" />
-            <circle className="panda-face" cx="39" cy="29" r="2.6" />
+            <circle className="panda-face" cx="25" cy="30.5" r="3" />
+            <circle className="panda-face" cx="39" cy="30.5" r="3" />
             <g className="panda-pupils">
-              <circle className="panda-dark" cx="25" cy="29.5" r="1.3" />
-              <circle className="panda-dark" cx="39" cy="29.5" r="1.3" />
+              <circle className="panda-dark" cx="25" cy="31" r="1.6" />
+              <circle className="panda-dark" cx="39" cy="31" r="1.6" />
+              <circle className="panda-face" cx="25.6" cy="30.4" r="0.55" />
+              <circle className="panda-face" cx="39.6" cy="30.4" r="0.55" />
             </g>
           </g>
-          <ellipse className="panda-dark" cx="32" cy="41" rx="3" ry="2.2" />
+          <ellipse className="panda-dark" cx="32" cy="40.5" rx="2" ry="1.5" />
           <path
             className="panda-mouth"
-            d="M32 43.4 Q32 46.2 28.2 46.2 M32 43.4 Q32 46.2 35.8 46.2"
+            d="M28.5 44.5 Q32 47 35.5 44.5"
             fill="none"
-            strokeWidth="1.4"
+            strokeWidth="1.3"
             strokeLinecap="round"
           />
         </g>
