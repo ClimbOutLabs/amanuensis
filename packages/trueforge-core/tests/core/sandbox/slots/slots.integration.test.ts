@@ -151,6 +151,58 @@ describe('sandbox slots (live agents)', () => {
     expect(tools.success && tools.response.exitCode).toBe(0);
   });
 
+  test('a fork bomb is stopped by the process cap and the slot keeps working', async () => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const runs = service();
+    const bomb = await runs.runCode(
+      {
+        language: 'python',
+        code: [
+          'import os, time',
+          'n = 0',
+          'try:',
+          '    while n < 5000:',
+          '        if os.fork() == 0:',
+          '            time.sleep(30); os._exit(0)',
+          '        n += 1',
+          'except OSError as error:',
+          "    print('stopped', type(error).__name__)",
+        ].join('\n'),
+        timeout_seconds: 30,
+      },
+      undefined,
+    );
+    expect(bomb).toMatchObject({ status: 'ok', exit_code: 0 });
+    expect(bomb.stdout).toContain('stopped BlockingIOError');
+    expect(await runs.runCode({ language: 'python', code: "print('still fine')" }, undefined)).toMatchObject({
+      status: 'ok',
+      stdout: expect.stringContaining('still fine'),
+    });
+  });
+
+  test('environment names outside the allowlist are refused, and listed ones reach the command', async () => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const provider = new SlotSandboxProvider({
+      socketPaths: socketPaths(),
+      defaultExecTimeoutSeconds: 30,
+      treeDiskMb: 100,
+      fileMaxBytesForDownload: 1024 * 1024,
+      logger: makeSilentLogger(),
+      sleepMs: undefined,
+      gitBridge: undefined,
+    });
+    const { sandboxId } = await provider.createSandbox();
+    const refused = await provider.exec({ sandboxId, command: 'env', env: { LD_PRELOAD: '/x.so' } });
+    expect(refused.success).toBe(false);
+    expect(!refused.success && refused.error).toContain('env names are not allowed: LD_PRELOAD');
+    const allowed = await provider.exec({ sandboxId, command: 'echo $NODE_ENV', env: { NODE_ENV: 'test' } });
+    expect(allowed).toEqual({ success: true, response: { exitCode: 0, result: 'test\n' } });
+  });
+
   test('the Sandbox tools run on slots: exec keeps files, run_code returns output, no provider is needed', async () => {
     if (SLOTS_DIR === undefined) {
       return;

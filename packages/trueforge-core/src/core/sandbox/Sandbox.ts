@@ -844,9 +844,10 @@ function injectMCPClientEnv(params: {
       // W3C trace context captured per-exec so each Code Mode request carries the originating
       // Sandbox: exec span as parent.
       ...injectTraceContextEnv(),
+      // Approvals are always enabled: destructive tools cannot run in code mode. The client
+      // defaults to enabled, so a sandbox without a Code Mode bridge needs no variable.
+      TFY_ENABLE_AGENT_APPROVALS: 'true',
     }),
-    // Approvals are always enabled: destructive tools cannot run in code mode.
-    TFY_ENABLE_AGENT_APPROVALS: 'true',
   };
 }
 
