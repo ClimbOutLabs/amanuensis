@@ -67,7 +67,10 @@ export const CHART_CHROME_FALLBACKS = {
 } as const;
 
 /** Fallback event-type colors for the session timeline, matching the pre-theme registry. */
-export const TIMELINE_EVENT_FALLBACKS: Record<string, { color: string; darkColor?: string }> = {
+export const TIMELINE_EVENT_FALLBACKS: Record<
+  'system' | 'user' | 'model' | 'tool_call' | 'approval' | 'sub_agent' | 'waiting_on_human' | 'error',
+  { color: string; darkColor?: string }
+> = {
   system: { color: '#94a3b8' },
   user: { color: '#34d399' },
   model: { color: '#3b82f6', darkColor: '#6366f1' },
