@@ -24,6 +24,7 @@ import (
 const (
 	agentVersion = "0.1.0"
 	socketPath   = "/run/aman/agent.sock"
+	volumeDir    = "/workspace"
 	leaseDir     = "/workspace/.leases"
 	treeDir      = "/workspace/sessions"
 	rootFS       = "/rootfs"
@@ -101,12 +102,13 @@ func run() error {
 	}
 
 	srv := &api.Server{
-		Attestor: collector,
-		Runner:   runner,
-		LeaseDir: leaseDir,
-		TreeDir:  treeDir,
-		RootFS:   rootFS,
-		OOMKills: api.CgroupOOMKills(cgroupRoot),
+		Attestor:  collector,
+		Runner:    runner,
+		LeaseDir:  leaseDir,
+		VolumeDir: volumeDir,
+		TreeDir:   treeDir,
+		RootFS:    rootFS,
+		OOMKills:  api.CgroupOOMKills(cgroupRoot),
 	}
 
 	_ = os.Remove(socketPath)

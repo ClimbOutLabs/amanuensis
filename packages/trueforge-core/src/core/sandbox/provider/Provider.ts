@@ -431,6 +431,11 @@ export interface SandboxProvider {
   /** Stable provider kind used in fancy sandbox ids and carry-forward (plain string). */
   readonly type: string;
   /**
+   * False when the provider offers no Code Mode bridge: the agent then keeps its connector tools as
+   * ordinary tools and `createCodeModeTransport` is never called. Absent means supported.
+   */
+  readonly supportsCodeMode?: boolean | undefined;
+  /**
    * Ensures the release image is being built into the provider's backing store and
    * returns its current status. Idempotent: an already-built image reports `ready`;
    * a fresh build starts in the background and reports `pending`.

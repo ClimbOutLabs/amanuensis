@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -77,6 +78,8 @@ type Collector struct {
 	PID         int
 	// Runsc returns the runtime version string.
 	Runsc func() (string, error)
+	// RootFlags returns the statfs flags of the root filesystem; nil reads them from the kernel.
+	RootFlags func() (int64, error)
 	// Canary starts a real guest running a trivial program.
 	Canary func() error
 	// CanaryEvery bounds how often the canary runs; zero runs it every time.
@@ -200,14 +203,37 @@ func (c *Collector) checkField(name, status string, err error, key, want string)
 	return pass(name, fmt.Sprintf("%s %s", key, got))
 }
 
+// stRdonly is ST_RDONLY, the statfs flag of a read-only mount.
+const stRdonly = 1
+
+// checkReadOnlyRoot reads the mount flag of the root filesystem; a write attempt alone proves nothing, since
+// the slot user cannot write to a root-owned directory even on a writable mount.
 func (c *Collector) checkReadOnlyRoot() Check {
+	flags, err := c.rootFlags()
+	if err != nil {
+		return fail(CheckReadOnlyRoot, "cannot read the root filesystem flags: "+err.Error())
+	}
+	if flags&stRdonly == 0 {
+		return fail(CheckReadOnlyRoot, "the root filesystem is mounted writable")
+	}
 	f, err := os.OpenFile(c.RootProbe, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err == nil {
 		f.Close()
 		_ = os.Remove(c.RootProbe)
-		return fail(CheckReadOnlyRoot, "the root filesystem is writable")
+		return fail(CheckReadOnlyRoot, "the root filesystem is mounted read-only but accepted a write")
 	}
-	return pass(CheckReadOnlyRoot, "root filesystem refuses writes")
+	return pass(CheckReadOnlyRoot, "root filesystem is a read-only mount")
+}
+
+func (c *Collector) rootFlags() (int64, error) {
+	if c.RootFlags != nil {
+		return c.RootFlags()
+	}
+	var st syscall.Statfs_t
+	if err := syscall.Statfs("/", &st); err != nil {
+		return 0, err
+	}
+	return int64(st.Flags), nil
 }
 
 func (c *Collector) checkNetwork() Check {
@@ -305,25 +331,35 @@ func (c *Collector) checkAppArmor() (string, Check) {
 	return current, pass(CheckAppArmor, current)
 }
 
+// checkProcFS requires the real /proc/fs to be a read-only mount of its own, which the container runtime
+// sets up. AppArmor lets runsc write below /proc/fs inside its private namespace, so the mount is what
+// keeps the real directory from being written, and it must be present, not merely absent of writes.
 func (c *Collector) checkProcFS() Check {
-	dir := filepath.Join(c.Proc, "fs", ".aman-probe")
-	if err := os.Mkdir(dir, 0o700); err == nil {
-		_ = os.Remove(dir)
-		return fail(CheckProcFS, "the real /proc/fs accepts writes")
-	}
 	mi, err := os.ReadFile(filepath.Join(c.Proc, "self", "mountinfo"))
 	if err != nil {
 		return fail(CheckProcFS, "cannot read mountinfo")
 	}
+	mountPoint := filepath.Join(c.Proc, "fs")
+	found := false
 	for _, line := range strings.Split(string(mi), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) > 5 && fields[4] == filepath.Join(c.Proc, "fs") {
+		if len(fields) > 5 && fields[4] == mountPoint {
+			found = true
 			if !strings.Contains(","+fields[5]+",", ",ro,") {
 				return fail(CheckProcFS, "/proc/fs is mounted writable")
 			}
 		}
 	}
-	return pass(CheckProcFS, "/proc/fs refuses writes")
+	if !found {
+		return fail(CheckProcFS, "/proc/fs is not a read-only mount of its own")
+	}
+	// A name the AppArmor profile allows, so only the mount can be what refuses it.
+	probe := filepath.Join(mountPoint, "root")
+	if err := os.Mkdir(probe, 0o700); err == nil {
+		_ = os.Remove(probe)
+		return fail(CheckProcFS, "the real /proc/fs accepted a write")
+	}
+	return pass(CheckProcFS, "/proc/fs is a read-only mount and refuses writes")
 }
 
 func (c *Collector) checkRunsc() (string, Check) {

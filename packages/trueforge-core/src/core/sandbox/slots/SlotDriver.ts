@@ -225,6 +225,12 @@ export class SlotDriver implements IsolationDriver {
         this.downUntil[index] = this.now() + DOWN_FOR_MS;
       } else if (result.error.kind === 'agent' && result.error.code === 'busy') {
         continue;
+      } else if (result.error.kind === 'agent' && result.error.code === 'storage_full') {
+        return this.failure({
+          terminatedBy: 'internal',
+          message:
+            'The sandbox storage is almost full, so the code was not run. Free some disk space on this machine, then try again.',
+        });
       } else if (result.error.kind === 'agent' && result.error.code === 'isolation_refused') {
         refusal = result.error.message;
         this.downUntil[index] = this.now() + DOWN_FOR_MS;

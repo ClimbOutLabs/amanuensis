@@ -174,20 +174,25 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		Tmpfs:  []guest.Tmpfs{{Dest: "/tmp", SizeMB: guestTmpMB}},
 	}
 	limit := int64(req.DiskMB) << 20
+	spec.MaxFileBytes = limit
+	// A tree left over its limit by an earlier overshoot is trimmed before anything new runs in it.
+	lease.Reclaim(root, limit)
+	watch, err := newDiskWatch(s.VolumeDir, s.MinFreeBytes, limit, root)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
 	started := time.Now()
 	oomBefore := s.OOMKills()
 	res := s.Runner.Run(r.Context(), spec, guest.Options{
-		Timeout:     time.Duration(req.TimeoutMS) * time.Millisecond,
-		StreamCap:   StreamCapBytes,
-		MergeStderr: true,
-		Guard: func() string {
-			used, entries := lease.Usage(root)
-			if used > limit || entries > lease.MaxTreeEntries {
-				return TermDiskExceeded
-			}
-			return ""
-		},
+		Timeout:       time.Duration(req.TimeoutMS) * time.Millisecond,
+		StreamCap:     StreamCapBytes,
+		MergeStderr:   true,
+		Guard:         watch.guard,
+		GuardInterval: guardIntervalMS * time.Millisecond,
 	})
+	// Whatever a fast writer got in before the kill is removed, largest files first, so the overshoot never stays.
+	lease.Reclaim(root, limit)
 	writeJSON(w, http.StatusOK, execResponse{
 		ExitCode:      res.ExitCode,
 		Output:        string(res.Stdout),

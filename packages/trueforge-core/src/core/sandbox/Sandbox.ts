@@ -2712,7 +2712,7 @@ export class Sandbox extends LocalToolMCP {
   }
 
   configureCodeMode(servers: readonly IToolSet[]): void {
-    if (!servers.length) {
+    if (!servers.length || this.provider.supportsCodeMode === false) {
       return;
     }
     if (this.codeModeDispatcher !== undefined || this.codeModeTransport !== undefined) {

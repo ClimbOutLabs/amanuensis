@@ -15,7 +15,7 @@ function execResponse(overrides: Record<string, unknown> = {}): Record<string, u
 
 const healthy: FakeHandler = request =>
   request.path === '/v1/health'
-    ? { status: 200, body: { busy: false, attestation: attestation() } }
+    ? { status: 200, body: { busy: false, sessions: 0, attestation: attestation() } }
     : { status: 200, body: execResponse() };
 
 describe('SlotSandboxProvider', () => {
@@ -42,10 +42,41 @@ describe('SlotSandboxProvider', () => {
     };
   }
 
-  test('createSandbox pins the sandbox to the first slot that attests', async () => {
+  test('createSandbox places a chat on the slot with the fewest chats, and spreads them', async () => {
+    const withSessions =
+      (sessions: number): FakeHandler =>
+      () => ({
+        status: 200,
+        body: { busy: false, sessions, attestation: attestation() },
+      });
+    const { provider } = await providerFor([withSessions(3), withSessions(0), withSessions(5)]);
+    expect((await provider.createSandbox()).sandboxId).toMatch(/^s2-/);
+
+    const level = await providerFor([withSessions(1), withSessions(1), withSessions(1), withSessions(1)]);
+    const picked = new Set<string>();
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      picked.add((await level.provider.createSandbox()).sandboxId.slice(0, 2));
+    }
+    expect(picked.size).toBeGreaterThan(1);
+  });
+
+  test('a slot that is busy with a long command does not stop other slots from taking new chats', async () => {
+    const busySlot: FakeHandler = () => ({
+      status: 200,
+      body: { busy: true, sessions: 0, attestation: attestation() },
+    });
+    const { provider } = await providerFor([
+      busySlot,
+      () => ({ status: 200, body: { busy: false, sessions: 4, attestation: attestation() } }),
+    ]);
+    // Both are placeable: busy is about the current call, load is about chats.
+    expect((await provider.createSandbox()).sandboxId).toMatch(/^s1-/);
+  });
+
+  test('createSandbox skips a slot that fails its checks', async () => {
     const refusing: FakeHandler = () => ({
       status: 200,
-      body: { busy: false, attestation: attestation({ failing: ['seccomp'] }) },
+      body: { busy: false, sessions: 0, attestation: attestation({ failing: ['seccomp'] }) },
     });
     const { provider } = await providerFor([refusing, healthy]);
     const { sandboxId } = await provider.createSandbox();

@@ -17,7 +17,10 @@ describe('SlotClient', () => {
   }
 
   test('health parses a valid attestation', async () => {
-    const client = await clientFor(() => ({ status: 200, body: { busy: false, attestation: attestation() } }));
+    const client = await clientFor(() => ({
+      status: 200,
+      body: { busy: false, sessions: 0, attestation: attestation() },
+    }));
     const result = await client.health({ signal: undefined, timeoutMs: 2000 });
     expect(result.ok).toBe(true);
     expect(result.ok && result.value.attestation.ok).toBe(true);
@@ -69,7 +72,7 @@ describe('SlotClient', () => {
   test('an aborted call reports aborted', async () => {
     const client = await clientFor(() => ({
       status: 200,
-      body: { busy: false, attestation: attestation() },
+      body: { busy: false, sessions: 0, attestation: attestation() },
       delayMs: 2000,
     }));
     const controller = new AbortController();
@@ -82,7 +85,7 @@ describe('SlotClient', () => {
   test('a slow agent hits the health timeout', async () => {
     const client = await clientFor(() => ({
       status: 200,
-      body: { busy: false, attestation: attestation() },
+      body: { busy: false, sessions: 0, attestation: attestation() },
       delayMs: 1500,
     }));
     const result = await client.health({ signal: undefined, timeoutMs: 100 });

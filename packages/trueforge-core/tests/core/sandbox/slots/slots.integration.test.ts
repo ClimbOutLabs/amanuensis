@@ -202,4 +202,41 @@ describe('sandbox slots (live agents)', () => {
     ).toContain('remembered-dir');
     expect(await call(SANDBOX_RUN_CODE_TOOL_NAME, { language: 'python', code: 'print(6 * 7)' })).toContain('42');
   });
+
+  test('a guest cannot push the workspace volume past its quota, even through deleted open files', async () => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const provider = new SlotSandboxProvider({
+      socketPaths: socketPaths(),
+      defaultExecTimeoutSeconds: 60,
+      treeDiskMb: 64,
+      fileMaxBytesForDownload: 1024 * 1024,
+      logger: makeSilentLogger(),
+      sleepMs: undefined,
+    });
+    const { sandboxId } = await provider.createSandbox();
+    // Writes to many files that are deleted while still open, so no directory walk can see them.
+    const attack = [
+      'import os',
+      'fds = []',
+      'for i in range(200):',
+      '    fd = os.open("/workspace/f%d" % i, os.O_CREAT | os.O_WRONLY)',
+      '    os.unlink("/workspace/f%d" % i)',
+      '    fds.append(fd)',
+      '    try:',
+      '        for _ in range(60):',
+      '            os.write(fd, b"x" * (1 << 20))',
+      '    except OSError:',
+      '        pass',
+      'print("finished")',
+    ].join('\n');
+    await provider.uploadFile({ sandboxId, remotePath: '/workspace/attack.py', content: Buffer.from(attack) });
+    const result = await provider.exec({ sandboxId, command: 'python3 /workspace/attack.py', timeoutSeconds: 60 });
+    expect(result.success).toBe(false);
+    expect(!result.success && result.error).toContain('disk limit');
+
+    const after = await provider.exec({ sandboxId, command: 'du -sk /workspace | cut -f1' });
+    expect(after.success && Number.parseInt(after.response.result, 10)).toBeLessThan(64 * 1024 + 1024);
+  });
 });

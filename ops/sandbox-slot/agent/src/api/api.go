@@ -20,6 +20,7 @@ import (
 	"aman/slotagent/src/attest"
 	"aman/slotagent/src/guest"
 	"aman/slotagent/src/lease"
+	"aman/slotagent/src/tree"
 )
 
 // Limits on a request.
@@ -56,6 +57,7 @@ const (
 	ErrIsolationRefused = "isolation_refused"
 	ErrInternal         = "internal"
 	ErrNotFound         = "not_found"
+	ErrStorageFull      = "storage_full"
 )
 
 // Runner runs one guest; guest.Runner is the real one.
@@ -74,6 +76,10 @@ type Server struct {
 	Runner   Runner
 	// LeaseDir is where run_code leases are created, on the slot volume.
 	LeaseDir string
+	// VolumeDir is the mount point of the slot's workspace volume, whose free space is checked.
+	VolumeDir string
+	// MinFreeBytes is the free space the volume needs for a call to start; zero means 1 GiB.
+	MinFreeBytes int64
 	// TreeDir holds one workspace tree per session, on the slot volume.
 	TreeDir string
 	RootFS  string
@@ -134,7 +140,9 @@ func decodeStrict(r *http.Request, w http.ResponseWriter, dst any) error {
 }
 
 type healthResponse struct {
-	Busy        bool          `json:"busy"`
+	Busy bool `json:"busy"`
+	// Sessions is how many session trees this slot holds, so the server can place new chats on the emptiest slot.
+	Sessions    int           `json:"sessions"`
 	Attestation attest.Report `json:"attestation"`
 }
 
@@ -146,13 +154,13 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
 		s.last = report
 		s.mu.Unlock()
-		writeJSON(w, http.StatusOK, healthResponse{Busy: false, Attestation: report})
+		writeJSON(w, http.StatusOK, healthResponse{Busy: false, Sessions: tree.Count(s.TreeDir), Attestation: report})
 	default:
 		// A lease is running: its own attestation just passed, so report the last one.
 		s.mu.Lock()
 		report := s.last
 		s.mu.Unlock()
-		writeJSON(w, http.StatusOK, healthResponse{Busy: true, Attestation: report})
+		writeJSON(w, http.StatusOK, healthResponse{Busy: true, Sessions: tree.Count(s.TreeDir), Attestation: report})
 	}
 }
 
@@ -312,18 +320,19 @@ func (s *Server) runCode(w http.ResponseWriter, r *http.Request) {
 		Tmpfs: []guest.Tmpfs{{Dest: "/tmp", SizeMB: guestTmpMB}},
 	}
 	limit := int64(req.DiskMB) << 20
+	spec.MaxFileBytes = limit
+	watch, err := newDiskWatch(s.VolumeDir, s.MinFreeBytes, limit, dirs.Scratch, dirs.Egress)
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
 	started := time.Now()
 	oomBefore := s.OOMKills()
 	res := s.Runner.Run(r.Context(), spec, guest.Options{
-		Timeout:   time.Duration(req.TimeoutMS) * time.Millisecond,
-		StreamCap: StreamCapBytes,
-		Guard: func() string {
-			used, entries := lease.Usage(dirs.Scratch, dirs.Egress)
-			if used > limit || entries > lease.MaxTreeEntries {
-				return TermDiskExceeded
-			}
-			return ""
-		},
+		Timeout:       time.Duration(req.TimeoutMS) * time.Millisecond,
+		StreamCap:     StreamCapBytes,
+		Guard:         watch.guard,
+		GuardInterval: guardIntervalMS * time.Millisecond,
 	})
 	oomed := s.OOMKills() > oomBefore
 
@@ -388,4 +397,12 @@ func CgroupOOMKills(cgroupRoot string) func() int64 {
 		}
 		return 0
 	}
+}
+
+func writeStorageError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errStorageFull) {
+		writeError(w, http.StatusInsufficientStorage, ErrStorageFull, err.Error())
+		return
+	}
+	writeError(w, http.StatusInternalServerError, ErrInternal, "the slot storage could not be checked")
 }

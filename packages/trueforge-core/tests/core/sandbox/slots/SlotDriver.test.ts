@@ -95,7 +95,7 @@ describe('SlotDriver', () => {
     };
   }
 
-  const healthy: FakeHandler = () => ({ status: 200, body: { busy: false, attestation: attestation() } });
+  const healthy: FakeHandler = () => ({ status: 200, body: { busy: false, sessions: 0, attestation: attestation() } });
 
   test('ready when one slot attests, even if another is unreachable', async () => {
     const { driver } = await driverFor([healthy]);
@@ -112,7 +112,7 @@ describe('SlotDriver', () => {
   test('every slot failing its checks is isolation_refused and names the cause', async () => {
     const refusing: FakeHandler = () => ({
       status: 200,
-      body: { busy: false, attestation: attestation({ failing: ['apparmor'] }) },
+      body: { busy: false, sessions: 0, attestation: attestation({ failing: ['apparmor'] }) },
     });
     const { driver } = await driverFor([refusing, refusing]);
     const readiness = await driver.ensureReady();

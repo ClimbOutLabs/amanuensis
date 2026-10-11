@@ -37,6 +37,8 @@ type fakeRunner struct {
 	play func(guest.Spec)
 	res  guest.Result
 	hold chan struct{}
+	// guardCause is what the disk guard answered when the fake guest finished writing.
+	guardCause string
 }
 
 func (f *fakeRunner) Run(_ context.Context, spec guest.Spec, opts guest.Options) guest.Result {
@@ -48,6 +50,12 @@ func (f *fakeRunner) Run(_ context.Context, spec guest.Spec, opts guest.Options)
 	}
 	if f.play != nil {
 		f.play(spec)
+	}
+	if opts.Guard != nil {
+		f.guardCause = opts.Guard()
+		if f.guardCause != "" {
+			return guest.Result{Cause: f.guardCause, ExitCode: -1}
+		}
 	}
 	return f.res
 }
@@ -64,12 +72,13 @@ func newEnv(t *testing.T, attestOK bool) *env {
 	tmp := t.TempDir()
 	runner := &fakeRunner{res: guest.Result{Cause: guest.Completed, Stdout: []byte("hi")}}
 	srv := &api.Server{
-		Attestor: fakeAttestor{ok: attestOK},
-		Runner:   runner,
-		LeaseDir: filepath.Join(tmp, "leases"),
-		TreeDir:  filepath.Join(tmp, "sessions"),
-		RootFS:   "/rootfs",
-		OOMKills: func() int64 { return 0 },
+		Attestor:  fakeAttestor{ok: attestOK},
+		Runner:    runner,
+		LeaseDir:  filepath.Join(tmp, "leases"),
+		VolumeDir: tmp,
+		TreeDir:   filepath.Join(tmp, "sessions"),
+		RootFS:    "/rootfs",
+		OOMKills:  func() int64 { return 0 },
 	}
 	return &env{srv: srv, runner: runner, h: srv.Handler(), tmp: tmp}
 }
@@ -117,6 +126,17 @@ func TestHealthReportsAttestation(t *testing.T) {
 	rec := e.do("GET", "/v1/health", nil)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"busy":false`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHealthCountsSessionTrees(t *testing.T) {
+	e := newEnv(t, true)
+	content := base64.StdEncoding.EncodeToString([]byte("x"))
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": runID, "path": "/workspace/a", "content_base64": content, "mode": 0o644})
+	rec := e.do("GET", "/v1/health", nil)
+	if !strings.Contains(rec.Body.String(), `"sessions":2`) {
+		t.Fatalf("%s", rec.Body.String())
 	}
 }
 
@@ -365,5 +385,60 @@ func TestOOMKillsCountOnlyWhenTheCounterRisesAndTheGuestDied(t *testing.T) {
 	rec := e.do("POST", "/v1/run_code", runReq(nil))
 	if !strings.Contains(rec.Body.String(), `"terminated_by":"oom"`) {
 		t.Fatalf("%s", rec.Body.String())
+	}
+}
+
+func TestExecDiskGuardKillsAnOverQuotaGuestAndTheOvershootIsRemoved(t *testing.T) {
+	e := newEnv(t, true)
+	e.runner.play = func(s guest.Spec) {
+		// 3 MiB of real data against a 1 MiB quota, plus a small file that should survive.
+		_ = os.WriteFile(filepath.Join(s.Binds[0].Source, "flood"), bytes.Repeat([]byte{1}, 3<<20), 0o644)
+		_ = os.WriteFile(filepath.Join(s.Binds[0].Source, "keep.txt"), []byte("ok"), 0o644)
+	}
+	rec := e.do("POST", "/v1/exec", execBody(func(m map[string]any) { m["disk_mb"] = 1 }))
+	if !strings.Contains(rec.Body.String(), `"terminated_by":"disk_exceeded"`) {
+		t.Fatalf("%s", rec.Body.String())
+	}
+	tree := filepath.Join(e.srv.TreeDir, sessionID)
+	if _, err := os.Stat(filepath.Join(tree, "flood")); !os.IsNotExist(err) {
+		t.Fatal("the overshoot must be removed, not left on the disk")
+	}
+	if _, err := os.Stat(filepath.Join(tree, "keep.txt")); err != nil {
+		t.Fatal("files within the quota stay")
+	}
+}
+
+func TestRunCodeDiskGuardAndFileSizeCap(t *testing.T) {
+	e := newEnv(t, true)
+	e.runner.play = func(s guest.Spec) {
+		for _, b := range s.Binds {
+			if b.Dest == "/scratch" {
+				_ = os.WriteFile(filepath.Join(b.Source, "flood"), bytes.Repeat([]byte{1}, 3<<20), 0o644)
+			}
+		}
+	}
+	rec := e.do("POST", "/v1/run_code", runReq(func(m map[string]any) { m["disk_mb"] = 1 }))
+	if !strings.Contains(rec.Body.String(), `"terminated_by":"disk_exceeded"`) {
+		t.Fatalf("%s", rec.Body.String())
+	}
+	if e.runner.spec.MaxFileBytes != 1<<20 {
+		t.Fatalf("a single file must be capped at the quota, got %d", e.runner.spec.MaxFileBytes)
+	}
+}
+
+func TestCallsAreRefusedWhenTheVolumeIsAlmostFull(t *testing.T) {
+	e := newEnv(t, true)
+	e.srv.MinFreeBytes = 1 << 60
+	for _, call := range []struct {
+		path string
+		body any
+	}{{"/v1/run_code", runReq(nil)}, {"/v1/exec", execBody(nil)}} {
+		rec := e.do("POST", call.path, call.body)
+		if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+			t.Fatalf("%s: %d %s", call.path, rec.Code, rec.Body.String())
+		}
+	}
+	if e.runner.spec.ID != "" {
+		t.Fatal("no guest may start on a full volume")
 	}
 }

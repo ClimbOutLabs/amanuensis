@@ -186,3 +186,18 @@ func Write(root, guestPath string, content []byte, mode os.FileMode) error {
 	}
 	return nil
 }
+
+// Count returns how many session trees exist under parent.
+func Count(parent string) int {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() && ValidSessionID(e.Name()) {
+			n++
+		}
+	}
+	return n
+}

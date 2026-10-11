@@ -58,9 +58,15 @@ function parseSandboxId(sandboxId: string): { slot: number; sessionId: string } 
   return { slot: Number.parseInt(slot, 10) - 1, sessionId };
 }
 
+const STORAGE_FULL_MESSAGE =
+  'The sandbox storage is almost full, so nothing was run. Free some disk space on this machine, then try again.';
+
 function describeAgentError(error: SlotCallError): string {
   if (error.kind === 'agent' && error.code === 'isolation_refused') {
     return `The sandbox could not prove its safety limits, so nothing was run (${error.message}). Run \`${SLOT_FIX_COMMAND}\`, then try again.`;
+  }
+  if (error.kind === 'agent' && error.code === 'storage_full') {
+    return STORAGE_FULL_MESSAGE;
   }
   if (error.kind === 'unreachable') {
     return `The sandbox slot for this chat is not reachable. Run \`${SLOT_FIX_COMMAND}\`, then try again.`;
@@ -74,6 +80,8 @@ function describeAgentError(error: SlotCallError): string {
  */
 export class SlotSandboxProvider implements SandboxProvider {
   readonly type = 'slots';
+  /** The slots are offline, so sandbox code cannot reach connectors through a bridge. */
+  readonly supportsCodeMode = false;
 
   private readonly clients: SlotClient[];
   private readonly defaultExecTimeoutSeconds: number;
@@ -97,7 +105,7 @@ export class SlotSandboxProvider implements SandboxProvider {
 
   /** Ready when at least one slot proves its isolation; slots are prepared outside the app. */
   async getImageBuildStatus(): Promise<SandboxBuild> {
-    const slot = await this.firstAttestedSlot(undefined);
+    const slot = await this.leastLoadedSlot(undefined);
     return slot.ok
       ? { status: 'ready', reason: null, metadata: null }
       : { status: 'failed', reason: slot.reason, metadata: null };
@@ -105,7 +113,7 @@ export class SlotSandboxProvider implements SandboxProvider {
 
   async createSandbox(params?: SandboxCreateParams): Promise<{ sandboxId: string }> {
     throwIfSignalAborted(params?.signal);
-    const slot = await this.firstAttestedSlot(params?.signal);
+    const slot = await this.leastLoadedSlot(params?.signal);
     if (!slot.ok) {
       throw new Error(slot.reason);
     }
@@ -247,21 +255,38 @@ export class SlotSandboxProvider implements SandboxProvider {
     return { client, sessionId: parsed.sessionId };
   }
 
-  private async firstAttestedSlot(
+  /**
+   * The attested slot holding the fewest chats, so one long command cannot block every chat. The slot is
+   * recorded in the sandbox id, which keeps a chat on the same slot across turns and restarts.
+   */
+  private async leastLoadedSlot(
     signal: AbortSignal | undefined,
   ): Promise<{ ok: true; index: number } | { ok: false; reason: string }> {
+    const probes = await Promise.all(
+      this.clients.map(async (client, index) => ({
+        index,
+        health: await client.health({ signal, timeoutMs: HEALTH_TIMEOUT_MS }),
+      })),
+    );
     const problems: string[] = [];
-    for (const [index, client] of this.clients.entries()) {
-      const health = await client.health({ signal, timeoutMs: HEALTH_TIMEOUT_MS });
+    const usable: { index: number; sessions: number }[] = [];
+    for (const { index, health } of probes) {
       if (!health.ok) {
         problems.push(`slot ${String(index + 1)} is not reachable`);
         continue;
       }
       const problem = attestationProblem(health.value.attestation);
       if (problem === undefined) {
-        return { ok: true, index };
+        usable.push({ index, sessions: health.value.sessions });
+      } else {
+        problems.push(`slot ${String(index + 1)} failed its checks (${problem})`);
       }
-      problems.push(`slot ${String(index + 1)} failed its checks (${problem})`);
+    }
+    const fewest = Math.min(...usable.map(slot => slot.sessions));
+    const emptiest = usable.filter(slot => slot.sessions === fewest);
+    const chosen = emptiest[Math.floor(Math.random() * emptiest.length)];
+    if (chosen !== undefined) {
+      return { ok: true, index: chosen.index };
     }
     return {
       ok: false,

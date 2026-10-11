@@ -33,6 +33,8 @@ type Spec struct {
 	GID    uint32
 	Binds  []Bind
 	Tmpfs  []Tmpfs
+	// MaxFileBytes caps the size of any one file a guest process writes (RLIMIT_FSIZE); zero means no cap.
+	MaxFileBytes int64
 }
 
 type ociUser struct {
@@ -47,14 +49,21 @@ type ociCaps struct {
 	Inheritable []string `json:"inheritable"`
 }
 
+type ociRlimit struct {
+	Type string `json:"type"`
+	Hard uint64 `json:"hard"`
+	Soft uint64 `json:"soft"`
+}
+
 type ociProcess struct {
-	Terminal        bool     `json:"terminal"`
-	User            ociUser  `json:"user"`
-	Args            []string `json:"args"`
-	Env             []string `json:"env"`
-	Cwd             string   `json:"cwd"`
-	NoNewPrivileges bool     `json:"noNewPrivileges"`
-	Capabilities    ociCaps  `json:"capabilities"`
+	Terminal        bool        `json:"terminal"`
+	User            ociUser     `json:"user"`
+	Args            []string    `json:"args"`
+	Env             []string    `json:"env"`
+	Cwd             string      `json:"cwd"`
+	NoNewPrivileges bool        `json:"noNewPrivileges"`
+	Capabilities    ociCaps     `json:"capabilities"`
+	Rlimits         []ociRlimit `json:"rlimits,omitempty"`
 }
 
 type ociRoot struct {
@@ -114,6 +123,10 @@ func BuildConfig(s Spec) ([]byte, error) {
 			Options: []string{"rbind", "nosuid", "nodev", mode},
 		})
 	}
+	var rlimits []ociRlimit
+	if s.MaxFileBytes > 0 {
+		rlimits = append(rlimits, ociRlimit{Type: "RLIMIT_FSIZE", Hard: uint64(s.MaxFileBytes), Soft: uint64(s.MaxFileBytes)})
+	}
 	cfg := ociConfig{
 		OCIVersion: "1.0.2",
 		Process: ociProcess{
@@ -123,6 +136,7 @@ func BuildConfig(s Spec) ([]byte, error) {
 			Cwd:             s.Cwd,
 			NoNewPrivileges: true,
 			Capabilities:    ociCaps{Bounding: []string{}, Effective: []string{}, Permitted: []string{}, Inheritable: []string{}},
+			Rlimits:         rlimits,
 		},
 		Root:     ociRoot{Path: s.RootFS, Readonly: true},
 		Hostname: "sandbox",

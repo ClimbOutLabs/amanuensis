@@ -54,6 +54,7 @@ func (w *world) collector() *attest.Collector {
 		RootProbe:    "/proc/nonexistent/probe",
 		DockerSocks:  []string{filepath.Join(w.root, "docker.sock")},
 		PID:          1,
+		RootFlags:    func() (int64, error) { return 1, nil },
 		Runsc:        func() (string, error) { return "release-test", nil },
 		Canary:       func() error { return nil },
 		Platform:     "systrap",
@@ -104,7 +105,18 @@ func TestEachMissingGuaranteeFailsClosed(t *testing.T) {
 		{"no seccomp", attest.CheckSeccomp, func(w *world, _ *attest.Collector) {
 			w.write("proc/self/status", strings.Replace(goodStatus, "Seccomp:\t2", "Seccomp:\t0", 1))
 		}},
-		{"writable root", attest.CheckReadOnlyRoot, func(w *world, c *attest.Collector) { c.RootProbe = filepath.Join(w.root, "rw-probe") }},
+		{"root mounted writable", attest.CheckReadOnlyRoot, func(_ *world, c *attest.Collector) {
+			c.RootFlags = func() (int64, error) { return 0, nil }
+		}},
+		{"root flags unreadable", attest.CheckReadOnlyRoot, func(_ *world, c *attest.Collector) {
+			c.RootFlags = func() (int64, error) { return 0, os.ErrPermission }
+		}},
+		{"read-only root that accepts a write", attest.CheckReadOnlyRoot, func(w *world, c *attest.Collector) {
+			c.RootProbe = filepath.Join(w.root, "rw-probe")
+		}},
+		{"no /proc/fs mount at all", attest.CheckProcFS, func(w *world, _ *attest.Collector) {
+			w.write("proc/self/mountinfo", "10 9 0:5 / /proc/other ro - proc proc rw\n")
+		}},
 		{"second interface", attest.CheckNetwork, func(w *world, _ *attest.Collector) {
 			w.write("proc/net/dev", "Inter-|   Receive\n face |bytes\n    lo: 0 0\n  eth0: 1 1\n")
 		}},

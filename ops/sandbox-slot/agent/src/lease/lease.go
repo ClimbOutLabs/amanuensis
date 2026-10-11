@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 )
 
 // Transport bounds. The server applies the model-facing policy again; these protect the slot.
@@ -125,7 +126,9 @@ func DecodeBase64(s string) ([]byte, error) {
 	return b, nil
 }
 
-// Usage returns the apparent bytes and the entry count under dirs. Symlinks are counted, never followed.
+// Usage returns the disk bytes actually allocated and the entry count under dirs. Allocated blocks are
+// counted, not file sizes, so a sparse file is not undercounted by its holes and a write that is still
+// being flushed is not missed. Symlinks are counted, never followed.
 func Usage(dirs ...string) (bytes int64, entries int) {
 	for _, dir := range dirs {
 		_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -138,13 +141,70 @@ func Usage(dirs ...string) (bytes int64, entries int) {
 			}
 			if d.Type().IsRegular() {
 				if info, e := d.Info(); e == nil {
-					bytes += info.Size()
+					bytes += allocatedBytes(info)
 				}
 			}
 			return nil
 		})
 	}
 	return bytes, entries
+}
+
+// allocatedBytes is the space a file occupies on disk, falling back to its size where the platform does
+// not report blocks.
+func allocatedBytes(info fs.FileInfo) int64 {
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		return st.Blocks * 512
+	}
+	return info.Size()
+}
+
+// FilesystemUsedBytes returns the bytes in use on the filesystem holding path, and how many are free.
+// It sees space held by files that were deleted while a guest still has them open, which a walk cannot.
+func FilesystemUsedBytes(path string) (used, free int64, err error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return 0, 0, err
+	}
+	block := int64(st.Bsize)
+	return (int64(st.Blocks) - int64(st.Bfree)) * block, int64(st.Bavail) * block, nil
+}
+
+// Reclaim deletes regular files, largest first, until the tree is within limit bytes. It runs only when
+// no guest is alive, and returns how many files and bytes it removed.
+func Reclaim(root string, limit int64) (files int, bytes int64) {
+	type entry struct {
+		path string
+		size int64
+	}
+	var all []entry
+	var total int64
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return nil
+		}
+		if info, e := d.Info(); e == nil {
+			size := allocatedBytes(info)
+			total += size
+			all = append(all, entry{path, size})
+		}
+		return nil
+	})
+	if total <= limit {
+		return 0, 0
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].size > all[j].size })
+	for _, e := range all {
+		if total <= limit {
+			break
+		}
+		if os.Remove(e.path) == nil {
+			total -= e.size
+			files++
+			bytes += e.size
+		}
+	}
+	return files, bytes
 }
 
 // Output is one collected result file.

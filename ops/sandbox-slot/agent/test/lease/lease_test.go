@@ -92,14 +92,56 @@ func TestCollectSkipsSymlinksDirsAndReportsWarnings(t *testing.T) {
 	}
 }
 
-func TestUsageCountsApparentBytesAndEntries(t *testing.T) {
+func TestUsageCountsAllocatedBlocksNotFileSize(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a"), make([]byte, 1000), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "a"), make([]byte, 100_000), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	bytes, entries := lease.Usage(dir)
-	if bytes != 1000 || entries != 2 {
+	if bytes < 100_000 || bytes > 110_000 || entries != 2 {
 		t.Fatalf("got %d bytes %d entries", bytes, entries)
+	}
+	// A sparse file with a huge size but no data takes (almost) no space and must not count as full.
+	sparse, err := os.Create(filepath.Join(dir, "sparse"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sparse.Truncate(1 << 30); err != nil {
+		t.Fatal(err)
+	}
+	sparse.Close()
+	after, _ := lease.Usage(dir)
+	if after-bytes > 1<<20 {
+		t.Fatalf("a sparse file counted as %d bytes", after-bytes)
+	}
+}
+
+func TestReclaimRemovesTheLargestFilesUntilWithinTheLimit(t *testing.T) {
+	dir := t.TempDir()
+	for name, size := range map[string]int{"big": 400_000, "mid": 200_000, "small": 20_000} {
+		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, freed := lease.Reclaim(dir, 250_000)
+	if files != 1 || freed < 400_000 {
+		t.Fatalf("removed %d files, %d bytes", files, freed)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "big")); !os.IsNotExist(err) {
+		t.Fatal("the largest file should go first")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "small")); err != nil {
+		t.Fatal("small files within the limit must stay")
+	}
+	if files, _ := lease.Reclaim(dir, 1<<30); files != 0 {
+		t.Fatal("nothing to reclaim under the limit")
+	}
+}
+
+func TestFilesystemUsedBytesReportsUsedAndFree(t *testing.T) {
+	used, free, err := lease.FilesystemUsedBytes(t.TempDir())
+	if err != nil || used <= 0 || free <= 0 {
+		t.Fatalf("used=%d free=%d err=%v", used, free, err)
 	}
 }
 

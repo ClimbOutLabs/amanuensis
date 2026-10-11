@@ -48,6 +48,8 @@ export type SlotAttestation = z.infer<typeof SlotAttestationSchema>;
 
 export const SlotHealthResponseSchema = z.object({
   busy: z.boolean(),
+  /** Session trees on the slot, used to place a new chat on the emptiest one. */
+  sessions: z.number().int().nonnegative(),
   attestation: SlotAttestationSchema,
 });
 export type SlotHealthResponse = z.infer<typeof SlotHealthResponseSchema>;
@@ -110,7 +112,14 @@ export const SlotFsReadResponseSchema = z.object({
 });
 export type SlotFsReadResponse = z.infer<typeof SlotFsReadResponseSchema>;
 
-export const SLOT_ERROR_CODES = ['invalid_request', 'busy', 'isolation_refused', 'internal', 'not_found'] as const;
+export const SLOT_ERROR_CODES = [
+  'invalid_request',
+  'busy',
+  'isolation_refused',
+  'internal',
+  'not_found',
+  'storage_full',
+] as const;
 export const SlotErrorBodySchema = z.object({
   error: z.object({ code: z.enum(SLOT_ERROR_CODES), message: z.string() }),
 });
