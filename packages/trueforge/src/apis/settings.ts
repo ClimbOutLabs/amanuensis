@@ -79,7 +79,7 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
   router.route(
     '/run-code',
     createRunCodeRouter({
-      imageConfigured: () => configuration.SANDBOX_IMAGE.trim() !== '',
+      imageConfigured: () => configuration.SANDBOX_BACKEND === 'slots' || configuration.SANDBOX_IMAGE.trim() !== '',
       ensureReady: signal => getSharedRunCodeService(deps.logger).ensureReady(signal),
     }),
   );

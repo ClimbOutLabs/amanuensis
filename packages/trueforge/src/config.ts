@@ -282,6 +282,23 @@ function parseIsolationDriver(options: {
   throw new Error(`${options.envKey} must be one of docker, firecracker; got ${JSON.stringify(options.raw)}`);
 }
 
+/** Where `run_code` and the shell tools execute: Docker containers, or the gVisor sandbox slots. */
+export type SandboxBackend = 'docker' | 'slots';
+
+function parseSandboxBackend(options: { envKey: string; raw: string | undefined }): SandboxBackend {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return 'docker';
+  }
+  const value = options.raw.trim().toLowerCase();
+  if (value === 'docker' || value === 'slots') {
+    return value;
+  }
+  throw new Error(`${options.envKey} must be one of docker, slots; got ${JSON.stringify(options.raw)}`);
+}
+
+/** Most slot services the compose files define. */
+export const SANDBOX_MAX_SLOTS = 4;
+
 /** Which long-term memory backend Aman uses. */
 export type MemoryBackend = 'markdown' | 'hindsight';
 
@@ -713,6 +730,20 @@ export interface SharedServerConfiguration {
    * server start; changing it requires a config change and restart.
    */
   SANDBOX_ISOLATION_DRIVER: SandboxIsolationDriver;
+  /**
+   * Where sandboxed code runs. Env: `SANDBOX_BACKEND`. Default 'docker'; 'slots' sends run_code and the
+   * shell and file tools to the gVisor sandbox slots, and then ignores SANDBOX_IMAGE and the cosign key.
+   */
+  SANDBOX_BACKEND: SandboxBackend;
+  /** Number of slot agents to use, 1 to 4. Env: `SANDBOX_SLOTS`. Default 4. */
+  SANDBOX_SLOTS: number;
+  /**
+   * Directory holding one control directory per slot (`<dir>/<n>/agent.sock`). Env: `SANDBOX_SLOTS_DIR`.
+   * Required when SANDBOX_BACKEND=slots.
+   */
+  SANDBOX_SLOTS_DIR: string;
+  /** Disk quota of one chat's sandbox workspace on a slot, MiB. Env: `SANDBOX_SESSION_DISK_MB`. Default 2048. */
+  SANDBOX_SESSION_DISK_MB: number;
   /**
    * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
    * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
@@ -1366,6 +1397,18 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_ISOLATION_DRIVER'),
     defaultValue: 'docker',
   }),
+  SANDBOX_BACKEND: parseSandboxBackend({ envKey: 'SANDBOX_BACKEND', raw: getEnv('SANDBOX_BACKEND') }),
+  SANDBOX_SLOTS: parsePositiveInt({
+    envKey: 'SANDBOX_SLOTS',
+    raw: getEnv('SANDBOX_SLOTS'),
+    defaultValue: SANDBOX_MAX_SLOTS,
+  }),
+  SANDBOX_SLOTS_DIR: getEnv('SANDBOX_SLOTS_DIR', { defaultValue: '' }) ?? '',
+  SANDBOX_SESSION_DISK_MB: parsePositiveInt({
+    envKey: 'SANDBOX_SESSION_DISK_MB',
+    raw: getEnv('SANDBOX_SESSION_DISK_MB'),
+    defaultValue: 2048,
+  }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
@@ -1990,7 +2033,15 @@ if (isTrueFoundryModeEnabled(configuration)) {
 // for existing standalone installs) leaves run_code dormant — Docker is
 // required only when run_code executes (plan §2.8), not at boot — while a
 // configured image gets the full fail-closed validation.
-const runCodeConfigured = configuration.SANDBOX_IMAGE.trim() !== '';
+const runCodeConfigured = configuration.SANDBOX_BACKEND === 'docker' && configuration.SANDBOX_IMAGE.trim() !== '';
+if (configuration.SANDBOX_BACKEND === 'slots') {
+  if (configuration.SANDBOX_SLOTS_DIR.trim() === '') {
+    throw new Error('SANDBOX_SLOTS_DIR is required when SANDBOX_BACKEND=slots: it holds the slot control directories.');
+  }
+  if (configuration.SANDBOX_SLOTS > SANDBOX_MAX_SLOTS) {
+    throw new Error(`SANDBOX_SLOTS must be at most ${String(SANDBOX_MAX_SLOTS)}.`);
+  }
+}
 validateRunCodeStartupConfig({
   networkEgress: configuration.SANDBOX_NETWORK_EGRESS,
   isolationDriver: configuration.SANDBOX_ISOLATION_DRIVER,

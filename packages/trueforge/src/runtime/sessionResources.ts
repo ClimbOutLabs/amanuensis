@@ -6,6 +6,7 @@ import {
   RunCodeService,
   Sandbox,
   SkillMounter,
+  SlotDriver,
   type AgentTracing,
   type BoundRepository,
   type GitSkill,
@@ -34,6 +35,7 @@ import { isFirstPartyOrigin } from '../mcp/firstParty';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { toSandboxProviderFromRecord } from '../sandbox/providerUtils';
+import { createSlotSandboxProvider, slotsBackendEnabled, slotSocketPaths } from '../sandbox/slotBackend';
 import { resolveConfiguredMcpRequestHeaders, type McpServerManifest } from '../schemas/mcpServer';
 import type { ModelProperties, ModelProviderStreamTimeout } from '../schemas/modelProvider';
 import { parseGitSkill } from '../schemas/skill';
@@ -587,6 +589,9 @@ export async function resolveSandboxProvider({
   logger: Logger;
   sessionId: string;
 }): Promise<SandboxProvider | undefined> {
+  if (slotsBackendEnabled()) {
+    return createSlotSandboxProvider({ logger });
+  }
   const record = await store.getSandboxProvider(tenant_id);
   if (record !== undefined) {
     return toSandboxProviderFromRecord({ record, tenant_id, logger });
@@ -631,21 +636,23 @@ export function getSharedRunCodeService(logger: Logger): RunCodeService {
       );
     }
     const runCodeLogger = logger.child({ module: 'run-code' });
-    const driver = new DockerDriver(
-      {
-        image: configuration.SANDBOX_IMAGE,
-        cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
-        stateDir: configuration.SANDBOX_STATE_DIR,
-        dockerBinary: undefined,
-        cosignBinary: undefined,
-        dockerSocketPath: undefined,
-        dataDir: configuration.SANDBOX_RUNS_DIR,
-        commandTimeoutMs: undefined,
-        createTimeoutMs: undefined,
-        logger: runCodeLogger,
-      },
-      undefined,
-    );
+    const driver = slotsBackendEnabled()
+      ? new SlotDriver({ socketPaths: slotSocketPaths(), logger: runCodeLogger, now: undefined, sleepMs: undefined })
+      : new DockerDriver(
+          {
+            image: configuration.SANDBOX_IMAGE,
+            cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
+            stateDir: configuration.SANDBOX_STATE_DIR,
+            dockerBinary: undefined,
+            cosignBinary: undefined,
+            dockerSocketPath: undefined,
+            dataDir: configuration.SANDBOX_RUNS_DIR,
+            commandTimeoutMs: undefined,
+            createTimeoutMs: undefined,
+            logger: runCodeLogger,
+          },
+          undefined,
+        );
     sharedRunCodeService = new RunCodeService({
       driver,
       dataDir: configuration.SANDBOX_RUNS_DIR,
@@ -824,7 +831,7 @@ export async function validateAgentSpec({
   const hasSkills = requestedSkills.length > 0;
   if (wantsSandbox || hasSkills) {
     const record = await sandboxProviderStore.getSandboxProvider(tenant_id);
-    if (record === undefined && !isLocalSandboxFallbackEnabled()) {
+    if (!slotsBackendEnabled() && record === undefined && !isLocalSandboxFallbackEnabled()) {
       throw new HTTPException(422, {
         message: hasSkills
           ? 'skills require a sandbox provider — configure via PUT /settings/sandbox-providers'

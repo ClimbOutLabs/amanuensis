@@ -352,6 +352,9 @@ export {
 export { SANDBOX_IMAGE_URI } from './sandbox/sandboxImage';
 export { existingSandboxIdForProvider, formatSandboxId, parseSandboxId, rawSandboxId } from './sandbox/sandboxRef';
 export type { SandboxRefParts } from './sandbox/sandboxRef';
+export { SLOT_AGENT_SOCKET_NAME } from './sandbox/slots/slotContract';
+export { SLOT_FIX_COMMAND, SlotDriver } from './sandbox/slots/SlotDriver';
+export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';
 export type { StructuredEditPathRequest, StructuredEditPathResolution } from './sandbox/structuredEditPaths';
 
