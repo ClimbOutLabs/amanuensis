@@ -7,6 +7,10 @@
  * invocation counters — the counters are the only evidence that a call actually reached
  * the mock server, independent of what the UI would render.
  *
+ * The connector under test is registered through the memory-provider setup, so the server
+ * marks it first-party: that is what lets its annotated read-only retrieval tools run
+ * without an approval pause.
+ *
  * Five axes, from the dossier's acceptance list:
  *   1. SUCCESS       — an annotated retrieval tool runs without an approval pause.
  *   2. ABSTENTION    — an empty result arrives as an honest, non-error empty.
@@ -31,7 +35,12 @@ import { TENANT_ID } from '../../../src/apis/sessions';
 import { ListSessionEventsResponseSchema, TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetMcpServerResponseSchema } from '../../../src/schemas/mcpServer';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
-import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import {
+  INERT_MEMORY_SERVER_NAME,
+  MODEL_FQN,
+  startApprovalTestServer,
+  type ApprovalTestServer,
+} from '../../fixtures/approvalTestServer';
 import {
   EMPTY_MEMORY_RESULT,
   INERT_ASK_MEMORY_TOOL,
@@ -39,7 +48,7 @@ import {
   INERT_SERVER_NAME,
   populatedMemoryResult,
 } from '../../fixtures/inertMcpServer';
-import { RUN_DIRECTIVE_PREFIX } from '../../fixtures/scriptedModelServer';
+import { RUN_DIRECTIVE_PREFIX, SERVER_DIRECTIVE_PREFIX } from '../../fixtures/scriptedModelServer';
 
 const TURN_TIMEOUT_MS = 60_000;
 
@@ -105,18 +114,27 @@ function jsonInit(method: 'POST' | 'PUT', body: unknown): RequestInit {
   return { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-function agentSpec({ preload, forceApprovalTools = [] }: { preload: boolean; forceApprovalTools?: string[] }) {
+function agentSpec({
+  preload,
+  forceApprovalTools = [],
+  server = INERT_MEMORY_SERVER_NAME,
+}: {
+  preload: boolean;
+  forceApprovalTools?: string[];
+  server?: string;
+}) {
   return {
     model: { name: MODEL_FQN },
     instructions: 'Use the memory tools exactly as instructed.',
     mcp_servers: [
       {
-        name: INERT_SERVER_NAME,
+        name: server,
         preload,
         // Defaults (`@write`, `@destructive`, `@unclassified`) never cover ask_memory /
         // search_memory — both are readOnlyHint+non-open-world, so they escape gating on
-        // their own. `forceApprovalTools` adds a literal name to force-gate one anyway, the
-        // same way approvalFlow.test.ts force-gates `inert_read` for its chat-grant test.
+        // their own, and the memory provider's first-party mark lets them run. `forceApprovalTools`
+        // adds a literal name to force-gate one anyway, the same way approvalFlow.test.ts
+        // force-gates `inert_read` for its chat-grant test.
         require_approval_for_tools: ['@write', '@destructive', '@unclassified', ...forceApprovalTools],
       },
     ],
@@ -130,8 +148,11 @@ function agentSpec({ preload, forceApprovalTools = [] }: { preload: boolean; for
   };
 }
 
-function userMessage(tool: string): TurnInputItem[] {
-  return [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}${tool} please` }];
+/** `server` only matters for `call_tool`, which reaches a deferred connector's tool by name. */
+function userMessage(tool: string, { server = INERT_MEMORY_SERVER_NAME }: { server?: string } = {}): TurnInputItem[] {
+  return [
+    { type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}${tool} ${SERVER_DIRECTIVE_PREFIX}${server} please` },
+  ];
 }
 
 function plainMessage(text: string): TurnInputItem[] {
@@ -309,7 +330,7 @@ describe('LKOS-shaped memory retrieval over the inert connector', () => {
   let server: ApprovalTestServer;
 
   beforeAll(async () => {
-    server = await startApprovalTestServer();
+    server = await startApprovalTestServer({ memoryProvider: true });
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -580,8 +601,12 @@ describe('LKOS-shaped memory retrieval over the inert connector', () => {
             got.manifest.auth?.type === 'header' ? got.manifest.auth.headers['Authorization'] : undefined;
           expect(gotAuthorization).toBe(`\${env:${TOKEN_ENV_VAR}}`);
 
-          const sessionId = await createSession(server, agentSpec({ preload: true }));
-          await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+          const sessionId = await createSession(server, agentSpec({ preload: true, server: INERT_SERVER_NAME }));
+          await runTurn({
+            server,
+            sessionId,
+            input: userMessage(INERT_ASK_MEMORY_TOOL, { server: INERT_SERVER_NAME }),
+          });
 
           expect(server.mcp.lastAuthorizationHeader()).toBe(RESOLVED_TOKEN);
         } finally {

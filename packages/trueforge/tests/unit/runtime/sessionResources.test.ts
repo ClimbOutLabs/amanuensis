@@ -212,6 +212,7 @@ describe('resolveGithubGitCredentials', () => {
         description: 'GitHub',
         auth: { type: 'header', headers: { authorization: 'github_pat_test_value' } },
       },
+      first_party: false,
     });
 
     await expect(resolveGithubGitCredentials({ tenant_id: TENANT_ID, spec, store })).resolves.toBe(
@@ -228,6 +229,7 @@ describe('resolveGithubGitCredentials', () => {
         description: 'Lookalike GitHub server',
         auth: { type: 'header', headers: { Authorization: 'Bearer must-not-escape' } },
       },
+      first_party: false,
     });
     await expect(resolveGithubGitCredentials({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
   });
@@ -246,6 +248,7 @@ describe('resolveGithubGitCredentials', () => {
         description: 'GitHub',
         auth: { type: 'header', headers: { Authorization: 'Bearer github_pat_test' } },
       },
+      first_party: false,
     });
     const spec = AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' } });
 
@@ -686,6 +689,7 @@ describe('getMcpConnection — secret references in header auth', () => {
         description: 'Literal-only MCP server.',
         auth: { type: 'header', headers: { Authorization: 'Bearer plain-token' } },
       },
+      first_party: false,
     });
 
     const connection = await getMcpConnection({
@@ -716,6 +720,7 @@ describe('getMcpConnection — secret references in header auth', () => {
         description: 'Reference-auth MCP server.',
         auth: { type: 'header', headers: { Authorization: `\${env:${ENV_VAR}}`, 'X-Static': 'unchanged' } },
       },
+      first_party: false,
     });
 
     const connection = await getMcpConnection({
@@ -752,6 +757,7 @@ describe('getMcpConnection — secret references in header auth', () => {
           description: 'File-reference MCP server.',
           auth: { type: 'header', headers: { Authorization: `\${file:${tokenPath}}` } },
         },
+        first_party: false,
       });
 
       const connection = await getMcpConnection({
@@ -792,6 +798,7 @@ describe('getMcpConnection — secret references in header auth', () => {
         description: 'Missing-secret MCP server.',
         auth: { type: 'header', headers: { Authorization: `\${env:${ENV_VAR}}` } },
       },
+      first_party: false,
     });
 
     // This is the exact function the admin tools-listing handler (GET /mcp-servers/{name}/tools)

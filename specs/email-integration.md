@@ -95,7 +95,7 @@ Default-deny. The adapter defines 36 tools today and 37 with the `get_draft` pat
 
 ## Sentinel tiers
 
-Unrecognized MCP tools default to Tier 3 in the classifier, and read-only hints cannot lower a tier, so without a change every email read would prompt. The connector declares a tier per allowlisted tool, and the classifier honors it only for tools on a verified connector allowlist. Hints still only escalate.
+Unrecognized MCP tools default to Tier 3 in the classifier, and a connector's read-only hints cannot lower a tier on their own, so without a change every email read would prompt. The connector declares a tier per allowlisted tool, and the classifier honors it only for tools on a verified connector allowlist. Hints still only escalate. The first-party mark in `privacy-safe-mcp.md` lets only read-only, closed-world tools skip a card, so it cannot express the Tier 2 and Tier 3 rows below; the declared tiers decide.
 
 | Tool                                                                                   | Tier        | Reason                                                                                                                 |
 | -------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
