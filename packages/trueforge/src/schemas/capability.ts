@@ -161,7 +161,11 @@ export const SandboxIsolationCapabilitySchema = z
     isolation_driver: z
       .enum(['docker', 'firecracker'])
       .describe('Process-isolation backend behind the run_code tool (`SANDBOX_ISOLATION_DRIVER`).'),
-    image: z.string().describe('Expected sandbox image as <tag>@sha256:<digest> (`SANDBOX_IMAGE`). Never a bare tag.'),
+    image: z
+      .string()
+      .describe(
+        'Expected sandbox image as <tag>@sha256:<digest> (`SANDBOX_IMAGE`); empty when run_code is not configured.',
+      ),
     default_timeout_seconds: z
       .number()
       .int()
