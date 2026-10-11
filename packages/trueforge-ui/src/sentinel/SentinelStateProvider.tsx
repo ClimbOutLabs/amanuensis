@@ -39,7 +39,13 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
       .listSentinelSessionContext(sessionId)
       .then(context => {
         if (cancelled) return;
-        setApprovals(new Map(context.approvals.map(info => [info.toolCallId, info])));
+        // A live card that arrived while this read was in flight is newer than what it saw, so it wins:
+        // replacing the map would turn a card the user is looking at back into the generic bar.
+        setApprovals(previous => {
+          const merged = new Map(context.approvals.map(info => [info.toolCallId, info]));
+          for (const [toolCallId, info] of previous) merged.set(toolCallId, info);
+          return merged;
+        });
       })
       .catch(() => {
         // Best-effort history load: live events still populate the map.

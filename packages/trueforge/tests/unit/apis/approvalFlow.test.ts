@@ -26,7 +26,7 @@ import {
   INERT_WRITE_TOOL,
   startInertMcpServer,
 } from '../../fixtures/inertMcpServer';
-import { RUN_DIRECTIVE_PREFIX } from '../../fixtures/scriptedModelServer';
+import { RUN_DIRECTIVE_PREFIX, THREE_AT_ONCE_DIRECTIVE } from '../../fixtures/scriptedModelServer';
 
 const TURN_TIMEOUT_MS = 60_000;
 
@@ -734,6 +734,29 @@ describe('approval gate over an inert connector', () => {
     );
 
     it(
+      'still shows a card when a selector gates a call the standing grant let through',
+      async () => {
+        await alwaysAllow(INERT_READ_TOOL);
+
+        // AGENT_SPEC force-gates inert_read by name, so the grant makes it Tier 1 but the selector still asks.
+        const sessionId = await createSession(server);
+        const gated = await runTurn({ server, sessionId, input: userMessage(INERT_READ_TOOL) });
+        if (gated.state.status !== 'done') {
+          throw new Error(`turn is not done: ${JSON.stringify(gated.state)}`);
+        }
+        const ref = gated.state.required_actions.flatMap(action =>
+          action.type === 'tool.approval_required' ? action.tool_calls : [],
+        )[0];
+
+        expect(ref?.tier).toBe(3);
+        expect(ref?.tier3_card?.plain_what).toContain(INERT_READ_TOOL);
+        expect(ref?.tier3_card?.outbound_text).toContain('text: inert');
+        expect(server.mcp.readInvocations()).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
       'covers only the approved tool on that connector',
       async () => {
         await alwaysAllow(INERT_READ_TOOL);
@@ -1077,6 +1100,135 @@ describe('memory provider on an origin the operator did not list', () => {
       const askedAgain = await runTurn({ server, sessionId: afterRemoval, input: userMessage(INERT_ASK_MEMORY_TOOL) });
       expect(pendingApproval(askedAgain)).toBeDefined();
       expect(server.mcp.askMemoryInvocations()).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('three connector calls pending in one turn', () => {
+  let server: ApprovalTestServer;
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer({ memoryProvider: true });
+  }, TURN_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  beforeEach(() => {
+    server.mcp.resetInvocations();
+  });
+
+  /** Every pending approval of a paused turn, in the order the model asked for them. */
+  function pendingApprovals(turn: Turn): PendingApproval[] {
+    if (turn.state.status !== 'done') {
+      throw new Error(`turn is not done: ${JSON.stringify(turn.state)}`);
+    }
+    return turn.state.required_actions.flatMap(action =>
+      action.type === 'tool.approval_required'
+        ? action.tool_calls.map(call => ({ thread_id: action.thread_id, tool_call_id: call.id }))
+        : [],
+    );
+  }
+
+  async function pauseOnThree(): Promise<{ sessionId: string; turn: Turn; pending: PendingApproval[] }> {
+    const sessionId = await createSession(server);
+    const turn = await runTurn({ server, sessionId, input: userMessage(THREE_AT_ONCE_DIRECTIVE) });
+    return { sessionId, turn, pending: pendingApprovals(turn) };
+  }
+
+  it(
+    'asks once per call, each with its own card, and runs nothing until answered',
+    async () => {
+      const { turn, pending } = await pauseOnThree();
+
+      expect(pending).toHaveLength(3);
+      expect(new Set(pending.map(call => call.tool_call_id)).size).toBe(3);
+      expect(server.mcp.unannotatedInvocations()).toBe(0);
+      if (turn.state.status !== 'done') {
+        throw new Error(`turn is not done: ${JSON.stringify(turn.state)}`);
+      }
+      const refs = turn.state.required_actions.flatMap(action =>
+        action.type === 'tool.approval_required' ? action.tool_calls : [],
+      );
+      expect(refs.map(ref => ref.tier)).toEqual([3, 3, 3]);
+      for (const ref of refs) {
+        expect(ref.tier3_card?.outbound_text).toContain('text: ');
+      }
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'approves two and denies one in one answer: the turn continues, and each call runs or is refused as decided',
+    async () => {
+      const { sessionId, turn, pending } = await pauseOnThree();
+      const [first, second, third] = pending;
+      if (first === undefined || second === undefined || third === undefined) {
+        throw new Error('expected three pending approvals');
+      }
+
+      const resumed = await runTurn({
+        server,
+        sessionId,
+        previousTurnId: turn.id,
+        input: [
+          ...approvalInput({ ...first, approval: { status: 'allow', scope: 'once' } }),
+          ...approvalInput({ ...second, approval: { status: 'deny', reason: 'not this one' } }),
+          ...approvalInput({ ...third, approval: { status: 'allow', scope: 'once' } }),
+        ],
+      });
+
+      expect(resumed.state.status).toBe('done');
+      expect(requiredActions(resumed)).toEqual([]);
+      expect(server.mcp.unannotatedInvocations()).toBe(2);
+      const responses = await toolResponses(server, sessionId);
+      const byCall = new Map(responses.map(response => [response.tool_call_id, response.content]));
+      expect(byCall.get(second.tool_call_id)).toMatch(/denied/i);
+      expect(byCall.get(first.tool_call_id)).not.toMatch(/denied/i);
+      expect(byCall.get(third.tool_call_id)).not.toMatch(/denied/i);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'refuses a partial answer by name, runs nothing, and still accepts the full answer afterwards',
+    async () => {
+      const { sessionId, turn, pending } = await pauseOnThree();
+      const [first, second, third] = pending;
+      if (first === undefined || second === undefined || third === undefined) {
+        throw new Error('expected three pending approvals');
+      }
+
+      // The client collects every decision before sending, so a lone answer is a client bug:
+      // the server says exactly which calls are missing instead of resuming half a batch.
+      const partial = await server.request(
+        `/api/v1/sessions/${sessionId}/turns`,
+        jsonInit({
+          input: approvalInput({ ...first, approval: { status: 'allow', scope: 'once' } }),
+          stream: true,
+          previous_turn_id: turn.id,
+        }),
+      );
+      expect(partial.status).toBe(422);
+      const partialBody = z.object({ error: z.object({ message: z.string() }) }).parse(await partial.json());
+      expect(partialBody.error.message).toContain(second.tool_call_id);
+      expect(partialBody.error.message).toContain(third.tool_call_id);
+      expect(server.mcp.unannotatedInvocations()).toBe(0);
+
+      const done = await runTurn({
+        server,
+        sessionId,
+        previousTurnId: turn.id,
+        input: [
+          ...approvalInput({ ...first, approval: { status: 'allow', scope: 'once' } }),
+          ...approvalInput({ ...second, approval: { status: 'deny' } }),
+          ...approvalInput({ ...third, approval: { status: 'allow', scope: 'once' } }),
+        ],
+      });
+      expect(requiredActions(done)).toEqual([]);
+      expect(server.mcp.unannotatedInvocations()).toBe(2);
     },
     TURN_TIMEOUT_MS,
   );

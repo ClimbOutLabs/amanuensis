@@ -101,6 +101,29 @@ describe('approval card for connector calls', () => {
     });
   });
 
+  it.each([
+    [
+      'web_fetch',
+      { urls: ['https://www.usps.com/'], objective: 'o' },
+      'Fetch a web page with web_fetch on parallel-web.',
+    ],
+    ['web_search', { objective: 'o', search_queries: ['q'] }, 'Search the web with web_search on parallel-web.'],
+  ])('shows %s on the Parallel connector the same way directly and through call_tool', async (name, input, what) => {
+    const tool: ToolSchema = { name, description: 'Parallel tool.', inputSchema: schema };
+    const toolSet = makeToolSet({ name: 'parallel-web', url: 'https://search.parallel.ai/mcp', tools: [tool] });
+    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const direct = await toolSet.toolCallInfo({ name, arguments: input });
+    const wrapped = await deferred.toolCallInfo({
+      name: 'call_tool',
+      arguments: { mcp_server: 'parallel-web', tool_name: name, input },
+    });
+    for (const info of [direct, wrapped]) {
+      expect(info.tier).toBe(3);
+      expect(info.tier3_card).toMatchObject({ plain_what: what, destination_host: 'search.parallel.ai' });
+    }
+    expect(direct.tier3_card).toEqual(wrapped.tier3_card);
+  });
+
   it('shows a Gmail send through call_tool with recipients, subject and body', async () => {
     const toolSet = makeToolSet({ name: 'gmail', url: 'https://gmail.example.com/mcp', tools: [sendEmail] });
     const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
@@ -132,7 +155,7 @@ describe('approval card for connector calls', () => {
     });
     for (const info of [direct, wrapped]) {
       expect(info.tier).toBe(3);
-      expect(info.tier3_card?.plain_what).toBe('Run `frobnicate`, which the classifier does not recognize.');
+      expect(info.tier3_card?.plain_what).toBe("Aman doesn't know this tool yet: frobnicate.");
       expect(info.tier3_card?.destination_host).toBe('misc.example.com');
       expect(info.tier3_card?.outbound_text).toBe('id: 7');
     }

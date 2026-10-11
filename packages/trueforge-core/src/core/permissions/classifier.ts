@@ -30,7 +30,7 @@ import {
   type SentinelHostContext,
   type SentinelServices,
 } from './context';
-import { extractCardFields } from './extractorRegistry';
+import { escapeDisplayText, extractCardFields, type ExtractionResult } from './extractorRegistry';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
 import { isRunnerWorkflow } from './runner';
 import {
@@ -47,6 +47,7 @@ import {
   tier2Decision,
   tier3Decision,
   type Tier2ActionKind,
+  type Tier3Card,
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
@@ -1027,7 +1028,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
               amount: fields.amount,
             })
           : destructiveHint || extraction.connector_what === null
-            ? `Run \`${action.tool_name}\`, flagged as ${destructiveHint ? 'destructive' : 'reaching outside this machine'}.`
+            ? `Run ${action.tool_name}, flagged as ${destructiveHint ? 'destructive' : 'reaching outside this machine'}.`
             : extraction.connector_what,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: destructiveHint
@@ -1141,32 +1142,15 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
-  // Fail closed: anything unrecognized is Tier 3 with a card. A connector call still shows
-  // its exact arguments and server host, and a known search, fetch, write or mail tool is
-  // named in plain words; the tier is Tier 3 either way.
-  const { fields } = extraction;
+  // Fail closed: anything unrecognized is Tier 3 with a card.
+  const card = connectorApprovalCard({ action, extraction, agent_intent: ctx.agent_intent });
+  const recognized = extraction.connector_what !== null;
   return tier3Decision({
-    card: {
-      plain_what: extraction.connector_what ?? `Run \`${action.tool_name}\`, which the classifier does not recognize.`,
-      plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone:
-        extraction.connector_what === null
-          ? "Aman doesn't know this tool yet, so check the details first."
-          : "Once this is sent, it can't be unsent.",
-      why_asked_again: null,
-      destination: fields.destination,
-      recipient: fields.recipient,
-      amount: fields.amount,
-      parsed_command: null,
-      outbound_text: fields.outbound_text,
-      destination_host: fields.destination_host,
-      outbound_truncated: fields.outbound_truncated,
-    },
-    reason: extraction.connector_what === null ? 'unrecognized_tool' : 'connector_outbound',
-    reason_detail:
-      extraction.connector_what === null
-        ? 'Fail-closed: unrecognized tools require approval.'
-        : 'Connector call that sends data out; always asks.',
+    card,
+    reason: recognized ? 'connector_outbound' : 'unrecognized_tool',
+    reason_detail: recognized
+      ? 'Connector call that sends data out; always asks.'
+      : 'Fail-closed: unrecognized tools require approval.',
     sensitive_read: sensitiveReadHit(action.canonical_params),
     approval_token_id: await mintPlainToken({
       ctx,
@@ -1174,6 +1158,56 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       params: action.canonical_params,
       connector: connectorBindingFor(action),
     }),
+  });
+}
+
+/**
+ * The card for a call that has to ask but matched no more specific class. A connector call shows its
+ * exact arguments and server host, and a known search, fetch, write or mail tool is named in plain
+ * words. Pure: it mints nothing, so it can also describe an approval that was gated some other way.
+ */
+function connectorApprovalCard(input: {
+  action: SentinelAction;
+  extraction: ExtractionResult;
+  agent_intent: string | null;
+}): Tier3Card {
+  const { action, extraction } = input;
+  const { fields } = extraction;
+  return {
+    plain_what: extraction.connector_what ?? `Aman doesn't know this tool yet: ${escapeDisplayText(action.tool_name)}.`,
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone:
+      extraction.connector_what === null
+        ? 'Check the details before you go ahead.'
+        : "Once this is sent, it can't be unsent.",
+    why_asked_again: null,
+    destination: fields.destination,
+    recipient: fields.recipient,
+    amount: fields.amount,
+    parsed_command: null,
+    outbound_text: fields.outbound_text,
+    destination_host: fields.destination_host,
+    outbound_truncated: fields.outbound_truncated,
+  };
+}
+
+/**
+ * The card for an approval that no classifier decision carded, such as a call a selector gates
+ * though Sentinel let it through. It describes the call the same way an unrecognized one is
+ * described, so every approval the user is asked for reads the same.
+ */
+export function approvalCardForGatedCall(input: { action: SentinelAction; agent_intent: string | null }): Tier3Card {
+  const { action } = input;
+  return connectorApprovalCard({
+    action,
+    extraction: extractCardFields({
+      tool_name: action.tool_name,
+      canonical_params: action.canonical_params,
+      tool_type: action.tool_type,
+      server_host: action.mcp_server_host,
+      server_name: action.mcp_server_name,
+    }),
+    agent_intent: input.agent_intent,
   });
 }
 

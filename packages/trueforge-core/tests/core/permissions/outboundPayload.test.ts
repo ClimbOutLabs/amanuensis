@@ -1,4 +1,9 @@
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import {
+  approvalCardForGatedCall,
+  classifyTier,
+  type ClassifyContext,
+  type SentinelAction,
+} from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import {
   extractCardFields,
@@ -220,7 +225,7 @@ describe('connector card: web search', () => {
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('connector_outbound');
     expect(card.plain_what).toBe('Search the web with web_search on exa.');
-    expect(card.plain_what).not.toContain('does not recognize');
+    expect(card.plain_what).not.toMatch(/classifier|recognize/);
     expect(card.cannot_be_undone).toBe("Once this is sent, it can't be unsent.");
     expect(card.destination_host).toBe('mcp.exa.ai');
     expect(card.outbound_text).toBe('query: best pizza near me');
@@ -394,7 +399,7 @@ describe('connector card: unknown tools stay fail-closed', () => {
     const card = cardOf(decision);
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('unrecognized_tool');
-    expect(card.plain_what).toBe('Run `frobnicate`, which the classifier does not recognize.');
+    expect(card.plain_what).toBe("Aman doesn't know this tool yet: frobnicate.");
     expect(card.destination).toBe('https://api.example.com/data');
     expect(card.destination_host).toBe('mcp.exa.ai');
     expect(card.outbound_text).toBe('target: https://api.example.com/data\nn (number): 2');
@@ -509,7 +514,7 @@ describe('connector card wording precedence', () => {
       makeCtx(),
     );
     expect(decision.reason).toBe('mcp_destructive_hint');
-    expect(cardOf(decision).plain_what).toBe('Run `web_search`, flagged as destructive.');
+    expect(cardOf(decision).plain_what).toBe('Run web_search, flagged as destructive.');
     expect(cardOf(decision).cannot_be_undone).toBe('This might change or delete something for good.');
   });
 });
@@ -518,7 +523,7 @@ describe('card copy', () => {
   test.each([
     ['delete_note', "Once deleted, it's gone for good."],
     ['install_package', "Once this runs, it can't be undone."],
-    ['frobnicate', "Aman doesn't know this tool yet, so check the details first."],
+    ['frobnicate', 'Check the details before you go ahead.'],
   ])('%s explains itself in plain second person', async (toolName, expected) => {
     const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { id: '1' } }), makeCtx());
     expect(cardOf(decision).cannot_be_undone).toBe(expected);
@@ -544,6 +549,59 @@ describe('card copy', () => {
         /\u2014|cannot be taken back|irreversible/,
       );
     }
+  });
+});
+
+describe('Parallel preset tools', () => {
+  const parallel = (tool_name: string, params: Record<string, unknown>) =>
+    connectorCall({ tool_name, params, server_name: 'parallel-web', server_host: 'search.parallel.ai' });
+
+  test('web_fetch with a list of URLs gets plain fetch wording, never the unknown-tool sentence', async () => {
+    const decision = await classifyTier(
+      parallel('web_fetch', {
+        urls: ['https://www.usps.com/manage/forward.htm', 'https://faq.usps.com/s/article/Change-of-Address'],
+        objective: 'How to change an address',
+      }),
+      makeCtx(),
+    );
+    const card = cardOf(decision);
+    expect(decision.reason).toBe('connector_outbound');
+    expect(card.plain_what).toBe('Fetch a web page with web_fetch on parallel-web.');
+    expect(card.destination_host).toBe('search.parallel.ai');
+    expect(card.outbound_text).toContain('urls (array): ["https://www.usps.com/manage/forward.htm"');
+    expect(card.outbound_text).toContain('objective: How to change an address');
+  });
+
+  test('web_search gets plain search wording', async () => {
+    const decision = await classifyTier(
+      parallel('web_search', { objective: 'USPS processing time', search_queries: ['usps change of address'] }),
+      makeCtx(),
+    );
+    expect(cardOf(decision).plain_what).toBe('Search the web with web_search on parallel-web.');
+  });
+
+  test.each(['web_fetch', 'web_search'])('%s keeps its wording when it carries no annotations at all', async name => {
+    const decision = await classifyTier(parallel(name, { objective: 'o' }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(cardOf(decision).plain_what).not.toMatch(/Aman doesn't know|classifier/);
+  });
+});
+
+describe('card for a call that was gated some other way', () => {
+  test('describes a connector call exactly as the classifier does, without minting anything', async () => {
+    const action = connectorCall({ tool_name: 'web_fetch', params: { url: 'https://example.com/a' } });
+    const gated = approvalCardForGatedCall({ action, agent_intent: null });
+    expect(gated).toEqual(cardOf(await classifyTier(action, makeCtx())));
+    expect(gated.plain_what).toBe('Fetch a web page with web_fetch on exa.');
+  });
+
+  test('an unknown tool is described plainly with its arguments', () => {
+    const card = approvalCardForGatedCall({
+      action: connectorCall({ tool_name: 'frobnicate', params: { id: '7' } }),
+      agent_intent: null,
+    });
+    expect(card.plain_what).toBe("Aman doesn't know this tool yet: frobnicate.");
+    expect(card.outbound_text).toBe('id: 7');
   });
 });
 

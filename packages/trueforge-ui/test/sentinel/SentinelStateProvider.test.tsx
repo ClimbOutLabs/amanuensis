@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { act, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
+import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
 import { publishSentinelEvent } from '@/sentinel/sentinelEvents.js';
 import { SentinelStateProvider, useOptionalSentinelState } from '@/sentinel/SentinelStateProvider.js';
+import type { SentinelApi, SentinelSessionContext } from '@/sentinel/types.js';
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
 
 // Chat parts identify a tool call by the runtime's invocation key: source event id, NUL, server id.
@@ -64,5 +66,64 @@ describe('SentinelStateProvider', () => {
     renderProbe('call-9');
     act(() => publishSentinelEvent({ toolCallId: 'call-9', tier: 3, card: CARD, eventId: null, threadId: null }));
     expect(screen.getByTestId('approval')).toHaveTextContent('Run code in the sandbox');
+  });
+
+  it('keeps a live card when the saved-history read finishes later without it', async () => {
+    let finishHistory: (context: SentinelSessionContext) => void = () => {};
+    const api: SentinelApi = {
+      listAuditEntries: vi.fn(async () => []),
+      getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [] })),
+      updateUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [] })),
+      listSentinelSessionContext: vi.fn(
+        () =>
+          new Promise<SentinelSessionContext>(resolve => {
+            finishHistory = resolve;
+          }),
+      ),
+    };
+    render(
+      <RuntimeHarness messages={[]} threadId="local-1" remoteId="session-1">
+        <SentinelApiProvider api={api}>
+          <SentinelStateProvider>
+            <ApprovalProbe toolCallId="call-9" />
+          </SentinelStateProvider>
+        </SentinelApiProvider>
+      </RuntimeHarness>,
+    );
+    await waitFor(() => {
+      expect(api.listSentinelSessionContext).toHaveBeenCalledWith('session-1');
+    });
+
+    act(() => publishSentinelEvent({ toolCallId: 'call-9', tier: 3, card: CARD, eventId: null, threadId: null }));
+    expect(screen.getByTestId('approval')).toHaveTextContent('Run code in the sandbox');
+    await act(async () => {
+      finishHistory({ approvals: [] });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('approval')).toHaveTextContent('Run code in the sandbox');
+  });
+
+  it('fills in a card from saved history that the live stream never delivered', async () => {
+    const api: SentinelApi = {
+      listAuditEntries: vi.fn(async () => []),
+      getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [] })),
+      updateUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [] })),
+      listSentinelSessionContext: vi.fn(async () => ({
+        approvals: [{ toolCallId: 'call-9', tier: 3 as const, card: CARD, eventId: null, threadId: null }],
+      })),
+    };
+    render(
+      <RuntimeHarness messages={[]} threadId="local-1" remoteId="session-1">
+        <SentinelApiProvider api={api}>
+          <SentinelStateProvider>
+            <ApprovalProbe toolCallId="call-9" />
+          </SentinelStateProvider>
+        </SentinelApiProvider>
+      </RuntimeHarness>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('approval')).toHaveTextContent('Run code in the sandbox');
+    });
   });
 });
