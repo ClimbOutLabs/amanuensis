@@ -1,9 +1,17 @@
 import { execFile as execFileCallback, spawn } from 'node:child_process';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import type { Logger } from 'winston';
 import {
+  cosignKeyFingerprint,
+  readImageVerificationRecord,
+  recordVouchesForSubject,
+  writeImageVerificationRecord,
+} from './ImageVerificationRecord.js';
+import {
+  ISOLATION_REFUSED_MARKER,
   OUTPUT_EXCEEDED_MARKER,
   runCodeProgramPath,
   type DriverReadiness,
@@ -11,22 +19,92 @@ import {
   type DriverRunResult,
   type IsolationDriver,
   type RunCodeLanguage,
+  type SandboxIdentity,
 } from './IsolationDriver.js';
+import {
+  measureRunDiskUsage,
+  removeRunTree,
+  resolveSandboxIdentity,
+  SANDBOX_RUN_ENV,
+  sandboxRunsDir,
+  stageRunDirs,
+} from './RunStaging.js';
 
 const execFileAsync = promisify(execFileCallback);
 
 /** Label selecting sandbox run containers for the reaper. */
 const SANDBOX_RUN_LABEL = 'tf.sandbox.run';
+
+/** The `key=value` label that ties a container to its run; the value is made label-safe. */
+function runLabel(runId: string): string {
+  return `${SANDBOX_RUN_LABEL}=${runId.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
+}
+
 /** Label for the transient wedged-daemon probe container. */
 const PROBE_LABEL = 'tf.sandbox.probe';
-/** Sandbox uid:gid baked into the image (plan §2.5). */
-const SANDBOX_USER = '65532:65532';
+/** Readiness canary: a python program touching every mount the way a real run does. */
+const CANARY_INPUT_NAME = 'canary_in';
+const CANARY_PROGRAM = [
+  'import pathlib',
+  `data = pathlib.Path('/ingress/${CANARY_INPUT_NAME}').read_bytes()`,
+  "pathlib.Path('/scratch/sub').mkdir()",
+  "pathlib.Path('/scratch/sub/f').write_bytes(data)",
+  "pathlib.Path('/egress/out').write_bytes(data)",
+].join('\n');
 /** Driver-internal per-stream capture bound; the wrapper owns the model-visible contract. */
 const TRANSPORT_STREAM_CAP_BYTES = 4 * 1024 * 1024;
 /** Reaper age: containers older than this are crashed-supervisor leaks. */
 const STALE_CONTAINER_MS = 30 * 60 * 1000;
 /** dispose() drains in-flight runs up to this long, then kills the remainder. */
 const DISPOSE_DRAIN_MS = 30 * 1000;
+
+/** cosign stderr that means the registry could not be reached, as opposed to the signature being bad. */
+const REGISTRY_UNREACHABLE_PATTERN =
+  /dial tcp|no such host|server misbehaving|name resolution|network is unreachable|no route to host|connection (refused|reset)|timeout|timed out|deadline exceeded/i;
+
+/** Default Docker socket path probed by detectDocker(). */
+export const DOCKER_SOCKET_PATH = '/var/run/docker.sock';
+
+/**
+ * Exact user-facing message when Docker is not available (spec acceptance #5).
+ * Returned as the readiness error; the wrapper surfaces it verbatim.
+ */
+export const DOCKER_UNAVAILABLE_MESSAGE =
+  "I can't run code on this machine because Docker isn't available. To enable code execution, install Docker from https://docs.docker.com/engine/install/ and restart Aman.";
+
+/**
+ * Exact user-facing message when mandatory isolation guarantees cannot be
+ * applied (spec acceptance #6). Quoted verbatim from the spec.
+ */
+export const ISOLATION_REFUSED_MESSAGE =
+  "I can't run this safely, the sandbox couldn't apply all isolation guarantees.";
+
+const dockerDetectionCache = new Map<string, Promise<boolean>>();
+
+/**
+ * Probe Docker socket accessibility. The result is memoized per socket path
+ * for the process lifetime: detection happens once at startup, not per tool
+ * call. A missing socket means Docker is not installed or not running for
+ * this user; the driver reports docker_unavailable and the wrapper shows the
+ * recovery message. (Restarting Aman re-probes, per the message.)
+ */
+export function detectDocker(socketPath: string = DOCKER_SOCKET_PATH): Promise<boolean> {
+  const cached = dockerDetectionCache.get(socketPath);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const probe = stat(socketPath).then(
+    () => true,
+    () => false,
+  );
+  dockerDetectionCache.set(socketPath, probe);
+  return probe;
+}
+
+/** Test seam: clear the memoized detection so tests can re-probe. */
+export function resetDockerDetectionForTests(): void {
+  dockerDetectionCache.clear();
+}
 
 /** Outcome of one docker/cosign CLI invocation. */
 export interface DockerCommandResult {
@@ -67,12 +145,19 @@ export interface DockerDriverOptions {
   image: string;
   /** Path to the cosign public-key PEM. Signature verification is fail-closed. */
   cosignPublicKeyPath: string;
+  /** Directory owned by the app where the driver remembers its last successful signature verification. */
+  stateDir: string;
   dockerBinary: string | undefined;
   cosignBinary: string | undefined;
+  /** Override for the Docker socket path probed by detectDocker(). Defaults to /var/run/docker.sock. */
+  dockerSocketPath: string | undefined;
+  /** Same data dir the RunCodeService stages runs under; the readiness canary stages there too. */
+  dataDir: string;
   /** Bound for docker info / image inspect / cosign verify. Default 5000. */
   commandTimeoutMs: number | undefined;
   /** Bound for the wedged-daemon docker create probe. Default 30000. */
   createTimeoutMs: number | undefined;
+  logger: Logger;
 }
 
 /** execFile-shaped failure: non-zero exit or timeout kill. */
@@ -101,6 +186,39 @@ function isExecFileFailure(error: unknown): error is ExecFileFailure {
 
 function truncateSingleLine(text: string, maxChars: number): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, maxChars);
+}
+
+/** The errno-style `code` of a failed fs call, without the message that would carry its path. */
+function errorCode(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : 'unknown';
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Deletes the canary run root; the server must be able to remove what the container wrote. */
+async function removeCanaryRoot({
+  runRoot,
+  runStopped,
+}: {
+  runRoot: string;
+  runStopped: boolean;
+}): Promise<string | undefined> {
+  try {
+    await removeRunTree({ runRoot, runStopped });
+  } catch (error: unknown) {
+    return `the host could not remove the run directory: ${errorText(error)}`;
+  }
+  try {
+    await stat(runRoot);
+  } catch (error: unknown) {
+    const gone = typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+    return gone ? undefined : `the host could not confirm the run directory was removed: ${errorText(error)}`;
+  }
+  return 'the run directory still exists after removal';
 }
 
 /** Production runner: real docker/cosign binaries via execFile/spawn. */
@@ -219,11 +337,11 @@ export function createDefaultDockerCommandRunner(options: { dockerBinary: string
   };
 }
 
-/** docker image inspect → RepoDigest pin check. */
-function checkRepoDigest(input: {
+/** docker image inspect → RepoDigest pin check; yields the local image ID a verification record binds to. */
+function checkPinnedImage(input: {
   inspectJson: string;
   expectedDigest: string;
-}): { ok: true } | { ok: false; error: string } {
+}): { ok: true; imageId: string } | { ok: false; error: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(input.inspectJson);
@@ -234,6 +352,7 @@ function checkRepoDigest(input: {
     return { ok: false, error: '`docker image inspect` returned no image data' };
   }
   const digests: string[] = [];
+  let imageId: string | undefined;
   const entries: unknown[] = parsed;
   for (const entry of entries) {
     if (typeof entry === 'object' && entry !== null && 'RepoDigests' in entry) {
@@ -244,6 +363,12 @@ function checkRepoDigest(input: {
             digests.push(digest);
           }
         }
+      }
+    }
+    if (imageId === undefined && typeof entry === 'object' && entry !== null && 'Id' in entry) {
+      const id: unknown = entry.Id;
+      if (typeof id === 'string' && id.length > 0) {
+        imageId = id;
       }
     }
   }
@@ -261,6 +386,77 @@ function checkRepoDigest(input: {
       error: `sandbox image digest mismatch: expected ${input.expectedDigest}, image reports ${digests.join(', ')} — refusing to run`,
     };
   }
+  if (imageId === undefined) {
+    return {
+      ok: false,
+      error: '`docker image inspect` reported no image ID; refusing to run an unidentifiable image',
+    };
+  }
+  return { ok: true, imageId };
+}
+
+/**
+ * Verify a created container actually carries the mandatory isolation flags,
+ * including the uid:gid it was created to run as.
+ * Fail-closed (spec): any missing guarantee refuses the run. A partial
+ * sandbox is never silently downgraded. Defensive unknown-typed navigation in
+ * the checkRepoDigest style; exported for unit tests.
+ */
+export function checkContainerIsolation(input: {
+  inspectJson: string;
+  /** The uid:gid the container was created to run as. */
+  identity: SandboxIdentity;
+}): { ok: true } | { ok: false; reason: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input.inspectJson);
+  } catch {
+    return { ok: false, reason: 'could not parse `docker inspect` output' };
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    return { ok: false, reason: '`docker inspect` returned no container data' };
+  }
+  const entry: unknown = parsed[0];
+  if (typeof entry !== 'object' || entry === null) {
+    return { ok: false, reason: '`docker inspect` returned a non-object container entry' };
+  }
+  const record = entry as Record<string, unknown>;
+  const hostConfig: unknown = record['HostConfig'];
+  const config: unknown = record['Config'];
+  if (typeof hostConfig !== 'object' || hostConfig === null || typeof config !== 'object' || config === null) {
+    return { ok: false, reason: '`docker inspect` entry is missing HostConfig or Config' };
+  }
+  const hc = hostConfig as Record<string, unknown>;
+  const cc = config as Record<string, unknown>;
+
+  if (hc['NetworkMode'] !== 'none') {
+    const actual = typeof hc['NetworkMode'] === 'string' ? hc['NetworkMode'] : 'missing';
+    return { ok: false, reason: `container NetworkMode is '${actual}', expected 'none'` };
+  }
+  if (hc['ReadonlyRootfs'] !== true) {
+    return { ok: false, reason: 'container root filesystem is not read-only' };
+  }
+  const user: unknown = cc['User'];
+  if (typeof user !== 'string' || user === '' || user === '0' || user === 'root' || user === '0:0') {
+    const actual = typeof user === 'string' && user !== '' ? user : 'missing';
+    return { ok: false, reason: `container user is '${actual}', expected a non-root user` };
+  }
+  const expectedUser = `${String(input.identity.uid)}:${String(input.identity.gid)}`;
+  if (user !== expectedUser) {
+    return { ok: false, reason: `container user is '${user}', expected '${expectedUser}'` };
+  }
+  const capDrop: unknown = hc['CapDrop'];
+  if (!Array.isArray(capDrop) || !capDrop.includes('ALL')) {
+    return { ok: false, reason: 'container capabilities were not fully dropped (CapDrop does not include ALL)' };
+  }
+  const securityOpt: unknown = hc['SecurityOpt'];
+  const opts = Array.isArray(securityOpt) ? securityOpt.filter((o): o is string => typeof o === 'string') : [];
+  if (!opts.includes('no-new-privileges:true')) {
+    return { ok: false, reason: 'container is missing no-new-privileges' };
+  }
+  if (!opts.some(o => o === 'seccomp=default' || o.startsWith('seccomp='))) {
+    return { ok: false, reason: 'container is missing an explicit seccomp profile' };
+  }
   return { ok: true };
 }
 
@@ -269,10 +465,14 @@ export class DockerDriver implements IsolationDriver {
 
   private readonly image: string;
   private readonly cosignPublicKeyPath: string;
+  private readonly stateDir: string;
   private readonly dockerBinary: string;
   private readonly cosignBinary: string;
+  private readonly dockerSocketPath: string;
+  private readonly dataDir: string;
   private readonly commandTimeoutMs: number;
   private readonly createTimeoutMs: number;
+  private readonly logger: Logger;
   private readonly runner: DockerCommandRunner;
   /** containerId → in-flight run, for dispose()'s drain-then-kill. */
   private readonly inFlight = new Map<string, Promise<DriverRunResult>>();
@@ -282,10 +482,14 @@ export class DockerDriver implements IsolationDriver {
   constructor(options: DockerDriverOptions, commandRunner: DockerCommandRunner | undefined) {
     this.image = options.image;
     this.cosignPublicKeyPath = options.cosignPublicKeyPath;
+    this.stateDir = options.stateDir;
     this.dockerBinary = options.dockerBinary ?? 'docker';
     this.cosignBinary = options.cosignBinary ?? 'cosign';
+    this.dockerSocketPath = options.dockerSocketPath ?? DOCKER_SOCKET_PATH;
+    this.dataDir = options.dataDir;
     this.commandTimeoutMs = options.commandTimeoutMs ?? 5000;
     this.createTimeoutMs = options.createTimeoutMs ?? 30000;
+    this.logger = options.logger;
     this.runner = commandRunner ?? createDefaultDockerCommandRunner({ dockerBinary: this.dockerBinary });
   }
 
@@ -304,12 +508,36 @@ export class DockerDriver implements IsolationDriver {
   }
 
   async ensureReady(signal?: AbortSignal): Promise<DriverReadiness> {
+    return this.probeReadiness({ signal, forceVerification: false });
+  }
+
+  /**
+   * forceVerification re-runs the cosign check even when a matching record
+   * exists; provisioning uses it because a pull is online and refreshes trust.
+   */
+  private async probeReadiness({
+    signal,
+    forceVerification,
+  }: {
+    signal: AbortSignal | undefined;
+    forceVerification: boolean;
+  }): Promise<DriverReadiness> {
     // v1: the Docker driver needs a Linux container host (plan §4 edge 11).
     if (process.platform === 'win32') {
       return {
         ready: false,
         error_code: 'unsupported_platform',
         error: 'run_code is not supported on Windows in v1: the Docker driver needs a Linux container host.',
+      };
+    }
+    // Docker detection (spec): a missing socket is a distinct, user-actionable
+    // state from a wedged daemon. The wrapper surfaces the exact recovery
+    // message; detection is memoized per process (see detectDocker).
+    if (!(await detectDocker(this.dockerSocketPath))) {
+      return {
+        ready: false,
+        error_code: 'docker_unavailable',
+        error: DOCKER_UNAVAILABLE_MESSAGE,
       };
     }
     const expectedDigest = this.expectedDigest();
@@ -342,23 +570,18 @@ export class DockerDriver implements IsolationDriver {
         error: `sandbox image '${this.image}' is not present locally — the harness will pull it as an explicit provisioning step`,
       };
     }
-    const digestCheck = checkRepoDigest({ inspectJson: inspect.stdout, expectedDigest });
+    const digestCheck = checkPinnedImage({ inspectJson: inspect.stdout, expectedDigest });
     if (!digestCheck.ok) {
       return { ready: false, error_code: 'image_unavailable', error: digestCheck.error };
     }
-    const cosign = await this.runner.run(this.cosignBinary, ['verify', '--key', this.cosignPublicKeyPath, this.image], {
-      timeoutMs: this.commandTimeoutMs,
+    const verification = await this.verifyImageSignature({
+      expectedDigest,
+      imageId: digestCheck.imageId,
+      forceVerification,
       signal,
     });
-    if (cosign.timedOut || cosign.exitCode !== 0) {
-      return {
-        ready: false,
-        error_code: 'image_unavailable',
-        // cosign echoes the --key path in its stderr (missing/unreadable
-        // key file); the detail is model-visible, so the host key path is
-        // redacted before it leaves the driver.
-        error: `cosign signature verification failed for '${this.image}': ${truncateSingleLine(this.scrubCosignKeyPath(cosign.stderr), 300)}`,
-      };
+    if (!verification.ok) {
+      return { ready: false, error_code: 'image_unavailable', error: verification.error };
     }
     // Wedged-daemon escalation (plan §2.8): dockerd answers `docker info` but
     // `docker create` never returns → daemon_unavailable, manual remediation.
@@ -388,15 +611,80 @@ export class DockerDriver implements IsolationDriver {
       timeoutMs: this.commandTimeoutMs,
       signal: undefined,
     });
-    // Bind-mount ownership probe (plan E-B1): Docker Desktop/macOS virtiofs may
-    // squash or silently ignore the chown the wrapper best-effort applies. A
-    // failed probe is a clear capability error here, not a silent permission
-    // failure mid-run.
+    // Canary run through the real staging and create flags: a host/uid mismatch
+    // is a clear capability error here, not a permission failure mid-run.
     const ownership = await this.probeBindMountOwnership(signal);
     if (!ownership.ok) {
       return { ready: false, error_code: 'daemon_unavailable', error: ownership.error };
     }
     return { ready: true };
+  }
+
+  /**
+   * cosign verify fetches signatures from the registry, so it must not gate
+   * every probe or run_code breaks offline. A prior success is trusted only
+   * while the pinned reference and digest, the local image ID, and the key
+   * fingerprint all equal what is observed now; anything else re-verifies.
+   */
+  private async verifyImageSignature(input: {
+    expectedDigest: string;
+    imageId: string;
+    forceVerification: boolean;
+    signal: AbortSignal | undefined;
+  }): Promise<{ ok: true } | { ok: false; error: string }> {
+    const keyFingerprint = await cosignKeyFingerprint({ keyPath: this.cosignPublicKeyPath });
+    const subject =
+      keyFingerprint === undefined
+        ? undefined
+        : {
+            image_ref: this.image,
+            image_digest: input.expectedDigest,
+            image_id: input.imageId,
+            key_fingerprint: keyFingerprint,
+          };
+    if (subject !== undefined && !input.forceVerification) {
+      const record = await readImageVerificationRecord({ stateDir: this.stateDir });
+      if (recordVouchesForSubject({ record, subject })) {
+        return { ok: true };
+      }
+    }
+    const cosign = await this.runner.run(this.cosignBinary, ['verify', '--key', this.cosignPublicKeyPath, this.image], {
+      timeoutMs: this.commandTimeoutMs,
+      signal: input.signal,
+    });
+    if (cosign.timedOut || cosign.exitCode !== 0) {
+      return { ok: false, error: this.describeCosignFailure(cosign) };
+    }
+    if (subject !== undefined) {
+      try {
+        await writeImageVerificationRecord({
+          stateDir: this.stateDir,
+          record: { ...subject, verified_at: new Date().toISOString() },
+        });
+      } catch (error: unknown) {
+        // The image is verified now, so this does not fail readiness; the next probe verifies again.
+        // Only the errno code is logged: fs messages carry the state dir path.
+        this.logger.warn('sandbox image verification record could not be saved; the next probe verifies again', {
+          errorCode: errorCode(error),
+        });
+      }
+    }
+    return { ok: true };
+  }
+
+  private describeCosignFailure(cosign: DockerCommandResult): string {
+    // cosign echoes the --key path in its stderr (missing/unreadable key
+    // file); the detail is model-visible, so the host key path is redacted
+    // before it leaves the driver.
+    const detail = truncateSingleLine(this.scrubCosignKeyPath(cosign.stderr), 300);
+    if (cosign.timedOut || REGISTRY_UNREACHABLE_PATTERN.test(cosign.stderr)) {
+      return (
+        `cosign could not reach the image registry to verify the signature of '${this.image}'. ` +
+        'The signature is verified once when the image is set up and remembered afterwards, so run_code works offline from then on; ' +
+        `connect to the internet once so the check can complete.${detail === '' ? '' : ` Detail: ${detail}`}`
+      );
+    }
+    return `cosign signature verification failed for '${this.image}': ${detail}`;
   }
 
   async provision(input: {
@@ -413,7 +701,7 @@ export class DockerDriver implements IsolationDriver {
       await this.pullBounded(input);
       // A pulled image is verified exactly like a present one: digest pin +
       // cosign signature, or the provisioning fails.
-      const readiness = await this.ensureReady(input.signal ?? undefined);
+      const readiness = await this.probeReadiness({ signal: input.signal, forceVerification: true });
       if (!readiness.ready) {
         throw new Error(`provisioned image failed verification: ${readiness.error}`);
       }
@@ -433,6 +721,11 @@ export class DockerDriver implements IsolationDriver {
     let result: DriverRunResult;
     try {
       containerId = await this.createContainer(params);
+      // Fail-closed isolation verification (spec): the flags passed to
+      // `docker create` must be reflected in the created container. A
+      // container missing any mandatory guarantee is removed and the run is
+      // refused, never executed with reduced isolation.
+      await this.verifyContainerIsolation(containerId, params.sandboxIdentity);
       const task = this.attachAndRun(containerId, params);
       this.inFlight.set(containerId, task);
       try {
@@ -466,6 +759,19 @@ export class DockerDriver implements IsolationDriver {
       await this.removeContainer(containerId);
     }
     return result;
+  }
+
+  async isRunGone(runId: string): Promise<boolean> {
+    try {
+      const ps = await this.runner.run(
+        this.dockerBinary,
+        ['ps', '-a', '--filter', `label=${runLabel(runId)}`, '--format', '{{.ID}}'],
+        { timeoutMs: this.commandTimeoutMs, signal: undefined },
+      );
+      return !ps.timedOut && ps.exitCode === 0 && ps.stdout.trim().length === 0;
+    } catch {
+      return false;
+    }
   }
 
   /** Reaper support: remove labeled containers older than 30 minutes. */
@@ -593,7 +899,6 @@ export class DockerDriver implements IsolationDriver {
    * in config. Curated env only — the host process env never passes through.
    */
   private async createContainer(params: DriverRunParams): Promise<string> {
-    const safeRunId = params.runId.replace(/[^a-zA-Z0-9_.-]/g, '_');
     const envArgs = Object.entries(params.env).flatMap(([key, value]: [string, string]) => ['-e', `${key}=${value}`]);
     const args = [
       'create',
@@ -607,10 +912,12 @@ export class DockerDriver implements IsolationDriver {
       '--tmpfs',
       '/tmp:rw,noexec,nosuid,size=64m',
       '--user',
-      SANDBOX_USER,
+      `${String(params.sandboxIdentity.uid)}:${String(params.sandboxIdentity.gid)}`,
       '--cap-drop=ALL',
       '--security-opt',
       'no-new-privileges:true',
+      '--security-opt',
+      'seccomp=default',
       '--pids-limit',
       '256',
       '--memory',
@@ -630,7 +937,7 @@ export class DockerDriver implements IsolationDriver {
       '--log-opt',
       'max-file=2',
       '--label',
-      `${SANDBOX_RUN_LABEL}=${safeRunId}`,
+      runLabel(params.runId),
       '-v',
       `${params.ingressDir}:/ingress:ro`,
       '-v',
@@ -657,6 +964,28 @@ export class DockerDriver implements IsolationDriver {
       throw new Error(`docker create failed: ${truncateSingleLine(result.stderr, 500)}`);
     }
     return containerId;
+  }
+
+  /**
+   * Fail-closed post-create verification: inspect the created container and
+   * confirm every mandatory isolation flag took effect. On any failure the
+   * container is removed (best-effort; the labeled reaper owns leftovers) and
+   * the run is refused with the spec's exact message, marked with
+   * ISOLATION_REFUSED_MARKER for the wrapper.
+   */
+  private async verifyContainerIsolation(containerId: string, identity: SandboxIdentity): Promise<void> {
+    const inspect = await this.runner.run(this.dockerBinary, ['inspect', containerId], {
+      timeoutMs: this.commandTimeoutMs,
+      signal: undefined,
+    });
+    const check: { ok: true } | { ok: false; reason: string } =
+      inspect.timedOut || inspect.exitCode !== 0
+        ? { ok: false, reason: '`docker inspect` failed on the created container' }
+        : checkContainerIsolation({ inspectJson: inspect.stdout, identity });
+    if (!check.ok) {
+      await this.removeContainer(containerId);
+      throw new Error(`${ISOLATION_REFUSED_MARKER}${ISOLATION_REFUSED_MESSAGE}`);
+    }
   }
 
   private async attachAndRun(containerId: string, params: DriverRunParams): Promise<DriverRunResult> {
@@ -751,58 +1080,93 @@ export class DockerDriver implements IsolationDriver {
   }
 
   /**
-   * Runs a throwaway container as the sandbox uid against a host temp dir and
-   * requires a file write to land both inside the container and back on the
-   * host. Catches the Docker Desktop/macOS virtiofs uid-mapping quirk where
-   * chown through a bind mount is silently ignored.
+   * Readiness canary: a throwaway run with the same staging, identity, env and
+   * create flags as a real one. It then checks what the host relies on later:
+   * the container read ingress and wrote scratch and egress, du can account for
+   * them, and the run root can be deleted. Catches uid/permission mismatches,
+   * including bind mounts that ignore ownership (Docker Desktop).
    */
   private async probeBindMountOwnership(
     signal: AbortSignal | undefined,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    const probeDir = await mkdtemp(join(tmpdir(), 'tf-sandbox-probe-'));
+    let identity;
     try {
-      const result = await this.runner.run(
-        this.dockerBinary,
-        [
-          'run',
-          '--rm',
-          '--network',
-          'none',
-          '--user',
-          SANDBOX_USER,
-          '-v',
-          `${probeDir}:/probe:rw`,
-          '--entrypoint',
-          'sh',
-          this.image,
-          '-c',
-          'touch /probe/write-test && echo PROBE_OK',
-        ],
-        { timeoutMs: this.commandTimeoutMs, signal },
-      );
-      const wroteInside = !result.timedOut && result.exitCode === 0 && result.stdout.includes('PROBE_OK');
-      let visibleOnHost = false;
-      if (wroteInside) {
-        try {
-          await stat(join(probeDir, 'write-test'));
-          visibleOnHost = true;
-        } catch {
-          visibleOnHost = false;
-        }
-      }
-      if (!wroteInside || !visibleOnHost) {
-        return {
-          ok: false,
-          error:
-            'sandbox bind-mount ownership probe failed: a container running as the sandbox uid (65532) could not write through a host bind mount. ' +
-            "On Docker Desktop/macOS this is the virtiofs uid-mapping quirk — the wrapper's chown is silently ignored and runs would fail on permissions. " +
-            `Probe output: ${truncateSingleLine(result.stderr, 300)}`,
-        };
-      }
-      return { ok: true };
-    } finally {
-      await rm(probeDir, { recursive: true, force: true });
+      identity = resolveSandboxIdentity();
+    } catch (error: unknown) {
+      return { ok: false, error: `sandbox canary run not started: ${errorText(error)}` };
     }
+    const token = randomUUID();
+    const runId = `canary-${token}`;
+    const runRoot = join(sandboxRunsDir(this.dataDir), runId);
+    const canaryProblem = await this.runCanary({ runId, runRoot, token, identity, signal });
+    // Always clean up: a failed canary must not leave container-written files behind.
+    const cleanupProblem = await removeCanaryRoot({ runRoot, runStopped: await this.isRunGone(runId) });
+    const problem = canaryProblem ?? cleanupProblem;
+    if (problem === undefined) {
+      return { ok: true };
+    }
+    const sandboxUser = `${String(identity.uid)}:${String(identity.gid)}`;
+    return {
+      ok: false,
+      error: `sandbox canary run failed as ${sandboxUser}: ${problem.split(runRoot).join('<canary>')}`,
+    };
+  }
+
+  /** Returns the first failed check, or undefined when the canary behaved like a healthy run. */
+  private async runCanary(input: {
+    runId: string;
+    runRoot: string;
+    token: string;
+    identity: SandboxIdentity;
+    signal: AbortSignal | undefined;
+  }): Promise<string | undefined> {
+    const files = [{ name: CANARY_INPUT_NAME, bytes: Buffer.from(input.token) }];
+    let dirs;
+    try {
+      dirs = await stageRunDirs({
+        runRoot: input.runRoot,
+        language: 'python',
+        code: CANARY_PROGRAM,
+        files,
+        identity: input.identity,
+      });
+    } catch (error: unknown) {
+      return `the host could not stage the run directories: ${errorText(error)}`;
+    }
+    const timeout = AbortSignal.timeout(this.createTimeoutMs);
+    const result = await this.run({
+      language: 'python',
+      code: CANARY_PROGRAM,
+      filesIn: files,
+      ingressDir: dirs.ingressDir,
+      scratchDir: dirs.scratchDir,
+      egressDir: dirs.egressDir,
+      timeoutMs: this.createTimeoutMs,
+      memoryMb: 256,
+      diskMb: 16,
+      runId: input.runId,
+      env: SANDBOX_RUN_ENV,
+      sandboxIdentity: input.identity,
+      signal: input.signal === undefined ? timeout : AbortSignal.any([input.signal, timeout]),
+      harvestGraceMs: 0,
+    });
+    if (result.terminatedBy !== 'completed' || result.exitCode !== 0) {
+      const detail = truncateSingleLine(result.internalError ?? result.stderr, 300);
+      return `the canary container ended as ${result.terminatedBy} (exit ${String(result.exitCode)}): ${detail}`;
+    }
+    let output: string;
+    try {
+      output = await readFile(join(dirs.egressDir, 'out'), 'utf8');
+    } catch (error: unknown) {
+      return `the host could not read the file the container wrote to egress: ${errorText(error)}`;
+    }
+    if (output !== input.token) {
+      return 'the file read back from egress does not match what the container read from ingress';
+    }
+    if ((await measureRunDiskUsage({ scratchDir: dirs.scratchDir, egressDir: dirs.egressDir })) === undefined) {
+      return 'the host could not measure the canary directories with du';
+    }
+    return undefined;
   }
 
   /** Best-effort OOM check: false when the inspect fails or the flag is absent. */

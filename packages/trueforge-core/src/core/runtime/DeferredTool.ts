@@ -333,7 +333,7 @@ export class DeferredTool extends LocalToolMCP {
         List tool names available on an MCP server.
         Returns tool names only — use ${GET_TOOL_INFO_NAME} to get full details before calling a tool.`,
       schema: listToolsSchema,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
       handler: async (input: { mcp_server: string }) => this.runListTools(input),
     });
   }
@@ -393,7 +393,7 @@ export class DeferredTool extends LocalToolMCP {
         If outputSchema is null, it will NOT be present in ${GET_TOOL_OUTPUT_SCHEMA_NAME} as well.
         The Agent MUST call ${LIST_TOOLS_NAME} first to know which tools are available.`,
       schema: getToolInfoSchema,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
       handler: async (input: { mcp_server: string; tool_name: string }) => this.runGetToolInfo(input),
     });
   }
@@ -452,7 +452,7 @@ export class DeferredTool extends LocalToolMCP {
         The Agent MUST either call ${GET_TOOL_OUTPUT_SCHEMA_NAME} or ${GET_TOOL_INFO_NAME} before entering Code Mode.
         The Agent must NOT assume the structure of a tool's response from its name or description alone.`,
       schema: getToolOutputSchemaSchema,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
       handler: async (input: { mcp_server: string; tool_name: string }) => this.runGetToolOutputSchema(input),
     });
   }

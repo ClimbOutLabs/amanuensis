@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -236,12 +236,10 @@ describe('automatic warm retry', () => {
       // The model comes back; the next automatic retry warms successfully.
       fixture.model.ready = true;
       await jest.advanceTimersByTimeAsync(WARM_RETRY_COOLDOWN_MS);
-      // The warm's store load + backfill use real fs I/O across several event
-      // loop turns; poll until it settles (bounded, well under the next
-      // cooldown so no spurious retry fires).
-      for (let i = 0; i < 200 && fixture.subsystem.getStatus().state !== 'ready'; i++) {
-        await jest.advanceTimersByTimeAsync(10);
-      }
+      // The warm's store load + backfill use real fs I/O, which fake time cannot advance:
+      // hand the clock back and wait on the real status instead of counting fake ticks.
+      jest.useRealTimers();
+      await waitForState(fixture.subsystem, 'ready');
       expect(fixture.subsystem.getStatus().state).toBe('ready');
     } finally {
       jest.useRealTimers();
@@ -599,18 +597,12 @@ describe('EmbeddingSubsystem', () => {
       const original = await readFile(day, 'utf8');
       await writeFile(day, original.replace('gamma entry', 'gamma entry EDITED'), 'utf8');
       nowOffsetMs = 11 * 60_000;
-      const editTime = realNow();
       fixture.subsystem.ensureWarmed();
-      // The re-warm is done when its trailing save rewrites the store file;
-      // only then is it safe to assert and clean up. (The store keeps hashes
-      // and vectors, never plaintext, so we wait on mtime not content.)
-      const storeFile = path.join(fixture.baseDir, fixture.namespace, '.embeddings.json');
+      // The re-warm is done once the edited entry is embedded and the subsystem is back to
+      // ready: the status stays "backfilling" until the backfill's trailing save completes.
+      // (Filesystem mtimes are too coarse to order a save against a wall-clock stamp.)
       const rewarmStart = realNow();
-      for (;;) {
-        const fileStat = await stat(storeFile).catch(() => undefined);
-        if (fileStat !== undefined && fileStat.mtimeMs >= editTime) {
-          break;
-        }
+      while (fixture.model.embeddedPassageTexts.flat().length < 4 || fixture.subsystem.getStatus().state !== 'ready') {
         if (realNow() - rewarmStart > 15000) {
           throw new Error('stale re-warm did not reconcile the edit');
         }

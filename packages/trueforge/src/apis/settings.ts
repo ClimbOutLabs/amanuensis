@@ -9,6 +9,7 @@ import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
+import type { IMcpToolGrantStore } from '../db/mcpToolGrantStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { WithTransaction } from '../db/transaction';
@@ -25,6 +26,7 @@ export interface SettingsRouterDeps<TTransaction> {
   resolveModelProviderStore: (c: Context) => IModelProviderStore<TTransaction>;
   resolveMcpServerStore: (c: Context) => IMcpServerWithAuthStore<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
+  toolGrantStore: IMcpToolGrantStore<TTransaction>;
   resolveSkillStore: ResolveSkillStore<TTransaction>;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
@@ -48,6 +50,7 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
     createSettingsMcpServersRouter({
       resolveMcpServerStore: deps.resolveMcpServerStore,
       tokenStore: deps.tokenStore,
+      toolGrantStore: deps.toolGrantStore,
       withTransaction: deps.withTransaction,
       logger: deps.logger,
       resolveRequestContext: deps.resolveRequestContext,

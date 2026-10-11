@@ -62,6 +62,72 @@ export function getActiveStreamingFenceCode(content: string): string | null {
   return content.slice(open.after).replace(/\n$/, '');
 }
 
+/**
+ * True when an image src is safe to load inline without leaking data off-page:
+ * `data:` and `blob:` URIs never touch the network, and same-origin URLs stay
+ * inside the app. Anything else (http:, https:, protocol-relative, unparseable)
+ * is treated as remote, because a prompt injection can hide private data in the
+ * URL and the browser would send it to that host the moment the chat renders.
+ */
+export function isSafeInlineImageSrc(src: string): boolean {
+  const trimmed = src.trim();
+  if (trimmed === '') {
+    return false;
+  }
+  if (/^(data|blob):/i.test(trimmed)) {
+    return true;
+  }
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  try {
+    return new URL(trimmed, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Host portion of a remote image src, shown on the click-to-load placeholder so
+ * the user sees where the image would come from before choosing to open it.
+ */
+export function remoteImageHost(src: string): string {
+  const trimmed = src.trim();
+  try {
+    const host = new URL(trimmed, 'https://placeholder.invalid').host;
+    if (host !== '' && host !== 'placeholder.invalid') {
+      return host;
+    }
+  } catch {
+    // Fall through to the raw value below.
+  }
+  return trimmed;
+}
+
+// react-markdown strips URLs whose protocol is not in its built-in allowlist
+// (https, http, irc, mailto, xmpp). data: and blob: images would be emptied
+// before they ever reach the img component, so allow them here. Dangerous
+// protocols like javascript: are still stripped. Remote http(s) URLs pass
+// through untouched; the img component above decides whether they render.
+const SAFE_MARKDOWN_URL_PROTOCOL = /^(https?|ircs?|mailto|xmpp|data|blob)$/i;
+
+export function markdownUrlTransform(value: string): string {
+  const colon = value.indexOf(':');
+  const slash = value.indexOf('/');
+  const questionMark = value.indexOf('?');
+  const numberSign = value.indexOf('#');
+  if (
+    colon === -1 ||
+    (slash !== -1 && colon > slash) ||
+    (questionMark !== -1 && colon > questionMark) ||
+    (numberSign !== -1 && colon > numberSign) ||
+    SAFE_MARKDOWN_URL_PROTOCOL.test(value.slice(0, colon))
+  ) {
+    return value;
+  }
+  return '';
+}
+
 function makeComponents(opts: {
   isStreaming?: boolean;
   /** Latest unmatched fence body; read via ref so `components` identity stays stable across growth. */
@@ -101,6 +167,37 @@ function makeComponents(opts: {
       return (
         <a {...props} href={href} target="_blank" rel="noopener noreferrer">
           {children}
+        </a>
+      );
+    },
+    // Remote images never auto-load: a prompt injection can hide private data in an
+    // image URL, which the browser would send to that host on render. Show a
+    // placeholder with the destination host instead; clicking opens the image in
+    // a new tab. Same-origin, data: and blob: images still render inline.
+    // An empty src renders nothing at all, not a placeholder.
+    img({ src, alt, node: _node, ...props }) {
+      const srcValue = typeof src === 'string' ? src : '';
+      if (srcValue.trim() === '') {
+        return null;
+      }
+      if (isSafeInlineImageSrc(srcValue)) {
+        return <img {...props} src={src} alt={alt} />;
+      }
+      const host = remoteImageHost(srcValue);
+      const label = alt != null && alt !== '' ? alt : 'External image';
+      return (
+        <a
+          href={srcValue}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn(
+            'aui-remote-image my-2 inline-flex max-w-full items-center gap-2 rounded border border-border bg-card-bg px-2 py-1 text-xs text-text-secondary',
+          )}
+          data-testid="aui-remote-image-placeholder"
+          title={srcValue}
+        >
+          <span className="truncate">{label}</span>
+          <span className="truncate opacity-70">{host}</span>
         </a>
       );
     },
@@ -231,9 +328,11 @@ const MARKDOWN_TAG_NAMES = [
  * `rehype-sanitize`'s default (GitHub-style) schema, restricted to {@link MARKDOWN_TAG_NAMES} so a
  * raw HTML tag not part of ordinary markdown output (`<div>`, `<script>`, an unknown tag, ...) is
  * dropped or unwrapped to its text content instead of rendered as a live element, and with `br`
- * given no allowed attributes at all. Everything else (allowed attributes per tag, URL protocol
- * allowlists, `script` fully stripped rather than unwrapped) is inherited from the default schema
- * unchanged, so a real markdown link, image, or table keeps working exactly as before.
+ * given no allowed attributes at all. `data:` and `blob:` are added to the allowed `src`
+ * protocols so inline images survive sanitize and reach the component-level remote-image gate.
+ * Everything else (allowed attributes per tag, remaining URL protocol allowlists, `script` fully
+ * stripped rather than unwrapped) is inherited from the default schema unchanged, so a real
+ * markdown link or table keeps working exactly as before.
  */
 const MARKDOWN_SANITIZE_SCHEMA: SanitizeSchema = {
   ...defaultSchema,
@@ -241,6 +340,12 @@ const MARKDOWN_SANITIZE_SCHEMA: SanitizeSchema = {
   attributes: {
     ...defaultSchema.attributes,
     br: [],
+  },
+  protocols: {
+    ...(defaultSchema.protocols ?? {}),
+    // `data:` and `blob:` survive sanitize so inline images reach the
+    // component-level remote-image gate below instead of being stripped here.
+    src: [...(defaultSchema.protocols?.src ?? []), 'data', 'blob'],
   },
 };
 
@@ -319,7 +424,12 @@ export function Markdown({
     <div
       className={cn('aui-markdown markdown-body min-w-0 max-w-full overflow-x-clip', classNames.markdown, className)}
     >
-      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={REHYPE_PLUGINS} components={components}>
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={REHYPE_PLUGINS}
+        components={components}
+        urlTransform={markdownUrlTransform}
+      >
         {transformedContent}
       </ReactMarkdown>
     </div>
