@@ -18,7 +18,6 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentHarnessError,
-  createSentinelHostContext,
   existingSandboxIdForProvider,
   extractErrorLogFields,
   isAgentInputUserMessage,
@@ -397,11 +396,12 @@ function createTurnResolver(deps: {
             headers: connection.headers,
             metadataHeaders,
           }),
+          first_party: connection.first_party,
         };
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
-      sandboxProvider: async ({ spec, existingSandboxId, tracing }) => {
+      sandboxProvider: async ({ spec, existingSandboxId, tracing, sentinel }) => {
         const provider = await sandboxProviderResolver({
           tenant_id,
           store: sandboxProviderStore,
@@ -441,10 +441,6 @@ function createTurnResolver(deps: {
           spec,
           store: mcpServerStore,
         });
-        const sentinelSession = await sessionStore.getSession({
-          tenant_id,
-          session_id: sessionId,
-        });
         return buildTurnSandbox({
           provider,
           logger,
@@ -455,12 +451,7 @@ function createTurnResolver(deps: {
           fileDownloadEnabled: spec.config.sandbox.file_downloads,
           existingSandboxId: carriedSandboxId,
           boundRepository,
-          sentinel: createSentinelHostContext({
-            tenant_id,
-            created_by: userRef,
-            conversation_id: sessionId,
-            workspace_cwd: sentinelSession?.workspace_cwd ?? null,
-          }),
+          sentinel,
           loadBoundRepository:
             boundRepository === undefined
               ? undefined
@@ -1931,10 +1922,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           model_name: persona.kind === 'persona' ? persona.persona.model_name : null,
           source: persona.source,
         };
-        // A no-op switch (the invocation named the already-active identity, or an
-        // ambiguous request failed closed onto the already-active default)
-        // records nothing: the turn still runs under the resolved identity,
-        // but there is no state change to put in the activation log.
+        // A no-op switch (the invocation named the already-active identity, or an ambiguous
+        // request failed closed onto the already-active default) changes no state, so the
+        // activation log records nothing while the turn still runs under that identity.
         if (persona.skipActivationWrite === true) {
           activationRecorded = true;
         } else if (persona.selection === 'direct') {

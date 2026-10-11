@@ -5,11 +5,15 @@
  *
  * Contract: a user message containing `run:<tool>` produces a tool call against
  * the advertised tool whose name contains `<tool>`; once its scripted sequence
- * is complete, the turn is closed with plain text.
+ * is complete, the turn is closed with plain text. `run:call_tool` reaches a
+ * deferred connector's tool: it targets `inert` unless the same message adds
+ * `server:<name>`.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
 export const RUN_DIRECTIVE_PREFIX = 'run:';
+export const SERVER_DIRECTIVE_PREFIX = 'server:';
+const DEFAULT_CALL_TOOL_SERVER = 'inert';
 export const FINAL_TEXT = 'inert connector work is finished.';
 export const VERIFY_THEN_COMMIT_DIRECTIVE = 'verify_then_commit';
 export const COMMIT_ONLY_DIRECTIVE = 'commit_only';
@@ -155,11 +159,26 @@ function readRequestBody(req: IncomingMessage): Promise<unknown> {
  * `inert` connector — the only way to reach a non-preloaded server's tool without
  * simulating the full list_tools/get_tool_info discovery round trip.
  */
-function argumentsJsonForTool(name: string): string {
+function argumentsJsonForTool({ name, callToolServer }: { name: string; callToolServer: string }): string {
   if (name === 'call_tool') {
-    return '{"mcp_server":"inert","tool_name":"ask_memory","input":{"question":"inert"}}';
+    return JSON.stringify({ mcp_server: callToolServer, tool_name: 'ask_memory', input: { question: 'inert' } });
   }
   return name.includes('ask_memory') ? '{"question":"inert"}' : '{"text":"inert"}';
+}
+
+/** The connector the latest `run:` directive's `call_tool` targets: its `server:<name>`, else `inert`. */
+function callToolServer(messages: ChatMessage[]): string {
+  let server = DEFAULT_CALL_TOOL_SERVER;
+  for (const message of messages) {
+    if (message.role !== 'user') {
+      continue;
+    }
+    const text = messageText(message.content);
+    if (new RegExp(`${RUN_DIRECTIVE_PREFIX}[A-Za-z0-9_-]+`).test(text)) {
+      server = new RegExp(`${SERVER_DIRECTIVE_PREFIX}([A-Za-z0-9_-]+)`).exec(text)?.[1] ?? DEFAULT_CALL_TOOL_SERVER;
+    }
+  }
+  return server;
 }
 
 function sandboxArgumentsJson(purpose: 'verify' | 'commit'): string {
@@ -318,7 +337,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
         callId: `call_${String(callCounter)}`,
         argumentsJson:
           requestedTool?.argumentsJson === '' || requestedTool?.argumentsJson === undefined
-            ? argumentsJsonForTool(toolName)
+            ? argumentsJsonForTool({ name: toolName, callToolServer: callToolServer(parsed.messages) })
             : requestedTool.argumentsJson,
       };
     }

@@ -198,8 +198,8 @@ describe('beginTurnExecution tool-output screen wiring', () => {
 
     const { capturedResolver, ctorArgs } = await beginTurnWithStore(store);
 
-    // One settings read per turn per domain: tool-output screen, turn
-    // summarization, and the recall screen.
+    // One settings read per turn per domain: tool-output screen, turn summarization and
+    // the recall screen.
     expect(store.getSettingCalls).toEqual([
       { key: TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY },
       { key: MEMORY_SUMMARIZE_SETTING_KEY },
@@ -216,7 +216,6 @@ describe('beginTurnExecution tool-output screen wiring', () => {
 
     const { ctorArgs } = await beginTurnWithStore(store);
 
-    // Same per-turn reads as above.
     expect(store.getSettingCalls).toEqual([
       { key: TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY },
       { key: MEMORY_SUMMARIZE_SETTING_KEY },

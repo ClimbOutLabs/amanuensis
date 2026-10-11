@@ -13,5 +13,7 @@ dependencies and their licenses include (non-exhaustive):
 - monaco-editor — see its LICENSE
 - react-markdown / remark-gfm / react-syntax-highlighter — see their respective LICENSE files
 
+Turn-status panda sprites are AI-generated project artwork, licensed with this package.
+
 Full license texts for installed packages are available in node_modules under
 each package's LICENSE (or equivalent) file.
