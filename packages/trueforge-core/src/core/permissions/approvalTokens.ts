@@ -205,6 +205,23 @@ export function prepareApprovalToken(input: MintApprovalTokenInput): PreparedApp
   return { token, token_hash: hashApprovalTokenId(token.token_id), expires_at: expiresAt.toISOString() };
 }
 
+/** Rebuilds a token from a persisted row; a stored shell binding that no longer parses throws. */
+export function restoreApprovalToken(input: {
+  token_id: string;
+  action_id: string;
+  params_hash: string;
+  shell: unknown;
+  created_at: string;
+}): ApprovalToken {
+  return {
+    token_id: input.token_id,
+    action_id: input.action_id,
+    params_hash: input.params_hash,
+    shell: ShellApprovalBindingSchema.nullable().parse(input.shell),
+    created_at: input.created_at,
+  };
+}
+
 const MAX_TOKENS = 5000;
 
 interface InMemoryEntry {
@@ -217,7 +234,14 @@ interface InMemoryEntry {
 export class InMemoryApprovalTokenStore implements ApprovalTokenStore {
   private readonly tokens = new Map<string, InMemoryEntry>();
 
-  async mint(input: MintApprovalTokenInput): Promise<ApprovalToken> {
+  mint(input: MintApprovalTokenInput): Promise<ApprovalToken> {
+    // A throw inside the executor rejects, as a persisted store's failed mint would.
+    return new Promise(resolve => {
+      resolve(this.insert(input));
+    });
+  }
+
+  private insert(input: MintApprovalTokenInput): ApprovalToken {
     const prepared = prepareApprovalToken(input);
     this.dropSpent();
     if (this.tokens.size >= MAX_TOKENS) {
@@ -236,17 +260,17 @@ export class InMemoryApprovalTokenStore implements ApprovalTokenStore {
     return prepared.token;
   }
 
-  async peek(input: ApprovalTokenRef): Promise<ApprovalToken | undefined> {
-    return this.live(input)?.token;
+  peek(input: ApprovalTokenRef): Promise<ApprovalToken | undefined> {
+    return Promise.resolve(this.live(input)?.token);
   }
 
-  async redeem(input: ApprovalTokenRef): Promise<ApprovalToken | undefined> {
+  redeem(input: ApprovalTokenRef): Promise<ApprovalToken | undefined> {
     const entry = this.live(input);
     if (entry === undefined) {
-      return undefined;
+      return Promise.resolve(undefined);
     }
     entry.used = true;
-    return entry.token;
+    return Promise.resolve(entry.token);
   }
 
   /** Rows held, spent ones included until the next mint drops them. */

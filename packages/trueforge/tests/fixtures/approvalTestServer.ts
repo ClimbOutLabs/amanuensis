@@ -29,6 +29,7 @@ import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
+import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
@@ -47,6 +48,7 @@ import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAu
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
+import { createSentinelServices } from '../../src/runtime/sentinelServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
 import { INERT_SERVER_NAME, startInertMcpServer, type InertMcpServer } from './inertMcpServer';
 import { startScriptedModelServer, type ScriptedModelServer } from './scriptedModelServer';
@@ -88,6 +90,14 @@ function buildApp(input: {
   const sandboxProviderStore = new SqliteSandboxProviderStore(db);
   const skillStore = new SqliteSkillStore(db);
   const globalSettingsStore = new SqliteGlobalSettingsStore(db);
+  const sentinelAuditStore = new SentinelAuditStore(db);
+  const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
+  // Same composition as main.ts, so approval tokens are durable and shared across turns.
+  const sentinelServices = createSentinelServices({
+    audit: sentinelAuditStore,
+    settings: sentinelSettingsStore,
+    approvalTokens: new SqliteApprovalTokenStore(db),
+  });
   return createServerApp({
     modelCatalog: ModelCatalog.load(),
     mcpCatalog: McpCatalog.load(),
@@ -108,9 +118,9 @@ function buildApp(input: {
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore,
     sessionStore,
-    sentinelAuditStore: new SentinelAuditStore(db),
-    sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
-    sessions: new Sessions({ sessionStore }),
+    sentinelAuditStore,
+    sentinelSettingsStore,
+    sessions: new Sessions({ sessionStore, sentinelServices }),
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),
     requestReplyRouter: new RequestReplyRouter(),

@@ -366,10 +366,10 @@ export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCal
 // Sentinel: three-tier permission system for tool execution
 export {
   InMemoryApprovalTokenStore,
-  ShellApprovalBindingSchema,
   hasApprovalScope,
   hashApprovalTokenId,
   prepareApprovalToken,
+  restoreApprovalToken,
 } from './permissions/approvalTokens';
 export type {
   ApprovalToken,
