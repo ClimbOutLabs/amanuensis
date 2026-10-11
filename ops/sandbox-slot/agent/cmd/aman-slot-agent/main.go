@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -22,7 +23,7 @@ import (
 )
 
 const (
-	agentVersion = "0.1.0"
+	agentVersion = "0.2.0"
 	socketPath   = "/run/aman/agent.sock"
 	volumeDir    = "/workspace"
 	leaseDir     = "/workspace/.leases"
@@ -61,7 +62,27 @@ func main() {
 	}
 }
 
+// quotaEnv names the size in bytes of the fixed disk the host backed the workspace with; unset means the
+// platform has none.
+const quotaEnv = "AMAN_WORKSPACE_QUOTA_BYTES"
+
+func workspaceQuota() (int64, error) {
+	raw := os.Getenv(quotaEnv)
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s must be a positive number of bytes, got %q", quotaEnv, raw)
+	}
+	return n, nil
+}
+
 func run() error {
+	quota, err := workspaceQuota()
+	if err != nil {
+		return err
+	}
 	rp := reaper.New()
 	rp.Start()
 
@@ -75,7 +96,10 @@ func run() error {
 		DockerSocks:  []string{"/var/run/docker.sock", "/run/docker.sock"},
 		PID:          os.Getpid(),
 		Platform:     "systrap",
-		CanaryEvery:  canaryEvery,
+		Workspace:    volumeDir,
+
+		WorkspaceQuotaBytes: quota,
+		CanaryEvery:         canaryEvery,
 		Runsc: func() (string, error) {
 			out, code, err := rp.Output(runscPath, []string{runscPath, "--version"}, 10*time.Second)
 			if err != nil {

@@ -75,8 +75,8 @@ func TestHardenedCellPasses(t *testing.T) {
 	if !r.OK {
 		t.Fatalf("expected ok, got %+v", r.Checks)
 	}
-	if len(r.Checks) != 12 {
-		t.Fatalf("expected 12 checks, got %d", len(r.Checks))
+	if len(r.Checks) != 13 {
+		t.Fatalf("expected 13 checks, got %d", len(r.Checks))
 	}
 }
 
@@ -229,5 +229,50 @@ func TestCanaryIsCachedOnlyWhenItPassed(t *testing.T) {
 	c.Collect()
 	if calls != 2 {
 		t.Fatalf("a passing canary should be cached, calls=%d", calls)
+	}
+}
+
+const gib = int64(1) << 30
+
+func quotaCollector(w *world, fsType, size int64) *attest.Collector {
+	c := w.collector()
+	c.Workspace = "/workspace"
+	c.WorkspaceQuotaBytes = 16 * gib
+	c.Statfs = func(string) (int64, int64, error) { return fsType, size, nil }
+	return c
+}
+
+func TestWorkspaceQuotaPassesWithoutADiskOnlyWhenNoneIsConfigured(t *testing.T) {
+	c := check(newWorld(t).collector().Collect(), attest.CheckWorkspaceQuota)
+	if !c.OK || !strings.Contains(c.Detail, "no per-slot disk") {
+		t.Fatalf("no configured disk is recorded, not failed: %+v", c)
+	}
+}
+
+func TestWorkspaceQuotaRequiresTheConfiguredDisk(t *testing.T) {
+	const ext4, xfs = 0xEF53, 0x58465342
+	cases := []struct {
+		name   string
+		fsType int64
+		size   int64
+		ok     bool
+	}{
+		{"the configured disk", ext4, 16*gib - 100<<20, true},
+		{"a bit under half is too small to be it", ext4, 7 * gib, false},
+		{"the host filesystem, far larger", ext4, 250 * gib, false},
+		{"another filesystem type", xfs, 15 * gib, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := check(quotaCollector(newWorld(t), tc.fsType, tc.size).Collect(), attest.CheckWorkspaceQuota)
+			if got.OK != tc.ok {
+				t.Fatalf("want ok=%v, got %+v", tc.ok, got)
+			}
+		})
+	}
+	c := quotaCollector(newWorld(t), ext4, 15*gib)
+	c.Statfs = func(string) (int64, int64, error) { return 0, 0, os.ErrNotExist }
+	if got := check(c.Collect(), attest.CheckWorkspaceQuota); got.OK {
+		t.Fatalf("an unreadable workspace must fail: %+v", got)
 	}
 }

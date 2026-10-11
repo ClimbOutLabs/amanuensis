@@ -39,6 +39,7 @@ const (
 	CheckCgroupLimits   = "cgroup_limits"
 	CheckAppArmor       = "apparmor"
 	CheckProcFS         = "proc_fs"
+	CheckWorkspaceQuota = "workspace_quota"
 	CheckRunsc          = "runsc"
 )
 
@@ -84,6 +85,12 @@ type Collector struct {
 	Runsc func() (string, error)
 	// RootFlags returns the statfs flags of the root filesystem; nil reads them from the kernel.
 	RootFlags func() (int64, error)
+	// Workspace is the slot's workspace mount, and WorkspaceQuotaBytes the size of the fixed disk the host
+	// backed it with; zero means this platform has no per-slot disk (the Docker VM's disk bounds it).
+	Workspace           string
+	WorkspaceQuotaBytes int64
+	// Statfs returns the filesystem type and size in bytes of a path; nil reads them from the kernel.
+	Statfs func(path string) (fsType int64, sizeBytes int64, err error)
 	// Canary starts a real guest running a trivial program.
 	Canary func() error
 	// CanaryEvery bounds how often the canary runs; zero runs it every time.
@@ -133,6 +140,7 @@ func (c *Collector) Collect() Report {
 	aa, aaCheck := c.checkAppArmor()
 	checks = append(checks, aaCheck)
 	checks = append(checks, c.checkProcFS())
+	checks = append(checks, c.checkWorkspaceQuota())
 	version, runscCheck := c.checkRunsc()
 	checks = append(checks, runscCheck)
 
@@ -393,4 +401,38 @@ func (c *Collector) canary() error {
 	c.canaryAt = time.Now()
 	c.canaryDone = true
 	return c.canaryErr
+}
+
+// ext4SuperMagic is the statfs type of an ext4 filesystem.
+const ext4SuperMagic = 0xEF53
+
+// checkWorkspaceQuota proves the workspace is the fixed-size disk the host set up, not the host's own
+// filesystem: when a disk size is configured, the workspace must be an ext4 filesystem no larger than it
+// and not much smaller. Without a configured size it records that no hard limit exists here.
+func (c *Collector) checkWorkspaceQuota() Check {
+	if c.WorkspaceQuotaBytes <= 0 {
+		return pass(CheckWorkspaceQuota, "no per-slot disk on this platform; the Docker VM's disk bounds the workspaces")
+	}
+	fsType, size, err := c.statfs(c.Workspace)
+	if err != nil {
+		return fail(CheckWorkspaceQuota, "cannot read the workspace filesystem: "+err.Error())
+	}
+	if fsType != ext4SuperMagic {
+		return fail(CheckWorkspaceQuota, fmt.Sprintf("the workspace is not the slot's ext4 disk (filesystem type %#x)", fsType))
+	}
+	if size > c.WorkspaceQuotaBytes || size < c.WorkspaceQuotaBytes/2 {
+		return fail(CheckWorkspaceQuota, fmt.Sprintf("the workspace is %d MiB, not the configured %d MiB disk", size>>20, c.WorkspaceQuotaBytes>>20))
+	}
+	return pass(CheckWorkspaceQuota, fmt.Sprintf("workspace is a %d MiB disk", size>>20))
+}
+
+func (c *Collector) statfs(path string) (int64, int64, error) {
+	if c.Statfs != nil {
+		return c.Statfs(path)
+	}
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return 0, 0, err
+	}
+	return int64(st.Type), int64(st.Blocks) * int64(st.Bsize), nil
 }

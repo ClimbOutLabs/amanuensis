@@ -192,3 +192,35 @@ describe('ops/sandbox-slot/sandbox-seccomp.json', () => {
     expect(clone3.map(rule => rule.action)).toEqual(['SCMP_ACT_ERRNO']);
   });
 });
+
+describe('docker-compose.slots-disks.yml', () => {
+  const disks = z
+    .object({
+      services: z.record(z.string(), z.object({ environment: z.record(z.string(), z.string()) }).strict()),
+      volumes: z.record(
+        z.string(),
+        z
+          .object({
+            driver: z.literal('local'),
+            driver_opts: z.object({ type: z.literal('none'), o: z.literal('bind'), device: z.string() }).strict(),
+          })
+          .strict(),
+      ),
+    })
+    .parse(load('docker-compose.slots-disks.yml'));
+
+  test('gives each slot the disk size to prove and nothing else', () => {
+    expect(Object.keys(disks.services).sort()).toEqual(['sandbox-1', 'sandbox-2', 'sandbox-3', 'sandbox-4']);
+    for (const service of Object.values(disks.services)) {
+      expect(Object.keys(service.environment)).toEqual(['AMAN_WORKSPACE_QUOTA_BYTES']);
+    }
+  });
+
+  test("swaps each workspace volume for a bind of that slot's own mounted disk", () => {
+    expect(Object.keys(disks.volumes).sort()).toEqual(['slot_ws_1', 'slot_ws_2', 'slot_ws_3', 'slot_ws_4']);
+    for (const [name, volume] of Object.entries(disks.volumes)) {
+      const slot = name.slice(-1);
+      expect(volume.driver_opts.device).toBe(`\${AMAN_SLOTS_DISK_DIR:?run pnpm sandbox:slots}/ws-${slot}`);
+    }
+  });
+});

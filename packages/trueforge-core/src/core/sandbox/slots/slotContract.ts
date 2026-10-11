@@ -4,7 +4,7 @@ import { z } from 'zod';
 export const SLOT_AGENT_SOCKET_NAME = 'agent.sock';
 
 /** The agent build and gVisor release this server was written against; a slot reporting others is refused. */
-export const SLOT_AGENT_VERSION = '0.1.0';
+export const SLOT_AGENT_VERSION = '0.2.0';
 export const SLOT_RUNSC_VERSION = 'runsc version release-20260928.0';
 export const SLOT_PLATFORM = 'systrap';
 
@@ -35,6 +35,7 @@ export const SLOT_REQUIRED_CHECKS = [
   'cgroup_limits',
   'apparmor',
   'proc_fs',
+  'workspace_quota',
   'runsc',
 ] as const;
 
