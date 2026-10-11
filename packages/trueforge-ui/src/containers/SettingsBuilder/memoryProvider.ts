@@ -6,9 +6,10 @@
  * the flag on an unrelated credential change). One owner for the shape rather than the same
  * predicate written twice.
  */
+import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
+
 import {
   type MemoryProviderConnector,
-  type MemoryProviderSettings,
   type MemoryProviderUpdateRequest,
   REFLECT_BUDGETS,
   type ReflectBudget,
@@ -19,7 +20,6 @@ import type { ConnectorBase } from '@/server/types.js';
 export type {
   ConnectorWithMemoryProvider,
   MemoryProviderConnector,
-  MemoryProviderSettings,
   MemoryProviderUpdateRequest,
 } from '@/server/memoryProviderTypes.js';
 
@@ -42,14 +42,15 @@ function optionalBoolean(value: unknown): boolean | undefined {
 
 /**
  * Reads the per-bank tuning off the row with runtime checks rather than a cast: `ConnectorBase`
- * does not declare it, and a value that is not the expected shape must read as unset.
+ * does not declare it, and a value that is not the expected shape must read as unset. Keys are the
+ * SDK's camelCase names; its serializer maps them to and from the snake_case wire.
  */
-export function readMemorySettings(connector: ConnectorBase): MemoryProviderSettings | undefined {
+export function readMemorySettings(connector: ConnectorBase): TrueForgeApi.MemoryProviderSettings | undefined {
   const raw: unknown = Reflect.get(connector, 'memorySettings');
   if (!isRecord(raw)) {
     return undefined;
   }
-  const settings: MemoryProviderSettings = {};
+  const settings: TrueForgeApi.MemoryProviderSettings = {};
   const budget = raw['reflectBudget'];
   setIfDefined(settings, 'recallTimeoutMs', optionalInteger(raw['recallTimeoutMs']));
   setIfDefined(settings, 'recallQueryWindow', optionalInteger(raw['recallQueryWindow']));
@@ -63,10 +64,8 @@ export function readMemorySettings(connector: ConnectorBase): MemoryProviderSett
   setIfDefined(settings, 'reflectBudget', isReflectBudget(budget) ? budget : undefined);
   setIfDefined(settings, 'reflectMaxTokens', optionalInteger(raw['reflectMaxTokens']));
   setIfDefined(settings, 'reflectTimeoutMs', optionalInteger(raw['reflectTimeoutMs']));
-  // Wire name, not camelCase: see the field's doc comment in memoryProviderTypes.ts.
-  setIfDefined(settings, 'screen_enabled', optionalBoolean(raw['screen_enabled']));
-  // Wire name, not camelCase: see the field's doc comment in memoryProviderTypes.ts.
-  setIfDefined(settings, 'prerecall_gate_enabled', optionalBoolean(raw['prerecall_gate_enabled']));
+  setIfDefined(settings, 'screenEnabled', optionalBoolean(raw['screenEnabled']));
+  setIfDefined(settings, 'prerecallGateEnabled', optionalBoolean(raw['prerecallGateEnabled']));
   return Object.keys(settings).length > 0 ? settings : undefined;
 }
 
@@ -75,10 +74,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function setIfDefined<K extends keyof MemoryProviderSettings>(
-  settings: MemoryProviderSettings,
+function setIfDefined<K extends keyof TrueForgeApi.MemoryProviderSettings>(
+  settings: TrueForgeApi.MemoryProviderSettings,
   key: K,
-  value: MemoryProviderSettings[K] | undefined,
+  value: TrueForgeApi.MemoryProviderSettings[K] | undefined,
 ): void {
   if (value !== undefined) {
     settings[key] = value;

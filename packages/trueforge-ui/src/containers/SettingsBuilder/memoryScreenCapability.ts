@@ -2,10 +2,10 @@
  * Read-only status of memory-adjacent content screens, from the `memory_screen` and
  * `tool_output_screen` capabilities the server adds to `GET /api/v1/capabilities` (see
  * `packages/trueforge/src/schemas/capability.ts`). The generated SDK normalizes snake_case wire
- * keys before the UI receives them; `configured` and `reason` are read defensively with
- * `Reflect.get` rather than through the generated `MemoryScreenCapability` /
- * `ToolOutputScreenCapability` types, which do not yet declare them (they landed on the server
- * first).
+ * keys before the UI receives them; the capabilities arrive through the runtime's untyped port, so
+ * fields are read defensively with `Reflect.get` and returned as the SDK's own capability types.
+ * `configured` defaults to true when a server predates the field, so an old build's switch is
+ * never wrongly shown disabled.
  *
  * The screen classifies recalled memory as it would be injected into the model's context — the
  * structural defense against a note the host retained getting recalled into an unrelated chat and
@@ -44,17 +44,7 @@ function booleanFieldOf(raw: object, field: string): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
-/**
- * `MemoryScreenCapability` widened with the fields the generated SDK does not yet declare.
- * `configured` defaults to true when a server predates the field, so an old build's switch is
- * never wrongly shown disabled.
- */
-export type MemoryScreenStatus = TrueForgeApi.MemoryScreenCapability & {
-  configured: boolean;
-  reason?: string;
-};
-
-export function readMemoryScreenStatus(capabilities: unknown): MemoryScreenStatus | null {
+export function readMemoryScreenStatus(capabilities: unknown): TrueForgeApi.MemoryScreenCapability | null {
   if (!isObject(capabilities)) return null;
   const normalized = Reflect.get(capabilities, 'memoryScreen');
   const raw = normalized ?? Reflect.get(capabilities, 'memory_screen');
@@ -70,17 +60,7 @@ export function readMemoryScreenStatus(capabilities: unknown): MemoryScreenStatu
   };
 }
 
-/**
- * `ToolOutputScreenCapability` widened with the fields the generated SDK does not yet declare.
- * `configured` defaults to true when a server predates the field, so an old build's switch is
- * never wrongly shown disabled.
- */
-export type ToolOutputScreenStatus = TrueForgeApi.ToolOutputScreenCapability & {
-  configured: boolean;
-  reason?: string;
-};
-
-export function readToolOutputScreenStatus(capabilities: unknown): ToolOutputScreenStatus | null {
+export function readToolOutputScreenStatus(capabilities: unknown): TrueForgeApi.ToolOutputScreenCapability | null {
   if (!isObject(capabilities)) return null;
   const normalized = Reflect.get(capabilities, 'toolOutputScreen');
   const raw = normalized ?? Reflect.get(capabilities, 'tool_output_screen');

@@ -63,17 +63,6 @@ export function memoryProviderWriteRequestOptions(memoryProvider: boolean | unde
     : undefined;
 }
 
-/**
- * The SDK's generated `McpServerManifest` type may not yet declare the memory fields (they land
- * on the server side first; the SDK's own convention camelCases them and maps them to the
- * `memory_provider` / `memory_settings` wire names via its serializer). Widen locally so this
- * package never edits the generated SDK package to add a field.
- */
-type HarnessManifestWithMemory = TrueForgeApi.McpServerManifest & MemoryProviderFields;
-type ConfiguredMcpServerWithMemory = TrueForgeApi.ConfiguredMcpServer & {
-  manifest: HarnessManifestWithMemory;
-};
-
 const ApiErrorResponseSchema = z.object({ error: z.object({ message: z.string() }) });
 
 /** The HTTP status the SDK puts on the errors it throws, when it threw one of those. */
@@ -249,9 +238,12 @@ export function toUiTool(tool: Record<string, unknown>): ToolBase & { annotation
 }
 
 export function toUiConnector(server: TrueForgeApi.ConfiguredMcpServer): UiConnector {
-  const manifest = (server as ConfiguredMcpServerWithMemory).manifest;
+  const manifest = server.manifest;
   const auth = toUiAuthPublic(manifest.auth);
-  const searchProvider = server.manifest.type === 'remote' ? server.manifest.searchProvider : undefined;
+  const remote = manifest.type === 'remote' ? manifest : undefined;
+  const memoryProvider = remote?.memoryProvider;
+  const memorySettings = remote?.memorySettings;
+  const searchProvider = remote?.searchProvider;
   return {
     id: server.name,
     name: server.name,
@@ -260,8 +252,8 @@ export function toUiConnector(server: TrueForgeApi.ConfiguredMcpServer): UiConne
     auth,
     requiresAuth: server.authStatus.status === 'auth_required',
     authenticated: server.authStatus.status !== 'auth_required',
-    ...(manifest.memoryProvider === undefined ? {} : { memoryProvider: manifest.memoryProvider }),
-    ...(manifest.memorySettings === undefined ? {} : { memorySettings: manifest.memorySettings }),
+    ...(memoryProvider === undefined ? {} : { memoryProvider }),
+    ...(memorySettings === undefined ? {} : { memorySettings }),
     ...(searchProvider === undefined ? {} : { searchProvider }),
   };
 }
@@ -290,7 +282,7 @@ export function toHarnessManifest(
 ): TrueForgeApi.McpServerManifest {
   const auth = toHarnessAuth(req.auth);
   const trimmed = req.description?.trim();
-  const manifest: HarnessManifestWithMemory = {
+  const manifest: TrueForgeApi.RemoteMcpServerManifest = {
     type: 'remote',
     name: req.name,
     url: req.url,
