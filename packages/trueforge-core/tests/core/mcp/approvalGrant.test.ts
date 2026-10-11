@@ -4,6 +4,7 @@ import type { ApprovalDecision } from '../../../src/core/events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import {
   allowsChatApproval,
+  allowsToolGrant,
   approvalGrantKey,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
@@ -159,7 +160,7 @@ describe('chat approval grants', () => {
     const readTool: ToolSchema = {
       name: 'read_thing',
       inputSchema: { type: 'object' },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     };
     const toolSet = makeRealToolSet({
       tools: [readTool],
@@ -206,6 +207,27 @@ describe('chat approval grants', () => {
       implementationPlanGrants: new Set(),
     });
     expect(effective.has('call')).toBe(false);
+  });
+});
+
+describe('always-allow grant eligibility', () => {
+  it('admits only a connector tool the host classified as inspection', () => {
+    expect(allowsToolGrant({ ...toolInfo('notes', 'lookup_note'), effect: 'inspect' })).toBe(true);
+    expect(allowsToolGrant(toolInfo('notes', 'lookup_note'))).toBe(false);
+    expect(allowsToolGrant({ ...toolInfo('notes', 'lookup_note'), effect: 'edit' })).toBe(false);
+    expect(allowsToolGrant({ ...toolInfo('', 'current_datetime'), type: 'truefoundry-system', effect: 'inspect' })).toBe(
+      false,
+    );
+  });
+
+  it('end-to-end: a real read-only MCP tool that omits openWorldHint is not eligible', async () => {
+    const toolSet = makeRealToolSet({
+      tools: [{ name: 'peek_thing', inputSchema: { type: 'object' }, annotations: { readOnlyHint: true } }],
+      selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: ['@all'] },
+    });
+    const info = await toolSet.toolCallInfo({ name: 'peek_thing', arguments: {} });
+    expect(allowsToolGrant(info)).toBe(false);
+    expect(allowsChatApproval(info)).toBe(false);
   });
 });
 

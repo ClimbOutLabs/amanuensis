@@ -2,12 +2,12 @@
 
 /** Why the memory provider could not be reached: `invalid_url` (not an `{apiBase}/mcp/{bank}` URL), `auth_required` (the connector still needs authorization), `header_resolution_failed` (a `${env:}` / `${file:}` header reference did not resolve), `timeout`, `request_failed` (the host could not reach it), `http_error` (it answered with a non-2xx status), or `invalid_response` (its answer was unreadable). */
 export const MemoryProviderFailureCode = {
-    InvalidUrl: "invalid_url",
-    AuthRequired: "auth_required",
-    HeaderResolutionFailed: "header_resolution_failed",
-    Timeout: "timeout",
-    RequestFailed: "request_failed",
-    HttpError: "http_error",
-    InvalidResponse: "invalid_response",
-} as const;
-export type MemoryProviderFailureCode = (typeof MemoryProviderFailureCode)[keyof typeof MemoryProviderFailureCode];
+        InvalidUrl: "invalid_url",
+        AuthRequired: "auth_required",
+        HeaderResolutionFailed: "header_resolution_failed",
+        Timeout: "timeout",
+        RequestFailed: "request_failed",
+        HttpError: "http_error",
+        InvalidResponse: "invalid_response"
+    } as const;
+export type MemoryProviderFailureCode = typeof MemoryProviderFailureCode[keyof typeof MemoryProviderFailureCode];

@@ -8,6 +8,7 @@ import { ToolSet } from '../core/mcp/ToolSet';
 import { createSentinelHostContext, type SentinelHostContext, type SentinelServices } from '../core/permissions';
 import type { AgentDefinition, ConfiguredModelSummary, ModelParams } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
+import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../core/tracing/NoopAgentTracing';
@@ -76,6 +77,8 @@ export class TurnResourceResolver<
   TTurnCustom extends object = Record<string, never>,
 > implements ITurnResourceResolver<TTurnCustom> {
   readonly #sources = new Map<string, Promise<ToolSource>>();
+  /** MCP servers the host reported as first-party when it resolved their connection this turn. */
+  readonly #firstPartyServers = new Set<string>();
   readonly #models = new Map<string, Promise<ResolvedModel>>();
   #sandbox?: Sandbox | undefined;
 
@@ -97,8 +100,11 @@ export class TurnResourceResolver<
        * the AgentSpec carries names only (no url/headers on the wire) — the
        * runtime supplies the catalog. Called once per distinct server name per
        * turn. Throw for unknown names. `headers` supports the async resolver form.
+       * `first_party` is true only for a connector the host itself vouches for, never one a user,
+       * a request or the model described: it lets that server's read-only, explicitly
+       * closed-world tools run without a card.
        */
-      mcp: (name: string) => Promise<{ url: string; headers?: RemoteMcpHeaders }>;
+      mcp: (name: string) => Promise<{ url: string; headers?: RemoteMcpHeaders; first_party?: boolean }>;
       mcpRequestTimeoutMs: number;
       mcpConnectTimeoutMs: number;
       /** One sandbox type per runtime. Omit = no sandbox support. */
@@ -132,6 +138,15 @@ export class TurnResourceResolver<
        * See ITurnResourceResolver.runCodeToolCallTimeoutMs.
        */
       runCodeToolCallTimeoutMs?: number | undefined;
+      /**
+       * Host instance-wide bound in milliseconds on waiting for a model call's
+       * first output. See ITurnResourceResolver.modelFirstResponseTimeoutMs.
+       */
+      modelFirstResponseTimeoutMs?: number | undefined;
+      /**
+       * Per-run host policy over tool calls. See ITurnResourceResolver.toolCallPolicy.
+       */
+      toolCallPolicy?: HostToolCallPolicy | undefined;
       /** Resolved T2 binding, independent of whether this turn enables a sandbox. */
       boundRepository?: BoundRepository | undefined;
       /** IANA timezone name the client sent with this turn. See ITurnResourceResolver.clientTimezone. */
@@ -183,6 +198,14 @@ export class TurnResourceResolver<
 
   get runCodeToolCallTimeoutMs(): number | undefined {
     return this.deps.runCodeToolCallTimeoutMs;
+  }
+
+  get modelFirstResponseTimeoutMs(): number | undefined {
+    return this.deps.modelFirstResponseTimeoutMs;
+  }
+
+  get toolCallPolicy(): HostToolCallPolicy | undefined {
+    return this.deps.toolCallPolicy;
   }
 
   get boundRepository(): BoundRepository | undefined {
@@ -310,7 +333,10 @@ export class TurnResourceResolver<
         const source = await this.getOrCreateToolSource({
           id: entry.name,
           create: async () => {
-            const { url, headers } = await this.deps.mcp(entry.name);
+            const { url, headers, first_party } = await this.deps.mcp(entry.name);
+            if (first_party === true) {
+              this.#firstPartyServers.add(entry.name);
+            }
             return new RemoteMCP({
               id: entry.name,
               name: entry.name,
@@ -319,6 +345,8 @@ export class TurnResourceResolver<
               sessionId: previousTurn?.snapshot.mcp_servers?.[entry.name]?.session_id,
               requestTimeoutMs: this.deps.mcpRequestTimeoutMs,
               connectTimeoutMs: this.deps.mcpConnectTimeoutMs,
+              // A vouched-for connector must not hand its trust to wherever it redirects.
+              refuseRedirects: first_party === true,
               logger: this.deps.logger,
               tracing,
               signal,
@@ -330,6 +358,7 @@ export class TurnResourceResolver<
           selectors: toSelectors(entry),
           preload: entry.preload,
           sentinel,
+          firstParty: this.#firstPartyServers.has(entry.name),
         });
       }),
     );

@@ -828,6 +828,8 @@ export class SessionHandle<
       toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
       toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
       runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
+      modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
+      toolCallPolicy: input.resolver.toolCallPolicy,
       sentinel: this.createSentinelContext(),
     });
   }
@@ -918,6 +920,8 @@ export class SessionHandle<
         toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
         toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
+        modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
+        toolCallPolicy: input.resolver.toolCallPolicy,
         sentinel: this.createSentinelContext(),
       });
     };

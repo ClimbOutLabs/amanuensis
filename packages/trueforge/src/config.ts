@@ -25,6 +25,7 @@ import {
   MEMORY_SETTINGS_LIMITS,
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
+import { normalizedOrigin } from './mcp/firstParty';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
 
@@ -135,6 +136,33 @@ export function parseOidcAllowedEmails(raw: string | undefined): string[] {
     .split(',')
     .map(part => part.trim())
     .filter(part => part.length > 0);
+}
+
+/**
+ * Parses `FIRST_PARTY_MCP_ORIGINS`: comma-separated exact origins (scheme, host and optional
+ * port, no path) of the operator's own memory provider. Unset / blank → none, so no connector is
+ * first-party. Each entry is normalized the way a connector URL's origin is, then matched exactly.
+ * Anything else fails the boot: a silently dropped typo would read as "nothing is trusted", and a
+ * path or wildcard would suggest a prefix or suffix match the list never does.
+ */
+export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === '') {
+    return [];
+  }
+  const origins = new Set<string>();
+  for (const entry of raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)) {
+    const origin = normalizedOrigin(entry);
+    if (origin === undefined || origin.includes('*') || new URL(entry).href !== `${origin}/`) {
+      throw new Error(
+        `FIRST_PARTY_MCP_ORIGINS entries must be exact http(s) origins such as https://memory.internal:8443, got: ${entry}`,
+      );
+    }
+    origins.add(origin);
+  }
+  return [...origins];
 }
 
 /**
@@ -638,6 +666,13 @@ export interface SharedServerConfiguration {
   /** Max milliseconds for an MCP transport connection. Env: `MCP_CONNECT_TIMEOUT_MS`. Default 30 seconds. */
   MCP_CONNECT_TIMEOUT_MS: number;
   /**
+   * Origins of the operator's own memory provider, as normalized `scheme://host[:port]` strings.
+   * A connector saved as the memory provider on one of these origins is first-party: its tools that
+   * declare `readOnlyHint` true and `openWorldHint` false run without an approval card. Empty means
+   * no connector is first-party. Env: `FIRST_PARTY_MCP_ORIGINS` (comma-separated). Default empty.
+   */
+  FIRST_PARTY_MCP_ORIGINS: string[];
+  /**
    * Max concurrent read-only (Phase-A) tool-call dispatches per assistant batch.
    * Env: `TOOL_DISPATCH_MAX_CONCURRENCY`. Default 4.
    */
@@ -652,6 +687,14 @@ export interface SharedServerConfiguration {
    * Must stay below `SERVER_EXECUTION_TIMEOUT_SECONDS`.
    */
   TOOL_CALL_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on waiting for a model call's first output before
+   * the turn fails visibly instead of hanging. A provider that accepts the
+   * request but never produces a first chunk would otherwise leave the turn
+   * active indefinitely. Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default
+   * 600000 (10 minutes).
+   */
+  MODEL_FIRST_RESPONSE_TIMEOUT_MS: number;
   /**
    * Client name used for Dynamic Client Registration (DCR) of MCP servers.
    * This is the client name shown on authorization-server consent screens.
@@ -1057,6 +1100,14 @@ export interface SharedServerConfiguration {
    */
   MEMORY_EMBEDDINGS_MODEL_DIR: string;
   /**
+   * Root directory for persona knowledge libraries. Each persona gets its own
+   * SQLite database file under a sanitized tenant subdirectory, so knowledge
+   * can never leak across personas. Persist it (Docker volume) or libraries
+   * vanish on container recreate.
+   * Env: `PERSONA_KNOWLEDGE_DIR`. Default `./data/persona-knowledge` (relative to the process cwd).
+   */
+  PERSONA_KNOWLEDGE_DIR: string;
+  /**
    * Memories embedded per background-backfill batch. Smaller batches yield to the
    * event loop more often; larger batches finish sooner.
    * Env: `MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE`. Default 8.
@@ -1277,6 +1328,7 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MCP_CONNECT_TIMEOUT_MS'),
     defaultValue: 30 * 1000,
   }),
+  FIRST_PARTY_MCP_ORIGINS: parseFirstPartyMcpOrigins(getEnv('FIRST_PARTY_MCP_ORIGINS')),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),
@@ -1294,6 +1346,13 @@ const shared: SharedServerConfiguration = {
     // deadline (see getRunCodeToolCallTimeoutMs), so the long bound is scoped
     // to the one tool that needs it instead of every tool.
     defaultValue: 240_000,
+  }),
+  MODEL_FIRST_RESPONSE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_FIRST_RESPONSE_TIMEOUT_MS',
+    raw: getEnv('MODEL_FIRST_RESPONSE_TIMEOUT_MS'),
+    // Literal mirror of DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS in
+    // trueforge-core's AgentThread.ts (the canonical owner).
+    defaultValue: 600_000,
   }),
   MCP_DCR_OAUTH_CLIENT_NAME:
     getEnv('MCP_DCR_OAUTH_CLIENT_NAME', { defaultValue: 'truefoundry-harness' }) ?? 'truefoundry-harness',
@@ -1586,6 +1645,8 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE'),
     defaultValue: 8,
   }),
+  PERSONA_KNOWLEDGE_DIR:
+    getEnv('PERSONA_KNOWLEDGE_DIR', { defaultValue: './data/persona-knowledge' }) ?? './data/persona-knowledge',
   MEMORY_REFLECT_MAX_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_REFLECT_MAX_TOKENS',
     raw: getEnv('MEMORY_REFLECT_MAX_TOKENS'),

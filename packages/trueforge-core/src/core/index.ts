@@ -250,6 +250,7 @@ export {
 export { REDIS_KEY_NAMESPACE, redisKey } from './redisKeys';
 export { describeUnknownError, extractErrorLogFields } from './util/errorLogFields';
 export { PromiseTimeoutError, withTimeout } from './util/promiseUtils';
+export { isRedirectStatus, redirectTargetOrigin } from './util/redirects';
 
 // Sandbox (concrete implementation; provider details exported for composition)
 export { CodeModeDispatcher } from './sandbox/codeMode/CodeModeDispatcher';
@@ -274,8 +275,13 @@ export type {
   RunCodeLanguage,
   SandboxIdentity,
 } from './sandbox/driver/IsolationDriver';
-export { RUN_CODE_ERROR_CODES, RunCodeInputSchema, RunCodeResultSchema } from './sandbox/driver/RunCodeSchemas';
-export type { RunCodeErrorCode, RunCodeInput, RunCodeResult } from './sandbox/driver/RunCodeSchemas';
+export {
+  RUN_CODE_ERROR_CODES,
+  RunCodeInputSchema,
+  RunCodeResultSchema,
+  RunCodeStatusSchema,
+} from './sandbox/driver/RunCodeSchemas';
+export type { RunCodeErrorCode, RunCodeInput, RunCodeResult, RunCodeStatus } from './sandbox/driver/RunCodeSchemas';
 export { RunCodeService, validateRunCodeStartupConfig } from './sandbox/driver/RunCodeService';
 export type {
   HarvestedFile,
@@ -283,6 +289,7 @@ export type {
   RunCodeServiceOptions,
   TurnAttachment,
 } from './sandbox/driver/RunCodeService';
+export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DaytonaSandboxProvider } from './sandbox/provider/DaytonaProvider';
 export type { DaytonaSandboxProviderOptions } from './sandbox/provider/DaytonaProvider';
 export { absolutizeRelativeExecEnv } from './sandbox/provider/execEnv';
@@ -411,3 +418,4 @@ export type {
   TierDecision,
   TrackedExecutionBinding,
 } from './permissions/tier';
+export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';

@@ -72,6 +72,7 @@ import { estimateTokensForString } from '../llm/usage';
 import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
 import {
   allowsChatApproval,
+  allowsToolGrant,
   approvalGrantKey,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
@@ -168,7 +169,8 @@ import {
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
 } from './contextUtils';
-import { DeferredTool } from './DeferredTool';
+import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
+import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThreadMetrics } from './metrics';
 import {
   getClosableOpenToolCallOutcomes,
@@ -819,11 +821,17 @@ function validateToolMessage(
   }
 }
 
-function validateApprovalMessage(
-  message: UserToolApprovalMessage,
-  pendingApprovals: ReadonlyMap<string, InternalEnrichedToolCall>,
-  index: number,
-): void {
+function validateApprovalMessage({
+  message,
+  pendingApprovals,
+  index,
+  toolGrantsAvailable,
+}: {
+  message: UserToolApprovalMessage;
+  pendingApprovals: ReadonlyMap<string, InternalEnrichedToolCall>;
+  index: number;
+  toolGrantsAvailable: boolean;
+}): void {
   const pending = pendingApprovals.get(message.tool_call_id);
   if (pending === undefined) {
     throw new InvalidAgentSendInputError(
@@ -837,6 +845,15 @@ function validateApprovalMessage(
   ) {
     throw new InvalidAgentSendInputError(
       `messages[${String(index)}] chat-scoped approval is not available for tool_call_id '${message.tool_call_id}'`,
+    );
+  }
+  if (
+    message.approval.status === 'allow' &&
+    message.approval.scope === 'always' &&
+    !(toolGrantsAvailable && allowsToolGrant(pending.tool_info))
+  ) {
+    throw new InvalidAgentSendInputError(
+      `messages[${String(index)}] always-allow approval is not available for tool_call_id '${message.tool_call_id}'`,
     );
   }
 }
@@ -870,6 +887,8 @@ function validateInputMessageTypesGivenContext(input: {
   messages: AgentThreadRuntimeSendInput[];
   chatApprovalGrants: ReadonlySet<string>;
   implementationPlanGrants: ReadonlySet<string>;
+  /** Whether a standing tool grant can be recorded: only with a Sentinel context. */
+  toolGrantsAvailable: boolean;
 }): void {
   // Full open set: validates incoming tool responses and dedupes within the batch.
   const openToolCallIds = getOpenToolCallIds(input.context);
@@ -892,7 +911,12 @@ function validateInputMessageTypesGivenContext(input: {
       continue;
     }
     if (isApprovalDecisionMessage(m)) {
-      validateApprovalMessage(m, pendingApprovalCalls, i);
+      validateApprovalMessage({
+        message: m,
+        pendingApprovals: pendingApprovalCalls,
+        index: i,
+        toolGrantsAvailable: input.toolGrantsAvailable,
+      });
       pendingApprovalCalls.delete(m.tool_call_id);
       pendingApprovalIds.delete(m.tool_call_id);
     } else if (isInputUserMessage(m)) {
@@ -1155,11 +1179,15 @@ async function enrichAssistantMessage({
   toolMapping,
   resolveUnderlyingTool,
   sentinel,
+  toolCallPolicy,
+  logger,
 }: {
   assistantMessage: RawAssistantMessage;
   toolMapping: Map<string, MappedMCPTool>;
   resolveUnderlyingTool: boolean;
   sentinel: SentinelHostContext | undefined;
+  toolCallPolicy: HostToolCallPolicy | undefined;
+  logger: HostToolCallPolicyLogger | undefined;
 }): Promise<InternalEnrichedAssistantMessage> {
   // Omit tool_calls when empty; OpenAI rejects `tool_calls: []` on replay.
   if (!assistantMessage.tool_calls?.length) {
@@ -1183,10 +1211,33 @@ async function enrichAssistantMessage({
       ...(resolveUnderlyingTool ? { arguments: tryParseToolArgs(toolCall.function.arguments) } : {}),
     };
     const resolved = await resolveToolCallInfo({ toolInfo, params, resolveUnderlyingTool });
+    // The host policy runs before Sentinel classification so a call it blocks
+    // never reaches the permission layer. It sees the effective call: the
+    // underlying tool (e.g. `web_search` reached through `call_tool`) with its
+    // args unwrapped from the dispatcher's envelope.
+    let policed = resolved;
+    if (toolCallPolicy !== undefined) {
+      const underlyingToolName = resolved.type === 'mcp' ? resolved.original_tool_name : undefined;
+      const parsedArgs = params.arguments ?? tryParseToolArgs(toolCall.function.arguments);
+      const viaCallTool =
+        toolInfo.originalToolName === CALL_TOOL_NAME &&
+        underlyingToolName !== undefined &&
+        underlyingToolName !== CALL_TOOL_NAME;
+      policed = applyHostToolCallPolicy({
+        call: {
+          functionName: toolCall.function.name,
+          underlyingToolName,
+          args: viaCallTool ? (tryUnwrapCallToolInput(parsedArgs) ?? parsedArgs) : parsedArgs,
+        },
+        toolInfo: resolved,
+        policy: toolCallPolicy,
+        logger,
+      });
+    }
     const tool_info = await classifyUnstampedToolCall({
       sentinel,
       canonical_params: params.arguments ?? {},
-      info: resolved,
+      info: policed,
     });
     enrichedToolCalls.push({ ...toolCall, tool_info });
   }
@@ -1329,6 +1380,7 @@ export class AgentThread {
   private readonly toolCallTimeoutMs?: number | undefined;
   private readonly runCodeToolCallTimeoutMs?: number | undefined;
   private readonly modelFirstResponseTimeoutMs: number;
+  private readonly toolCallPolicy: HostToolCallPolicy | undefined;
   private readonly preLLMProcessorsTimeoutMs: number;
   private readonly sandboxRefreshTimeoutMs: number;
   private readonly sentinel?: SentinelHostContext | undefined;
@@ -1377,6 +1429,7 @@ export class AgentThread {
     this.toolCallTimeoutMs = input.toolCallTimeoutMs;
     this.runCodeToolCallTimeoutMs = input.runCodeToolCallTimeoutMs;
     this.modelFirstResponseTimeoutMs = input.modelFirstResponseTimeoutMs ?? DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
+    this.toolCallPolicy = input.toolCallPolicy;
     this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
     this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
     this.sentinel = input.sentinel;
@@ -1549,6 +1602,7 @@ export class AgentThread {
         messages,
         chatApprovalGrants: this.chatApprovalGrants,
         implementationPlanGrants: this.implementationPlanGrants,
+        toolGrantsAvailable: this.sentinel !== undefined,
       });
       if (messages.some(isInputUserMessage)) {
         this.toolCallMemo = createToolCallMemoState();
@@ -1590,16 +1644,31 @@ export class AgentThread {
           }).map(call => [call.id, call]),
         );
         for (const approval of approvals) {
-          if (approval.approval.status !== 'allow' || approval.approval.scope !== 'chat') {
+          if (approval.approval.status !== 'allow') {
             continue;
           }
           const pending = pendingById.get(approval.tool_call_id);
+          if (pending === undefined) {
+            continue;
+          }
           if (
-            pending &&
+            approval.approval.scope === 'chat' &&
             pending.tool_info.implementation_plan_grant === undefined &&
             allowsChatApproval(pending.tool_info)
           ) {
             this.chatApprovalGrants.add(approvalGrantKey(pending.tool_info));
+          }
+          if (
+            approval.approval.scope === 'always' &&
+            this.sentinel !== undefined &&
+            allowsToolGrant(pending.tool_info)
+          ) {
+            await this.sentinel.services.tool_grants.recordToolGrant({
+              tenant_id: this.sentinel.tenant_id,
+              created_by: this.sentinel.created_by,
+              mcp_server_name: pending.tool_info.mcp_server_name,
+              tool_name: pending.tool_info.original_tool_name,
+            });
           }
         }
         const pendingClientCalls = new Map(getPendingClientSideToolCalls(this.context).map(call => [call.id, call]));
@@ -1886,6 +1955,7 @@ export class AgentThread {
       messages,
       chatApprovalGrants: this.chatApprovalGrants,
       implementationPlanGrants: this.implementationPlanGrants,
+      toolGrantsAvailable: this.sentinel !== undefined,
     });
   }
 
@@ -2771,6 +2841,8 @@ export class AgentThread {
       // Hence, we resolve the underlying tool to get the tool information.
       resolveUnderlyingTool: true,
       sentinel: this.sentinel,
+      toolCallPolicy: this.toolCallPolicy,
+      logger: this.logger,
     });
     const finishReason = result.value.finish_reason;
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the

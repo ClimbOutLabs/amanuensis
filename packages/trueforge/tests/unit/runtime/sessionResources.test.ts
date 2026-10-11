@@ -30,7 +30,7 @@ import {
   localSandboxSessionSegment,
   RepositoryBindingResolutionError,
   resolveBoundRepository,
-  resolveGithubGitCredentials,
+  resolveGithubGitToken,
   TFG_METADATA_PREFIX,
   validateAgentSpec,
   withGatewayMetadataHeaders,
@@ -193,7 +193,7 @@ describe('localSandboxSessionSegment', () => {
   });
 });
 
-describe('resolveGithubGitCredentials', () => {
+describe('resolveGithubGitToken', () => {
   it('bridges an explicitly enabled trusted GitHub connector without admitting lookalike hosts', async () => {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
@@ -212,11 +212,10 @@ describe('resolveGithubGitCredentials', () => {
         description: 'GitHub',
         auth: { type: 'header', headers: { authorization: 'github_pat_test_value' } },
       },
+      first_party: false,
     });
 
-    await expect(resolveGithubGitCredentials({ tenant_id: TENANT_ID, spec, store })).resolves.toBe(
-      'https://x-access-token:github_pat_test_value@github.com\n',
-    );
+    await expect(resolveGithubGitToken({ tenant_id: TENANT_ID, spec, store })).resolves.toBe('github_pat_test_value');
 
     await store.upsertServer({
       tenant_id: TENANT_ID,
@@ -228,8 +227,9 @@ describe('resolveGithubGitCredentials', () => {
         description: 'Lookalike GitHub server',
         auth: { type: 'header', headers: { Authorization: 'Bearer must-not-escape' } },
       },
+      first_party: false,
     });
-    await expect(resolveGithubGitCredentials({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
+    await expect(resolveGithubGitToken({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
   });
 
   it('does not bridge a stored token unless the GitHub connector is enabled for the agent', async () => {
@@ -246,10 +246,11 @@ describe('resolveGithubGitCredentials', () => {
         description: 'GitHub',
         auth: { type: 'header', headers: { Authorization: 'Bearer github_pat_test' } },
       },
+      first_party: false,
     });
     const spec = AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' } });
 
-    await expect(resolveGithubGitCredentials({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
+    await expect(resolveGithubGitToken({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
   });
 });
 
@@ -686,6 +687,7 @@ describe('getMcpConnection — secret references in header auth', () => {
         description: 'Literal-only MCP server.',
         auth: { type: 'header', headers: { Authorization: 'Bearer plain-token' } },
       },
+      first_party: false,
     });
 
     const connection = await getMcpConnection({
@@ -716,6 +718,7 @@ describe('getMcpConnection — secret references in header auth', () => {
         description: 'Reference-auth MCP server.',
         auth: { type: 'header', headers: { Authorization: `\${env:${ENV_VAR}}`, 'X-Static': 'unchanged' } },
       },
+      first_party: false,
     });
 
     const connection = await getMcpConnection({
@@ -752,6 +755,7 @@ describe('getMcpConnection — secret references in header auth', () => {
           description: 'File-reference MCP server.',
           auth: { type: 'header', headers: { Authorization: `\${file:${tokenPath}}` } },
         },
+        first_party: false,
       });
 
       const connection = await getMcpConnection({
@@ -792,6 +796,7 @@ describe('getMcpConnection — secret references in header auth', () => {
         description: 'Missing-secret MCP server.',
         auth: { type: 'header', headers: { Authorization: `\${env:${ENV_VAR}}` } },
       },
+      first_party: false,
     });
 
     // This is the exact function the admin tools-listing handler (GET /mcp-servers/{name}/tools)

@@ -2,7 +2,7 @@
 
 /** Sort sessions by `updated_at`. Defaults to "desc". */
 export const ListSessionsOrder = {
-    Asc: "asc",
-    Desc: "desc",
-} as const;
-export type ListSessionsOrder = (typeof ListSessionsOrder)[keyof typeof ListSessionsOrder];
+        Asc: "asc",
+        Desc: "desc"
+    } as const;
+export type ListSessionsOrder = typeof ListSessionsOrder[keyof typeof ListSessionsOrder];

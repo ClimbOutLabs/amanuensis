@@ -14,23 +14,44 @@ const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'graphem
 
 export const ImplementationPlanSchema = z
   .object({
-    repository_id: z.string().min(1).max(256),
+    repository_id: z
+      .string()
+      .min(1)
+      .refine(id => id.length <= 256, 'must be at most 256 characters'),
     repository_revision: z.number().int().nonnegative(),
-    branch: z.string().min(1).max(512),
+    branch: z
+      .string()
+      .min(1)
+      .refine(branch => branch.length <= 512, 'must be at most 512 characters'),
     head_sha: z.string().min(1).max(128),
     file_globs: z
       .array(
         z
           .string()
           .min(1)
-          .max(MAX_PLAN_FILE_GLOB_LENGTH)
+          .refine(
+            glob => glob.length <= MAX_PLAN_FILE_GLOB_LENGTH,
+            `must be at most ${String(MAX_PLAN_FILE_GLOB_LENGTH)} characters`,
+          )
           .refine(glob => compileRepositoryGlob(glob) !== undefined, 'File globs must be repository-relative patterns'),
       )
       .min(1)
       .max(MAX_PLAN_FILE_GLOBS),
-    approach: z.string().trim().min(1).max(4_000),
+    approach: z
+      .string()
+      .trim()
+      .min(1)
+      .refine(approach => approach.length <= 4_000, 'must be at most 4000 characters'),
     verify_command_ids: z
-      .array(z.string().min(1).max(MAX_PLAN_VERIFY_COMMAND_ID_LENGTH))
+      .array(
+        z
+          .string()
+          .min(1)
+          .refine(
+            id => id.length <= MAX_PLAN_VERIFY_COMMAND_ID_LENGTH,
+            `must be at most ${String(MAX_PLAN_VERIFY_COMMAND_ID_LENGTH)} characters`,
+          ),
+      )
       .min(1)
       .max(MAX_PLAN_VERIFY_COMMANDS),
   })

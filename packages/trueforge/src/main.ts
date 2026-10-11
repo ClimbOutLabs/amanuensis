@@ -75,6 +75,7 @@ import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerStore';
 import { McpServerWithAuthStore } from './db/McpServerWithAuthStore';
+import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
@@ -117,6 +118,7 @@ import { TrueFoundryModelProviderStore } from './truefoundry/TrueFoundryModelPro
 import { TrueFoundrySandboxProviderStore } from './truefoundry/TrueFoundrySandboxProviderStore';
 import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundryServiceFoundryServerClient';
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
+import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
 
 /** Persistence + optional Redis wired for the selected topology. */
@@ -151,6 +153,7 @@ interface ServerPersistence<TTransaction> {
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   approvalTokenStore: ApprovalTokenStore;
@@ -319,6 +322,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/global-settings-store/SqliteGlobalSettingsStore'),
       import('./db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore'),
       import('./db/sqlite/approval-token-store/SqliteApprovalTokenStore'),
+      import('./db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore'),
     ]),
   ]);
   const [
@@ -339,6 +343,7 @@ async function createStandalonePersistence(options: {
     { SqliteGlobalSettingsStore },
     { SqliteSentinelSettingsStore },
     { SqliteApprovalTokenStore },
+    { SqliteMcpToolGrantStore },
   ] = sqliteStores;
 
   const db = createSqliteDb(sqlitePath);
@@ -372,6 +377,7 @@ async function createStandalonePersistence(options: {
     scheduleStore: new SqliteScheduleStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
+    mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
@@ -424,6 +430,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/global-settings-store/PostgresGlobalSettingsStore'),
       import('./db/postgres/sentinel-settings-store/PostgresSentinelSettingsStore'),
       import('./db/postgres/approval-token-store/PostgresApprovalTokenStore'),
+      import('./db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore'),
     ]),
   ]);
   const [
@@ -444,6 +451,7 @@ async function createDistributedPersistence(options: {
     { PostgresGlobalSettingsStore },
     { PostgresSentinelSettingsStore },
     { PostgresApprovalTokenStore },
+    { PostgresMcpToolGrantStore },
   ] = postgresStores;
 
   const db = createDb({
@@ -525,6 +533,7 @@ async function createDistributedPersistence(options: {
     scheduleStore: new PostgresScheduleStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
+    mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
@@ -559,6 +568,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     repositoryStore,
     turnArtifactStore,
     globalSettingsStore,
+    mcpToolGrantStore,
     sentinelAuditStore,
     sentinelSettingsStore,
     approvalTokenStore,
@@ -589,6 +599,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: approvalTokenStore,
+    toolGrants: mcpToolGrantStore,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
 
@@ -667,6 +678,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     resolveSkillStore,
     withTransaction,
     tokenStore,
+    mcpToolGrantStore,
     scheduleStore,
     agentStore,
     skillStore,
@@ -712,6 +724,21 @@ try {
     standalone: configuration.STANDALONE,
     version: PACKAGE_VERSION,
   });
+
+  // Fail fast on unwritable data directories: the persona knowledge library and
+  // (with the markdown backend) the memory store write here at query time, and
+  // a bare EACCES mid-request is a silent production outage. This throws a
+  // configuration-shaped error naming the env var instead.
+  await ensureWritableDataDir({
+    dir: configuration.PERSONA_KNOWLEDGE_DIR,
+    envVar: 'PERSONA_KNOWLEDGE_DIR',
+  });
+  if (configuration.MEMORY_BACKEND === 'markdown') {
+    await ensureWritableDataDir({
+      dir: configuration.MEMORY_MARKDOWN_DIR,
+      envVar: 'MEMORY_MARKDOWN_DIR',
+    });
+  }
 
   if (configuration.STANDALONE) {
     printStandaloneStartupBanner({ version: PACKAGE_VERSION, color: shouldColorize() });

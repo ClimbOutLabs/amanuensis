@@ -16,6 +16,11 @@ export interface MemoryVaultSharing {
   shares: Record<string, string[]>;
 }
 
+/** Wire namespace of a persona's own vault. */
+export function personaVaultNamespace(displayName: string): string {
+  return `persona:${displayName}`;
+}
+
 export interface MemoryVaultCatalog {
   listEntries(namespace?: string): Promise<MemoryVaultEntry[]>;
   updateEntry(options: { entryId: string; text: string }): Promise<MemoryVaultEntry>;
