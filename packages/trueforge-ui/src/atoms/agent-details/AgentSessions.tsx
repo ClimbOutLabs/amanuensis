@@ -10,7 +10,7 @@ import { buildSessionResumeHref } from '../../routing/paths.js';
 import { useOptionalResolvedRoutes } from '../../routing/ResolvedRoutesContext.js';
 import { useAgentSessionsServer, useServer } from '../../server/ServerContext.js';
 import { useOptionalShellMode } from '../../server/ShellModeContext.js';
-import type { Session, SessionEventItem, SessionListEntry } from '../../server/types.js';
+import type { AgentSessionsServer, Session, SessionEventItem, SessionListEntry } from '../../server/types.js';
 import { useSlot } from '../../theme/SlotsProvider.js';
 import { drainListPages } from '../../utils/drainListPages.js';
 import { sessionTimeRangeFromCreatedAt } from '../../utils/sessionShareUrl.js';
@@ -38,15 +38,18 @@ function entrySourceType(entry: SessionListEntry): 'schedule' | undefined {
   return 'sourceType' in entry && Reflect.get(entry, 'sourceType') === 'schedule' ? 'schedule' : undefined;
 }
 
+type RecallCapableSessionsServer = AgentSessionsServer & {
+  listRecallTimestamps: (params: { sessionId: string }) => Promise<{ turnId: string; timestamp: string }[]>;
+};
+
+/** Narrows to the harness server when recall timestamp support is available. */
+function hasRecallSupport(server: AgentSessionsServer): server is RecallCapableSessionsServer {
+  return 'listRecallTimestamps' in server;
+}
+
 export function AgentSessions({ agentId, startTimestamp, endTimestamp, shareView }: AgentSessionsProps) {
   const sessionsServer = useAgentSessionsServer();
 
-  /** Narrows to the harness server when recall timestamp support is available. */
-  function hasRecallSupport(server: typeof sessionsServer): server is typeof sessionsServer & {
-    listRecallTimestamps: (params: { sessionId: string }) => Promise<{ turnId: string; timestamp: string }[]>;
-  } {
-    return 'listRecallTimestamps' in server;
-  }
   const chatServer = useServer();
   const shell = useOptionalShellMode();
   const routes = useOptionalResolvedRoutes();
