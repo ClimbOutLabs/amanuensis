@@ -270,6 +270,33 @@ describe('chat whose first turn kept historic required actions', () => {
   });
 });
 
+describe('chat that paused on a card, was approved, then got a follow-up', () => {
+  const approved = doneTurn({
+    id: 'trn_2',
+    previousTurnId: 'trn_1',
+    input: [{ type: 'user.tool_approval', threadId: 'main', toolCallId: 'call_1', approval: { status: 'allow' } }],
+  });
+  const followUp = doneTurn({
+    id: 'trn_3',
+    previousTurnId: 'trn_2',
+    input: [{ type: 'user.message', content: 'and one more thing' }],
+  });
+  const turns = [pausedTurn('trn_1'), approved, followUp];
+
+  it('probes the follow-up as the tip and finds nothing pending', async () => {
+    const { extensions } = createFakeClient(fakeTurns(turns));
+    const tip = await extensions.peekSessionTip({ sessionId: 'ses_1' });
+    assert.deepEqual(tip, { turnId: 'trn_3', status: 'done', pendingApprovals: [] });
+  });
+
+  it('sends no continuation anchored on the turn that asked', async () => {
+    const { extensions, sessions } = createFakeClient(fakeTurns(turns));
+    const result = await extensions.dismissPendingApprovals({ sessionId: 'ses_1', reason: 'x' });
+    assert.deepEqual(result, { dismissed: 0, alreadyResolved: true });
+    assert.equal(sessions.createTurnStream.mock.calls.length, 0);
+  });
+});
+
 describe('getLastTurnInputTokens', () => {
   it('reads the newest turn metrics', async () => {
     const newest = doneTurn({
