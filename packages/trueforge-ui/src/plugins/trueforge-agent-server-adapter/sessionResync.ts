@@ -35,8 +35,8 @@ export interface LastCompactionStatus {
   tokensBefore: number;
   /** Estimated context tokens after the compaction attempt. */
   tokensAfter: number;
-  /** Whether the compaction applied, or was skipped as invalid or blocked. */
-  outcome: 'applied' | 'skipped_invalid' | 'skipped_blocked';
+  /** Whether the compaction applied, fell back to truncation, or was skipped as invalid or blocked. */
+  outcome: 'applied' | 'skipped_invalid' | 'skipped_blocked' | 'truncated_fallback';
 }
 
 /** Host-facing methods beyond the vendor `AgentChatServer` contract. */

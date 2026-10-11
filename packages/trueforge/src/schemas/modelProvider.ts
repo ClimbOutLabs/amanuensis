@@ -31,6 +31,22 @@ export const ModelPropertiesSchema = z
     vision: z.boolean().optional().describe('Whether the model can read images directly. Absent means false.'),
   })
   .strict()
+  .superRefine((properties, ctx) => {
+    // A model that reserves its whole context window for output leaves no room
+    // for input, so every turn fails the token pre-flight guard. Reject the
+    // combination at the boundary instead of failing silently at runtime.
+    if (
+      properties.context_length != null &&
+      properties.max_output_tokens != null &&
+      properties.max_output_tokens >= properties.context_length
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Max output must be smaller than the context length.',
+        path: ['max_output_tokens'],
+      });
+    }
+  })
   .describe('Optional model capability metadata.')
   .openapi('ModelProperties');
 

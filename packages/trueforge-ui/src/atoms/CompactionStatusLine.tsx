@@ -77,8 +77,11 @@ export function CompactionStatusLine({ className }: { className?: string }) {
   if (lastCompaction != null) {
     const when = formatRelativeTime(lastCompaction.createdAt);
     if (lastCompaction.outcome === 'applied') {
-      const saved = Math.max(0, lastCompaction.tokensBefore - lastCompaction.tokensAfter);
-      parts.push(`Compacted ${when}, saved ${formatTokenCount(saved)} tokens`);
+      // The saved-tokens number is dropped: tokensBefore is a provider count
+      // and tokensAfter is a text estimate, so their difference overstates.
+      parts.push(`Compacted ${when}`);
+    } else if (lastCompaction.outcome === 'truncated_fallback') {
+      parts.push(`Shortened history to fit ${when}`);
     } else {
       parts.push(`Compaction failed ${when}`);
     }

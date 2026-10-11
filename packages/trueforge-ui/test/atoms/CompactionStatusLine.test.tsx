@@ -127,3 +127,35 @@ describe('CompactionStatusLine token budget', () => {
     expect(container.querySelector('[role="img"]')).toBeNull();
   });
 });
+
+describe('CompactionStatusLine compaction outcomes', () => {
+  // 30 minutes ago from test time, so the relative label is stable.
+  const createdAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const baseCompaction = {
+    createdAt,
+    tokensBefore: 100000,
+    tokensAfter: 20000,
+  };
+
+  it('shows only the age for an applied compaction, without a saved-tokens number', () => {
+    stubStatus({ lastCompaction: { ...baseCompaction, outcome: 'applied' } });
+    render(<CompactionStatusLine />);
+    // The saved number mixed a provider count with a text estimate; the line
+    // now shows just the age.
+    expect(screen.getByText('Compacted 30m ago')).toBeDefined();
+    expect(screen.queryByText(/saved/)).toBeNull();
+  });
+
+  it('shows shortened history for a truncated fallback, not a failure', () => {
+    stubStatus({ lastCompaction: { ...baseCompaction, outcome: 'truncated_fallback' } });
+    render(<CompactionStatusLine />);
+    expect(screen.getByText('Shortened history to fit 30m ago')).toBeDefined();
+    expect(screen.queryByText(/failed/i)).toBeNull();
+  });
+
+  it('shows a failure for skipped outcomes', () => {
+    stubStatus({ lastCompaction: { ...baseCompaction, outcome: 'skipped_invalid' } });
+    render(<CompactionStatusLine />);
+    expect(screen.getByText('Compaction failed 30m ago')).toBeDefined();
+  });
+});

@@ -101,4 +101,43 @@ describe('ModelProviderManifestSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  // Reserving the whole context window for output leaves no room for input, so
+  // every turn fails the token pre-flight guard. The schema rejects it up front.
+  it('rejects max_output_tokens greater than or equal to context_length', () => {
+    const withProperties = (properties: Record<string, unknown>): boolean => {
+      const result = ModelProviderManifestSchema.safeParse({
+        auth: { api_key: 'k' },
+        type: 'anthropic',
+        models: [{ model_id: 'a-model', name: 'a-model', properties }],
+      });
+      return result.success;
+    };
+    expect(withProperties({ context_length: 128000, max_output_tokens: 128000 })).toBe(false);
+    expect(withProperties({ context_length: 128000, max_output_tokens: 200000 })).toBe(false);
+    expect(withProperties({ context_length: 128000, max_output_tokens: 4096 })).toBe(true);
+    // Either limit alone is fine; the guard only applies to the combination.
+    expect(withProperties({ context_length: 128000 })).toBe(true);
+    expect(withProperties({ max_output_tokens: 4096 })).toBe(true);
+    expect(withProperties({})).toBe(true);
+  });
+
+  it('reports a clear message when max output covers the context window', () => {
+    const result = ModelProviderManifestSchema.safeParse({
+      auth: { api_key: 'k' },
+      type: 'anthropic',
+      models: [
+        {
+          model_id: 'a-model',
+          name: 'a-model',
+          properties: { context_length: 8000, max_output_tokens: 8000 },
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map(issue => issue.message);
+      expect(messages).toContain('Max output must be smaller than the context length.');
+    }
+  });
 });

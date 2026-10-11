@@ -110,6 +110,31 @@ describe('CustomModelProviderForm', () => {
     expect(onAdd).not.toHaveBeenCalled();
   });
 
+  it('rejects max output tokens at or above the context length', () => {
+    const onAdd = renderForm();
+    fillVisible();
+    fillLimits('8000', '8000'); // max output covers the whole context window
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+    expect(screen.getByText('Max output must be smaller than the context length.')).toBeInTheDocument();
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('rejects max output tokens above the context length', () => {
+    const onAdd = renderForm();
+    fillVisible();
+    fillLimits('8000', '16000');
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+    expect(screen.getByText('Max output must be smaller than the context length.')).toBeInTheDocument();
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('accepts max output tokens below the context length', async () => {
+    const onAdd = renderForm();
+    fillValid(); // 128000 context, 4096 max output
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+    await waitFor(() => expect(onAdd).toHaveBeenCalled());
+  });
+
   it('keeps a newly added model clean after a failed submit attempt', () => {
     renderForm();
     fillVisible(); // model 1 visible-valid, limits still empty

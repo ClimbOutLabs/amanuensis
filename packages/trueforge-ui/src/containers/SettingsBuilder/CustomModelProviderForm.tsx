@@ -206,6 +206,16 @@ const CustomModelProviderForm = ({
   const modelMaxOutputError = (model: ModelRow): string | null =>
     parsePositiveInt(model.maxOutputTokens) == null ? 'Set the max output tokens.' : null;
 
+  // Reserving the whole context window for output leaves no room for input, so
+  // every turn fails. Catch it here with the same message the server schema uses.
+  const modelOutputExceedsContextError = (model: ModelRow): string | null => {
+    const contextLength = parsePositiveInt(model.contextLength);
+    const maxOutputTokens = parsePositiveInt(model.maxOutputTokens);
+    return contextLength != null && maxOutputTokens != null && maxOutputTokens >= contextLength
+      ? 'Max output must be smaller than the context length.'
+      : null;
+  };
+
   // The Add-provider button gates on the always-visible fields. The collapsed per-model
   // limits are enforced on submit — auto-expanding and focusing the first offender.
   const visibleValid =
@@ -218,13 +228,19 @@ const CustomModelProviderForm = ({
     markAllTouched();
     if (!visibleValid || busy) return;
 
-    // A required per-model limit is missing: reveal it rather than silently blocking.
-    // Expand that model's Advanced section, then scroll to and focus the first empty field.
-    const incompleteIndex = models.findIndex(model => modelContextError(model) || modelMaxOutputError(model));
+    // A required per-model limit is missing, or the output reservation covers the
+    // whole context window: reveal it rather than silently blocking.
+    // Expand that model's Advanced section, then scroll to and focus the first offending field.
+    const incompleteIndex = models.findIndex(
+      model => modelContextError(model) || modelMaxOutputError(model) || modelOutputExceedsContextError(model),
+    );
     if (incompleteIndex !== -1) {
       updateModel(incompleteIndex, { advancedExpanded: true });
       const target = models[incompleteIndex];
-      const field = target && modelContextError(target) ? 'context-length' : 'max-output-tokens';
+      const field =
+        target && (modelContextError(target) || modelOutputExceedsContextError(target))
+          ? 'context-length'
+          : 'max-output-tokens';
       setTimeout(() => {
         const el = document.getElementById(`custom-provider-model-${incompleteIndex}-${field}`);
         // scrollIntoView is unimplemented in jsdom; guard the method so tests don't throw.
@@ -411,7 +427,7 @@ const CustomModelProviderForm = ({
                 // type one. Only surface an error once they have hand-edited the name themselves.
                 const showNameFieldError = !!nameFieldError && model.nameDirty;
                 const contextError = modelContextError(model);
-                const maxError = modelMaxOutputError(model);
+                const maxError = modelMaxOutputError(model) ?? modelOutputExceedsContextError(model);
                 const showContextError = model.contextTouched && contextError;
                 const showMaxError = model.maxTouched && maxError;
                 return (
