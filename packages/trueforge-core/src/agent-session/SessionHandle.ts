@@ -14,7 +14,7 @@ import {
   createSentinelHostContext,
   DEFAULT_PINNED_PATH,
   defaultSentinelServices,
-  withoutTier2Relaxations,
+  forUnattendedRun,
   type SentinelHostContext,
   type SentinelServices,
 } from '../core/permissions';
@@ -225,7 +225,7 @@ export class SessionHandle<
     this.session = options.session;
     const services = options.sentinelServices ?? defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH });
     // Nobody watches a scheduled run, so relaxations never apply: Tier 2 parks for approval.
-    this.sentinelServices = options.session.source?.type === 'schedule' ? withoutTier2Relaxations(services) : services;
+    this.sentinelServices = options.session.source?.type === 'schedule' ? forUnattendedRun(services) : services;
   }
 
   get session_id(): string {

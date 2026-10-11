@@ -109,25 +109,30 @@ function redactMcpServerManifest(manifest: McpServerManifest): McpServerManifest
   return manifest;
 }
 
+/** Connector roles of which exactly one configured server may hold the flag. */
+type SingleHolderRole = 'memory_provider' | 'search_provider';
+
 /**
- * Only one configured server may hold `manifest.memory_provider === true` (the host recalls
- * from and retains to exactly one connector). `excludeName` skips the row being written itself,
- * so re-saving the server that already holds the flag is not treated as a conflict with itself.
- * Returns the first other flagged server found, or undefined when there is none.
+ * Only one configured server may hold each single-holder role: the host recalls from and retains to
+ * exactly one memory connector, and routes the user's silent searches through exactly one search
+ * connector. `excludeName` skips the row being written itself, so re-saving the server that already
+ * holds the flag is not treated as a conflict with itself. Returns the first other flagged server
+ * found, or undefined when there is none.
  */
-async function findOtherMemoryProviderServer({
+async function findOtherRoleHolder({
   mcpServerStore,
   tenant_id,
   excludeName,
+  role,
 }: {
   mcpServerStore: IMcpServerStore;
   tenant_id: string;
   excludeName: string;
+  role: SingleHolderRole;
 }): Promise<McpServerRecord | undefined> {
   const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
   return servers.find(
-    server =>
-      server.name !== excludeName && server.manifest.type === 'remote' && server.manifest.memory_provider === true,
+    server => server.name !== excludeName && server.manifest.type === 'remote' && server.manifest[role] === true,
   );
 }
 
@@ -441,13 +446,25 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
     const incomingManifest = body.manifest;
 
     if (incomingManifest.type === 'remote' && incomingManifest.memory_provider === true) {
-      const conflict = await findOtherMemoryProviderServer({
+      const conflict = await findOtherRoleHolder({
         mcpServerStore: deps.resolveMcpServerStore(c),
         tenant_id: requestContext.tenant_id,
         excludeName: incomingManifest.name,
+        role: 'memory_provider',
       });
       if (conflict !== undefined) {
         return c.json({ error: { message: `memory provider already set on ${conflict.name}; disable it first` } }, 409);
+      }
+    }
+    if (incomingManifest.type === 'remote' && incomingManifest.search_provider === true) {
+      const conflict = await findOtherRoleHolder({
+        mcpServerStore: deps.resolveMcpServerStore(c),
+        tenant_id: requestContext.tenant_id,
+        excludeName: incomingManifest.name,
+        role: 'search_provider',
+      });
+      if (conflict !== undefined) {
+        return c.json({ error: { message: `search provider already set on ${conflict.name}; disable it first` } }, 409);
       }
     }
 
@@ -549,13 +566,25 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
     const incomingManifest = body.manifest;
 
     if (incomingManifest.type === 'remote' && incomingManifest.memory_provider === true) {
-      const conflict = await findOtherMemoryProviderServer({
+      const conflict = await findOtherRoleHolder({
         mcpServerStore: deps.resolveMcpServerStore(c),
         tenant_id: requestContext.tenant_id,
         excludeName: incomingManifest.name,
+        role: 'memory_provider',
       });
       if (conflict !== undefined) {
         return c.json({ error: { message: `memory provider already set on ${conflict.name}; disable it first` } }, 409);
+      }
+    }
+    if (incomingManifest.type === 'remote' && incomingManifest.search_provider === true) {
+      const conflict = await findOtherRoleHolder({
+        mcpServerStore: deps.resolveMcpServerStore(c),
+        tenant_id: requestContext.tenant_id,
+        excludeName: incomingManifest.name,
+        role: 'search_provider',
+      });
+      if (conflict !== undefined) {
+        return c.json({ error: { message: `search provider already set on ${conflict.name}; disable it first` } }, 409);
       }
     }
 

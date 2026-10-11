@@ -7,12 +7,15 @@
  * the advertised tool whose name contains `<tool>`; once its scripted sequence
  * is complete, the turn is closed with plain text. `run:call_tool` reaches a
  * deferred connector's tool: it targets `inert` unless the same message adds
- * `server:<name>`.
+ * `server:<name>`. A `text:<value>` in the same message sets the `text` argument of
+ * a tool that takes one (default `inert`).
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
 export const RUN_DIRECTIVE_PREFIX = 'run:';
 export const SERVER_DIRECTIVE_PREFIX = 'server:';
+export const TEXT_DIRECTIVE_PREFIX = 'text:';
+const DEFAULT_TEXT_ARGUMENT = 'inert';
 const DEFAULT_CALL_TOOL_SERVER = 'inert';
 export const FINAL_TEXT = 'inert connector work is finished.';
 export const VERIFY_THEN_COMMIT_DIRECTIVE = 'verify_then_commit';
@@ -159,11 +162,31 @@ function readRequestBody(req: IncomingMessage): Promise<unknown> {
  * `inert` connector — the only way to reach a non-preloaded server's tool without
  * simulating the full list_tools/get_tool_info discovery round trip.
  */
-function argumentsJsonForTool({ name, callToolServer }: { name: string; callToolServer: string }): string {
+function argumentsJsonForTool({
+  name,
+  callToolServer,
+  text,
+}: {
+  name: string;
+  callToolServer: string;
+  text: string;
+}): string {
   if (name === 'call_tool') {
     return JSON.stringify({ mcp_server: callToolServer, tool_name: 'ask_memory', input: { question: 'inert' } });
   }
-  return name.includes('ask_memory') ? '{"question":"inert"}' : '{"text":"inert"}';
+  return name.includes('ask_memory') ? '{"question":"inert"}' : JSON.stringify({ text });
+}
+
+/** The `text:<value>` of the latest user message that names one, else the default. */
+function textArgument(messages: ChatMessage[]): string {
+  let text = DEFAULT_TEXT_ARGUMENT;
+  for (const message of messages) {
+    if (message.role === 'user') {
+      text =
+        new RegExp(`${TEXT_DIRECTIVE_PREFIX}(\\S+)`).exec(messageText(message.content))?.[1] ?? DEFAULT_TEXT_ARGUMENT;
+    }
+  }
+  return text;
 }
 
 /** The connector the latest `run:` directive's `call_tool` targets: its `server:<name>`, else `inert`. */
@@ -337,7 +360,11 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
         callId: `call_${String(callCounter)}`,
         argumentsJson:
           requestedTool?.argumentsJson === '' || requestedTool?.argumentsJson === undefined
-            ? argumentsJsonForTool({ name: toolName, callToolServer: callToolServer(parsed.messages) })
+            ? argumentsJsonForTool({
+                name: toolName,
+                callToolServer: callToolServer(parsed.messages),
+                text: textArgument(parsed.messages),
+              })
             : requestedTool.argumentsJson,
       };
     }

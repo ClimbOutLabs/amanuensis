@@ -55,9 +55,10 @@ function NestedReasoningContainer() {
   return isRunning ? <ReasoningCard content="" isStreaming headingText="Thinking…" /> : null;
 }
 
-function hostObservedTargetSummary(artifact: unknown): string | undefined {
+/** A host-set text fact on the tool-call part (the model cannot forge these), or undefined. */
+function artifactText(artifact: unknown, name: 'hostObservedTargetSummary' | 'silentSearchQuery'): string | undefined {
   if (artifact === null || typeof artifact !== 'object' || Array.isArray(artifact)) return undefined;
-  const value = Object.entries(artifact).find(([key]) => key === 'hostObservedTargetSummary')?.[1];
+  const value = Object.entries(artifact).find(([key]) => key === name)?.[1];
   return typeof value === 'string' ? value : undefined;
 }
 
@@ -214,7 +215,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     <ToolApprovalContainer
       toolName={part.toolName}
       argsText={part.argsText}
-      hostObservedTargetSummary={hostObservedTargetSummary(part.artifact)}
+      hostObservedTargetSummary={artifactText(part.artifact, 'hostObservedTargetSummary')}
       options={buildApprovalOptions(part.approval?.options)}
       onSelectOption={onSelectOption}
     />
@@ -413,6 +414,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         status={status}
         showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
         mcpServerName={mcpServer}
+        searchedQuery={artifactText(part.artifact, 'silentSearchQuery')}
         {...slots}
         approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
         approvalId={showApproval ? approval?.id : undefined}
@@ -437,6 +439,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
       outcomeText={outcomeText}
       status={status}
       showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
+      searchedQuery={artifactText(part.artifact, 'silentSearchQuery')}
       {...slots}
       approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
       approvalId={showApproval ? approval?.id : undefined}

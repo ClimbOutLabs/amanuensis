@@ -193,6 +193,12 @@ const RemoteMcpServerManifestSchema = z
         'When true, this connector is the long-term memory provider: the host recalls from it before every model call and retains every completed turn. Its URL must be a single-bank Hindsight MCP URL.',
       ),
     memory_settings: MemoryProviderSettingsSchema.optional(),
+    search_provider: z
+      .boolean()
+      .optional()
+      .describe(
+        'When true, this connector is the web search provider: its tools run without asking, behind an outbound secret check, unless the user switched searches to Ask. At most one connector holds it.',
+      ),
   })
   .strict()
   .openapi('RemoteMCPServerManifest');

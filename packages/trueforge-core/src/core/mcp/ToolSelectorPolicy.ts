@@ -7,6 +7,7 @@ import {
   MCP_AUTO_PRELOAD_MAX_TOOLS,
   selectorsIncludeAll,
   toolMatchesAnySelector,
+  TOOL_TAG_UNCLASSIFIED,
   toolRequiresApproval,
 } from './toolSelectors';
 
@@ -169,7 +170,17 @@ export class ToolSelectorPolicy {
    * undefined defaults to write+destructive+unclassified, i.e. fail-closed (constructor); an
    * explicit list — including empty — is exact.
    */
-  requiresApproval(toolName: string, annotations: ToolAnnotations | undefined): boolean {
-    return toolRequiresApproval(toolName, annotations, this.requireApprovalForTools);
+  requiresApproval(
+    toolName: string,
+    annotations: ToolAnnotations | undefined,
+    options?: { waiveUnclassified: boolean },
+  ): boolean {
+    // The user's own designation of a connector settles what its missing annotations leave open;
+    // every other selector, `@all` and literal names included, still gates.
+    const selectors =
+      options?.waiveUnclassified === true
+        ? this.requireApprovalForTools.filter(selector => selector !== TOOL_TAG_UNCLASSIFIED)
+        : this.requireApprovalForTools;
+    return toolRequiresApproval(toolName, annotations, selectors);
   }
 }

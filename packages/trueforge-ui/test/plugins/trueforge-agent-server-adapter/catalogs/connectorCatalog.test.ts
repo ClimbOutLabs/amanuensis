@@ -185,6 +185,52 @@ describe('connectorCatalog mappers', () => {
     );
   });
 
+  it('maps the search provider role from the manifest, whichever spelling the SDK delivers', () => {
+    const base = {
+      type: 'remote' as const,
+      name: 'finder',
+      url: 'https://finder.example/mcp',
+      description: 'Finder.',
+    };
+    // The generated SDK passes a key it does not declare through unchanged, so the wire name arrives as is.
+    const fromWire: TrueForgeApi.McpServerManifest & { search_provider: boolean } = { ...base, search_provider: true };
+    // Once the SDK declares the field it camel-cases it.
+    const fromSdk: TrueForgeApi.McpServerManifest & { searchProvider: boolean } = { ...base, searchProvider: true };
+    for (const manifest of [fromWire, fromSdk]) {
+      assert.equal(
+        toUiConnector({ name: 'finder', manifest, authStatus: { status: 'not_required' } }).searchProvider,
+        true,
+      );
+    }
+    assert.equal(
+      'searchProvider' in toUiConnector({ name: 'finder', manifest: base, authStatus: { status: 'not_required' } }),
+      false,
+    );
+  });
+
+  it('sends the search provider role under its wire name and omits it when unset', () => {
+    const request = { name: 'finder', url: 'https://finder.example/mcp', auth: { type: 'none' as const } };
+    assert.deepEqual(toHarnessManifest({ ...request, searchProvider: true }), {
+      type: 'remote',
+      name: 'finder',
+      url: 'https://finder.example/mcp',
+      description: 'finder MCP server',
+      search_provider: true,
+    });
+    assert.equal('search_provider' in toHarnessManifest(request), false);
+  });
+
+  it('carries a catalog preset’s offer to be the search provider', () => {
+    const preset: TrueForgeApi.CatalogMcpServer & { search_provider: boolean } = {
+      type: 'remote',
+      name: 'parallel-web',
+      url: 'https://search.parallel.ai/mcp',
+      description: 'Search the web.',
+      search_provider: true,
+    };
+    assert.equal(toUiCatalogEntry(preset).searchProvider, true);
+  });
+
   it('omits memoryProvider when the manifest does not set it', () => {
     assert.deepEqual(
       toUiConnector({

@@ -420,3 +420,5 @@ export type {
   TrackedExecutionBinding,
 } from './permissions/tier';
 export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
+export { createWebSearchTurnState } from './permissions/webSearch';
+export type { WebSearchTurnState } from './permissions/webSearch';

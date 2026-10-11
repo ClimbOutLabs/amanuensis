@@ -27,4 +27,18 @@ describe('shipped MCP catalog', () => {
     expect(hindsight.logo).toBeUndefined();
     expect(hindsight.description).toMatch(/\{apiBase\}\/mcp\/\{bank\}/);
   });
+
+  it('offers Parallel’s keyless hosted MCP as the one preset that becomes the web search provider', () => {
+    const presets = McpCatalog.load().list();
+    expect(presets.filter(server => server.search_provider === true).map(server => server.name)).toEqual([
+      'parallel-web',
+    ]);
+    const parallel = presets.find(server => server.name === 'parallel-web');
+    if (parallel === undefined) {
+      throw new Error('expected a parallel-web preset in the shipped MCP catalog');
+    }
+    expect(parallel.url).toBe('https://search.parallel.ai/mcp');
+    // Keyless: no credentials to ask for.
+    expect(parallel.auth).toBeUndefined();
+  });
 });

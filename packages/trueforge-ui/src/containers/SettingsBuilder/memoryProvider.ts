@@ -13,6 +13,7 @@ import {
   REFLECT_BUDGETS,
   type ReflectBudget,
 } from '@/server/memoryProviderTypes.js';
+import { isSearchProvider } from '@/server/searchProviderTypes.js';
 import type { ConnectorBase } from '@/server/types.js';
 
 export type {
@@ -91,7 +92,8 @@ export function isMemoryProvider(connector: ConnectorBase): connector is MemoryP
 
 /**
  * A full manifest with the flag set as asked. `updateConnector` replaces the whole manifest, so
- * every caller has to resupply `memoryProvider` or an unrelated edit would silently clear it.
+ * every caller has to resupply `memoryProvider` or an unrelated edit would silently clear it. The
+ * search-provider flag is resupplied from the connector for the same reason.
  */
 export function memoryProviderUpdateRequest(
   connector: ConnectorBase,
@@ -107,6 +109,7 @@ export function memoryProviderUpdateRequest(
     memoryProvider,
     // Resupplied for the same reason as the flag: an unrelated edit must not clear the tuning.
     ...(memorySettings === undefined ? {} : { memorySettings }),
+    ...(isSearchProvider(connector) ? { searchProvider: true } : {}),
   };
 }
 

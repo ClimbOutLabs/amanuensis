@@ -153,6 +153,21 @@ describe('first-party marker on stored connectors', () => {
       expect(await firstPartyOf('docs')).toBe(false);
     });
 
+    it('never marks the search provider first-party, even on a listed origin: the role is a different trust', async () => {
+      const created = await save(
+        'POST',
+        manifestOf('finder', { url: `${LISTED_ORIGIN}/mcp/finder`, search_provider: true }),
+      );
+      const replaced = await save(
+        'PUT',
+        manifestOf('finder', { url: `${LISTED_ORIGIN}/mcp/finder`, search_provider: true, description: 'Edited.' }),
+      );
+
+      expect([created.status, replaced.status]).toEqual([201, 200]);
+      expect(await firstPartyOf('finder')).toBe(false);
+      expect(await firstPartyForTurn('finder')).toBe(false);
+    });
+
     it('does not carry the marker on the wire', async () => {
       const response = await save('POST', manifestOf('memory', { url: MEMORY_URL, memory_provider: true }));
 

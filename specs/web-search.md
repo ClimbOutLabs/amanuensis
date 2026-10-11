@@ -43,9 +43,11 @@ The guard is tuned so ordinary queries with numbers, dates, and names pass.
 
 **Silent means audited.** The audit row is written once, at dispatch, like the other standing-trust runs.
 
+**The role replaces missing hints, not declared ones.** On the designated connector a tool with no annotations is treated as a search tool, because the user designated the connector. A tool that declares itself destructive or not read-only, or whose name falls in an existing escalation class (delete, install, send, post, and similar), still asks. The connection to the provider refuses redirects, so a silent search cannot be forwarded to another host.
+
 ## Scope
 
-- `search_provider` role on the remote MCP connector manifest, with the single-holder rule, across core, server, SDK, and UI
+- `search_provider` role on the remote MCP connector manifest, with the single-holder rule, across core, server, and UI (the SDK and OpenAPI follow from the Generate SDK workflow)
 - The Parallel keyless catalog preset marked as the search provider
 - Per-user "Searches: Run without asking / Ask" setting (default Run without asking), in the Sentinel settings API, store, and settings UI
 - The outbound secret guard module in core, with a host-supplied secret source
@@ -71,7 +73,7 @@ The guard is tuned so ordinary queries with numbers, dates, and names pass.
 - Exact-URL fetch is silent while a modified URL asks.
 - The audit row and the chip.
 - The user setting set to Ask makes the designated provider ask.
-- Settings, connector role, and catalog preset covered through the API and UI test suites; OpenAPI and SDK regenerated from the repo scripts.
+- Settings, connector role, and catalog preset covered through the API and UI test suites.
 
 ## Out of Scope
 

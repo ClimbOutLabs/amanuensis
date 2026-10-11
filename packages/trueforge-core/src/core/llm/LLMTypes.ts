@@ -140,6 +140,10 @@ export const InternalToolCallInfoSchema = z.object({
     .nullable()
     .optional()
     .describe('Single-use approval token id for actions that need approval, or null.'),
+  silent_search_query: z
+    .string()
+    .optional()
+    .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
     .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),
@@ -171,6 +175,10 @@ export const MCPToolInfoSchema = z
       .string()
       .optional()
       .describe('Host-observed structured-edit target summary shown during approval.'),
+    silent_search_query: z
+      .string()
+      .optional()
+      .describe('Text of a web search the host ran without asking, for the Searched chip.'),
     ...ToolEffectHintsSchema.shape,
   })
   .openapi('MCPToolInfo');

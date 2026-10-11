@@ -16,6 +16,11 @@ import {
 
 import { parseToolGrants, type ConnectorToolGrants } from '../../../server/connectorToolGrants.js';
 import type { MemoryProviderFields } from '../../../server/memoryProviderTypes.js';
+import {
+  readSearchProviderFlag,
+  type SearchProviderFields,
+  type SearchProviderWireFields,
+} from '../../../server/searchProviderTypes.js';
 import type {
   ConnectorAuth,
   ConnectorAuthPublic,
@@ -33,18 +38,20 @@ export type UiConnectorAuth = ConnectorAuth;
 export type UiConnectorAuthPublic = ConnectorAuthPublic;
 /**
  * `ConnectorBase` is the runtime's generic connector row type; it doesn't know about the
- * memory-provider flag. Widen locally rather than editing `@truefoundry/assistant-ui-runtime`.
+ * memory-provider or search-provider flags. Widen locally rather than editing
+ * `@truefoundry/assistant-ui-runtime`.
  */
-export type UiConnector = ConnectorBase & MemoryProviderFields;
-export type UiConnectorCatalogEntry = ConnectorCatalogEntry;
-/** `updateConnector` sends the full manifest; widen its request to carry the memory fields alongside it. */
-export type UiUpdateConnectorRequest = UpdateConnectorRequest & MemoryProviderFields;
+export type UiConnector = ConnectorBase & MemoryProviderFields & SearchProviderFields;
+/** A preset can offer to become the search provider; the settings screen decides whether it does. */
+export type UiConnectorCatalogEntry = ConnectorCatalogEntry & SearchProviderFields;
+/** `updateConnector` sends the full manifest; widen its request to carry the role fields alongside it. */
+export type UiUpdateConnectorRequest = UpdateConnectorRequest & MemoryProviderFields & SearchProviderFields;
 /**
  * Create carries the flag too, so pointing at a memory bank for the first time is one write that
  * the server validates once, rather than a create followed by a flag-setting update that could
  * fail and leave an unflagged row behind.
  */
-export type UiCreateConnectorRequest = CreateConnectorRequest & MemoryProviderFields;
+export type UiCreateConnectorRequest = CreateConnectorRequest & MemoryProviderFields & SearchProviderFields;
 
 /** Five seconds past the longest deadline any memory check can be configured to, server-wide or per bank. */
 const MEMORY_PROVIDER_WRITE_TIMEOUT_SECONDS = MEMORY_PROVIDER_MAX_TIMEOUT_MS / 1000 + 5;
@@ -66,7 +73,7 @@ export function memoryProviderWriteRequestOptions(memoryProvider: boolean | unde
  * `memory_provider` / `memory_settings` wire names via its serializer). Widen locally so this
  * package never edits the generated SDK package to add a field.
  */
-type HarnessManifestWithMemory = TrueForgeApi.McpServerManifest & MemoryProviderFields;
+type HarnessManifestWithMemory = TrueForgeApi.McpServerManifest & MemoryProviderFields & SearchProviderWireFields;
 type ConfiguredMcpServerWithMemory = TrueForgeApi.ConfiguredMcpServer & {
   manifest: HarnessManifestWithMemory;
 };
@@ -211,6 +218,7 @@ export function toHarnessAuth(auth: ConnectorAuth): TrueForgeApi.McpServerManife
 }
 
 export function toUiCatalogEntry(server: TrueForgeApi.CatalogMcpServer): UiConnectorCatalogEntry {
+  const searchProvider = readSearchProviderFlag(server);
   return {
     id: server.name,
     name: server.name,
@@ -218,6 +226,7 @@ export function toUiCatalogEntry(server: TrueForgeApi.CatalogMcpServer): UiConne
     description: server.description,
     ...(server.logo === undefined ? {} : { logo: server.logo }),
     auth: toUiAuthPublic(server.auth),
+    ...(searchProvider === undefined ? {} : { searchProvider }),
   };
 }
 
@@ -247,6 +256,7 @@ export function toUiTool(tool: Record<string, unknown>): ToolBase & { annotation
 export function toUiConnector(server: TrueForgeApi.ConfiguredMcpServer): UiConnector {
   const manifest = (server as ConfiguredMcpServerWithMemory).manifest;
   const auth = toUiAuthPublic(manifest.auth);
+  const searchProvider = readSearchProviderFlag(manifest);
   return {
     id: server.name,
     name: server.name,
@@ -257,6 +267,7 @@ export function toUiConnector(server: TrueForgeApi.ConfiguredMcpServer): UiConne
     authenticated: server.authStatus.status !== 'auth_required',
     ...(manifest.memoryProvider === undefined ? {} : { memoryProvider: manifest.memoryProvider }),
     ...(manifest.memorySettings === undefined ? {} : { memorySettings: manifest.memorySettings }),
+    ...(searchProvider === undefined ? {} : { searchProvider }),
   };
 }
 
@@ -279,7 +290,8 @@ export function toHarnessManifest(
     url: string;
     auth: ConnectorAuth;
     description?: string;
-  } & MemoryProviderFields,
+  } & MemoryProviderFields &
+    SearchProviderFields,
 ): TrueForgeApi.McpServerManifest {
   const auth = toHarnessAuth(req.auth);
   const trimmed = req.description?.trim();
@@ -291,6 +303,7 @@ export function toHarnessManifest(
     ...(auth === undefined ? {} : { auth }),
     ...(req.memoryProvider === undefined ? {} : { memoryProvider: req.memoryProvider }),
     ...(req.memorySettings === undefined ? {} : { memorySettings: req.memorySettings }),
+    ...(req.searchProvider === undefined ? {} : { search_provider: req.searchProvider }),
   };
   return manifest;
 }
@@ -394,6 +407,7 @@ export function createConnectorCatalog(
             description: req.description,
             memoryProvider: req.memoryProvider,
             memorySettings: req.memorySettings,
+            searchProvider: req.searchProvider,
           }),
         },
         memoryProviderWriteRequestOptions(req.memoryProvider),
@@ -411,6 +425,7 @@ export function createConnectorCatalog(
             description: req.description,
             memoryProvider: req.memoryProvider,
             memorySettings: req.memorySettings,
+            searchProvider: req.searchProvider,
           }),
         },
         memoryProviderWriteRequestOptions(req.memoryProvider),

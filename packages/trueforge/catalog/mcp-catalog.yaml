@@ -37,7 +37,8 @@ mcp_servers:
     name: parallel-web
     logo: https://assets.production.truefoundry.com/parallel-web.svg
     url: https://search.parallel.ai/mcp
-    description: Search the web and get ranked results with extracted content.
+    description: Free web search and page fetch. No API key needed. Added as your web search provider.
+    search_provider: true
   - type: remote
     name: github
     logo: https://assets.production.truefoundry.com/github.svg

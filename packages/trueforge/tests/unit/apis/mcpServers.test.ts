@@ -1203,6 +1203,73 @@ describe('mcp-servers routers', () => {
     expect(missing.status).toBe(404);
   });
 
+  describe('search provider single-flag enforcement', () => {
+    function searchManifest(name: string, extra: Record<string, unknown> = {}) {
+      return {
+        type: 'remote' as const,
+        name,
+        url: `https://${name}.example.com/mcp`,
+        description: `Search connector "${name}".`,
+        ...extra,
+      };
+    }
+
+    it('PUT creates the first search provider and keeps the flag on the wire', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(searchManifest('search-primary', { search_provider: true }))),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: { name: 'search-primary', manifest: { search_provider: true } },
+      });
+    });
+
+    it('POST create rejects a second search provider with 409 naming the existing one', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        postInit(wrapManifest(searchManifest('search-secondary', { search_provider: true }))),
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: { message: 'search provider already set on search-primary; disable it first' },
+      });
+      expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'search-secondary' })).toBeUndefined();
+    });
+
+    it('PUT rejects flagging a second, already-existing server with 409 and leaves it unflagged', async () => {
+      const created = await settingsRouter.request('/', putInit(wrapManifest(searchManifest('search-secondary'))));
+      expect(created.status).toBe(200);
+
+      const response = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(searchManifest('search-secondary', { search_provider: true }))),
+      );
+      expect(response.status).toBe(409);
+      const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'search-secondary' });
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.search_provider : undefined).toBeUndefined();
+    });
+
+    it('PUT re-saving the holder is not a conflict with itself, and designation moves in two steps', async () => {
+      const resave = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(searchManifest('search-primary', { search_provider: true, description: 'Renamed.' }))),
+      );
+      expect(resave.status).toBe(200);
+
+      const disable = await settingsRouter.request('/', putInit(wrapManifest(searchManifest('search-primary'))));
+      expect(disable.status).toBe(200);
+      const enable = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(searchManifest('search-secondary', { search_provider: true }))),
+      );
+      expect(enable.status).toBe(200);
+      expect(await enable.json()).toMatchObject({
+        data: { name: 'search-secondary', manifest: { search_provider: true } },
+      });
+    });
+  });
+
   describe('memory provider single-flag enforcement', () => {
     const hindsightUrl = HINDSIGHT_MCP_URL;
 

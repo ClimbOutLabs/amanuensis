@@ -1081,3 +1081,171 @@ describe('memory provider on an origin the operator did not list', () => {
     TURN_TIMEOUT_MS,
   );
 });
+
+describe('web search provider over an inert connector', () => {
+  let server: ApprovalTestServer;
+
+  /** Assembled at run time so no literal here looks like a credential to a scanner. */
+  const syntheticAwsKeyId = ['AKI', 'A', 'ABCDEFGH', 'IJKLMNOP'].join('');
+
+  /** The user's own switch, set through the same route the settings page uses. */
+  async function setSearchWithoutAsking(value: boolean) {
+    const response = await server.request('/api/v1/user/settings/sentinel', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ search_without_asking: value }),
+    });
+    expect(response.status).toBe(200);
+  }
+
+  /** Designates the inert connector (or clears the role) the way the settings page does. */
+  async function designateSearchProvider(designated: boolean) {
+    const response = await server.request('/api/v1/settings/mcp-servers', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        manifest: {
+          type: 'remote',
+          name: INERT_SERVER_NAME,
+          url: server.mcp.url,
+          description: 'Inert connector used by approval-flow tests.',
+          ...(designated ? { search_provider: true } : {}),
+        },
+      }),
+    });
+    expect(response.status).toBe(200);
+  }
+
+  function searchMessage(text: string): TurnInputItem[] {
+    return [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}${INERT_ECHO_TOOL} text:${text}` }];
+  }
+
+  /** The `silent_search_query` the server stamped on any tool call of the session, as the chat would draw its chip. */
+  async function stampedQueries(sessionId: string): Promise<string[]> {
+    const ToolCallsSchema = z.object({
+      type: z.literal('model.message'),
+      tool_calls: z
+        .array(z.object({ tool_info: z.object({ silent_search_query: z.string().optional() }).loose() }).loose())
+        .optional(),
+    });
+    const queries: string[] = [];
+    for (const item of await listSessionEvents(server, sessionId)) {
+      const parsed = ToolCallsSchema.safeParse(item.event);
+      for (const call of parsed.success ? (parsed.data.tool_calls ?? []) : []) {
+        if (call.tool_info.silent_search_query !== undefined) {
+          queries.push(call.tool_info.silent_search_query);
+        }
+      }
+    }
+    return queries;
+  }
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer();
+  }, TURN_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  beforeEach(async () => {
+    server.mcp.resetInvocations();
+    await setSearchWithoutAsking(true);
+    await designateSearchProvider(true);
+  });
+
+  it(
+    'runs the designated provider’s tool without asking, stamps the chip text on the call, and audits the run',
+    async () => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: searchMessage('tallest-building-in-Lisbon') });
+
+      expect(requiredActions(turn)).toEqual([]);
+      expect(server.mcp.echoInvocations()).toBe(1);
+      expect(await stampedQueries(sessionId)).toEqual(['tallest-building-in-Lisbon']);
+      expect(await auditEntries({ server, sessionId })).toEqual([
+        expect.objectContaining({
+          tier: 1,
+          tool_name: INERT_ECHO_TOOL,
+          outcome: 'logged',
+          description: 'Searched: tallest-building-in-Lisbon',
+        }),
+      ]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'still asks for the same tool once the connector is no longer the designated provider',
+    async () => {
+      await designateSearchProvider(false);
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: searchMessage('tallest-building-in-Lisbon') });
+
+      expect(pendingApproval(turn)).toBeDefined();
+      expect(server.mcp.echoInvocations()).toBe(0);
+      expect(await stampedQueries(sessionId)).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'asks when the user switched searches to Ask, and runs again once they switch back',
+    async () => {
+      await setSearchWithoutAsking(false);
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const asked = await runTurn({ server, sessionId, input: searchMessage('tallest-building-in-Lisbon') });
+      expect(pendingApproval(asked)).toBeDefined();
+      expect(server.mcp.echoInvocations()).toBe(0);
+
+      await setSearchWithoutAsking(true);
+      const otherSessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const ran = await runTurn({
+        server,
+        sessionId: otherSessionId,
+        input: searchMessage('tallest-building-in-Lisbon'),
+      });
+      expect(requiredActions(ran)).toEqual([]);
+      expect(server.mcp.echoInvocations()).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'holds a query that carries a key for approval instead of running it, with the exact query on the card',
+    async () => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: searchMessage(syntheticAwsKeyId) });
+
+      expect(pendingApproval(turn)).toBeDefined();
+      expect(server.mcp.echoInvocations()).toBe(0);
+      expect(await stampedQueries(sessionId)).toEqual([]);
+      const events = await listSessionEvents(server, sessionId);
+      expect(JSON.stringify(events)).toContain(syntheticAwsKeyId);
+      expect(await auditEntries({ server, sessionId })).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'runs the held query only after the user approves it, once',
+    async () => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const held = await runTurn({ server, sessionId, input: searchMessage(syntheticAwsKeyId) });
+      const pending = pendingApproval(held);
+      if (pending === undefined) {
+        throw new Error('expected the query to wait for approval');
+      }
+
+      const approved = await runTurn({
+        server,
+        sessionId,
+        previousTurnId: held.id,
+        input: approvalInput({ ...pending, approval: { status: 'allow' } }),
+      });
+      expect(requiredActions(approved)).toEqual([]);
+      expect(server.mcp.echoInvocations()).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});

@@ -1,4 +1,4 @@
-import type { CallToolRequest, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolRequest, CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { McpConnectionError, ToolPolicyBlockedError, ToolPreDispatchError } from '../errors';
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo, ToolEffectHints } from '../llm/LLMTypes';
@@ -9,6 +9,14 @@ import {
   type TierDecision,
 } from '../permissions';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
+import { collectOutboundStrings } from '../permissions/outboundGuard';
+import {
+  isSearchAskReason,
+  namesUrl,
+  recordResultUrls,
+  SEARCH_SILENT_REASON,
+  SILENT_SEARCH_LIMIT,
+} from '../permissions/webSearch';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
   isAuthRequired,
@@ -60,6 +68,7 @@ export function stampSentinelDecision(input: {
   | 'shell_binding'
   | 'is_approval_required'
   | 'pre_dispatch_failure'
+  | 'silent_search_query'
 > {
   const decision = input.decision;
   return {
@@ -69,6 +78,7 @@ export function stampSentinelDecision(input: {
     approval_token_id: decision.approval_token_id,
     approval_binding: decision.approval_binding,
     shell_binding: decision.shell_binding,
+    ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
     is_approval_required:
       decision.auto_deny === null &&
       (decision.tier === 3 || (decision.tier === 2 && decision.approval_token_id !== null)),
@@ -77,13 +87,46 @@ export function stampSentinelDecision(input: {
       : {
           pre_dispatch_failure: {
             kind: 'policy_blocked' as const,
-            message:
-              decision.auto_deny === 'offline_mode'
-                ? 'Auto-denied: offline mode is on.'
-                : 'Auto-denied: the destination of this external action could not be verified.',
+            message: autoDenyMessage(decision),
           },
         }),
   };
+}
+
+function searchNotRunText(decision: TierDecision): string {
+  return JSON.stringify({
+    error: `The web search was not run: ${decision.reason_detail ?? 'it needs approval'} Ask again; it will be sent for approval.`,
+  });
+}
+
+/** Text a search result carries: its text blocks and its structured content. */
+function resultTexts(result: CallToolResult): string[] {
+  if (result.isError === true) {
+    return [];
+  }
+  const texts: string[] = [];
+  if (Array.isArray(result.content)) {
+    for (const block of result.content) {
+      if (block.type === 'text') {
+        texts.push(block.text);
+      }
+    }
+  }
+  if (result.structuredContent !== undefined) {
+    texts.push(JSON.stringify(result.structuredContent));
+  }
+  return texts;
+}
+
+function autoDenyMessage(decision: TierDecision): string {
+  switch (decision.auto_deny) {
+    case 'offline_mode':
+      return 'Auto-denied: offline mode is on.';
+    case 'outbound_guard':
+      return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
+    default:
+      return 'Auto-denied: the destination of this external action could not be verified.';
+  }
 }
 
 /**
@@ -99,6 +142,7 @@ export class ToolSet implements IToolSet {
   private readonly policy: ToolSelectorPolicy;
   private readonly sentinel: SentinelHostContext | undefined;
   private readonly firstParty: boolean;
+  private readonly searchProvider: boolean;
 
   constructor(params: {
     source: ToolSource;
@@ -118,6 +162,12 @@ export class ToolSet implements IToolSet {
      * URL, client input, or tool metadata. Has no effect without `sentinel`.
      */
     firstParty?: boolean | undefined;
+    /**
+     * The user designated this connector as their search provider. Set by the host from the
+     * connector record only, never from a connector URL, client input, or tool metadata. Has no
+     * effect without `sentinel`.
+     */
+    searchProvider?: boolean | undefined;
   }) {
     this.source = params.source;
     this.name = params.source.name;
@@ -129,6 +179,7 @@ export class ToolSet implements IToolSet {
     });
     this.sentinel = params.sentinel;
     this.firstParty = params.firstParty === true;
+    this.searchProvider = params.searchProvider === true;
   }
 
   // True when every exposed tool is eager. Tracks the policy live: for an auto-preload server
@@ -204,6 +255,12 @@ export class ToolSet implements IToolSet {
       await this.assertToolAllowed(params.name, tool?.annotations);
 
       const { info: tool_info, classification } = await this.buildToolCallInfo(params, tool);
+      if (decision === undefined && classification !== undefined && isSearchAskReason(classification.reason)) {
+        // The turn settled this call as silent before dispatch, and a count, setting, or secret
+        // changed since. The turn loop cannot take an approval request at dispatch, so the call
+        // does not run; the next attempt is classified afresh and asks.
+        return toolResultResponse({ text: searchNotRunText(classification), isError: true });
+      }
       if (!decision && tool_info.is_approval_required) {
         return { approvalRequired: { tool_info } };
       }
@@ -213,6 +270,16 @@ export class ToolSet implements IToolSet {
           text: deniedToolCallText(decision.reason),
           isError: true,
         });
+      }
+
+      if (decision === undefined && classification?.reason === SEARCH_SILENT_REASON && this.sentinel !== undefined) {
+        // Checked and counted with no await between, so concurrent calls of one batch cannot
+        // all pass on the same count.
+        const turn = this.sentinel.web_search;
+        if (turn.silentSearches >= SILENT_SEARCH_LIMIT) {
+          return toolResultResponse({ text: searchNotRunText(classification), isError: true });
+        }
+        turn.silentSearches += 1;
       }
 
       if (
@@ -243,6 +310,14 @@ export class ToolSet implements IToolSet {
       params,
       response: await this.source.callTool(params, decision, context),
     });
+    if (this.searchProvider && this.sentinel !== undefined && isCallToolResponseResult(response)) {
+      // What a search returned is what a later fetch in this turn may name. A call that itself
+      // names a URL is a fetch: its page's links are not search results, so they stay unreturned.
+      const sent = collectOutboundStrings(params.arguments ?? {});
+      if (sent !== undefined && !namesUrl(sent.values)) {
+        recordResultUrls({ state: this.sentinel.web_search, texts: resultTexts(response.result) });
+      }
+    }
     // The priming listTools() may have captured the first-connect init; carry it forward since the
     // subsequent callTool sees an already-open connection and reports none.
     if (listed.wasInitialized && isCallToolResponseResult(response) && !response.wasInitialized) {
@@ -314,6 +389,7 @@ export class ToolSet implements IToolSet {
         tool_type: info.type,
         mcp_server_name: info.mcp_server_name,
         mcp_first_party: this.firstParty,
+        mcp_search_provider: this.searchProvider,
         mcp_hints: {
           read_only_hint: info.read_only_hint,
           destructive_hint: info.destructive_hint,
@@ -330,7 +406,10 @@ export class ToolSet implements IToolSet {
         // standing grant, but never to a call that is auto-denied without a card.
         is_approval_required:
           stamp.is_approval_required === true ||
-          (decision.auto_deny === null && this.policy.requiresApproval(params.name, tool?.annotations)),
+          (decision.auto_deny === null &&
+            this.policy.requiresApproval(params.name, tool?.annotations, {
+              waiveUnclassified: decision.reason === SEARCH_SILENT_REASON,
+            })),
       },
       classification: decision,
     };
