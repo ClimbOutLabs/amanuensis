@@ -29,12 +29,15 @@ vi.mock('leaflet', () => {
     }),
     addTo: vi.fn(),
   });
+  const makeMap = () => ({
+    remove: vi.fn(),
+    setView: vi.fn(),
+    fitBounds: vi.fn(),
+    on: vi.fn(),
+    scrollWheelZoom: { enable: vi.fn(), disable: vi.fn() },
+  });
   return {
-    map: vi.fn(() => ({
-      remove: vi.fn(),
-      setView: vi.fn(),
-      fitBounds: vi.fn(),
-    })),
+    map: vi.fn(makeMap),
     tileLayer: vi.fn(makeTileLayer),
     marker: vi.fn(() => {
       const m = mockLayer();
@@ -92,7 +95,7 @@ async function failTiles(count = 3) {
 
 describe('MapCard', () => {
   it('renders the place name, address, and attribution', () => {
-    renderCard({ data: placeData, state: 'ready', cardId: 'call-1' });
+    renderCard({ data: placeData, state: 'ready' });
     expect(screen.getByTestId('map-card')).toBeInTheDocument();
     expect(screen.getByText('Eiffel Tower, Paris, France')).toBeInTheDocument();
     expect(screen.getByText('Champ de Mars, 75007 Paris, France')).toBeInTheDocument();
@@ -103,7 +106,6 @@ describe('MapCard', () => {
     renderCard({
       data: { ...placeData, address: 'Eiffel Tower, Paris, France' },
       state: 'ready',
-      cardId: 'call-1',
     });
     // The name appears exactly once: no duplicate subtitle.
     expect(screen.getAllByText('Eiffel Tower, Paris, France')).toHaveLength(1);
@@ -121,14 +123,13 @@ describe('MapCard', () => {
         duration_min: 360.2,
       },
       state: 'ready',
-      cardId: 'call-2',
     });
     expect(screen.getAllByText(/Madrid/).length).toBeGreaterThan(0);
     expect(screen.getByText(/621.5 km/)).toBeInTheDocument();
   });
 
   it('renders the blocked state with a message and Retry', () => {
-    renderCard({ data: null, state: 'blocked', cardId: 'call-3', blockedMessage: 'Rate limited.' });
+    renderCard({ data: null, state: 'blocked', blockedMessage: 'Rate limited.' });
     expect(screen.getByRole('status')).toBeInTheDocument();
     expect(screen.getByText('Map unavailable')).toBeInTheDocument();
     expect(screen.getByText('Rate limited.')).toBeInTheDocument();
@@ -136,35 +137,35 @@ describe('MapCard', () => {
   });
 
   it('renders the unavailable state', () => {
-    renderCard({ data: null, state: 'unavailable', cardId: 'call-4' });
+    renderCard({ data: null, state: 'unavailable' });
     expect(screen.getByText('Map tiles unavailable')).toBeInTheDocument();
   });
 
   it('renders blocked when data is null even in ready state', () => {
-    renderCard({ data: null, state: 'ready', cardId: 'call-5' });
+    renderCard({ data: null, state: 'ready' });
     expect(screen.getByRole('status')).toBeInTheDocument();
   });
 
   it('uses the same card frame for every state', () => {
-    const { rerender } = renderCard({ data: placeData, state: 'ready', cardId: 'call-1' });
+    const { rerender } = renderCard({ data: placeData, state: 'ready' });
     expect(screen.getByTestId('map-card')).toHaveClass('maps-card');
     rerender(
       <ThemeProvider>
-        <MapCard data={null} state="blocked" cardId="call-1" blockedMessage="Rate limited." />
+        <MapCard data={null} state="blocked" blockedMessage="Rate limited." />
       </ThemeProvider>,
     );
     // Blocked keeps the identical .maps-card frame: same width and radius.
     expect(screen.getByTestId('map-card')).toHaveClass('maps-card');
     rerender(
       <ThemeProvider>
-        <MapCard data={placeData} state="ready" cardId="call-1" />
+        <MapCard data={placeData} state="ready" />
       </ThemeProvider>,
     );
     expect(screen.getByTestId('map-card')).toHaveClass('maps-card');
   });
 
   it('shows the unavailable panel with Retry when tiles fail, never a blank map', async () => {
-    renderCard({ data: placeData, state: 'ready', cardId: 'call-1' });
+    renderCard({ data: placeData, state: 'ready' });
     await failTiles();
     await waitFor(() => expect(screen.getByText('Map tiles unavailable')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
@@ -173,7 +174,7 @@ describe('MapCard', () => {
   });
 
   it('Retry re-attempts tiles exactly once and does not auto-retry', async () => {
-    renderCard({ data: placeData, state: 'ready', cardId: 'call-1' });
+    renderCard({ data: placeData, state: 'ready' });
     await failTiles();
     await waitFor(() => expect(screen.getByText('Map tiles unavailable')).toBeInTheDocument());
     const callsAfterFailure = vi.mocked(leaflet.tileLayer).mock.calls.length;
@@ -188,13 +189,13 @@ describe('MapCard', () => {
 
   it('calls onRetry when provided instead of retrying tiles internally', async () => {
     const onRetry = vi.fn();
-    renderCard({ data: null, state: 'blocked', cardId: 'call-3', blockedMessage: 'Rate limited.', onRetry });
+    renderCard({ data: null, state: 'blocked', blockedMessage: 'Rate limited.', onRetry });
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   it('draws exactly one pin for render_map without poi', async () => {
-    renderCard({ data: { ...placeData, pins: [] }, state: 'ready', cardId: 'call-6' });
+    renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
     await waitFor(() => expect(vi.mocked(leaflet.circleMarker).mock.calls.length).toBe(1));
     expect(vi.mocked(leaflet.circleMarker)).toHaveBeenCalledWith([48.858844, 2.294481], expect.anything());
   });
@@ -209,7 +210,6 @@ describe('MapCard', () => {
         ],
       },
       state: 'ready',
-      cardId: 'call-7',
     });
     await waitFor(() => expect(vi.mocked(leaflet.circleMarker).mock.calls.length).toBe(3));
   });
@@ -221,7 +221,6 @@ describe('MapCard', () => {
         pins: [{ name: 'Eiffel Tower', lat: 48.858844, lng: 2.294481 }],
       },
       state: 'ready',
-      cardId: 'call-8',
     });
     await waitFor(() => expect(vi.mocked(leaflet.circleMarker).mock.calls.length).toBeGreaterThan(0));
     // One marker total: the coincident poi pin is not drawn twice.
@@ -230,12 +229,106 @@ describe('MapCard', () => {
   });
 
   it('tells the user the place search is not sent again when tiles fail', async () => {
-    renderCard({ data: { ...placeData, pins: [] }, state: 'ready', cardId: 'call-9' });
+    renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
     await failTiles();
     await waitFor(() =>
       expect(
         screen.getByText('The map tiles could not be loaded. Your place search was not sent again.'),
       ).toBeInTheDocument(),
     );
+  });
+
+  it('requests tiles through the proxy without a card query parameter', async () => {
+    renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
+    await waitFor(() => expect(leaflet.tileLayer).toHaveBeenCalled());
+    expect(vi.mocked(leaflet.tileLayer).mock.calls[0][0]).toBe('/api/maps/tiles/{z}/{x}/{y}.png');
+  });
+
+  it('does not re-create the map when the data object changes identity', async () => {
+    const { rerender } = renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
+    await waitFor(() => expect(leaflet.map).toHaveBeenCalledTimes(1));
+    // Same values, fresh object identity, as parseMapsResult produces on each render.
+    rerender(
+      <ThemeProvider>
+        <MapCard data={{ ...placeData, pins: [] }} state="ready" />
+      </ThemeProvider>,
+    );
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(leaflet.map).toHaveBeenCalledTimes(1);
+    expect(leaflet.tileLayer).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-creates the map when the place changes', async () => {
+    const { rerender } = renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
+    await waitFor(() => expect(leaflet.map).toHaveBeenCalledTimes(1));
+    rerender(
+      <ThemeProvider>
+        <MapCard data={{ ...placeData, lat: 40.4168, lng: -3.7038, pins: [] }} state="ready" />
+      </ThemeProvider>,
+    );
+    await waitFor(() => expect(leaflet.map).toHaveBeenCalledTimes(2));
+  });
+
+  it('keeps scroll wheel zoom off until the map is clicked or focused', async () => {
+    renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
+    await waitFor(() => expect(leaflet.map).toHaveBeenCalled());
+    expect(vi.mocked(leaflet.map).mock.calls[0][1]).toMatchObject({ scrollWheelZoom: false });
+    const mapInstance = vi.mocked(leaflet.map).mock.results[0].value as {
+      on: ReturnType<typeof vi.fn>;
+      scrollWheelZoom: { enable: ReturnType<typeof vi.fn> };
+    };
+    const calls = vi.mocked(mapInstance.on).mock.calls as Array<[string, () => void]>;
+    const clickHandler = calls.find(([event]) => event === 'click')?.[1];
+    const focusHandler = calls.find(([event]) => event === 'focus')?.[1];
+    expect(clickHandler).toBeDefined();
+    expect(focusHandler).toBeDefined();
+    clickHandler?.();
+    expect(mapInstance.scrollWheelZoom.enable).toHaveBeenCalledTimes(1);
+  });
+
+  it('links the OSM attribution and names the search provider', () => {
+    renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
+    const link = screen.getByRole('link', { name: '© OpenStreetMap contributors' });
+    expect(link).toHaveAttribute('href', 'https://www.openstreetmap.org/copyright');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(screen.getByText('Search: Nominatim')).toBeInTheDocument();
+  });
+
+  it('names the routing provider on route cards', () => {
+    renderCard({
+      data: { ...placeData, kind: 'route', from_name: 'Madrid', to_name: 'Barcelona' },
+      state: 'ready',
+    });
+    expect(screen.getByText('Routing: OSRM')).toBeInTheDocument();
+  });
+
+  it('does not add a dark tile filter class', async () => {
+    renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
+    await waitFor(() => expect(leaflet.tileLayer).toHaveBeenCalled());
+    expect(vi.mocked(leaflet.tileLayer).mock.calls[0][1]).not.toHaveProperty('className');
+  });
+
+  it('waits for the container to become visible before creating the map', async () => {
+    const observe = vi.fn();
+    let observerCallback: IntersectionObserverCallback = () => {};
+    class MockIntersectionObserver {
+      constructor(callback: IntersectionObserverCallback) {
+        observerCallback = callback;
+      }
+      observe = observe;
+      disconnect = vi.fn();
+      unobserve = vi.fn();
+    }
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+    try {
+      renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
+      await waitFor(() => expect(observe).toHaveBeenCalled());
+      expect(leaflet.map).not.toHaveBeenCalled();
+      // The container scrolls into view: the map is created exactly once.
+      observerCallback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+      await waitFor(() => expect(leaflet.map).toHaveBeenCalledTimes(1));
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -20,6 +20,14 @@ vi.mock('thinking-orbs', () => ({
   ThinkingOrb: ({ state }: { state: string }) => <div data-testid="thinking-orb" data-state={state} />,
 }));
 
+// Stub the real MapCard (its Leaflet setup is covered in MapCard.test.tsx);
+// these tests assert where the maps result renders, not how the map draws.
+vi.mock('@/components/MapCard.js', () => ({
+  MapCard: ({ data }: { data: { resolved_name: string } | null }) => (
+    <div data-testid="mock-map-card">{data?.resolved_name ?? 'no data'}</div>
+  ),
+}));
+
 function renderAssistantMessage(
   messages: ThreadMessageLike[],
   options?: { isRunning?: boolean; onRespondToToolApproval?: (options: RespondToToolApprovalOptions) => void },
@@ -632,5 +640,96 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('renders a completed maps result inline, outside the agent internals', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'tool-map-1',
+            toolName: 'render_map',
+            args: { place_name: 'Paris' },
+            argsText: '{"place_name":"Paris"}',
+            result: JSON.stringify({
+              status: 'ok',
+              resolved_name: 'Paris, France',
+              address: 'Paris, France',
+              lat: 48.8566,
+              lng: 2.3522,
+              zoom: 13,
+              pins: [],
+              attribution: '© OpenStreetMap contributors',
+            }),
+          },
+          { type: 'text', text: 'Here is the map of Paris.' },
+        ],
+      },
+    ]);
+
+    const internals = getAgentInternals();
+    // The map is not inside the collapsed agent details.
+    expect(within(internals).queryByTestId('mock-map-card')).not.toBeInTheDocument();
+    // It renders inline in the conversation, before the assistant text.
+    const mapCard = screen.getByTestId('mock-map-card');
+    expect(mapCard).toHaveTextContent('Paris, France');
+    const text = screen.getByText('Here is the map of Paris.');
+    expect(mapCard.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('shows only the approval card for a maps call awaiting approval', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'tool-map-approval',
+            toolName: 'render_map',
+            args: { place_name: 'Paris' },
+            argsText: '{"place_name":"Paris"}',
+            approval: {
+              id: 'approval-map',
+              options: [
+                { id: 'allow-once', kind: 'allow-once' },
+                { id: 'deny', kind: 'reject-once' },
+              ],
+            },
+          },
+        ],
+        status: { type: 'requires-action', reason: 'tool-calls' },
+      },
+    ]);
+
+    const internals = getAgentInternals();
+    // The approval card stays inside the disclosure (lockOpen keeps it visible).
+    expect(within(internals).getByRole('radiogroup', { name: 'Approval options for render_map' })).toBeInTheDocument();
+    // No map card and no loading state anywhere while approval is pending.
+    expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('map-card-loading')).not.toBeInTheDocument();
+  });
+
+  it('shows a quiet loading state while the maps call runs', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'tool-map-running',
+            toolName: 'render_map',
+            args: { place_name: 'Paris' },
+            argsText: '{"place_name":"Paris"}',
+            status: { type: 'running' },
+          },
+        ],
+        status: { type: 'running' },
+      },
+    ]);
+
+    expect(screen.getByTestId('map-card-loading')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
   });
 });

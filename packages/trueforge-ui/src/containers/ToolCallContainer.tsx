@@ -224,6 +224,56 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   );
 }
 
+/** The approval state for a tool-call part, preferring live runtime state. */
+function useResolvedToolApproval(part: ToolCallMessagePartProps) {
+  const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
+  return stateApproval ?? part.approval;
+}
+
+/**
+ * The pending-approval card for a maps tool call. Rendered inside the agent
+ * internals disclosure; renders nothing once the approval is decided, because
+ * the result itself lives inline in the conversation.
+ */
+export function MapsApprovalCard({ part }: { part: ToolCallMessagePartProps }) {
+  const approval = useResolvedToolApproval(part);
+  const approvalPart = approval === part.approval ? part : { ...part, approval };
+  if (!hasPendingToolApproval(approval)) {
+    return null;
+  }
+  return <ToolApprovalSlot part={approvalPart} />;
+}
+
+/**
+ * The user-facing result of a maps tool call, rendered inline in the
+ * conversation (never inside the collapsed agent internals). Renders nothing
+ * while the approval is pending, a quiet loading state while the call runs,
+ * and the map card once the result is in.
+ */
+export function MapsResultCard({ part }: { part: ToolCallMessagePartProps }) {
+  const approval = useResolvedToolApproval(part);
+  if (hasPendingToolApproval(approval)) {
+    return null;
+  }
+  const resultString =
+    part.result === undefined
+      ? undefined
+      : typeof part.result === 'string'
+        ? part.result
+        : JSON.stringify(part.result, null, 2);
+  const mapsResult = parseMapsResult(resultString, part.toolName);
+  if (part.status?.type === 'running' && mapsResult.data === null) {
+    return (
+      <div className="maps-card" data-testid="map-card-loading">
+        <div className="maps-card-loading" role="status" aria-label="Loading map">
+          <span aria-hidden="true" className="maps-card-loading-spinner" />
+        </div>
+      </div>
+    );
+  }
+  return <MapCard data={mapsResult.data} state={mapsResult.state} blockedMessage={mapsResult.blockedMessage} />;
+}
+
 function RequestResponseSlots({
   request,
   response,
@@ -371,16 +421,10 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   }
 
   if (isMaps) {
-    const mapsResult = parseMapsResult(resultString, part.toolName);
     return (
       <div data-slot="tool-call-card" data-variant="map" className="w-full">
-        {showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
-        <MapCard
-          data={mapsResult.data}
-          state={mapsResult.state}
-          cardId={part.toolCallId}
-          blockedMessage={mapsResult.blockedMessage}
-        />
+        <MapsApprovalCard part={part} />
+        <MapsResultCard part={part} />
       </div>
     );
   }

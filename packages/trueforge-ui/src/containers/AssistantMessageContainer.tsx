@@ -16,7 +16,7 @@ import { MemoryContextCard } from '../atoms/agent-chat/MemoryContextCard.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { computeAgentStepsSplit } from '../utils/computeAgentStepsSplit.js';
-import { parseToolResultDisposition } from '../utils/toolCallParsing.js';
+import { MAPS_TOOL_NAMES, parseToolResultDisposition } from '../utils/toolCallParsing.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
 import { useDocumentIngestionStatusLine } from './DocumentIngestionStatusProvider.js';
@@ -24,7 +24,7 @@ import { useMemoryTurnContext, useMemoryTurnContextStatus } from './MemoryTurnCo
 import { MessageImageContainer } from './MessageImageContainer.js';
 import { ReasoningContainer } from './ReasoningContainer.js';
 import { RunCodeSetupNoticesContainer } from './RunCodeSetupNoticesContainer.js';
-import { ToolCallContainer } from './ToolCallContainer.js';
+import { MapsApprovalCard, MapsResultCard, ToolCallContainer } from './ToolCallContainer.js';
 
 /**
  * Dispatches a leaf message part to its renderer. "data" parts (generative
@@ -179,6 +179,12 @@ export function AssistantMessageContainer() {
     const index = parts.findIndex(p => p === part);
     if (index === -1) return null;
 
+    // Maps tool calls render inline in the conversation (approval in the
+    // internals disclosure, result in the main flow), never inside agent steps.
+    if (part.type === 'tool-call' && MAPS_TOOL_NAMES.has(part.toolName)) {
+      return null;
+    }
+
     if (part.type === 'text' && index >= cutIndex) {
       return null;
     }
@@ -249,6 +255,13 @@ export function AssistantMessageContainer() {
                   case 'reasoning':
                     return isMessageRunning ? <AssistantLeafPartContainer part={part} /> : null;
                   case 'tool-call':
+                    // Maps results render inline in the main flow below; the
+                    // disclosure keeps only the pending approval card.
+                    return MAPS_TOOL_NAMES.has(part.toolName) ? (
+                      <MapsApprovalCard part={part} />
+                    ) : (
+                      <AssistantLeafPartContainer part={part} />
+                    );
                   case 'image':
                   case 'data':
                     return <AssistantLeafPartContainer part={part} />;
@@ -294,6 +307,13 @@ export function AssistantMessageContainer() {
               case 'reasoning':
                 return isMessageRunning ? <AssistantLeafPartContainer part={part} /> : null;
               case 'tool-call':
+                // Maps results are user-facing: render the card inline here,
+                // ahead of the assistant text, instead of inside agent steps.
+                return MAPS_TOOL_NAMES.has(part.toolName) ? (
+                  <MapsResultCard part={part} />
+                ) : (
+                  <AssistantLeafPartContainer part={part} />
+                );
               case 'image':
               case 'data':
                 return <AssistantLeafPartContainer part={part} />;

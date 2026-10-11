@@ -3,8 +3,6 @@
 import type { Map as LeafletMap, TileLayer } from 'leaflet';
 import { useEffect, useRef, useState } from 'react';
 
-import { useTheme } from '../theme/ThemeProvider.js';
-
 export interface MapPin {
   name: string;
   lat: number;
@@ -38,8 +36,6 @@ export type MapCardState = 'ready' | 'blocked' | 'unavailable';
 interface MapCardProps {
   data: MapCardData | null;
   state: MapCardState;
-  /** Tool call id: keys the proxy rate limit per card. */
-  cardId: string;
   blockedMessage?: string;
   /**
    * Called when the user clicks Retry on a blocked or tile-failed panel.
@@ -99,6 +95,19 @@ function bindTextPopup(marker: { bindPopup: (el: HTMLElement) => unknown }, text
 }
 
 /**
+ * Stable identity for the map setup, derived from the values that change what
+ * the map shows. The parsed result object changes identity on every parent
+ * render; keying the Leaflet setup on it tore the map down and rebuilt it
+ * (re-requesting every tile) on each render.
+ */
+function mapSetupKey(data: MapCardData): string {
+  const pins = data.pins.map(pin => `${pin.name}|${pin.lat.toFixed(6)}|${pin.lng.toFixed(6)}`).join(';');
+  return [data.kind, data.lat.toFixed(6), data.lng.toFixed(6), String(data.zoom), pins, data.route_geometry ?? ''].join(
+    '#',
+  );
+}
+
+/**
  * Interactive map card. Tiles load only through the same-origin proxy; the
  * browser never contacts the tile host. Popups are DOM text nodes, never HTML.
  * No geolocation, no locate control.
@@ -106,40 +115,61 @@ function bindTextPopup(marker: { bindPopup: (el: HTMLElement) => unknown }, text
  * A blank map never ships: when tiles fail to load, the card shows the
  * "Map tiles unavailable" panel with a one-shot Retry instead of a grey box.
  */
-export function MapCard({ data, state, cardId, blockedMessage, onRetry }: MapCardProps) {
+export function MapCard({ data, state, blockedMessage, onRetry }: MapCardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<LeafletMap | null>(null);
-  const { mode } = useTheme();
+  // The effect below keys on the stable setup key, so it reads the latest
+  // data through a ref instead of closing over a fresh object each render.
+  const dataRef = useRef(data);
+  dataRef.current = data;
   // Set when tile loading fails; the card renders the unavailable panel.
   const [tilesFailed, setTilesFailed] = useState(false);
   // Bumped by Retry to re-create the tile layer exactly once per click.
   const [retryKey, setRetryKey] = useState(0);
+  const setupKey = data === null ? null : mapSetupKey(data);
 
   useEffect(() => {
+    if (setupKey === null || state !== 'ready' || tilesFailed) {
+      return;
+    }
+    const el = containerRef.current;
+    if (el === null) {
+      return;
+    }
     let cancelled = false;
     let map: LeafletMap | null = null;
     let tileLayer: TileLayer | null = null;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let observer: IntersectionObserver | undefined;
 
     async function init() {
-      if (containerRef.current === null || data === null || state !== 'ready' || tilesFailed) {
-        return;
-      }
-      const L = await import('leaflet');
       if (cancelled || containerRef.current === null) {
         return;
       }
+      const current = dataRef.current;
+      if (current === null) {
+        return;
+      }
+      const L = await import('leaflet');
+      if (cancelled || containerRef.current === null || dataRef.current === null) {
+        return;
+      }
+      const mapData = dataRef.current;
       map = L.map(containerRef.current, {
         zoomControl: true,
         // Attribution renders in the card footer; the Leaflet control would duplicate it.
         attributionControl: false,
+        // Wheel zoom stays off until the user focuses or clicks the map, so
+        // scrolling the chat never gets trapped inside the map.
+        scrollWheelZoom: false,
       });
-      mapRef.current = map;
+      const enableWheelZoom = () => {
+        map?.scrollWheelZoom.enable();
+      };
+      map.on('click', enableWheelZoom);
+      map.on('focus', enableWheelZoom);
 
-      const tileUrl = `/api/maps/tiles/{z}/{x}/{y}.png?card=${encodeURIComponent(cardId)}`;
-      tileLayer = L.tileLayer(tileUrl, {
+      tileLayer = L.tileLayer('/api/maps/tiles/{z}/{x}/{y}.png', {
         maxZoom: 18,
-        ...(mode === 'dark' ? { className: 'maps-tiles-dark' } : {}),
       });
 
       // A grey box is not an acceptable failure mode: when tiles cannot load,
@@ -165,22 +195,30 @@ export function MapCard({ data, state, cardId, blockedMessage, onRetry }: MapCar
 
       // Circle markers: no image assets to bundle or fail.
       const pinStyle = { radius: 8, color: '#ffffff', weight: 2, fillColor: '#dc2626', fillOpacity: 1 };
-      if (data.kind === 'route' && data.route_geometry !== undefined) {
-        const points = decodePolyline(data.route_geometry);
+      if (mapData.kind === 'route' && mapData.route_geometry !== undefined) {
+        const points = decodePolyline(mapData.route_geometry);
         const latlngs = points.map(([lat, lng]) => L.latLng(lat, lng));
         L.polyline(latlngs, { color: '#2563eb', weight: 4 }).addTo(map);
-        const fromMarker = L.circleMarker([data.from_lat ?? data.lat, data.from_lng ?? data.lng], pinStyle).addTo(map);
-        const toMarker = L.circleMarker([data.to_lat ?? data.lat, data.to_lng ?? data.lng], pinStyle).addTo(map);
-        bindTextPopup(fromMarker, data.from_name ?? 'Origin');
-        bindTextPopup(toMarker, data.to_name ?? 'Destination');
+        const fromMarker = L.circleMarker(
+          [mapData.from_lat ?? mapData.lat, mapData.from_lng ?? mapData.lng],
+          pinStyle,
+        ).addTo(map);
+        const toMarker = L.circleMarker([mapData.to_lat ?? mapData.lat, mapData.to_lng ?? mapData.lng], pinStyle).addTo(
+          map,
+        );
+        bindTextPopup(fromMarker, mapData.from_name ?? 'Origin');
+        bindTextPopup(toMarker, mapData.to_name ?? 'Destination');
         map.fitBounds(L.latLngBounds(latlngs));
       } else {
-        map.setView([data.lat, data.lng], data.zoom);
-        const mainMarker = L.circleMarker([data.lat, data.lng], pinStyle).addTo(map);
-        bindTextPopup(mainMarker, data.resolved_name);
-        for (const pin of data.pins) {
+        map.setView([mapData.lat, mapData.lng], mapData.zoom);
+        const mainMarker = L.circleMarker([mapData.lat, mapData.lng], pinStyle).addTo(map);
+        bindTextPopup(mainMarker, mapData.resolved_name);
+        for (const pin of mapData.pins) {
           // A POI at the place itself would stack exactly on the main pin.
-          if (Math.abs(pin.lat - data.lat) < SAME_SPOT_EPSILON && Math.abs(pin.lng - data.lng) < SAME_SPOT_EPSILON) {
+          if (
+            Math.abs(pin.lat - mapData.lat) < SAME_SPOT_EPSILON &&
+            Math.abs(pin.lng - mapData.lng) < SAME_SPOT_EPSILON
+          ) {
             continue;
           }
           const marker = L.circleMarker([pin.lat, pin.lng], pinStyle).addTo(map);
@@ -189,17 +227,35 @@ export function MapCard({ data, state, cardId, blockedMessage, onRetry }: MapCar
       }
     }
 
-    void init();
+    // Build the map only once its container is visible: an off-screen card
+    // must not burn tile requests or mis-measure its viewport.
+    if (typeof IntersectionObserver === 'undefined') {
+      void init();
+    } else {
+      observer = new IntersectionObserver(
+        entries => {
+          if (entries.some(entry => entry.isIntersecting)) {
+            observer?.disconnect();
+            observer = undefined;
+            void init();
+          }
+        },
+        { threshold: 0 },
+      );
+      observer.observe(el);
+    }
+
     return () => {
       cancelled = true;
+      observer?.disconnect();
       if (timeout !== undefined) {
         clearTimeout(timeout);
       }
       map?.remove();
-      mapRef.current = null;
+      map = null;
       tileLayer = null;
     };
-  }, [data, state, cardId, mode, tilesFailed, retryKey]);
+  }, [setupKey, state, tilesFailed, retryKey]);
 
   const handleRetry = () => {
     if (onRetry !== undefined) {
@@ -239,7 +295,13 @@ export function MapCard({ data, state, cardId, blockedMessage, onRetry }: MapCar
               {data.kind === 'route' ? `${data.from_name ?? ''} → ${data.to_name ?? ''}` : data.resolved_name}
             </p>
             {mapSubtitle(data) !== null && <p className="maps-card-subtitle">{mapSubtitle(data)}</p>}
-            <p className="maps-card-attribution">{data.attribution}</p>
+            <p className="maps-card-attribution">
+              <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+                {data.attribution}
+              </a>
+              <span aria-hidden="true"> · </span>
+              {data.kind === 'route' ? 'Routing: OSRM' : 'Search: Nominatim'}
+            </p>
           </div>
         </>
       )}
