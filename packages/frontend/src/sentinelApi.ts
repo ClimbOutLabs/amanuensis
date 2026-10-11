@@ -7,14 +7,11 @@ import {
   type SentinelUserSettings,
 } from '@truefoundry/trueforge-ui';
 
-// Sentinel HTTP routes. Tier, card, Tier 2 kind, and audit-outcome shapes are confirmed
-// against the backend contracts in trueforge-core; the routes themselves are still
-// being finalized server-side, so confirm before release. All response bodies are
-// parsed defensively: unknown shapes are dropped, never asserted.
+// Sentinel HTTP routes. Tier, card, Tier 2 kind, audit-outcome, and settings shapes are
+// owned by the server (trueforge-core permissions and the server settings schema). All
+// response bodies are parsed defensively: unknown shapes are dropped, never asserted.
 const AUDIT_LOG_URL = (sessionId: string) => `/api/v1/sessions/${encodeURIComponent(sessionId)}/audit-log`;
 const SETTINGS_URL = '/api/v1/user/settings/sentinel';
-const NOTICE_ACTION_URL = (sessionId: string, noticeId: string, action: 'undo' | 'stop') =>
-  `/api/v1/sessions/${encodeURIComponent(sessionId)}/sentinel/notices/${encodeURIComponent(noticeId)}/${action}`;
 
 async function readError(response: Response): Promise<Error> {
   const body: unknown = await response.json().catch(() => null);
@@ -63,10 +60,6 @@ export function createSentinelApi({ fetcher, listSessionEvents }: SentinelApiDep
 
     async getUserSettings() {
       const response = await fetcher(SETTINGS_URL);
-      // A server predating Sentinel has no settings route: fall back to safe defaults.
-      if (response.status === 404) {
-        return { offline_mode: false, tier2_always_ask: [] };
-      }
       if (!response.ok) {
         throw await readError(response);
       }
@@ -83,24 +76,6 @@ export function createSentinelApi({ fetcher, listSessionEvents }: SentinelApiDep
         throw await readError(response);
       }
       return parseUserSettings(await response.json());
-    },
-
-    async undoTier2Action({ sessionId, noticeId }) {
-      const response = await fetcher(NOTICE_ACTION_URL(sessionId, noticeId, 'undo'), {
-        method: 'POST',
-      });
-      if (!response.ok) {
-        throw await readError(response);
-      }
-    },
-
-    async stopTier2Action({ sessionId, noticeId }) {
-      const response = await fetcher(NOTICE_ACTION_URL(sessionId, noticeId, 'stop'), {
-        method: 'POST',
-      });
-      if (!response.ok) {
-        throw await readError(response);
-      }
     },
 
     async listSentinelSessionContext(sessionId: string): Promise<SentinelSessionContext> {

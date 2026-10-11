@@ -437,6 +437,56 @@ describe('connectorCatalog memory-provider check', () => {
   });
 });
 
+describe('connectorCatalog tool grants', () => {
+  const client = new TrueForge({ baseUrl: 'http://harness.test' });
+
+  function catalogWithFetch(fetchImpl: typeof fetch) {
+    return createConnectorCatalog(client, { baseUrl: 'http://harness.test', fetch: fetchImpl });
+  }
+
+  function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  }
+
+  it("lists the caller's always-allowed tools", async () => {
+    const calls: { url: string; method: string | undefined }[] = [];
+    const catalog = catalogWithFetch(async (input, init) => {
+      calls.push({ url: String(input), method: init?.method });
+      return jsonResponse({ data: [{ tool_name: 'lookup_note', created_at: '2026-10-10T00:00:00.000Z' }] });
+    });
+
+    assert.deepEqual(await catalog.listToolGrants({ id: 'notes' }), ['lookup_note']);
+    assert.deepEqual(calls, [{ url: 'http://harness.test/api/v1/mcp-servers/notes/tool-grants', method: 'GET' }]);
+  });
+
+  it('revokes one tool by name', async () => {
+    const calls: { url: string; method: string | undefined }[] = [];
+    const catalog = catalogWithFetch(async (input, init) => {
+      calls.push({ url: String(input), method: init?.method });
+      return jsonResponse({});
+    });
+
+    await catalog.revokeToolGrant({ id: 'notes', toolName: 'lookup note' });
+    assert.deepEqual(calls, [
+      { url: 'http://harness.test/api/v1/mcp-servers/notes/tool-grants/lookup%20note', method: 'DELETE' },
+    ]);
+  });
+
+  it('throws the API error message when the route rejects the request', async () => {
+    const catalog = catalogWithFetch(async () =>
+      jsonResponse({ error: { message: 'MCP server not found: nope' } }, 404),
+    );
+
+    await assert.rejects(() => catalog.listToolGrants({ id: 'nope' }), /MCP server not found: nope/);
+  });
+
+  it('rejects an unreadable listing instead of guessing', async () => {
+    const catalog = catalogWithFetch(async () => jsonResponse({ data: [{ name: 'lookup_note' }] }));
+
+    await assert.rejects(() => catalog.listToolGrants({ id: 'notes' }), /unreadable response/);
+  });
+});
+
 describe('connectorCatalog connection test', () => {
   function catalogWithFetch(fetchImpl: typeof fetch) {
     // maxRetries 0 so a 502 fixture is not retried with backoff before it is reported.

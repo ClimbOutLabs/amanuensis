@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { WaitQueueIndicator } from '@/atoms/WaitQueueIndicator.js';
-import type { WaitQueueSnapshot } from '@/utils/waitQueueJourney.js';
+import { deriveWaitQueue, LONG_WAIT_MS, type TurnSpriteId, type WaitQueueSnapshot } from '@/utils/waitQueueJourney.js';
+
+const SPRITES: TurnSpriteId[] = ['listening', 'remembering', 'found-memories', 'doing', 'writing', 'still-writing'];
 
 function snapshot(overrides: Partial<WaitQueueSnapshot> = {}): WaitQueueSnapshot {
   return {
@@ -13,6 +18,7 @@ function snapshot(overrides: Partial<WaitQueueSnapshot> = {}): WaitQueueSnapshot
       { id: 'writing', label: 'Writing', state: 'pending' },
     ],
     activeStation: 'doing',
+    recallJustLanded: false,
     microcopy: 'Searching the web…',
     ticks: ['Read schema.sql'],
     ...overrides,
@@ -60,6 +66,12 @@ describe('WaitQueueIndicator', () => {
     expect(document.querySelector('.aui-wait-queue')).toHaveClass('aui-wait-queue--static');
   });
 
+  it('keeps the sprite an image for reduced-motion users', () => {
+    render(<WaitQueueIndicator snapshot={snapshot()} elapsedMs={0} reducedMotion />);
+
+    expect(document.querySelector('.aui-state-sprite--doing img')).not.toBeNull();
+  });
+
   it('marks the Writing station as arriving when the first tokens land', () => {
     render(
       <WaitQueueIndicator
@@ -80,5 +92,128 @@ describe('WaitQueueIndicator', () => {
 
     expect(document.querySelector('.aui-wait-queue__station--arriving')).not.toBeNull();
     expect(document.querySelector('.aui-state-sprite--writing')).not.toBeNull();
+  });
+
+  it('walks remembering -> found-memories -> doing as the turn progresses', () => {
+    const { rerender } = render(
+      <WaitQueueIndicator
+        snapshot={snapshot({ activeStation: null, microcopy: 'Thinking it through…' })}
+        elapsedMs={0}
+        reducedMotion={false}
+      />,
+    );
+    expect(document.querySelector('.aui-state-sprite--remembering')).not.toBeNull();
+
+    rerender(
+      <WaitQueueIndicator
+        snapshot={snapshot({ activeStation: null, recallJustLanded: true, microcopy: 'Thinking it through…' })}
+        elapsedMs={0}
+        reducedMotion={false}
+      />,
+    );
+    expect(document.querySelector('.aui-state-sprite--found-memories')).not.toBeNull();
+
+    rerender(
+      <WaitQueueIndicator
+        snapshot={snapshot({ activeStation: 'doing', recallJustLanded: false })}
+        elapsedMs={0}
+        reducedMotion={false}
+      />,
+    );
+    expect(document.querySelector('.aui-state-sprite--doing')).not.toBeNull();
+    expect(document.querySelector('.aui-state-sprite--found-memories')).toBeNull();
+  });
+
+  it('switches the writing sprite to still-writing past the long-wait threshold', () => {
+    const writing = snapshot({ activeStation: 'writing', microcopy: 'Writing…', ticks: [] });
+    const { rerender } = render(
+      <WaitQueueIndicator snapshot={writing} elapsedMs={LONG_WAIT_MS - 1} reducedMotion={false} />,
+    );
+    expect(document.querySelector('.aui-state-sprite--writing')).not.toBeNull();
+
+    rerender(<WaitQueueIndicator snapshot={writing} elapsedMs={LONG_WAIT_MS} reducedMotion={false} />);
+    expect(document.querySelector('.aui-state-sprite--still-writing')).not.toBeNull();
+    expect(document.querySelector('.aui-state-sprite--writing')).toBeNull();
+  });
+
+  it('keeps a recall that lands after the first part out of found-memories', () => {
+    // Real snapshot: recall landed, then a tool started. deriveWaitQueue
+    // clears recallJustLanded once a part exists, so the indicator never
+    // shows found-memories for a late recall.
+    const late = deriveWaitQueue({
+      isRunning: true,
+      parts: [{ type: 'tool-call', statusType: 'running', toolName: 'web_search' }],
+      memory: { available: true, landed: true, items: 2, outcome: 'ok' },
+    });
+    expect(late.recallJustLanded).toBe(false);
+    render(<WaitQueueIndicator snapshot={late} elapsedMs={0} reducedMotion={false} />);
+    expect(document.querySelector('.aui-state-sprite--doing')).not.toBeNull();
+    expect(document.querySelector('.aui-state-sprite--found-memories')).toBeNull();
+  });
+
+  it('keeps the status line text unchanged per sprite state', () => {
+    const { rerender } = render(
+      <WaitQueueIndicator
+        snapshot={snapshot({ activeStation: 'writing', microcopy: 'Writing…' })}
+        elapsedMs={0}
+        reducedMotion={false}
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Writing…');
+
+    rerender(
+      <WaitQueueIndicator
+        snapshot={snapshot({ activeStation: 'writing', microcopy: 'Writing…' })}
+        elapsedMs={LONG_WAIT_MS}
+        reducedMotion={false}
+      />,
+    );
+    // The sprite changes; the announced microcopy does not.
+    expect(screen.getByRole('status')).toHaveTextContent('Writing…');
+    expect(document.querySelector('.aui-state-sprite--still-writing')).not.toBeNull();
+  });
+
+  it.each(SPRITES)('renders the %s sprite in the same box (no layout shift)', sprite => {
+    const { unmount } = render(
+      <WaitQueueIndicator
+        snapshot={snapshot({
+          activeStation:
+            sprite === 'doing'
+              ? 'doing'
+              : sprite === 'writing' || sprite === 'still-writing'
+                ? 'writing'
+                : sprite === 'listening'
+                  ? 'listening'
+                  : null,
+          recallJustLanded: sprite === 'found-memories',
+          microcopy: 'Working…',
+          ticks: [],
+        })}
+        elapsedMs={sprite === 'still-writing' ? LONG_WAIT_MS : 0}
+        reducedMotion={false}
+      />,
+    );
+
+    const el = document.querySelector(`.aui-state-sprite--${sprite}`);
+    expect(el).not.toBeNull();
+    // Same single-box structure in every state: one img, no size variants.
+    expect(el?.tagName).toBe('SPAN');
+    expect(el?.querySelectorAll('img')).toHaveLength(1);
+    unmount();
+  });
+
+  it('sizes the sprite box once in CSS (2rem, no per-state overrides)', () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'styles.css'), 'utf8');
+    const boxRule = css.match(/\.aui-state-sprite\s*\{[^}]*\}/);
+    expect(boxRule).not.toBeNull();
+    expect(boxRule?.[0]).toMatch(/width:\s*2rem/);
+    expect(boxRule?.[0]).toMatch(/height:\s*2rem/);
+    // No state modifier may resize the box.
+    for (const sprite of SPRITES) {
+      const stateRule = css.match(new RegExp(`\\.aui-state-sprite--${sprite}\\s*\\{[^}]*\\}`));
+      if (stateRule) {
+        expect(stateRule[0]).not.toMatch(/width|height/);
+      }
+    }
   });
 });

@@ -6,6 +6,7 @@ import { cn } from '../../atoms/lib/cn.js';
 import { Button } from '../../atoms/primitives/Button.js';
 import { useMCPAuth } from '../../hooks/useMcpAuth.js';
 import { Icon } from '../../icons/Icon.js';
+import { hasConnectorToolGrants } from '../../server/connectorToolGrants.js';
 import { useCatalogServer } from '../../server/ServerContext.js';
 import type { ConnectorBase, ToolBase } from '../../server/types.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
@@ -109,6 +110,9 @@ const ConnectorDetails = ({
   const [toolsLoading, setToolsLoading] = useState(true);
   const [toolsError, setToolsError] = useState<string | null>(null);
   const [refreshingAfterAuth, setRefreshingAfterAuth] = useState(false);
+  const [grantedTools, setGrantedTools] = useState<string[]>([]);
+  const [grantsError, setGrantsError] = useState<string | null>(null);
+  const [revokingTool, setRevokingTool] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,6 +138,40 @@ const ConnectorDetails = ({
       cancelled = true;
     };
   }, [connector.authenticated, connector.id, connectorCatalog]);
+
+  useEffect(() => {
+    setGrantedTools([]);
+    setGrantsError(null);
+    if (!hasConnectorToolGrants(connectorCatalog)) return;
+    let cancelled = false;
+
+    void connectorCatalog
+      .listToolGrants({ id: connector.id })
+      .then(names => {
+        if (!cancelled) setGrantedTools(names);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setGrantsError(getErrorMessage(err, 'Failed to load always-allowed tools'));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connector.id, connectorCatalog]);
+
+  const revokeToolGrant = async (toolName: string) => {
+    if (!hasConnectorToolGrants(connectorCatalog)) return;
+    setRevokingTool(toolName);
+    setGrantsError(null);
+    try {
+      await connectorCatalog.revokeToolGrant({ id: connector.id, toolName });
+      setGrantedTools(current => current.filter(name => name !== toolName));
+    } catch (err: unknown) {
+      setGrantsError(getErrorMessage(err, 'Failed to revoke the always-allowed tool'));
+    } finally {
+      setRevokingTool(null);
+    }
+  };
 
   const refreshAfterAuthentication = async () => {
     setRefreshingAfterAuth(true);
@@ -222,6 +260,43 @@ const ConnectorDetails = ({
             ) : null}
           </div>
         </header>
+
+        {grantedTools.length > 0 ? (
+          <section className="mt-6" aria-labelledby="connector-grants-heading">
+            <h5 id="connector-grants-heading" className="text-[0.8125rem] font-semibold text-text-primary">
+              Always allowed <span className="font-normal text-text-secondary">· {grantedTools.length}</span>
+            </h5>
+            <p className="mb-2 text-xs text-text-secondary">
+              These tools run without asking first. Safety checks can still ask before a call.
+            </p>
+            <ul className="overflow-hidden rounded-xl border border-border bg-card-bg">
+              {grantedTools.map(toolName => (
+                <li
+                  key={toolName}
+                  className="flex min-h-12 items-center gap-3 border-b border-border px-3 py-2 last:border-b-0"
+                >
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">{toolName}</span>
+                  <Button.Secondary
+                    size="small"
+                    type="button"
+                    disabled={busy || revokingTool !== null}
+                    aria-label={`Stop always allowing ${toolName}`}
+                    onClick={() => {
+                      void revokeToolGrant(toolName);
+                    }}
+                  >
+                    {revokingTool === toolName ? 'Revoking…' : 'Revoke'}
+                  </Button.Secondary>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        {grantsError ? (
+          <p className="mt-3 rounded-md border border-failure-bg/30 bg-failure-bg/10 px-3 py-2 text-sm text-failure-bg">
+            {grantsError}
+          </p>
+        ) : null}
 
         <section className="mt-6" aria-labelledby="connector-tools-heading">
           {toolsLoading ? (

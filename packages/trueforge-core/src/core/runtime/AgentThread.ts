@@ -72,6 +72,7 @@ import { estimateTokensForString } from '../llm/usage';
 import { ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
 import {
   allowsChatApproval,
+  allowsToolGrant,
   approvalGrantKey,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
@@ -819,11 +820,17 @@ function validateToolMessage(
   }
 }
 
-function validateApprovalMessage(
-  message: UserToolApprovalMessage,
-  pendingApprovals: ReadonlyMap<string, InternalEnrichedToolCall>,
-  index: number,
-): void {
+function validateApprovalMessage({
+  message,
+  pendingApprovals,
+  index,
+  toolGrantsAvailable,
+}: {
+  message: UserToolApprovalMessage;
+  pendingApprovals: ReadonlyMap<string, InternalEnrichedToolCall>;
+  index: number;
+  toolGrantsAvailable: boolean;
+}): void {
   const pending = pendingApprovals.get(message.tool_call_id);
   if (pending === undefined) {
     throw new InvalidAgentSendInputError(
@@ -837,6 +844,15 @@ function validateApprovalMessage(
   ) {
     throw new InvalidAgentSendInputError(
       `messages[${String(index)}] chat-scoped approval is not available for tool_call_id '${message.tool_call_id}'`,
+    );
+  }
+  if (
+    message.approval.status === 'allow' &&
+    message.approval.scope === 'always' &&
+    !(toolGrantsAvailable && allowsToolGrant(pending.tool_info))
+  ) {
+    throw new InvalidAgentSendInputError(
+      `messages[${String(index)}] always-allow approval is not available for tool_call_id '${message.tool_call_id}'`,
     );
   }
 }
@@ -870,6 +886,8 @@ function validateInputMessageTypesGivenContext(input: {
   messages: AgentThreadRuntimeSendInput[];
   chatApprovalGrants: ReadonlySet<string>;
   implementationPlanGrants: ReadonlySet<string>;
+  /** Whether a standing tool grant can be recorded: only with a Sentinel context. */
+  toolGrantsAvailable: boolean;
 }): void {
   // Full open set: validates incoming tool responses and dedupes within the batch.
   const openToolCallIds = getOpenToolCallIds(input.context);
@@ -892,7 +910,12 @@ function validateInputMessageTypesGivenContext(input: {
       continue;
     }
     if (isApprovalDecisionMessage(m)) {
-      validateApprovalMessage(m, pendingApprovalCalls, i);
+      validateApprovalMessage({
+        message: m,
+        pendingApprovals: pendingApprovalCalls,
+        index: i,
+        toolGrantsAvailable: input.toolGrantsAvailable,
+      });
       pendingApprovalCalls.delete(m.tool_call_id);
       pendingApprovalIds.delete(m.tool_call_id);
     } else if (isInputUserMessage(m)) {
@@ -1549,6 +1572,7 @@ export class AgentThread {
         messages,
         chatApprovalGrants: this.chatApprovalGrants,
         implementationPlanGrants: this.implementationPlanGrants,
+        toolGrantsAvailable: this.sentinel !== undefined,
       });
       if (messages.some(isInputUserMessage)) {
         this.toolCallMemo = createToolCallMemoState();
@@ -1590,16 +1614,31 @@ export class AgentThread {
           }).map(call => [call.id, call]),
         );
         for (const approval of approvals) {
-          if (approval.approval.status !== 'allow' || approval.approval.scope !== 'chat') {
+          if (approval.approval.status !== 'allow') {
             continue;
           }
           const pending = pendingById.get(approval.tool_call_id);
+          if (pending === undefined) {
+            continue;
+          }
           if (
-            pending &&
+            approval.approval.scope === 'chat' &&
             pending.tool_info.implementation_plan_grant === undefined &&
             allowsChatApproval(pending.tool_info)
           ) {
             this.chatApprovalGrants.add(approvalGrantKey(pending.tool_info));
+          }
+          if (
+            approval.approval.scope === 'always' &&
+            this.sentinel !== undefined &&
+            allowsToolGrant(pending.tool_info)
+          ) {
+            await this.sentinel.services.tool_grants.recordToolGrant({
+              tenant_id: this.sentinel.tenant_id,
+              created_by: this.sentinel.created_by,
+              mcp_server_name: pending.tool_info.mcp_server_name,
+              tool_name: pending.tool_info.original_tool_name,
+            });
           }
         }
         const pendingClientCalls = new Map(getPendingClientSideToolCalls(this.context).map(call => [call.id, call]));
@@ -1886,6 +1925,7 @@ export class AgentThread {
       messages,
       chatApprovalGrants: this.chatApprovalGrants,
       implementationPlanGrants: this.implementationPlanGrants,
+      toolGrantsAvailable: this.sentinel !== undefined,
     });
   }
 

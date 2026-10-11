@@ -2,21 +2,19 @@
  * Sentinel three-tier permissions: wire types and defensive parsers.
  *
  * Tier, card, Tier 2 kind, and audit-outcome shapes mirror the backend contracts in
- * trueforge-core (`permissions/tier.ts`, `permissions/audit.ts`); the server is the
- * canonical owner and the UI never re-derives these values. Sentinel data arrives per
- * tool-call reference on `tool.approval_required` / `tool.tier2_notice` events, with a
- * fallback read of the event top level for single-action events; audit history and
- * user settings come over HTTP. Every parser checks shapes instead of asserting them:
- * both event placements are accepted and anything unrecognized is dropped.
- *
- * The event envelope and the HTTP routes are still being finalized server-side, so
- * parsers also accept the provisional field names alongside the backend ones.
+ * trueforge-core (`permissions/tier.ts`, `permissions/audit.ts`) and the settings
+ * schema in the server package; the server is the canonical owner and the UI never
+ * re-derives these values. Approval cards arrive per tool-call reference on
+ * `tool.approval_required` events, with a fallback read of the event top level for
+ * single-action events; audit history and user settings come over HTTP. Every parser
+ * checks shapes instead of asserting them: both event placements are accepted and
+ * anything unrecognized is dropped.
  *
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
 
-/** Sentinel permission tier: 1 silent, 2 inline notice, 3 approval card. */
+/** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export const TOOL_TIERS = [1, 2, 3] as const;
 
 export type ToolTier = (typeof TOOL_TIERS)[number];
@@ -25,17 +23,14 @@ export function parseToolTier(value: unknown): ToolTier | undefined {
   return value === 1 || value === 2 || value === 3 ? value : undefined;
 }
 
-/** Tier 2 action kinds with a per-user "always ask me" toggle. Pinned to the backend list. */
-export const TIER2_ACTION_KINDS = ['file_write', 'shell', 'runner', 'branch'] as const;
+/** Tier 2 action kinds the user may relax to run without asking. Pinned to the backend list. */
+export const TIER2_ACTION_KINDS = ['file_write'] as const;
 
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 
 /** Human-readable labels for Tier 2 action kinds. */
 export const TIER2_ACTION_LABELS: Record<Tier2ActionKind, string> = {
   file_write: 'Write files',
-  shell: 'Run shell commands',
-  runner: 'Run code',
-  branch: 'Manage git branches',
 };
 
 export function parseTier2ActionKind(value: unknown): Tier2ActionKind | undefined {
@@ -46,7 +41,7 @@ export function parseTier2ActionKind(value: unknown): Tier2ActionKind | undefine
 }
 
 /**
- * Server-rendered Tier 3 approval card. Mirrors the backend `Tier3Card` schema:
+ * Server-rendered approval card for Tier 2 and Tier 3 actions. Mirrors the backend `Tier3Card` schema:
  * destination/recipient/amount come from the server-side extractor registry over
  * canonical params, never agent text. Shell cards carry the server-parsed command.
  */
@@ -69,37 +64,18 @@ export type SentinelApprovalCard = {
   parsed_command: string | null;
 };
 
-/** Everything the UI needs to render a Tier 3 approval, keyed to one tool call. */
+/** Everything the UI needs to render a Tier 2 or Tier 3 approval, keyed to one tool call. */
 export type SentinelApprovalInfo = {
   toolCallId: string;
   tier: ToolTier;
   card: SentinelApprovalCard;
+  /** Id of the `tool.approval_required` event that asked; calls from one event share it. */
+  eventId: string | null;
+  /** Thread that owns the call; a sub-agent's calls carry its own thread id. */
+  threadId: string | null;
 };
 
-/** Non-blocking notice for an action that ran under Tier 2. */
-export type Tier2Notice = {
-  toolCallId: string;
-  /** Plain-language description of what ran. */
-  message: string;
-  /** Tier 2 member kind, for the per-action "always ask me" toggle lookup. */
-  kind: Tier2ActionKind | null;
-  undoable: boolean;
-  stoppable: boolean;
-  /** Tracked executable files the server named in the inline indicator. */
-  tracked_files: string[];
-  /** Identifier for the undo/stop endpoints; falls back to the tool call id. */
-  notice_id: string;
-};
-
-export const SENTINEL_AUDIT_OUTCOMES = [
-  'logged',
-  'ran',
-  'stopped_by_user',
-  'undone',
-  'approved',
-  'denied',
-  'auto_denied',
-] as const;
+export const SENTINEL_AUDIT_OUTCOMES = ['logged', 'ran', 'approved', 'denied', 'auto_denied'] as const;
 
 export type SentinelAuditOutcome = (typeof SENTINEL_AUDIT_OUTCOMES)[number];
 
@@ -128,33 +104,28 @@ export type SentinelAuditEntry = {
 
 /** User-level Sentinel preferences. */
 export type SentinelUserSettings = {
-  /** While on, external Tier 3 actions are auto-denied without an approval card. */
+  /** While on, actions that reach outside this machine are auto-denied without an approval card. */
   offline_mode: boolean;
-  /** Tier 2 action kinds the user escalated to always ask. Default: none. */
-  tier2_always_ask: Tier2ActionKind[];
+  /** Tier 2 action kinds that run without asking. Default: none, so Tier 2 asks. */
+  tier2_auto_allow: Tier2ActionKind[];
 };
 
 /**
  * Host-provided Sentinel backend access. The frontend implements this against the
  * server's HTTP API plus the SDK client; trueforge-ui only declares the contract.
  *
- * The HTTP routes are still being finalized server-side (provisional):
  * - `GET /api/v1/sessions/{sessionId}/audit-log?limit=N` -> `{ entries: [...] }`
- * - `GET /api/v1/user/settings/sentinel` -> settings object
- * - `PATCH /api/v1/user/settings/sentinel` with a settings patch -> updated settings
- * - `POST /api/v1/sessions/{sessionId}/sentinel/notices/{noticeId}/undo`
- * - `POST /api/v1/sessions/{sessionId}/sentinel/notices/{noticeId}/stop`
+ * - `GET /api/v1/user/settings/sentinel` -> `{ data: settings }`
+ * - `PATCH /api/v1/user/settings/sentinel` with a settings patch -> `{ data: settings }`
  */
 export type SentinelApi = {
   listAuditEntries: (input: { sessionId: string; limit?: number }) => Promise<SentinelAuditEntry[]>;
   getUserSettings: () => Promise<SentinelUserSettings>;
   updateUserSettings: (patch: Partial<SentinelUserSettings>) => Promise<SentinelUserSettings>;
-  undoTier2Action: (input: { sessionId: string; noticeId: string }) => Promise<void>;
-  stopTier2Action: (input: { sessionId: string; noticeId: string }) => Promise<void>;
   /**
-   * Durable read of Sentinel state for a session: approval cards and Tier 2 notices
-   * rebuilt from persisted `tool.approval_required` / `tool.tier2_notice` events, so a
-   * reloaded tab shows the same cards and notices the live stream already delivered.
+   * Durable read of Sentinel state for a session: approval cards rebuilt from persisted
+   * `tool.approval_required` events, so a reloaded tab shows the same cards the live
+   * stream already delivered.
    */
   listSentinelSessionContext: (sessionId: string) => Promise<SentinelSessionContext>;
 };
@@ -162,7 +133,6 @@ export type SentinelApi = {
 /** Durable per-tool-call Sentinel state for one session. */
 export type SentinelSessionContext = {
   approvals: SentinelApprovalInfo[];
-  notices: Tier2Notice[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -182,10 +152,6 @@ function nullableString(record: Record<string, unknown>, key: string): string | 
 function optionalBoolean(record: Record<string, unknown>, key: string): boolean | undefined {
   const value = record[key];
   return typeof value === 'boolean' ? value : undefined;
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
 function tier2ActionKindArray(value: unknown): Tier2ActionKind[] {
@@ -228,42 +194,18 @@ function toolCallIdFrom(record: Record<string, unknown>): string | undefined {
   );
 }
 
-function parseApprovalInfo(ref: Record<string, unknown>): SentinelApprovalInfo | undefined {
+function parseApprovalInfo(
+  ref: Record<string, unknown>,
+  origin: { eventId: string | null; threadId: string | null },
+): SentinelApprovalInfo | undefined {
   const tier = parseToolTier(ref.tier);
-  // The backend stamps the decision card as `tier3_card`; `card` is the provisional name.
   const card = parseApprovalCard(ref.tier3_card ?? ref.tier3Card ?? ref.card);
   const toolCallId = toolCallIdFrom(ref);
   if (tier === undefined || card === undefined || toolCallId === undefined) return undefined;
-  return { toolCallId, tier, card };
+  return { toolCallId, tier, card, ...origin };
 }
 
-function parseTier2Notice(ref: Record<string, unknown>): Tier2Notice | undefined {
-  const tier = parseToolTier(ref.tier);
-  if (tier !== 2) return undefined;
-  const toolCallId = toolCallIdFrom(ref);
-  const message = optionalString(ref, 'message') ?? optionalString(ref, 'plain_message');
-  if (toolCallId === undefined || message === undefined) return undefined;
-  return {
-    toolCallId,
-    message,
-    kind: parseTier2ActionKind(ref.tier2_kind) ?? null,
-    undoable: optionalBoolean(ref, 'undoable') ?? false,
-    stoppable: optionalBoolean(ref, 'stoppable') ?? false,
-    // The backend names these `tier2_files`; `tracked_files` is the provisional name.
-    tracked_files: stringArray(ref.tier2_files ?? ref.tracked_files),
-    notice_id: optionalString(ref, 'notice_id') ?? toolCallId,
-  };
-}
-
-const SENTINEL_EVENT_TYPES = ['tool.approval_required', 'tool.tier2_notice'] as const;
-
-function isSentinelEventType(value: unknown): value is (typeof SENTINEL_EVENT_TYPES)[number] {
-  if (typeof value !== 'string') return false;
-  for (const eventType of SENTINEL_EVENT_TYPES) {
-    if (value === eventType) return true;
-  }
-  return false;
-}
+export const APPROVAL_REQUIRED_EVENT_TYPE = 'tool.approval_required';
 
 function toolCallRefs(event: Record<string, unknown>): Record<string, unknown>[] {
   const refs = event.tool_calls ?? event.toolCalls;
@@ -273,38 +215,31 @@ function toolCallRefs(event: Record<string, unknown>): Record<string, unknown>[]
 }
 
 /**
- * Extracts Sentinel approval info and Tier 2 notices from one raw session event.
- * Accepts the parsed JSON of either an SSE streaming event or a persisted session
- * event; returns nothing for events that carry no Sentinel data.
+ * Extracts Sentinel approval info from one raw session event. Accepts the parsed JSON
+ * of either an SSE streaming event or a persisted session event; returns nothing for
+ * events that carry no Sentinel data.
  */
-export function extractSentinelFromEvent(event: unknown): {
-  approvals: SentinelApprovalInfo[];
-  notices: Tier2Notice[];
-} {
-  const empty = { approvals: [], notices: [] };
-  if (!isRecord(event)) return empty;
-  if (!isSentinelEventType(event.type)) return empty;
+export function extractSentinelFromEvent(event: unknown): SentinelApprovalInfo[] {
+  if (!isRecord(event) || event.type !== APPROVAL_REQUIRED_EVENT_TYPE) return [];
+  const origin = {
+    eventId: optionalString(event, 'id') ?? null,
+    threadId: optionalString(event, 'thread_id') ?? optionalString(event, 'threadId') ?? null,
+  };
   const approvals: SentinelApprovalInfo[] = [];
-  const notices: Tier2Notice[] = [];
   for (const ref of toolCallRefs(event)) {
-    const approval = parseApprovalInfo(ref);
+    const approval = parseApprovalInfo(ref, origin);
     if (approval !== undefined) approvals.push(approval);
-    const notice = parseTier2Notice(ref);
-    if (notice !== undefined) notices.push(notice);
   }
-  return { approvals, notices };
+  return approvals;
 }
 
 /** Folds raw session events into per-tool-call Sentinel state (later events win). */
 export function extractSentinelSessionContext(events: unknown[]): SentinelSessionContext {
   const approvals = new Map<string, SentinelApprovalInfo>();
-  const notices = new Map<string, Tier2Notice>();
   for (const event of events) {
-    const { approvals: foundApprovals, notices: foundNotices } = extractSentinelFromEvent(event);
-    for (const approval of foundApprovals) approvals.set(approval.toolCallId, approval);
-    for (const notice of foundNotices) notices.set(notice.toolCallId, notice);
+    for (const approval of extractSentinelFromEvent(event)) approvals.set(approval.toolCallId, approval);
   }
-  return { approvals: [...approvals.values()], notices: [...notices.values()] };
+  return { approvals: [...approvals.values()] };
 }
 
 function parseAuditEntry(value: unknown): SentinelAuditEntry | undefined {
@@ -356,11 +291,12 @@ export function parseAuditEntries(body: unknown): SentinelAuditEntry[] {
   return entries;
 }
 
-/** Parses user settings; absent fields fall back to safe defaults (all off). */
+/** Parses a settings response body (`{ data: settings }`); absent fields fall back to safe defaults. */
 export function parseUserSettings(body: unknown): SentinelUserSettings {
-  if (!isRecord(body)) return { offline_mode: false, tier2_always_ask: [] };
+  const settings = isRecord(body) ? body.data : undefined;
+  if (!isRecord(settings)) return { offline_mode: false, tier2_auto_allow: [] };
   return {
-    offline_mode: optionalBoolean(body, 'offline_mode') ?? false,
-    tier2_always_ask: tier2ActionKindArray(body.tier2_always_ask),
+    offline_mode: optionalBoolean(settings, 'offline_mode') ?? false,
+    tier2_auto_allow: tier2ActionKindArray(settings.tier2_auto_allow),
   };
 }
