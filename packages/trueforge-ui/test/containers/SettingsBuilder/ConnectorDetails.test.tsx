@@ -309,7 +309,7 @@ describe('ConnectorDetails always-allowed tools', () => {
     renderWithGrants({ listToolGrants, revokeToolGrant });
 
     const revoke = await screen.findByRole('button', { name: 'Stop always allowing list_issues' });
-    expect(screen.getByRole('heading', { name: /Always allowed/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Runs without asking/ })).toBeInTheDocument();
     expect(listToolGrants).toHaveBeenCalledWith({ id: connector.id });
 
     fireEvent.click(revoke);
@@ -338,11 +338,11 @@ describe('ConnectorDetails always-allowed tools', () => {
   it('shows no grant section when the catalog cannot report grants or none exist', async () => {
     const { unmount } = renderWithGrants({});
     expect(await screen.findByText('list_issues')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: /Always allowed/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Runs without asking/ })).not.toBeInTheDocument();
     unmount();
 
     renderWithGrants({ listToolGrants: async () => [], revokeToolGrant: async () => {} });
     expect(await screen.findByText('list_issues')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: /Always allowed/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Runs without asking/ })).not.toBeInTheDocument();
   });
 });

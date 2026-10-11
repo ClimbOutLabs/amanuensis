@@ -25,12 +25,12 @@ export function AgentRuntimeConfigDrawer({
     <SideDrawer
       open={open}
       onOpenChange={nextOpen => !nextOpen && onClose()}
-      title="Runtime Config"
-      description="Control execution, sandbox, and context behavior."
+      title="Run settings"
+      description="Control how the agent runs and uses context."
       anchor="right"
       size="xl"
       className="md:w-3xl"
-      aria-label="Edit Runtime Config"
+      aria-label="Edit Run settings"
     >
       <AgentRuntimeEditorContent spec={spec} sandboxAvailable={sandboxAvailable} onChange={onChange} />
     </SideDrawer>
