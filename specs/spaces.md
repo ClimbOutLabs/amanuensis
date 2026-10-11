@@ -1,8 +1,19 @@
 # Spec: Spaces
 
-**Status:** implemented
+**Status:** partly implemented
 
 Normative contract for the Spaces feature as shipped.
+
+## Not yet built
+
+The following are designed but not implemented on main today:
+
+- **Context budgets.** The 8,000-token per-call budget, the 24,000-token per-turn aggregate budget, and the `budget_exceeded` refusal shape are not enforced. The server enforces only the 65,536-character body cap.
+- **Mutation cap.** The per-turn cap of 5 space mutations is not enforced.
+- **`read_block` tool.** Not registered. Block-level reads go through `get_space` today.
+- **`list_revisions` tool.** Not registered. Revision history is readable via `get_space` with a revision parameter.
+
+The Context Budgets section below describes the intended design, not current behavior.
 
 ## Problem
 
@@ -36,6 +47,8 @@ Spaces are per-user. Every store query is scoped by tenant and user id; one user
 Delete removes the space row and all of its retained revisions permanently.
 
 ## User Journeys
+
+Note: journeys that mention `read_block` or `list_revisions` describe the intended design. Those tools are not yet built (see Not yet built above); the journeys are kept to document the target behavior.
 
 **Create.** User: "Put together a space for tracking the home renovation." The assistant first checks for an existing space on the subject with `list_spaces`, using the name filter rather than paging the whole collection. Active matches are preferred: if an active space fits, it updates that space instead of creating a duplicate, and says so in chat ("Found 'Home renovation'. I will add this there rather than starting a new space.") so the merge is visible, not silent. If only archived spaces match, the assistant does not quietly resurrect or silently duplicate: it offers the choice in chat ("I found an archived space, 'Home renovation', from March. Unarchive it and update it, or start a fresh one?"). If none fits, it calls `create_space` with a name, purpose, format, and body. The space appears in the Spaces view. Markdown for a plain note; HTML when the page is meant to be looked at rather than skimmed. The assistant authors block markers at creation for any space it expects to update later; markers are what make cheap block edits possible.
 
@@ -125,6 +138,8 @@ Markdown bodies render through `rehype-raw` plus `rehype-sanitize` with a restri
 Name, purpose, the one-line body preview, and the delete confirmation title are rendered as framework text nodes, which escape markup by construction; the preview is additionally tag-stripped to plain text first. There is no `dangerouslySetInnerHTML` anywhere in the Spaces view. Stored markup in these fields is inert text, not stored XSS.
 
 ## Context Budgets
+
+Not yet built. The design below is the target; on main today the server enforces only the 65,536-character body cap. See Not yet built.
 
 Space content injected into the assistant's context is bounded. The numbers below are host-configured policy constants, enforced by the host, not advisory guidance and not derived from a context-window measurement. Token estimates are format-aware and deliberately conservative overestimates, not prose averages: ceiling(chars / 4) for markdown and plain-text content (metadata, previews, markdown bodies), ceiling(chars / 2.5) for HTML bodies (tags, attributes, and entities run closer to 2 to 3 characters per token). The format used is the body format of the space being read.
 

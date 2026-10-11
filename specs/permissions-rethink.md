@@ -17,21 +17,19 @@ A three-tier permission system. Tier 1 runs silently. Tier 2 asks by default but
 Runs without asking:
 
 - Read-only allowlisted shell commands inside the workspace. The server parses the command: it must be a single simple command (no pipes, redirects, or chaining), argv[0] must match the allowlist exactly, and arguments must match the command's enumerated flag list.
-- First-party connector reads only (email, calendar, and similar read-only operations).
+- Local read-only system tools (first-party tools that only read, never write or reach outside the machine).
 
 These are the agent doing its job. Reads of sensitive paths (SSH keys, credential files, .env) are logged in the audit feed even when silent.
 
 ### Tier 2: Asks by default
 
-Actions that change state but are reversible or low-stakes:
+Actions that change state but are reversible or low-stakes. Today this covers only file writes:
 
 - Writing files in the workspace
-- Running tests, lint, typecheck, builds
-- Creating branches
 
-The user sees an approval card and can approve or deny. Each Tier 2 action type has a per-user relaxation toggle in the right rail. When enabled for a specific type, that action runs without asking.
+The user sees an approval card and can approve or deny. There is one per-user relaxation toggle in the right rail, for file writes. When enabled, file writes run without asking.
 
-Scheduled runs never use relaxed permissions. A scheduled task always asks, even if the user relaxed that action type for interactive use.
+Scheduled runs never use relaxed permissions. A scheduled task always asks, even if the user relaxed file writes for interactive use.
 
 ### Tier 3: Always asks
 
@@ -63,7 +61,7 @@ Classification is computed once, server-side, at action invocation. The tier tra
 
 ## Privacy
 
-- Approval history and the audit log stay on the device
+- Approval history and the audit log are stored in the server's database
 - Every Tier 2 and Tier 3 action appears in the audit feed with its outcome
 - Tier 1 reads of sensitive paths are logged
 
