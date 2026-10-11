@@ -101,9 +101,7 @@ describe('mountFrontend security headers', () => {
     // equality is asserted here instead of shared by import.
     const indexPath = path.resolve(__dirname, '../../../frontend/index.html');
     const html = readFileSync(indexPath, 'utf-8');
-    const match = html.match(
-      /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i,
-    );
+    const match = html.match(/<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i);
     expect(match).not.toBeNull();
     expect(match?.[1]).toBe(APP_SHELL_IMAGE_CSP);
   });

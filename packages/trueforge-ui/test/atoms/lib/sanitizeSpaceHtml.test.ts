@@ -136,9 +136,7 @@ describe('sanitizeSpaceHtml', () => {
   });
 
   it('strips href from <image> inside <svg>', () => {
-    const out = sanitizeSpaceHtml(
-      '<svg><image href="https://evil.example/pic.png" width="10" height="10"/></svg>',
-    );
+    const out = sanitizeSpaceHtml('<svg><image href="https://evil.example/pic.png" width="10" height="10"/></svg>');
     expect(out).not.toContain('evil.example');
     expect(out).not.toContain('href="https://');
   });
@@ -166,9 +164,7 @@ describe('sanitizeSpaceHtml', () => {
   });
 
   it('strips the background attribute from table cells', () => {
-    const out = sanitizeSpaceHtml(
-      '<table><tr><td background="https://evil.example/bg.png">hi</td></tr></table>',
-    );
+    const out = sanitizeSpaceHtml('<table><tr><td background="https://evil.example/bg.png">hi</td></tr></table>');
     expect(out).not.toContain('background=');
     expect(out).not.toContain('evil.example');
     expect(out).toContain('hi');
