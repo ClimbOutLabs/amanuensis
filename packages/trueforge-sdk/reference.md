@@ -4248,7 +4248,7 @@ await client.sessions.revokeImplementationPlanGrant("session_id", "grant_id");
 <dl>
 <dd>
 
-List turns for a session (newest first by default), token-paginated. Only the session creator may list turns.
+List turns for a session, oldest first, token-paginated. Only the session creator may list turns.
 </dd>
 </dl>
 </dd>

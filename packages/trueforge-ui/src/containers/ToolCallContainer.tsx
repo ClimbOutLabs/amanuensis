@@ -94,6 +94,14 @@ function collectAllowOnceIds(messages: readonly ThreadMessage[], into: Map<strin
   }
 }
 
+function ExpiredApprovalNote() {
+  return (
+    <p data-role="approval-expired" className="text-text-secondary px-3 py-2 text-sm">
+      This request expired.
+    </p>
+  );
+}
+
 function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   const isNestedReadonly = useNestedApprovalBridge();
   const respondToNestedApproval = useTrueFoundryRespondToToolApproval();
@@ -263,7 +271,15 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
     if (isRequiresAction) setExpanded(true);
   }
 
-  const showApproval = hasPendingToolApproval(approval);
+  // Only the newest message can still be answered: the server refuses a decision once the chat
+  // has moved past the turn that asked, so an older pending card is shown as expired instead.
+  // Sub-agent messages live inside their parent's message and follow it.
+  const isNestedMessage = useNestedApprovalBridge();
+  const isNewestMessage = useAuiState(s => s.message.isLast);
+  const hasPendingApproval = hasPendingToolApproval(approval);
+  const approvalExpired = hasPendingApproval && !isNestedMessage && !isNewestMessage;
+  const showApproval = hasPendingApproval && !approvalExpired;
+  const expiredNote = approvalExpired ? <ExpiredApprovalNote /> : undefined;
 
   const durationText = elapsedMs === undefined ? undefined : formatDuration(elapsedMs);
   const disposition = parseToolResultDisposition(part.result);
@@ -360,7 +376,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         argsJson={argsJson}
         resultText={resultText}
         resultJson={resultJson}
-        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
         approvalId={showApproval ? approval?.id : undefined}
       />
     );
@@ -389,7 +405,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
           showResponseLine={status !== 'running' && !!resultDisplay.data}
           mcpServerName={mcpServer}
           {...slots}
-          approvalSlot={showApproval ? <ToolApprovalSlot part={part} /> : undefined}
+          approvalSlot={showApproval ? <ToolApprovalSlot part={part} /> : expiredNote}
           approvalId={showApproval ? part.approval?.id : undefined}
         />
       );
@@ -414,7 +430,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
         mcpServerName={mcpServer}
         {...slots}
-        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
         approvalId={showApproval ? approval?.id : undefined}
       />
     );
@@ -438,7 +454,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
       status={status}
       showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
       {...slots}
-      approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+      approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
       approvalId={showApproval ? approval?.id : undefined}
     />
   );

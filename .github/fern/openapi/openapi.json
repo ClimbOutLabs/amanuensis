@@ -17449,7 +17449,7 @@
     },
     "/api/v1/sessions/{session_id}/turns": {
       "get": {
-        "description": "List turns for a session (newest first by default), token-paginated. Only the session creator may list turns.",
+        "description": "List turns for a session, oldest first, token-paginated. Only the session creator may list turns.",
         "parameters": [
           {
             "description": "Session identifier.",

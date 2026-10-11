@@ -25,6 +25,7 @@ import { ForegroundEventSync } from '@/hooks/useForegroundEventSync.js';
 import type { SessionTipInfo } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { publishBlockedSend } from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { ServerProvider } from '@/server/ServerContext.js';
+import { publishStaleApproval } from '@/utils/staleApproval.js';
 
 let hidden = false;
 Object.defineProperty(document, 'hidden', {
@@ -163,6 +164,41 @@ describe('ForegroundEventSync lifecycle journeys', () => {
     expect(request.sessionId).toBe('ses_1');
     expect(request.reason).toMatch(/30 minutes/);
     expect(showSuccess).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('swallows a stale refusal while auto-denying and just reloads', async () => {
+    peekSessionTip.mockResolvedValue(tipWith({ pendingApprovals: [oldApproval(45)] }));
+    dismissPendingApprovals.mockRejectedValue(
+      Object.assign(new Error('Status code: 409'), {
+        statusCode: 409,
+        body: { error: { message: 'stale', type: 'conflict', code: 'stale_approval_continuation' } },
+      }),
+    );
+    renderSync();
+    await backgroundThenForeground(60_000);
+
+    expect(dismissPendingApprovals).toHaveBeenCalledTimes(1);
+    expect(showError).not.toHaveBeenCalled();
+    expect(showSuccess).not.toHaveBeenCalled();
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('still reports other auto-deny failures', async () => {
+    peekSessionTip.mockResolvedValue(tipWith({ pendingApprovals: [oldApproval(45)] }));
+    dismissPendingApprovals.mockRejectedValue(new Error('server unreachable'));
+    renderSync();
+    await backgroundThenForeground(60_000);
+
+    expect(showError).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads the chat when an approval is refused as stale', () => {
+    renderSync();
+    act(() => {
+      publishStaleApproval();
+    });
+
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
