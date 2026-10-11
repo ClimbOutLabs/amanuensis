@@ -905,6 +905,27 @@
   color: var(--aui-color-text-muted, #6b7280);
 }
 
+.maps-card-retry {
+  margin-top: 1rem;
+  padding: 0.5rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--aui-color-surface, #ffffff);
+  background: var(--aui-color-accent, #2563eb);
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.maps-card-retry:hover {
+  filter: brightness(0.92);
+}
+
+.maps-card-retry:focus-visible {
+  outline: 2px solid var(--aui-color-accent, #2563eb);
+  outline-offset: 2px;
+}
+
 /* Phone layout: the map fills the card width with a shorter viewport. */
 @media (max-width: 40rem) {
   .maps-card {

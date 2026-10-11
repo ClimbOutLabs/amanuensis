@@ -608,7 +608,11 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
       return { state: 'unavailable', data: null, blockedMessage: 'No driving route was found between the two places.' };
     }
     if (code === 'rate_limited') {
-      return { state: 'blocked', data: null, blockedMessage: 'The map service rate limit was reached. Try again shortly.' };
+      return {
+        state: 'blocked',
+        data: null,
+        blockedMessage: 'The map service rate limit was reached. Try again in a minute.',
+      };
     }
     return { state: 'blocked', data: null, blockedMessage: 'The map service is unavailable right now.' };
   }

@@ -151,11 +151,14 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
 
   const app = new OpenAPIHono();
 
-  app.get('/tiles/:z/:x/:y.png', async c => {
+  // Note: the route omits the `.png` suffix because Hono does not extract
+  // params correctly from patterns like `:y.png`; the suffix is stripped below.
+  app.get('/tiles/:z/:x/:y', async c => {
     const subject = deps.resolveRequestContext(c).subject;
     const z = Number(c.req.param('z'));
     const x = Number(c.req.param('x'));
-    const y = Number(c.req.param('y'));
+    const yRaw = c.req.param('y');
+    const y = Number(yRaw.endsWith('.png') ? yRaw.slice(0, -'.png'.length) : yRaw);
     if (!validTileCoords(z, x, y)) {
       return c.json({ error: { message: 'Invalid tile coordinates.' } }, 400);
     }
@@ -182,11 +185,15 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
       });
     }
 
-    const upstreamUrl = configuration.MAPS_TILE_URL.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y));
+    const upstreamUrl = configuration.MAPS_TILE_URL.replace('{z}', String(z))
+      .replace('{x}', String(x))
+      .replace('{y}', String(y));
     await acquireSlot();
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => { controller.abort(); }, UPSTREAM_TIMEOUT_MS);
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, UPSTREAM_TIMEOUT_MS);
       let upstream: Response;
       try {
         upstream = await fetch(upstreamUrl, {
@@ -207,7 +214,9 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
         }
         // Same-host redirect: follow once.
         const retryController = new AbortController();
-        const retryTimeout = setTimeout(() => { retryController.abort(); }, UPSTREAM_TIMEOUT_MS);
+        const retryTimeout = setTimeout(() => {
+          retryController.abort();
+        }, UPSTREAM_TIMEOUT_MS);
         try {
           upstream = await fetch(target, {
             signal: retryController.signal,

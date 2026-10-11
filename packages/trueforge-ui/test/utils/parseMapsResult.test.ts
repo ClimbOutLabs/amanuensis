@@ -52,6 +52,7 @@ describe('parseMapsResult', () => {
     const parsed = parseMapsResult(JSON.stringify({ status: 'error', code: 'rate_limited' }), 'render_map');
     expect(parsed.state).toBe('blocked');
     expect(parsed.data).toBeNull();
+    expect(parsed.blockedMessage).toContain('Try again in a minute');
   });
 
   it('maps service_unavailable to blocked', () => {
