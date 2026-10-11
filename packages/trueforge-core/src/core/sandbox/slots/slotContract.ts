@@ -3,6 +3,22 @@ import { z } from 'zod';
 /** Socket file name inside a slot's control directory. */
 export const SLOT_AGENT_SOCKET_NAME = 'agent.sock';
 
+/** The agent build and gVisor release this server was written against; a slot reporting others is refused. */
+export const SLOT_AGENT_VERSION = '0.1.0';
+export const SLOT_RUNSC_VERSION = 'runsc version release-20260928.0';
+export const SLOT_PLATFORM = 'systrap';
+
+/** An attestation older than this (a call can hold the lease for 10 minutes) no longer proves anything. */
+export const SLOT_ATTESTATION_MAX_AGE_MS = 15 * 60_000;
+
+/** Health probes include the agent's first runtime check, which starts a guest. */
+export const SLOT_HEALTH_TIMEOUT_MS = 120_000;
+/** Pause between passes while a slot is running another call. */
+export const SLOT_QUEUE_POLL_MS = 250;
+/** The agent stops the program slightly before the server's own timer so partial output survives. */
+export const SLOT_AGENT_TIMEOUT_MARGIN_MS = 750;
+export const SLOT_MIN_AGENT_TIMEOUT_MS = 1_000;
+
 /**
  * Attestation checks the agent reports. A slot is usable only when every one is present and passing;
  * the agent refuses calls on its own when any fails, and the server refuses the slot independently.

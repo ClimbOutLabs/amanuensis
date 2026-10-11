@@ -1,5 +1,6 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { z } from 'zod';
 import {
   SandboxFileNotFoundError,
   SandboxNotAvailableError,
@@ -7,7 +8,7 @@ import {
 } from '../../../../src/core/sandbox/SandboxErrors';
 import { SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
 import { makeSilentLogger } from '../../harnessMocks';
-import { attestation, errorBody, FakeAgent, type FakeHandler } from './fakeAgent';
+import { attestation, bodyOf, errorBody, FakeAgent, type FakeHandler } from './fakeAgent';
 
 function execResponse(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return { exit_code: 0, output: 'ok\n', terminated_by: 'completed', internal_error: '', duration_ms: 3, ...overrides };
@@ -201,7 +202,36 @@ describe('SlotSandboxProvider', () => {
       remotePath: '.aman/uploads/a.txt',
       content: Buffer.from('x'),
     });
-    expect((started[0]?.requests[0]?.body as { path: string }).path).toBe('/workspace/.aman/uploads/a.txt');
+    expect(bodyOf(started[0]?.requests[0], z.object({ path: z.string() })).path).toBe('/workspace/.aman/uploads/a.txt');
+  });
+
+  test('file transfers wait while a command holds the same chat, then go through', async () => {
+    let calls = 0;
+    const { provider, agents: started } = await providerFor([
+      () => {
+        calls += 1;
+        return calls < 3
+          ? { status: 429, body: errorBody('busy', 'this session is in use by another call') }
+          : { status: 204, body: undefined };
+      },
+    ]);
+    await provider.uploadFile({ sandboxId: `s1-${'f'.repeat(32)}`, remotePath: 'a.txt', content: Buffer.from('x') });
+    expect(started[0]?.requests).toHaveLength(3);
+  });
+
+  test('destroySandbox removes the chat workspace on its slot and reports a refusal', async () => {
+    const { provider, agents: started } = await providerFor([() => ({ status: 204, body: undefined })]);
+    await provider.destroySandbox({ sandboxId: `s1-${'a'.repeat(32)}` });
+    expect(started[0]?.requests[0]?.path).toBe('/v1/destroy_session');
+    expect(bodyOf(started[0]?.requests[0], z.object({ session_id: z.string() })).session_id).toBe('a'.repeat(32));
+
+    const failing = await providerFor([
+      () => ({ status: 500, body: errorBody('internal', 'the session tree could not be removed') }),
+    ]);
+    await expect(failing.provider.destroySandbox({ sandboxId: `s1-${'a'.repeat(32)}` })).rejects.toThrow(
+      'Failed to remove the sandbox workspace',
+    );
+    await expect(provider.destroySandbox({ sandboxId: 'tenant.1' })).rejects.toBeInstanceOf(SandboxNotAvailableError);
   });
 
   test('Code Mode is refused', async () => {

@@ -8,7 +8,7 @@ import type {
 import { CancellationReason, TurnNotFoundError } from '@truefoundry/trueforge-core/agent-session';
 import { NoResponderError, redisRequest, RequestTimeoutError } from '@truefoundry/trueforge-core/request-reply';
 import type { RedisClientType } from 'redis';
-import { cancelSessionTurn } from '../../../src/apis/sessions';
+import { cancelSessionTurn, sandboxIdOfLastTurn } from '../../../src/apis/sessions';
 import configuration from '../../../src/config';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { mintPeeredTurnId } from '../../../src/runtime/peeringIds';
@@ -319,5 +319,50 @@ describe('cancelSessionTurn', () => {
         turnId,
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('sandboxIdOfLastTurn', () => {
+  const withSandbox = (sandboxId: string | undefined): TurnRecord => ({
+    ...turnRecord('t1', 'done'),
+    snapshot: {
+      threads: {},
+      mcp_servers: null,
+      sandbox_info: sandboxId === undefined ? null : { sandbox_id: sandboxId },
+    },
+  });
+
+  it('returns the sandbox of the last turn', async () => {
+    const id = await sandboxIdOfLastTurn({
+      deps: { sessionStore: storeReturning(withSandbox('slots:s1-abc')), logger: silentLogger() },
+      record: { session_id: SESSION_ID, last_turn_id: 't1' },
+    });
+    expect(id).toBe('slots:s1-abc');
+  });
+
+  it('has none for a chat without turns or without a sandbox', async () => {
+    const logger = silentLogger();
+    expect(
+      await sandboxIdOfLastTurn({
+        deps: { sessionStore: storeReturning(undefined), logger },
+        record: { session_id: SESSION_ID, last_turn_id: null },
+      }),
+    ).toBeUndefined();
+    expect(
+      await sandboxIdOfLastTurn({
+        deps: { sessionStore: storeReturning(withSandbox(undefined)), logger },
+        record: { session_id: SESSION_ID, last_turn_id: 't1' },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('never blocks deleting a chat when the lookup fails', async () => {
+    const logger = silentLogger();
+    const id = await sandboxIdOfLastTurn({
+      deps: { sessionStore: { getTurn: () => Promise.reject(new Error('db down')) }, logger },
+      record: { session_id: SESSION_ID, last_turn_id: 't1' },
+    });
+    expect(id).toBeUndefined();
+    expect(logger.warn).toHaveBeenCalled();
   });
 });

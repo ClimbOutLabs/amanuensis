@@ -509,6 +509,8 @@ export interface SandboxProvider {
   downloadFile(params: SandboxDownloadFileParams): Promise<Buffer>;
   /** Uploads a file to the sandbox. */
   uploadFile(params: SandboxUploadFileParams): Promise<void>;
+  /** Removes a sandbox's stored workspace when its chat is deleted. Absent when the provider keeps nothing per chat. */
+  destroySandbox?(params: { sandboxId: string }): Promise<void>;
 
   /**
    * Construct a Code Mode transport for this provider (no connect/listen yet).

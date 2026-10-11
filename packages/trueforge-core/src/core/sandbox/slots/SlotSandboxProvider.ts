@@ -22,22 +22,24 @@ import {
   type VerifiedWorkspaceCommitParams,
   type VerifiedWorkspaceCommitResult,
 } from '../provider/Provider';
-import { SlotClient, type SlotCallError } from './SlotClient';
+import { SlotClient, type SlotCallError, type SlotCallResult } from './SlotClient';
 import { attestationProblem, SLOT_FIX_COMMAND } from './SlotDriver';
 import { GitBridge, type BridgeGuest } from './git/gitBridge';
-import type { SlotExecResponse } from './slotContract';
+import {
+  SLOT_AGENT_TIMEOUT_MARGIN_MS,
+  SLOT_HEALTH_TIMEOUT_MS,
+  SLOT_MIN_AGENT_TIMEOUT_MS,
+  SLOT_QUEUE_POLL_MS,
+  type SlotExecResponse,
+} from './slotContract';
 
 const WORKSPACE_DIR = '/workspace';
 const STATE_DIR = `${WORKSPACE_DIR}/.aman`;
 const SANDBOX_ID_PATTERN = /^s([1-9][0-9]{0,2})-([0-9a-f]{32})$/;
-const QUEUE_POLL_MS = 250;
 /** How long a call waits for its slot when other sessions hold it, beyond the call's own limit. */
 const QUEUE_GRACE_MS = 120_000;
-const AGENT_TIMEOUT_MARGIN_MS = 750;
-const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 600_000;
 const OUTPUT_TAIL_CHARS = 2_000;
-const HEALTH_TIMEOUT_MS = 120_000;
 
 export interface SlotSandboxProviderOptions {
   /** Unix socket path of each slot agent, in slot order. */
@@ -144,7 +146,7 @@ export class SlotSandboxProvider implements SandboxProvider {
     const target = this.resolve(params.sandboxId);
     const timeoutMs = Math.min(
       MAX_TIMEOUT_MS,
-      Math.max(MIN_TIMEOUT_MS, (params.timeoutSeconds ?? this.defaultExecTimeoutSeconds) * 1000),
+      Math.max(SLOT_MIN_AGENT_TIMEOUT_MS, (params.timeoutSeconds ?? this.defaultExecTimeoutSeconds) * 1000),
     );
     const cwd = params.cwd === undefined ? WORKSPACE_DIR : posix.resolve(WORKSPACE_DIR, params.cwd);
     const request = {
@@ -152,7 +154,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       argv: ['bash', '-c', params.command],
       cwd,
       env: params.env ?? {},
-      timeout_ms: Math.max(MIN_TIMEOUT_MS, timeoutMs - AGENT_TIMEOUT_MARGIN_MS),
+      timeout_ms: Math.max(SLOT_MIN_AGENT_TIMEOUT_MS, timeoutMs - SLOT_AGENT_TIMEOUT_MARGIN_MS),
       disk_mb: this.treeDiskMb,
     };
     const deadline = Date.now() + timeoutMs + QUEUE_GRACE_MS;
@@ -166,7 +168,7 @@ export class SlotSandboxProvider implements SandboxProvider {
         throw signalAbortError(params.signal);
       }
       if (result.error.kind === 'agent' && result.error.code === 'busy' && Date.now() < deadline) {
-        await this.sleepMs(QUEUE_POLL_MS);
+        await this.sleepMs(SLOT_QUEUE_POLL_MS);
         continue;
       }
       return { success: false, error: describeAgentError(result.error) };
@@ -184,9 +186,8 @@ export class SlotSandboxProvider implements SandboxProvider {
 
   async downloadFile(params: SandboxDownloadFileParams): Promise<Buffer> {
     const target = this.resolve(params.sandboxId);
-    const result = await target.client.fsRead({
-      sessionId: target.sessionId,
-      path: params.path,
+    const result = await this.whileBusy({
+      call: () => target.client.fsRead({ sessionId: target.sessionId, path: params.path, signal: params.signal }),
       signal: params.signal,
     });
     if (!result.ok) {
@@ -212,11 +213,15 @@ export class SlotSandboxProvider implements SandboxProvider {
 
   async uploadFile(params: SandboxUploadFileParams): Promise<void> {
     const target = this.resolve(params.sandboxId);
-    const result = await target.client.fsWrite({
-      sessionId: target.sessionId,
-      path: posix.resolve(WORKSPACE_DIR, params.remotePath),
-      content: params.content,
-      mode: 0o644,
+    const result = await this.whileBusy({
+      call: () =>
+        target.client.fsWrite({
+          sessionId: target.sessionId,
+          path: posix.resolve(WORKSPACE_DIR, params.remotePath),
+          content: params.content,
+          mode: 0o644,
+          signal: params.signal,
+        }),
       signal: params.signal,
     });
     if (!result.ok) {
@@ -224,6 +229,17 @@ export class SlotSandboxProvider implements SandboxProvider {
         throw signalAbortError(params.signal);
       }
       throw new Error(`Failed to upload file: ${describeAgentError(result.error)}`);
+    }
+  }
+
+  async destroySandbox(params: { sandboxId: string }): Promise<void> {
+    const target = this.resolve(params.sandboxId);
+    const result = await this.whileBusy({
+      call: () => target.client.destroySession({ sessionId: target.sessionId, signal: undefined }),
+      signal: undefined,
+    });
+    if (!result.ok) {
+      throw new Error(`Failed to remove the sandbox workspace: ${describeAgentError(result.error)}`);
     }
   }
 
@@ -320,11 +336,15 @@ export class SlotSandboxProvider implements SandboxProvider {
         }),
       putFile: async input => {
         const target = this.resolve(sandboxId);
-        const written = await target.client.fsWrite({
-          sessionId: target.sessionId,
-          path: input.path,
-          content: input.content,
-          mode: 0o644,
+        const written = await this.whileBusy({
+          call: () =>
+            target.client.fsWrite({
+              sessionId: target.sessionId,
+              path: input.path,
+              content: input.content,
+              mode: 0o644,
+              signal: input.signal,
+            }),
           signal: input.signal,
         });
         if (!written.ok) {
@@ -333,9 +353,8 @@ export class SlotSandboxProvider implements SandboxProvider {
       },
       getFile: async input => {
         const target = this.resolve(sandboxId);
-        const read = await target.client.fsRead({
-          sessionId: target.sessionId,
-          path: input.path,
+        const read = await this.whileBusy({
+          call: () => target.client.fsRead({ sessionId: target.sessionId, path: input.path, signal: input.signal }),
           signal: input.signal,
         });
         if (!read.ok) {
@@ -344,6 +363,22 @@ export class SlotSandboxProvider implements SandboxProvider {
         return Buffer.from(read.value.content_base64, 'base64');
       },
     };
+  }
+
+  /** File transfers and removal wait while a command holds the same chat's workspace or its slot. */
+  private async whileBusy<T>(input: {
+    call: () => Promise<SlotCallResult<T>>;
+    signal: AbortSignal | undefined;
+  }): Promise<SlotCallResult<T>> {
+    const deadline = Date.now() + MAX_TIMEOUT_MS + QUEUE_GRACE_MS;
+    for (;;) {
+      throwIfSignalAborted(input.signal);
+      const result = await input.call();
+      if (result.ok || result.error.kind !== 'agent' || result.error.code !== 'busy' || Date.now() >= deadline) {
+        return result;
+      }
+      await this.sleepMs(SLOT_QUEUE_POLL_MS);
+    }
   }
 
   private resolve(sandboxId: string): { client: SlotClient; sessionId: string } {
@@ -365,7 +400,7 @@ export class SlotSandboxProvider implements SandboxProvider {
     const probes = await Promise.all(
       this.clients.map(async (client, index) => ({
         index,
-        health: await client.health({ signal, timeoutMs: HEALTH_TIMEOUT_MS }),
+        health: await client.health({ signal, timeoutMs: SLOT_HEALTH_TIMEOUT_MS }),
       })),
     );
     const problems: string[] = [];
@@ -375,7 +410,7 @@ export class SlotSandboxProvider implements SandboxProvider {
         problems.push(`slot ${String(index + 1)} is not reachable`);
         continue;
       }
-      const problem = attestationProblem(health.value.attestation);
+      const problem = attestationProblem(health.value.attestation, Date.now());
       if (problem === undefined) {
         usable.push({ index, sessions: health.value.sessions });
       } else {

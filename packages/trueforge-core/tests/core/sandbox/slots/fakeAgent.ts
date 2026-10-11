@@ -2,7 +2,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SLOT_REQUIRED_CHECKS, type SlotAttestation } from '../../../../src/core/sandbox/slots/slotContract';
+import type { z } from 'zod';
+import {
+  SLOT_AGENT_VERSION,
+  SLOT_PLATFORM,
+  SLOT_REQUIRED_CHECKS,
+  SLOT_RUNSC_VERSION,
+  type SlotAttestation,
+} from '../../../../src/core/sandbox/slots/slotContract';
 
 export interface FakeReply {
   status: number;
@@ -13,7 +20,14 @@ export interface FakeReply {
 
 export type FakeHandler = (request: { method: string; path: string; body: unknown }) => FakeReply;
 
-export function attestation(overrides: { failing?: string[]; omitted?: string[] } = {}): SlotAttestation {
+/** Parses a recorded request body with the schema the test expects, instead of asserting its type. */
+export function bodyOf<T>(request: { body: unknown } | undefined, schema: z.ZodType<T>): T {
+  return schema.parse(request?.body);
+}
+
+export function attestation(
+  overrides: { failing?: string[]; omitted?: string[]; checkedAt?: Date; duplicated?: string } = {},
+): SlotAttestation {
   const failing = new Set(overrides.failing ?? []);
   const omitted = new Set(overrides.omitted ?? []);
   const checks = SLOT_REQUIRED_CHECKS.filter(name => !omitted.has(name)).map(name => ({
@@ -21,20 +35,21 @@ export function attestation(overrides: { failing?: string[]; omitted?: string[] 
     ok: !failing.has(name),
     detail: failing.has(name) ? `${name} is wrong` : 'fine',
   }));
+  const duplicated = checks.find(check => check.name === overrides.duplicated);
   return {
     schema: 1,
-    agent_version: 'test',
+    agent_version: SLOT_AGENT_VERSION,
     ok: failing.size === 0 && omitted.size === 0,
-    checked_at: '2026-10-12T00:00:00Z',
-    checks,
+    checked_at: (overrides.checkedAt ?? new Date()).toISOString(),
+    checks: duplicated === undefined ? checks : [...checks, duplicated],
     facts: {
       kernel: 'k',
       arch: 'amd64',
       page_size: 4096,
       cgroup: 'v2',
       apparmor: 'none',
-      runsc_version: 'r',
-      platform: 'systrap',
+      runsc_version: SLOT_RUNSC_VERSION,
+      platform: SLOT_PLATFORM,
     },
   };
 }
@@ -42,10 +57,11 @@ export function attestation(overrides: { failing?: string[]; omitted?: string[] 
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
+    chunks.push(Buffer.from(chunk));
   }
   const text = Buffer.concat(chunks).toString('utf8');
-  return text === '' ? undefined : (JSON.parse(text) as unknown);
+  const parsed: unknown = text === '' ? undefined : JSON.parse(text);
+  return parsed;
 }
 
 /** A slot agent stand-in listening on a Unix socket in a private temp directory. */

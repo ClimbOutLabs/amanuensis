@@ -14,7 +14,15 @@ import {
 import { RunCodeFileNameSchema } from '../driver/RunCodeSchemas';
 import { SlotClient, type SlotCallError } from './SlotClient';
 import {
+  SLOT_AGENT_TIMEOUT_MARGIN_MS,
+  SLOT_AGENT_VERSION,
+  SLOT_ATTESTATION_MAX_AGE_MS,
+  SLOT_HEALTH_TIMEOUT_MS,
+  SLOT_MIN_AGENT_TIMEOUT_MS,
+  SLOT_PLATFORM,
+  SLOT_QUEUE_POLL_MS,
   SLOT_REQUIRED_CHECKS,
+  SLOT_RUNSC_VERSION,
   type SlotAttestation,
   type SlotRunCodeResponse,
   type SlotTerminationName,
@@ -23,22 +31,21 @@ import {
 /** The one repair command shown to users for every slot problem. */
 export const SLOT_FIX_COMMAND = 'aman doctor sandbox --fix';
 
-/** Health probes include the agent's first runtime check, which starts a guest. */
-const HEALTH_TIMEOUT_MS = 120_000;
 /** A slot that refused a connection is not tried again for this long. */
 const DOWN_FOR_MS = 5_000;
-/** Pause between passes while every slot is running another call. */
-const QUEUE_POLL_MS = 250;
 /** Extra wait allowed for a free slot beyond the call's own time limit. */
 const QUEUE_GRACE_MS = 10_000;
-/** The agent stops the program slightly before the server's own timer so partial output survives. */
-const AGENT_TIMEOUT_MARGIN_MS = 750;
-const MIN_AGENT_TIMEOUT_MS = 1_000;
 
 /** Why a slot's attestation does not qualify, or undefined when every required check passes. */
-export function attestationProblem(attestation: SlotAttestation): string | undefined {
-  const byName = new Map(attestation.checks.map(check => [check.name, check]));
+export function attestationProblem(attestation: SlotAttestation, nowMs: number): string | undefined {
   const problems: string[] = [];
+  const byName = new Map<string, SlotAttestation['checks'][number]>();
+  for (const check of attestation.checks) {
+    if (byName.has(check.name)) {
+      problems.push(`${check.name}: reported more than once`);
+    }
+    byName.set(check.name, check);
+  }
   for (const name of SLOT_REQUIRED_CHECKS) {
     const check = byName.get(name);
     if (check === undefined) {
@@ -46,6 +53,19 @@ export function attestationProblem(attestation: SlotAttestation): string | undef
     } else if (!check.ok) {
       problems.push(`${name}: ${check.detail}`);
     }
+  }
+  const checkedAt = Date.parse(attestation.checked_at);
+  if (Number.isNaN(checkedAt) || nowMs - checkedAt > SLOT_ATTESTATION_MAX_AGE_MS || checkedAt - nowMs > 60_000) {
+    problems.push('the attestation is not current');
+  }
+  if (attestation.agent_version !== SLOT_AGENT_VERSION) {
+    problems.push(`agent version ${attestation.agent_version} is not the expected ${SLOT_AGENT_VERSION}`);
+  }
+  if (attestation.facts.runsc_version !== SLOT_RUNSC_VERSION) {
+    problems.push(`gVisor is "${attestation.facts.runsc_version}", expected "${SLOT_RUNSC_VERSION}"`);
+  }
+  if (attestation.facts.platform !== SLOT_PLATFORM) {
+    problems.push(`platform is ${attestation.facts.platform}, expected ${SLOT_PLATFORM}`);
   }
   if (!attestation.ok && problems.length === 0) {
     problems.push('the agent reported a failed attestation');
@@ -171,11 +191,11 @@ export class SlotDriver implements IsolationDriver {
     if (client === undefined) {
       return { index: input.index, state: 'unreachable', detail: 'no such slot' };
     }
-    const result = await client.health({ signal: input.signal, timeoutMs: HEALTH_TIMEOUT_MS });
+    const result = await client.health({ signal: input.signal, timeoutMs: SLOT_HEALTH_TIMEOUT_MS });
     if (!result.ok) {
       return { index: input.index, state: 'unreachable', detail: result.error.message };
     }
-    const problem = attestationProblem(result.value.attestation);
+    const problem = attestationProblem(result.value.attestation, this.now());
     return problem === undefined
       ? { index: input.index, state: 'ok', detail: '' }
       : { index: input.index, state: 'refused', detail: problem };
@@ -188,7 +208,7 @@ export class SlotDriver implements IsolationDriver {
       run_id: params.runId,
       argv: runCodeArgv(params.language),
       files_in: filesIn,
-      timeout_ms: Math.max(MIN_AGENT_TIMEOUT_MS, params.timeoutMs - AGENT_TIMEOUT_MARGIN_MS),
+      timeout_ms: Math.max(SLOT_MIN_AGENT_TIMEOUT_MS, params.timeoutMs - SLOT_AGENT_TIMEOUT_MARGIN_MS),
       disk_mb: params.diskMb,
     };
     const deadline = this.now() + params.timeoutMs + QUEUE_GRACE_MS;
@@ -200,7 +220,7 @@ export class SlotDriver implements IsolationDriver {
         if (this.now() > deadline) {
           return this.failure({ terminatedBy: 'internal', message: 'every sandbox slot stayed busy for too long' });
         }
-        await this.sleepMs(QUEUE_POLL_MS);
+        await this.sleepMs(SLOT_QUEUE_POLL_MS);
         continue;
       }
       const client = this.clients[index];

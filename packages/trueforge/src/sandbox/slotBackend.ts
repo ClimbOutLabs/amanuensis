@@ -1,6 +1,8 @@
 import {
   execFileRunner,
+  extractErrorLogFields,
   GitBridge,
+  rawSandboxId,
   SLOT_AGENT_SOCKET_NAME,
   SlotSandboxProvider,
   type SandboxBuild,
@@ -59,4 +61,13 @@ export async function slotSandboxBuildStatus({ logger }: { logger: Logger }): Pr
   const build = await createSlotSandboxProvider({ logger }).getImageBuildStatus();
   cached = { at: Date.now(), build };
   return build;
+}
+
+/** Removes a deleted chat's workspace from its slot; if that fails the agent's idle sweep removes it later. */
+export async function removeSlotWorkspace({ sandboxId, logger }: { sandboxId: string; logger: Logger }): Promise<void> {
+  try {
+    await createSlotSandboxProvider({ logger }).destroySandbox({ sandboxId: rawSandboxId(sandboxId) });
+  } catch (error) {
+    logger.warn('Could not remove the sandbox workspace of a deleted chat', extractErrorLogFields(error));
+  }
 }

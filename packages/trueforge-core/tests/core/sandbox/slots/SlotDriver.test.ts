@@ -4,9 +4,10 @@ import { join } from 'node:path';
 import type { DriverRunParams } from '../../../../src/core/sandbox/driver/IsolationDriver';
 import { ISOLATION_REFUSED_MARKER, OUTPUT_EXCEEDED_MARKER } from '../../../../src/core/sandbox/driver/IsolationDriver';
 import { runCodeStatusFromReadiness } from '../../../../src/core/sandbox/driver/runCodeStatus';
+import { SlotRunCodeRequestSchema } from '../../../../src/core/sandbox/slots/slotContract';
 import { attestationProblem, SlotDriver } from '../../../../src/core/sandbox/slots/SlotDriver';
 import { makeSilentLogger } from '../../harnessMocks';
-import { attestation, errorBody, FakeAgent, type FakeHandler } from './fakeAgent';
+import { attestation, bodyOf, errorBody, FakeAgent, type FakeHandler } from './fakeAgent';
 
 const RUN_ID = 'c'.repeat(32);
 
@@ -25,20 +26,47 @@ function runResponse(overrides: Record<string, unknown> = {}): Record<string, un
 }
 
 describe('attestationProblem', () => {
+  const now = Date.now();
+
   test('passes when every required check passes', () => {
-    expect(attestationProblem(attestation())).toBeUndefined();
+    expect(attestationProblem(attestation(), now)).toBeUndefined();
   });
 
   test('names a failing check', () => {
-    expect(attestationProblem(attestation({ failing: ['apparmor'] }))).toBe('apparmor: apparmor is wrong');
+    expect(attestationProblem(attestation({ failing: ['apparmor'] }), now)).toBe('apparmor: apparmor is wrong');
   });
 
   test('a required check that is not reported fails closed', () => {
-    expect(attestationProblem(attestation({ omitted: ['seccomp'] }))).toContain('seccomp: not reported');
+    expect(attestationProblem(attestation({ omitted: ['seccomp'] }), now)).toContain('seccomp: not reported');
+  });
+
+  test('a check reported twice fails, so a later passing copy cannot hide a failing one', () => {
+    expect(attestationProblem(attestation({ duplicated: 'network' }), now)).toBe('network: reported more than once');
   });
 
   test('an agent that says not ok with every check passing still fails', () => {
-    expect(attestationProblem({ ...attestation(), ok: false })).toBe('the agent reported a failed attestation');
+    expect(attestationProblem({ ...attestation(), ok: false }, now)).toBe('the agent reported a failed attestation');
+  });
+
+  test('a stale or future attestation is not current', () => {
+    const old = attestation({ checkedAt: new Date(now - 16 * 60_000) });
+    const future = attestation({ checkedAt: new Date(now + 5 * 60_000) });
+    expect(attestationProblem(old, now)).toBe('the attestation is not current');
+    expect(attestationProblem(future, now)).toBe('the attestation is not current');
+    expect(attestationProblem({ ...attestation(), checked_at: 'yesterday' }, now)).toBe(
+      'the attestation is not current',
+    );
+  });
+
+  test('a different agent build, gVisor release or platform is refused', () => {
+    const base = attestation();
+    expect(attestationProblem({ ...base, agent_version: '0.0.1' }, now)).toContain('agent version 0.0.1');
+    expect(
+      attestationProblem({ ...base, facts: { ...base.facts, runsc_version: 'runsc version other' } }, now),
+    ).toContain('gVisor is');
+    expect(attestationProblem({ ...base, facts: { ...base.facts, platform: 'ptrace' } }, now)).toContain(
+      'platform is ptrace',
+    );
   });
 });
 
@@ -154,7 +182,7 @@ describe('SlotDriver', () => {
     expect(await readFile(join(input.egressDir, 'out.txt'), 'utf8')).toBe('E');
     expect(await readFile(join(input.scratchDir, 'tmp.txt'), 'utf8')).toBe('S');
     expect(result.harvestWarnings).toEqual(['agent warning', 'Skipped a result file with an invalid name.']);
-    const sent = started[0]?.requests[0]?.body as { argv: string[]; files_in: { name: string }[]; timeout_ms: number };
+    const sent = bodyOf(started[0]?.requests[0], SlotRunCodeRequestSchema);
     expect(sent.argv).toEqual(['python3', '/ingress/__runcode_main.py']);
     expect(sent.files_in.map(file => file.name).sort()).toEqual(['__runcode_main.py', 'data.csv']);
     expect(sent.timeout_ms).toBe(29_250);
