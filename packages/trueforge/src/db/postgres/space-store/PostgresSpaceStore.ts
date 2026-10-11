@@ -308,9 +308,13 @@ export class PostgresSpaceStore implements ISpaceStore<Transaction<Database>> {
   /**
    * Records the row a write is about to supersede, then prunes snapshots older than the newest
    * `SPACE_REVISION_HISTORY_LIMIT` so one heavily-edited space cannot grow `space_revision`
-   * without bound. Runs inside the caller's write transaction; rolls back with it.
+   * without bound. The write is an upsert: the snapshot must always reflect the superseded row,
+   * so a stale row for the same revision (e.g. left behind by an out-of-band table reset that
+   * bypassed deleteSpace) can never shadow the true content. Runs inside the caller's write
+   * transaction; rolls back with it.
    */
   async #snapshotRevision(trx: Transaction<Database>, row: Selectable<SpaceTable>): Promise<void> {
+    const snapshot_at = now();
     await trx
       .insertInto('space_revision')
       .values({
@@ -323,9 +327,18 @@ export class PostgresSpaceStore implements ISpaceStore<Transaction<Database>> {
         status: row.status,
         body: row.body,
         format: row.format,
-        created_at: now(),
+        created_at: snapshot_at,
       })
-      .onConflict(oc => oc.columns(['tenant_id', 'created_by', 'space_id', 'revision']).doNothing())
+      .onConflict(oc =>
+        oc.columns(['tenant_id', 'created_by', 'space_id', 'revision']).doUpdateSet({
+          name: row.name,
+          purpose: row.purpose,
+          status: row.status,
+          body: row.body,
+          format: row.format,
+          created_at: snapshot_at,
+        }),
+      )
       .execute();
     await trx
       .deleteFrom('space_revision')
