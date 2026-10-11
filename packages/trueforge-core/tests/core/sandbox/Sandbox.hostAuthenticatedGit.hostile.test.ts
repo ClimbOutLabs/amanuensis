@@ -1,5 +1,6 @@
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpsServer } from 'node:https';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,6 +26,7 @@ const TOKEN = ['ghp', 'SyntheticTokenForTestsOnly0123456789'].join('_');
 const GIT = '/usr/bin/git';
 const HAS_TOOLS = ['/usr/bin/git', '/usr/bin/env', '/usr/bin/flock'].every(path => existsSync(path));
 const describeWithTools = HAS_TOOLS ? describe : describe.skip;
+const describeWithOpenssl = HAS_TOOLS && existsSync('/usr/bin/openssl') ? describe : describe.skip;
 
 function initRepo(root: string): string {
   const repo = join(root, 'repo');
@@ -244,5 +246,103 @@ describeWithTools('hostile repository config and PATH never reach the token', ()
       expect(result.isError).toBe(false);
     }
     expect(existsSync(seen) ? readFileSync(seen, 'utf8') : '').toBe('');
+  });
+});
+
+describeWithOpenssl('the hardened git config still completes a verified TLS handshake', () => {
+  test('a CA bundle supplied only through GIT_SSL_CAINFO is honoured and the request reaches the server', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'host-auth-git-tls-'));
+    try {
+      const openssl = (args: string[]): void => {
+        execFileSync('/usr/bin/openssl', args, { cwd: root, stdio: 'ignore' });
+      };
+      openssl([
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-keyout',
+        'ca.key',
+        '-out',
+        'ca.crt',
+        '-subj',
+        '/CN=test-ca',
+        '-days',
+        '2',
+      ]);
+      openssl([
+        'req',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-keyout',
+        'srv.key',
+        '-out',
+        'srv.csr',
+        '-subj',
+        '/CN=127.0.0.1',
+      ]);
+      writeFileSync(join(root, 'ext.cnf'), 'subjectAltName=IP:127.0.0.1\n');
+      openssl([
+        'x509',
+        '-req',
+        '-in',
+        'srv.csr',
+        '-CA',
+        'ca.crt',
+        '-CAkey',
+        'ca.key',
+        '-CAcreateserial',
+        '-out',
+        'srv.crt',
+        '-days',
+        '2',
+        '-extfile',
+        'ext.cnf',
+      ]);
+
+      let requests = 0;
+      const server = createHttpsServer(
+        { key: readFileSync(join(root, 'srv.key')), cert: readFileSync(join(root, 'srv.crt')) },
+        (_request, response) => {
+          requests += 1;
+          response.statusCode = 404;
+          response.end('not found');
+        },
+      );
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        throw new Error('tls server has no port');
+      }
+      try {
+        const plan = planHostAuthenticatedGit({ command: 'git ls-remote https://github.com/o/r' });
+        if (plan === undefined) {
+          throw new Error('expected a plan');
+        }
+        const built = buildHostAuthenticatedGit({ plan, token: TOKEN, workspaceRoot: undefined });
+        const command = built.command.replace(
+          'https://github.com/o/r',
+          `https://127.0.0.1:${String(address.port)}/o/r`,
+        );
+        const output = await execFileAsync('/bin/sh', ['-c', `${command} 2>&1`], {
+          cwd: root,
+          env: { ...built.env, GIT_SSL_CAINFO: join(root, 'ca.crt') },
+          timeout: 20_000,
+        }).then(
+          result => result.stdout,
+          (error: { stdout?: string }) => error.stdout ?? '',
+        );
+        // The empty-CA-config regression (which libcurl cannot satisfy) is pinned by the unit test;
+        // here the CA arrives the way an image would supply it and must survive the env scrub.
+        expect(output).not.toMatch(/SSL|certificate|CAfile/iu);
+        expect(requests).toBeGreaterThan(0);
+      } finally {
+        await new Promise<void>(resolve => server.close(() => resolve()));
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

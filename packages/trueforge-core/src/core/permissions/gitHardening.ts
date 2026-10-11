@@ -21,13 +21,12 @@ const GITHUB_HTTP_SCOPE = 'http.https://github.com/';
  * http.* keys are refused separately; these overrides, including the
  * github.com-scoped ones that beat unscoped keys, are a second layer. http.proxy
  * is deliberately absent: an empty value would drop the proxy some providers
- * need for egress.
+ * need for egress. sslCAInfo and sslCAPath are absent too: an empty value leaves
+ * libcurl with no CA bundle and every TLS handshake fails.
  */
 export function gitNetworkHardeningConfigEntries(): GitConfigEntry[] {
   const httpDefaults: GitConfigEntry[] = [
     ['sslVerify', 'true'],
-    ['sslCAInfo', ''],
-    ['sslCAPath', ''],
     ['extraHeader', ''],
     ['curloptResolve', ''],
     ['followRedirects', 'false'],

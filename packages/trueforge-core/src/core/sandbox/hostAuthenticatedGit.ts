@@ -15,7 +15,10 @@ const TOKEN_ENV_KEY = 'TRUEFORGE_GIT_TOKEN';
 /** Absolute so the env wrapper, like git, is found without any PATH lookup. */
 const ENV_BINARY = '/usr/bin/env';
 
-/** Inherited variables that can redirect, trace or inject code into git; the model cannot set them, the image might. */
+/**
+ * Inherited variables that can redirect, trace or inject code into git; the model cannot set them, the image might.
+ * GIT_SSL_CAINFO and GIT_SSL_CAPATH stay: images may supply their only CA bundle through them.
+ */
 const SCRUBBED_ENV_KEYS: readonly string[] = [
   'GIT_EXEC_PATH',
   'GIT_DIR',
@@ -33,8 +36,6 @@ const SCRUBBED_ENV_KEYS: readonly string[] = [
   'GIT_SSH_COMMAND',
   'GIT_PROXY_COMMAND',
   'GIT_SSL_NO_VERIFY',
-  'GIT_SSL_CAINFO',
-  'GIT_SSL_CAPATH',
   'GIT_SSL_CERT',
   'GIT_SSL_KEY',
   'GIT_CURL_VERBOSE',

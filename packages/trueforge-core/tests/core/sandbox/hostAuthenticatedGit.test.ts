@@ -129,11 +129,19 @@ describe('buildHostAuthenticatedGit', () => {
     for (const scope of ['http.', 'http.https://github.com/.']) {
       expect(pairs.get(`${scope}sslVerify`)).toBe('true');
       expect(pairs.get(`${scope}extraHeader`)).toBe('');
-      expect(pairs.get(`${scope}sslCAInfo`)).toBe('');
-      expect(pairs.get(`${scope}sslCAPath`)).toBe('');
       expect(pairs.get(`${scope}curloptResolve`)).toBe('');
       expect(pairs.get(`${scope}followRedirects`)).toBe('false');
     }
+    // An empty CA path leaves libcurl without a CA bundle, so every TLS handshake would fail.
+    for (const [key, value] of pairs) {
+      if (/\.ssl(CAInfo|CAPath)$/iu.test(key)) {
+        expect(value).not.toBe('');
+      }
+    }
+    expect(pairs.has('http.sslCAInfo')).toBe(false);
+    expect(pairs.has('http.sslCAPath')).toBe(false);
+    expect(built.command).not.toContain("'GIT_SSL_CAINFO'");
+    expect(built.command).not.toContain("'GIT_SSL_CAPATH'");
     expect(pairs.get('fetch.recurseSubmodules')).toBe('false');
     expect(pairs.get('diff.external')).toBe('');
     expect(pairs.get('status.submoduleSummary')).toBe('false');
