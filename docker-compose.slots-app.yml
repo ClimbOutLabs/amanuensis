@@ -1,0 +1,29 @@
+# Joins the app service of an existing Compose deploy to the sandbox slots: add this file with `-f` to the
+# deploy's command. The slots themselves are started by `pnpm sandbox:slots` (docker-compose.slots.yml);
+# this file only mounts their control volumes, read-only, and switches the app to the slot backend. The
+# app service must be named `server`. No Docker socket is mounted.
+services:
+  server:
+    environment:
+      SANDBOX_BACKEND: slots
+      SANDBOX_SLOTS: '4'
+      SANDBOX_SLOTS_DIR: /run/aman-slots
+    volumes:
+      - slot_ctl_1:/run/aman-slots/1:ro
+      - slot_ctl_2:/run/aman-slots/2:ro
+      - slot_ctl_3:/run/aman-slots/3:ro
+      - slot_ctl_4:/run/aman-slots/4:ro
+
+volumes:
+  slot_ctl_1:
+    name: aman_slot_ctl_1
+    external: true
+  slot_ctl_2:
+    name: aman_slot_ctl_2
+    external: true
+  slot_ctl_3:
+    name: aman_slot_ctl_3
+    external: true
+  slot_ctl_4:
+    name: aman_slot_ctl_4
+    external: true
