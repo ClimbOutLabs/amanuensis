@@ -228,4 +228,41 @@ describe('sanitizeSpaceHtml numeric cell classification', () => {
     const out = sanitizeSpaceHtml('<table><tr><td>(123.45)</td></tr></table>');
     expect(out).toContain('<td class="num">(123.45)</td>');
   });
+
+  it('strips a remote src from <video>', () => {
+    const out = sanitizeSpaceHtml('<video src="https://evil.example/v.mp4" controls></video>');
+    expect(out).not.toContain('evil.example');
+    expect(out).not.toContain('src=');
+    expect(out).toContain('<video');
+  });
+
+  it('keeps a <video> with a data: URI src', () => {
+    const out = sanitizeSpaceHtml('<video src="data:video/mp4;base64,AAAA" controls></video>');
+    expect(out).toContain('data:video/mp4;base64,AAAA');
+  });
+
+  it('strips a remote src from <audio>', () => {
+    const out = sanitizeSpaceHtml('<audio src="https://evil.example/a.mp3" controls></audio>');
+    expect(out).not.toContain('evil.example');
+    expect(out).not.toContain('src=');
+    expect(out).toContain('<audio');
+  });
+
+  it('strips a remote src from <source>', () => {
+    const out = sanitizeSpaceHtml('<video><source src="https://evil.example/v.mp4" type="video/mp4"></video>');
+    expect(out).not.toContain('evil.example');
+    expect(out).not.toContain('src=');
+  });
+
+  it('strips a remote href from <svg><use>', () => {
+    const out = sanitizeSpaceHtml('<svg><use href="https://evil.example/icons.svg#icon"></use></svg>');
+    expect(out).not.toContain('evil.example');
+    expect(out).not.toContain('href=');
+    expect(out).toContain('<use');
+  });
+
+  it('strips a remote xlink:href from <svg><use>', () => {
+    const out = sanitizeSpaceHtml('<svg><use xlink:href="https://evil.example/icons.svg#icon"></use></svg>');
+    expect(out).not.toContain('evil.example');
+  });
 });

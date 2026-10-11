@@ -85,7 +85,7 @@ describe('mountFrontend', () => {
 });
 
 describe('mountFrontend security headers', () => {
-  it('sends an img-src-only CSP and no-referrer on the app shell', async () => {
+  it('sends an image-and-media-only CSP and no-referrer on the app shell', async () => {
     const app = appWithFrontend(buildDir());
 
     for (const shellPath of ['/', '/index.html', '/sessions/abc123']) {

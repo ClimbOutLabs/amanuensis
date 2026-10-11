@@ -2,8 +2,9 @@
  * Allow-list sanitiser for an html-format space body before it is handed to the sandboxed iframe
  * in `SpacesView`. The model authors the page; nothing here trusts it. Strips everything capable
  * of executing script or reaching off-page. No off-page fetch is left standing on purpose:
- * only a `data:` URI survives on `<img src>`; anything else drops the image entirely
- * rather than leaving a broken reference to strip later.
+ * only a `data:` URI survives on `<img src>` and on media `src`/`href` attributes
+ * (`<video>`, `<audio>`, `<source>`, `<svg><use>`); anything else drops the attribute
+ * entirely rather than leaving a broken reference to strip later.
  *
  * Everything else that could reach off-page is removed:
  *   - `<script>`, `<link>`, `<iframe>`, `<object>`, `<embed>`, `<meta>`, `<base>`.
@@ -135,6 +136,26 @@ function sanitiseElement(element: Element): void {
     element.removeAttribute('href');
     const href = element.getAttribute('xlink:href');
     if (href !== null) {
+      element.removeAttribute('xlink:href');
+    }
+  }
+
+  // <video> and <audio> src can trigger an off-page fetch for media.
+  if (tag === 'video' || tag === 'audio') {
+    const src = element.getAttribute('src');
+    if (src !== null && !isAllowedImageSrc(src)) {
+      element.removeAttribute('src');
+    }
+  }
+
+  // <use href> inside <svg> can reference a remote document.
+  if (tag === 'use') {
+    const href = element.getAttribute('href');
+    if (href !== null && !isAllowedImageSrc(href)) {
+      element.removeAttribute('href');
+    }
+    const xlinkHref = element.getAttribute('xlink:href');
+    if (xlinkHref !== null && !isAllowedImageSrc(xlinkHref)) {
       element.removeAttribute('xlink:href');
     }
   }
