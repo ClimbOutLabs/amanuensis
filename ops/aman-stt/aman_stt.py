@@ -22,6 +22,7 @@ import hashlib
 import io
 import logging
 import os
+import shutil
 import time
 import wave
 from collections.abc import Callable
@@ -80,6 +81,11 @@ class PinnedModel:
 # Every model the sidecar may load, pinned in one place. The primary and
 # the fallback go through the same verify-before-load path; a size with no
 # entry here is refused rather than downloaded unpinned.
+#
+# The loader (faster-whisper) also reads `preprocessor_config.json` when it
+# exists in the model directory. The pinned revisions below do not ship that
+# file, so its presence in a snapshot is treated as a verification failure
+# (fail closed): see LOADER_READ_FILES and verify_model_files.
 PINNED_MODELS: dict[str, PinnedModel] = {
     "small": PinnedModel(
         repo="Systran/faster-whisper-small",
@@ -108,6 +114,22 @@ PINNED_MODELS: dict[str, PinnedModel] = {
 Downloader = Callable[[PinnedModel, str], str]
 
 
+# Files the faster-whisper loader may read from the model directory.
+# `preprocessor_config.json` is optional for the loader (it is only read when
+# present), but the pinned revisions do not ship it. If it appears in a
+# snapshot, that is unexpected and the snapshot is refused: the loader would
+# trust it, so an unpinned copy must never load.
+LOADER_READ_FILES: frozenset[str] = frozenset(
+    {
+        "config.json",
+        "model.bin",
+        "tokenizer.json",
+        "vocabulary.txt",
+        "preprocessor_config.json",
+    }
+)
+
+
 def _sha256_file(path: str) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -120,8 +142,10 @@ def verify_model_files(snapshot_dir: str, expected_files: dict[str, str]) -> Non
     """Check every pinned file exists and matches its SHA-256.
 
     Raises ModelVerificationError on the first missing or mismatched file.
-    Extra files in the directory are ignored: the pinned commit hash already
-    fixes the full file set, so only the files the loader needs are checked.
+    Extra files in the directory are ignored, except for files the loader
+    may read (LOADER_READ_FILES): an unpinned loader-read file (for example
+    a `preprocessor_config.json` the pinned revision does not ship) is
+    refused, because the loader would trust it.
     """
     for name, expected in expected_files.items():
         path = os.path.join(snapshot_dir, name)
@@ -132,6 +156,15 @@ def verify_model_files(snapshot_dir: str, expected_files: dict[str, str]) -> Non
             raise ModelVerificationError(
                 f"SHA-256 mismatch for {name}: expected {expected[:16]}..., "
                 f"got {actual[:16]}..."
+            )
+    try:
+        present = set(os.listdir(snapshot_dir))
+    except OSError as exc:
+        raise ModelVerificationError(f"cannot list snapshot directory: {exc}") from exc
+    for name in sorted(present & LOADER_READ_FILES):
+        if name not in expected_files:
+            raise ModelVerificationError(
+                f"unpinned loader-read file present in snapshot: {name}; refusing"
             )
 
 
@@ -176,6 +209,10 @@ def ensure_verified_model_dir(
     pinned revision and verifies every file hash before returning. Raises
     ModelVerificationError when the size is not pinned, the revision does
     not match, or any file is missing or tampered. Never downloads unpinned.
+
+    A warm cache with a missing file (for example an interrupted first
+    download) is removed and downloaded again, once. A hash mismatch is
+    always a hard refusal and is never retried.
     """
     pinned = PINNED_MODELS.get(model_size)
     if pinned is None:
@@ -183,16 +220,29 @@ def ensure_verified_model_dir(
             f"model size {model_size!r} has no pinned revision; refusing "
             f"unpinned download (pinned sizes: {sorted(PINNED_MODELS)})"
         )
+    resolve = downloader or _default_downloader
     snapshot_dir = _offline_snapshot_dir(pinned, cache_dir)
+    downloaded = False
     if snapshot_dir is None:
-        snapshot_dir = (downloader or _default_downloader)(pinned, cache_dir)
-    revision_dir = os.path.basename(os.path.normpath(snapshot_dir))
-    if revision_dir != pinned.revision:
-        raise ModelVerificationError(
-            f"revision mismatch for {pinned.repo}: downloader returned "
-            f"{revision_dir!r}, pinned revision is {pinned.revision!r}"
+        snapshot_dir = resolve(pinned, cache_dir)
+        downloaded = True
+    _check_revision_dir(snapshot_dir, pinned)
+    try:
+        verify_model_files(snapshot_dir, pinned.files)
+    except ModelVerificationError as exc:
+        if downloaded or "pinned file missing from snapshot" not in str(exc):
+            raise
+        # Partial snapshot from an interrupted download: drop it and fetch
+        # the pinned revision again, exactly once.
+        LOGGER.warning(
+            "Partial snapshot for %s (%s); removing and re-downloading once",
+            pinned.repo,
+            exc,
         )
-    verify_model_files(snapshot_dir, pinned.files)
+        shutil.rmtree(snapshot_dir, ignore_errors=True)
+        snapshot_dir = resolve(pinned, cache_dir)
+        _check_revision_dir(snapshot_dir, pinned)
+        verify_model_files(snapshot_dir, pinned.files)
     LOGGER.info(
         "model verified: %s@%s (%d files)",
         pinned.repo,
@@ -200,6 +250,16 @@ def ensure_verified_model_dir(
         len(pinned.files),
     )
     return snapshot_dir
+
+
+def _check_revision_dir(snapshot_dir: str, pinned: PinnedModel) -> None:
+    """Raise unless the snapshot directory is for the pinned revision."""
+    revision_dir = os.path.basename(os.path.normpath(snapshot_dir))
+    if revision_dir != pinned.revision:
+        raise ModelVerificationError(
+            f"revision mismatch for {pinned.repo}: downloader returned "
+            f"{revision_dir!r}, pinned revision is {pinned.revision!r}"
+        )
 
 
 def _default_cache_dir() -> str:
@@ -213,15 +273,22 @@ def _load_first_verified(
     cache_dir: str,
     downloader: Downloader | None,
     model_factory: Callable[[str], object],
-) -> tuple[object, str]:
-    """Load the first size whose pinned files verify; raise if none do."""
+) -> tuple[object, str, str | None]:
+    """Load the first size whose pinned files verify; raise if none do.
+
+    Returns (model, size, primary_error): primary_error is the failure
+    reason for sizes[0] when it failed but a later size loaded, else None.
+    Callers surface it so a fallback load does not hide the primary's
+    verification failure.
+    """
     failures: list[str] = []
     for size in sizes:
         try:
             snapshot_dir = ensure_verified_model_dir(
                 model_size=size, cache_dir=cache_dir, downloader=downloader
             )
-            return model_factory(snapshot_dir), size
+            primary_error = failures[0] if failures else None
+            return model_factory(snapshot_dir), size, primary_error
         except Exception as exc:
             failures.append(f"{size}: {exc}")
             LOGGER.warning("Model load failed for %r: %s", size, exc)
@@ -232,6 +299,9 @@ def _load_first_verified(
 
 class Transcriber(Protocol):
     model_label: str
+    # Verification failure of the primary model when a fallback loaded
+    # instead; surfaced on /healthz so the primary failure is not hidden.
+    primary_error: str | None
 
     def warmup(self) -> None:
         """Run one inference pass so the first real request is fast."""
@@ -262,7 +332,7 @@ class FasterWhisperTranscriber:
                 cpu_threads=settings.cpu_threads,
             )
 
-        self._model, self._size = _load_first_verified(
+        self._model, self._size, self.primary_error = _load_first_verified(
             (settings.model_size, settings.fallback_model_size),
             cache_dir,
             downloader,
@@ -340,6 +410,9 @@ def create_app(
             transcriber = factory(settings)
             await asyncio.to_thread(transcriber.warmup)
             state.transcriber = transcriber
+            # A fallback load still reports the primary's verification
+            # failure; the primary problem must not be hidden.
+            state.model_error = transcriber.primary_error
             LOGGER.info("Model warm: %s", transcriber.model_label)
         except Exception as exc:
             state.model_error = f"{type(exc).__name__}: {exc}"

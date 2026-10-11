@@ -73,6 +73,9 @@ newer model revision:
    `tokenizer.json`, `vocabulary.txt`) at that revision and compute each
    file's SHA-256, for example:
    `python -c "import hashlib; print(hashlib.sha256(open('model.bin','rb').read()).hexdigest())"`.
+   The loader (faster-whisper) also reads `preprocessor_config.json` when
+   present; the pinned revisions do not ship it, and any snapshot
+   containing an unpinned copy is refused (fail closed).
 3. Update the `repo`, `revision`, and `files` entries in `PINNED_MODELS`.
    Keep both the primary and the fallback entries current; never leave a
    size pointing at a stale revision.

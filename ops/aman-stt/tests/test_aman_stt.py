@@ -56,6 +56,7 @@ class FakeTranscriber:
     """A Transcriber that returns canned output; never touches a real model."""
 
     model_label = "whisper-small-int8"
+    primary_error: str | None = None
     instances: list["FakeTranscriber"] = []
 
     def __init__(self, settings: Settings) -> None:
@@ -363,7 +364,7 @@ class PinnedModelTest(unittest.TestCase):
                 loaded.append(snapshot_dir)
                 return object()
 
-            model, size = _load_first_verified(
+            model, size, primary_error = _load_first_verified(
                 ("t", "f"), self.cache_dir, no_network, fake_factory
             )
             self.assertEqual(size, "f")
@@ -376,6 +377,149 @@ class PinnedModelTest(unittest.TestCase):
 
         with self.assertRaises(ModelVerificationError):
             _load_first_verified(("t",), self.cache_dir, dl, lambda d: object())
+
+    def test_missing_file_retries_download_once(self):
+        # Warm cache with a missing file (interrupted download): the
+        # snapshot is removed and downloaded again, exactly once.
+        short = {k: v for k, v in self.FAKE_FILES.items() if k != "tokenizer.json"}
+        self._write_snapshot(self.pinned.repo, self.pinned.revision, short)
+        calls = []
+
+        def dl(pinned, cache_dir):
+            calls.append((pinned.repo, pinned.revision))
+            return self._write_snapshot(pinned.repo, pinned.revision, self.FAKE_FILES)
+
+        snapshot = self._ensure(downloader=dl)
+        self.assertTrue(os.path.isdir(snapshot))
+        self.assertEqual(len(calls), 1)
+        # All files are present after the retry.
+        for name in self.FAKE_FILES:
+            self.assertTrue(os.path.isfile(os.path.join(snapshot, name)))
+
+    def test_missing_file_after_download_is_hard_failure(self):
+        # If the download itself leaves a file missing, there is no second retry.
+        short = {k: v for k, v in self.FAKE_FILES.items() if k != "tokenizer.json"}
+        calls = []
+
+        def dl(pinned, cache_dir):
+            calls.append((pinned.repo, pinned.revision))
+            return self._write_snapshot(pinned.repo, pinned.revision, short)
+
+        with self.assertRaisesRegex(ModelVerificationError, "missing"):
+            self._ensure(downloader=dl)
+        self.assertEqual(len(calls), 1)
+
+    def test_unpinned_preprocessor_config_is_refused(self):
+        # faster-whisper reads preprocessor_config.json when present; the
+        # pinned revisions do not ship it, so its presence is refused.
+        extra = dict(self.FAKE_FILES)
+        extra["preprocessor_config.json"] = b'{"fake": true}'
+
+        def dl(pinned, cache_dir):
+            return self._write_snapshot(pinned.repo, pinned.revision, extra)
+
+        with self.assertRaisesRegex(ModelVerificationError, "unpinned loader-read file"):
+            self._ensure(downloader=dl)
+
+    def test_primary_error_returned_when_fallback_loads(self):
+        primary = self._fake_pinned(repo="FakeOrg/fake-primary")
+        fallback = self._fake_pinned(repo="FakeOrg/fake-fallback")
+        with mock.patch.dict(aman_stt.PINNED_MODELS, {"t": primary, "f": fallback}):
+            tampered = dict(self.FAKE_FILES)
+            tampered["model.bin"] = b"tampered!"
+            self._write_snapshot(primary.repo, primary.revision, tampered)
+            self._write_snapshot(fallback.repo, fallback.revision, self.FAKE_FILES)
+
+            def no_network(pinned, cache_dir):
+                raise AssertionError("network must not be touched")
+
+            loaded = []
+
+            def fake_factory(snapshot_dir):
+                loaded.append(snapshot_dir)
+                return object()
+
+            _model, size, primary_error = _load_first_verified(
+                ("t", "f"), self.cache_dir, no_network, fake_factory
+            )
+            self.assertEqual(size, "f")
+            self.assertIsNotNone(primary_error)
+            self.assertIn("t", primary_error)
+            self.assertIn("mismatch", primary_error)
+
+
+class PinnedModelsShapeTest(unittest.TestCase):
+    """The real PINNED_MODELS table has the shape the loader requires."""
+
+    REQUIRED_FILES = frozenset(
+        {"config.json", "model.bin", "tokenizer.json", "vocabulary.txt"}
+    )
+
+    def test_revisions_are_40_hex(self):
+        import re
+
+        for size, pinned in aman_stt.PINNED_MODELS.items():
+            self.assertRegex(
+                pinned.revision,
+                r"^[0-9a-f]{40}$",
+                f"revision for {size!r} must be a 40-char hex commit hash",
+            )
+
+    def test_hashes_are_64_hex(self):
+        import re
+
+        for size, pinned in aman_stt.PINNED_MODELS.items():
+            for name, digest in pinned.files.items():
+                self.assertRegex(
+                    digest,
+                    r"^[0-9a-f]{64}$",
+                    f"hash for {size!r}/{name} must be a 64-char hex SHA-256",
+                )
+
+    def test_full_required_file_set(self):
+        for size, pinned in aman_stt.PINNED_MODELS.items():
+            self.assertEqual(
+                set(pinned.files),
+                self.REQUIRED_FILES,
+                f"pinned files for {size!r} must be exactly the loader-required set",
+            )
+
+    def test_loader_read_files_covered(self):
+        # Every file the loader may read is either pinned or fail-closed.
+        for size, pinned in aman_stt.PINNED_MODELS.items():
+            for name in aman_stt.LOADER_READ_FILES:
+                if name not in pinned.files:
+                    # Unpinned loader-read files must be refused when present;
+                    # verify_model_files enforces this.
+                    self.assertIn(name, {"preprocessor_config.json"})
+
+
+class HealthzPrimaryErrorTest(unittest.TestCase):
+    """A fallback load still reports the primary's verification error."""
+
+    def test_healthz_reports_primary_error_when_fallback_loads(self):
+        class PrimaryFailsFallbackLoads:
+            model_label = "whisper-base-int8"
+            primary_error = "small: SHA-256 mismatch for model.bin"
+
+            def __init__(self, settings):
+                pass
+
+            def warmup(self):
+                pass
+
+            def transcribe(self, audio, language):
+                return "x", "en"
+
+        settings = Settings()
+        FakeTranscriber.instances.clear()
+        app = create_app(settings=settings, transcriber_factory=PrimaryFailsFallbackLoads)
+        with TestClient(app) as client:
+            response = client.get("/healthz")
+        body = response.json()
+        self.assertTrue(body["model_loaded"])
+        self.assertIsNotNone(body["model_error"])
+        self.assertIn("small", body["model_error"])
 
 
 if __name__ == "__main__":
