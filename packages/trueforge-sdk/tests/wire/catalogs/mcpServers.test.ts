@@ -5,64 +5,54 @@ import { TrueForge } from "../../../src/Client";
 import { mockServerPool } from "../../mock-server/MockServerPool";
 
 describe("McpServersClient", () => {
+    
     test("list (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {
-            data: [
-                {
-                    auth: { type: "dcr" },
-                    description: "description",
-                    logo: "logo",
-                    name: "name",
-                    type: "remote",
-                    url: "url",
-                },
-            ],
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : [ { "auth" : { "type" : "dcr" } , "description" : "description" , "logo" : "logo" , "name" : "name" , "type" : "remote" , "url" : "url" } ] };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/catalogs/mcp-servers")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/catalogs/mcp-servers").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.catalogs.mcpServers.list();
-        expect(response).toEqual({
-            data: [
-                {
-                    auth: {
-                        type: "dcr",
-                    },
-                    description: "description",
-                    logo: "logo",
-                    name: "name",
-                    type: "remote",
-                    url: "url",
-                },
-            ],
-        });
+        
+                        
+                                const response = await client.catalogs.mcpServers.list();
+                                expect(response).toEqual({
+    data: [{
+            auth: {
+                type: "dcr"
+            },
+            description: "description",
+            logo: "logo",
+            name: "name",
+            type: "remote",
+            url: "url"
+        }]
+});
+                              
+                    
     });
-
+          
     test("list (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/catalogs/mcp-servers")
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/catalogs/mcp-servers").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.catalogs.mcpServers.list();
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.catalogs.mcpServers.list()
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
+          
 });

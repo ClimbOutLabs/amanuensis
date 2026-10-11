@@ -2,7 +2,7 @@
 
 /** Present when the host changed the result text before the model saw it. */
 export const ToolOutputTransform = {
-    Truncated: "truncated",
-    Replaced: "replaced",
-} as const;
-export type ToolOutputTransform = (typeof ToolOutputTransform)[keyof typeof ToolOutputTransform];
+        Truncated: "truncated",
+        Replaced: "replaced"
+    } as const;
+export type ToolOutputTransform = typeof ToolOutputTransform[keyof typeof ToolOutputTransform];

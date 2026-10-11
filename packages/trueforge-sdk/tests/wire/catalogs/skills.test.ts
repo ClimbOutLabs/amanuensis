@@ -5,64 +5,53 @@ import { TrueForge } from "../../../src/Client";
 import { mockServerPool } from "../../mock-server/MockServerPool";
 
 describe("SkillsClient", () => {
+    
     test("list (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {
-            data: [
-                {
-                    description: "description",
-                    name: "name",
-                    path: "path",
-                    ref: "ref",
-                    requires: ["requires"],
-                    type: "git",
-                    url: "url",
-                },
-            ],
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : [ { "description" : "description" , "name" : "name" , "path" : "path" , "ref" : "ref" , "requires" : [ "requires" ] , "type" : "git" , "url" : "url" } ] };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/catalogs/skills")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/catalogs/skills").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.catalogs.skills.list();
-        expect(response).toEqual({
-            data: [
-                {
-                    description: "description",
-                    name: "name",
-                    path: "path",
-                    ref: "ref",
-                    requires: ["requires"],
-                    type: "git",
-                    url: "url",
-                },
-            ],
-        });
+        
+                        
+                                const response = await client.catalogs.skills.list();
+                                expect(response).toEqual({
+    data: [{
+            description: "description",
+            name: "name",
+            path: "path",
+            ref: "ref",
+            requires: ["requires"],
+            type: "git",
+            url: "url"
+        }]
+});
+                              
+                    
     });
-
+          
     test("list (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/catalogs/skills")
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/catalogs/skills").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.catalogs.skills.list();
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.catalogs.skills.list()
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
+          
 });

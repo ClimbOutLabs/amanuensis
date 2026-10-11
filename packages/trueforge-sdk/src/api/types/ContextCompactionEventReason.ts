@@ -2,11 +2,10 @@
 
 /** Rejection reason when outcome is skipped_invalid. missing_block: no complete <summary> block. missing_section: a required section is absent. duplicate_section: a section appears more than once. self_referential: the goal/user_goal describes the summarization request instead of the user objective. over_length: summary exceeds bounded length. */
 export const ContextCompactionEventReason = {
-    MissingBlock: "missing_block",
-    MissingSection: "missing_section",
-    DuplicateSection: "duplicate_section",
-    SelfReferential: "self_referential",
-    OverLength: "over_length",
-} as const;
-export type ContextCompactionEventReason =
-    (typeof ContextCompactionEventReason)[keyof typeof ContextCompactionEventReason];
+        MissingBlock: "missing_block",
+        MissingSection: "missing_section",
+        DuplicateSection: "duplicate_section",
+        SelfReferential: "self_referential",
+        OverLength: "over_length"
+    } as const;
+export type ContextCompactionEventReason = typeof ContextCompactionEventReason[keyof typeof ContextCompactionEventReason];
