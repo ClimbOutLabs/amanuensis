@@ -264,18 +264,24 @@ describe('chat whose first turn kept historic required actions', () => {
     );
     const result = await extensions.dismissPendingApprovals({ sessionId: 'ses_1', reason: 'x' });
     assert.deepEqual(result, { dismissed: 1, alreadyResolved: false });
-    const [, request] = sessions.createTurnStream.mock.calls[0] as [string, { previousTurnId: string }];
-    assert.equal(request.previousTurnId, 'trn_3');
+    const request: unknown = sessions.createTurnStream.mock.calls[0]?.[1];
+    assert.ok(typeof request === 'object' && request !== null);
+    assert.equal(Reflect.get(request, 'previousTurnId'), 'trn_3');
   });
 });
 
 describe('getLastTurnInputTokens', () => {
   it('reads the newest turn metrics', async () => {
-    const metrics = { totalInputTokens: 4321 };
     const newest = doneTurn({
       id: 'trn_2',
-      state: { status: 'done', completedAt: '2026-09-25T00:00:01.000Z', output: null, requiredActions: [], metrics },
-    } as Partial<TrueForgeApi.Turn>);
+      state: {
+        status: 'done',
+        completedAt: '2026-09-25T00:00:01.000Z',
+        output: null,
+        requiredActions: [],
+        metrics: { totalInputTokens: 4321 },
+      },
+    });
     const { extensions } = createFakeClient(fakeTurns([doneTurn({ id: 'trn_1' }), newest]));
     assert.equal(await extensions.getLastTurnInputTokens({ sessionId: 'ses_1' }), 4321);
   });

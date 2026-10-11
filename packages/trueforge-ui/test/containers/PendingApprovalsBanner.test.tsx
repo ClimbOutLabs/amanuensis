@@ -11,7 +11,9 @@ vi.mock('@assistant-ui/react', async importOriginal => {
   };
 });
 
-const { threadMessages } = vi.hoisted(() => ({ threadMessages: { current: [] as unknown[] } }));
+const { threadMessages } = vi.hoisted((): { threadMessages: { current: unknown[] } } => ({
+  threadMessages: { current: [] },
+}));
 const reload = vi.fn();
 let pendingApprovals: Array<{ approvalId: string }> = [];
 vi.mock('@truefoundry/assistant-ui-runtime', () => ({

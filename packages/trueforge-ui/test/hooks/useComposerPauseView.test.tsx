@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const useAuiState = vi.hoisted(() => vi.fn());
 const useToolResponses = vi.hoisted(() => vi.fn());
 const useApprovals = vi.hoisted(() => vi.fn());
-const newestMessage = vi.hoisted(() => ({ current: undefined as unknown }));
+const newestMessage = vi.hoisted((): { current: unknown } => ({ current: undefined }));
 
 vi.mock('@assistant-ui/react', () => ({
   useAuiState,

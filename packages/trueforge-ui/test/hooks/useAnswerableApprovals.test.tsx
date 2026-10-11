@@ -2,10 +2,12 @@
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-const { thread, runtimePending } = vi.hoisted(() => ({
-  thread: { messages: [] as unknown[] },
-  runtimePending: { current: [] as Array<{ approvalId: string }> },
-}));
+const { thread, runtimePending } = vi.hoisted(
+  (): { thread: { messages: unknown[] }; runtimePending: { current: Array<{ approvalId: string }> } } => ({
+    thread: { messages: [] },
+    runtimePending: { current: [] },
+  }),
+);
 
 vi.mock('@assistant-ui/react', async importOriginal => {
   const actual = await importOriginal<typeof import('@assistant-ui/react')>();
