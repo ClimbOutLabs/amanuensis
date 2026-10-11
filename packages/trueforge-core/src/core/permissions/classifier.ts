@@ -1099,7 +1099,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     card: {
       plain_what: extraction.connector_what ?? `Run \`${action.tool_name}\`, which the classifier does not recognize.`,
       plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'Unrecognized actions are treated as potentially irreversible.',
+      cannot_be_undone:
+        extraction.connector_what === null
+          ? 'Unrecognized actions are treated as potentially irreversible.'
+          : 'Once data leaves this machine it cannot be taken back.',
       why_asked_again: null,
       destination: fields.destination,
       recipient: fields.recipient,

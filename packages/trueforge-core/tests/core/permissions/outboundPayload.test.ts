@@ -97,6 +97,7 @@ describe('connector card: web search', () => {
     expect(decision.reason).toBe('connector_outbound');
     expect(card.plain_what).toBe('Search the web with `web_search` on exa.');
     expect(card.plain_what).not.toContain('does not recognize');
+    expect(card.cannot_be_undone).toBe('Once data leaves this machine it cannot be taken back.');
     expect(card.destination_host).toBe('mcp.exa.ai');
     expect(card.outbound_text).toBe('query: best pizza near me');
   });
