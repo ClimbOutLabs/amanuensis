@@ -324,7 +324,7 @@ describe('cancelSessionTurn', () => {
 
 describe('sandboxIdOfLastTurn', () => {
   const withSandbox = (sandboxId: string | undefined): TurnRecord => ({
-    ...turnRecord('t1', 'done'),
+    ...turnRecord('t1', { status: 'running' }),
     snapshot: {
       threads: {},
       mcp_servers: null,
