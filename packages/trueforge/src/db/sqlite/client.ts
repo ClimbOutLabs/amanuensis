@@ -13,6 +13,8 @@ import {
   type QueryCompiler,
   type TransactionSettings,
 } from 'kysely';
+import { chmodSync, existsSync, lstatSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 import type { Database as Schema } from './types';
 
@@ -162,13 +164,55 @@ function shouldParseJsonResultColumn(_value: string, jsonPath: string): boolean 
 }
 
 export function createSqliteDb(filename: string): Kysely<Schema> {
+  const isMemoryDb = filename === ':memory:';
+  const isNewFile = !isMemoryDb && !existsSync(filename);
+  if (!isMemoryDb) {
+    mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
+    tightenSqlitePermissions(filename);
+  }
   const database = new Database(filename);
+  if (isNewFile) {
+    chmodSync(filename, 0o600);
+  }
   applyPragmas(database);
   return new Kysely<Schema>({
     dialect: new ImmediateSqliteDialect(database),
     // Parse only projected JSON columns once; never re-parse nested string values.
     plugins: [new ParseJSONResultsPlugin({ shouldParse: shouldParseJsonResultColumn })],
   });
+}
+
+/**
+ * Tighten permissions on an existing SQLite database directory and files.
+ * Only touches paths owned by the current user; never follows symlinks.
+ * Directory goes to 0700; the database file plus -wal/-shm go to 0600.
+ * Only tightens (never loosens); missing paths are skipped.
+ */
+function tightenSqlitePermissions(dbPath: string): void {
+  tightenPathMode(dirname(dbPath), 0o700);
+  for (const suffix of ['', '-wal', '-shm']) {
+    tightenPathMode(`${dbPath}${suffix}`, 0o600);
+  }
+}
+
+function tightenPathMode(target: string, mode: number): void {
+  let stat;
+  try {
+    stat = lstatSync(target);
+  } catch {
+    return;
+  }
+  if (stat.isSymbolicLink()) {
+    return;
+  }
+  // Only tighten files we own; skip when ownership cannot be verified.
+  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
+    return;
+  }
+  const current = stat.mode & 0o777;
+  if ((current & ~mode) !== 0) {
+    chmodSync(target, mode);
+  }
 }
 
 /**
