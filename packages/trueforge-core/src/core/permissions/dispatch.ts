@@ -18,7 +18,7 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { ShellApprovalBinding } from './approvalTokens';
 import { actionIdFor, verifyApprovalToken, type ApprovalToken } from './approvalTokens';
-import { canonicalShellForm } from './classifier';
+import { canonicalShellFormFor } from './classifier';
 import type { SentinelCallIdentity, SentinelServices } from './context';
 import { extractCardFields } from './extractorRegistry';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
@@ -27,12 +27,13 @@ import type { Tier, TrackedExecutionBinding } from './tier';
 import {
   canonicalFileIdentity,
   canonicalWriteTarget,
+  contentDigest,
   extractExecutedFileOperand,
   isUnderRoot,
   lexicalPath,
-  sha256FileContent,
   splitWordsLenient,
   writeTargetTouchesGitControl,
+  type FileDigest,
   type PathResolution,
 } from './trackedExecutables';
 
@@ -51,6 +52,8 @@ export interface DispatchCheckContext extends SentinelCallIdentity {
   offline: boolean;
   /** How the call's paths are resolved; must be the value the classifier used. Absent means the server's filesystem. */
   path_resolution?: PathResolution | undefined;
+  /** Reads file digests from the remote sandbox the call runs in. */
+  file_digest?: FileDigest | undefined;
 }
 
 /** Build a VerifiableCall from a classified tool call's host-only info. */
@@ -241,13 +244,14 @@ export async function verifyPreDispatch(input: {
 
   // Rebuild the canonical params identically to classify time, with fresh hashes.
   if (call.shell_binding !== null) {
-    const form = canonicalShellForm({
+    const form = await canonicalShellFormFor({
       command: stringParam(call.canonical_params, 'command') ?? '',
       cwd: stringParam(call.canonical_params, 'cwd'),
       env: envOverrides(call.canonical_params),
       allowlist: services.shell_allowlist,
       workspace_cwd: ctx.workspace_cwd,
       path_resolution: ctx.path_resolution,
+      file_digest: ctx.file_digest,
     });
     const verification = verifyApprovalToken({
       token,
@@ -271,8 +275,8 @@ export async function verifyPreDispatch(input: {
       executedOperand === undefined
         ? null
         : canonicalFileIdentity({ p: executedOperand, cwd: identityCwd, resolution: ctx.path_resolution });
-    if (ctx.path_resolution === 'remote') {
-      // The server cannot read files in a remote sandbox, so there is no content to bind and no grant to keep:
+    if (ctx.path_resolution === 'remote' && ctx.file_digest === undefined) {
+      // The sandbox offers no way to read its files, so there is no content to bind and no grant to keep:
       // the token covers the call's own parameters and the file's normalized path, and every run asks again.
       const sameFile = identity !== null && identity === binding.file_identity;
       const verified = verifyApprovalToken({
@@ -285,7 +289,10 @@ export async function verifyPreDispatch(input: {
       }
       return verified.valid ? undefined : `Approval invalid: ${verified.reason}; request approval again.`;
     }
-    const contentHash = identity === null ? null : sha256FileContent(identity);
+    const contentHash =
+      identity === null
+        ? null
+        : await contentDigest({ identity, resolution: ctx.path_resolution, digest: ctx.file_digest });
     const argvHash = hashArgv(argv);
     const grantParams = {
       file_identity: binding.file_identity,

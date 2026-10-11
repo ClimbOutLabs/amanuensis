@@ -53,6 +53,7 @@ import { TOOL_GRANT_REASON } from './toolGrants';
 import {
   canonicalFileIdentity,
   canonicalWriteTarget,
+  contentDigest,
   extractExecutedFileOperand,
   isInsideWorkspace,
   isUnderRoot,
@@ -61,6 +62,7 @@ import {
   splitCompoundSegments,
   splitWordsLenient,
   writeTargetTouchesGitControl,
+  type FileDigest,
   type PathResolution,
   type TrackedExecutableScope,
 } from './trackedExecutables';
@@ -89,6 +91,8 @@ export interface ClassifyContext extends SentinelCallIdentity {
   services: SentinelServices;
   /** How this call's paths are resolved; set by the sandbox provider. Absent means the server's own filesystem. */
   path_resolution?: PathResolution | undefined;
+  /** Reads file digests from a remote sandbox, so approvals can bind to file content there too. */
+  file_digest?: FileDigest | undefined;
 }
 
 const SENSITIVE_PATH_PATTERNS = [
@@ -322,13 +326,24 @@ export function canonicalShellForm(input: {
   allowlist: ShellAllowlistConfig;
   workspace_cwd: string | null;
   path_resolution?: PathResolution | undefined;
+  /** Remote sandbox only: digests of the files the command names, fetched beforehand (see canonicalShellFormFor). */
+  file_digests?: ReadonlyMap<string, string> | undefined;
+  /** Remote sandbox only: receives the files whose digests the form would use. */
+  collect_files?: Set<string> | undefined;
 }): CanonicalShellForm {
   const resolution = input.path_resolution;
+  const digestOf = (p: string): string | null => {
+    if (resolution !== 'remote') {
+      return sha256FileContent(p);
+    }
+    input.collect_files?.add(p);
+    return input.file_digests?.get(p) ?? null;
+  };
   const parsed = parseSimpleCommand(input.command);
   const identityCwd = input.cwd ?? input.workspace_cwd ?? '/';
   const fileHashes: Record<string, string> = {};
   const hashFile = (p: string): void => {
-    const hash = sha256FileContent(p, resolution);
+    const hash = digestOf(p);
     if (hash !== null) {
       fileHashes[p] = hash;
     }
@@ -396,7 +411,7 @@ export function canonicalShellForm(input: {
       // waiting to happen.
       const hashes: Record<string, string> = {};
       const hashSegFile = (p: string): void => {
-        const hash = sha256FileContent(p, resolution);
+        const hash = digestOf(p);
         if (hash !== null) {
           hashes[p] = hash;
         }
@@ -432,6 +447,32 @@ export function canonicalShellForm(input: {
       return hashes;
     })(),
   };
+}
+
+const MAX_REMOTE_DIGESTS = 16;
+
+/**
+ * The canonical shell form. In a remote sandbox the files the command names are read through the sandbox
+ * first, so the form binds to their content as it does on the server's own filesystem.
+ */
+export async function canonicalShellFormFor(
+  input: Parameters<typeof canonicalShellForm>[0] & { file_digest?: FileDigest | undefined },
+): Promise<CanonicalShellForm> {
+  if (input.path_resolution !== 'remote' || input.file_digest === undefined) {
+    return canonicalShellForm(input);
+  }
+  const wanted = new Set<string>();
+  canonicalShellForm({ ...input, collect_files: wanted });
+  const digests = new Map<string, string>();
+  await Promise.all(
+    [...wanted].slice(0, MAX_REMOTE_DIGESTS).map(async file => {
+      const digest = await contentDigest({ identity: file, resolution: 'remote', digest: input.file_digest });
+      if (digest !== null) {
+        digests.set(file, digest);
+      }
+    }),
+  );
+  return canonicalShellForm({ ...input, file_digests: digests });
 }
 
 export function shellBindingFromForm(form: CanonicalShellForm): ShellApprovalBinding {
@@ -472,13 +513,14 @@ async function mintShellApproval(input: {
   env: Record<string, string> | null;
 }): Promise<{ approval_token_id: string; shell_binding: ShellApprovalBinding }> {
   const { ctx, action } = input;
-  const form = canonicalShellForm({
+  const form = await canonicalShellFormFor({
     command: input.command,
     cwd: input.cwd,
     env: input.env,
     allowlist: ctx.services.shell_allowlist,
     workspace_cwd: ctx.workspace_cwd,
     path_resolution: ctx.path_resolution,
+    file_digest: ctx.file_digest,
   });
   const { token_id, binding } = await mintShellToken({ ctx, tool_name: action.tool_name, form });
   return { approval_token_id: token_id, shell_binding: binding };
@@ -575,7 +617,11 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       });
     }
     if (services.tracked_store.isTracked({ scope: workspaceScope(ctx), file_identity: identity })) {
-      const contentHash = sha256FileContent(identity, ctx.path_resolution);
+      const contentHash = await contentDigest({
+        identity,
+        resolution: ctx.path_resolution,
+        digest: ctx.file_digest,
+      });
       const argvHash = hashArgv(argvForHash);
       const grantParams =
         contentHash === null
@@ -708,13 +754,14 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   }
 
   // Not allowlisted: Tier 3 with the full parsed binding.
-  const form = canonicalShellForm({
+  const form = await canonicalShellFormFor({
     command,
     cwd,
     env,
     allowlist: services.shell_allowlist,
     workspace_cwd: ctx.workspace_cwd,
     path_resolution: ctx.path_resolution,
+    file_digest: ctx.file_digest,
   });
   const { token_id, binding } = await mintShellToken({ ctx, tool_name: action.tool_name, form });
   return tier3Decision({
@@ -1188,6 +1235,8 @@ export async function classifyHostToolCall(input: {
   action: SentinelAction;
   /** How the calling tool's paths are resolved; absent means the server's own filesystem. */
   path_resolution?: PathResolution | undefined;
+  /** Reads file digests from the calling tool's remote sandbox. */
+  file_digest?: FileDigest | undefined;
 }): Promise<TierDecision> {
   // Normalize canonical params to JSON form once, here, so every caller mints
   // approval tokens over the same value the verify path re-parses from the
@@ -1201,7 +1250,11 @@ export async function classifyHostToolCall(input: {
     repository_id: input.repository_id,
     workspace_cwd: input.workspace_cwd,
   });
-  const decision = await classifyTier(action, { ...ctx, path_resolution: input.path_resolution });
+  const decision = await classifyTier(action, {
+    ...ctx,
+    path_resolution: input.path_resolution,
+    file_digest: input.file_digest,
+  });
   await recordClassificationAudit({
     services: ctx.services,
     identity: {

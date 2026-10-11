@@ -489,6 +489,8 @@ function parseToolArguments(argumentsJson: string): Record<string, unknown> {
  */
 async function verifySentinelPreDispatch(input: {
   toolCall: InternalEnrichedToolCall;
+  /** Reads file digests from the sandbox the call runs in, when the tool set has one the server cannot see. */
+  fileDigest: ((absolutePath: string) => Promise<string | null>) | undefined;
   approvalDecisions: Map<string, ApprovalDecision>;
   sentinel: { services: SentinelServices; identity: SentinelCallIdentity } | undefined;
 }): Promise<string | undefined> {
@@ -540,7 +542,13 @@ async function verifySentinelPreDispatch(input: {
       approval_binding: info.approval_binding ?? null,
       shell_binding: info.shell_binding ?? null,
     },
-    ctx: { ...sentinel.identity, services: sentinel.services, offline, path_resolution: info.path_resolution },
+    ctx: {
+      ...sentinel.identity,
+      services: sentinel.services,
+      offline,
+      path_resolution: info.path_resolution,
+      file_digest: input.fileDigest,
+    },
   });
 }
 
@@ -1114,6 +1122,10 @@ export async function executeToolCalls({
     // and never records a side-effect attempt or memo entry.
     const sentinelVerificationError = await verifySentinelPreDispatch({
       toolCall,
+      fileDigest:
+        toolInfo.toolSet.fileDigest === undefined
+          ? undefined
+          : path => toolInfo.toolSet.fileDigest?.(path) ?? Promise.resolve(null),
       approvalDecisions,
       sentinel,
     });

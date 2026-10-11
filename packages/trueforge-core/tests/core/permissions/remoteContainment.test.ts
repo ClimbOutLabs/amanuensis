@@ -342,3 +342,65 @@ describe('approvals bind to the normalized path', () => {
     expect((await classify('sh sub/../tool.sh')).decision.reason).toBe('tracked_executable_unapproved');
   });
 });
+
+describe('approvals bind to file content in a remote sandbox when the sandbox can be read', () => {
+  const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+  const files = new Map<string, string>([['/workspace/tool.sh', 'digest-one']]);
+  const read = (path: string): Promise<string | null> => Promise.resolve(files.get(path) ?? null);
+  const ctx: ClassifyContext = { ...ctxFor({ services, root: REMOTE_ROOT, resolution: 'remote' }), file_digest: read };
+
+  beforeAll(() => {
+    services.tracked_store.track({
+      scope: { tenant_id: 't1', created_by: 'u1', repository_id: null, workspace_cwd: REMOTE_ROOT },
+      file_identity: '/workspace/tool.sh',
+    });
+  });
+
+  async function ask(command: string) {
+    const decision = await classifyTier(action('exec', { command, cwd: REMOTE_ROOT }), ctx);
+    return decision;
+  }
+
+  function callFor(decision: Awaited<ReturnType<typeof ask>>, command: string) {
+    return {
+      tool_name: 'exec',
+      tool_type: 'truefoundry-system' as const,
+      canonical_params: { command, cwd: REMOTE_ROOT },
+      tier: 3 as const,
+      approval_token_id: decision.approval_token_id ?? null,
+      approval_binding: decision.approval_binding ?? null,
+      shell_binding: decision.shell_binding ?? null,
+    };
+  }
+
+  test('a script that changed since approval is refused, and an unchanged one is remembered', async () => {
+    const first = await ask('sh tool.sh');
+    expect(first.approval_binding?.content_hash).toBe('digest-one');
+    files.set('/workspace/tool.sh', 'digest-two');
+    const changed = await verifyPreDispatch({
+      call: callFor(first, 'sh tool.sh'),
+      ctx: { ...ctx, offline: false },
+    });
+    expect(changed).toMatch(/invalid/i);
+    files.set('/workspace/tool.sh', 'digest-one');
+    const second = await ask('sh tool.sh');
+    expect(
+      await verifyPreDispatch({ call: callFor(second, 'sh tool.sh'), ctx: { ...ctx, offline: false } }),
+    ).toBeUndefined();
+    // The byte-identical re-run is now remembered, as on the server's own filesystem.
+    expect((await ask('sh tool.sh')).reason).not.toBe('tracked_executable_unapproved');
+  });
+
+  test('a command that runs a file binds to that file, so editing it after approval voids the approval', async () => {
+    files.set('/workspace/job.py', 'job-one');
+    const decision = await ask('python3 job.py');
+    expect(decision.tier).toBe(3);
+    expect(decision.shell_binding?.file_hashes).toMatchObject({ '/workspace/job.py': 'job-one' });
+    files.set('/workspace/job.py', 'job-two');
+    const result = await verifyPreDispatch({
+      call: callFor(decision, 'python3 job.py'),
+      ctx: { ...ctx, offline: false },
+    });
+    expect(result).toMatch(/changed since approval/i);
+  });
+});

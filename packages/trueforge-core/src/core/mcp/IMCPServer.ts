@@ -148,6 +148,12 @@ export interface IToolSet {
 
   toolCallInfo(params: CallToolRequest['params'], resolveUnderlyingTool?: boolean): Promise<InternalToolCallInfo>;
 
+  /**
+   * Content digest of a file in this tool set's own sandbox, for approvals that bind to file content when the
+   * server cannot read that sandbox's disk. Null when the file cannot be read. Absent for tool sets without one.
+   */
+  fileDigest?(absolutePath: string): Promise<string | null>;
+
   // Existing synchronous Code Mode allow-list. Optional implementations fall
   // back to the current unrestricted envelope; callTool still enforces policy.
   getAllowedToolNamesForSandbox?(): string[] | undefined;

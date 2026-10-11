@@ -221,6 +221,28 @@ function isDanglingSymlink(input: { p: string; cwd: string }): boolean {
   }
 }
 
+/** Content digest of a file inside a remote sandbox, read through the sandbox; null when it cannot be read. */
+export type FileDigest = (absolutePath: string) => Promise<string | null>;
+
+/**
+ * Digest of the file a call is about to run. On the server's own filesystem it is read directly; in a remote
+ * sandbox it comes from the sandbox's reader, and without one there is no digest (null: callers fail closed).
+ */
+export async function contentDigest(input: {
+  identity: string;
+  resolution: PathResolution | undefined;
+  digest: FileDigest | undefined;
+}): Promise<string | null> {
+  if (input.resolution !== 'remote') {
+    return sha256FileContent(input.identity);
+  }
+  try {
+    return (await input.digest?.(input.identity)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * sha256 of current file content. Null when the file cannot be read: fail closed. Files of a remote sandbox
  * cannot be read from the server, and a same-named file on the server must never stand in for them.

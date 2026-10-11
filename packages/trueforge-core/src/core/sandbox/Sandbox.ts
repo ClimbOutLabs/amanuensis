@@ -2180,6 +2180,7 @@ export class Sandbox extends LocalToolMCP {
         // Chosen by the provider, never by a path. A remote sandbox's paths are judged by name because the server
         // cannot follow its symlinks; the slot agent's O_NOFOLLOW walk and the guest's own view contain those.
         path_resolution: this.provider.filesystem,
+        ...(this.provider.filesystem === 'remote' ? { file_digest: (path: string) => this.fileDigest(path) } : {}),
         action: {
           tool_name: params.name,
           canonical_params: effectiveArguments ?? {},
@@ -3061,6 +3062,20 @@ export class Sandbox extends LocalToolMCP {
    * Create or reattach, then init. A missing same-type sandbox throws
    * `SandboxNotAvailableError` from the provider; reattach then recreates.
    */
+  /** Digest of a file in the sandbox, read through the provider, for approvals that bind to file content. */
+  async fileDigest(absolutePath: string): Promise<string | null> {
+    try {
+      const { sandboxInfo } = await this.ensureReadySandbox();
+      const content = await this.provider.downloadFile({
+        sandboxId: this.providerSandboxId(sandboxInfo.sandbox_id),
+        path: absolutePath,
+      });
+      return createHash('sha256').update(content).digest('hex');
+    } catch {
+      return null;
+    }
+  }
+
   private async ensureReadySandbox(signal?: AbortSignal): Promise<{
     sandboxInfo: SandboxInfo;
     sandboxCreated: SandboxInfo | undefined;
