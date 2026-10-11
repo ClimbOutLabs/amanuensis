@@ -1454,7 +1454,7 @@ await client.personalization.deleteProfile();
 <dl>
 <dd>
 
-Returns the authenticated user’s offline mode and the Tier 2 action kinds that run without asking.
+Returns the authenticated user’s offline mode, the Tier 2 action kinds that run without asking, and whether web searches run without asking.
 </dd>
 </dl>
 </dd>
@@ -1871,6 +1871,278 @@ await client.personas.getContext("persona_id");
 <dd>
 
 **persona_id:** `string` — Stable persona identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PersonasClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personas.<a href="/src/api/resources/personas/client/Client.ts">listKnowledge</a>(persona_id) -> TrueForge.ListKnowledgeDocumentsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Returns the documents in the persona’s knowledge library with their indexing status.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personas.listKnowledge("persona_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**persona_id:** `string` — Stable persona identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PersonasClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personas.<a href="/src/api/resources/personas/client/Client.ts">createKnowledge</a>(persona_id, { ...params }) -> TrueForge.GetKnowledgeDocumentResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Adds a file, saved link, or pasted text to the persona’s knowledge library. Indexing runs in the background; the document reports its status until it is searchable.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personas.createKnowledge("persona_id", {
+    kind: "text",
+    text: "text",
+    title: "title"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**persona_id:** `string` — Stable persona identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.CreateKnowledgeDocumentRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PersonasClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personas.<a href="/src/api/resources/personas/client/Client.ts">getKnowledgeEmbeddingModel</a>(persona_id) -> TrueForge.GetKnowledgeEmbeddingModelResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Reports the one-time search model download in plain English.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personas.getKnowledgeEmbeddingModel("persona_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**persona_id:** `string` — Stable persona identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PersonasClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.personas.<a href="/src/api/resources/personas/client/Client.ts">deleteKnowledge</a>(persona_id, document_id) -> TrueForge.DeleteKnowledgeDocumentResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Removes the document and all of its indexed chunks from the persona’s library.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.personas.deleteKnowledge("persona_id", "document_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**persona_id:** `string` — Stable persona identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**document_id:** `string` — Stable knowledge document identifier.
 
 </dd>
 </dl>
