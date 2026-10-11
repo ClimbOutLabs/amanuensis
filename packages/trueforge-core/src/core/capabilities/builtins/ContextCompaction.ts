@@ -4,6 +4,7 @@ import type { ContextCompactionEvent } from '../../events/schema';
 import { EventType, newEventId } from '../../events/schema';
 import type { ILLM, LLMCreateParams } from '../../llm/ILLM';
 import { getEmptyUsage, type CompletionUsage } from '../../llm/LLMTypes';
+import { resolveMaxOutputTokens } from '../../llm/maxOutputTokens';
 import { estimateTokensForString } from '../../llm/usage';
 import type { AgentDefinition, ModelParams } from '../../runtime/AgentDefinition';
 import { InternalEventType, type ContextMessage } from '../../runtime/AgentThread.types';
@@ -104,17 +105,6 @@ export function compactionValidationFingerprint(modelOutput: string, requiredSec
     return `${name}=${String(count)}`;
   });
   return `len=${String(modelOutput.length)}:prefix=${(hash >>> 0).toString(16)}:sections=[${sectionCounts.join(',')}]`;
-}
-
-/**
- * Resolves the configured max output tokens from modelParams: max_completion_tokens
- * preferred, max_tokens as fallback; undefined when unset or unusable (non-numeric,
- * non-finite, or negative). Shared by the compaction threshold and the token
- * pre-flight guard in AgentThread so the two budgets cannot drift apart.
- */
-export function resolveMaxOutputTokens(modelParams: AgentDefinition['modelParams']): number | undefined {
-  const configured = modelParams?.['max_completion_tokens'] ?? modelParams?.['max_tokens'];
-  return typeof configured === 'number' && Number.isFinite(configured) && configured >= 0 ? configured : undefined;
 }
 
 /**
