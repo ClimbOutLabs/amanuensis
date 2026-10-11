@@ -2,12 +2,17 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type {
+  HarnessChatServerExtensions,
+  LastCompactionStatus,
+} from '@/plugins/trueforge-agent-server-adapter/sessionResync.js';
+
 const useThreadIsRunning = vi.fn(() => false);
 let auiState: { threadListItem?: { remoteId?: string } } = {
   threadListItem: { remoteId: 'session-1' },
 };
 const useTrueFoundryAgentSpec = vi.fn(() => ({ agentSpec: null }));
-const useOptionalServer = vi.fn(() => null);
+const useOptionalServer = vi.fn((): HarnessChatServerExtensions | null => null);
 
 vi.mock('@assistant-ui/core/react', () => ({
   useThreadIsRunning: () => useThreadIsRunning(),
@@ -28,11 +33,11 @@ vi.mock('@/server/ServerContext.js', () => ({
 import { useCompactionStatus } from '@/hooks/useCompactionStatus.js';
 
 describe('useCompactionStatus', () => {
-  const getLastCompactionStatus = vi.fn(async () => null);
-  const getLastTurnInputTokens = vi.fn(async () => null);
+  const getLastCompactionStatus = vi.fn(async (): Promise<LastCompactionStatus | null> => null);
+  const getLastTurnInputTokens = vi.fn(async (): Promise<number | null> => null);
   // hasSessionResync checks for these methods via Reflect; a plain object with
   // all four methods passes.
-  const server = {
+  const server: HarnessChatServerExtensions = {
     peekSessionTip: vi.fn(async () => null),
     dismissPendingApprovals: vi.fn(async () => ({ dismissed: 0, alreadyResolved: true })),
     getLastCompactionStatus,
@@ -68,7 +73,7 @@ describe('useCompactionStatus', () => {
     const { result, rerender } = renderHook(() => useCompactionStatus());
 
     await waitFor(() => expect(getLastCompactionStatus).toHaveBeenCalledTimes(1));
-    expect(result.current.loading).toBe(false);
+    await waitFor(() => expect(result.current.loading).toBe(false));
 
     // A turn starts and ends; the hook must re-fetch instead of staying stale.
     useThreadIsRunning.mockReturnValue(true);

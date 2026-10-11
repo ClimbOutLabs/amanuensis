@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 
+import { getModelOutputExceedsContextError } from '@truefoundry/trueforge-core/core';
 import { cn } from '../../atoms/lib/cn.js';
 import { Button } from '../../atoms/primitives/Button.js';
 import { CenteredModal } from '../../atoms/primitives/CenteredModal.js';
@@ -207,14 +208,12 @@ const CustomModelProviderForm = ({
     parsePositiveInt(model.maxOutputTokens) == null ? 'Set the max output tokens.' : null;
 
   // Reserving the whole context window for output leaves no room for input, so
-  // every turn fails. Catch it here with the same message the server schema uses.
-  const modelOutputExceedsContextError = (model: ModelRow): string | null => {
-    const contextLength = parsePositiveInt(model.contextLength);
-    const maxOutputTokens = parsePositiveInt(model.maxOutputTokens);
-    return contextLength != null && maxOutputTokens != null && maxOutputTokens >= contextLength
-      ? 'Max output must be smaller than the context length.'
-      : null;
-  };
+  // every turn fails. The rule and message live in core; reuse them here.
+  const modelOutputExceedsContextError = (model: ModelRow): string | null =>
+    getModelOutputExceedsContextError({
+      context_length: parsePositiveInt(model.contextLength),
+      max_output_tokens: parsePositiveInt(model.maxOutputTokens),
+    });
 
   // The Add-provider button gates on the always-visible fields. The collapsed per-model
   // limits are enforced on submit — auto-expanding and focusing the first offender.

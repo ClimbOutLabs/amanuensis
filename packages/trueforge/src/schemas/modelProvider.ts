@@ -7,6 +7,7 @@ import {
   SUPPORTED_REASONING_EFFORTS,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   VERCEL_AI_PROVIDER_NAMES,
+  getModelOutputExceedsContextError,
 } from '@truefoundry/trueforge-core/core';
 import { NameSchema, uniqueNames, type ResourceName } from './common';
 
@@ -35,14 +36,11 @@ export const ModelPropertiesSchema = z
     // A model that reserves its whole context window for output leaves no room
     // for input, so every turn fails the token pre-flight guard. Reject the
     // combination at the boundary instead of failing silently at runtime.
-    if (
-      properties.context_length != null &&
-      properties.max_output_tokens != null &&
-      properties.max_output_tokens >= properties.context_length
-    ) {
+    const message = getModelOutputExceedsContextError(properties);
+    if (message != null) {
       ctx.addIssue({
         code: 'custom',
-        message: 'Max output must be smaller than the context length.',
+        message,
         path: ['max_output_tokens'],
       });
     }
