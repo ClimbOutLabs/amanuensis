@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import aman_stt  # noqa: E402
 from aman_stt import (  # noqa: E402
+    FasterWhisperTranscriber,
     MalformedAudio,
     ModelVerificationError,
     PinnedModel,
@@ -520,6 +521,123 @@ class HealthzPrimaryErrorTest(unittest.TestCase):
         self.assertTrue(body["model_loaded"])
         self.assertIsNotNone(body["model_error"])
         self.assertIn("small", body["model_error"])
+
+
+class TranscriberWiringTest(unittest.TestCase):
+    """FasterWhisperTranscriber wires the verified snapshot into WhisperModel.
+
+    Synthetic files and a recording stand-in for faster_whisper only; never
+    touches the network or real weights. Each test fails if the wiring it
+    covers is changed.
+    """
+
+    FAKE_FILES = {
+        "config.json": b'{"fake": true}',
+        "model.bin": b"\x00\x01\x02" * 64,
+        "tokenizer.json": b"{}",
+        "vocabulary.txt": b"a\nb\n",
+    }
+
+    def _write_snapshot(self, repo, revision, files):
+        snap = os.path.join(
+            self.cache_dir,
+            "models--" + repo.replace("/", "--"),
+            "snapshots",
+            revision,
+        )
+        os.makedirs(snap, exist_ok=True)
+        for name, data in files.items():
+            with open(os.path.join(snap, name), "wb") as fh:
+                fh.write(data)
+        return snap
+
+    def setUp(self):
+        import types
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cache_dir = os.path.join(self.tmp.name, "cache")
+        self.pinned = PinnedModel(
+            repo="FakeOrg/fake-model",
+            revision="b" * 40,
+            files={
+                name: hashlib.sha256(data).hexdigest()
+                for name, data in self.FAKE_FILES.items()
+            },
+        )
+        patcher = mock.patch.dict(aman_stt.PINNED_MODELS, {"t": self.pinned})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        def fake_downloader(pinned_model, cache_dir):
+            return self._write_snapshot(
+                pinned_model.repo, pinned_model.revision, self.FAKE_FILES
+            )
+
+        self.fake_downloader = fake_downloader
+
+        # Recording stand-in for faster_whisper.WhisperModel, which the
+        # transcriber imports lazily inside __init__.
+        self.constructed = []
+        constructed = self.constructed
+
+        class RecordingWhisperModel:
+            def __init__(self, *args, **kwargs):
+                constructed.append((args, kwargs))
+
+        fake_module = types.ModuleType("faster_whisper")
+        fake_module.WhisperModel = RecordingWhisperModel
+        mod_patcher = mock.patch.dict(sys.modules, {"faster_whisper": fake_module})
+        mod_patcher.start()
+        self.addCleanup(mod_patcher.stop)
+
+    def test_whisper_model_receives_verified_snapshot_dir(self):
+        settings = Settings(model_dir=self.cache_dir, model_size="t", cpu_threads=7)
+        transcriber = FasterWhisperTranscriber(
+            settings, downloader=self.fake_downloader
+        )
+        self.assertEqual(len(self.constructed), 1)
+        args, kwargs = self.constructed[0]
+        self.assertEqual(
+            args[0],
+            os.path.join(
+                self.cache_dir, "models--FakeOrg--fake-model", "snapshots", "b" * 40
+            ),
+        )
+        self.assertEqual(kwargs["device"], "cpu")
+        self.assertEqual(kwargs["compute_type"], "int8")
+        self.assertEqual(kwargs["cpu_threads"], 7)
+        self.assertEqual(transcriber.model_label, "whisper-t-int8")
+        self.assertIsNone(transcriber.primary_error)
+
+    def test_fallback_load_sets_label_and_primary_error(self):
+        fallback = PinnedModel(
+            repo="FakeOrg/fake-fallback",
+            revision="c" * 40,
+            files={
+                name: hashlib.sha256(data).hexdigest()
+                for name, data in self.FAKE_FILES.items()
+            },
+        )
+        with mock.patch.dict(aman_stt.PINNED_MODELS, {"f": fallback}):
+            tampered = dict(self.FAKE_FILES)
+            tampered["model.bin"] = b"tampered!"
+            self._write_snapshot(self.pinned.repo, self.pinned.revision, tampered)
+            self._write_snapshot(fallback.repo, fallback.revision, self.FAKE_FILES)
+
+            def no_network(pinned_model, cache_dir):
+                raise AssertionError("network must not be touched")
+
+            settings = Settings(
+                model_dir=self.cache_dir, model_size="t", fallback_model_size="f"
+            )
+            transcriber = FasterWhisperTranscriber(settings, downloader=no_network)
+            self.assertEqual(transcriber.model_label, "whisper-f-int8")
+            self.assertIsNotNone(transcriber.primary_error)
+            self.assertIn("t", transcriber.primary_error)
+            # Only the fallback snapshot reached WhisperModel.
+            self.assertEqual(len(self.constructed), 1)
+            self.assertIn("fake-fallback", self.constructed[0][0][0])
 
 
 if __name__ == "__main__":

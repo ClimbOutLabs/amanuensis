@@ -116,9 +116,10 @@ Downloader = Callable[[PinnedModel, str], str]
 
 # Files the faster-whisper loader may read from the model directory.
 # `preprocessor_config.json` is optional for the loader (it is only read when
-# present), but the pinned revisions do not ship it. If it appears in a
-# snapshot, that is unexpected and the snapshot is refused: the loader would
-# trust it, so an unpinned copy must never load.
+# present), and neither pinned revision ships it (checked against both
+# revision file lists). Its presence means the snapshot is not the pinned
+# revision, so the snapshot is refused: the loader would trust the file,
+# and an unpinned copy must never load.
 LOADER_READ_FILES: frozenset[str] = frozenset(
     {
         "config.json",
