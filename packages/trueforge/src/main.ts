@@ -53,7 +53,7 @@ import {
   type ISessionStore,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
-import { DEFAULT_PINNED_PATH, defaultSentinelServices, type SentinelServices } from '@truefoundry/trueforge-core/core';
+import type { ApprovalTokenStore } from '@truefoundry/trueforge-core/core';
 import { heartbeatKey, RequestReplyExecutor, RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Kysely, Transaction } from 'kysely';
 import type { RedisClientType } from 'redis';
@@ -101,7 +101,7 @@ import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
-import { sentinelSettingsServices } from './runtime/sentinelSettingsServices';
+import { createSentinelServices } from './runtime/sentinelServices';
 import { TurnDrainRegistry } from './runtime/turnDrains';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
@@ -153,6 +153,7 @@ interface ServerPersistence<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
+  approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
   /** One shared client for TrueFoundry store resolvers + auth; undefined when TrueFoundry mode is off. */
@@ -317,6 +318,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/turn-artifact-store/SqliteTurnArtifactStore'),
       import('./db/sqlite/global-settings-store/SqliteGlobalSettingsStore'),
       import('./db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore'),
+      import('./db/sqlite/approval-token-store/SqliteApprovalTokenStore'),
     ]),
   ]);
   const [
@@ -336,6 +338,7 @@ async function createStandalonePersistence(options: {
     { SqliteTurnArtifactStore },
     { SqliteGlobalSettingsStore },
     { SqliteSentinelSettingsStore },
+    { SqliteApprovalTokenStore },
   ] = sqliteStores;
 
   const db = createSqliteDb(sqlitePath);
@@ -371,6 +374,7 @@ async function createStandalonePersistence(options: {
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
+    approvalTokenStore: new SqliteApprovalTokenStore(db),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
     resolveSandboxProviderStore: () => sandboxProviderStore,
@@ -419,6 +423,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/turn-artifact-store/PostgresTurnArtifactStore'),
       import('./db/postgres/global-settings-store/PostgresGlobalSettingsStore'),
       import('./db/postgres/sentinel-settings-store/PostgresSentinelSettingsStore'),
+      import('./db/postgres/approval-token-store/PostgresApprovalTokenStore'),
     ]),
   ]);
   const [
@@ -438,6 +443,7 @@ async function createDistributedPersistence(options: {
     { PostgresTurnArtifactStore },
     { PostgresGlobalSettingsStore },
     { PostgresSentinelSettingsStore },
+    { PostgresApprovalTokenStore },
   ] = postgresStores;
 
   const db = createDb({
@@ -521,6 +527,7 @@ async function createDistributedPersistence(options: {
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
+    approvalTokenStore: new PostgresApprovalTokenStore(db),
     resolveModelProviderStore,
     resolveMcpServerStore,
     resolveSandboxProviderStore,
@@ -554,6 +561,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     globalSettingsStore,
     sentinelAuditStore,
     sentinelSettingsStore,
+    approvalTokenStore,
     destroyDb,
     redis,
     serviceFoundryClient,
@@ -577,11 +585,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const turnDrains = new TurnDrainRegistry();
   const requestReplyRouter = new RequestReplyRouter();
   const eventSubscriptions = new EventSubscriptionRegistry<TurnStreamingEvent>(redis);
-  const sentinelServices: SentinelServices = {
-    ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
+  const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
-    ...sentinelSettingsServices(sentinelSettingsStore),
-  };
+    settings: sentinelSettingsStore,
+    approvalTokens: approvalTokenStore,
+  });
   const sessions = new Sessions({ sessionStore, sentinelServices });
 
   const oidc = isOidcConfigured(configuration) ? configuration.OIDC : undefined;

@@ -530,7 +530,7 @@ async function verifySentinelPreDispatch(input: {
     tenant_id: sentinel.identity.tenant_id,
     created_by: sentinel.identity.created_by,
   });
-  return verifyPreDispatch({
+  return await verifyPreDispatch({
     call: {
       tool_name: info.mint_tool_name ?? info.original_tool_name,
       tool_type: info.type,

@@ -24,6 +24,7 @@ import type {
   JsonValue,
   MCPServerInitInfo,
   SandboxInfo,
+  ShellApprovalBinding,
   SubAgentCompletionMarker,
   TaskStateSnapshot,
   Tier2ActionKind,
@@ -169,6 +170,19 @@ export interface SentinelAuditTable {
   outcome: 'logged' | 'ran' | 'approved' | 'denied' | 'auto_denied';
   auto_deny_reason: string | null;
   created_at: string;
+}
+
+/** Sentinel approval token, keyed by the sha256 of the token id. PRIMARY KEY (token_hash). */
+export interface ApprovalTokenTable {
+  token_hash: string;
+  action_id: string;
+  params_hash: string;
+  shell_binding: JsonbColumn<ShellApprovalBinding> | null;
+  tenant_id: string;
+  created_by: string;
+  created_at: string;
+  expires_at: string;
+  used_at: string | null;
 }
 
 /** Per-user Sentinel preferences. PRIMARY KEY (tenant_id, created_by). */
@@ -639,6 +653,7 @@ export interface Database {
   space: SpaceTable;
   space_revision: SpaceRevisionTable;
   sentinel_audit: SentinelAuditTable;
+  approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;
   implementation_plan_dispatch: ImplementationPlanDispatchTable;

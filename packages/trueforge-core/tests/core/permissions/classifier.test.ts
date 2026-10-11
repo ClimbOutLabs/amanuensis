@@ -11,6 +11,7 @@ import {
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { seedShellAllowlist, type ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 import type { Tier2ActionKind } from '../../../src/core/permissions/tier';
+import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';
 
 /**
  * Environment-independent allowlist: a temp dir with one fake `mycmd`
@@ -571,7 +572,8 @@ describe('verifyPreDispatch', () => {
     try {
       const params = { path: '/etc/passwd', content: 'x' };
       const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
-      const token = services.token_store.mint({
+      const token = await services.token_store.mint({
+        ...testApprovalOwner(),
         action_id: actionIdFor({ tool_name: 'write_file', canonical_params: params }),
         canonical_params: params,
       });
@@ -588,7 +590,7 @@ describe('verifyPreDispatch', () => {
         ctx: { ...makeCtx({ services, workspace_cwd: dir }), offline: false },
       });
       expect(result).toMatch(/outside the workspace/i);
-      expect(services.token_store.peek({ token_id: token.token_id })).toBeDefined();
+      expect(await services.token_store.peek({ ...TEST_TOKEN_SCOPE, token_id: token.token_id })).toBeDefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -614,7 +616,8 @@ describe('verifyPreDispatch', () => {
   test('a redeemed token cannot verify twice', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const params = { command: 'curl https://example.com' };
-    const token = services.token_store.mint({
+    const token = await services.token_store.mint({
+      ...testApprovalOwner(),
       action_id: actionIdFor({ tool_name: 'exec', canonical_params: params }),
       canonical_params: params,
     });
@@ -636,7 +639,8 @@ describe('verifyPreDispatch', () => {
   test('stale offline context blocks an approved shell call', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const params = { command: 'curl https://example.com' };
-    const token = services.token_store.mint({
+    const token = await services.token_store.mint({
+      ...testApprovalOwner(),
       action_id: actionIdFor({ tool_name: 'exec', canonical_params: params }),
       canonical_params: params,
     });
@@ -658,7 +662,8 @@ describe('verifyPreDispatch', () => {
   test('changed params invalidate the token', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const params = { command: 'ls -la' };
-    const token = services.token_store.mint({
+    const token = await services.token_store.mint({
+      ...testApprovalOwner(),
       action_id: actionIdFor({ tool_name: 'exec', canonical_params: params }),
       canonical_params: params,
     });

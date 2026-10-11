@@ -21,6 +21,7 @@ import { defaultSentinelServices, type SentinelServices } from '../../../src/cor
 import { verifyPreDispatch, type VerifiableCall } from '../../../src/core/permissions/dispatch';
 import type { ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 import type { Tier, TrackedExecutionBinding } from '../../../src/core/permissions/tier';
+import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';
 
 function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'sentinel-bin-'));
@@ -728,14 +729,19 @@ describe('Suite D - approval token integrity', () => {
 
   test('D8 GAP: the oldest token is evicted at the 5000-token cap', async () => {
     const store = new InMemoryApprovalTokenStore();
-    const first = store.mint({
+    const first = await store.mint({
+      ...testApprovalOwner(),
       action_id: actionIdFor({ tool_name: 'exec', canonical_params: {} }),
       canonical_params: {},
     });
     for (let i = 0; i < 5000; i += 1) {
-      store.mint({ action_id: actionIdFor({ tool_name: 'exec', canonical_params: { i } }), canonical_params: { i } });
+      await store.mint({
+        ...testApprovalOwner(),
+        action_id: actionIdFor({ tool_name: 'exec', canonical_params: { i } }),
+        canonical_params: { i },
+      });
     }
-    expect(store.redeem({ token_id: first.token_id })).toBeUndefined();
+    expect(await store.redeem({ ...TEST_TOKEN_SCOPE, token_id: first.token_id })).toBeUndefined();
   });
 });
 
