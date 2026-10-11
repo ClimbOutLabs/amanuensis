@@ -106,7 +106,7 @@ describe('SlotDriver', () => {
       sleepMs: undefined,
     });
     expect(await driver.ensureReady()).toEqual({ ready: true });
-    expect(await bad.ensureReady()).toMatchObject({ ready: false, error_code: 'daemon_unavailable' });
+    expect(await bad.ensureReady()).toMatchObject({ ready: false, error_code: 'slots_unavailable' });
   });
 
   test('every slot failing its checks is isolation_refused and names the cause', async () => {
@@ -121,7 +121,7 @@ describe('SlotDriver', () => {
     expect(runCodeStatusFromReadiness(readiness).state).toBe('isolation_refused');
   });
 
-  test('slots that are not running are daemon_unavailable with the repair command', async () => {
+  test('slots that are not running are slots_unavailable with the repair command', async () => {
     const driver = new SlotDriver({
       socketPaths: [join(workDir, 'missing.sock')],
       logger: makeSilentLogger(),
@@ -129,9 +129,9 @@ describe('SlotDriver', () => {
       sleepMs: undefined,
     });
     const readiness = await driver.ensureReady();
-    expect(readiness).toMatchObject({ ready: false, error_code: 'daemon_unavailable' });
+    expect(readiness).toMatchObject({ ready: false, error_code: 'slots_unavailable' });
     expect(!readiness.ready && readiness.error).toContain('aman doctor sandbox --fix');
-    expect(runCodeStatusFromReadiness(readiness).state).toBe('daemon_unavailable');
+    expect(runCodeStatusFromReadiness(readiness).state).toBe('slots_unavailable');
   });
 
   test('run sends the program from ingress and writes result files where the wrapper harvests them', async () => {

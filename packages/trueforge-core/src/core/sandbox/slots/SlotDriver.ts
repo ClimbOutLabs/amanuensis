@@ -119,7 +119,7 @@ export class SlotDriver implements IsolationDriver {
     }
     return {
       ready: false,
-      error_code: 'daemon_unavailable',
+      error_code: 'slots_unavailable',
       error: `The sandbox slots are not running. Run \`${SLOT_FIX_COMMAND}\`, then check again.`,
     };
   }

@@ -3,7 +3,7 @@
 import * as TrueForge from "../index.js";
 
 /**
- * Uses 80% of the model context length when the explicit trigger is omitted, or 50000 tokens if unknown.
+ * Without an explicit trigger, compaction starts at 80% of the model context length, lowered so input plus the configured max output tokens fit (never below 4000), or at 50000 tokens when the context length is unknown.
  */
 export interface CompactionConfig {
     /** Summarize older history when context grows too large. Default: true. */
