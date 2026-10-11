@@ -65,6 +65,7 @@ function harness(options: {
   secrets?: readonly string[];
   result?: (name: string) => string;
   requireApprovalForTools?: string[];
+  tools?: ToolSchema[];
 }): Harness {
   const audit: AuditRecordInput[] = [];
   const dispatched: { name: string; args: unknown }[] = [];
@@ -86,7 +87,8 @@ function harness(options: {
     Promise.resolve({
       transportType: 'streamable-http' as const,
       sessionId: null,
-      listTools: () => Promise.resolve({ tools: [searchTool, fetchTool, writingTool, destructiveTool] }),
+      listTools: () =>
+        Promise.resolve({ tools: options.tools ?? [searchTool, fetchTool, writingTool, destructiveTool] }),
       callTool: callParams => {
         dispatched.push({ name: callParams.name, args: callParams.arguments });
         return Promise.resolve({
@@ -391,5 +393,53 @@ describe('links', () => {
     await runSearch(h, 'oslo weather');
     expect((await fetchTier(h, page)).tier).toBe(1);
     expect((await fetchTier(h, 'https://docs.example.net/guide')).tier).toBe(1);
+  });
+});
+
+describe('Tavily as the designated search provider', () => {
+  const tavilySearch: ToolSchema = {
+    name: 'tavily_search',
+    description: 'Search the web.',
+    inputSchema: schema,
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  };
+  // Left unannotated on purpose: the role must not depend on what the connector declares.
+  const tavilyExtract: ToolSchema = {
+    name: 'tavily_extract',
+    description: 'Extract page content.',
+    inputSchema: schema,
+  };
+  const tools = [tavilySearch, tavilyExtract];
+  const page = 'https://docs.example.net/guides/oslo';
+  const results = (name: string): string =>
+    name === 'tavily_search' ? JSON.stringify({ results: [{ title: 'Oslo', url: page }] }) : 'page body';
+
+  it('runs tavily_search silently behind the guard, and holds a query that carries a key', async () => {
+    const h = harness({ serverName: 'tavily', searchProvider: true, tools, result: results });
+    const silent = await h.toolSet.toolCallInfo({ name: 'tavily_search', arguments: { query: 'oslo weather' } });
+    expect(silent.tier).toBe(1);
+    expect(silent.is_approval_required).toBe(false);
+    expect(silent.silent_search_query).toBe('oslo weather');
+
+    const key = ['AKI', 'A', 'ABCDEFGH', 'IJKLMNOP'].join('');
+    const held = await h.toolSet.toolCallInfo({ name: 'tavily_search', arguments: { query: key } });
+    expect(held.tier).toBe(3);
+    expect(held.is_approval_required).toBe(true);
+  });
+
+  it('runs tavily_extract silently only on an exact URL this turn’s results returned', async () => {
+    const h = harness({ serverName: 'tavily', searchProvider: true, tools, result: results });
+    const extract = (urls: string[]) => h.toolSet.toolCallInfo({ name: 'tavily_extract', arguments: { urls } });
+
+    expect((await extract([page])).tier).toBe(3);
+    await h.toolSet.callTool({ name: 'tavily_search', arguments: { query: 'oslo guide' } });
+    expect((await extract([page])).tier).toBe(1);
+    expect((await extract([`${page}?utm=1`])).tier).toBe(3);
+    expect((await extract([page, 'https://evil.example/collect'])).tier).toBe(3);
+  });
+
+  it('asks for the same tools when Tavily does not hold the role', async () => {
+    const h = harness({ serverName: 'tavily', searchProvider: false, tools, result: results });
+    expect((await h.toolSet.toolCallInfo({ name: 'tavily_search', arguments: { query: 'oslo' } })).tier).toBe(3);
   });
 });

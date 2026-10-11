@@ -41,4 +41,12 @@ describe('shipped MCP catalog', () => {
     // Keyless: no credentials to ask for.
     expect(parallel.auth).toBeUndefined();
   });
+
+  it('keeps Tavily as a preset a user can pick as the search provider, without making it the default', () => {
+    const tavily = McpCatalog.load()
+      .list()
+      .find(server => server.name === 'tavily');
+    expect(tavily?.url).toBe('https://mcp.tavily.com/mcp');
+    expect(tavily?.search_provider).toBeUndefined();
+  });
 });
