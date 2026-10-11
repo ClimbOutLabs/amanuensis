@@ -27,6 +27,7 @@ let getTrueForgeAuthMode: typeof import('./config').getTrueForgeAuthMode;
 let assertNetworkAuthRequirement: typeof import('./config').assertNetworkAuthRequirement;
 let getPublicUiBasePath: typeof import('./config').getPublicUiBasePath;
 let TrueForgeAuthMode: typeof import('./config').TrueForgeAuthMode;
+let isPlaceholderTrueForgeApiKey: typeof import('./config').isPlaceholderTrueForgeApiKey;
 
 try {
   ({
@@ -37,6 +38,7 @@ try {
     assertNetworkAuthRequirement,
     getPublicUiBasePath,
     TrueForgeAuthMode,
+    isPlaceholderTrueForgeApiKey,
   } = await import('./config'));
 } catch (error) {
   console.error(
@@ -440,6 +442,9 @@ async function createDistributedPersistence(options: {
   });
   await migrateToLatest(db);
   logger.info('Distributed mode: postgres');
+  if (isPlaceholderTrueForgeApiKey(configuration.TRUEFORGE_API_KEY)) {
+    logger.warn('TRUEFORGE_API_KEY is a well-known placeholder; set a real key before any shared deployment');
+  }
   logger.info(`Executor id: ${executorId}`);
   const serviceFoundryClient = createServiceFoundryServerClient(logger);
   const tokenStore = new PostgresOAuthTokenStore(db);

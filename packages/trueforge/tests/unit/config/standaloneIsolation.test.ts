@@ -4,7 +4,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger } from 'winston';
-import { resolveCodeModeSocketParent, resolveTrueForgeApiKey } from '../../../src/config';
+import { isPlaceholderTrueForgeApiKey, resolveCodeModeSocketParent, resolveTrueForgeApiKey } from '../../../src/config';
 import { prepareCodeModeSocketParent, removeCodeModeSocketParent } from '../../../src/sandbox/localLifecycle';
 
 const logger = createLogger();
@@ -101,8 +101,20 @@ describe('standalone scheduler key', () => {
     expect(key).toHaveLength(64);
   });
 
-  it('throws for distributed mode when the env var is unset', () => {
-    expect(() => resolveTrueForgeApiKey({ standalone: false })).toThrow(/TRUEFORGE_API_KEY/);
+  it.each([undefined, ''])('falls back to the placeholder in distributed mode when the env var is %j', value => {
+    if (value !== undefined) {
+      process.env[ENV_KEY] = value;
+    }
+    const key = resolveTrueForgeApiKey({ standalone: false });
+    expect(key).toBe('placeholder-value-please-generate-your-own');
+    expect(isPlaceholderTrueForgeApiKey(key)).toBe(true);
+  });
+
+  it('keeps an explicit key over the distributed fallback', () => {
+    process.env[ENV_KEY] = 'from-env-file';
+    const key = resolveTrueForgeApiKey({ standalone: false });
+    expect(key).toBe('from-env-file');
+    expect(isPlaceholderTrueForgeApiKey(key)).toBe(false);
   });
 
   it.each(['dev-only-placeholder', 'placeholder-value-please-generate-your-own'])(

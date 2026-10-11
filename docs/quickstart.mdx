@@ -161,7 +161,7 @@ None of these are required to chat with a model. Each is one sentence plus where
     | --- | --- | --- |
     | `POSTGRES_USER` / `POSTGRES_DB` | `trueforge` / `trueforge` | Credentials for the Postgres container this stack starts for you. |
     | `POSTGRES_PASSWORD` | `trueforge` | Change it before running on any shared machine. |
-    | `TRUEFORGE_API_KEY` | `placeholder-value-please-generate-your-own` | Set by `docker-compose.yml` for this stack (the `.env.example` entry is commented out). Shared secret the internal schedule controller uses to call the server; fine as-is while the ports stay on `127.0.0.1`. To use your own, export `TRUEFORGE_API_KEY` (`openssl rand -hex 32`) in your shell before `docker compose up`. Standalone generates a random key for each process and refuses placeholder values. |
+    | `TRUEFORGE_API_KEY` | unset (commented out in `.env.example`) | Shared secret the internal schedule controller uses to call the server. This stack runs hosted mode, which falls back to the well-known `placeholder-value-please-generate-your-own` and logs a warning, so it starts with no setup; fine while the ports stay on `127.0.0.1`. To use your own, set `TRUEFORGE_API_KEY` in `packages/trueforge/.env` (`openssl rand -hex 32`). Standalone generates a random key for each process and refuses placeholder values. |
     | `PUBLIC_BASE_URL` | `http://localhost:8791` | Set by `docker-compose.yml` for this stack (the `.env.example` entry is commented out). Only needs changing if you put the app behind a different host or port. |
     | Host ports | `8791`, `5433`, `6380` | App, Postgres, and Redis, all bound to `127.0.0.1` only by this Compose file — not reachable from other machines by default. |
 

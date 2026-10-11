@@ -63,21 +63,25 @@ export function generateStandaloneSchedulerKey(): string {
   return randomBytes(32).toString('hex');
 }
 
+/** Hosted-mode fallback, also the Helm chart default; refused in standalone. */
+const HOSTED_DEFAULT_API_KEY = 'placeholder-value-please-generate-your-own';
+const PLACEHOLDER_API_KEYS: ReadonlySet<string> = new Set(['dev-only-placeholder', HOSTED_DEFAULT_API_KEY]);
+
+export function isPlaceholderTrueForgeApiKey(key: string): boolean {
+  return PLACEHOLDER_API_KEYS.has(key);
+}
+
 /**
- * Resolve the scheduler service credential.
- * Standalone: an explicit `TRUEFORGE_API_KEY` wins, except the well-known placeholders,
- * which are refused; otherwise generate a fresh random 32-byte key at process start so
- * instances never share a guessable key.
- * Distributed: the variable is required. Placeholders are accepted because the Helm chart
- * ships one as its default.
+ * Resolve the scheduler service credential. A non-empty `TRUEFORGE_API_KEY` always wins.
+ * Standalone: placeholders are refused; unset generates a fresh random 32-byte key at process
+ * start so instances never share a guessable key.
+ * Distributed: unset falls back to the well-known placeholder (the Helm chart's default), so
+ * the Compose stack starts without setup. Callers warn when the result is a placeholder.
  */
 export function resolveTrueForgeApiKey({ standalone }: { standalone: boolean }): string {
   const fromEnv = getEnv('TRUEFORGE_API_KEY');
   if (fromEnv !== undefined && fromEnv !== '') {
-    if (
-      standalone &&
-      (fromEnv === 'dev-only-placeholder' || fromEnv === 'placeholder-value-please-generate-your-own')
-    ) {
+    if (standalone && isPlaceholderTrueForgeApiKey(fromEnv)) {
       throw new Error(
         'Environment variable TRUEFORGE_API_KEY is set to a placeholder value. ' +
           'Generate a real key, or unset it so standalone generates a random key at startup.',
@@ -85,10 +89,7 @@ export function resolveTrueForgeApiKey({ standalone }: { standalone: boolean }):
     }
     return fromEnv;
   }
-  if (standalone) {
-    return generateStandaloneSchedulerKey();
-  }
-  throw new Error('Environment variable TRUEFORGE_API_KEY is required but was not specified.');
+  return standalone ? generateStandaloneSchedulerKey() : HOSTED_DEFAULT_API_KEY;
 }
 
 /**
@@ -1190,8 +1191,8 @@ export interface SharedServerConfiguration {
   SERVER_URL: string;
   /**
    * Service credential for controller calls.
-   * Env: `TRUEFORGE_API_KEY`. Required and non-empty when `STANDALONE=false`.
-   * Standalone generates a fresh random key at process start when unset (local only).
+   * Env: `TRUEFORGE_API_KEY`. When `STANDALONE=false` and unset, falls back to a well-known placeholder.
+   * Standalone refuses placeholders and generates a fresh random key at process start when unset (local only).
    */
   TRUEFORGE_API_KEY: string;
   /**

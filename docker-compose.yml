@@ -3,11 +3,6 @@
 # inherit host-dev localhost values. Postgres/Redis stay off the host network.
 name: trueforge
 
-# Controller and server must share one key. Hosted mode accepts this well-known default (127.0.0.1
-# only); override it from the shell or a root .env, which Compose interpolates. A value in
-# packages/trueforge/.env is not seen here because `environment` wins over `env_file`.
-x-api-key: &api-key ${TRUEFORGE_API_KEY:-placeholder-value-please-generate-your-own}
-
 services:
   postgres:
     image: postgres:17
@@ -107,7 +102,6 @@ services:
       # stays exercised. STANDALONE=false ⇒ Postgres + Redis.
       # A single-process deployment can set STANDALONE=true and drop redis.
       STANDALONE: 'false'
-      TRUEFORGE_API_KEY: *api-key
       REDIS_URL: redis://redis:6379
       # Markdown memory backend (default): local files under
       # MEMORY_MARKDOWN_DIR. Mounted on the persistent memory-data volume so
@@ -125,6 +119,8 @@ services:
       STT_URL: http://aman-stt:8001
     # Secrets and Postgres credentials (POSTGRES_USER, …).
     # `environment` above overrides any colliding keys from this file.
+    # TRUEFORGE_API_KEY is deliberately not overridden: set it here and the server and controller
+    # share it; unset, hosted mode falls back to a well-known placeholder and warns at startup.
     env_file:
       - path: packages/trueforge/.env
         required: true
@@ -204,7 +200,6 @@ services:
     environment:
       NODE_ENV: production
       STANDALONE: 'false'
-      TRUEFORGE_API_KEY: *api-key
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       # The controller is its own container, so localhost would be itself; the
