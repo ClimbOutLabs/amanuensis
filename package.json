@@ -36,6 +36,8 @@
     "postinstall": "pnpm --filter @truefoundry/trueforge-core build:gen",
     "pre-push": "node scripts/pre-push.mjs",
     "prepare": "husky || true",
+    "sandbox:slots": "pnpm --filter @truefoundry/trueforge sandbox:slots",
+    "test:sandbox-slot-agent": "cd ops/sandbox-slot/agent && go test ./test/...",
     "sdk:generate": "bash scripts/generate-sdk.sh",
     "sdk:check": "bash scripts/check-generated-contracts.sh",
     "sdk:types": "pnpm --filter @truefoundry/trueforge-sdk exec tsc --project ./tsconfig.cjs.json --emitDeclarationOnly --noCheck",
