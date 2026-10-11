@@ -332,9 +332,9 @@ func (c *Collector) checkRunsc() (string, Check) {
 		return "", fail(CheckRunsc, "runsc cannot run: "+err.Error())
 	}
 	if err := c.canary(); err != nil {
-		return version, fail(CheckRunsc, "runsc "+version+" cannot start a guest: "+err.Error())
+		return version, fail(CheckRunsc, version+" cannot start a guest: "+err.Error())
 	}
-	return version, pass(CheckRunsc, "runsc "+version+" started a guest")
+	return version, pass(CheckRunsc, version+" started a guest")
 }
 
 func (c *Collector) canary() error {
