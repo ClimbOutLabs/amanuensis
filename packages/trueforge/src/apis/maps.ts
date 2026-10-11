@@ -224,9 +224,14 @@ export async function readCappedBody({
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
+    const read: { done: boolean; value?: unknown } = await reader.read();
+    if (read.done) {
       break;
+    }
+    const value = read.value;
+    if (!(value instanceof Uint8Array)) {
+      await reader.cancel();
+      return null;
     }
     total += value.byteLength;
     if (total > maxBytes) {
