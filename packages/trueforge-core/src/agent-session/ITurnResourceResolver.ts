@@ -1,10 +1,10 @@
 import type { Logger } from 'winston';
 import type { AgentCapability } from '../core/capabilities/AgentCapability';
+import type { CompactionModel } from '../core/capabilities/builtins/ContextCompaction';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
 import type { ModelMessageEvent } from '../core/events/schema';
-import type { ILLM } from '../core/llm/ILLM';
 import type { SentinelHostContext } from '../core/permissions';
-import type { AgentDefinition, ModelParams } from '../core/runtime/AgentDefinition';
+import type { AgentDefinition } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
 import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
@@ -25,7 +25,7 @@ export interface ResolvedAgentDefinition {
    * of truth for "no override" and changing the main model carries an
    * inheriting compaction role with it.
    */
-  compactionModel?: { modelClient: ILLM; modelParams: ModelParams } | undefined;
+  compactionModel?: CompactionModel | undefined;
 }
 
 /**

@@ -6,6 +6,7 @@ import type {
 import {
   contextCompaction,
   CONVERSATION_REQUIRED_SUMMARY_SECTIONS,
+  resolveCompactionThresholdTokens,
 } from '../../../../src/core/capabilities/builtins/ContextCompaction';
 import { EventType } from '../../../../src/core/events/schema';
 import type { ILLM, LLMCreateParams } from '../../../../src/core/llm/ILLM';
@@ -382,5 +383,207 @@ describe('pre-flight guard with an explicit threshold above the model window', (
     expect(create).toHaveBeenCalledTimes(1);
     expect(events.some(event => event.type === EventType.AGENT_CONTEXT_OVERWRITE)).toBe(true);
     expect(events.some(event => event.type === InternalEventType.AGENT_DONE && event.status === 'error')).toBe(false);
+  });
+});
+
+const EMOJI = '\u{1F600}';
+
+function allText(messages: readonly ContextMessage[]): string {
+  return messages.map(message => JSON.stringify(message)).join('');
+}
+
+/** JSON.stringify escapes lone surrogates, so well-formedness has to be checked on the raw strings. */
+function rawStringsWellFormed(messages: readonly ContextMessage[]): boolean {
+  return messages.every(message => {
+    if (!('content' in message) || typeof message.content !== 'string') {
+      return true;
+    }
+    return message.content.isWellFormed();
+  });
+}
+
+describe('surrogate-safe cuts', () => {
+  it.each([280, 281, 282, 283])(
+    'keeps a cut tool-call argument well formed when emoji follow %i characters',
+    async prefix => {
+      const createNonStream = transcriptFaithfulSummarizer([]);
+      const args = JSON.stringify({ q: 'a'.repeat(prefix) + EMOJI.repeat(300) });
+      await collect(makeCapability({ createNonStream }), [
+        { role: 'user', content: 'Look it up.' },
+        { role: 'assistant', content: 'On it.', tool_calls: [toolCall({ id: 'c1', name: 'web_search', args })] },
+        { role: 'tool', tool_call_id: 'c1', content: 'done' },
+        ...turns('after', 4),
+      ]);
+
+      const transcript = requestTranscript(createNonStream);
+      expect(transcript).toContain(TRUNCATION_MARKER);
+      expect(transcript.isWellFormed()).toBe(true);
+    },
+  );
+
+  it.each([0, 1, 2, 3])('keeps a 200k emoji tool output well formed with a %i-character offset', async offset => {
+    const createNonStream = transcriptFaithfulSummarizer([]);
+    const output = 'a'.repeat(offset) + EMOJI.repeat(100_000);
+    await collect(makeCapability({ createNonStream, contextLength: 8_000 }), [
+      { role: 'user', content: 'Run it.' },
+      { role: 'assistant', content: null, tool_calls: [toolCall({ id: 'c1', name: 'run', args: '{}' })] },
+      { role: 'tool', tool_call_id: 'c1', content: output },
+      ...turns('after', 3, 100),
+    ]);
+
+    const transcript = requestTranscript(createNonStream);
+    expect(transcript).toContain(TRUNCATION_MARKER);
+    expect(transcript.isWellFormed()).toBe(true);
+  });
+
+  it.each([0, 1])('keeps the retained active request well formed with a %i-character offset', async offset => {
+    const createNonStream = jest.fn().mockRejectedValue(new Error('503'));
+    const events = await collect(
+      makeCapability({ createNonStream, thresholdTokens: 10_000, contextLength: 32_000 }),
+      [...turns('old', 4), { role: 'user', content: 'a'.repeat(offset) + EMOJI.repeat(100_000) }],
+      { promptTokens: 20_000 },
+    );
+
+    const persisted = overwriteContext(events);
+    expect(allText(persisted)).toContain(TRUNCATION_MARKER);
+    expect(rawStringsWellFormed(persisted)).toBe(true);
+  });
+});
+
+describe('truncation fallback keeps the active request', () => {
+  const HEAD = 'HEAD-OF-THE-ACTIVE-REQUEST';
+  const END = 'END-OF-THE-ACTIVE-REQUEST';
+  const hugeRequest = `${HEAD} ${'r'.repeat(200_000)} ${END}`;
+
+  it('keeps a cut copy of an oversized last user message when the summarizer rejects with 503', async () => {
+    const createNonStream = jest.fn().mockRejectedValue(new Error('503 Service Unavailable'));
+    const events = await collect(
+      makeCapability({ createNonStream, thresholdTokens: 10_000, contextLength: 32_000 }),
+      [...turns('history', 6), { role: 'user', content: hugeRequest }],
+      { promptTokens: 20_000 },
+    );
+
+    expect(compactionEvent(events).reason).toBe('summarizer_failed');
+    const persisted = overwriteContext(events);
+    const text = allText(persisted);
+    expect(text).toContain(HEAD);
+    expect(text).toContain(END);
+    expect(text).toContain(TRUNCATION_MARKER);
+    expect(text.length).toBeLessThan(20_000);
+    expect(estimateTokensForContextMessages(persisted).prompt_tokens).toBeLessThan(5_000);
+  });
+
+  it('keeps it when the request cannot fit the summarizer either', async () => {
+    const createNonStream = transcriptFaithfulSummarizer([]);
+    const events = await collect(makeCapability({ createNonStream, contextLength: 5_000 }), [
+      ...turns('history', 100, 2_000),
+      { role: 'user', content: hugeRequest },
+    ]);
+
+    expect(createNonStream).not.toHaveBeenCalled();
+    expect(compactionEvent(events).reason).toBe('request_too_large');
+    expect(allText(overwriteContext(events))).toContain(HEAD);
+  });
+
+  it('keeps the earlier summary, the latest user message and the latest tool exchange together', async () => {
+    const FACT = 'the deploy key is KEY-9931';
+    const first = await collect(makeCapability({ createNonStream: transcriptFaithfulSummarizer([FACT]) }), [
+      { role: 'user', content: `Remember: ${FACT}.` },
+      ...turns('early', 4),
+    ]);
+    const failing = jest.fn().mockRejectedValue(new Error('503'));
+    const events = await collect(
+      makeCapability({ createNonStream: failing, thresholdTokens: 10_000 }),
+      [
+        ...overwriteContext(first),
+        ...turns('mid', 3),
+        { role: 'user', content: 'Check the build.' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [toolCall({ id: 'b1', name: 'run_build', args: '{"t":"all"}' })],
+        },
+        { role: 'tool', tool_call_id: 'b1', content: `BUILD-HEAD ${'o'.repeat(200_000)}` },
+      ],
+      { promptTokens: 20_000 },
+    );
+
+    const persisted = overwriteContext(events);
+    const text = allText(persisted);
+    expect(text).toContain(FACT);
+    expect(text).toContain('Check the build.');
+    expect(text).toContain('run_build');
+    expect(text).toContain('BUILD-HEAD');
+    expect(text).toContain(TRUNCATION_MARKER);
+    expect(text.length).toBeLessThan(30_000);
+    // The call and its result stay paired and in order.
+    const roles = persisted.map(message => ('role' in message ? message.role : 'other'));
+    expect(roles.indexOf('assistant')).toBeGreaterThanOrEqual(0);
+    expect(roles.indexOf('tool')).toBe(roles.indexOf('assistant') + 1);
+  });
+});
+
+describe('threshold floor with a large output reserve', () => {
+  it('does not let the output reserve push the threshold to a tiny value', () => {
+    expect(
+      resolveCompactionThresholdTokens({
+        configuredThresholdTokens: undefined,
+        modelContextLength: 32_000,
+        modelParams: { max_tokens: 31_000 },
+      }),
+    ).toBe(4_000);
+  });
+
+  it('keeps the ratio on windows smaller than the floor', () => {
+    expect(
+      resolveCompactionThresholdTokens({
+        configuredThresholdTokens: undefined,
+        modelContextLength: 4_096,
+        modelParams: { max_tokens: 3_900 },
+      }),
+    ).toBe(3_276);
+  });
+});
+
+describe('separate compaction model', () => {
+  const olderTurns = (): ContextMessage[] => [
+    ...Array.from({ length: 10 }, (_, i): ContextMessage => ({
+      role: 'assistant',
+      content: `${'m'.repeat(40_000)}${String(i)}`,
+    })),
+    ...turns('tail', 2),
+  ];
+
+  function capabilityWith(input: { threadLength: number | undefined; compactionLength: number | undefined }) {
+    const createNonStream = transcriptFaithfulSummarizer([]);
+    const capability = contextCompaction({
+      logger: undefined,
+      definition: {
+        modelId: undefined,
+        configuredModels: undefined,
+        modelClient: makeMockILLM(),
+        modelProperties: { contextLength: input.threadLength },
+      },
+      compactionModel: {
+        modelClient: makeMockILLM({ createNonStream }),
+        modelParams: {},
+        modelProperties: { contextLength: input.compactionLength },
+      },
+      compactionThresholdTokens: 1,
+    });
+    return { capability, createNonStream };
+  }
+
+  it('bounds the request by the compaction model window, not the thread model window', async () => {
+    const { capability, createNonStream } = capabilityWith({ threadLength: 1_000_000, compactionLength: 8_000 });
+    await collect(capability, olderTurns());
+    expect(requestChars(createNonStream) / 4).toBeLessThanOrEqual(8_000 - 4_096 - 512);
+    expect(requestTranscript(createNonStream)).toContain(TRUNCATION_MARKER);
+  });
+
+  it('does not cut for a small thread model when the compaction model window is large', async () => {
+    const { capability, createNonStream } = capabilityWith({ threadLength: 8_000, compactionLength: 1_000_000 });
+    await collect(capability, olderTurns());
+    expect(requestTranscript(createNonStream)).not.toContain(TRUNCATION_MARKER);
   });
 });

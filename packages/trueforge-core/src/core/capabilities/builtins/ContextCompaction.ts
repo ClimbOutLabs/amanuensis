@@ -53,6 +53,15 @@ export const MAX_CONSECUTIVE_COMPACTION_SKIPS = 3;
 /** Unused: retained for API compatibility. The truncation fallback supersedes the skip circuit breaker. */
 export const COMPACTION_BACKOFF_TOKEN_DELTA = 10_000;
 export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
+
+/** A separately configured summarizing model; its own context length bounds the summarization request. */
+export interface CompactionModel {
+  modelClient: ILLM;
+  modelParams: ModelParams;
+  modelProperties?: AgentDefinition['modelProperties'];
+}
+/** Lowest threshold a large output reserve can push the ratio path to; below it compaction would fire every turn. */
+const MIN_COMPACTION_THRESHOLD_TOKENS = 4_000;
 /**
  * Token budget held back from the compaction input threshold. Covers additive
  * overhead on top of the estimated request: the provider-added BOS token,
@@ -110,8 +119,8 @@ export function resolveMaxOutputTokens(modelParams: AgentDefinition['modelParams
 
 /**
  * Resolves the compaction trigger threshold: an explicit configured value wins;
- * otherwise a ratio of the model's context length (minus a reserved output budget
- * when known); otherwise the fixed default. Additive threshold-resolution helper
+ * otherwise 80% of the model's context length, capped so the input plus the configured
+ * max output tokens fit (never below a small floor); otherwise the fixed default. Additive threshold-resolution helper
  * layered on top of the compaction logic below; it does not change how compaction
  * itself behaves once a threshold is known.
  */
@@ -129,10 +138,10 @@ export function resolveCompactionThresholdTokens(input: {
     if (maxOutputTokens !== undefined) {
       const inputBudget = Math.floor(input.modelContextLength - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN);
       if (inputBudget > 0) {
-        return Math.min(ratioThreshold, inputBudget);
+        return Math.min(ratioThreshold, Math.max(inputBudget, MIN_COMPACTION_THRESHOLD_TOKENS));
       }
     }
-    // An unusable output reservation must not turn compaction into an always-on loop.
+    // An output reservation that leaves no input room must not turn compaction into an always-on loop.
     return ratioThreshold;
   }
   return DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS;
@@ -341,6 +350,18 @@ interface TranscriptEntry {
   suffix: string;
 }
 
+/** End index for a head slice that does not split a surrogate pair. */
+function wellFormedHeadEnd(text: string, end: number): number {
+  const previous = text.charCodeAt(end - 1);
+  return end > 0 && end < text.length && previous >= 0xd800 && previous <= 0xdbff ? end - 1 : end;
+}
+
+/** Start index for a tail slice that does not split a surrogate pair. */
+function wellFormedTailStart(text: string, start: number): number {
+  const unit = text.charCodeAt(start);
+  return start > 0 && start < text.length && unit >= 0xdc00 && unit <= 0xdfff ? start + 1 : start;
+}
+
 /** Keeps the head and the end of `text` within `maxChars`, marking the omission. */
 function truncateForTranscript(text: string, maxChars: number): string {
   if (text.length <= maxChars) {
@@ -348,11 +369,9 @@ function truncateForTranscript(text: string, maxChars: number): string {
   }
   const kept = Math.max(maxChars - TRUNCATION_MARKER_RESERVE_CHARS, 0);
   const headChars = Math.ceil(kept * 0.7);
-  const tailChars = kept - headChars;
-  return (
-    `${text.slice(0, headChars)}\n[... ${String(text.length - kept)} characters truncated by host ...]\n` +
-    (tailChars > 0 ? text.slice(text.length - tailChars) : '')
-  );
+  const headEnd = wellFormedHeadEnd(text, headChars);
+  const tailStart = wellFormedTailStart(text, text.length - (kept - headChars));
+  return `${text.slice(0, headEnd)}\n[... ${String(tailStart - headEnd)} characters truncated by host ...]\n${text.slice(tailStart)}`;
 }
 
 function compactToolArguments(rawArguments: string): string {
@@ -387,6 +406,108 @@ function compactionSummaryText(message: ContextMessage): string | undefined {
 
 function latestCompactionSummaryMessage(context: readonly ContextMessage[]): ContextMessage | undefined {
   return context.findLast(message => compactionSummaryText(message) !== undefined);
+}
+
+/** Tool-call arguments must stay valid JSON, so an oversized value is wrapped rather than cut mid-string. */
+function boundToolCallArguments(rawArguments: string, maxChars: number): string {
+  return rawArguments.length <= maxChars
+    ? rawArguments
+    : JSON.stringify({ truncated_by_host: truncateForTranscript(rawArguments, maxChars) });
+}
+
+/**
+ * Bounded copies of what the model is working on right now, for the truncation fallback: the
+ * latest genuine user message and the latest tool exchange (the call and its results), each
+ * absent from `tail`. Oversized text is cut with a marker so the active request is never lost
+ * and never alone overflows the context. Returned in conversation order.
+ */
+function activeRequestMessages(input: {
+  context: readonly ContextMessage[];
+  tail: ReadonlySet<ContextMessage>;
+  maxChars: number;
+}): ContextMessage[] {
+  const { context, tail, maxChars } = input;
+  const keep = new Set<number>();
+  const userIndex = context.findLastIndex(
+    message => isLLMContextMessage(message) && message.role === 'user' && !isInternalSystemMessage(message),
+  );
+  if (userIndex !== -1) {
+    keep.add(userIndex);
+  }
+  const assistantIndex = context.findLastIndex(
+    message => isLLMContextMessage(message) && message.role === 'assistant' && (message.tool_calls?.length ?? 0) > 0,
+  );
+  const assistant = context[assistantIndex];
+  const callIds = new Set<string>();
+  if (assistant !== undefined && isLLMContextMessage(assistant) && assistant.role === 'assistant') {
+    keep.add(assistantIndex);
+    for (const call of assistant.tool_calls ?? []) {
+      callIds.add(call.id);
+    }
+    context.forEach((message, index) => {
+      if (
+        index > assistantIndex &&
+        isLLMContextMessage(message) &&
+        message.role === 'tool' &&
+        callIds.has(message.tool_call_id)
+      ) {
+        keep.add(index);
+      }
+    });
+  }
+  const resultCount = Math.max(callIds.size, 1);
+  const resultChars = Math.max(Math.floor(maxChars / resultCount), MIN_TRANSCRIPT_ENTRY_CHARS);
+  const retained: ContextMessage[] = [];
+  [...keep]
+    .sort((a, b) => a - b)
+    .forEach(index => {
+      const message = context[index];
+      if (message === undefined || tail.has(message) || !isLLMContextMessage(message)) {
+        return;
+      }
+      switch (message.role) {
+        case 'user':
+          retained.push({
+            ...message,
+            content:
+              typeof message.content === 'string'
+                ? truncateForTranscript(message.content, maxChars)
+                : message.content.map(part =>
+                    part.type === 'text'
+                      ? { ...part, text: truncateForTranscript(part.text, maxChars) }
+                      : {
+                          type: 'text' as const,
+                          text: `[user attached a ${part.type} here, no longer available after truncation]`,
+                        },
+                  ),
+          });
+          break;
+        case 'assistant':
+          retained.push({
+            ...message,
+            content:
+              message.content === null || message.content === undefined
+                ? message.content
+                : truncateForTranscript(formatAssistantContent(message.content), resultChars),
+            ...(message.tool_calls === undefined
+              ? {}
+              : {
+                  tool_calls: message.tool_calls.map(call => ({
+                    ...call,
+                    function: {
+                      ...call.function,
+                      arguments: boundToolCallArguments(call.function.arguments, resultChars),
+                    },
+                  })),
+                }),
+          });
+          break;
+        case 'tool':
+          retained.push({ ...message, content: truncateForTranscript(message.content, resultChars) });
+          break;
+      }
+    });
+  return retained;
 }
 
 function transcriptEntries(context: ContextMessage[]): TranscriptEntry[] {
@@ -703,7 +824,7 @@ function replaceDoneSoFarSection(summary: string, touchedPaths: readonly string[
   const boundedModelSummary =
     modelSummary.length <= MAX_DONE_SO_FAR_SUMMARY_CHARS
       ? modelSummary || 'none'
-      : `${modelSummary.slice(0, MAX_DONE_SO_FAR_SUMMARY_CHARS)}\n[completed-work summary truncated by host]`;
+      : `${modelSummary.slice(0, wellFormedHeadEnd(modelSummary, MAX_DONE_SO_FAR_SUMMARY_CHARS))}\n[completed-work summary truncated by host]`;
   const paths = touchedPaths.length === 0 ? '- none' : touchedPaths.map(path => `- ${path}`).join('\n');
   const ledger = overflowed
     ? `${HOST_TOUCHED_PATHS_HEADING}\nstatus: truncated\noverflowed: true\nretained_path_count: ${String(touchedPaths.length)}\nretained_path_limit: ${String(MAX_COMPACTION_TOUCHED_PATHS)}\ntotal_observed_path_count: unknown (greater than ${String(MAX_COMPACTION_TOUCHED_PATHS)})\n${paths}\nAdditional host-observed paths were omitted after the bounded ledger reached its limit.`
@@ -945,6 +1066,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
   private modelParams: ModelParams | undefined;
   private compactionThresholdTokens: number;
   private readonly modelContextLength: number | undefined;
+  private readonly summarizerContextLength: number | undefined;
   private readonly checklist: TaskChecklistAccess | undefined;
   private readonly checklistState: TaskChecklistRequestState | undefined;
   private readonly boundRepository: BoundRepository | undefined;
@@ -956,8 +1078,10 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     modelClient: ILLM;
     modelParams: ModelParams | undefined;
     compactionThresholdTokens: number;
-    /** Sizes the summarizer request; unknown falls back to the larger of the threshold and the default. */
+    /** The thread model's context length; sizes the retained tail. */
     modelContextLength?: number | undefined;
+    /** The summarizing model's context length; bounds its request. Unknown falls back to the larger of the threshold and the default. */
+    summarizerContextLength?: number | undefined;
     checklist?: TaskChecklistAccess | undefined;
     checklistState?: TaskChecklistRequestState | undefined;
     boundRepository?: BoundRepository | undefined;
@@ -967,6 +1091,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
     this.modelParams = input.modelParams;
     this.compactionThresholdTokens = input.compactionThresholdTokens;
     this.modelContextLength = input.modelContextLength;
+    this.summarizerContextLength = input.summarizerContextLength;
     this.checklist = input.checklist;
     this.checklistState = input.checklistState;
     this.boundRepository = input.boundRepository;
@@ -1061,9 +1186,9 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
   /** Characters the transcript may take so the whole summarizer request fits the model context. */
   private transcriptBudgetChars(systemContent: string): number {
     const inputBudgetTokens =
-      this.modelContextLength === undefined
+      this.summarizerContextLength === undefined
         ? Math.max(this.compactionThresholdTokens, DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS)
-        : this.modelContextLength - boundedCompactionOutputTokens(this.modelParams) - TOKEN_BUDGET_SAFETY_MARGIN;
+        : this.summarizerContextLength - boundedCompactionOutputTokens(this.modelParams) - TOKEN_BUDGET_SAFETY_MARGIN;
     const transcriptTokens =
       inputBudgetTokens - estimateTokensForString(systemContent) - SUMMARIZER_REQUEST_OVERHEAD_TOKENS;
     return Math.floor(transcriptTokens * CHARS_PER_TOKEN);
@@ -1071,13 +1196,16 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
 
   /**
    * Deterministic recovery when no usable summary exists: drop the old turns but keep system
-   * messages, the latest earlier summary and the recent tail, so the context shrinks without
-   * ever losing what an earlier compaction already preserved.
+   * messages, the latest earlier summary, the latest user message and tool exchange (cut if
+   * oversized) and the recent tail, so the context shrinks without losing the active request
+   * or what an earlier compaction already preserved.
    */
   private *truncationFallback(input: {
     mode: CompactionSessionMode;
     context: readonly ContextMessage[];
     recentTail: readonly ContextMessage[];
+    /** Character budget for the retained latest user message and tool exchange. */
+    activeRequestChars: number;
     contextTokens: number;
     reason: NonNullable<ContextCompactionEvent['reason']>;
     /** Usage of a summarizer call that completed but was discarded; absent when no call completed. */
@@ -1100,6 +1228,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
       ...systemMessages,
       ...keptSummary,
       truncationNotice,
+      ...activeRequestMessages({ context: input.context, tail: tailSet, maxChars: input.activeRequestChars }),
       ...input.recentTail,
     ];
     const tokensAfterTruncation = estimateTokensForContextMessages(truncatedContext).prompt_tokens;
@@ -1196,6 +1325,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
             Math.floor(this.modelContextLength * DEFAULT_CONTEXT_COMPACTION_RATIO),
           );
     const tailTokenBudget = Math.floor(tailBasisTokens * COMPACTION_RETAINED_TAIL_FRACTION);
+    const activeRequestChars = Math.max(tailTokenBudget, 100) * CHARS_PER_TOKEN;
     // A last message larger than the tail budget leaves the tail empty: it is then summarized from
     // the transcript (cut there if oversized) and the summary's last_request carries it forward.
     const { older: olderContext, tail: recentTail } = splitContextForCompaction(execution.context, tailTokenBudget);
@@ -1241,6 +1371,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
         mode,
         context: execution.context,
         recentTail,
+        activeRequestChars,
         contextTokens,
         reason: 'request_too_large',
         discardedUsage: undefined,
@@ -1292,6 +1423,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
         mode,
         context: execution.context,
         recentTail,
+        activeRequestChars,
         contextTokens,
         reason: 'summarizer_failed',
         discardedUsage: undefined,
@@ -1356,6 +1488,7 @@ export class ContextCompaction implements PreLLMAgentContextProcessor {
         mode,
         context: execution.context,
         recentTail,
+        activeRequestChars,
         contextTokens,
         reason: validationReason,
         discardedUsage: response.usage,
@@ -1408,7 +1541,7 @@ export function contextCompaction(options: {
    * the thread's own model — so it always tracks the thread's model, including
    * across a later change to it.
    */
-  compactionModel?: { modelClient: ILLM; modelParams: ModelParams } | undefined;
+  compactionModel?: CompactionModel | undefined;
   compactionThresholdTokens?: number | undefined;
   checklist?: TaskChecklistAccess | undefined;
   checklistState?: TaskChecklistRequestState | undefined;
@@ -1425,6 +1558,7 @@ export function contextCompaction(options: {
     modelParams: options.compactionModel?.modelParams ?? options.definition.modelParams,
     compactionThresholdTokens: threshold,
     modelContextLength: options.definition.modelProperties?.contextLength,
+    summarizerContextLength: (options.compactionModel ?? options.definition).modelProperties?.contextLength,
     checklist: options.checklist,
     checklistState: options.checklistState,
     logger: options.logger,

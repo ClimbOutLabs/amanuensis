@@ -132,7 +132,7 @@ const CompactionSettingsSchema = z
   })
   .strict()
   .describe(
-    'Without an explicit trigger, compaction starts at 80% of the model context length, less any reserved output, or at 50000 tokens when the context length is unknown.',
+    'Without an explicit trigger, compaction starts at 80% of the model context length, lowered so input plus the configured max output tokens fit (never below 4000), or at 50000 tokens when the context length is unknown.',
   )
   .openapi('CompactionConfig');
 

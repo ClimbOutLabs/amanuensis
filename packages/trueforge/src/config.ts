@@ -751,8 +751,9 @@ export interface SharedServerConfiguration {
   /**
    * Instance-wide context size in tokens that triggers compaction, used whenever an agent spec
    * does not set `config.context_management.compaction.trigger` itself; an explicit spec value
-   * always wins. Unset leaves the threshold to the model's context length (80% of it), with a
-   * fixed 50000-token fallback when that length is unknown.
+   * always wins. Unset leaves the threshold to the model's context length (80% of it, lowered so
+   * input plus the configured max output tokens fit, never below 4000), with a fixed 50000-token
+   * fallback when that length is unknown.
    * Env: `CONTEXT_COMPACTION_THRESHOLD_TOKENS`.
    */
   CONTEXT_COMPACTION_THRESHOLD_TOKENS: number | undefined;

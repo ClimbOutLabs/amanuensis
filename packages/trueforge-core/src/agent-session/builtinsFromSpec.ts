@@ -5,7 +5,7 @@
 import type { Logger } from 'winston';
 import type { AgentCapability } from '../core/capabilities/AgentCapability';
 import { askUserQuestion } from '../core/capabilities/builtins/AskUserQuestion';
-import { contextCompaction } from '../core/capabilities/builtins/ContextCompaction';
+import { contextCompaction, type CompactionModel } from '../core/capabilities/builtins/ContextCompaction';
 import { currentDateTime } from '../core/capabilities/builtins/CurrentDateTime';
 import { documentCapability } from '../core/capabilities/builtins/DocumentTools';
 import { dynamicSubAgents } from '../core/capabilities/builtins/DynamicSubAgents';
@@ -18,8 +18,7 @@ import {
   type TaskChecklistAccess,
 } from '../core/capabilities/builtins/TaskChecklist';
 import { webSearchRendering } from '../core/capabilities/builtins/WebSearchRendering';
-import type { ILLM } from '../core/llm/ILLM';
-import type { AgentDefinition, ModelParams } from '../core/runtime/AgentDefinition';
+import type { AgentDefinition } from '../core/runtime/AgentDefinition';
 import type { BoundRepository, Sandbox } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import type { AgentSpec } from './schemas/agentSpec';
@@ -32,7 +31,7 @@ export function builtinsFromSpec(input: {
    * Undefined means compaction inherits definition.modelClient/modelParams —
    * the thread's own model.
    */
-  compactionModel: { modelClient: ILLM; modelParams: ModelParams } | undefined;
+  compactionModel: CompactionModel | undefined;
   /** Root thread only — child threads omit interactive builtins. */
   isChild: boolean;
   sandbox: Sandbox | undefined;
