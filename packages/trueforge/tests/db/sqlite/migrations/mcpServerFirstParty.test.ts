@@ -1,5 +1,5 @@
 /**
- * `20261010_000004_mcp_server_first_party` adds the server-owned trust marker. Every connector
+ * `20261010_000007_mcp_server_first_party` adds the server-owned trust marker. Every connector
  * stored before it existed must come out untrusted, and rolling it back must keep the rows.
  */
 import { promises as fs } from 'node:fs';
@@ -12,7 +12,7 @@ import { FileMigrationProvider, Migrator } from 'kysely/migration';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import type { Database } from '../../../../src/db/sqlite/types';
 
-const PREVIOUS_MIGRATION = '20261010_000003_mcp_tool_grant';
+const PREVIOUS_MIGRATION = '20261010_000006_mcp_tool_grant';
 
 async function createMigrator(db: Kysely<Database>): Promise<Migrator> {
   return new Migrator({
@@ -31,7 +31,7 @@ async function columnNames(db: Kysely<Database>): Promise<string[]> {
   return rows.map(row => row.name);
 }
 
-describe('20261010_000004_mcp_server_first_party migration', () => {
+describe('20261010_000007_mcp_server_first_party migration', () => {
   let tempDir: string;
   let db: Kysely<Database>;
 
