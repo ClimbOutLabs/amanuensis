@@ -5,324 +5,257 @@ import { TrueForge } from "../../../src/Client";
 import { mockServerPool } from "../../mock-server/MockServerPool";
 
 describe("SandboxProvidersClient", () => {
+    
     test("get (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {
-            data: {
-                manifest: {
-                    api_url: "api_url",
-                    auth: { api_key: "api_key" },
-                    auto_archive_interval_in_minutes: 1,
-                    auto_delete_interval_in_minutes: 1,
-                    auto_stop_interval_in_minutes: 1,
-                    exec_timeout_ms: 1,
-                    type: "daytona",
-                },
-                status: "pending",
-                status_reason: "status_reason",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "manifest" : { "api_url" : "api_url" , "auth" : { "api_key" : "api_key" } , "auto_archive_interval_in_minutes" : 1 , "auto_delete_interval_in_minutes" : 1 , "auto_stop_interval_in_minutes" : 1 , "exec_timeout_ms" : 1 , "type" : "daytona" } , "status" : "pending" , "status_reason" : "status_reason" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/settings/sandbox-providers")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/settings/sandbox-providers").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.settings.sandboxProviders.get();
-        expect(response).toEqual({
-            data: {
-                manifest: {
-                    apiUrl: "api_url",
-                    auth: {
-                        apiKey: "api_key",
-                    },
-                    autoArchiveIntervalInMinutes: 1,
-                    autoDeleteIntervalInMinutes: 1,
-                    autoStopIntervalInMinutes: 1,
-                    execTimeoutMs: 1,
-                    type: "daytona",
-                },
-                status: "pending",
-                statusReason: "status_reason",
+        
+                        
+                                const response = await client.settings.sandboxProviders.get();
+                                expect(response).toEqual({
+    data: {
+        manifest: {
+            apiUrl: "api_url",
+            auth: {
+                apiKey: "api_key"
             },
-        });
+            autoArchiveIntervalInMinutes: 1,
+            autoDeleteIntervalInMinutes: 1,
+            autoStopIntervalInMinutes: 1,
+            execTimeoutMs: 1,
+            type: "daytona"
+        },
+        status: "pending",
+        statusReason: "status_reason"
+    }
+});
+                              
+                    
     });
-
+          
     test("get (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/settings/sandbox-providers")
-            .respondWith()
-            .statusCode(404)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/settings/sandbox-providers").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.sandboxProviders.get();
-        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        
+            await expect(async () => {
+                return await client.settings.sandboxProviders.get()
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-
+          
     test("create_or_update (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            manifest: {
-                auth: { api_key: "api_key" },
-                auto_archive_interval_in_minutes: 1,
-                auto_delete_interval_in_minutes: 1,
-                auto_stop_interval_in_minutes: 1,
-                exec_timeout_ms: 1,
-                type: "daytona",
-            },
-        };
-        const rawResponseBody = {
-            data: {
-                manifest: {
-                    api_url: "api_url",
-                    auth: { api_key: "api_key" },
-                    auto_archive_interval_in_minutes: 1,
-                    auto_delete_interval_in_minutes: 1,
-                    auto_stop_interval_in_minutes: 1,
-                    exec_timeout_ms: 1,
-                    type: "daytona",
-                },
-                status: "pending",
-                status_reason: "status_reason",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "manifest" : { "auth" : { "api_key" : "api_key" } , "auto_archive_interval_in_minutes" : 1 , "auto_delete_interval_in_minutes" : 1 , "auto_stop_interval_in_minutes" : 1 , "exec_timeout_ms" : 1 , "type" : "daytona" } };
+        const rawResponseBody = { "data" : { "manifest" : { "api_url" : "api_url" , "auth" : { "api_key" : "api_key" } , "auto_archive_interval_in_minutes" : 1 , "auto_delete_interval_in_minutes" : 1 , "auto_stop_interval_in_minutes" : 1 , "exec_timeout_ms" : 1 , "type" : "daytona" } , "status" : "pending" , "status_reason" : "status_reason" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/settings/sandbox-providers")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/settings/sandbox-providers").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.settings.sandboxProviders.createOrUpdate({
-            manifest: {
-                auth: {
-                    apiKey: "api_key",
-                },
-                autoArchiveIntervalInMinutes: 1,
-                autoDeleteIntervalInMinutes: 1,
-                autoStopIntervalInMinutes: 1,
-                execTimeoutMs: 1,
-                type: "daytona",
+        
+                        
+                                const response = await client.settings.sandboxProviders.createOrUpdate({
+    manifest: {
+        auth: {
+            apiKey: "api_key"
+        },
+        autoArchiveIntervalInMinutes: 1,
+        autoDeleteIntervalInMinutes: 1,
+        autoStopIntervalInMinutes: 1,
+        execTimeoutMs: 1,
+        type: "daytona"
+    }
+});
+                                expect(response).toEqual({
+    data: {
+        manifest: {
+            apiUrl: "api_url",
+            auth: {
+                apiKey: "api_key"
             },
-        });
-        expect(response).toEqual({
-            data: {
-                manifest: {
-                    apiUrl: "api_url",
-                    auth: {
-                        apiKey: "api_key",
-                    },
-                    autoArchiveIntervalInMinutes: 1,
-                    autoDeleteIntervalInMinutes: 1,
-                    autoStopIntervalInMinutes: 1,
-                    execTimeoutMs: 1,
-                    type: "daytona",
-                },
-                status: "pending",
-                statusReason: "status_reason",
-            },
-        });
+            autoArchiveIntervalInMinutes: 1,
+            autoDeleteIntervalInMinutes: 1,
+            autoStopIntervalInMinutes: 1,
+            execTimeoutMs: 1,
+            type: "daytona"
+        },
+        status: "pending",
+        statusReason: "status_reason"
+    }
+});
+                              
+                    
     });
-
+          
     test("create_or_update (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            manifest: {
-                auth: { api_key: "x" },
-                auto_archive_interval_in_minutes: 1,
-                auto_delete_interval_in_minutes: 1,
-                auto_stop_interval_in_minutes: 1,
-                exec_timeout_ms: 1,
-                type: "daytona",
-            },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "manifest" : { "auth" : { "api_key" : "x" } , "auto_archive_interval_in_minutes" : 1 , "auto_delete_interval_in_minutes" : 1 , "auto_stop_interval_in_minutes" : 1 , "exec_timeout_ms" : 1 , "type" : "daytona" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/settings/sandbox-providers")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(400)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/settings/sandbox-providers").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.sandboxProviders.createOrUpdate({
-                manifest: {
-                    auth: {
-                        apiKey: "x",
-                    },
-                    autoArchiveIntervalInMinutes: 1,
-                    autoDeleteIntervalInMinutes: 1,
-                    autoStopIntervalInMinutes: 1,
-                    execTimeoutMs: 1,
-                    type: "daytona",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        
+            await expect(async () => {
+                return await client.settings.sandboxProviders.createOrUpdate({
+    manifest: {
+        auth: {
+            apiKey: "x"
+        },
+        autoArchiveIntervalInMinutes: 1,
+        autoDeleteIntervalInMinutes: 1,
+        autoStopIntervalInMinutes: 1,
+        execTimeoutMs: 1,
+        type: "daytona"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-
+          
     test("create_or_update (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            manifest: {
-                auth: { api_key: "x" },
-                auto_archive_interval_in_minutes: 1,
-                auto_delete_interval_in_minutes: 1,
-                auto_stop_interval_in_minutes: 1,
-                exec_timeout_ms: 1,
-                type: "daytona",
-            },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "manifest" : { "auth" : { "api_key" : "x" } , "auto_archive_interval_in_minutes" : 1 , "auto_delete_interval_in_minutes" : 1 , "auto_stop_interval_in_minutes" : 1 , "exec_timeout_ms" : 1 , "type" : "daytona" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/settings/sandbox-providers")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(422)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/settings/sandbox-providers").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(422).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.sandboxProviders.createOrUpdate({
-                manifest: {
-                    auth: {
-                        apiKey: "x",
-                    },
-                    autoArchiveIntervalInMinutes: 1,
-                    autoDeleteIntervalInMinutes: 1,
-                    autoStopIntervalInMinutes: 1,
-                    execTimeoutMs: 1,
-                    type: "daytona",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+        
+            await expect(async () => {
+                return await client.settings.sandboxProviders.createOrUpdate({
+    manifest: {
+        auth: {
+            apiKey: "x"
+        },
+        autoArchiveIntervalInMinutes: 1,
+        autoDeleteIntervalInMinutes: 1,
+        autoStopIntervalInMinutes: 1,
+        execTimeoutMs: 1,
+        type: "daytona"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
     });
-
+          
     test("upgrade_image (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {
-            data: {
-                manifest: {
-                    api_url: "api_url",
-                    auth: { api_key: "api_key" },
-                    auto_archive_interval_in_minutes: 1,
-                    auto_delete_interval_in_minutes: 1,
-                    auto_stop_interval_in_minutes: 1,
-                    exec_timeout_ms: 1,
-                    type: "daytona",
-                },
-                status: "pending",
-                status_reason: "status_reason",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "manifest" : { "api_url" : "api_url" , "auth" : { "api_key" : "api_key" } , "auto_archive_interval_in_minutes" : 1 , "auto_delete_interval_in_minutes" : 1 , "auto_stop_interval_in_minutes" : 1 , "exec_timeout_ms" : 1 , "type" : "daytona" } , "status" : "pending" , "status_reason" : "status_reason" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/settings/sandbox-providers/provider_id/upgrade-image")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/settings/sandbox-providers/provider_id/upgrade-image").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.settings.sandboxProviders.upgradeImage("provider_id");
-        expect(response).toEqual({
-            data: {
-                manifest: {
-                    apiUrl: "api_url",
-                    auth: {
-                        apiKey: "api_key",
-                    },
-                    autoArchiveIntervalInMinutes: 1,
-                    autoDeleteIntervalInMinutes: 1,
-                    autoStopIntervalInMinutes: 1,
-                    execTimeoutMs: 1,
-                    type: "daytona",
-                },
-                status: "pending",
-                statusReason: "status_reason",
+        
+                        
+                                const response = await client.settings.sandboxProviders.upgradeImage("provider_id");
+                                expect(response).toEqual({
+    data: {
+        manifest: {
+            apiUrl: "api_url",
+            auth: {
+                apiKey: "api_key"
             },
-        });
+            autoArchiveIntervalInMinutes: 1,
+            autoDeleteIntervalInMinutes: 1,
+            autoStopIntervalInMinutes: 1,
+            execTimeoutMs: 1,
+            type: "daytona"
+        },
+        status: "pending",
+        statusReason: "status_reason"
+    }
+});
+                              
+                    
     });
-
+          
     test("upgrade_image (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/settings/sandbox-providers/provider_id/upgrade-image")
-            .respondWith()
-            .statusCode(404)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/settings/sandbox-providers/provider_id/upgrade-image").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.sandboxProviders.upgradeImage("provider_id");
-        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        
+            await expect(async () => {
+                return await client.settings.sandboxProviders.upgradeImage("provider_id")
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-
+          
     test("upgrade_image (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/settings/sandbox-providers/provider_id/upgrade-image")
-            .respondWith()
-            .statusCode(409)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/settings/sandbox-providers/provider_id/upgrade-image").respondWith()
+            .statusCode(409).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.sandboxProviders.upgradeImage("provider_id");
-        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        
+            await expect(async () => {
+                return await client.settings.sandboxProviders.upgradeImage("provider_id")
+            }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-
+          
     test("upgrade_image (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/settings/sandbox-providers/provider_id/upgrade-image")
-            .respondWith()
-            .statusCode(422)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/settings/sandbox-providers/provider_id/upgrade-image").respondWith()
+            .statusCode(422).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.sandboxProviders.upgradeImage("provider_id");
-        }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+        
+            await expect(async () => {
+                return await client.settings.sandboxProviders.upgradeImage("provider_id")
+            }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
     });
+          
 });

@@ -2,8 +2,8 @@
 
 /** Session metrics chart to return. */
 export const SessionMetricsChartName = {
-    SessionsOverTime: "sessions_over_time",
-    SessionsCostOverTime: "sessions_cost_over_time",
-    TurnsOverTime: "turns_over_time",
-} as const;
-export type SessionMetricsChartName = (typeof SessionMetricsChartName)[keyof typeof SessionMetricsChartName];
+        SessionsOverTime: "sessions_over_time",
+        SessionsCostOverTime: "sessions_cost_over_time",
+        TurnsOverTime: "turns_over_time"
+    } as const;
+export type SessionMetricsChartName = typeof SessionMetricsChartName[keyof typeof SessionMetricsChartName];

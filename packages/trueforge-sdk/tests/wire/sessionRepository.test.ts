@@ -5,325 +5,317 @@ import { TrueForge } from "../../src/Client";
 import { mockServerPool } from "../mock-server/MockServerPool";
 
 describe("SessionRepositoryClient", () => {
+    
     test("get (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {
-            data: { repository_id: "repository_id", session_id: "session_id", workspace_cwd: "workspace_cwd" },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "repository_id" : "repository_id" , "session_id" : "session_id" , "workspace_cwd" : "workspace_cwd" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/sessions/session_id/repository")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/sessions/session_id/repository").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.sessionRepository.get("session_id");
-        expect(response).toEqual({
-            data: {
-                repositoryId: "repository_id",
-                sessionId: "session_id",
-                workspaceCwd: "workspace_cwd",
-            },
-        });
+        
+                        
+                                const response = await client.sessionRepository.get("session_id");
+                                expect(response).toEqual({
+    data: {
+        repositoryId: "repository_id",
+        sessionId: "session_id",
+        workspaceCwd: "workspace_cwd"
+    }
+});
+                              
+                    
     });
-
+          
     test("get (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/sessions/session_id/repository")
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/sessions/session_id/repository").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.sessionRepository.get("session_id");
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.sessionRepository.get("session_id")
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("get (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/sessions/session_id/repository")
-            .respondWith()
-            .statusCode(403)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/sessions/session_id/repository").respondWith()
+            .statusCode(403).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.sessionRepository.get("session_id");
-        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+        
+            await expect(async () => {
+                return await client.sessionRepository.get("session_id")
+            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
-
+          
     test("get (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/sessions/session_id/repository")
-            .respondWith()
-            .statusCode(404)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/sessions/session_id/repository").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.sessionRepository.get("session_id");
-        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        
+            await expect(async () => {
+                return await client.sessionRepository.get("session_id")
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-
+          
     test("create_or_update (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { repository_id: "repository_id", workspace_cwd: "workspace_cwd" };
-        const rawResponseBody = {
-            data: { repository_id: "repository_id", session_id: "session_id", workspace_cwd: "workspace_cwd" },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "repository_id" : "repository_id" , "workspace_cwd" : "workspace_cwd" };
+        const rawResponseBody = { "data" : { "repository_id" : "repository_id" , "session_id" : "session_id" , "workspace_cwd" : "workspace_cwd" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/sessions/session_id/repository")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/sessions/session_id/repository").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.sessionRepository.createOrUpdate("session_id", {
-            repositoryId: "repository_id",
-            workspaceCwd: "workspace_cwd",
-        });
-        expect(response).toEqual({
-            data: {
-                repositoryId: "repository_id",
-                sessionId: "session_id",
-                workspaceCwd: "workspace_cwd",
-            },
-        });
+        
+                        
+                                const response = await client.sessionRepository.createOrUpdate("session_id", {
+    repositoryId: "repository_id",
+    workspaceCwd: "workspace_cwd"
+});
+                                expect(response).toEqual({
+    data: {
+        repositoryId: "repository_id",
+        sessionId: "session_id",
+        workspaceCwd: "workspace_cwd"
+    }
+});
+                              
+                    
     });
-
+          
     test("create_or_update (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { repository_id: "x", workspace_cwd: "x" };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "repository_id" : "x" , "workspace_cwd" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/sessions/session_id/repository")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(400)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/sessions/session_id/repository").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.sessionRepository.createOrUpdate("session_id", {
-                repositoryId: "x",
-                workspaceCwd: "x",
-            });
-        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        
+            await expect(async () => {
+                return await client.sessionRepository.createOrUpdate("session_id", {
+    repositoryId: "x",
+    workspaceCwd: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-
+          
     test("create_or_update (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { repository_id: "x", workspace_cwd: "x" };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "repository_id" : "x" , "workspace_cwd" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/sessions/session_id/repository")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/sessions/session_id/repository").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.sessionRepository.createOrUpdate("session_id", {
-                repositoryId: "x",
-                workspaceCwd: "x",
-            });
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.sessionRepository.createOrUpdate("session_id", {
+    repositoryId: "x",
+    workspaceCwd: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("create_or_update (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { repository_id: "x", workspace_cwd: "x" };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "repository_id" : "x" , "workspace_cwd" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/sessions/session_id/repository")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(403)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/sessions/session_id/repository").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(403).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.sessionRepository.createOrUpdate("session_id", {
-                repositoryId: "x",
-                workspaceCwd: "x",
-            });
-        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+        
+            await expect(async () => {
+                return await client.sessionRepository.createOrUpdate("session_id", {
+    repositoryId: "x",
+    workspaceCwd: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
-
+          
     test("create_or_update (5)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { repository_id: "x", workspace_cwd: "x" };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "repository_id" : "x" , "workspace_cwd" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/sessions/session_id/repository")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(404)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/sessions/session_id/repository").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.sessionRepository.createOrUpdate("session_id", {
-                repositoryId: "x",
-                workspaceCwd: "x",
-            });
-        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        
+            await expect(async () => {
+                return await client.sessionRepository.createOrUpdate("session_id", {
+    repositoryId: "x",
+    workspaceCwd: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-
+          
     test("create_or_update (6)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { repository_id: "x", workspace_cwd: "x" };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "repository_id" : "x" , "workspace_cwd" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/sessions/session_id/repository")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(409)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/sessions/session_id/repository").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(409).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.sessionRepository.createOrUpdate("session_id", {
-                repositoryId: "x",
-                workspaceCwd: "x",
-            });
-        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        
+            await expect(async () => {
+                return await client.sessionRepository.createOrUpdate("session_id", {
+    repositoryId: "x",
+    workspaceCwd: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-
+          
     test("delete (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {};
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { };
+        
         server
             .mockEndpoint()
-            .delete("/api/v1/sessions/session_id/repository")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .delete("/api/v1/sessions/session_id/repository").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.sessionRepository.delete("session_id");
-        expect(response).toEqual({});
+        
+                        
+                                const response = await client.sessionRepository.delete("session_id");
+                                expect(response).toEqual({});
+                              
+                    
     });
-
+          
     test("delete (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .delete("/api/v1/sessions/session_id/repository")
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .delete("/api/v1/sessions/session_id/repository").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.sessionRepository.delete("session_id");
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.sessionRepository.delete("session_id")
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("delete (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .delete("/api/v1/sessions/session_id/repository")
-            .respondWith()
-            .statusCode(403)
-            .jsonBody(rawResponseBody)
-            .build();
+            .delete("/api/v1/sessions/session_id/repository").respondWith()
+            .statusCode(403).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.sessionRepository.delete("session_id");
-        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+        
+            await expect(async () => {
+                return await client.sessionRepository.delete("session_id")
+            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
-
+          
     test("delete (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .delete("/api/v1/sessions/session_id/repository")
-            .respondWith()
-            .statusCode(404)
-            .jsonBody(rawResponseBody)
-            .build();
+            .delete("/api/v1/sessions/session_id/repository").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.sessionRepository.delete("session_id");
-        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        
+            await expect(async () => {
+                return await client.sessionRepository.delete("session_id")
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-
+          
     test("delete (5)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .delete("/api/v1/sessions/session_id/repository")
-            .respondWith()
-            .statusCode(409)
-            .jsonBody(rawResponseBody)
-            .build();
+            .delete("/api/v1/sessions/session_id/repository").respondWith()
+            .statusCode(409).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.sessionRepository.delete("session_id");
-        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        
+            await expect(async () => {
+                return await client.sessionRepository.delete("session_id")
+            }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
+          
 });

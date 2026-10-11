@@ -5,301 +5,349 @@ import { TrueForge } from "../../src/Client";
 import { mockServerPool } from "../mock-server/MockServerPool";
 
 describe("PersonalizationClient", () => {
+    
     test("get_context (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {
-            data: {
-                injected_context: "injected_context",
-                profile_digest: "profile_digest",
-                profile_revision: 1,
-                version: "personalization-context/v1",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "injected_context" : "injected_context" , "profile_digest" : "profile_digest" , "profile_revision" : 1 , "version" : "personalization-context/v1" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/personalization/context")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/personalization/context").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.personalization.getContext();
-        expect(response).toEqual({
-            data: {
-                injectedContext: "injected_context",
-                profileDigest: "profile_digest",
-                profileRevision: 1,
-                version: "personalization-context/v1",
-            },
-        });
+        
+                        
+                                const response = await client.personalization.getContext();
+                                expect(response).toEqual({
+    data: {
+        injectedContext: "injected_context",
+        profileDigest: "profile_digest",
+        profileRevision: 1,
+        version: "personalization-context/v1"
+    }
+});
+                              
+                    
     });
-
+          
     test("get_context (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/personalization/context")
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/personalization/context").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personalization.getContext();
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.personalization.getContext()
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("get_profile (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {
-            data: {
-                assistant_identity: "A thoughtful local-first personal assistant.",
-                assistant_name: "Aman",
-                created_at: "2024-01-15T09:30:00Z",
-                created_by: "created_by",
-                digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                learned_profile: "learned_profile",
-                learning_enabled: false,
-                pinned_preferences: ["Use short bullet points."],
-                revision: 1,
-                updated_at: "2024-01-15T09:30:00Z",
-                updated_by: "updated_by",
-                user_profile: "Prefers local-first tools and plain English.",
-                voice_guidance: "Warm, direct, and concise.",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "digest" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" , "learned_profile" : "learned_profile" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/personalization/profile")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/personalization/profile").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.personalization.getProfile();
-        expect(response).toEqual({
-            data: {
-                assistantIdentity: "A thoughtful local-first personal assistant.",
-                assistantName: "Aman",
-                createdAt: new Date("2024-01-15T09:30:00.000Z"),
-                createdBy: "created_by",
-                digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                learnedProfile: "learned_profile",
-                learningEnabled: false,
-                pinnedPreferences: ["Use short bullet points."],
-                revision: 1,
-                updatedAt: new Date("2024-01-15T09:30:00.000Z"),
-                updatedBy: "updated_by",
-                userProfile: "Prefers local-first tools and plain English.",
-                voiceGuidance: "Warm, direct, and concise.",
-            },
-        });
+        
+                        
+                                const response = await client.personalization.getProfile();
+                                expect(response).toEqual({
+    data: {
+        assistantIdentity: "A thoughtful local-first personal assistant.",
+        assistantName: "Aman",
+        createdAt: new Date("2024-01-15T09:30:00.000Z"),
+        createdBy: "created_by",
+        digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        learnedProfile: "learned_profile",
+        learningEnabled: false,
+        pinnedPreferences: ["Use short bullet points."],
+        revision: 1,
+        updatedAt: new Date("2024-01-15T09:30:00.000Z"),
+        updatedBy: "updated_by",
+        userProfile: "Prefers local-first tools and plain English.",
+        voiceGuidance: "Warm, direct, and concise."
+    }
+});
+                              
+                    
     });
-
+          
     test("get_profile (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/personalization/profile")
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/personalization/profile").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personalization.getProfile();
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.personalization.getProfile()
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("create_or_update_profile (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            profile: {
-                assistant_identity: "A thoughtful local-first personal assistant.",
-                assistant_name: "Aman",
-                learning_enabled: false,
-                pinned_preferences: ["Use short bullet points."],
-                user_profile: "Prefers local-first tools and plain English.",
-                voice_guidance: "Warm, direct, and concise.",
-            },
-        };
-        const rawResponseBody = {
-            data: {
-                assistant_identity: "A thoughtful local-first personal assistant.",
-                assistant_name: "Aman",
-                created_at: "2024-01-15T09:30:00Z",
-                created_by: "created_by",
-                digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                learned_profile: "learned_profile",
-                learning_enabled: false,
-                pinned_preferences: ["Use short bullet points."],
-                revision: 1,
-                updated_at: "2024-01-15T09:30:00Z",
-                updated_by: "updated_by",
-                user_profile: "Prefers local-first tools and plain English.",
-                voice_guidance: "Warm, direct, and concise.",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "profile" : { "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
+        const rawResponseBody = { "data" : { "assistant_identity" : "A thoughtful local-first personal assistant." , "assistant_name" : "Aman" , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "digest" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" , "learned_profile" : "learned_profile" , "learning_enabled" : false , "pinned_preferences" : [ "Use short bullet points." ] , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" , "user_profile" : "Prefers local-first tools and plain English." , "voice_guidance" : "Warm, direct, and concise." } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/personalization/profile")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/personalization/profile").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.personalization.createOrUpdateProfile({
-            profile: {
-                assistantIdentity: "A thoughtful local-first personal assistant.",
-                assistantName: "Aman",
-                learningEnabled: false,
-                pinnedPreferences: ["Use short bullet points."],
-                userProfile: "Prefers local-first tools and plain English.",
-                voiceGuidance: "Warm, direct, and concise.",
-            },
-        });
-        expect(response).toEqual({
-            data: {
-                assistantIdentity: "A thoughtful local-first personal assistant.",
-                assistantName: "Aman",
-                createdAt: new Date("2024-01-15T09:30:00.000Z"),
-                createdBy: "created_by",
-                digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                learnedProfile: "learned_profile",
-                learningEnabled: false,
-                pinnedPreferences: ["Use short bullet points."],
-                revision: 1,
-                updatedAt: new Date("2024-01-15T09:30:00.000Z"),
-                updatedBy: "updated_by",
-                userProfile: "Prefers local-first tools and plain English.",
-                voiceGuidance: "Warm, direct, and concise.",
-            },
-        });
+        
+                        
+                                const response = await client.personalization.createOrUpdateProfile({
+    profile: {
+        assistantIdentity: "A thoughtful local-first personal assistant.",
+        assistantName: "Aman",
+        learningEnabled: false,
+        pinnedPreferences: ["Use short bullet points."],
+        userProfile: "Prefers local-first tools and plain English.",
+        voiceGuidance: "Warm, direct, and concise."
+    }
+});
+                                expect(response).toEqual({
+    data: {
+        assistantIdentity: "A thoughtful local-first personal assistant.",
+        assistantName: "Aman",
+        createdAt: new Date("2024-01-15T09:30:00.000Z"),
+        createdBy: "created_by",
+        digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        learnedProfile: "learned_profile",
+        learningEnabled: false,
+        pinnedPreferences: ["Use short bullet points."],
+        revision: 1,
+        updatedAt: new Date("2024-01-15T09:30:00.000Z"),
+        updatedBy: "updated_by",
+        userProfile: "Prefers local-first tools and plain English.",
+        voiceGuidance: "Warm, direct, and concise."
+    }
+});
+                              
+                    
     });
-
+          
     test("create_or_update_profile (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            profile: {
-                assistant_identity: null,
-                assistant_name: null,
-                pinned_preferences: ["pinned_preferences", "pinned_preferences"],
-                user_profile: null,
-                voice_guidance: null,
-            },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "profile" : { "assistant_identity" : null , "assistant_name" : null , "pinned_preferences" : [ "pinned_preferences" , "pinned_preferences" ] , "user_profile" : null , "voice_guidance" : null } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/personalization/profile")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(400)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/personalization/profile").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personalization.createOrUpdateProfile({
-                profile: {
-                    assistantIdentity: null,
-                    assistantName: null,
-                    pinnedPreferences: ["pinned_preferences", "pinned_preferences"],
-                    userProfile: null,
-                    voiceGuidance: null,
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        
+            await expect(async () => {
+                return await client.personalization.createOrUpdateProfile({
+    profile: {
+        assistantIdentity: null,
+        assistantName: null,
+        pinnedPreferences: ["pinned_preferences", "pinned_preferences"],
+        userProfile: null,
+        voiceGuidance: null
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-
+          
     test("create_or_update_profile (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            profile: {
-                assistant_identity: null,
-                assistant_name: null,
-                pinned_preferences: ["pinned_preferences", "pinned_preferences"],
-                user_profile: null,
-                voice_guidance: null,
-            },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "profile" : { "assistant_identity" : null , "assistant_name" : null , "pinned_preferences" : [ "pinned_preferences" , "pinned_preferences" ] , "user_profile" : null , "voice_guidance" : null } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/personalization/profile")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/personalization/profile").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personalization.createOrUpdateProfile({
-                profile: {
-                    assistantIdentity: null,
-                    assistantName: null,
-                    pinnedPreferences: ["pinned_preferences", "pinned_preferences"],
-                    userProfile: null,
-                    voiceGuidance: null,
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.personalization.createOrUpdateProfile({
+    profile: {
+        assistantIdentity: null,
+        assistantName: null,
+        pinnedPreferences: ["pinned_preferences", "pinned_preferences"],
+        userProfile: null,
+        voiceGuidance: null
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("delete_profile (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {};
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { };
+        
         server
             .mockEndpoint()
-            .delete("/api/v1/personalization/profile")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .delete("/api/v1/personalization/profile").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.personalization.deleteProfile();
-        expect(response).toEqual({});
+        
+                        
+                                const response = await client.personalization.deleteProfile();
+                                expect(response).toEqual({});
+                              
+                    
     });
-
+          
     test("delete_profile (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .delete("/api/v1/personalization/profile")
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .delete("/api/v1/personalization/profile").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personalization.deleteProfile();
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.personalization.deleteProfile()
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
+          
+    test("get_sentinel_settings (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "offline_mode" : true , "tier2_auto_allow" : [ "file_write" ] } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/user/settings/sentinel").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
+
+        
+                        
+                                const response = await client.personalization.getSentinelSettings();
+                                expect(response).toEqual({
+    data: {
+        offlineMode: true,
+        tier2AutoAllow: ["file_write"]
+    }
+});
+                              
+                    
+    });
+          
+    test("get_sentinel_settings (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/user/settings/sentinel").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personalization.getSentinelSettings()
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("update_sentinel_settings (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { };
+        const rawResponseBody = { "data" : { "offline_mode" : true , "tier2_auto_allow" : [ "file_write" ] } };
+        
+        server
+            .mockEndpoint()
+            .patch("/api/v1/user/settings/sentinel").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
+
+        
+                        
+                                const response = await client.personalization.updateSentinelSettings();
+                                expect(response).toEqual({
+    data: {
+        offlineMode: true,
+        tier2AutoAllow: ["file_write"]
+    }
+});
+                              
+                    
+    });
+          
+    test("update_sentinel_settings (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .patch("/api/v1/user/settings/sentinel").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personalization.updateSentinelSettings()
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+          
+    test("update_sentinel_settings (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .patch("/api/v1/user/settings/sentinel").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personalization.updateSentinelSettings()
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
 });
