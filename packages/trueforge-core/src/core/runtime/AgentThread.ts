@@ -107,6 +107,7 @@ import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
 import { stampSentinelDecision } from '../mcp/ToolSet';
 import type { SentinelHostContext } from '../permissions';
 import { classifyHostToolCall, toDispatchSentinelContext } from '../permissions';
+import type { ConnectorBinding } from '../permissions/approvalTokens';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -1145,8 +1146,10 @@ export async function classifyUnstampedToolCall(input: {
   sentinel: SentinelHostContext | undefined;
   canonical_params: Record<string, unknown>;
   info: InternalToolCallInfo;
+  /** The connector the call goes to, bound into the approval token; absent when the tool set has none. */
+  connector?: ConnectorBinding | undefined;
 }): Promise<InternalToolCallInfo> {
-  const { sentinel, canonical_params, info } = input;
+  const { sentinel, canonical_params, info, connector } = input;
   if (
     sentinel === undefined ||
     info.tier !== undefined ||
@@ -1164,6 +1167,12 @@ export async function classifyUnstampedToolCall(input: {
       tool_name: info.original_tool_name,
       canonical_params,
       tool_type: info.type,
+      ...(connector === undefined
+        ? {}
+        : {
+            mcp_server_id: connector.server_id,
+            ...(connector.destination_host === null ? {} : { mcp_server_host: connector.destination_host }),
+          }),
       mcp_hints: {
         read_only_hint: info.read_only_hint,
         destructive_hint: info.destructive_hint,
@@ -1238,6 +1247,13 @@ async function enrichAssistantMessage({
       sentinel,
       canonical_params: params.arguments ?? {},
       info: policed,
+      connector:
+        policed.type === 'mcp'
+          ? toolInfo.toolSet.resolveConnector?.({
+              name: toolInfo.originalToolName,
+              arguments: tryParseToolArgs(toolCall.function.arguments),
+            })
+          : undefined,
     });
     enrichedToolCalls.push({ ...toolCall, tool_info });
   }

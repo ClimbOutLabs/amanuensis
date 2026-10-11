@@ -21,7 +21,7 @@ import type {
   InternalToolCallInfo,
   LLMToolMessage,
 } from '../llm/LLMTypes';
-import type { CallToolResponse, IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
+import type { CallToolResponse, MCPAuthRequired } from '../mcp/IMCPServer';
 import type { AgentThreadCreateSubAgent } from '../runtime/AgentThread.types';
 import { InternalEventType } from '../runtime/AgentThread.types';
 import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/abort';
@@ -489,7 +489,7 @@ function parseToolArguments(argumentsJson: string): Record<string, unknown> {
  */
 async function verifySentinelPreDispatch(input: {
   toolCall: InternalEnrichedToolCall;
-  toolSet: IToolSet;
+  toolInfo: MappedMCPTool;
   approvalDecisions: Map<string, ApprovalDecision>;
   sentinel: { services: SentinelServices; identity: SentinelCallIdentity } | undefined;
 }): Promise<string | undefined> {
@@ -536,7 +536,7 @@ async function verifySentinelPreDispatch(input: {
   // no longer matches what the user approved.
   const connector =
     info.type === 'mcp'
-      ? input.toolSet.resolveConnector?.({ name: toolCall.function.name, arguments: wireArguments })
+      ? input.toolInfo.toolSet.resolveConnector?.({ name: input.toolInfo.originalToolName, arguments: wireArguments })
       : undefined;
   return await verifyPreDispatch({
     call: {
@@ -1123,7 +1123,7 @@ export async function executeToolCalls({
     // and never records a side-effect attempt or memo entry.
     const sentinelVerificationError = await verifySentinelPreDispatch({
       toolCall,
-      toolSet: toolInfo.toolSet,
+      toolInfo,
       approvalDecisions,
       sentinel,
     });
