@@ -80,6 +80,9 @@ test_failed_upgrade_restores_database_and_images() {
   assert_log_has "run --rm -i --network none -v aman_main_data:/data $old sh -c"
   assert_eq "$(cat "$SB_STATE/up/aman-main")" "$old" "stack running on the previous image"
   assert_eq "$(find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" 1 "backup kept"
+  assert_no_path "$AMAN_HOME/state/lock"
+  run_install upgrade --check
+  assert_rc 0
   sandbox_drop
 }
 

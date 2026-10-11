@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
@@ -470,6 +470,20 @@ describe('instance settings file', () => {
     assert.match(check.fix, /chmod 600 .*instances\/main\/\.env/);
   });
 
+  it('also guards dex.env, which holds the login password hash', () => {
+    make();
+    const file = path.join(world.instanceDir('main'), 'dex.env');
+    writeFileSync(file, "DEX_USER_PASSWORD_HASH='SENTINEL-hash'\n");
+    chmodSync(file, 0o600);
+    assert.equal(find(world.json().doc.instances.main, 'config').state, 'ok');
+    chmodSync(file, 0o644);
+    const check = find(world.json().doc.instances.main, 'config');
+    assert.equal(check.state, 'fail');
+    assert.match(check.detail, /dex\.env/);
+    assert.match(check.fix, /chmod 600 .*instances\/main\/dex\.env/);
+    assert.doesNotMatch(world.json().stdout, /SENTINEL-hash/);
+  });
+
   it('fails when the file is missing', () => {
     make();
     rmSync(path.join(world.instanceDir('main'), '.env'));
@@ -491,14 +505,14 @@ describe('instance service health', () => {
     const result = world.json(['--deep']);
     assert.equal(find(result.doc.instances.main, 'database').state, 'ok');
     const exec = world.calls().find(call => call.startsWith('exec'));
-    assert.equal(exec, 'exec c1 amanuensis doctor --text --deep');
+    assert.equal(exec, `exec -e AMAN_HOST_EPOCH=${world.now} c1 amanuensis doctor --text --deep`);
     assert.ok(world.calls().some(call => call.includes('label=com.docker.compose.project=aman-main')));
   });
 
   it('passes --only to the in-image doctor only for in-image checks', () => {
     make();
     world.run(['--only', 'login']);
-    assert.ok(world.calls().includes('exec c1 amanuensis doctor --text --only login'));
+    assert.ok(world.calls().includes(`exec -e AMAN_HOST_EPOCH=${world.now} c1 amanuensis doctor --text --only login`));
     world.run(['--only', 'ports']);
     assert.ok(!world.calls().some(call => call.includes('--only ports')));
   });

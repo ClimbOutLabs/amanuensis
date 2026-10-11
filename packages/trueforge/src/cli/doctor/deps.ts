@@ -6,8 +6,6 @@ import { processEnv, type CliEnv } from '../env';
 
 export interface HttpResponse {
   status: number;
-  /** `Date` response header, used as an outside time reference. */
-  date: string | null;
   json: unknown;
 }
 
@@ -30,7 +28,7 @@ async function get({ url, timeoutMs }: { url: string; timeoutMs: number }): Prom
   } catch {
     json = undefined;
   }
-  return { status: response.status, date: response.headers.get('date'), json };
+  return { status: response.status, json };
 }
 
 async function freeBytes(dir: string): Promise<number> {

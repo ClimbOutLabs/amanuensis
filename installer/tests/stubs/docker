@@ -73,6 +73,32 @@ case "$cmd" in
     echo "$1" >>"$S/images"
     exit 0
     ;;
+  network)
+    sub=$1
+    shift
+    touch "$S/networks" "$S/network_links"
+    case "$sub" in
+      inspect) grep -Fxq "$1" "$S/networks"; exit $? ;;
+      connect)
+        # connect [--alias NAME] NETWORK CONTAINER
+        [ "$1" = --alias ] && shift 2
+        grep -Fxq "$1" "$S/networks" || { echo "network $1 not found" >&2; exit 1; }
+        if grep -Fxq "$1 $2" "$S/network_links"; then
+          echo "endpoint with name $2 already exists in network $1" >&2
+          exit 1
+        fi
+        echo "$1 $2" >>"$S/network_links"
+        exit 0
+        ;;
+      disconnect)
+        [ "$1" = -f ] && shift
+        grep -Fxv "$1 $2" "$S/network_links" >"$S/network_links.new" || true
+        mv "$S/network_links.new" "$S/network_links"
+        exit 0
+        ;;
+    esac
+    exit 0
+    ;;
   volume)
     sub=$1
     shift
@@ -226,12 +252,17 @@ case "$cmd" in
         printf '%s\n' "$img" >"$S/up/$proj"
         awk '/^    name: / {n = $2} /com.amanuensis.instance:/ {print n, $2}' "$file" >>"$S/volumes_labels"
         grep -o 'name: aman_[a-z0-9_-]*' "$file" | sed 's/name: //' | while read -r v; do
-          grep -Fxq "$v" "$S/volumes" || echo "$v" >>"$S/volumes"
+          case "$v" in
+            *_stt) grep -Fxq "$v" "$S/networks" 2>/dev/null || echo "$v" >>"$S/networks" ;;
+            *) grep -Fxq "$v" "$S/volumes" || echo "$v" >>"$S/volumes" ;;
+          esac
         done
         exit 0
         ;;
       down)
         rm -f "$S/up/$proj"
+        n=aman_${proj#aman-}_stt
+        grep -Fxv "$n" "$S/networks" >"$S/networks.new" 2>/dev/null; mv "$S/networks.new" "$S/networks" 2>/dev/null
         exit 0
         ;;
       *) exit 0 ;;

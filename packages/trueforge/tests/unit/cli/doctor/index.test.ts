@@ -3,10 +3,14 @@ import { createDoctor } from '../../../../src/cli/doctor';
 import { CheckSchema } from '../../../../src/cli/doctor/schemas';
 import { UsageError } from '../../../../src/cli/io';
 import { fakeIo } from '../fakeIo';
-import { fakeDeps, networkError, response, type FakeGet } from './fakeDeps';
+import { NOW_MS, fakeDeps, networkError, response, type FakeGet } from './fakeDeps';
 
 const ISSUER = 'http://127.0.0.1:5556/dex';
-const healthyEnv = { OIDC_ISSUER_URL: ISSUER, SQLITE_PATH: '/data/db/db.sqlite' };
+const healthyEnv = {
+  OIDC_ISSUER_URL: ISSUER,
+  SQLITE_PATH: '/data/db/db.sqlite',
+  AMAN_HOST_EPOCH: String(NOW_MS / 1000),
+};
 const healthyGet: FakeGet = ({ url }) =>
   Promise.resolve(response(url.endsWith('/healthz') ? {} : { json: { issuer: ISSUER } }));
 

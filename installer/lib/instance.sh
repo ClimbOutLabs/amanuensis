@@ -52,8 +52,33 @@ machine_render() {
 
 # up -d is a no-op when nothing changed. The speech model loads in the background, so this does not wait on it.
 machine_up() {
+  local name
   machine_render "$1"
   dcm up -d || die "could not start the shared speech-to-text service"
+  # A recreated speech container loses the extra networks it was connected to, so reconnect them all.
+  for name in $(reg_names); do
+    if D network inspect "aman_${name}_stt" >/dev/null 2>&1; then
+      stt_attach "$name" || true
+    fi
+  done
+}
+
+# Each instance has its own network with only the speech service on it besides itself. The shared
+# service is connected to every one of those networks, so no instance has a route to another.
+stt_attach() {
+  local out
+  if out=$(D network connect --alias aman-stt "aman_${1}_stt" aman-stt 2>&1); then
+    return 0
+  fi
+  case "$out" in
+    *"already exists"*) return 0 ;;
+  esac
+  warn "could not connect the speech-to-text service to instance $1: $out"
+  return 1
+}
+
+stt_detach() {
+  D network disconnect -f "aman_${1}_stt" aman-stt >/dev/null 2>&1 || true
 }
 
 machine_running() {
@@ -99,6 +124,9 @@ instance_up() {
   if ! dc "$name" up -d --wait --wait-timeout 240; then
     warn "instance $name did not become healthy. Look at: docker compose -p aman-$name logs --tail 50"
     return 1
+  fi
+  if machine_running; then
+    stt_attach "$name" || true
   fi
 }
 
@@ -238,8 +266,9 @@ instance_create() {
   hash=$(hash_password "$REL_APP_TAG")
   render_template "$TEMPLATES_DIR/instance/env.tpl" \
     "PUBLIC_URL=$I_PUBLIC_URL" "COOKIE_SUFFIX=$cookie" "ISSUER=$I_ISSUER" "CLIENT_ID=$client_id" \
-    "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "API_KEY=$api_key" "PASSWORD_HASH=$hash" |
+    "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "API_KEY=$api_key" |
     write_if_changed "$dir/.env" 600 || true
+  render_template "$TEMPLATES_DIR/instance/dex.env.tpl" "PASSWORD_HASH=$hash" | write_if_changed "$dir/dex.env" 600 || true
   created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   reg_write "$I_NAME" "name=$I_NAME" "app_port=$I_PORT" "login_port=$I_LOGIN_PORT" "public_url=$I_PUBLIC_URL" \
     "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
@@ -453,6 +482,7 @@ cmd_instance_remove() {
   lock_acquire
   if [ "$exists" = 1 ]; then
     if [ -f "$(instance_dir "$name")/compose.yaml" ] && [ -f "$(instance_dir "$name")/.env" ]; then
+      stt_detach "$name"
       dc "$name" down || warn "could not stop the stack cleanly; continuing with the removal"
     fi
     remove_instance_dir "$name"

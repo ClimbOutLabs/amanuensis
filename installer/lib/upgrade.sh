@@ -15,6 +15,7 @@ upgrade_rollback() {
   fi
   if ! release_load "$RELEASE_DIR/release.json"; then
     warn "the previous release record is unreadable; restore by hand from $UPGRADE_BACKUP"
+    lock_release
     exit 2
   fi
   (machine_up "$CUR_STT_TAG") || failed=1
@@ -34,6 +35,7 @@ upgrade_rollback() {
     rc=2
     warn "the rollback did not fully complete. Your backup is at ${UPGRADE_BACKUP:-none}; run install.sh again after fixing the error above."
   fi
+  lock_release
   exit "$rc"
 }
 

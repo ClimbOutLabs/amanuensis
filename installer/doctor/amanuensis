@@ -393,20 +393,24 @@ check_backup() {
 # ---------------------------------------------------------------- instance checks
 
 check_instance_config() {
-  local name=$1 file mode
-  file="${AMAN_HOME}/instances/${name}/.env"
-  if [ ! -f "$file" ]; then
+  local name=$1 file mode dir
+  dir="${AMAN_HOME}/instances/${name}"
+  if [ ! -f "${dir}/.env" ]; then
     record "$name" config fail "The instance settings file is missing." \
       "Run install.sh to recreate it, or restore it from a backup."
     return
   fi
-  mode=$(file_mode "$file")
-  if [ "$mode" != 600 ]; then
-    record "$name" config fail "The settings file holds secrets but is readable by other users (mode ${mode:-unknown})." \
-      "Run: chmod 600 ${file}"
-    return
-  fi
-  record "$name" config ok "The settings file exists and is private to you." ""
+  # dex.env holds the login password hash; both files hold secrets.
+  for file in "${dir}/.env" "${dir}/dex.env"; do
+    [ -f "$file" ] || continue
+    mode=$(file_mode "$file")
+    if [ "$mode" != 600 ]; then
+      record "$name" config fail "${file##*/} holds secrets but is readable by other users (mode ${mode:-unknown})." \
+        "Run: chmod 600 ${file}"
+      return
+    fi
+  done
+  record "$name" config ok "The settings files exist and are private to you." ""
 }
 
 check_instance_containers() { # name; sets APP_CONTAINER
@@ -477,7 +481,8 @@ run_in_image_checks() { # name
   if [ -n "$ONLY" ] && in_list "$ONLY" "$IN_IMAGE_IDS"; then
     args+=(--only "$ONLY")
   fi
-  out=$(bounded "$exec_timeout" docker exec "$APP_CONTAINER" amanuensis "${args[@]}" 2>&1)
+  # The host passes its own time: the app's clock is judged against the host, not against a service on it.
+  out=$(bounded "$exec_timeout" docker exec -e "AMAN_HOST_EPOCH=$(now_epoch)" "$APP_CONTAINER" amanuensis "${args[@]}" 2>&1)
   rc=$?
   if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
     record "$name" service fail "The checks could not run inside the app container: ${out%%$'\n'*}" \

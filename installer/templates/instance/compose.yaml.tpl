@@ -7,6 +7,8 @@ services:
   # URL for the browser and for the app.
   loopback:
     image: @@APP_IMAGE@@
+    # Built on this machine and never pulled.
+    pull_policy: never
     init: true
     entrypoint: ['sleep', 'infinity']
     ports:
@@ -15,13 +17,15 @@ services:
     # Lets a model server on the host answer at host.docker.internal.
     extra_hosts:
       - 'host.docker.internal:host-gateway'
+    # Own network for the shared speech service, so instances cannot reach each other through it.
     networks:
       - default
-      - machine
+      - stt
     restart: unless-stopped
 
   app:
     image: @@APP_IMAGE@@
+    pull_policy: never
     network_mode: 'service:loopback'
     env_file:
       - .env
@@ -54,10 +58,12 @@ services:
     image: @@DEX_IMAGE@@
     network_mode: 'service:loopback'
     command: ['dex', 'serve', '/etc/dex/config.yaml']
-    # Only what login needs; the rest of the instance secrets stay with the app.
+    # Only what login needs: the client secret it shares with the app, and the password hash in its own
+    # file, which the app container never receives.
+    env_file:
+      - dex.env
     environment:
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?missing from .env}
-      DEX_USER_PASSWORD_HASH: ${DEX_USER_PASSWORD_HASH:?missing from .env}
     configs:
       - source: dex_config
         target: /etc/dex/config.yaml
@@ -86,6 +92,5 @@ volumes:
       com.amanuensis.instance: @@NAME@@
 
 networks:
-  machine:
-    name: aman_machine
-    external: true
+  stt:
+    name: aman_@@NAME@@_stt

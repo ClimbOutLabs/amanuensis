@@ -1,5 +1,5 @@
-import { checkClock, checkLogin, probeLogin, type LoginProbe } from '../../../../../src/cli/doctor/checks/login';
-import { NOW_MS, fakeDeps, networkError, response } from '../fakeDeps';
+import { checkLogin, probeLogin } from '../../../../../src/cli/doctor/checks/login';
+import { fakeDeps, networkError, response } from '../fakeDeps';
 
 const ISSUER = 'http://127.0.0.1:5556/dex';
 const DISCOVERY = { issuer: ISSUER };
@@ -55,31 +55,5 @@ describe('login probe and check', () => {
       expect(check.state).toBe('fail');
       expect(check.fix).not.toBe('');
     }
-  });
-});
-
-describe('clock check', () => {
-  function answered(date: string | null): LoginProbe {
-    return { kind: 'answered', issuer: ISSUER, response: response({ date, json: DISCOVERY }) };
-  }
-
-  it('is ok when the clock matches the provider', () => {
-    expect(checkClock({ probe: answered(new Date(NOW_MS - 5_000).toUTCString()), nowMs: NOW_MS }).state).toBe('ok');
-  });
-
-  it('warns past 60 seconds and fails past 300 seconds, with a fix', () => {
-    const warn = checkClock({ probe: answered(new Date(NOW_MS - 120_000).toUTCString()), nowMs: NOW_MS });
-    expect(warn.state).toBe('warn');
-    expect(warn.detail).toContain('120');
-    expect(warn.fix).not.toBe('');
-    const fail = checkClock({ probe: answered(new Date(NOW_MS + 900_000).toUTCString()), nowMs: NOW_MS });
-    expect(fail.state).toBe('fail');
-    expect(fail.fix).not.toBe('');
-  });
-
-  it('is off when there is no reference time', () => {
-    expect(checkClock({ probe: answered(null), nowMs: NOW_MS }).state).toBe('off');
-    expect(checkClock({ probe: answered('garbage'), nowMs: NOW_MS }).state).toBe('off');
-    expect(checkClock({ probe: { kind: 'unconfigured' }, nowMs: NOW_MS }).state).toBe('off');
   });
 });

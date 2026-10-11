@@ -283,6 +283,48 @@ test_add_before_install_is_refused() {
   sandbox_drop
 }
 
+test_instances_are_isolated_and_images_stay_local() {
+  t_begin "each instance has its own speech network, shares no network, and never pulls local images"
+  sandbox_new
+  install_machine
+  add_instance second
+  local main second machine
+  main=$(cat "$AMAN_HOME/instances/main/compose.yaml")
+  second=$(cat "$AMAN_HOME/instances/second/compose.yaml")
+  machine=$(cat "$AMAN_HOME/machine/compose.yaml")
+  assert_contains "$main" "name: aman_main_stt"
+  assert_contains "$second" "name: aman_second_stt"
+  assert_not_contains "$main" "aman_second" "an instance never names another's networks"
+  assert_not_contains "$second" "aman_main_"
+  assert_not_contains "$main" "external: true" "no network is shared with other instances"
+  assert_not_contains "$main" "aman_machine"
+  assert_contains "$machine" "container_name: aman-stt"
+  assert_log_has "network connect --alias aman-stt aman_main_stt aman-stt"
+  assert_log_has "network connect --alias aman-stt aman_second_stt aman-stt"
+  assert_eq "$(sort "$SB_STATE/network_links" | tr '\n' ',')" "aman_main_stt aman-stt,aman_second_stt aman-stt," "the speech service is the only thing joined to each"
+  assert_eq "$(grep -c 'pull_policy: never' "$AMAN_HOME/instances/main/compose.yaml")" 2 "app and holder are never pulled"
+  assert_contains "$machine" "pull_policy: never"
+  assert_not_contains "$(sed -n '/^  dex:/,/^configs:/p' "$AMAN_HOME/instances/main/compose.yaml")" "pull_policy" "the login image is pulled by digest"
+  run_install instance remove second
+  assert_rc 0
+  assert_log_has "network disconnect -f aman_second_stt aman-stt"
+  assert_not_contains "$(cat "$SB_STATE/network_links")" "aman_second_stt"
+  sandbox_drop
+}
+
+test_app_env_lacks_dex_only_values() {
+  t_begin "the app's env file holds no password hash and the login container gets it from its own file"
+  sandbox_new
+  install_machine
+  local compose
+  compose=$(cat "$AMAN_HOME/instances/main/compose.yaml")
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/.env")" "DEX_"
+  assert_contains "$(sed -n '/^  dex:/,/^configs:/p' <<<"$compose")" "dex.env"
+  assert_not_contains "$(sed -n '/^  app:/,/^  dex:/p' <<<"$compose")" "dex.env"
+  assert_contains "$(cat "$AMAN_HOME/backups/"*/main/dex.env 2>/dev/null || { run_install backup; cat "$AMAN_HOME"/backups/*/main/dex.env; })" "DEX_USER_PASSWORD_HASH"
+  sandbox_drop
+}
+
 test_dry_run_instance_add() {
   t_begin "instance add --dry-run reports the plan without writing"
   sandbox_new
@@ -326,6 +368,8 @@ test_explicit_busy_port_is_refused
 test_add_existing_is_idempotent
 test_list
 test_remove_keeps_volumes
+test_instances_are_isolated_and_images_stay_local
+test_app_env_lacks_dex_only_values
 test_purge_after_remove_deletes_the_leftover_volumes
 test_purge_failure_is_not_reported_as_success
 test_purge_needs_typed_name

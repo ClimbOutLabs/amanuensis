@@ -22,7 +22,8 @@ test_doctor_reads_what_the_installer_wrote() {
   assert_contains "$out" '"id":"containers","state":"ok","detail":"All 3 containers are running.'
   assert_contains "$out" '"id":"backup","state":"ok","detail":"No backup yet' "a fresh install is not warned about backups"
   assert_log_has "docker ps -a --filter label=com.docker.compose.project=aman-main"
-  assert_log_has "docker exec c-app amanuensis doctor --text"
+  assert_log_has "amanuensis doctor --text"
+  assert_log_has "docker exec -e AMAN_HOST_EPOCH="
   assert_no_path "$AMAN_HOME/backups"
   sandbox_drop
 }

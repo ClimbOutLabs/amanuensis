@@ -1,6 +1,6 @@
 import type { DoctorDeps, HttpResponse } from '../deps';
 import { describeNetworkError, redactUrl } from '../redact';
-import { failCheck, offCheck, okCheck, warnCheck, type Check } from '../schemas';
+import { failCheck, okCheck, type Check } from '../schemas';
 
 export type LoginProbe =
   | { kind: 'unconfigured' }
@@ -8,7 +8,7 @@ export type LoginProbe =
   | { kind: 'unreachable'; reason: string; issuer: string }
   | { kind: 'answered'; issuer: string; response: HttpResponse };
 
-/** One request to the login provider's discovery document, shared by the login and clock checks. */
+/** One request to the login provider's discovery document. */
 export async function probeLogin({ deps, timeoutMs }: { deps: DoctorDeps; timeoutMs: number }): Promise<LoginProbe> {
   const raw = deps.env['OIDC_ISSUER_URL']?.trim();
   if (!raw) {
@@ -63,30 +63,4 @@ export function checkLogin(probe: LoginProbe): Check {
       }
       return okCheck({ id, detail: `The login provider at ${probe.issuer} answers.` });
   }
-}
-
-const CLOCK_WARN_SECONDS = 60;
-const CLOCK_FAIL_SECONDS = 300;
-
-export function checkClock({ probe, nowMs }: { probe: LoginProbe; nowMs: number }): Check {
-  const id = 'clock';
-  const date = probe.kind === 'answered' ? probe.response.date : null;
-  const reference = date === null ? Number.NaN : Date.parse(date);
-  if (Number.isNaN(reference)) {
-    return offCheck({ id, detail: 'Skipped: the login provider gave no time to compare against.' });
-  }
-  const skew = Math.round(Math.abs(nowMs - reference) / 1000);
-  const fix =
-    'Turn on automatic time sync on this machine (on Docker Desktop, restart it; its clock drifts after sleep), then restart the instance.';
-  if (skew > CLOCK_FAIL_SECONDS) {
-    return failCheck({
-      id,
-      detail: `The clock differs from the login provider by ${String(skew)} seconds; sign-in will fail.`,
-      fix,
-    });
-  }
-  if (skew > CLOCK_WARN_SECONDS) {
-    return warnCheck({ id, detail: `The clock differs from the login provider by ${String(skew)} seconds.`, fix });
-  }
-  return okCheck({ id, detail: `The clock is within ${String(CLOCK_WARN_SECONDS)} seconds of the login provider.` });
 }

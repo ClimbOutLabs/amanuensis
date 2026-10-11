@@ -32,7 +32,7 @@ case "$1" in
   compose) key="compose_$2" ;;
   ps) key=ps ;;
   port) key="port_$2" ;;
-  exec) key="exec_$2" ;;
+  exec) shift; while [ "$1" = -e ]; do shift 2; done; key="exec_$1" ;;
   image) eval "last=\\\${$#}"; key="image_$(sanitize "$last")" ;;
   *) key=unknown ;;
 esac

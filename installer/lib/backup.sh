@@ -69,7 +69,8 @@ backup_instance() {
     mv "$dest/dex.tar.part" "$dest/dex.tar"
   fi
   cp "$(instance_dir "$name")/.env" "$dest/env"
-  chmod 600 "$dest/env"
+  cp "$(instance_dir "$name")/dex.env" "$dest/dex.env"
+  chmod 600 "$dest/env" "$dest/dex.env"
 }
 
 backup_prune() {

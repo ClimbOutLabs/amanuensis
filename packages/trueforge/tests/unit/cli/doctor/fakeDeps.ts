@@ -15,12 +15,8 @@ export function fakeDeps(overrides: Partial<DoctorDeps> = {}): DoctorDeps {
   };
 }
 
-export function response({
-  status = 200,
-  date = new Date(NOW_MS).toUTCString(),
-  json,
-}: { status?: number; date?: string | null; json?: unknown } = {}): HttpResponse {
-  return { status, date, json };
+export function response({ status = 200, json }: { status?: number; json?: unknown } = {}): HttpResponse {
+  return { status, json };
 }
 
 export function networkError(code: string): Error {

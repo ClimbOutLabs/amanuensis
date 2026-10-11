@@ -74,7 +74,10 @@ test_first_install() {
   assert_contains "$env" "SQLITE_PATH=/data/db/db.sqlite"
   assert_contains "$env" "STT_URL=http://aman-stt:8001"
   assert_contains "$env" "AUTH_COOKIE_SUFFIX="
-  assert_contains "$env" "DEX_USER_PASSWORD_HASH='\$2a\$10\$"
+  assert_not_contains "$env" "DEX_USER_PASSWORD_HASH" "the app container never gets the login password hash"
+  assert_not_contains "$env" "\$2a\$10\$"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/dex.env")" "DEX_USER_PASSWORD_HASH='\$2a\$10\$"
+  assert_mode "$AMAN_HOME/instances/main/dex.env" 600
   assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "type: sqlite3"
   assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "redirectURIs:"
   assert_contains "$compose" "name: aman_main_data"

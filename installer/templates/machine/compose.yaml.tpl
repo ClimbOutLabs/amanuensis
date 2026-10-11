@@ -4,6 +4,10 @@ name: aman-machine
 services:
   aman-stt:
     image: @@STT_IMAGE@@
+    # Built on this machine and never pulled.
+    pull_policy: never
+    # Instances reach it by this name on a network each of them has with it alone.
+    container_name: aman-stt
     # No CPU pinning: transcription shares the machine cores with everything else.
     mem_limit: 2g
     environment:

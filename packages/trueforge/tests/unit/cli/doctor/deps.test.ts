@@ -88,11 +88,10 @@ describe('real doctor dependencies', () => {
       await new Promise(resolve => server.close(resolve));
     });
 
-    it('returns status, the Date header and parsed JSON', async () => {
+    it('returns status and parsed JSON', async () => {
       const result = await deps.get({ url: `${base}/json`, timeoutMs: 1000 });
       expect(result.status).toBe(200);
       expect(result.json).toEqual({ issuer: 'x' });
-      expect(Number.isNaN(Date.parse(result.date ?? ''))).toBe(false);
     });
 
     it('returns an error status with undefined JSON for a non-JSON body', async () => {

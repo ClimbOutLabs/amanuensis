@@ -1,6 +1,7 @@
+import { checkClock } from './checks/clock';
 import { checkDatabase } from './checks/database';
 import { checkDisk } from './checks/disk';
-import { checkClock, checkLogin, probeLogin } from './checks/login';
+import { checkLogin, probeLogin } from './checks/login';
 import { checkAttachments, checkRunCode } from './checks/sandbox';
 import { checkService } from './checks/service';
 import type { DoctorDeps } from './deps';
@@ -28,7 +29,7 @@ export async function runInstanceChecks({
     checkLogin(probe),
     checkDatabase({ deps, timeoutMs }),
     await checkDisk({ deps }),
-    checkClock({ probe, nowMs: deps.nowMs() }),
+    checkClock({ deps }),
     checkRunCode(),
     checkAttachments(),
   ];
