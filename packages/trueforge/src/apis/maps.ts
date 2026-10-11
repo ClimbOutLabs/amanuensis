@@ -86,7 +86,16 @@ export function parseCacheMaxAge(cache_control: string | null): number | undefin
 
 /** Plain decimal digits only: `Number()` alone also accepts `1e1`, `0x5`, `5.0` and padded spaces. */
 export function parseTileIndex(raw: string): number {
-  return raw !== '' && raw.length <= 8 && [...raw].every(ch => ch >= '0' && ch <= '9') ? Number(raw) : Number.NaN;
+  if (raw === '' || raw.length > 8) {
+    return Number.NaN;
+  }
+  for (let i = 0; i < raw.length; i += 1) {
+    const code = raw.charCodeAt(i);
+    if (code < 48 || code > 57) {
+      return Number.NaN;
+    }
+  }
+  return Number(raw);
 }
 
 /** SVG is an active format: served same-origin it could run script, so only raster images pass. */
