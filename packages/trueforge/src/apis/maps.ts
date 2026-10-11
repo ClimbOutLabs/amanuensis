@@ -21,6 +21,8 @@ const MAX_TILES_PER_CARD_PER_MINUTE = 128;
 const TILE_CACHE_MAX_ENTRIES = 2000;
 const MAX_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const UPSTREAM_TIMEOUT_MS = 10_000;
+/** Never let a browser sniff an upstream body into something executable. */
+const TILE_SECURITY_HEADERS = { 'X-Content-Type-Options': 'nosniff' };
 
 interface TileCacheEntry {
   body: Uint8Array;
@@ -82,8 +84,18 @@ export function parseCacheMaxAge(cache_control: string | null): number | undefin
   return Number.isFinite(seconds) ? seconds * 1000 : undefined;
 }
 
+/** Plain decimal digits only: `Number()` alone also accepts `1e1`, `0x5`, `5.0` and padded spaces. */
+export function parseTileIndex(raw: string): number {
+  return raw !== '' && raw.length <= 8 && [...raw].every(ch => ch >= '0' && ch <= '9') ? Number(raw) : Number.NaN;
+}
+
+/** SVG is an active format: served same-origin it could run script, so only raster images pass. */
+export function isServableTileType(contentType: string): boolean {
+  return contentType.startsWith('image/') && !contentType.startsWith('image/svg');
+}
+
 /** Validate tile coordinates: z in 0..18, x/y in 0..2^z-1. */
-export function validTileCoords(z: number, x: number, y: number): boolean {
+export function validTileCoords({ z, x, y }: { z: number; x: number; y: number }): boolean {
   if (!Number.isInteger(z) || !Number.isInteger(x) || !Number.isInteger(y)) {
     return false;
   }
@@ -98,7 +110,13 @@ export function validTileCoords(z: number, x: number, y: number): boolean {
  * Resolve a redirect target, returning null when it points at another host.
  * The proxy never follows the browser to a host outside the configured tile URL.
  */
-export function safeRedirectTarget(upstreamUrl: string, location: string): string | null {
+export function safeRedirectTarget({
+  upstreamUrl,
+  location,
+}: {
+  upstreamUrl: string;
+  location: string;
+}): string | null {
   let target: URL;
   try {
     target = new URL(location, upstreamUrl);
@@ -155,11 +173,11 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
   // params correctly from patterns like `:y.png`; the suffix is stripped below.
   app.get('/tiles/:z/:x/:y', async c => {
     const subject = deps.resolveRequestContext(c).subject;
-    const z = Number(c.req.param('z'));
-    const x = Number(c.req.param('x'));
+    const z = parseTileIndex(c.req.param('z'));
+    const x = parseTileIndex(c.req.param('x'));
     const yRaw = c.req.param('y');
-    const y = Number(yRaw.endsWith('.png') ? yRaw.slice(0, -'.png'.length) : yRaw);
-    if (!validTileCoords(z, x, y)) {
+    const y = parseTileIndex(yRaw.endsWith('.png') ? yRaw.slice(0, -'.png'.length) : yRaw);
+    if (!validTileCoords({ z, x, y })) {
       return c.json({ error: { message: 'Invalid tile coordinates.' } }, 400);
     }
 
@@ -181,7 +199,11 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
     if (cached !== undefined) {
       return new Response(cached.body, {
         status: 200,
-        headers: { 'Content-Type': cached.content_type, 'Cache-Control': 'public, max-age=86400' },
+        headers: {
+          'Content-Type': cached.content_type,
+          'Cache-Control': 'public, max-age=86400',
+          ...TILE_SECURITY_HEADERS,
+        },
       });
     }
 
@@ -207,7 +229,7 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
       }
       if (upstream.status >= 300 && upstream.status < 400) {
         const location = upstream.headers.get('location');
-        const target = location === null ? null : safeRedirectTarget(upstreamUrl, location);
+        const target = location === null ? null : safeRedirectTarget({ upstreamUrl, location });
         if (target === null) {
           deps.logger.warn('maps tile proxy dropped redirect to another host', { location });
           return c.json({ error: { message: 'Tile upstream returned an unexpected redirect.' } }, 503);
@@ -234,7 +256,7 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
         return c.json({ error: { message: 'Tile upstream unavailable.' } }, 503);
       }
       const contentType = upstream.headers.get('content-type') ?? '';
-      if (!contentType.startsWith('image/')) {
+      if (!isServableTileType(contentType)) {
         deps.logger.warn('maps tile proxy dropped non-image upstream body', { contentType });
         return c.json({ error: { message: 'Tile upstream returned a non-image response.' } }, 503);
       }
@@ -253,7 +275,7 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
       cache.set(cacheKey, { body, content_type: mimeType, expires_at: now() + ttl });
       return new Response(body, {
         status: 200,
-        headers: { 'Content-Type': mimeType, 'Cache-Control': 'public, max-age=86400' },
+        headers: { 'Content-Type': mimeType, 'Cache-Control': 'public, max-age=86400', ...TILE_SECURITY_HEADERS },
       });
     } catch (error) {
       deps.logger.warn('maps tile proxy upstream failure', { error });

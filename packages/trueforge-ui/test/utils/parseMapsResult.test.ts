@@ -23,6 +23,28 @@ describe('parseMapsResult', () => {
     expect(parsed.data?.pins).toHaveLength(1);
   });
 
+  it('unwraps the tool.response.v2 envelope the host sends on the wire', () => {
+    const result = {
+      status: 'ok',
+      resolved_name: 'Paris, France',
+      address: null,
+      lat: 48.85,
+      lng: 2.35,
+      zoom: 13,
+      pins: [],
+      attribution: '© OpenStreetMap contributors',
+    };
+    const wrap = (inner: unknown) =>
+      JSON.stringify({ schema_version: 'tool.response.v2', outcome: { disposition: 'executed_ok' }, result: inner });
+    for (const inner of [result, JSON.stringify(result)]) {
+      const parsed = parseMapsResult(wrap(inner), 'render_map');
+      expect(parsed.state).toBe('ready');
+      expect(parsed.data?.resolved_name).toBe('Paris, France');
+    }
+    const blocked = parseMapsResult(wrap({ status: 'error', code: 'rate_limited', service: 'geocoder' }), 'render_map');
+    expect(blocked.state).toBe('blocked');
+  });
+
   it('parses a render_route ok result', () => {
     const parsed = parseMapsResult(
       JSON.stringify({

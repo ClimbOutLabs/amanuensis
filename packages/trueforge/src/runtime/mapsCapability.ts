@@ -34,7 +34,7 @@ export function roundOriginCoordinate(value: number): number {
   return Math.round(value * factor) / factor;
 }
 
-/** One upstream request per second per service; 10 s timeout per request. */
+/** One upstream request per second per service; the fetch wrapper enforces the 10 s timeout. */
 const UPSTREAM_MIN_INTERVAL_MS = 1000;
 const UPSTREAM_TIMEOUT_MS = 10_000;
 
@@ -314,15 +314,7 @@ export class UpstreamLimiter {
         await new Promise(resolve => setTimeout(resolve, wait));
       }
       this.lastStart = this.now();
-      const controller = new AbortController();
-      const timeout = setTimeout(() => {
-        controller.abort();
-      }, UPSTREAM_TIMEOUT_MS);
-      try {
-        return await work();
-      } finally {
-        clearTimeout(timeout);
-      }
+      return await work();
     });
     // Keep the queue alive across rejections; the caller still sees its error.
     this.queue = run.catch(() => undefined);
@@ -629,7 +621,10 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
   // The fetch wrapper attaches the identifying User-Agent and strips nothing
   // else: these are server-to-upstream requests, never browser requests.
   const fetch_limited = (url: string): Promise<Response> =>
-    fetch(url, { headers: { 'User-Agent': user_agent, Accept: 'application/json' } });
+    fetch(url, {
+      headers: { 'User-Agent': user_agent, Accept: 'application/json' },
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    });
   const router_provider = createMapsRoutingProvider({
     provider_id: configuration.MAPS_ROUTER_PROVIDER,
     router_url: configuration.MAPS_ROUTER_URL,

@@ -185,3 +185,24 @@ test('record_finding (agent scratchpad) classifies Tier 1 silent', async () => {
   expect(stamped.is_approval_required).toBe(false);
   expect(stamped.tier3_card).toBeNull();
 });
+
+test('maps calls keep the host-stamped hosts on the card instead of the unnamed fallback', async () => {
+  const base = await infoFor('synthetic_write');
+  const info: InternalToolCallInfo = {
+    ...base,
+    original_tool_name: 'render_map',
+    maps_hosts: {
+      geocoder: 'https://geocode.example.internal',
+      router: 'https://routes.example.internal',
+      tile: 'https://tiles.example.internal/{z}/{x}/{y}.png',
+    },
+  };
+  const stamped = await classifyUnstampedToolCall({
+    sentinel: makeSentinel(),
+    canonical_params: { place_name: 'Paris' },
+    info,
+  });
+  expect(stamped.tier).toBe(3);
+  expect(stamped.tier3_card?.plain_what).toContain('geocode.example.internal');
+  expect(stamped.tier3_card?.destination).toContain('tiles.example.internal');
+});

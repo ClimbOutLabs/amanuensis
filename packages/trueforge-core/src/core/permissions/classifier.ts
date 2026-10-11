@@ -106,7 +106,7 @@ export const MAPS_TOOL_NAMES = ['render_map', 'render_route'] as const;
  * only this predicate changes.
  */
 export function isMapsToolAlwaysTier3(tool_name: string): boolean {
-  return (MAPS_TOOL_NAMES as readonly string[]).includes(tool_name);
+  return MAPS_TOOL_NAMES.some(name => name === tool_name);
 }
 
 /** Host part of a URL for card display; falls back to the raw value. */
@@ -1194,6 +1194,14 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
     // names the place strings verbatim and the configured hosts from server
     // config; the destination never comes from model params.
     if (isMapsToolAlwaysTier3(name)) {
+      // Offline outranks the card: a stale call is denied, not offered for approval.
+      if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+        return autoDenyDecision({
+          reason: 'offline_mode',
+          reason_detail: 'Maps need network access, which is disabled while offline.',
+          sensitive_read: false,
+        });
+      }
       return tier3Decision({
         card: {
           plain_what: mapsPlainWhat(action),

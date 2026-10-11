@@ -2,6 +2,7 @@ import type { ToolApprovalOption as AuiToolApprovalOption, ToolCallMessagePartPr
 import { parse as parsePartialJson } from 'partial-json';
 
 import type { ToolCallStatus } from '../atoms/ToolCallCard.js';
+import type { MapCardData, MapPin } from '../components/MapCard.js';
 
 export type ApprovalOptionView = {
   id: string;
@@ -577,8 +578,44 @@ export function mcpDisplayName(
 
 export interface ParsedMapsResult {
   state: 'ready' | 'blocked' | 'unavailable';
-  data: import('../components/MapCard.js').MapCardData | null;
+  data: MapCardData | null;
   blockedMessage?: string;
+}
+
+interface MapsEndpoint {
+  name: string;
+  lat: number;
+  lng: number;
+}
+
+function parseMapsEndpoint(value: unknown): MapsEndpoint | undefined {
+  if (!isUnknownRecord(value)) return undefined;
+  const { resolved_name: name, lat, lng } = value;
+  return typeof name === 'string' && typeof lat === 'number' && typeof lng === 'number'
+    ? { name, lat, lng }
+    : undefined;
+}
+
+/**
+ * The visible payload of a maps tool result: the `tool.response.v2` envelope's `result` when the
+ * host wrapped it (always, on the real wire), else the parsed JSON itself.
+ */
+function unwrapMapsPayload(resultString: string): unknown {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(resultString);
+  } catch {
+    return undefined;
+  }
+  const envelope = parseToolResultEnvelope(parsed);
+  if (envelope === undefined) return parsed;
+  const inner = envelope.result;
+  if (typeof inner !== 'string') return inner;
+  try {
+    return JSON.parse(inner);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -589,18 +626,12 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
   if (resultString === undefined || resultString === '') {
     return { state: 'unavailable', data: null, blockedMessage: 'The map result is not available yet.' };
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(resultString);
-  } catch {
+  const body = unwrapMapsPayload(resultString);
+  if (!isUnknownRecord(body)) {
     return { state: 'unavailable', data: null };
   }
-  if (typeof parsed !== 'object' || parsed === null) {
-    return { state: 'unavailable', data: null };
-  }
-  const body = parsed as Record<string, unknown>;
-  if (body['status'] === 'error') {
-    const code = typeof body['code'] === 'string' ? body['code'] : 'service_unavailable';
+  if (body.status === 'error') {
+    const code = typeof body.code === 'string' ? body.code : 'service_unavailable';
     if (code === 'not_found') {
       return { state: 'unavailable', data: null, blockedMessage: 'The place could not be found.' };
     }
@@ -616,12 +647,13 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
     }
     return { state: 'blocked', data: null, blockedMessage: 'The map service is unavailable right now.' };
   }
-  if (body['status'] !== 'ok') {
+  if (body.status !== 'ok') {
     return { state: 'unavailable', data: null };
   }
+  const attribution = typeof body.attribution === 'string' ? body.attribution : '© OpenStreetMap contributors';
   if (toolName === 'render_route') {
-    const from = body['from'] as { resolved_name?: string; lat?: number; lng?: number } | undefined;
-    const to = body['to'] as { resolved_name?: string; lat?: number; lng?: number } | undefined;
+    const from = parseMapsEndpoint(body.from);
+    const to = parseMapsEndpoint(body.to);
     if (from === undefined || to === undefined) {
       return { state: 'unavailable', data: null };
     }
@@ -629,41 +661,46 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
       state: 'ready',
       data: {
         kind: 'route',
-        lat: (from.lat ?? 0) / 1 + ((to.lat ?? 0) - (from.lat ?? 0)) / 2,
-        lng: (from.lng ?? 0) / 1 + ((to.lng ?? 0) - (from.lng ?? 0)) / 2,
+        lat: (from.lat + to.lat) / 2,
+        lng: (from.lng + to.lng) / 2,
         zoom: 6,
-        resolved_name: `${from.resolved_name ?? ''} to ${to.resolved_name ?? ''}`,
+        resolved_name: `${from.name} to ${to.name}`,
         address: null,
         pins: [],
-        from_name: from.resolved_name,
-        to_name: to.resolved_name,
+        from_name: from.name,
+        to_name: to.name,
         from_lat: from.lat,
         from_lng: from.lng,
         to_lat: to.lat,
         to_lng: to.lng,
-        distance_km: typeof body['distance_km'] === 'number' ? body['distance_km'] : undefined,
-        duration_min: typeof body['duration_min'] === 'number' ? body['duration_min'] : undefined,
-        route_geometry: typeof body['route_geometry'] === 'string' ? body['route_geometry'] : undefined,
-        attribution: typeof body['attribution'] === 'string' ? body['attribution'] : '© OpenStreetMap contributors',
+        distance_km: typeof body.distance_km === 'number' ? body.distance_km : undefined,
+        duration_min: typeof body.duration_min === 'number' ? body.duration_min : undefined,
+        route_geometry: typeof body.route_geometry === 'string' ? body.route_geometry : undefined,
+        attribution,
       },
     };
   }
-  const pins = Array.isArray(body['pins'])
-    ? (body['pins'] as Array<{ name?: string; lat?: number; lng?: number }>)
-        .filter(p => typeof p.name === 'string' && typeof p.lat === 'number' && typeof p.lng === 'number')
-        .map(p => ({ name: p.name as string, lat: p.lat as number, lng: p.lng as number }))
-    : [];
+  const pins: MapPin[] = [];
+  if (Array.isArray(body.pins)) {
+    for (const pin of body.pins) {
+      if (!isUnknownRecord(pin)) continue;
+      const { name, lat, lng } = pin;
+      if (typeof name === 'string' && typeof lat === 'number' && typeof lng === 'number') {
+        pins.push({ name, lat, lng });
+      }
+    }
+  }
   return {
     state: 'ready',
     data: {
       kind: 'place',
-      lat: typeof body['lat'] === 'number' ? body['lat'] : 0,
-      lng: typeof body['lng'] === 'number' ? body['lng'] : 0,
-      zoom: typeof body['zoom'] === 'number' ? body['zoom'] : 13,
-      resolved_name: typeof body['resolved_name'] === 'string' ? body['resolved_name'] : '',
-      address: typeof body['address'] === 'string' ? body['address'] : null,
+      lat: typeof body.lat === 'number' ? body.lat : 0,
+      lng: typeof body.lng === 'number' ? body.lng : 0,
+      zoom: typeof body.zoom === 'number' ? body.zoom : 13,
+      resolved_name: typeof body.resolved_name === 'string' ? body.resolved_name : '',
+      address: typeof body.address === 'string' ? body.address : null,
       pins,
-      attribution: typeof body['attribution'] === 'string' ? body['attribution'] : '© OpenStreetMap contributors',
+      attribution,
     },
   };
 }

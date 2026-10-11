@@ -1168,6 +1168,7 @@ export async function classifyUnstampedToolCall(input: {
         destructive_hint: info.destructive_hint,
         open_world_hint: info.open_world_hint,
       },
+      maps_hosts: info.maps_hosts,
     },
   });
   return { ...info, ...stampSentinelDecision({ decision }) };

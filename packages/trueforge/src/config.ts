@@ -371,7 +371,15 @@ function parsePublicBaseUrl(raw: string | undefined): string {
  * Parse a maps upstream URL: must be http(s), no query or hash. Fails fast at
  * boot like PUBLIC_BASE_URL. Trailing slashes are trimmed; callers join paths.
  */
-function parseMapsUrl(envKey: string, raw: string | undefined, defaultValue: string): string {
+function parseMapsUrl({
+  envKey,
+  raw,
+  defaultValue,
+}: {
+  envKey: string;
+  raw: string | undefined;
+  defaultValue: string;
+}): string {
   const value = raw === undefined || raw.trim() === '' ? defaultValue : raw.trim();
   let parsed: URL;
   try {
@@ -1571,18 +1579,22 @@ const shared: SharedServerConfiguration = {
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
   STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
-  MAPS_GEOCODER_URL: parseMapsUrl(
-    'MAPS_GEOCODER_URL',
-    getEnv('MAPS_GEOCODER_URL'),
-    'https://nominatim.openstreetmap.org',
-  ),
+  MAPS_GEOCODER_URL: parseMapsUrl({
+    envKey: 'MAPS_GEOCODER_URL',
+    raw: getEnv('MAPS_GEOCODER_URL'),
+    defaultValue: 'https://nominatim.openstreetmap.org',
+  }),
   MAPS_ROUTER_PROVIDER: parseMapsRouterProvider(getEnv('MAPS_ROUTER_PROVIDER', { required: false })),
-  MAPS_ROUTER_URL: parseMapsUrl('MAPS_ROUTER_URL', getEnv('MAPS_ROUTER_URL'), 'https://router.project-osrm.org'),
-  MAPS_TILE_URL: parseMapsUrl(
-    'MAPS_TILE_URL',
-    getEnv('MAPS_TILE_URL'),
-    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  ),
+  MAPS_ROUTER_URL: parseMapsUrl({
+    envKey: 'MAPS_ROUTER_URL',
+    raw: getEnv('MAPS_ROUTER_URL'),
+    defaultValue: 'https://router.project-osrm.org',
+  }),
+  MAPS_TILE_URL: parseMapsUrl({
+    envKey: 'MAPS_TILE_URL',
+    raw: getEnv('MAPS_TILE_URL'),
+    defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  }),
   MAPS_USER_AGENT:
     getEnv('MAPS_USER_AGENT', { required: false }) ??
     `Amanuensis/${PACKAGE_VERSION} (+https://github.com/ClimbOutLabs/amanuensis)`,

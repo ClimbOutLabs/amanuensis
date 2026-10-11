@@ -116,4 +116,17 @@ describe('maps classifier branch', () => {
     expect(decision.card?.destination).toContain('geocode.example.internal');
     expect(decision.card?.plain_what).toContain('geocode.example.internal');
   });
+  it('auto-denies with offline_mode instead of asking while offline', async () => {
+    const services: SentinelServices = {
+      ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+      isOffline: () => Promise.resolve(true),
+    };
+    for (const action of [
+      mapsAction('render_map', { place_name: 'Paris' }),
+      mapsAction('render_route', { from_place: 'Madrid', to_place: 'Barcelona' }),
+    ]) {
+      const decision = await classifyTier(action, makeCtx(services));
+      expect(decision.auto_deny).toBe('offline_mode');
+    }
+  });
 });
