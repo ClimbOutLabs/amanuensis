@@ -29,6 +29,7 @@ import {
   MEMORY_SETTINGS_LIMITS,
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
+import { normalizedOrigin } from './mcp/firstParty';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
 
@@ -139,6 +140,33 @@ export function parseOidcAllowedEmails(raw: string | undefined): string[] {
     .split(',')
     .map(part => part.trim())
     .filter(part => part.length > 0);
+}
+
+/**
+ * Parses `FIRST_PARTY_MCP_ORIGINS`: comma-separated exact origins (scheme, host and optional
+ * port, no path) of the operator's own memory provider. Unset / blank → none, so no connector is
+ * first-party. Each entry is normalized the way a connector URL's origin is, then matched exactly.
+ * Anything else fails the boot: a silently dropped typo would read as "nothing is trusted", and a
+ * path or wildcard would suggest a prefix or suffix match the list never does.
+ */
+export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === '') {
+    return [];
+  }
+  const origins = new Set<string>();
+  for (const entry of raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)) {
+    const origin = normalizedOrigin(entry);
+    if (origin === undefined || origin.includes('*') || new URL(entry).href !== `${origin}/`) {
+      throw new Error(
+        `FIRST_PARTY_MCP_ORIGINS entries must be exact http(s) origins such as https://memory.internal:8443, got: ${entry}`,
+      );
+    }
+    origins.add(origin);
+  }
+  return [...origins];
 }
 
 /**
@@ -633,6 +661,13 @@ export interface SharedServerConfiguration {
   MCP_REQUEST_TIMEOUT_MS: number;
   /** Max milliseconds for an MCP transport connection. Env: `MCP_CONNECT_TIMEOUT_MS`. Default 30 seconds. */
   MCP_CONNECT_TIMEOUT_MS: number;
+  /**
+   * Origins of the operator's own memory provider, as normalized `scheme://host[:port]` strings.
+   * A connector saved as the memory provider on one of these origins is first-party: its tools that
+   * declare `readOnlyHint` true and `openWorldHint` false run without an approval card. Empty means
+   * no connector is first-party. Env: `FIRST_PARTY_MCP_ORIGINS` (comma-separated). Default empty.
+   */
+  FIRST_PARTY_MCP_ORIGINS: string[];
   /**
    * Max concurrent read-only (Phase-A) tool-call dispatches per assistant batch.
    * Env: `TOOL_DISPATCH_MAX_CONCURRENCY`. Default 4.
@@ -1271,6 +1306,7 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MCP_CONNECT_TIMEOUT_MS'),
     defaultValue: 30 * 1000,
   }),
+  FIRST_PARTY_MCP_ORIGINS: parseFirstPartyMcpOrigins(getEnv('FIRST_PARTY_MCP_ORIGINS')),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),

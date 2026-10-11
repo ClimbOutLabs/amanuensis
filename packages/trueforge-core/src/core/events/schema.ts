@@ -80,9 +80,12 @@ export const AgentApprovalDecisionAllowSchema = z
   .object({
     status: z.literal('allow').describe('Allow the pending tool call(s).'),
     scope: z
-      .enum(['once', 'chat'])
+      .enum(['once', 'chat', 'always'])
       .optional()
-      .describe('Omitted or once allows only this invocation; chat grants this exact tool for the current session.'),
+      .describe(
+        'Omitted or once allows only this invocation; chat grants this exact tool for the current session; ' +
+          'always allows this read-only connector tool for the caller until revoked.',
+      ),
   })
   .openapi('ApprovalAllow');
 
@@ -233,7 +236,7 @@ const AutomaticAdmissionProvenanceSchema = z.object({
 const UserApprovalAdmissionProvenanceSchema = z.object({
   source: z.literal('user_approval').describe('The user supplied this invocation decision.'),
   decision: z.enum(['allow', 'deny']),
-  scope: z.enum(['once', 'chat']).optional(),
+  scope: z.enum(['once', 'chat', 'always']).optional(),
 });
 const ChatGrantAdmissionProvenanceSchema = z.object({
   source: z.literal('chat_grant').describe('A previously recorded exact chat grant admitted this invocation.'),
