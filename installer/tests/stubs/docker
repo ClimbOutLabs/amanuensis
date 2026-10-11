@@ -174,7 +174,7 @@ case "$cmd" in
     exit 0
     ;;
   exec)
-    # `docker exec <container> amanuensis doctor --text`: one tab-separated check per line.
+    # `docker exec <container> aman doctor --text`: one tab-separated check per line.
     printf 'service\tok\tstub\t\n'
     exit 0
     ;;
@@ -194,14 +194,14 @@ case "$cmd" in
       prev=$a
     done
     case "$*" in
-      *"amanuensis hash-password"*)
+      *"aman hash-password"*)
         cat >"$S/hash_stdin"
         env >"$S/hash_env"
         hash="\$2a\$10\$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY01"
         printf '{"hash":"%s"}\n' "$hash"
         exit 0
         ;;
-      *"amanuensis backup"*)
+      *"aman backup"*)
         # Models the CLI: refuses a missing --target, writes db.sqlite, memory/, persona-knowledge/ and a manifest there.
         echo "$*" >>"$S/backup_runs"
         [ -n "${STUB_BACKUP_FAIL:-}" ] && { echo "backup failed" >&2; exit 1; }

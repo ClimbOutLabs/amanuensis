@@ -10,7 +10,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   doctor,
 };
 
-const USAGE = `Usage: amanuensis <command> [options]
+const USAGE = `Usage: aman <command> [options]
 
 Commands:
   hash-password   Read a password on stdin, print {"hash": "<bcrypt>"}

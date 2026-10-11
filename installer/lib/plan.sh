@@ -231,7 +231,7 @@ plan_build() {
 
   if [ -x "$(doctor_shim)" ]; then
     plan_add have "Doctor command $(doctor_shim)"
-  elif [ -f "$INSTALLER_DIR/doctor/amanuensis" ]; then
+  elif [ -f "$INSTALLER_DIR/doctor/aman" ]; then
     plan_add todo "Install the doctor command at $(doctor_shim)"
   fi
 

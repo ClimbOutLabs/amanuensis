@@ -6,7 +6,7 @@ set -euo pipefail
 
 # Runs the real doctor shim the way the installer does, against the state an install just wrote.
 real_doctor() {
-  AMANUENSIS_HOME="$AMAN_HOME" PATH="$SB_BIN" bash "$INSTALLER_DIR/doctor/amanuensis" doctor "$@"
+  AMANUENSIS_HOME="$AMAN_HOME" PATH="$SB_BIN" bash "$INSTALLER_DIR/doctor/aman" doctor "$@"
 }
 
 test_doctor_reads_what_the_installer_wrote() {
@@ -22,24 +22,24 @@ test_doctor_reads_what_the_installer_wrote() {
   assert_contains "$out" '"id":"containers","state":"ok","detail":"All 3 containers are running.'
   assert_contains "$out" '"id":"backup","state":"ok","detail":"No backup yet' "a fresh install is not warned about backups"
   assert_log_has "docker ps -a --filter label=com.docker.compose.project=aman-main"
-  assert_log_has "amanuensis doctor --text"
+  assert_log_has "aman doctor --text"
   assert_log_has "docker exec -e AMAN_HOST_EPOCH="
   assert_no_path "$AMAN_HOME/backups"
   sandbox_drop
 }
 
 test_installer_calls_the_shim_as_documented() {
-  t_begin "the installer installs bin/amanuensis and calls 'doctor --json --instance NAME'"
+  t_begin "the installer installs bin/aman and calls 'doctor --json --instance NAME'"
   sandbox_new
   install_machine
-  assert_file "$AMAN_HOME/bin/amanuensis"
-  assert_mode "$AMAN_HOME/bin/amanuensis" 755
-  assert_eq "$(cmp -s "$AMAN_HOME/bin/amanuensis" "$SB_INSTALLER/doctor/amanuensis" && echo same)" same
+  assert_file "$AMAN_HOME/bin/aman"
+  assert_mode "$AMAN_HOME/bin/aman" 755
+  assert_eq "$(cmp -s "$AMAN_HOME/bin/aman" "$SB_INSTALLER/doctor/aman" && echo same)" same
   run_install instance list
   assert_rc 0
   assert_log_has "doctor --json --instance main"
-  assert_eq "$(basename "$INSTALLER_DIR/doctor/amanuensis")" amanuensis "the shipped shim carries the name the installer looks for"
-  assert_eq "$([ -x "$INSTALLER_DIR/doctor/amanuensis" ] && echo yes)" yes "the shipped shim is executable"
+  assert_eq "$(basename "$INSTALLER_DIR/doctor/aman")" aman "the shipped shim carries the name the installer looks for"
+  assert_eq "$([ -x "$INSTALLER_DIR/doctor/aman" ] && echo yes)" yes "the shipped shim is executable"
   sandbox_drop
 }
 

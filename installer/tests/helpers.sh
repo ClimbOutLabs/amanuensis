@@ -26,7 +26,7 @@ sandbox_new() {
   done
   for t in "$TESTS_DIR"/stubs/*; do
     case "$(basename "$t")" in
-      amanuensis-doctor) ;;
+      aman-doctor) ;;
       *) cp "$t" "$SB_BIN/" ;;
     esac
   done
@@ -50,7 +50,7 @@ stage_installer() {
   SB_INSTALLER=$SB/installer
   mkdir -p "$SB_INSTALLER/doctor"
   cp -R "$INSTALLER_DIR/install.sh" "$INSTALLER_DIR/lib" "$INSTALLER_DIR/templates" "$INSTALLER_DIR/release.json" "$INSTALLER_DIR/downloads.txt" "$SB_INSTALLER/"
-  cp "$TESTS_DIR/stubs/amanuensis-doctor" "$SB_INSTALLER/doctor/amanuensis"
+  cp "$TESTS_DIR/stubs/aman-doctor" "$SB_INSTALLER/doctor/aman"
 }
 
 sandbox_drop() {

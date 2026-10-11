@@ -105,7 +105,7 @@ When you set a public URL, that instance's URL and its login issuer switch to HT
 
 ## Doctor
 
-The doctor binary is not on your PATH. It lives at `~/.amanuensis/bin/amanuensis`. Either run it with the full path, or add the folder to your PATH:
+The doctor binary is not on your PATH. It lives at `~/.amanuensis/bin/aman`. Either run it with the full path, or add the folder to your PATH:
 
 ```bash
 export PATH="$HOME/.amanuensis/bin:$PATH"   # add to your shell profile to keep it
@@ -114,10 +114,10 @@ export PATH="$HOME/.amanuensis/bin:$PATH"   # add to your shell profile to keep 
 Doctor checks the whole setup and tells you exactly what to do about anything it finds:
 
 ```bash
-amanuensis doctor                 # everything: machine plus every instance
-amanuensis doctor --instance main # one instance only
-amanuensis doctor --deep          # raises the probe timeout to 30 seconds
-amanuensis doctor --json          # machine-readable output
+aman doctor                 # everything: machine plus every instance
+aman doctor --instance main # one instance only
+aman doctor --deep          # raises the probe timeout to 30 seconds
+aman doctor --json          # machine-readable output
 ```
 
 Each check reports one of four states:
@@ -176,7 +176,7 @@ Running code (`run_code`) and email attachment extraction show as **off** in thi
 
 **Clock skew.** If logins or certificate checks fail right after a sleep or a VM resume, check the machine clock. Turn on automatic time synchronization and run doctor again.
 
-**Login unavailable while the login server starts.** The login server takes a few seconds to come up on a first install. Wait, reload the page, and if it still fails, run `amanuensis doctor` and follow the login check's fix.
+**Login unavailable while the login server starts.** The login server takes a few seconds to come up on a first install. Wait, reload the page, and if it still fails, run `aman doctor` and follow the login check's fix.
 
 ## Privacy notes
 

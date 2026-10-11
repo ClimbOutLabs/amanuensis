@@ -37,7 +37,7 @@ backup_scratch_prune() {
   done
 }
 
-# backup_data NAME DESTDIR IMAGE: runs `amanuensis backup --target` into a scratch volume mounted at
+# backup_data NAME DESTDIR IMAGE: runs `aman backup --target` into a scratch volume mounted at
 # /backup, then streams that volume into DESTDIR as tar. The scratch volume is always removed again.
 # The CLI opens the live database through SQLite's online backup API, safe beside the running app.
 backup_data() {
@@ -45,7 +45,7 @@ backup_data() {
   scratch="aman_${name}_backup_scratch"
   env_file="$(instance_dir "$name")/.env"
   D volume create --label "$BACKUP_SCRATCH_LABEL" "$scratch" >/dev/null || return 1
-  D run --rm --network none -v "aman_${name}_data:/data" -v "$scratch:/backup" "$image" amanuensis backup \
+  D run --rm --network none -v "aman_${name}_data:/data" -v "$scratch:/backup" "$image" aman backup \
     --target /backup \
     --sqlite "$(env_get "$env_file" SQLITE_PATH)" \
     --memory-dir "$(env_get "$env_file" MEMORY_MARKDOWN_DIR)" \

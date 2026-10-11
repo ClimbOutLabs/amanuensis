@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Host shim installed as ~/.amanuensis/bin/amanuensis. `amanuensis doctor` runs machine checks with
-# the Docker CLI plus each instance's in-image `amanuensis doctor`, combined into one document.
+# Host shim installed as ~/.amanuensis/bin/aman. `aman doctor` runs machine checks with
+# the Docker CLI plus each instance's in-image `aman doctor`, combined into one document.
 # Read-only; needs only Docker (no jq, no Node). The state directory is AMANUENSIS_HOME.
 #
-#   amanuensis doctor [--json] [--only ID] [--instance NAME] [--deep]
+#   aman doctor [--json] [--only ID] [--instance NAME] [--deep]
 #
 # Exit codes: 0 no failures, 1 at least one failure, 2 usage error.
 # Test hooks: AMAN_DOCTOR_NOW (epoch seconds) replaces the clock.
@@ -43,7 +43,7 @@ APP_CONTAINER=""
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: amanuensis doctor [--json] [--only ID] [--instance NAME] [--deep]
+Usage: aman doctor [--json] [--only ID] [--instance NAME] [--deep]
 USAGE
 }
 
@@ -510,11 +510,11 @@ run_in_image_checks() { # name
     args+=(--only "$ONLY")
   fi
   # The host passes its own time: the app's clock is judged against the host, not against a service on it.
-  out=$(bounded "$exec_timeout" docker exec -e "AMAN_HOST_EPOCH=$(now_epoch)" "$APP_CONTAINER" amanuensis "${args[@]}" 2>&1)
+  out=$(bounded "$exec_timeout" docker exec -e "AMAN_HOST_EPOCH=$(now_epoch)" "$APP_CONTAINER" aman "${args[@]}" 2>&1)
   rc=$?
   if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
     record "$name" service fail "The checks could not run inside the app container: ${out%%$'\n'*}" \
-      "Rebuild the app image with install.sh (it must include the amanuensis command), then restart the instance."
+      "Rebuild the app image with install.sh (it must include the aman command), then restart the instance."
     return
   fi
   while IFS=$'\t' read -r id state detail fix; do

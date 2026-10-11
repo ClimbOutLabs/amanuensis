@@ -32,7 +32,7 @@ test_backup_layout_and_modes() {
 }
 
 test_backup_runs_the_cli_with_a_target() {
-  t_begin "the installer runs 'amanuensis backup --target' on a scratch volume and removes the volume"
+  t_begin "the installer runs 'aman backup --target' on a scratch volume and removes the volume"
   sandbox_new
   install_machine
   run_install backup
@@ -41,7 +41,7 @@ test_backup_runs_the_cli_with_a_target() {
   run=$(cat "$SB_STATE/backup_runs")
   assert_contains "$run" "-v aman_main_data:/data -v aman_main_backup_scratch:/backup"
   assert_contains "$run" "--network none"
-  assert_contains "$run" "amanuensis backup --target /backup"
+  assert_contains "$run" "aman backup --target /backup"
   assert_contains "$run" "--sqlite /data/db/db.sqlite --memory-dir /data/memory --persona-dir /data/persona-knowledge"
   assert_not_contains "$run" "-v aman_main_data:/data:ro" "the live database is opened read-write by the SQLite backup API"
   assert_log_has "volume create --label com.amanuensis.scratch=backup aman_main_backup_scratch"
@@ -59,7 +59,7 @@ test_backup_of_stopped_instance() {
   rm -f "$SB_STATE/up/aman-main"
   run_install backup main
   assert_rc 0
-  assert_contains "$(cat "$SB_STATE/backup_runs")" "amanuensis backup --target /backup"
+  assert_contains "$(cat "$SB_STATE/backup_runs")" "aman backup --target /backup"
   assert_file "$(find "$AMAN_HOME/backups" -name db.sqlite | head -n 1)"
   sandbox_drop
 }

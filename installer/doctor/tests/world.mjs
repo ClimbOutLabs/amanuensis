@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const DOCTOR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'amanuensis');
+const DOCTOR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'aman');
 
 export const NOW = 1791633600; // 2026-10-10T12:00:00Z
 export const DAEMON_TIME = '2026-10-10T12:00:00.123456789Z';

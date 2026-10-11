@@ -14,7 +14,7 @@ export function checkClock({ deps }: { deps: DoctorDeps }): Check {
   if (!/^\d{1,12}$/.test(raw)) {
     return offCheck({
       id,
-      detail: 'Skipped: the host did not pass its time. Run doctor through the amanuensis command.',
+      detail: 'Skipped: the host did not pass its time. Run doctor through the aman command.',
     });
   }
   const skew = Math.round(Math.abs(deps.nowMs() - Number(raw) * 1000) / 1000);

@@ -110,7 +110,7 @@ test_rerun_is_idempotent() {
   before_env=$(cat "$AMAN_HOME/instances/main/.env")
   before_tree=$(cd "$AMAN_HOME" && find . -type f ! -name install.log ! -path './state/lock/*' -exec cksum {} + | sort)
   builds=$(log_count "docker build")
-  runs=$(log_count "amanuensis hash-password")
+  runs=$(log_count "aman hash-password")
   ups=$(log_count " up -d")
   run_install --yes
   assert_rc 0
@@ -118,7 +118,7 @@ test_rerun_is_idempotent() {
   assert_eq "$(cat "$AMAN_HOME/instances/main/.env")" "$before_env" ".env untouched"
   assert_eq "$(cd "$AMAN_HOME" && find . -type f ! -name install.log ! -path './state/lock/*' -exec cksum {} + | sort)" "$before_tree" "tree"
   assert_eq "$(log_count "docker build")" "$builds" "no rebuild"
-  assert_eq "$(log_count "amanuensis hash-password")" "$runs" "no second hash"
+  assert_eq "$(log_count "aman hash-password")" "$runs" "no second hash"
   assert_eq "$(log_count " up -d")" "$ups" "nothing recreated"
   sandbox_drop
 }

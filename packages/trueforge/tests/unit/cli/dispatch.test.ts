@@ -12,7 +12,7 @@ jest.mock('../../../src/config', () => {
   throw new Error('server config was loaded by the CLI');
 });
 
-describe('amanuensis dispatcher', () => {
+describe('aman dispatcher', () => {
   it('loads and runs hash-password without the server config', async () => {
     const io = fakeIo({ stdin: 'pw\n' });
     expect(await runCli({ argv: ['hash-password'], io })).toBe(0);
@@ -24,7 +24,7 @@ describe('amanuensis dispatcher', () => {
     const io = fakeIo();
     expect(await runCli({ argv: [], io })).toBe(2);
     expect(io.out).toEqual([]);
-    expect(io.err.join('')).toContain('Usage: amanuensis <command>');
+    expect(io.err.join('')).toContain('Usage: aman <command>');
   });
 
   it('exits 2 for an unknown command, including inherited object keys', async () => {

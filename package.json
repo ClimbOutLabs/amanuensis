@@ -55,7 +55,7 @@
     "test:trueforge-sdk": "pnpm --filter @truefoundry/trueforge-sdk test:wire",
     "test:chart-version": "bash tests/scripts/resolve-chart-version.test.sh",
     "test:installer": "bash installer/tests/run.sh",
-    "lint:installer": "shellcheck installer/install.sh installer/doctor/amanuensis installer/lib/*.sh installer/tests/*.sh installer/tests/lib/*.sh installer/tests/stubs/*",
+    "lint:installer": "shellcheck installer/install.sh installer/doctor/aman installer/lib/*.sh installer/tests/*.sh installer/tests/lib/*.sh installer/tests/stubs/*",
     "test:trueforge-core": "pnpm --filter @truefoundry/trueforge-core test",
     "test:trueforge": "pnpm --filter @truefoundry/trueforge test",
     "test:local-sandbox:contract": "pnpm --filter @truefoundry/trueforge test:local-sandbox:contract",

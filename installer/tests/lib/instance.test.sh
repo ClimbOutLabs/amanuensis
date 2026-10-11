@@ -45,7 +45,7 @@ test_three_instances_never_share_values() {
   assert_contains "$(cat "$AMAN_HOME/instances/third/compose.yaml")" "name: aman_third_data"
   assert_contains "$(cat "$AMAN_HOME/instances/third/compose.yaml")" "name: aman-third"
   assert_mode "$AMAN_HOME/instances/third/.env" 600
-  assert_eq "$(log_count 'amanuensis hash-password')" 3 "one hash per instance"
+  assert_eq "$(log_count 'aman hash-password')" 3 "one hash per instance"
   assert_tree_lacks "$AMAN_HOME" "$SENTINEL_PASSWORD"
   sandbox_drop
 }
@@ -78,11 +78,11 @@ test_add_existing_is_idempotent() {
   install_machine
   local env_before hashes
   env_before=$(cat "$AMAN_HOME/instances/main/.env")
-  hashes=$(log_count 'amanuensis hash-password')
+  hashes=$(log_count 'aman hash-password')
   add_instance main
   assert_rc 0
   assert_eq "$(cat "$AMAN_HOME/instances/main/.env")" "$env_before"
-  assert_eq "$(log_count 'amanuensis hash-password')" "$hashes"
+  assert_eq "$(log_count 'aman hash-password')" "$hashes"
   sandbox_drop
 }
 

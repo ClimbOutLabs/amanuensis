@@ -20,7 +20,7 @@ async function run(args: string[], deps = fakeDeps({ env: healthyEnv, get: healt
   return { code, io };
 }
 
-describe('amanuensis doctor', () => {
+describe('aman doctor', () => {
   it('prints a JSON array of checks and exits 0 when nothing fails', async () => {
     const { code, io } = await run([]);
     expect(code).toBe(0);

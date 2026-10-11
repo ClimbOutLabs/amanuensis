@@ -130,16 +130,16 @@ instance_up() {
   fi
 }
 
-doctor_shim() { printf '%s/bin/amanuensis' "$AMAN_HOME"; }
+doctor_shim() { printf '%s/bin/aman' "$AMAN_HOME"; }
 
 install_doctor_shim() {
-  local src="$INSTALLER_DIR/doctor/amanuensis"
+  local src="$INSTALLER_DIR/doctor/aman"
   if [ ! -f "$src" ]; then
-    warn "doctor shim not found at installer/doctor/amanuensis; doctor will be unavailable"
+    warn "doctor shim not found at installer/doctor/aman; doctor will be unavailable"
     return 0
   fi
   ensure_private_dir "$AMAN_HOME/bin"
-  write_if_changed "$AMAN_HOME/bin/amanuensis" 755 <"$src" || true
+  write_if_changed "$AMAN_HOME/bin/aman" 755 <"$src" || true
 }
 
 # Runs the doctor shim with a time bound; prints nothing when it is not installed.

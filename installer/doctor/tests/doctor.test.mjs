@@ -549,14 +549,14 @@ describe('instance service health', () => {
     const result = world.json(['--deep']);
     assert.equal(find(result.doc.instances.main, 'database').state, 'ok');
     const exec = world.calls().find(call => call.startsWith('exec'));
-    assert.equal(exec, `exec -e AMAN_HOST_EPOCH=${world.now} c1 amanuensis doctor --text --deep`);
+    assert.equal(exec, `exec -e AMAN_HOST_EPOCH=${world.now} c1 aman doctor --text --deep`);
     assert.ok(world.calls().some(call => call.includes('label=com.docker.compose.project=aman-main')));
   });
 
   it('passes --only to the in-image doctor only for in-image checks', () => {
     make();
     world.run(['--only', 'login']);
-    assert.ok(world.calls().includes(`exec -e AMAN_HOST_EPOCH=${world.now} c1 amanuensis doctor --text --only login`));
+    assert.ok(world.calls().includes(`exec -e AMAN_HOST_EPOCH=${world.now} c1 aman doctor --text --only login`));
     world.run(['--only', 'ports']);
     assert.ok(!world.calls().some(call => call.includes('--only ports')));
   });
@@ -625,7 +625,7 @@ describe('instance service health', () => {
 
   it('fails the service when the in-image doctor cannot run', () => {
     make();
-    world.set('exec_c1', { out: 'OCI runtime exec failed: amanuensis: not found\n', rc: 126 });
+    world.set('exec_c1', { out: 'OCI runtime exec failed: aman: not found\n', rc: 126 });
     const service = check('service');
     assert.equal(service.state, 'fail');
     assert.match(service.detail, /could not run inside the app container/);

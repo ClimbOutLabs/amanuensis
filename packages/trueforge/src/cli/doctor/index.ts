@@ -8,7 +8,7 @@ import { processDeps, type DoctorDeps } from './deps';
 import { INSTANCE_CHECK_IDS, runInstanceChecks } from './run';
 import { CheckSchema, type Check } from './schemas';
 
-const USAGE = 'Usage: amanuensis doctor [--json | --text] [--only <check>] [--deep]';
+const USAGE = 'Usage: aman doctor [--json | --text] [--only <check>] [--deep]';
 
 interface DoctorOptions {
   text: boolean;
