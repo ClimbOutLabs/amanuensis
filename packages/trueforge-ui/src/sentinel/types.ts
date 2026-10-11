@@ -67,6 +67,8 @@ export type SentinelApprovalCard = {
   outbound_text: string | null;
   /** Host of the connector server that receives the call, or null. */
   destination_host: string | null;
+  /** True when part of outbound_text is cut and not shown in full. */
+  outbound_truncated: boolean;
 };
 
 /** Everything the UI needs to render a Tier 2 or Tier 3 approval, keyed to one tool call. */
@@ -177,6 +179,10 @@ function cardString(
   return nullableString(record, snake) ?? nullableString(record, camel);
 }
 
+function cardFlag(record: Record<string, unknown>, { snake, camel }: { snake: string; camel: string }): boolean {
+  return record[snake] === true || record[camel] === true;
+}
+
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
   const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
@@ -192,6 +198,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     parsed_command: cardString(value, { snake: 'parsed_command', camel: 'parsedCommand' }),
     outbound_text: cardString(value, { snake: 'outbound_text', camel: 'outboundText' }),
     destination_host: cardString(value, { snake: 'destination_host', camel: 'destinationHost' }),
+    outbound_truncated: cardFlag(value, { snake: 'outbound_truncated', camel: 'outboundTruncated' }),
   };
 }
 

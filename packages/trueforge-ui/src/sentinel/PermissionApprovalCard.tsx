@@ -8,8 +8,8 @@ import type { SentinelApprovalCard } from './types.js';
 
 type ApprovalCardTier = 2 | 3;
 
-/** Characters of the outbound arguments shown before "Show all". */
-const OUTBOUND_PREVIEW_CHARS = 500;
+/** Characters shown before a long value is folded behind "Show all". */
+const FOLD_PREVIEW_CHARS = 500;
 
 const TIER_LABELS: Record<ApprovalCardTier, string> = { 2: 'Needs your OK', 3: 'Review carefully' };
 
@@ -30,26 +30,15 @@ export type PermissionApprovalCardProps = {
   disabled?: boolean;
 };
 
-function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-baseline gap-2 text-sm">
-      <dt className="shrink-0 text-xs font-medium uppercase tracking-wide text-text-secondary">{label}</dt>
-      <dd className={mono ? 'font-mono text-xs text-text-primary break-all' : 'text-text-primary'}>{value}</dd>
-    </div>
-  );
-}
-
-function OutboundBlock({ text }: { text: string }) {
+/** Text folded after a preview, cut on code points so a surrogate pair is never split. */
+function FoldedText({ text, as: Tag, className }: { text: string; as: 'pre' | 'span'; className: string }) {
   const [expanded, setExpanded] = useState(false);
-  const isLong = text.length > OUTBOUND_PREVIEW_CHARS;
-  const shown = isLong && !expanded ? text.slice(0, OUTBOUND_PREVIEW_CHARS) : text;
+  const points = Array.from(text);
+  const isLong = points.length > FOLD_PREVIEW_CHARS;
+  const shown = isLong && !expanded ? `${points.slice(0, FOLD_PREVIEW_CHARS).join('')}...` : text;
   return (
-    <div className="rounded border border-border bg-primary-bg px-3 py-2">
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
-      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-text-primary">
-        {shown}
-        {isLong && !expanded ? '...' : ''}
-      </pre>
+    <>
+      <Tag className={className}>{shown}</Tag>
       {isLong && (
         <button
           type="button"
@@ -57,11 +46,40 @@ function OutboundBlock({ text }: { text: string }) {
             setExpanded(!expanded);
           }}
           aria-expanded={expanded}
-          className="mt-1 text-xs font-medium text-text-secondary underline hover:text-text-primary"
+          className="mt-1 block text-xs font-medium text-text-secondary underline hover:text-text-primary"
         >
-          {expanded ? 'Show less' : `Show all (${String(text.length - OUTBOUND_PREVIEW_CHARS)} more characters)`}
+          {expanded ? 'Show less' : `Show all (${String(points.length - FOLD_PREVIEW_CHARS)} more characters)`}
         </button>
       )}
+    </>
+  );
+}
+
+function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-baseline gap-2 text-sm">
+      <dt className="shrink-0 text-xs font-medium uppercase tracking-wide text-text-secondary">{label}</dt>
+      <dd className="min-w-0">
+        <FoldedText
+          text={value}
+          as="span"
+          className={`break-all text-text-primary ${mono ? 'font-mono text-xs' : ''}`}
+        />
+      </dd>
+    </div>
+  );
+}
+
+function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }) {
+  return (
+    <div className="rounded border border-border bg-primary-bg px-3 py-2">
+      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
+      {truncated && <p className="mb-1 text-sm text-text-primary">Part of what will be sent is not shown in full.</p>}
+      <FoldedText
+        text={text}
+        as="pre"
+        className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-text-primary"
+      />
     </div>
   );
 }
@@ -107,15 +125,12 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
 
       <div className="space-y-3 px-4 py-3">
         <p className="text-sm text-text-primary">{card.plain_what}</p>
-        {card.plain_why !== null && <p className="text-sm text-text-secondary">{card.plain_why}</p>}
+        {card.plain_why !== null && <p className="text-sm text-text-secondary">Agent says: {card.plain_why}</p>}
 
         {card.cannot_be_undone !== null && (
-          <p
-            role="note"
-            className="flex items-start gap-2 rounded-md border border-warning-bg/40 bg-warning-bg/10 px-3 py-2 text-sm text-text-primary"
-          >
-            <Icon name="triangle-exclamation" className="mt-0.5 shrink-0" aria-hidden="true" />
-            <span>Cannot be undone: {card.cannot_be_undone}</span>
+          <p className="flex items-start gap-2 text-sm text-text-secondary">
+            <Icon name="info" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+            <span>{card.cannot_be_undone}</span>
           </p>
         )}
 
@@ -133,7 +148,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           </dl>
         )}
 
-        {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} />}
+        {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />}
 
         <div className="flex gap-2">
           <Button variant="primary" size="small" onClick={onApprove} disabled={disabled} className="flex-1">

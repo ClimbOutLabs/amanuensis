@@ -1479,7 +1479,7 @@
         "default": {
           "enabled": true
         },
-        "description": "Uses 80% of the model context length when the explicit trigger is omitted, or 50000 tokens if unknown.",
+        "description": "Without an explicit trigger, compaction starts at 80% of the model context length, lowered so input plus the configured max output tokens fit (never below 4000), or at 50000 tokens when the context length is unknown.",
         "properties": {
           "enabled": {
             "default": true,
@@ -1635,7 +1635,7 @@
             "type": "string"
           },
           "outcome": {
-            "description": "applied: context was overwritten with the summary. skipped_invalid: the model produced a malformed summary and the attempt was discarded. skipped_blocked: the turn was cancelled before the attempt could complete. truncated_fallback: the summary was invalid so old turns were truncated instead.",
+            "description": "applied: context was overwritten with the summary. skipped_invalid: the model produced a malformed summary and the attempt was discarded. skipped_blocked: the turn was cancelled before the attempt could complete. truncated_fallback: no usable summary was produced, so old turns were truncated instead.",
             "enum": [
               "applied",
               "skipped_invalid",
@@ -1645,13 +1645,15 @@
             "type": "string"
           },
           "reason": {
-            "description": "Rejection reason when outcome is skipped_invalid. missing_block: no complete <summary> block. missing_section: a required section is absent. duplicate_section: a section appears more than once. self_referential: the goal/user_goal describes the summarization request instead of the user objective. over_length: summary exceeds bounded length.",
+            "description": "Why no summary was applied. missing_block, missing_section, duplicate_section, self_referential, over_length: the summary was invalid. summarizer_failed: the summarization call failed. request_too_large: the summarization request could not fit the model context.",
             "enum": [
               "missing_block",
               "missing_section",
               "duplicate_section",
               "self_referential",
-              "over_length"
+              "over_length",
+              "summarizer_failed",
+              "request_too_large"
             ],
             "type": "string"
           },
@@ -8716,7 +8718,7 @@
             ]
           },
           "cannot_be_undone": {
-            "description": "What cannot be undone, or null when fully reversible.",
+            "description": "A short note on what can't be reversed, or null.",
             "type": [
               "string",
               "null"
@@ -8737,11 +8739,15 @@
             ]
           },
           "outbound_text": {
-            "description": "Exact arguments sent to a connector, one \"name: value\" line each, cut at 20000 characters, or null.",
+            "description": "Exact arguments sent to a connector, one \"name: value\" line each. Long values are cut with a marker.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "outbound_truncated": {
+            "description": "True when part of outbound_text is cut and not shown in full.",
+            "type": "boolean"
           },
           "parsed_command": {
             "description": "Server-parsed command structure for shell actions, or null.",
@@ -8786,7 +8792,8 @@
           "amount",
           "parsed_command",
           "outbound_text",
-          "destination_host"
+          "destination_host",
+          "outbound_truncated"
         ],
         "type": "object"
       },

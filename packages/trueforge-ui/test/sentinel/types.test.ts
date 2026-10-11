@@ -103,12 +103,18 @@ describe('extractSentinelFromEvent', () => {
         {
           id: 'call-11',
           tier: 3,
-          tier3Card: { plainWhat: 'Search the web', outboundText: 'query: tides', destinationHost: 'mcp.exa.ai' },
+          tier3Card: {
+            plainWhat: 'Search the web',
+            outboundText: 'query: tides',
+            destinationHost: 'mcp.exa.ai',
+            outboundTruncated: true,
+          },
         },
       ],
     });
     expect(approvals[0]?.card.outbound_text).toBe('query: tides');
     expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
+    expect(approvals[0]?.card.outbound_truncated).toBe(true);
   });
 
   it('parses an approval event after the SDK deserializes it', () => {
@@ -135,6 +141,7 @@ describe('extractSentinelFromEvent', () => {
               why_asked_again: null,
               outbound_text: 'query: tides',
               destination_host: 'mcp.exa.ai',
+              outbound_truncated: true,
             },
           },
         ],
@@ -149,6 +156,7 @@ describe('extractSentinelFromEvent', () => {
     expect(approvals[0]?.card.cannot_be_undone).toBe('Runs once.');
     expect(approvals[0]?.card.outbound_text).toBe('query: tides');
     expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
+    expect(approvals[0]?.card.outbound_truncated).toBe(true);
   });
 
   it('reads a camel-cased card from a regenerated SDK shape', () => {

@@ -17,6 +17,7 @@ function baseCard(): SentinelApprovalCard {
     parsed_command: null,
     outbound_text: null,
     destination_host: null,
+    outbound_truncated: false,
   };
 }
 
@@ -36,18 +37,18 @@ describe('PermissionApprovalCard', () => {
       destination: 'acme-corp',
       recipient: 'Acme Corp',
       amount: '$250',
-      cannot_be_undone: 'The transfer cannot be reversed.',
+      cannot_be_undone: "Once this is sent, it can't be unsent.",
       why_asked_again: 'the earlier approval expired',
     });
     expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
-    expect(screen.getByText('You asked the assistant to pay the invoice.')).toBeInTheDocument();
+    expect(screen.getByText('Agent says: You asked the assistant to pay the invoice.')).toBeInTheDocument();
     expect(screen.getByText('Destination')).toBeInTheDocument();
     expect(screen.getByText('acme-corp')).toBeInTheDocument();
     expect(screen.getByText('Recipient')).toBeInTheDocument();
     expect(screen.getByText('Acme Corp')).toBeInTheDocument();
     expect(screen.getByText('Amount')).toBeInTheDocument();
     expect(screen.getByText('$250')).toBeInTheDocument();
-    expect(screen.getByText('Cannot be undone: The transfer cannot be reversed.')).toBeInTheDocument();
+    expect(screen.getByText("Once this is sent, it can't be unsent.")).toBeInTheDocument();
     expect(screen.getByText('You have seen this before: the earlier approval expired')).toBeInTheDocument();
   });
 
@@ -104,6 +105,52 @@ describe('PermissionApprovalCard', () => {
     renderCard({ plain_why: null });
     expect(screen.queryByText(/did not state a reason/i)).not.toBeInTheDocument();
     expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
+  });
+
+  it('shows the cannot-be-undone note as a calm line with no warning box or prefix', () => {
+    renderCard({ cannot_be_undone: "Once this is sent, it can't be unsent." });
+    const note = screen.getByText("Once this is sent, it can't be unsent.");
+    expect(screen.queryByText(/Cannot be undone/)).not.toBeInTheDocument();
+    expect(note.closest('[role="note"]')).toBeNull();
+    expect(note.closest('p')?.className).not.toMatch(/warning/);
+  });
+
+  it("labels the reason as the agent's own words", () => {
+    renderCard({ plain_why: 'Looking up a listing.' });
+    expect(screen.getByText('Agent says: Looking up a listing.')).toBeInTheDocument();
+  });
+
+  it('shows one plain line above the payload when part of it is cut', () => {
+    renderCard({ outbound_text: 'body: x ... (5 more characters not shown)', outbound_truncated: true });
+    expect(screen.getByText('Part of what will be sent is not shown in full.')).toBeInTheDocument();
+  });
+
+  it('shows no cut line when nothing was cut', () => {
+    renderCard({ outbound_text: 'body: x', outbound_truncated: false });
+    expect(screen.queryByText(/not shown in full/)).not.toBeInTheDocument();
+  });
+
+  it('breaks long recipient values and folds them behind Show all', () => {
+    const recipients = Array.from({ length: 60 }, (_, index) => `person${String(index)}@example.com`).join(', ');
+    renderCard({ recipient: recipients });
+    const folded = screen.getByText(/^person0@example\.com.*\.\.\.$/);
+    expect(folded.className).toContain('break-all');
+    expect(folded.parentElement?.className).toContain('min-w-0');
+    expect(folded.textContent).not.toContain('person59@example.com');
+    fireEvent.click(screen.getByRole('button', { name: /show all/i }));
+    expect(screen.getByText(recipients)).toBeInTheDocument();
+  });
+
+  it('folds a long destination too', () => {
+    renderCard({ destination: `https://example.com/${'a'.repeat(700)}` });
+    expect(screen.getByRole('button', { name: /show all \(\d+ more characters\)/i })).toBeInTheDocument();
+  });
+
+  it('never splits a surrogate pair when it folds', () => {
+    renderCard({ outbound_text: '\u{1F600}'.repeat(501) });
+    const folded = screen.getByText(/^(\u{1F600})+\.\.\.$/u);
+    expect(Array.from(folded.textContent ?? '')).toHaveLength(500 + 3);
+    expect(folded.textContent).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
   });
 
   it('calls Approve and Deny', () => {

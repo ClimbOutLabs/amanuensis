@@ -24,6 +24,8 @@ export interface ExtractedCardFields {
   outbound_text: string | null;
   /** Host of the connector server that receives the call; only for connector (MCP) calls. */
   destination_host: string | null;
+  /** True when part of outbound_text was cut and is not shown in full. */
+  outbound_truncated: boolean;
 }
 
 export type CardFieldExtractor = (params: Record<string, unknown>) => ExtractedCardFields;
@@ -45,7 +47,16 @@ const RECIPIENT_KEYS = [
   'user',
   'user_id',
   'contact',
+  'attendees',
+  'invitees',
+  'share_with',
+  'members',
+  'emails',
+  'webhook_url',
 ];
+
+/** Field names that hold the address inside an object recipient such as `{ email, name }`. */
+const ADDRESS_FIELD_KEYS = ['email', 'address', 'email_address', 'mail'];
 
 /** Param keys that can carry a destination. */
 const DESTINATION_KEYS = [
@@ -72,16 +83,112 @@ const DESTINATION_KEYS = [
 /** Param keys that can carry an amount. */
 const AMOUNT_KEYS = ['amount', 'price', 'cost', 'total', 'value', 'sum', 'quantity'];
 
+/** Lower-cased key without separators, so `emailAddress` and `email_address` compare equal. */
+function normalizeKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+const RECIPIENT_KEY_SET = new Set(RECIPIENT_KEYS.map(normalizeKey));
+const ADDRESS_FIELD_SET = new Set(ADDRESS_FIELD_KEYS.map(normalizeKey));
+
+function isRecipientKey(key: string): boolean {
+  return RECIPIENT_KEY_SET.has(normalizeKey(key));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** True for code points that can hide or fake text: controls, bidi controls, zero-width and line separators. */
+function needsEscape(codePoint: number): boolean {
+  return (
+    codePoint <= 0x1f ||
+    (codePoint >= 0x7f && codePoint <= 0x9f) ||
+    codePoint === 0x061c ||
+    (codePoint >= 0x200b && codePoint <= 0x200f) ||
+    (codePoint >= 0x2028 && codePoint <= 0x202e) ||
+    (codePoint >= 0x2060 && codePoint <= 0x2069) ||
+    codePoint === 0xfeff ||
+    (codePoint >= 0xd800 && codePoint <= 0xdfff)
+  );
+}
+
+/**
+ * Makes model-controlled text safe to show: characters that can hide or fake text become visible
+ * `\u{XXXX}` tokens. Display only; nothing that is sent or hashed passes through here. Newlines are
+ * kept only when asked, and CRLF counts as one.
+ */
+export function escapeDisplayText(text: string, options?: { keepNewlines?: boolean }): string {
+  const keepNewlines = options?.keepNewlines === true;
+  let out = '';
+  for (const char of keepNewlines ? text.replace(/\r\n/g, '\n') : text) {
+    const codePoint = char.codePointAt(0) ?? 0;
+    if (keepNewlines && codePoint === 0x0a) {
+      out += char;
+    } else if (needsEscape(codePoint)) {
+      out += `\\u{${codePoint.toString(16).toUpperCase().padStart(4, '0')}}`;
+    } else {
+      out += char;
+    }
+  }
+  return out;
+}
+
+function clean(text: string): string {
+  return escapeDisplayText(text.trim());
+}
+
+/** Every recipient in one value: strings, arrays of strings, and objects reduced to their address field. */
+function recipientItems(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return value.trim() === '' ? [] : [clean(value)];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(recipientItems);
+  }
+  if (isRecord(value)) {
+    const addresses = Object.entries(value)
+      .filter(([key, field]) => ADDRESS_FIELD_SET.has(normalizeKey(key)) && typeof field === 'string')
+      .flatMap(([, field]) => recipientItems(field));
+    // An object with no address field still shows what it holds rather than hiding it.
+    return addresses.length > 0 ? addresses : [clean(argumentJson(value))];
+  }
+  return [];
+}
+
+/** Recipients under the top-level recipient keys, in argument order, without duplicates. */
+function recipientValues(params: Record<string, unknown>): string[] {
+  const out = Object.entries(params)
+    .filter(([key]) => isRecipientKey(key))
+    .flatMap(([, value]) => recipientItems(value));
+  return [...new Set(out)];
+}
+
+const NESTED_RECIPIENT_MAX_DEPTH = 4;
+
+/** Recipients at any depth, so one tucked inside a nested argument still reaches the card. */
+function nestedRecipientValues(value: unknown, depth = 0): string[] {
+  if (Array.isArray(value)) {
+    return depth > NESTED_RECIPIENT_MAX_DEPTH ? [] : value.flatMap(item => nestedRecipientValues(item, depth + 1));
+  }
+  if (!isRecord(value) || depth > NESTED_RECIPIENT_MAX_DEPTH) {
+    return [];
+  }
+  return Object.entries(value).flatMap(([key, field]) =>
+    isRecipientKey(key) ? recipientItems(field) : nestedRecipientValues(field, depth + 1),
+  );
+}
+
 function stringValues(params: Record<string, unknown>, keys: string[]): string[] {
   const out: string[] = [];
   for (const key of keys) {
     const value = params[key];
     if (typeof value === 'string' && value.trim() !== '') {
-      out.push(value.trim());
+      out.push(clean(value));
     } else if (Array.isArray(value)) {
       for (const item of value) {
         if (typeof item === 'string' && item.trim() !== '') {
-          out.push(item.trim());
+          out.push(clean(item));
         }
       }
     }
@@ -105,20 +212,24 @@ function firstOrNull(values: string[]): string | null {
 export function genericExtractor(params: Record<string, unknown>): ExtractedCardFields {
   return {
     destination: firstOrNull(stringValues(params, DESTINATION_KEYS)),
-    recipient: joinOrNull(stringValues(params, RECIPIENT_KEYS)),
+    recipient: joinOrNull(recipientValues(params)),
     amount: firstOrNull(stringValues(params, AMOUNT_KEYS)),
     outbound_text: null,
     destination_host: null,
+    outbound_truncated: false,
   };
 }
 
-/** Longest outbound_text sent to the UI; a cut is marked in the text itself. */
-export const OUTBOUND_TEXT_MAX_CHARS = 20_000;
+/** Longest value shown in full; a longer one is cut with a marker. Recipient values are never cut. */
+export const OUTBOUND_VALUE_MAX_CHARS = 2000;
+/** Longest outbound_text before every non-recipient value is cut harder; keys and recipients always stay. */
+export const OUTBOUND_TEXT_MAX_CHARS = 100_000;
+const OUTBOUND_REDUCED_VALUE_MAX_CHARS = 100;
+const OUTBOUND_KEY_MAX_CHARS = 200;
+const OUTBOUND_GUTTER = '  | ';
+const PLAIN_KEY = /^[A-Za-z0-9_.-]+$/;
 
-function argumentValueText(value: unknown): string {
-  if (typeof value === 'string') {
-    return value;
-  }
+function argumentJson(value: unknown): string {
   try {
     return JSON.stringify(value);
   } catch {
@@ -126,21 +237,65 @@ function argumentValueText(value: unknown): string {
   }
 }
 
-/**
- * Every argument the connector will receive, verbatim, one "name: value" line each.
- * Built from the server's canonical params, so a model-written description can never
- * stand in for what is sent.
- */
-export function renderOutboundArguments(params: Record<string, unknown>): string | null {
-  const lines = Object.entries(params).map(([key, value]) => `${key}: ${argumentValueText(value)}`);
-  if (lines.length === 0) {
+/** Shown after the key for anything that is not a string, so `5` and `"5"` never look alike. */
+function typeHint(value: unknown): string | null {
+  if (typeof value === 'string') {
     return null;
   }
-  const text = lines.join('\n');
-  if (text.length <= OUTBOUND_TEXT_MAX_CHARS) {
-    return text;
+  if (value === null) {
+    return 'null';
   }
-  return `${text.slice(0, OUTBOUND_TEXT_MAX_CHARS)}\n... (cut at ${String(OUTBOUND_TEXT_MAX_CHARS)} characters)`;
+  return Array.isArray(value) ? 'array' : typeof value;
+}
+
+function leadingCodePoints(text: string, count: number): { head: string; rest: number } {
+  const points = Array.from(text);
+  return { head: points.slice(0, count).join(''), rest: Math.max(0, points.length - count) };
+}
+
+function keyDisplay(key: string): string {
+  const { head, rest } = leadingCodePoints(key, OUTBOUND_KEY_MAX_CHARS);
+  const shown = `${head}${rest > 0 ? '...' : ''}`;
+  // A key that is not plain is quoted, so it can never pass for a gutter or a separate line.
+  return PLAIN_KEY.test(shown) ? shown : `"${escapeDisplayText(shown).replace(/"/g, '\\"')}"`;
+}
+
+function renderOutboundLines(
+  params: Record<string, unknown>,
+  valueMaxChars: number,
+): { lines: string[]; truncated: boolean } {
+  let truncated = false;
+  const lines = Object.entries(params).map(([key, value]) => {
+    const raw = typeof value === 'string' ? value : argumentJson(value);
+    const { head, rest } = isRecipientKey(key) ? { head: raw, rest: 0 } : leadingCodePoints(raw, valueMaxChars);
+    truncated ||= rest > 0;
+    const shown = escapeDisplayText(head, { keepNewlines: true });
+    const marker = rest > 0 ? ` ... (${String(rest)} more characters not shown)` : '';
+    // Continuation lines carry a fixed gutter, so a value can never begin a line that reads like `key: value`.
+    const [first = '', ...more] = `${shown}${marker}`.split('\n');
+    const hint = typeHint(value);
+    const label = `${keyDisplay(key)}${hint === null ? '' : ` (${hint})`}`;
+    return [`${label}: ${first}`, ...more.map(line => `${OUTBOUND_GUTTER}${line}`)].join('\n');
+  });
+  return { lines, truncated };
+}
+
+/**
+ * Every argument the connector will receive, one line each, built from the server's canonical params
+ * so a model-written description can never stand in for what is sent. Every key is always listed
+ * and recipient values are never cut; other values are capped, and `truncated` says whether any was.
+ */
+export function renderOutboundArguments(params: Record<string, unknown>): { text: string | null; truncated: boolean } {
+  if (Object.keys(params).length === 0) {
+    return { text: null, truncated: false };
+  }
+  let rendered = renderOutboundLines(params, OUTBOUND_VALUE_MAX_CHARS);
+  let text = rendered.lines.join('\n');
+  if (text.length > OUTBOUND_TEXT_MAX_CHARS) {
+    rendered = renderOutboundLines(params, OUTBOUND_REDUCED_VALUE_MAX_CHARS);
+    text = rendered.lines.join('\n');
+  }
+  return { text, truncated: rendered.truncated };
 }
 
 /** Host (with any port) of an http(s) URL, or null when the value is not one. */
@@ -367,12 +522,19 @@ export function extractCardFields(input: {
   const family = hasPhrase(words, ...DESTRUCTIVE_AND_INSTALL_WORDS)
     ? undefined
     : CONNECTOR_FAMILIES.find(f => f.match(words));
-  const where = input.server_name === undefined || input.server_name === '' ? '' : ` on ${input.server_name}`;
+  const where =
+    input.server_name === undefined || input.server_name === '' ? '' : ` on ${escapeDisplayText(input.server_name)}`;
+  const outbound = renderOutboundArguments(input.canonical_params);
+  const recipients = [...new Set(nestedRecipientValues(input.canonical_params))];
   const fields: ExtractedCardFields = {
     ...base,
     destination: family?.destination?.(input.canonical_params) ?? base.destination,
-    outbound_text: renderOutboundArguments(input.canonical_params),
-    destination_host: input.server_host ?? (base.destination === null ? null : hostFromUrl(base.destination)),
+    // Includes recipients nested inside other arguments; the unverifiable check above stays top-level.
+    recipient: joinOrNull(recipients),
+    outbound_text: outbound.text,
+    outbound_truncated: outbound.truncated,
+    // Only the connector's own configured URL: a host read from the arguments is the model's claim.
+    destination_host: input.server_host === undefined ? null : escapeDisplayText(input.server_host),
   };
   return {
     fields,
@@ -382,7 +544,7 @@ export function extractCardFields(input: {
       family === undefined
         ? null
         : family.describe({
-            tool_name: input.tool_name,
+            tool_name: escapeDisplayText(input.tool_name),
             words,
             where,
             fields,

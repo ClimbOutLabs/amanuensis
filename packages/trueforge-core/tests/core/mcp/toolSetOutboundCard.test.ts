@@ -1,8 +1,12 @@
 import { createLogger } from 'winston';
 import { RemoteMCP, ToolSet, createSentinelHostContext, defaultSentinelServices } from '../../../src/core';
+import type { ApprovalDecision } from '../../../src/core/events/schema';
+import type { InternalEnrichedAssistantMessage } from '../../../src/core/llm/LLMTypes';
 import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
-import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
 import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
+import { createToolCallMemoState, executeToolCalls } from '../../../src/core/mcp/executeToolCalls';
+import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
+import type { SentinelServices } from '../../../src/core/permissions/context';
 import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
@@ -26,7 +30,7 @@ const webSearch: ToolSchema = {
 const sendEmail: ToolSchema = { name: 'send_email', description: 'Send an email.', inputSchema: schema };
 const mystery: ToolSchema = { name: 'frobnicate', description: 'Does something.', inputSchema: schema };
 
-function makeToolSet(input: { name: string; url: string; tools: ToolSchema[] }): ToolSet {
+function makeToolSet(input: { name: string; url: string; tools: ToolSchema[]; services?: SentinelServices }): ToolSet {
   mockConnect.mockImplementation(() =>
     Promise.resolve({
       transportType: 'streamable-http' as const,
@@ -56,7 +60,7 @@ function makeToolSet(input: { name: string; url: string; tools: ToolSchema[] }):
       tenant_id: 't1',
       created_by: 'u1',
       conversation_id: 'c1',
-      services: defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+      services: input.services ?? defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
     }),
   });
 }
@@ -133,4 +137,86 @@ describe('approval card for connector calls', () => {
       expect(info.tier3_card?.outbound_text).toBe('id: 7');
     }
   });
+});
+
+describe('approval is bound to the connector it was granted for', () => {
+  const identity = {
+    tenant_id: 't1',
+    created_by: 'u1',
+    conversation_id: 'c1',
+    repository_id: null,
+    workspace_cwd: null,
+    agent_intent: null,
+  };
+
+  async function approveThenDispatch(input: { cardUrl: string; dispatchUrl: string; viaCallTool: boolean }) {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const atCard = makeToolSet({ name: 'exa', url: input.cardUrl, tools: [webSearch], services });
+    const wireArgs = { query: 'my salary history' };
+    const wrapperArgs = { mcp_server: 'exa', tool_name: 'web_search', input: wireArgs };
+    const cardSource = input.viaCallTool
+      ? new DeferredTool([atCard], { tracing: NOOP_AGENT_TRACING, logger: noopLogger })
+      : atCard;
+    const info = await cardSource.toolCallInfo(
+      input.viaCallTool ? { name: 'call_tool', arguments: wrapperArgs } : { name: 'web_search', arguments: wireArgs },
+    );
+    expect(info.tier).toBe(3);
+    const atDispatch = makeToolSet({ name: 'exa', url: input.dispatchUrl, tools: [webSearch], services });
+    const dispatchSource = input.viaCallTool
+      ? new DeferredTool([atDispatch], { tracing: NOOP_AGENT_TRACING, logger: noopLogger })
+      : atDispatch;
+    const wireName = input.viaCallTool ? 'call_tool' : 'web_search';
+    const message: InternalEnrichedAssistantMessage = {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: 'call-1',
+          type: 'function',
+          function: { name: wireName, arguments: JSON.stringify(input.viaCallTool ? wrapperArgs : wireArgs) },
+          tool_info: info,
+        },
+      ],
+    };
+    const result = await executeToolCalls({
+      assistantMessage: message,
+      toolMapping: new Map([[wireName, { toolSet: dispatchSource, originalToolName: wireName }]]),
+      threadId: 'main',
+      approvalDecisions: new Map<string, ApprovalDecision>([['call-1', { status: 'allow' }]]),
+      memoState: createToolCallMemoState(),
+      sentinel: { services, identity },
+    });
+    const outcome = result.toolCallResults[0];
+    if (outcome === undefined) {
+      throw new Error('expected one tool call result');
+    }
+    return outcome;
+  }
+
+  it.each([false, true])(
+    'runs the approved call when the connector is unchanged (call_tool: %s)',
+    async viaCallTool => {
+      const outcome = await approveThenDispatch({
+        cardUrl: 'https://mcp.exa.ai/mcp',
+        dispatchUrl: 'https://mcp.exa.ai/mcp',
+        viaCallTool,
+      });
+      expect(outcome.failure).toBe(false);
+      expect(outcome.disposition).not.toBe('policy_blocked');
+    },
+  );
+
+  it.each([false, true])(
+    'denies the approved call when the connector URL changed after the card (call_tool: %s)',
+    async viaCallTool => {
+      const outcome = await approveThenDispatch({
+        cardUrl: 'https://mcp.exa.ai/mcp',
+        dispatchUrl: 'https://collector.evil.example/mcp',
+        viaCallTool,
+      });
+      expect(outcome.failure).toBe(true);
+      expect(outcome.disposition).toBe('policy_blocked');
+      expect(outcome.rawContent).toContain('Approval invalid');
+    },
+  );
 });

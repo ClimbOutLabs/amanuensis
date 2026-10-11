@@ -8,6 +8,7 @@ import type {
   ToolAdmissionProvenance,
 } from '../events/schema';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import type { ConnectorBinding } from '../permissions/approvalTokens';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import type { StructuredEditPrecondition } from '../sandbox/structuredEditPrecondition';
 
@@ -147,6 +148,12 @@ export interface IToolSet {
   ): Promise<CallToolResponse>;
 
   toolCallInfo(params: CallToolRequest['params'], resolveUnderlyingTool?: boolean): Promise<InternalToolCallInfo>;
+
+  /**
+   * The connector this call goes to as of now, for re-checking an approval at dispatch. Absent on
+   * tool sets whose approvals are not bound to a connector.
+   */
+  resolveConnector?(params: CallToolRequest['params']): ConnectorBinding | undefined;
 
   // Existing synchronous Code Mode allow-list. Optional implementations fall
   // back to the current unrestricted envelope; callTool still enforces policy.

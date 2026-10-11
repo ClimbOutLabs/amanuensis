@@ -8,6 +8,7 @@ import {
   type SentinelHostContext,
   type TierDecision,
 } from '../permissions';
+import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { isStandingTrustDecision } from '../permissions/connectorTrust';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
@@ -251,6 +252,10 @@ export class ToolSet implements IToolSet {
     return response;
   }
 
+  resolveConnector(): ConnectorBinding {
+    return { server_id: this.id, destination_host: this.source.serverHost ?? null };
+  }
+
   async toolCallInfo(
     params: CallToolRequest['params'],
     resolveUnderlyingTool?: boolean,
@@ -313,6 +318,7 @@ export class ToolSet implements IToolSet {
         canonical_params: isRecord(params.arguments) ? params.arguments : {},
         tool_type: info.type,
         mcp_server_name: info.mcp_server_name,
+        mcp_server_id: info.mcp_server_id,
         mcp_server_host: this.source.serverHost,
         mcp_first_party: this.firstParty,
         mcp_hints: {

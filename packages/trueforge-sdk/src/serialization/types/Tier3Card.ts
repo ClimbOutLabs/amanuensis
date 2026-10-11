@@ -10,6 +10,7 @@ export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Ra
         "destination": core.serialization.string().nullable(),
         "destinationHost": core.serialization.property("destination_host", core.serialization.string().nullable()),
         "outboundText": core.serialization.property("outbound_text", core.serialization.string().nullable()),
+        "outboundTruncated": core.serialization.property("outbound_truncated", core.serialization.boolean()),
         "parsedCommand": core.serialization.property("parsed_command", core.serialization.string().nullable()),
         "plainWhat": core.serialization.property("plain_what", core.serialization.string()),
         "plainWhy": core.serialization.property("plain_why", core.serialization.string().nullable()),
@@ -24,6 +25,7 @@ export declare namespace Tier3Card {
         destination?: string | null;
         destination_host?: string | null;
         outbound_text?: string | null;
+        outbound_truncated: boolean;
         parsed_command?: string | null;
         plain_what: string;
         plain_why?: string | null;
