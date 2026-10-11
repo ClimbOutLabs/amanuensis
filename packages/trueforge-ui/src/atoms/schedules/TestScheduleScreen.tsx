@@ -123,7 +123,7 @@ export function TestScheduleScreen({ schedule, agentName, mcpMounts, onEditConfi
                     className={cn(
                       'inline-flex size-4 shrink-0 items-center justify-center rounded-full border',
                       authenticated
-                        ? 'border-emerald-600/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                        ? 'border-success-bg/40 bg-success-bg/15 text-success-bg'
                         : 'border-border text-transparent',
                     )}
                     aria-hidden

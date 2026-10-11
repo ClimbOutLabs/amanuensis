@@ -10,17 +10,11 @@ export function ScheduleStatusBadge({ status }: { status: ScheduleStatus }) {
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium',
         active
-          ? 'border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/15 dark:text-emerald-300'
-          : 'border-amber-600/30 bg-amber-500/10 text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/15 dark:text-amber-300',
+          ? 'border-success-bg/30 bg-success-bg/10 text-success-bg'
+          : 'border-warning-bg/30 bg-warning-bg/10 text-warning-bg',
       )}
     >
-      <span
-        className={cn(
-          'size-1.5 shrink-0 rounded-full',
-          active ? 'bg-emerald-600 dark:bg-emerald-400' : 'bg-amber-600 dark:bg-amber-400',
-        )}
-        aria-hidden
-      />
+      <span className={cn('size-1.5 shrink-0 rounded-full', active ? 'bg-success-bg' : 'bg-warning-bg')} aria-hidden />
       {active ? 'Active' : 'Paused'}
     </span>
   );
