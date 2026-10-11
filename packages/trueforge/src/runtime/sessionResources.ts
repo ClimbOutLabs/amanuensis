@@ -111,7 +111,7 @@ export async function resolveBoundRepository(input: {
 
 /**
  * Whether the agent spec has a GitHub MCP connector configured, regardless of
- * whether {@link resolveGithubGitCredentials} could resolve usable
+ * whether `resolveGithubGitToken` could resolve usable
  * credentials from it. Used to distinguish "no connector attached" from
  * "connector attached but credentials were refused" in sandbox remediation.
  */
@@ -130,14 +130,14 @@ export function isWebConnectorAttached(spec: AgentSpec): boolean {
 }
 
 /**
- * Resolve the configured GitHub connector PAT into git-credential-store format.
+ * Resolve the configured GitHub connector PAT for host-authenticated git.
  *
  * The credential is admitted only when the agent explicitly enables the GitHub
- * connector and that connector points at a GitHub-owned host. The returned
- * value is written directly into the sandbox credential file by {@link Sandbox};
- * it is never included in model context or command arguments.
+ * connector and that connector points at a GitHub-owned host. The token stays on
+ * the host: the sandbox injects it into the environment of a single
+ * validated network git process and never writes it to the sandbox.
  */
-export async function resolveGithubGitCredentials({
+export async function resolveGithubGitToken({
   tenant_id,
   spec,
   store,
@@ -171,7 +171,7 @@ export async function resolveGithubGitCredentials({
   if (token === undefined) {
     return null;
   }
-  return `https://x-access-token:${encodeURIComponent(token)}@github.com\n`;
+  return token;
 }
 
 /** Gateway header carrying stringified JSON metadata. */
@@ -674,7 +674,7 @@ export function buildTurnSandbox(input: {
   provider: SandboxProvider;
   logger: Logger;
   gitSkills: readonly GitSkill[];
-  resolvedGitCredentialsContent?: string | null | undefined;
+  githubGitToken?: string | null | undefined;
   githubConnectorAttached?: boolean | undefined;
   webConnectorAttached?: boolean | undefined;
   fileDownloadEnabled: boolean;
@@ -717,7 +717,7 @@ export function buildTurnSandbox(input: {
     provider: input.provider,
     existingSandboxId: input.existingSandboxId,
     fileDownloadEnabled: input.fileDownloadEnabled,
-    resolvedGitCredentialsContent: input.resolvedGitCredentialsContent ?? null,
+    githubGitToken: input.githubGitToken ?? null,
     githubConnectorAttached: input.githubConnectorAttached ?? false,
     webConnectorAttached: input.webConnectorAttached ?? false,
     boundRepository: input.boundRepository,

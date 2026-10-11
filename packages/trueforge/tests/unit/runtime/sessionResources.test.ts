@@ -30,7 +30,7 @@ import {
   localSandboxSessionSegment,
   RepositoryBindingResolutionError,
   resolveBoundRepository,
-  resolveGithubGitCredentials,
+  resolveGithubGitToken,
   TFG_METADATA_PREFIX,
   validateAgentSpec,
   withGatewayMetadataHeaders,
@@ -193,7 +193,7 @@ describe('localSandboxSessionSegment', () => {
   });
 });
 
-describe('resolveGithubGitCredentials', () => {
+describe('resolveGithubGitToken', () => {
   it('bridges an explicitly enabled trusted GitHub connector without admitting lookalike hosts', async () => {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
@@ -215,9 +215,7 @@ describe('resolveGithubGitCredentials', () => {
       first_party: false,
     });
 
-    await expect(resolveGithubGitCredentials({ tenant_id: TENANT_ID, spec, store })).resolves.toBe(
-      'https://x-access-token:github_pat_test_value@github.com\n',
-    );
+    await expect(resolveGithubGitToken({ tenant_id: TENANT_ID, spec, store })).resolves.toBe('github_pat_test_value');
 
     await store.upsertServer({
       tenant_id: TENANT_ID,
@@ -231,7 +229,7 @@ describe('resolveGithubGitCredentials', () => {
       },
       first_party: false,
     });
-    await expect(resolveGithubGitCredentials({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
+    await expect(resolveGithubGitToken({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
   });
 
   it('does not bridge a stored token unless the GitHub connector is enabled for the agent', async () => {
@@ -252,7 +250,7 @@ describe('resolveGithubGitCredentials', () => {
     });
     const spec = AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' } });
 
-    await expect(resolveGithubGitCredentials({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
+    await expect(resolveGithubGitToken({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
   });
 });
 
