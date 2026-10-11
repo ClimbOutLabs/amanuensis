@@ -1,0 +1,165 @@
+---
+title: 'Install'
+description: 'Install Amanuensis with the one-command installer: Docker prerequisite, first login, extra instances, remote access, doctor, backup and upgrade.'
+---
+
+## What this is
+
+The installer sets up Amanuensis on your own machine with one command and a few prompts. Docker is the only prerequisite. The installer builds the app and its helpers locally, starts one stack per person, and gives each person a private login. Nothing is uploaded anywhere, and nothing is pushed to any registry.
+
+One instance serves one person. If two people in the same household need it, they run two instances.
+
+## What you need
+
+- A computer with Docker: Docker Engine with Compose v2 on Linux, or Docker Desktop on macOS and Windows. Rootless Docker and Podman are not supported.
+- About 5 GB of free disk space.
+- Your own model: either the address of a local model server you already run, or an API key from a major provider. The installer never scans your machine for models; you type the endpoint or key yourself.
+- A git checkout of this repository. The installer runs from the checkout and builds the images from source.
+
+## The one command
+
+From the repository root:
+
+```bash
+./install.sh
+```
+
+The installer works in phases and shows you a printed plan before changing anything:
+
+1. **Preflight (read-only).** Checks the OS, architecture, Docker, Compose v2, and free disk. On supported Linux without a working Engine, it offers to install Docker for you.
+2. **Plan and confirmation.** Prints each step as done, will do, or needs root, then asks to continue. `--yes` skips the prompt; `--dry-run` prints the plan and stops without changing anything.
+3. **Downloads.** Verifies the checksum of every downloaded file before using it.
+4. **Images.** Builds the app and helper images locally from the checked-out source. Third-party base images are pulled by pinned digest only.
+5. **Machine services.** Starts the shared speech-to-text service.
+6. **First instance.** Prompts for the instance details and starts your stack.
+7. **Doctor and summary.** Runs the health checks and prints your URLs, versions, backup location, and next steps.
+
+### What it asks
+
+For the first instance it prompts, with defaults in brackets:
+
+- Instance name `[main]`
+- Owner email
+- Password (typed twice, never echoed)
+- Public URL `[local-only loopback]`
+- Optional model endpoint or key
+
+Everything else is generated: ports, secrets, and the login setup.
+
+### What it downloads, and how big
+
+The printed plan lists every first-run download with its approximate size, including the speech model weights and the embedding model. Expect a few gigabytes in total on a first install, mostly model weights and container image layers. The installer downloads over HTTPS, hash-checks everything before use, and never pipes anything to a shell.
+
+### Fresh Docker installs on Linux
+
+If the installer just installed Docker for you, it finishes the same run without making you sign out first (it runs the Docker commands through a group wrapper for that run only) and prints a sign-out note. Sign out and back in afterwards so your shell picks up the `docker` group.
+
+## First login
+
+When the installer finishes, it prints a localhost address. Open it in your browser and sign in with the owner email and the password you set. The first run is local only: the app and its login server are reached over plain HTTP on loopback.
+
+Your password is never stored anywhere. The installer hashes it once and keeps only the hash.
+
+## Adding people
+
+Each person gets their own instance with their own ports, secrets, data, and login.
+
+```bash
+./install.sh instance add <name>    # create and start another instance
+./install.sh instance list          # show name, ports, URL, owner, and state
+./install.sh instance remove <name> # stop and remove it; data volumes are kept
+```
+
+`instance add` prompts for the new owner's details, picks free loopback ports by testing binds (override with `--port` and `--login-port`), generates fresh secrets, and waits for the instance to answer its health check.
+
+`instance remove` stops the stack and deletes its containers and config, but keeps the data volumes. To delete the data too:
+
+```bash
+./install.sh instance remove <name> --purge-data
+```
+
+This asks you to type the instance name to confirm. The installer never deletes a volume otherwise.
+
+## Using it from other devices
+
+The first run is local only. To reach an instance from another device on your network, you put your own reverse proxy in front of it. The installer configures nothing outside the machine; it only prints what your proxy must satisfy:
+
+- One HTTPS origin per instance, plus one HTTPS origin per login server. Never a path prefix.
+- The `Host` header forwarded to the instance.
+- Streaming responses passed through unbuffered.
+- Every name resolvable from inside the containers, not just from your browser.
+
+When you set a public URL, that instance's URL and its login issuer switch to HTTPS behind your proxy. An HTTP login issuer is only allowed for loopback addresses.
+
+## Doctor
+
+`amanuensis` is on your PATH after install. Doctor checks the whole setup and tells you exactly what to do about anything it finds:
+
+```bash
+amanuensis doctor                 # everything: machine plus every instance
+amanuensis doctor --instance main # one instance only
+amanuensis doctor --deep          # slower checks: sandbox canary, model endpoint
+amanuensis doctor --json          # machine-readable output
+```
+
+Each check reports one of four states:
+
+- **ok**: healthy, nothing to do.
+- **warn**: works today, needs attention soon.
+- **fail**: broken; the check prints the exact command that fixes it.
+- **off**: intentionally disabled; silent.
+
+The command exits 0 when nothing fails, 1 when anything fails, and 2 on a usage error. Doctor is read-only; to repair, rerun the installer.
+
+Common checks and what they mean:
+
+| Check | Fails when | Fix |
+| --- | --- | --- |
+| docker | Engine not answering, Compose v2 missing | Start the daemon; on Linux, accept the installer's Docker offer |
+| images | A pinned image is missing locally | Rerun the installer |
+| service | An instance's containers are unhealthy | The check prints the start command |
+| login | The login server is unreachable | Wait a few seconds on first start, then check the proxy hints |
+| database | SQLite is not writable or migrations are behind | The check prints the start command |
+| disk | Under 2 GB free is a fail | Free space or prune unused images |
+| clock skew | Machine clock disagrees with the containers | Enable automatic time sync |
+
+A fresh install never warns about backups until the first backup exists.
+
+## Backup and upgrade
+
+Backups stay on your machine, unencrypted, and are never uploaded:
+
+```bash
+./install.sh backup          # back up every instance
+./install.sh backup main     # back up one instance
+```
+
+Backups land in `backups/<timestamp>/` with restricted permissions. The installer keeps the five most recent.
+
+```bash
+./install.sh upgrade --check       # ask if a new version exists (the only version ping)
+./install.sh upgrade               # back up, rebuild, restart, health-check
+./install.sh upgrade --to <version>
+```
+
+Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. It backs up every instance first, rebuilds the images, restarts each stack, and checks health. If anything fails, it always restores the SQLite backup and the previous images, then tells you what it did.
+
+## What is off in this version
+
+Running code (`run_code`) and email attachment extraction show as **off** in this version, with the plain reason shown in the app. The sandbox broker that serves them ships in a later version. Everything else works.
+
+## Troubleshooting
+
+**The `docker` group needs a sign-out.** After a fresh Linux Docker install, your shell does not know about the new `docker` group until you sign out and back in (or reboot). The installer works around this for its own run and prints a reminder; if later commands say permission denied on the Docker socket, sign out and back in.
+
+**Ports in use.** `instance add` tests each port with a real bind before using it. If it reports a port conflict, either free the port or pass `--port` and `--login-port` explicitly.
+
+**Docker Desktop credential store.** If image pulls fail with credential errors, open Docker Desktop, sign the credential helper back in, and rerun the installer.
+
+**Clock skew.** If logins or certificate checks fail right after a sleep or a VM resume, check the machine clock. Turn on automatic time synchronization and run doctor again.
+
+**Login unavailable while the login server starts.** The login server takes a few seconds to come up on a first install. Wait, reload the page, and if it still fails, run `amanuensis doctor` and follow the login check's fix.
+
+## Privacy notes
+
+The installer reads no chats, memories, mail, or audio. What it handles: generated secrets, the owner email, the password hash, the model endpoint or key you typed, and install state and logs. Secrets never appear in command arguments, logs, or reports. There is no telemetry and no network scanning; the installer only contacts the addresses you typed or the ones its printed plan lists.
