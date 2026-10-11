@@ -1,0 +1,272 @@
+#!/usr/bin/env bash
+# Test double for the docker CLI. State lives in $STUB_STATE; every call is appended to $STUB_LOG.
+# It models only what the installer asks: images, volumes, compose projects and a few run commands.
+set -u
+printf 'docker %s\n' "$*" >>"$STUB_LOG"
+S=$STUB_STATE
+mkdir -p "$S/up"
+touch "$S/images" "$S/volumes"
+
+compose_image() { sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$1" | head -n 1; }
+
+cmd=${1:-}
+shift || true
+case "$cmd" in
+  info)
+    if [ -n "${STUB_DOCKER_DENIED:-}" ] && [ -z "${STUB_VIA_SG:-}" ] && [ -z "${STUB_VIA_SUDO:-}" ]; then
+      echo "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock" >&2
+      exit 1
+    fi
+    if [ -n "${STUB_DOCKER_DOWN:-}" ]; then
+      echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?" >&2
+      exit 1
+    fi
+    if [ "${1:-}" = "--format" ]; then
+      secopts=$(printf '[name=seccomp,profile=builtin%s]' "${STUB_ROOTLESS:+ name=rootless}")
+      case "${2:-}" in
+        *ServerVersion*) printf '27.1.1|x86_64|%s|/nonexistent|%s|Docker Engine\n' "$secopts" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ;;
+        *DockerRootDir*) printf '%s\n' "${STUB_DOCKER_ROOT:-}" ;;
+        *) printf '%s\n' "$secopts" ;;
+      esac
+      exit 0
+    fi
+    echo "Server Version: 27.1.1"
+    echo " Security Options:"
+    echo "  seccomp"
+    [ -n "${STUB_ROOTLESS:-}" ] && echo "  rootless"
+    exit 0
+    ;;
+  version)
+    if [ "${1:-}" = "--format" ]; then
+      echo "${STUB_ENGINE_VERSION:-27.1.1}"
+      exit 0
+    fi
+    echo "Client: Docker Engine"
+    [ -n "${STUB_PODMAN:-}" ] && echo "Server: Podman Engine"
+    exit 0
+    ;;
+  image)
+    if [ "$1" = inspect ]; then
+      for ref in "$@"; do :; done
+      if grep -Fxq "$ref" "$S/images"; then
+        case "$*" in *Architecture*) echo amd64 ;; esac
+        exit 0
+      fi
+      exit 1
+    fi
+    ;;
+  build)
+    tag=
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = -t ]; then tag=$2; fi
+      shift
+    done
+    if [ -n "${STUB_BUILD_FAIL:-}" ]; then
+      echo "build failed" >&2
+      exit 1
+    fi
+    echo "$tag" >>"$S/images"
+    echo "$tag" >>"$S/builds"
+    exit 0
+    ;;
+  pull)
+    echo "$1" >>"$S/images"
+    exit 0
+    ;;
+  network)
+    sub=$1
+    shift
+    touch "$S/networks" "$S/network_links"
+    case "$sub" in
+      inspect) grep -Fxq "$1" "$S/networks"; exit $? ;;
+      connect)
+        # connect [--alias NAME] NETWORK CONTAINER
+        [ "$1" = --alias ] && shift 2
+        grep -Fxq "$1" "$S/networks" || { echo "network $1 not found" >&2; exit 1; }
+        if grep -Fxq "$1 $2" "$S/network_links"; then
+          echo "endpoint with name $2 already exists in network $1" >&2
+          exit 1
+        fi
+        echo "$1 $2" >>"$S/network_links"
+        exit 0
+        ;;
+      disconnect)
+        [ "$1" = -f ] && shift
+        grep -Fxv "$1 $2" "$S/network_links" >"$S/network_links.new" || true
+        mv "$S/network_links.new" "$S/network_links"
+        exit 0
+        ;;
+    esac
+    exit 0
+    ;;
+  volume)
+    sub=$1
+    shift
+    case "$sub" in
+      inspect) grep -Fxq "$1" "$S/volumes"; exit $? ;;
+      create)
+        # Scratch volumes are labelled; the label lets the installer find leftovers.
+        label=
+        name=
+        while [ "$#" -gt 0 ]; do
+          case "$1" in --label) label=$2; shift 2 ;; *) name=$1; shift ;; esac
+        done
+        grep -Fxq "$name" "$S/volumes" || echo "$name" >>"$S/volumes"
+        [ -n "$label" ] && echo "$name" >>"$S/volumes_scratch"
+        echo "$name"
+        exit 0
+        ;;
+      ls)
+        case "$*" in
+          *label=com.amanuensis.instance=*)
+            inst=${*##*label=com.amanuensis.instance=}
+            inst=${inst%% *}
+            [ -f "$S/volumes_labels" ] && awk -v i="$inst" '$2 == i {print $1}' "$S/volumes_labels" | grep -Fxf - "$S/volumes"
+            ;;
+          *) [ -f "$S/volumes_scratch" ] && grep -Fxf "$S/volumes" "$S/volumes_scratch" ;;
+        esac
+        exit 0
+        ;;
+      rm)
+        for v in "$@"; do
+          [ "$v" = -f ] && continue
+          case " ${STUB_VOLUME_RM_FAIL:-} " in *" $v "*) echo "volume is in use" >&2; exit 1 ;; esac
+          grep -Fxv "$v" "$S/volumes" >"$S/volumes.new" || true
+          mv "$S/volumes.new" "$S/volumes"
+          if [ -f "$S/volumes_scratch" ] && grep -Fxq "$v" "$S/volumes_scratch"; then
+            rm -rf "${S:?}/scratchfs/$v"
+            echo "$v" >>"$S/scratch_removed"
+          else
+            echo "$v" >>"$S/volumes_removed"
+          fi
+        done
+        exit 0
+        ;;
+    esac
+    ;;
+  ps)
+    proj=
+    formatted=
+    for a in "$@"; do
+      case "$a" in
+        label=com.docker.compose.project=*) proj=${a#label=com.docker.compose.project=} ;;
+        '{{'*) formatted=1 ;;
+      esac
+    done
+    if [ -f "$S/up/$proj" ]; then
+      case "$proj" in
+        aman-machine) echo c1 ;;
+        *)
+          if [ -n "$formatted" ]; then
+            # id|name|state|status|compose service, as the doctor asks for them
+            for svc in loopback app dex; do printf 'c-%s|%s-%s-1|running|Up 2 minutes (healthy)|%s\n' "$svc" "$proj" "$svc" "$svc"; done
+          else
+            printf 'c1\nc2\nc3\n'
+          fi
+          ;;
+      esac
+    fi
+    exit 0
+    ;;
+  exec)
+    # `docker exec <container> amanuensis doctor --text`: one tab-separated check per line.
+    printf 'service\tok\tstub\t\n'
+    exit 0
+    ;;
+  run)
+    vol=
+    data_vol=
+    scratch_vol=
+    prev=
+    for a in "$@"; do
+      if [ "$prev" = -v ]; then
+        vol=${a%%:*}
+        case "$a" in
+          *:/data) data_vol=$vol ;;
+          *:/backup) scratch_vol=$vol ;;
+        esac
+      fi
+      prev=$a
+    done
+    case "$*" in
+      *"amanuensis hash-password"*)
+        cat >"$S/hash_stdin"
+        env >"$S/hash_env"
+        hash="\$2a\$10\$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY01"
+        printf '{"hash":"%s"}\n' "$hash"
+        exit 0
+        ;;
+      *"amanuensis backup"*)
+        # Models the CLI: refuses a missing --target, writes db.sqlite, memory/, persona-knowledge/ and a manifest there.
+        echo "$*" >>"$S/backup_runs"
+        [ -n "${STUB_BACKUP_FAIL:-}" ] && { echo "backup failed" >&2; exit 1; }
+        case "$*" in *"--target /backup"*) ;; *) echo "Missing --target <directory>." >&2; exit 2 ;; esac
+        [ -n "$scratch_vol" ] || exit 2
+        out=$S/scratchfs/$scratch_vol
+        mkdir -p "$out/memory" "$out/persona-knowledge"
+        printf 'SQLITE-OF-%s\n' "$data_vol" >"$out/db.sqlite"
+        printf '{"version":1,"files":[]}\n' >"$out/manifest.json"
+        printf '{"target":"/backup","manifest":"manifest.json","files":1,"bytes":1}\n'
+        exit 0
+        ;;
+      *" tar "*)
+        if [ -d "$S/scratchfs/$vol" ]; then
+          tar -C "$S/scratchfs/$vol" -cf - .
+        else
+          printf 'TAR-OF-%s\n' "$vol"
+        fi
+        exit 0
+        ;;
+      *"sh -c"*)
+        cat >"$S/restored_$vol"
+        echo "restore $vol" >>"$S/restores"
+        exit 0
+        ;;
+    esac
+    exit 0
+    ;;
+  compose)
+    if [ "${1:-}" = version ]; then
+      echo "${STUB_COMPOSE_VERSION:-2.29.1}"
+      exit 0
+    fi
+    proj=
+    file=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --project-name) proj=$2; shift 2 ;;
+        --project-directory | --env-file) shift 2 ;;
+        -f) file=$2; shift 2 ;;
+        *) break ;;
+      esac
+    done
+    sub=${1:-}
+    shift || true
+    case "$sub" in
+      up)
+        img=$(compose_image "$file")
+        if [ -n "${STUB_UP_FAIL_UNLESS_TAG:-}" ] && [ "$img" != "$STUB_UP_FAIL_UNLESS_TAG" ] && [ "$proj" != aman-machine ]; then
+          echo "container is unhealthy" >&2
+          exit 1
+        fi
+        printf '%s\n' "$img" >"$S/up/$proj"
+        awk '/^    name: / {n = $2} /com.amanuensis.instance:/ {print n, $2}' "$file" >>"$S/volumes_labels"
+        grep -o 'name: aman_[a-z0-9_-]*' "$file" | sed 's/name: //' | while read -r v; do
+          case "$v" in
+            *_stt) grep -Fxq "$v" "$S/networks" 2>/dev/null || echo "$v" >>"$S/networks" ;;
+            *) grep -Fxq "$v" "$S/volumes" || echo "$v" >>"$S/volumes" ;;
+          esac
+        done
+        exit 0
+        ;;
+      down)
+        rm -f "$S/up/$proj"
+        n=aman_${proj#aman-}_stt
+        grep -Fxv "$n" "$S/networks" >"$S/networks.new" 2>/dev/null; mv "$S/networks.new" "$S/networks" 2>/dev/null
+        exit 0
+        ;;
+      *) exit 0 ;;
+    esac
+    ;;
+esac
+exit 0

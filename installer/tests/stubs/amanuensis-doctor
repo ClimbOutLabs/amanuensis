@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Stand-in for the doctor shim: prints a fixed document and exits as STUB_DOCTOR_EXIT says.
+printf 'doctor %s\n' "$*" >>"$STUB_LOG"
+echo '{"machine":[{"id":"docker","state":"ok","detail":"","fix":""}],"instances":{}}'
+exit "${STUB_DOCTOR_EXIT:-0}"

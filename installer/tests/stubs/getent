@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+if [ "$1" = group ] && [ "$2" = docker ]; then
+  members=$(cat "$STUB_STATE/group_members" 2>/dev/null || true)
+  echo "docker:x:998:$members"
+fi

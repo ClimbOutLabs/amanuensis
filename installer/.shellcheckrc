@@ -1,0 +1,5 @@
+shell=bash
+external-sources=true
+source-path=SCRIPTDIR
+# The libraries share state through globals that install.sh sets, which shellcheck cannot trace.
+disable=SC2034
