@@ -6,10 +6,14 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { InternalEnrichedAssistantMessage } from '../../../../src/core/llm/LLMTypes';
+import { createToolCallMemoState, executeToolCalls } from '../../../../src/core/mcp/executeToolCalls';
 import { RunCodeService } from '../../../../src/core/sandbox/driver/RunCodeService';
+import { Sandbox, SANDBOX_EXEC_TOOL_NAME, SANDBOX_RUN_CODE_TOOL_NAME } from '../../../../src/core/sandbox/Sandbox';
 import { SLOT_AGENT_SOCKET_NAME } from '../../../../src/core/sandbox/slots/slotContract';
 import { SlotDriver } from '../../../../src/core/sandbox/slots/SlotDriver';
 import { SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
+import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../../harnessMocks';
 
 const SLOTS_DIR = process.env['AMAN_SLOTS_TEST_DIR'];
@@ -140,5 +144,62 @@ describe('sandbox slots (live agents)', () => {
       command: 'git --version && gcc --version | head -1 && node --version && python3 --version',
     });
     expect(tools.success && tools.response.exitCode).toBe(0);
+  });
+
+  test('the Sandbox tools run on slots: exec keeps files, run_code returns output, no provider is needed', async () => {
+    if (SLOTS_DIR === undefined) {
+      return;
+    }
+    const provider = new SlotSandboxProvider({
+      socketPaths: socketPaths(),
+      defaultExecTimeoutSeconds: 30,
+      treeDiskMb: 100,
+      fileMaxBytesForDownload: 1024 * 1024,
+      logger: makeSilentLogger(),
+      sleepMs: undefined,
+    });
+    const sandbox = new Sandbox({
+      provider,
+      workspaceVerificationCoordinator: undefined,
+      blockDestructiveToolsInCodeMode: true,
+      mcpRequestTimeoutMs: 60_000,
+      mcpConnectTimeoutMs: 5_000,
+      logger: makeSilentLogger(),
+      tracing: NOOP_AGENT_TRACING,
+      runCodeService: service(),
+    });
+    const call = async (name: string, args: Record<string, unknown>): Promise<string> => {
+      const toolInfo = await sandbox.toolCallInfo({ name, arguments: args });
+      const message: InternalEnrichedAssistantMessage = {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'c1', type: 'function', function: { name, arguments: JSON.stringify(args) }, tool_info: toolInfo },
+        ],
+      };
+      const outcome = await executeToolCalls({
+        assistantMessage: message,
+        toolMapping: new Map([[name, { toolSet: sandbox, originalToolName: name }]]),
+        threadId: 'main',
+        approvalDecisions: new Map([['c1', { status: 'allow', scope: 'once' }]]),
+        memoState: createToolCallMemoState(),
+      });
+      return outcome.toolCallResults[0]?.rawContent ?? '';
+    };
+    expect(
+      await call(SANDBOX_EXEC_TOOL_NAME, {
+        command: 'mkdir remembered-dir && echo done',
+        purpose: 'execute',
+        intent: 'write a note',
+      }),
+    ).toContain('done');
+    expect(
+      await call(SANDBOX_EXEC_TOOL_NAME, {
+        command: 'ls -d remembered-dir',
+        purpose: 'inspect',
+        intent: 'read the note',
+      }),
+    ).toContain('remembered-dir');
+    expect(await call(SANDBOX_RUN_CODE_TOOL_NAME, { language: 'python', code: 'print(6 * 7)' })).toContain('42');
   });
 });

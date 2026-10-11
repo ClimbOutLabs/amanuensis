@@ -75,13 +75,25 @@ export class FakeAgent {
         res.writeHead(reply.status, { 'content-type': 'application/json' }).end(JSON.stringify(reply.body));
       })();
     });
-    await new Promise<void>(resolve => this.server?.listen(socketPath, resolve));
+    const server = this.server;
+    await new Promise<void>(resolve => {
+      server.listen(socketPath, resolve);
+    });
     return socketPath;
   }
 
   async stop(): Promise<void> {
     this.server?.closeAllConnections();
-    await new Promise<void>(resolve => (this.server === undefined ? resolve() : this.server.close(() => resolve())));
+    const server = this.server;
+    await new Promise<void>(resolve => {
+      if (server === undefined) {
+        resolve();
+        return;
+      }
+      server.close(() => {
+        resolve();
+      });
+    });
     if (this.dir !== undefined) {
       await rm(this.dir, { recursive: true, force: true });
     }

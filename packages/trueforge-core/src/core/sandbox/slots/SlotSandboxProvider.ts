@@ -20,7 +20,6 @@ import {
   type SandboxUploadFileParams,
   type VerifiedWorkspaceCommitParams,
   type VerifiedWorkspaceCommitResult,
-  type WorkspaceTerminationParams,
 } from '../provider/Provider';
 import { SlotClient, type SlotCallError } from './SlotClient';
 import { attestationProblem, SLOT_FIX_COMMAND } from './SlotDriver';
@@ -150,7 +149,7 @@ export class SlotSandboxProvider implements SandboxProvider {
   }
 
   /** A cancelled call ends its whole guest, so nothing outlives the call and there is nothing to wait for. */
-  acknowledgeWorkspaceTermination(_params: WorkspaceTerminationParams): Promise<void> {
+  acknowledgeWorkspaceTermination(): Promise<void> {
     return Promise.resolve();
   }
 
