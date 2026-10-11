@@ -42,6 +42,11 @@ const WRITE_TOOL: ToolSchema = {
   inputSchema: { type: 'object' },
   annotations: { readOnlyHint: false },
 };
+const CLOSED_WORLD_READ_TOOL: ToolSchema = {
+  name: 'closed_world_read_thing',
+  inputSchema: { type: 'object' },
+  annotations: { readOnlyHint: true, openWorldHint: false },
+};
 const OPEN_WORLD_READ_TOOL: ToolSchema = {
   name: 'open_world_read_thing',
   inputSchema: { type: 'object' },
@@ -539,13 +544,21 @@ describe('RemoteMCP + ToolSet', () => {
   });
 
   describe('effect classification', () => {
-    it('gives a read-only tool with no openWorldHint effect: inspect', async () => {
+    it('gives a read-only tool that declares openWorldHint: false effect: inspect', async () => {
+      installFakeConnection({ tools: [CLOSED_WORLD_READ_TOOL] });
+      const server = makeServer({});
+
+      await expect(server.toolCallInfo({ name: 'closed_world_read_thing', arguments: {} })).resolves.toMatchObject({
+        effect: 'inspect',
+      });
+    });
+
+    it('does not classify a read-only tool that omits openWorldHint (absent means open-world)', async () => {
       installFakeConnection({ tools: [READ_TOOL] });
       const server = makeServer({});
 
-      await expect(server.toolCallInfo({ name: 'read_thing', arguments: {} })).resolves.toMatchObject({
-        effect: 'inspect',
-      });
+      const info = await server.toolCallInfo({ name: 'read_thing', arguments: {} });
+      expect(info).not.toHaveProperty('effect');
     });
 
     it('does not classify a read-only tool with openWorldHint: true (security-critical: data can leave the machine via arguments)', async () => {

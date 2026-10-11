@@ -290,6 +290,30 @@ export const GetAvailableMcpServerResponseSchema = z
   .object({ data: AvailableMcpServerSchema })
   .openapi('GetAvailableMCPServerResponse');
 
+export const McpToolGrantParamsSchema = z
+  .object({
+    name: z.string().min(1).describe('MCP server name.'),
+    tool_name: z.string().min(1).describe('Tool name on the MCP server.'),
+  })
+  .openapi('MCPToolGrantParams');
+
+/** One tool the caller always allows on an MCP server. */
+export const McpToolGrantSchema = z
+  .object({
+    tool_name: z.string().describe('Tool name on the MCP server.'),
+    created_at: z.string().describe('When the caller chose Always allow, as an ISO 8601 UTC instant.'),
+  })
+  .strict()
+  .openapi('MCPToolGrant');
+
+export const ListMcpToolGrantsResponseSchema = z
+  .object({
+    data: z.array(McpToolGrantSchema).describe('Tools the caller always allows on this MCP server, oldest first.'),
+  })
+  .openapi('ListMCPToolGrantsResponse');
+
+export const DeleteMcpToolGrantResponseSchema = z.object({}).openapi('DeleteMCPToolGrantResponse');
+
 export type McpServerType = z.infer<typeof McpServerTypeSchema>;
 export type McpServerManifestAuth = z.infer<typeof McpServerManifestAuthSchema>;
 export type RemoteMcpServerManifest = z.infer<typeof RemoteMcpServerManifestSchema>;
@@ -301,6 +325,7 @@ export type ConfiguredMcpServer = z.infer<typeof ConfiguredMcpServerSchema>;
 export type CreateMcpServerRequest = z.infer<typeof CreateMcpServerRequestSchema>;
 export type UpdateMcpServerRequest = z.infer<typeof UpdateMcpServerRequestSchema>;
 export type AvailableMcpServer = z.infer<typeof AvailableMcpServerSchema>;
+export type McpToolGrant = z.infer<typeof McpToolGrantSchema>;
 
 /**
  * Headers for live MCP calls against a configured server.

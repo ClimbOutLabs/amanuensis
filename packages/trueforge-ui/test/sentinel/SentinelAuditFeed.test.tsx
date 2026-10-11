@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
 import { SentinelAuditFeed } from '@/sentinel/SentinelAuditFeed.js';
-import type { SentinelApi, SentinelAuditEntry } from '@/sentinel/types.js';
+import type { SentinelApi, SentinelAuditEntry, SentinelUserSettings } from '@/sentinel/types.js';
 
 function makeEntry(overrides: Partial<SentinelAuditEntry>): SentinelAuditEntry {
   return {
@@ -20,17 +20,16 @@ function makeEntry(overrides: Partial<SentinelAuditEntry>): SentinelAuditEntry {
 }
 
 function stubApi(entries: SentinelAuditEntry[]): { api: SentinelApi; updateUserSettings: ReturnType<typeof vi.fn> } {
-  const updateUserSettings = vi.fn(async (_patch: object) => ({
+  const updateUserSettings = vi.fn(async (patch: Partial<SentinelUserSettings>) => ({
     offline_mode: false,
-    tier2_always_ask: [],
+    tier2_auto_allow: [],
+    ...patch,
   }));
   const api: SentinelApi = {
     listAuditEntries: vi.fn(async () => entries),
-    getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_always_ask: [] })),
+    getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [] })),
     updateUserSettings,
-    undoTier2Action: vi.fn(async () => {}),
-    stopTier2Action: vi.fn(async () => {}),
-    listSentinelSessionContext: vi.fn(async () => ({ approvals: [], notices: [] })),
+    listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
   };
   return { api, updateUserSettings };
 }
@@ -61,7 +60,7 @@ describe('SentinelAuditFeed', () => {
         tier: 3,
         action_type: 'db_refresh',
       }),
-      makeEntry({ id: 'entry-4', outcome: 'undone', description: 'Wrote a file', tier: 2, action_type: 'exec' }),
+      makeEntry({ id: 'entry-4', outcome: 'ran', description: 'Wrote a file', tier: 2, action_type: 'exec' }),
       makeEntry({
         id: 'entry-5',
         outcome: 'logged',
@@ -81,41 +80,70 @@ describe('SentinelAuditFeed', () => {
     expect(screen.getByText((_, element) => element?.textContent === ' · User declined.')).toBeInTheDocument();
     expect(screen.getByText('Auto-denied')).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === ' · Offline mode was on.')).toBeInTheDocument();
-    expect(screen.getByText('Undone')).toBeInTheDocument();
+    expect(screen.getByText('Ran')).toBeInTheDocument();
     expect(screen.getByText('Logged')).toBeInTheDocument();
   });
 
-  it('renders an Always ask toggle for each Tier 2 kind, off by default', async () => {
+  it('renders a Run without asking toggle for each Tier 2 kind, off by default', async () => {
     const { api, updateUserSettings } = stubApi([makeEntry({ id: 'entry-1' })]);
     render(
       <SentinelApiProvider api={api}>
         <SentinelAuditFeed sessionId="session-1" />
       </SentinelApiProvider>,
     );
-    const shellToggle = await screen.findByRole('switch', { name: 'Always ask before shell' });
-    expect(shellToggle).not.toBeChecked();
-    expect(screen.getByRole('switch', { name: 'Always ask before file_write' })).not.toBeChecked();
-    expect(screen.getByRole('switch', { name: 'Always ask before runner' })).not.toBeChecked();
-    expect(screen.getByRole('switch', { name: 'Always ask before branch' })).not.toBeChecked();
-    fireEvent.click(shellToggle);
+    const fileToggle = await screen.findByRole('switch', { name: 'Run without asking: file_write' });
     await waitFor(() => {
-      expect(updateUserSettings).toHaveBeenCalledWith({ tier2_always_ask: ['shell'] });
+      expect(fileToggle).toBeEnabled();
+    });
+    expect(fileToggle).not.toBeChecked();
+    // Only kinds the classifier can ask about get a toggle.
+    expect(screen.queryByRole('switch', { name: /shell|runner|branch/ })).not.toBeInTheDocument();
+    fireEvent.click(fileToggle);
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({ tier2_auto_allow: ['file_write'] });
+    });
+    // The saved settings come back through the provider, so the switch follows them.
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Run without asking: file_write' })).toBeChecked();
     });
   });
 
-  it('reflects the server-side escalated kinds', async () => {
-    const { api } = stubApi([makeEntry({ id: 'entry-1' })]);
+  it('switches a relaxed kind back off and saves the empty list', async () => {
+    const { api, updateUserSettings } = stubApi([]);
     api.getUserSettings = vi.fn(async () => ({
       offline_mode: false,
-      tier2_always_ask: ['file_write'] as Array<'file_write'>,
+      tier2_auto_allow: ['file_write'] as Array<'file_write'>,
     }));
     render(
       <SentinelApiProvider api={api}>
         <SentinelAuditFeed sessionId="session-1" />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always ask before file_write' });
-    expect(fileToggle).toBeChecked();
+    const fileToggle = await screen.findByRole('switch', { name: 'Run without asking: file_write' });
+    await waitFor(() => {
+      expect(fileToggle).toBeChecked();
+    });
+    fireEvent.click(fileToggle);
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({ tier2_auto_allow: [] });
+    });
+  });
+
+  it('reflects the server-side relaxed kinds', async () => {
+    const { api } = stubApi([makeEntry({ id: 'entry-1' })]);
+    api.getUserSettings = vi.fn(async () => ({
+      offline_mode: false,
+      tier2_auto_allow: ['file_write'] as Array<'file_write'>,
+    }));
+    render(
+      <SentinelApiProvider api={api}>
+        <SentinelAuditFeed sessionId="session-1" />
+      </SentinelApiProvider>,
+    );
+    const fileToggle = await screen.findByRole('switch', { name: 'Run without asking: file_write' });
+    await waitFor(() => {
+      expect(fileToggle).toBeChecked();
+    });
   });
 
   it('shows the empty state when the session has no permission activity', async () => {

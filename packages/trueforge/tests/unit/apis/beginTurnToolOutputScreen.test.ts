@@ -32,6 +32,7 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
+import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../../../src/runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../../../src/runtime/memorySummarizeSettings';
 import { toolOutputScreenCapability, type ToolOutputScreenConfig } from '../../../src/runtime/toolOutputScreen';
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../../../src/runtime/toolOutputScreenSettings';
@@ -197,12 +198,12 @@ describe('beginTurnExecution tool-output screen wiring', () => {
 
     const { capturedResolver, ctorArgs } = await beginTurnWithStore(store);
 
-    // Drive-by fix: the expectation predates the turn-summarization read that
-    // beginTurnExecution has always performed alongside the tool-output-screen
-    // read (one settings read per turn per domain). Both keys are legitimate.
+    // One settings read per turn per domain: tool-output screen, turn summarization and
+    // the recall screen.
     expect(store.getSettingCalls).toEqual([
       { key: TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY },
       { key: MEMORY_SUMMARIZE_SETTING_KEY },
+      { key: MEMORY_SCREEN_ENABLED_SETTING_KEY },
     ]);
     expect(capturedResolver).toEqual({ __mockToolOutputScreenResolver: true });
     expect(toolOutputScreenConfig(ctorArgs).enabled).toBe(false);
@@ -215,11 +216,10 @@ describe('beginTurnExecution tool-output screen wiring', () => {
 
     const { ctorArgs } = await beginTurnWithStore(store);
 
-    // Drive-by fix: same stale expectation as above — beginTurnExecution reads
-    // the turn-summarization override alongside the tool-output-screen setting.
     expect(store.getSettingCalls).toEqual([
       { key: TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY },
       { key: MEMORY_SUMMARIZE_SETTING_KEY },
+      { key: MEMORY_SCREEN_ENABLED_SETTING_KEY },
     ]);
     expect(toolOutputScreenConfig(ctorArgs).enabled).toBe(true);
   });

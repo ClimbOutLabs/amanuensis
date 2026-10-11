@@ -127,22 +127,19 @@ export const InternalToolCallInfoSchema = z.object({
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.
   tier: TierSchema.optional().describe('Server-owned Sentinel permission tier. Never model-authored.'),
-  tier3_card: Tier3CardSchema.nullable().optional().describe('Server-rendered Tier 3 approval card, or null.'),
+  tier3_card: Tier3CardSchema.nullable()
+    .optional()
+    .describe('Server-rendered approval card for Tier 2 and Tier 3 actions, or null.'),
   tier2_kind: z
     .enum(TIER2_ACTION_KINDS)
     .nullable()
     .optional()
-    .describe('Tier 2 member kind for the per-action "always ask me" toggle, or null.'),
-  tier2_files: z
-    .array(z.string())
-    .nullable()
-    .optional()
-    .describe('Tracked executable files named in the Tier 2 inline indicator, or null.'),
+    .describe('Tier 2 member kind governed by the per-kind relaxation, or null.'),
   approval_token_id: z
     .string()
     .nullable()
     .optional()
-    .describe('Single-use approval token id for Tier 3 carded actions, or null.'),
+    .describe('Single-use approval token id for actions that need approval, or null.'),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
     .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),

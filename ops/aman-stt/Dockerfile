@@ -5,8 +5,11 @@
 #
 # No GPU access: the base image has no CUDA userspace and the service pins
 # device=cpu. The model (~464 MB) downloads once from Hugging Face at first
-# startup into the stt-model-cache volume; pin AMAN_STT_MODEL_DIR to a baked-in
-# directory to ship the weights inside the image instead.
+# startup into the stt-model-cache volume: only the pinned revision recorded
+# in aman_stt.py (PINNED_MODELS) is fetched, and every file's SHA-256 is
+# verified before loading. Later starts reuse the verified cache with no
+# network access. Pin AMAN_STT_MODEL_DIR to a baked-in directory to ship the
+# weights inside the image instead.
 FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

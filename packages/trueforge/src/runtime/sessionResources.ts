@@ -30,6 +30,7 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { isFirstPartyOrigin } from '../mcp/firstParty';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { toSandboxProviderFromRecord } from '../sandbox/providerUtils';
@@ -42,6 +43,8 @@ import { buildRunCodeHarvestSink } from './artifacts/persistRunCodeHarvests';
 export interface McpConnection {
   url: string;
   headers: RemoteMcpHeaders;
+  /** The stored connector's trust marker, and only while the operator still lists its origin. */
+  first_party: boolean;
 }
 
 const GITHUB_MCP_SERVER_NAME = 'github';
@@ -473,6 +476,11 @@ export async function getMcpConnection({
   if (record === undefined) {
     return undefined;
   }
+  // The stored mark is what setup decided at save time. It counts only while the operator still
+  // lists the origin, so dropping an origin from the configuration takes effect on the next turn.
+  const firstParty =
+    record.first_party &&
+    isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS });
   const needsLiveAuth = record.manifest.auth?.type === 'dcr' || record.manifest.auth?.type === 'oauth_client';
   // Only the live-auth case delegates: a with-auth store's `resolveInvokeHeaders` may be
   // TrueFoundry-managed (mid-turn re-authorization through the gateway) rather than the generic
@@ -483,6 +491,7 @@ export async function getMcpConnection({
     return {
       url: record.manifest.url,
       headers: store.resolveInvokeHeaders({ record, userRef }),
+      first_party: firstParty,
     };
   }
   if (needsLiveAuth && tokenStore !== undefined && clientName !== undefined) {
@@ -495,11 +504,13 @@ export async function getMcpConnection({
         clientName,
         userRef,
       }),
+      first_party: firstParty,
     };
   }
   return {
     url: record.manifest.url,
     headers: resolveManifestRequestHeaders(record.manifest),
+    first_party: firstParty,
   };
 }
 
@@ -619,14 +630,19 @@ function getSharedRunCodeService(logger: Logger): RunCodeService {
         `run_code isolation driver "${configuration.SANDBOX_ISOLATION_DRIVER}" is not implemented in this build — refusing to dispatch.`,
       );
     }
+    const runCodeLogger = logger.child({ module: 'run-code' });
     const driver = new DockerDriver(
       {
         image: configuration.SANDBOX_IMAGE,
         cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
+        stateDir: configuration.SANDBOX_STATE_DIR,
         dockerBinary: undefined,
         cosignBinary: undefined,
+        dockerSocketPath: undefined,
+        dataDir: configuration.SANDBOX_RUNS_DIR,
         commandTimeoutMs: undefined,
         createTimeoutMs: undefined,
+        logger: runCodeLogger,
       },
       undefined,
     );
@@ -642,7 +658,7 @@ function getSharedRunCodeService(logger: Logger): RunCodeService {
       imagePullTimeoutSeconds: configuration.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS,
       // Docker ignores the FC pull-before-kill grace.
       harvestGraceMs: 0,
-      logger: logger.child({ module: 'run-code' }),
+      logger: runCodeLogger,
       now: undefined,
       sleepMs: undefined,
     });
@@ -689,11 +705,8 @@ export function buildTurnSandbox(input: {
         store: ITurnArtifactStore;
       }
     | undefined;
-  /**
-   * Sentinel permission context for this session. Passed through to Sandbox
-   * for run_code dispatch verification. Undefined means Sentinel is not active.
-   */
-  sentinel?: SentinelHostContext | undefined;
+  /** Session-scoped Sentinel context; sandbox approvals must use the session's services. */
+  sentinel: SentinelHostContext;
 }): Sandbox {
   // Empty mounter still uploads requested-skills file so existing skills are cleaned up.
   const skillMounter = new SkillMounter(

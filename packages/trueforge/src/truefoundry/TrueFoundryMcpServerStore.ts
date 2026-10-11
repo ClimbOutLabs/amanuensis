@@ -264,6 +264,8 @@ function toRecord(input: { tenant_id: string; server: SfyMcpServerSummary; gatew
     tenant_id: input.tenant_id,
     name: input.server.name,
     manifest: toTrueFoundryMcpManifest({ server: input.server, gatewayUrl: input.gatewayUrl }),
+    // Gateway-managed servers are never provisioned by this product's own setup.
+    first_party: false,
     created_at: input.server.createdAt,
     updated_at: input.server.updatedAt,
   };

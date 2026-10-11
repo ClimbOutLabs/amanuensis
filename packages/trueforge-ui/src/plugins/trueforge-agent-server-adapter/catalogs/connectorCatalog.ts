@@ -14,6 +14,7 @@ import {
   type MemoryProviderCheck,
 } from '../../../server/connectorChecks.js';
 
+import { parseToolGrants, type ConnectorToolGrants } from '../../../server/connectorToolGrants.js';
 import type { MemoryProviderFields } from '../../../server/memoryProviderTypes.js';
 import type {
   ConnectorAuth,
@@ -93,12 +94,41 @@ function toConnectionFailureKind(status: number | undefined): ConnectorConnectio
 }
 
 /**
- * Calls POST /api/v1/mcp-servers/{name}/memory-check with the same base URL, token, and fetch
- * the SDK client was built from. Direct rather than through the client because the generated
- * SDK does not carry this route yet; it moves onto the client at the next regeneration.
- * Cookie auth rides along: the default base URL is same-origin, and a host pointing the UI at
- * another origin supplies its own `fetch`.
+ * Calls a `/api/v1/mcp-servers/{name}/...` route with the same base URL, token, and fetch the SDK
+ * client was built from, and returns the JSON body. Direct rather than through the client because
+ * the generated SDK does not carry these routes yet; they move onto the client at the next
+ * regeneration. Cookie auth rides along: the default base URL is same-origin, and a host pointing
+ * the UI at another origin supplies its own `fetch`.
  */
+async function requestMcpServerRoute({
+  name,
+  route,
+  method,
+  failureLabel,
+  options,
+}: {
+  name: string;
+  route: string;
+  method: 'GET' | 'POST' | 'DELETE';
+  failureLabel: string;
+  options: CreateTrueForgeClientOptions;
+}): Promise<unknown> {
+  const base = (options.baseUrl ?? '/').replace(/\/+$/, '');
+  const fetchImpl = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
+  const response = await fetchImpl(`${base}/api/v1/mcp-servers/${encodeURIComponent(name)}/${route}`, {
+    method,
+    headers: options.token === undefined ? {} : { Authorization: `Bearer ${options.token}` },
+  });
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const failure = ApiErrorResponseSchema.safeParse(body);
+    throw new Error(
+      failure.success ? failure.data.error.message : `${failureLabel} failed with HTTP ${String(response.status)}`,
+    );
+  }
+  return body;
+}
+
 async function requestMemoryProviderCheck({
   name,
   options,
@@ -106,19 +136,13 @@ async function requestMemoryProviderCheck({
   name: string;
   options: CreateTrueForgeClientOptions;
 }): Promise<MemoryProviderCheck> {
-  const base = (options.baseUrl ?? '/').replace(/\/+$/, '');
-  const fetchImpl = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
-  const response = await fetchImpl(`${base}/api/v1/mcp-servers/${encodeURIComponent(name)}/memory-check`, {
+  const body = await requestMcpServerRoute({
+    name,
+    route: 'memory-check',
     method: 'POST',
-    headers: options.token === undefined ? {} : { Authorization: `Bearer ${options.token}` },
+    failureLabel: 'Memory check',
+    options,
   });
-  const body: unknown = await response.json().catch(() => undefined);
-  if (!response.ok) {
-    const failure = ApiErrorResponseSchema.safeParse(body);
-    throw new Error(
-      failure.success ? failure.data.error.message : `Memory check failed with HTTP ${String(response.status)}`,
-    );
-  }
   return parseMemoryProviderCheck(body);
 }
 
@@ -272,8 +296,8 @@ export function toHarnessManifest(
 }
 
 /**
- * The connector port plus the two connection checks, which the runtime's generic port type does
- * not declare. Widened here rather than in `@truefoundry/assistant-ui-runtime`.
+ * The connector port plus the two connection checks and the tool grants, which the runtime's
+ * generic port type does not declare. Widened here rather than in `@truefoundry/assistant-ui-runtime`.
  */
 export type HarnessConnectorCatalog = ConnectorCatalogServer<
   ToolBase,
@@ -284,7 +308,8 @@ export type HarnessConnectorCatalog = ConnectorCatalogServer<
   UiCreateConnectorRequest,
   UiUpdateConnectorRequest
 > &
-  ConnectorChecks;
+  ConnectorChecks &
+  ConnectorToolGrants;
 
 /** Settings connector port for `createTrueFoundryServer`. Delete omitted; disconnect unsupported. */
 export function createConnectorCatalog(
@@ -420,6 +445,25 @@ export function createConnectorCatalog(
       });
     },
     checkMemoryProvider: async req => requestMemoryProviderCheck({ name: req.id, options: clientOptions }),
+    listToolGrants: async req =>
+      parseToolGrants(
+        await requestMcpServerRoute({
+          name: req.id,
+          route: 'tool-grants',
+          method: 'GET',
+          failureLabel: 'Listing always-allowed tools',
+          options: clientOptions,
+        }),
+      ),
+    revokeToolGrant: async req => {
+      await requestMcpServerRoute({
+        name: req.id,
+        route: `tool-grants/${encodeURIComponent(req.toolName)}`,
+        method: 'DELETE',
+        failureLabel: 'Revoking an always-allowed tool',
+        options: clientOptions,
+      });
+    },
     testConnector: async req => {
       try {
         const tools = await listConnectorTools(req.id);

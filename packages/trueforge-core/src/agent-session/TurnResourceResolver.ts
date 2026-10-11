@@ -30,6 +30,7 @@ export type TurnSandboxFactory = (input: {
   turn_id: string;
   signal: AbortSignal;
   tracing: AgentTracing;
+  sentinel: SentinelHostContext;
 }) => Promise<Sandbox>;
 
 function specWantsSandbox(spec: AgentSpec): boolean {
@@ -75,6 +76,8 @@ export class TurnResourceResolver<
   TTurnCustom extends object = Record<string, never>,
 > implements ITurnResourceResolver<TTurnCustom> {
   readonly #sources = new Map<string, Promise<ToolSource>>();
+  /** MCP servers the host reported as first-party when it resolved their connection this turn. */
+  readonly #firstPartyServers = new Set<string>();
   readonly #models = new Map<string, Promise<ResolvedModel>>();
   #sandbox?: Sandbox | undefined;
 
@@ -96,8 +99,11 @@ export class TurnResourceResolver<
        * the AgentSpec carries names only (no url/headers on the wire) — the
        * runtime supplies the catalog. Called once per distinct server name per
        * turn. Throw for unknown names. `headers` supports the async resolver form.
+       * `first_party` is true only for a connector the host itself vouches for, never one a user,
+       * a request or the model described: it lets that server's read-only, explicitly
+       * closed-world tools run without a card.
        */
-      mcp: (name: string) => Promise<{ url: string; headers?: RemoteMcpHeaders }>;
+      mcp: (name: string) => Promise<{ url: string; headers?: RemoteMcpHeaders; first_party?: boolean }>;
       mcpRequestTimeoutMs: number;
       mcpConnectTimeoutMs: number;
       /** One sandbox type per runtime. Omit = no sandbox support. */
@@ -225,6 +231,7 @@ export class TurnResourceResolver<
     turn_id: string;
     signal: AbortSignal;
     tracing: AgentTracing;
+    sentinel: SentinelHostContext;
   }): Promise<Sandbox | undefined> {
     if (!this.deps.sandboxProvider || !specWantsSandbox(input.spec)) {
       return undefined;
@@ -238,6 +245,7 @@ export class TurnResourceResolver<
       turn_id: input.turn_id,
       signal: input.signal,
       tracing: input.tracing,
+      sentinel: input.sentinel,
     });
     return this.#sandbox;
   }
@@ -307,7 +315,10 @@ export class TurnResourceResolver<
         const source = await this.getOrCreateToolSource({
           id: entry.name,
           create: async () => {
-            const { url, headers } = await this.deps.mcp(entry.name);
+            const { url, headers, first_party } = await this.deps.mcp(entry.name);
+            if (first_party === true) {
+              this.#firstPartyServers.add(entry.name);
+            }
             return new RemoteMCP({
               id: entry.name,
               name: entry.name,
@@ -316,6 +327,8 @@ export class TurnResourceResolver<
               sessionId: previousTurn?.snapshot.mcp_servers?.[entry.name]?.session_id,
               requestTimeoutMs: this.deps.mcpRequestTimeoutMs,
               connectTimeoutMs: this.deps.mcpConnectTimeoutMs,
+              // A vouched-for connector must not hand its trust to wherever it redirects.
+              refuseRedirects: first_party === true,
               logger: this.deps.logger,
               tracing,
               signal,
@@ -327,6 +340,7 @@ export class TurnResourceResolver<
           selectors: toSelectors(entry),
           preload: entry.preload,
           sentinel,
+          firstParty: this.#firstPartyServers.has(entry.name),
         });
       }),
     );
