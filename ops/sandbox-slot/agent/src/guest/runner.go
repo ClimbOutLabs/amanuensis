@@ -150,7 +150,10 @@ func (r *Runner) Run(ctx context.Context, spec Spec, opts Options) Result {
 		}
 	}
 
-	argv := r.runscArgs("run", "--bundle", bundle, spec.ID)
+	// The Sentry can crash (for example when the host refuses it a thread) and exit 2, which looks like
+	// the program exiting 2; its panic log is the only reliable tell.
+	panicLog := filepath.Join(bundle, "panic.log")
+	argv := r.runscArgs("--panic-log="+panicLog, "run", "--bundle", bundle, spec.ID)
 	pid, exited, err := r.Reaper.Spawn(r.Runsc, argv, &os.ProcAttr{
 		Env:   []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/tmp"},
 		Files: []*os.File{devnull, outW, errW},
@@ -250,6 +253,13 @@ loop:
 		res.ExitCode = 128 + int(status.Signal())
 	default:
 		res.ExitCode = -1
+	}
+	if info, statErr := os.Stat(panicLog); statErr == nil {
+		if info.Size() > 0 {
+			res.Cause = Internal
+			res.InternalError = "the sandbox runtime crashed while running the program"
+			return res
+		}
 	}
 	diagnostics := res.Stderr
 	if opts.MergeStderr {

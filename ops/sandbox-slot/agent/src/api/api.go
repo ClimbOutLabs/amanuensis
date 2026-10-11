@@ -37,6 +37,8 @@ const (
 	guestUID   = 0
 	guestGID   = 0
 	guestTmpMB = 256
+	// Per-guest process cap so a fork bomb hits EAGAIN before the slot pids limit.
+	guestMaxProcesses = 128
 )
 
 // Termination causes reported for a run.
@@ -321,6 +323,7 @@ func (s *Server) runCode(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := int64(req.DiskMB) << 20
 	spec.MaxFileBytes = limit
+	spec.MaxProcesses = guestMaxProcesses
 	watch, err := newDiskWatch(s.VolumeDir, s.MinFreeBytes, limit, dirs.Scratch, dirs.Egress)
 	if err != nil {
 		writeStorageError(w, err)

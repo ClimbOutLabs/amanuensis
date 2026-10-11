@@ -22,11 +22,13 @@ while [ "$#" -gt 0 ]; do
     run) mode=run ;;
     delete) mode=delete ;;
     --bundle) bundle="$2"; shift ;;
+    --panic-log=*) panic="${1#--panic-log=}" ;;
   esac
   shift
 done
 if [ "$mode" = delete ]; then exit 0; fi
 script="$(sed -n 's/.*"args":\["sh","-c","\([^"]*\)".*/\1/p' "$bundle/config.json")"
+case "$script" in *CRASH*) echo "panic: boom" > "$panic"; exit 2 ;; esac
 exec sh -c "$script"
 `
 
@@ -117,6 +119,20 @@ func TestRuntimeFailureIsNotMistakenForTheProgramExitingWith128(t *testing.T) {
 	// The runtime fails: exit 128 with its own error line.
 	res = r.Run(context.Background(), spec("a8", "echo 'running container: creating container: boom' >&2; exit 128"), guest.Options{Timeout: 5 * time.Second, StreamCap: 1 << 20})
 	if res.Cause != guest.Internal || res.InternalError == "" {
+		t.Fatalf("%+v", res)
+	}
+}
+
+func TestRuntimeCrashIsNotReportedAsTheProgramExiting(t *testing.T) {
+	r, stop := newRunner(t)
+	defer stop()
+	res := r.Run(context.Background(), spec("a9", "CRASH"), guest.Options{Timeout: 5 * time.Second, StreamCap: 1 << 20})
+	if res.Cause != guest.Internal || res.InternalError == "" {
+		t.Fatalf("%+v", res)
+	}
+	// An empty panic log (runsc creates it eagerly) is not a crash.
+	res = r.Run(context.Background(), spec("a10", "exit 2"), guest.Options{Timeout: 5 * time.Second, StreamCap: 1 << 20})
+	if res.Cause != guest.Completed || res.ExitCode != 2 {
 		t.Fatalf("%+v", res)
 	}
 }

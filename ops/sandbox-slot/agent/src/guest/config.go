@@ -35,6 +35,8 @@ type Spec struct {
 	Tmpfs  []Tmpfs
 	// MaxFileBytes caps the size of any one file a guest process writes (RLIMIT_FSIZE); zero means no cap.
 	MaxFileBytes int64
+	// MaxProcesses caps the processes the guest can create (RLIMIT_NPROC); zero means no cap.
+	MaxProcesses int
 }
 
 type ociUser struct {
@@ -126,6 +128,9 @@ func BuildConfig(s Spec) ([]byte, error) {
 	var rlimits []ociRlimit
 	if s.MaxFileBytes > 0 {
 		rlimits = append(rlimits, ociRlimit{Type: "RLIMIT_FSIZE", Hard: uint64(s.MaxFileBytes), Soft: uint64(s.MaxFileBytes)})
+	}
+	if s.MaxProcesses > 0 {
+		rlimits = append(rlimits, ociRlimit{Type: "RLIMIT_NPROC", Hard: uint64(s.MaxProcesses), Soft: uint64(s.MaxProcesses)})
 	}
 	cfg := ociConfig{
 		OCIVersion: "1.0.2",

@@ -175,6 +175,7 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := int64(req.DiskMB) << 20
 	spec.MaxFileBytes = limit
+	spec.MaxProcesses = guestMaxProcesses
 	// A tree left over its limit by an earlier overshoot is trimmed before anything new runs in it.
 	lease.Reclaim(root, limit)
 	watch, err := newDiskWatch(s.VolumeDir, s.MinFreeBytes, limit, root)
