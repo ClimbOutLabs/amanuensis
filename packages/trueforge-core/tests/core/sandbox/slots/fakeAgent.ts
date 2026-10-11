@@ -57,7 +57,7 @@ export function attestation(
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
-    chunks.push(Buffer.from(chunk));
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
   }
   const text = Buffer.concat(chunks).toString('utf8');
   const parsed: unknown = text === '' ? undefined : JSON.parse(text);
