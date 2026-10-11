@@ -65,14 +65,19 @@ export function generateStandaloneSchedulerKey(): string {
 
 /**
  * Resolve the scheduler service credential.
- * Standalone: an explicit `TRUEFORGE_API_KEY` wins; otherwise generate a fresh
- * random 32-byte key at process start so instances never share a guessable key.
- * Distributed: the variable is required.
+ * Standalone: an explicit `TRUEFORGE_API_KEY` wins, except the well-known placeholders,
+ * which are refused; otherwise generate a fresh random 32-byte key at process start so
+ * instances never share a guessable key.
+ * Distributed: the variable is required. Placeholders are accepted because the Helm chart
+ * ships one as its default.
  */
 export function resolveTrueForgeApiKey({ standalone }: { standalone: boolean }): string {
   const fromEnv = getEnv('TRUEFORGE_API_KEY');
   if (fromEnv !== undefined && fromEnv !== '') {
-    if (fromEnv === 'dev-only-placeholder' || fromEnv === 'placeholder-value-please-generate-your-own') {
+    if (
+      standalone &&
+      (fromEnv === 'dev-only-placeholder' || fromEnv === 'placeholder-value-please-generate-your-own')
+    ) {
       throw new Error(
         'Environment variable TRUEFORGE_API_KEY is set to a placeholder value. ' +
           'Generate a real key, or unset it so standalone generates a random key at startup.',

@@ -106,11 +106,18 @@ describe('standalone scheduler key', () => {
   });
 
   it.each(['dev-only-placeholder', 'placeholder-value-please-generate-your-own'])(
-    'refuses placeholder key %s when set explicitly',
+    'refuses placeholder key %s in standalone mode',
     placeholder => {
       process.env[ENV_KEY] = placeholder;
       expect(() => resolveTrueForgeApiKey({ standalone: true })).toThrow(/placeholder/);
-      expect(() => resolveTrueForgeApiKey({ standalone: false })).toThrow(/placeholder/);
+    },
+  );
+
+  it.each(['dev-only-placeholder', 'placeholder-value-please-generate-your-own'])(
+    'accepts placeholder key %s in distributed mode so the Helm default still starts',
+    placeholder => {
+      process.env[ENV_KEY] = placeholder;
+      expect(resolveTrueForgeApiKey({ standalone: false })).toBe(placeholder);
     },
   );
 });
