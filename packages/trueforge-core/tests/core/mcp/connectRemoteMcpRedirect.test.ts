@@ -146,12 +146,12 @@ describe('redirects on a remote MCP connection', () => {
   });
 
   describe('when the connection does not ask to refuse them', () => {
-    it('is left as it was and still follows the redirect', async () => {
+    it('does not follow a redirect to another origin, which would forward its credentials', async () => {
       redirectStatus = 307;
 
-      await connectRemoteMcp(connectParams()).catch(() => undefined);
+      await expect(connectRemoteMcp(connectParams())).rejects.toBeInstanceOf(McpConnectionError);
 
-      expect(target.hits.length).toBeGreaterThan(0);
+      expect(target.hits).toEqual([]);
     });
   });
 });

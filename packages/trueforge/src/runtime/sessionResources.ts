@@ -623,7 +623,7 @@ let sharedRunCodeService: RunCodeService | undefined;
  * at startup, so construction here only fails on unexpected driver errors.
  * Keeps the first caller's logger for the service lifetime.
  */
-function getSharedRunCodeService(logger: Logger): RunCodeService {
+export function getSharedRunCodeService(logger: Logger): RunCodeService {
   if (sharedRunCodeService === undefined) {
     if (configuration.SANDBOX_ISOLATION_DRIVER !== 'docker') {
       throw new Error(
