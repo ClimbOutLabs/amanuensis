@@ -1,7 +1,12 @@
 """Local speech-to-text sidecar: Whisper `small` int8 via faster-whisper.
 
+Model weights are pinned to exact Hugging Face revisions with SHA-256
+hashes (see PINNED_MODELS). On first start the pinned revision is
+downloaded and every file is hash-verified before loading; later starts
+reuse the verified cache without network access and re-verify at load.
+
 HTTP contract:
-  GET  /healthz       -> {"status": "ok", "model_loaded": bool}
+  GET  /healthz       -> {"status": "ok", "model_loaded": bool, "model_error": str | None}
   POST /v1/transcribe -> {"text", "language", "duration_ms", "model"}
 
 Accepts `audio/wav` (16 kHz mono 16-bit PCM) or `audio/x-raw-pcm` with
@@ -13,11 +18,13 @@ error codes are logged, never transcripts or audio bytes.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import logging
 import os
 import time
 import wave
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -57,6 +64,172 @@ class Settings:
     model_dir: str | None = field(default_factory=lambda: os.environ.get("AMAN_STT_MODEL_DIR") or None)
 
 
+class ModelVerificationError(Exception):
+    """A pinned model could not be verified; it must not load."""
+
+
+@dataclass(frozen=True)
+class PinnedModel:
+    """One pinned model: exact repository, exact commit, and file hashes."""
+
+    repo: str
+    revision: str  # full commit hash, never a branch name
+    files: dict[str, str]  # snapshot-relative path -> expected SHA-256 hex digest
+
+
+# Every model the sidecar may load, pinned in one place. The primary and
+# the fallback go through the same verify-before-load path; a size with no
+# entry here is refused rather than downloaded unpinned.
+PINNED_MODELS: dict[str, PinnedModel] = {
+    "small": PinnedModel(
+        repo="Systran/faster-whisper-small",
+        revision="536b0662742c02347bc0e980a01041f333bce120",
+        files={
+            "config.json": "b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828",
+            "model.bin": "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671",
+            "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+            "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913",
+        },
+    ),
+    "base": PinnedModel(
+        repo="Systran/faster-whisper-base",
+        revision="ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66",
+        files={
+            "config.json": "56a6d8110d311f19c8f0471e562832c7527f146b567275bfca59fcf7c184da9a",
+            "model.bin": "d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9",
+            "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+            "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913",
+        },
+    ),
+}
+
+# Download seam: (pinned_model, cache_dir) -> snapshot directory holding the
+# revision's files. Injected in tests so they never touch the network.
+Downloader = Callable[[PinnedModel, str], str]
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_model_files(snapshot_dir: str, expected_files: dict[str, str]) -> None:
+    """Check every pinned file exists and matches its SHA-256.
+
+    Raises ModelVerificationError on the first missing or mismatched file.
+    Extra files in the directory are ignored: the pinned commit hash already
+    fixes the full file set, so only the files the loader needs are checked.
+    """
+    for name, expected in expected_files.items():
+        path = os.path.join(snapshot_dir, name)
+        if not os.path.isfile(path):
+            raise ModelVerificationError(f"pinned file missing from snapshot: {name}")
+        actual = _sha256_file(path)
+        if actual != expected:
+            raise ModelVerificationError(
+                f"SHA-256 mismatch for {name}: expected {expected[:16]}..., "
+                f"got {actual[:16]}..."
+            )
+
+
+def _offline_snapshot_dir(pinned: PinnedModel, cache_dir: str) -> str | None:
+    """Return the cached snapshot dir for the pinned revision, or None.
+
+    Mirrors the huggingface_hub cache layout, so a warm cache starts with no
+    network access. Pure local check.
+    """
+    snapshot_dir = os.path.join(
+        cache_dir,
+        "models--" + pinned.repo.replace("/", "--"),
+        "snapshots",
+        pinned.revision,
+    )
+    return snapshot_dir if os.path.isdir(snapshot_dir) else None
+
+
+def _default_downloader(pinned: PinnedModel, cache_dir: str) -> str:
+    """Download the pinned revision from the model hub (network)."""
+    from huggingface_hub import snapshot_download
+
+    try:
+        return snapshot_download(
+            repo_id=pinned.repo, revision=pinned.revision, cache_dir=cache_dir
+        )
+    except Exception as exc:
+        raise ModelVerificationError(
+            f"could not download pinned {pinned.repo}@{pinned.revision[:12]}: {exc}"
+        ) from exc
+
+
+def ensure_verified_model_dir(
+    *,
+    model_size: str,
+    cache_dir: str,
+    downloader: Downloader | None = None,
+) -> str:
+    """Return a local directory holding the verified pinned model files.
+
+    Uses the warm cache when present (no network); otherwise downloads the
+    pinned revision and verifies every file hash before returning. Raises
+    ModelVerificationError when the size is not pinned, the revision does
+    not match, or any file is missing or tampered. Never downloads unpinned.
+    """
+    pinned = PINNED_MODELS.get(model_size)
+    if pinned is None:
+        raise ModelVerificationError(
+            f"model size {model_size!r} has no pinned revision; refusing "
+            f"unpinned download (pinned sizes: {sorted(PINNED_MODELS)})"
+        )
+    snapshot_dir = _offline_snapshot_dir(pinned, cache_dir)
+    if snapshot_dir is None:
+        snapshot_dir = (downloader or _default_downloader)(pinned, cache_dir)
+    revision_dir = os.path.basename(os.path.normpath(snapshot_dir))
+    if revision_dir != pinned.revision:
+        raise ModelVerificationError(
+            f"revision mismatch for {pinned.repo}: downloader returned "
+            f"{revision_dir!r}, pinned revision is {pinned.revision!r}"
+        )
+    verify_model_files(snapshot_dir, pinned.files)
+    LOGGER.info(
+        "model verified: %s@%s (%d files)",
+        pinned.repo,
+        pinned.revision[:12],
+        len(pinned.files),
+    )
+    return snapshot_dir
+
+
+def _default_cache_dir() -> str:
+    from huggingface_hub import constants
+
+    return constants.HF_HUB_CACHE
+
+
+def _load_first_verified(
+    sizes: tuple[str, ...],
+    cache_dir: str,
+    downloader: Downloader | None,
+    model_factory: Callable[[str], object],
+) -> tuple[object, str]:
+    """Load the first size whose pinned files verify; raise if none do."""
+    failures: list[str] = []
+    for size in sizes:
+        try:
+            snapshot_dir = ensure_verified_model_dir(
+                model_size=size, cache_dir=cache_dir, downloader=downloader
+            )
+            return model_factory(snapshot_dir), size
+        except Exception as exc:
+            failures.append(f"{size}: {exc}")
+            LOGGER.warning("Model load failed for %r: %s", size, exc)
+    raise ModelVerificationError(
+        "no pinned model could be verified and loaded: " + "; ".join(failures)
+    )
+
+
 class Transcriber(Protocol):
     model_label: str
 
@@ -72,28 +245,29 @@ class Transcriber(Protocol):
 class FasterWhisperTranscriber:
     """faster-whisper backend. Imported lazily so tests can inject a fake."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        downloader: Downloader | None = None,
+    ) -> None:
         from faster_whisper import WhisperModel
 
-        load_kwargs: dict = {
-            "device": "cpu",
-            "compute_type": "int8",
-            "cpu_threads": settings.cpu_threads,
-        }
-        if settings.model_dir:
-            load_kwargs["download_root"] = settings.model_dir
-        try:
-            self._model = WhisperModel(settings.model_size, **load_kwargs)
-            self._size = settings.model_size
-        except Exception as exc:
-            LOGGER.warning(
-                "Failed to load whisper model %r (%s); falling back to %r",
-                settings.model_size,
-                exc,
-                settings.fallback_model_size,
+        cache_dir = settings.model_dir or _default_cache_dir()
+
+        def _factory(snapshot_dir: str) -> object:
+            return WhisperModel(
+                snapshot_dir,
+                device="cpu",
+                compute_type="int8",
+                cpu_threads=settings.cpu_threads,
             )
-            self._model = WhisperModel(settings.fallback_model_size, **load_kwargs)
-            self._size = settings.fallback_model_size
+
+        self._model, self._size = _load_first_verified(
+            (settings.model_size, settings.fallback_model_size),
+            cache_dir,
+            downloader,
+            _factory,
+        )
         self.model_label = f"whisper-{self._size}-int8"
 
     def warmup(self) -> None:
@@ -146,6 +320,8 @@ def decode_raw_pcm(body: bytes, sample_rate: int, channels: int, sample_width: i
 @dataclass
 class ServiceState:
     transcriber: Transcriber | None = None
+    # Set when the model fails to load; surfaced on /healthz.
+    model_error: str | None = None
     # One transcription at a time: the 4 pinned cores are fully used by a single decode.
     in_flight: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
 
@@ -165,7 +341,8 @@ def create_app(
             await asyncio.to_thread(transcriber.warmup)
             state.transcriber = transcriber
             LOGGER.info("Model warm: %s", transcriber.model_label)
-        except Exception:
+        except Exception as exc:
+            state.model_error = f"{type(exc).__name__}: {exc}"
             LOGGER.exception("Model failed to load; /v1/transcribe will return 503")
         yield
 
@@ -173,7 +350,11 @@ def create_app(
 
     @app.get("/healthz")
     def healthz() -> dict:
-        return {"status": "ok", "model_loaded": state.transcriber is not None}
+        return {
+            "status": "ok",
+            "model_loaded": state.transcriber is not None,
+            "model_error": state.model_error,
+        }
 
     @app.post("/v1/transcribe")
     async def transcribe(

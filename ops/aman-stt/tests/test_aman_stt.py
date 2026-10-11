@@ -4,21 +4,30 @@ import math
 import os
 import struct
 import sys
+import tempfile
 import unittest
 import wave
+from unittest import mock
 
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import numpy as np
-from fastapi.testclient import TestClient
+import hashlib  # noqa: E402
 
+import numpy as np  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+import aman_stt  # noqa: E402
 from aman_stt import (  # noqa: E402
     MalformedAudio,
+    ModelVerificationError,
+    PinnedModel,
     Settings,
+    _load_first_verified,
     create_app,
     decode_raw_pcm,
     decode_wav,
+    ensure_verified_model_dir,
 )
 
 
@@ -79,13 +88,19 @@ class HealthzTest(unittest.TestCase):
         with make_client() as client:
             response = client.get("/healthz")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"status": "ok", "model_loaded": True})
+        self.assertEqual(
+            response.json(),
+            {"status": "ok", "model_loaded": True, "model_error": None},
+        )
 
     def test_model_not_loaded_when_factory_fails(self):
         with make_client(factory=BrokenTranscriber) as client:
             response = client.get("/healthz")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"status": "ok", "model_loaded": False})
+        body = response.json()
+        self.assertEqual(body["status"], "ok")
+        self.assertFalse(body["model_loaded"])
+        self.assertIn("no model here", body["model_error"])
 
 
 class TranscribeTest(unittest.TestCase):
@@ -209,6 +224,158 @@ class PrivacyTest(unittest.TestCase):
                 client.post("/v1/transcribe", content=wav, headers={"Content-Type": "audio/wav"})
         log_text = "\n".join(captured.output)
         self.assertNotIn("synthetic transcript", log_text)
+
+
+class PinnedModelTest(unittest.TestCase):
+    """Model weight pinning: synthetic files and a fake downloader only.
+
+    Never touches the network or real weights. Each test fails if the
+    check it covers is removed from the implementation.
+    """
+
+    FAKE_FILES = {
+        "config.json": b'{"fake": true}',
+        "model.bin": b"\x00\x01\x02" * 64,
+        "tokenizer.json": b"{}",
+        "vocabulary.txt": b"a\nb\n",
+    }
+
+    def _fake_pinned(self, repo="FakeOrg/fake-model", revision="a" * 40, files=None):
+        contents = files if files is not None else self.FAKE_FILES
+        return PinnedModel(
+            repo=repo,
+            revision=revision,
+            files={
+                name: hashlib.sha256(data).hexdigest()
+                for name, data in contents.items()
+            },
+        )
+
+    def _write_snapshot(self, repo, revision, files):
+        snap = os.path.join(
+            self.cache_dir,
+            "models--" + repo.replace("/", "--"),
+            "snapshots",
+            revision,
+        )
+        os.makedirs(snap, exist_ok=True)
+        for name, data in files.items():
+            with open(os.path.join(snap, name), "wb") as fh:
+                fh.write(data)
+        return snap
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cache_dir = os.path.join(self.tmp.name, "cache")
+        self.pinned = self._fake_pinned()
+        patcher = mock.patch.dict(aman_stt.PINNED_MODELS, {"t": self.pinned})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.downloads = []
+
+        def fake_downloader(pinned, cache_dir):
+            self.downloads.append((pinned.repo, pinned.revision))
+            return self._write_snapshot(pinned.repo, pinned.revision, self.FAKE_FILES)
+
+        self.fake_downloader = fake_downloader
+
+    def _ensure(self, size="t", downloader=None):
+        return ensure_verified_model_dir(
+            model_size=size,
+            cache_dir=self.cache_dir,
+            downloader=downloader or self.fake_downloader,
+        )
+
+    def test_good_cache_loads(self):
+        snapshot = self._ensure()
+        self.assertTrue(os.path.isdir(snapshot))
+        self.assertEqual(self.downloads, [(self.pinned.repo, self.pinned.revision)])
+
+    def test_unpinned_size_is_refused_without_download(self):
+        with self.assertRaisesRegex(ModelVerificationError, "no pinned revision"):
+            self._ensure(size="tiny")
+        self.assertEqual(self.downloads, [])
+
+    def test_tampered_file_is_refused(self):
+        tampered = dict(self.FAKE_FILES)
+        tampered["model.bin"] = b"tampered!"
+
+        def dl(pinned, cache_dir):
+            return self._write_snapshot(pinned.repo, pinned.revision, tampered)
+
+        with self.assertRaisesRegex(ModelVerificationError, "mismatch"):
+            self._ensure(downloader=dl)
+
+    def test_missing_file_is_refused(self):
+        short = {k: v for k, v in self.FAKE_FILES.items() if k != "tokenizer.json"}
+
+        def dl(pinned, cache_dir):
+            return self._write_snapshot(pinned.repo, pinned.revision, short)
+
+        with self.assertRaisesRegex(ModelVerificationError, "missing"):
+            self._ensure(downloader=dl)
+
+    def test_wrong_revision_is_refused(self):
+        other_revision = "b" * 40
+
+        def dl(pinned, cache_dir):
+            return self._write_snapshot(pinned.repo, other_revision, self.FAKE_FILES)
+
+        with self.assertRaisesRegex(ModelVerificationError, "revision mismatch"):
+            self._ensure(downloader=dl)
+
+    def test_offline_start_loads_from_verified_cache(self):
+        self._write_snapshot(self.pinned.repo, self.pinned.revision, self.FAKE_FILES)
+
+        def no_network(pinned, cache_dir):
+            raise AssertionError("network must not be touched on a warm cache")
+
+        snapshot = self._ensure(downloader=no_network)
+        self.assertTrue(os.path.isdir(snapshot))
+
+    def test_offline_cache_with_tampered_file_is_still_refused(self):
+        tampered = dict(self.FAKE_FILES)
+        tampered["config.json"] = b"{}"
+        self._write_snapshot(self.pinned.repo, self.pinned.revision, tampered)
+
+        def no_network(pinned, cache_dir):
+            raise AssertionError("network must not be touched")
+
+        with self.assertRaisesRegex(ModelVerificationError, "mismatch"):
+            self._ensure(downloader=no_network)
+
+    def test_fallback_model_follows_same_rules(self):
+        primary = self._fake_pinned(repo="FakeOrg/fake-primary")
+        fallback = self._fake_pinned(repo="FakeOrg/fake-fallback")
+        with mock.patch.dict(aman_stt.PINNED_MODELS, {"t": primary, "f": fallback}):
+            tampered = dict(self.FAKE_FILES)
+            tampered["model.bin"] = b"tampered!"
+            self._write_snapshot(primary.repo, primary.revision, tampered)
+            self._write_snapshot(fallback.repo, fallback.revision, self.FAKE_FILES)
+
+            def no_network(pinned, cache_dir):
+                raise AssertionError("network must not be touched")
+
+            loaded = []
+
+            def fake_factory(snapshot_dir):
+                loaded.append(snapshot_dir)
+                return object()
+
+            model, size = _load_first_verified(
+                ("t", "f"), self.cache_dir, no_network, fake_factory
+            )
+            self.assertEqual(size, "f")
+            self.assertEqual(len(loaded), 1)
+            self.assertIn("fake-fallback", loaded[0])
+
+    def test_all_models_failing_raises(self):
+        def dl(pinned, cache_dir):
+            return self._write_snapshot(pinned.repo, pinned.revision, {})
+
+        with self.assertRaises(ModelVerificationError):
+            _load_first_verified(("t",), self.cache_dir, dl, lambda d: object())
 
 
 if __name__ == "__main__":
