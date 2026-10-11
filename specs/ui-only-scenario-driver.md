@@ -68,7 +68,7 @@ Selectors are listed in the next section. Each row is one step; the assertion mu
 ### Per-turn expectation steps (in order)
 
 1. `tool`: wait for the tool card whose title is the value (`span[title="run_code"]`, scoped to the card by `data-tool-name`). Fails if the model never invokes the tool. Whether the model chooses the tool is part of what the scenario tests.
-2. `approval`: `run_code` requires explicit approval, so assert the heading `Permission needed` is visible, then click the `Approve` button. Assert the approval card is replaced or shows an approved state.
+2. `approval`: `run_code` requires explicit approval, so assert the heading `Approval needed` is visible, then click the `Approve` button. Assert the approval card is replaced or shows an approved state.
 3. Expand the card (`Expand step` inside the tool card) when collapsed, then assert the card text contains each `result_contains` string (substring, whitespace-normalised).
 4. `assistant_contains`: assert the assistant message text contains each string.
 
@@ -121,7 +121,7 @@ Paths are relative to `packages/trueforge-ui/src`. "Stable" means role, label, o
 | Send                      | `atoms/ComposerSections.tsx:80`                                            | button `Send message`; while running it is replaced by `Cancel` (line 63)                                                                                      | stable        |
 | Tool card (`run_code`)    | `atoms/ToolCallCard.tsx:113`                                               | title `span[title="run_code"]`; card root has a test id only when a prefix is passed, and the generic path passes none                                         | PARTIAL       |
 | Expand                    | `atoms/agent-chat/AgentStepRow.tsx:85`                                     | button `Expand step` (needs card scope)                                                                                                                        | stable        |
-| Approval card             | `sentinel/PermissionApprovalCard.tsx:51,95`                                | heading text `Permission needed`; button `Approve`                                                                                                             | stable (text) |
+| Approval card             | `sentinel/PermissionApprovalCard.tsx:51,95`                                | heading text `Approval needed`; button `Approve`                                                                                                               | stable (text) |
 | Assistant completion      | `containers/AssistantMessageContainer.tsx:196`                             | root has only `data-role="assistant"`; `useThreadIsRunning` (line 119) is thread-wide; per-message `message.status.type` (line 123) is not exposed in the DOM  | MISSING       |
 
 ## Required DOM hooks
@@ -131,7 +131,7 @@ Paths are relative to `packages/trueforge-ui/src`. "Stable" means role, label, o
 | `data-testid="tool-call-card"` and `data-tool-name={toolName}` (only when no prefix is passed) | `atoms/ToolCallCard.tsx:113`                   | Scopes `Expand step` and result text to one card; the title alone is not a card handle |
 | `data-status={messageStatus}` on the existing assistant root                                   | `containers/AssistantMessageContainer.tsx:196` | Per-message completion; values `running`, `requires-action`, `complete`, `incomplete`  |
 
-One new test id and one data attribute. The generic approval bar needs no hook: the approval step requires the `Permission needed` card, and a different card fails the step, which keeps the explicit-approval contract under test. Prefix-based ids are unchanged.
+One new test id and one data attribute. The generic approval bar needs no hook: the approval step requires the `Approval needed` card, and a different card fails the step, which keeps the explicit-approval contract under test. Prefix-based ids are unchanged.
 
 ## Privacy
 
@@ -160,5 +160,5 @@ All tests use synthetic data.
 
 ## Open questions
 
-1. If `run_code` approval does not render the `Permission needed` card in practice, the scenario fails and the contract question goes to the maintainers; the driver does not add a fallback branch.
+1. If `run_code` approval does not render the `Approval needed` card in practice, the scenario fails and the contract question goes to the maintainers; the driver does not add a fallback branch.
 2. The Tier 3 card requires the Sentinel state provider to be mounted in the app shell; if absent, the approval step fails, which is the intended signal.

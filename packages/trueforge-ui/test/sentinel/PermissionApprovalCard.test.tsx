@@ -153,6 +153,12 @@ describe('PermissionApprovalCard', () => {
     expect(folded.textContent).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
   });
 
+  it('is headed "Approval needed"', () => {
+    renderCard();
+    expect(screen.getByText('Approval needed')).toBeInTheDocument();
+    expect(screen.queryByText('Permission needed')).not.toBeInTheDocument();
+  });
+
   it('calls Approve and Deny', () => {
     const { onApprove, onDeny } = renderCard();
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));

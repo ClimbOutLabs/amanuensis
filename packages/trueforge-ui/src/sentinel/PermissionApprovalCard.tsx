@@ -113,7 +113,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
       <div className="flex items-center justify-between gap-3 rounded-t-lg border-b border-primary-button-bg/30 px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon name="lock" className="shrink-0 text-text-secondary" aria-hidden="true" />
-          <span className="truncate text-sm font-semibold text-text-primary">Permission needed</span>
+          <span className="truncate text-sm font-semibold text-text-primary">Approval needed</span>
           <span className="min-w-0 truncate rounded bg-primary-bg px-1.5 py-0.5 font-mono text-xs text-text-secondary">
             {toolName}
           </span>
