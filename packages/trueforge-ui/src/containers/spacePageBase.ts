@@ -1,3 +1,37 @@
+import { resolvePresetTokens } from '../theme/presets/index.js';
+import type { SemanticTokens } from '../theme/types.js';
+
+/**
+ * Space-page variable to app theme token. `SpaceHtmlFrame` copies the live app values onto the
+ * frame's `:root`; the same table seeds the fallbacks below from the default preset.
+ */
+export const SPACE_THEME_VARS: ReadonlyArray<{ spaceVar: string; token: keyof SemanticTokens }> = [
+  { spaceVar: '--space-bg', token: 'primaryBg' },
+  { spaceVar: '--space-text', token: 'textPrimary' },
+  { spaceVar: '--space-muted', token: 'textSecondary' },
+  { spaceVar: '--space-card-bg', token: 'cardBg' },
+  { spaceVar: '--space-border', token: 'border' },
+  { spaceVar: '--space-thead-bg', token: 'secondaryBg' },
+  { spaceVar: '--space-accent', token: 'primaryButtonBg' },
+  { spaceVar: '--space-accent-text', token: 'primaryButtonText' },
+  { spaceVar: '--space-success-bg', token: 'successBg' },
+  { spaceVar: '--space-success-text', token: 'successText' },
+  { spaceVar: '--space-warning-bg', token: 'warningBg' },
+  { spaceVar: '--space-warning-text', token: 'warningText' },
+  { spaceVar: '--space-radius', token: 'radius' },
+];
+
+/** `:root` declarations for the frame, reading each token from `readToken` (live CSS var or preset). */
+export function spaceThemeDeclarations(readToken: (token: keyof SemanticTokens) => string): string {
+  return SPACE_THEME_VARS.map(({ spaceVar, token }) => `${spaceVar}:${readToken(token)};`).join('');
+}
+
+function presetDeclarations(mode: 'light' | 'dark'): string {
+  const tokens = resolvePresetTokens(undefined, mode);
+  const shadowAlpha = mode === 'dark' ? 40 : 8;
+  return `${spaceThemeDeclarations(token => tokens[token])}--space-shadow:0 1px 2px color-mix(in srgb,${tokens.shadowColor} ${shadowAlpha}%,transparent);`;
+}
+
 /**
  * The design system every `format: 'html'` space page inherits. `SpaceHtmlFrame` (in
  * `SpacesView.tsx`) injects this as a `<style>` block ahead of the page's own `<style>`, so the
@@ -6,46 +40,17 @@
  * cascade lets that later `<style>` override anything here.
  *
  * Colors are CSS custom properties (`--space-*`) so the page follows the app's own light/dark
- * theme: `SpaceHtmlFrame` reads the app's theme tokens (`--primary-bg`, `--text-primary`, …) via
- * `getComputedStyle` and writes measured values onto `:root` in a `<style>` block placed *after*
- * this one, so those real values win the cascade over the fallbacks declared here. The fallbacks
- * below (a warm neutral palette with one accent, light and dark) exist so a space still reads as
- * a designed page even where the host var block cannot run (no `window`, e.g. a unit test render,
- * or the frame opened standalone) — `prefers-color-scheme` picks the right set on its own.
+ * theme: `SpaceHtmlFrame` reads the app's theme tokens via `getComputedStyle` and writes measured
+ * values onto `:root` in a `<style>` block placed *after* this one, so those real values win the
+ * cascade over the fallbacks declared here. The fallbacks come from the default preset (light and
+ * dark) so a space still reads as a designed page even where the host var block cannot run (no
+ * `window`, e.g. a unit test render, or the frame opened standalone); `prefers-color-scheme`
+ * picks the right set on its own.
  */
 export const SPACE_PAGE_BASE_STYLE = `
-:root{
-  --space-bg:#faf8f5;
-  --space-text:#211f1b;
-  --space-muted:#6f6858;
-  --space-card-bg:#ffffff;
-  --space-border:#e7e0d4;
-  --space-thead-bg:#f1ece1;
-  --space-accent:#b5551f;
-  --space-accent-text:#ffffff;
-  --space-success-bg:#1f7a43;
-  --space-success-text:#ffffff;
-  --space-warning-bg:#9a5b06;
-  --space-warning-text:#ffffff;
-  --space-radius:10px;
-  --space-shadow:0 1px 2px rgba(24,20,12,0.08),0 1px 1px rgba(24,20,12,0.04);
-}
+:root{${presetDeclarations('light')}}
 @media (prefers-color-scheme:dark){
-  :root{
-    --space-bg:#1c1a16;
-    --space-text:#f2ede3;
-    --space-muted:#a89d89;
-    --space-card-bg:#262219;
-    --space-border:#3c362a;
-    --space-thead-bg:#2f2a20;
-    --space-accent:#e2924f;
-    --space-accent-text:#1c1a16;
-    --space-success-bg:#4ade80;
-    --space-success-text:#06210f;
-    --space-warning-bg:#fbbf24;
-    --space-warning-text:#2c1c02;
-    --space-shadow:0 1px 3px rgba(0,0,0,0.4);
-  }
+  :root{${presetDeclarations('dark')}}
 }
 *,*::before,*::after{box-sizing:border-box;}
 body{

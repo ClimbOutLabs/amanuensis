@@ -75,7 +75,7 @@ export function CenteredModal({
       style={compactStyle ?? (contentSized ? { height: 'fit-content', maxHeight: '85dvh' } : undefined)}
       className={cn(
         'bg-card-bg text-text-primary border-border open:flex open:flex-col overflow-hidden p-0 shadow-xl',
-        'backdrop:bg-black/50 backdrop:backdrop-blur-[2px] dark:backdrop:bg-black/70',
+        'backdrop:bg-[var(--overlay)] backdrop:backdrop-blur-[2px]',
         compact
           ? 'm-0 mt-auto max-w-none rounded-t-xl rounded-b-none border-t pb-[env(safe-area-inset-bottom)]'
           : contentSized
