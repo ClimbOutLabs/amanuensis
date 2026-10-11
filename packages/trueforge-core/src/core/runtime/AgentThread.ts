@@ -106,7 +106,7 @@ import { isGithubFileRead } from '../mcp/githubFileContents';
 import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
 import { stampSentinelDecision } from '../mcp/ToolSet';
 import type { SentinelHostContext } from '../permissions';
-import { classifyHostToolCall, toDispatchSentinelContext } from '../permissions';
+import { classifyHostToolCall, requiresNetwork, toDispatchSentinelContext } from '../permissions';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -2305,6 +2305,33 @@ export class AgentThread {
     return { initializationInfo, authRequirementInfo };
   }
 
+  /**
+   * While the user is offline, tools that need the network are withheld from the model request so it
+   * does not offer them. Dispatch still auto-denies a stale call that slips through.
+   */
+  private async withoutOfflineBlockedTools(
+    tools: ConvertToolsResult['tools'],
+    toolMapping: Map<string, MappedMCPTool>,
+  ): Promise<ConvertToolsResult['tools']> {
+    const sentinel = this.sentinel;
+    if (
+      sentinel === undefined ||
+      !(await sentinel.services.isOffline({ tenant_id: sentinel.tenant_id, created_by: sentinel.created_by }))
+    ) {
+      return tools;
+    }
+    return tools.filter(tool => {
+      const info = tool.type === 'function' ? toolMapping.get(tool.function.name) : undefined;
+      if (info === undefined) {
+        return true;
+      }
+      return !requiresNetwork({
+        tool_name: info.originalToolName,
+        provenance: this.tfyManagedServerNames.has(info.toolSet.name) ? 'first-party' : 'third-party',
+      });
+    });
+  }
+
   private getConvertedTools(): ConvertToolsResult {
     if (!this.convertedTools) {
       throw new Error('unreachable');
@@ -3999,10 +4026,15 @@ export class AgentThread {
                       toolMapping.get(tool.function.name)?.originalToolName !== ASK_USER_QUESTION_TOOL_NAME,
                   )
                 : tools;
-            const llmResult = yield* this.stepLLMCall(requestTools, toolMapping, signal, {
-              emptyTerminalFallback: undefined,
-              retryModelMessageEventId: pendingRetryModelMessageEventId,
-            });
+            const llmResult = yield* this.stepLLMCall(
+              await this.withoutOfflineBlockedTools(requestTools, toolMapping),
+              toolMapping,
+              signal,
+              {
+                emptyTerminalFallback: undefined,
+                retryModelMessageEventId: pendingRetryModelMessageEventId,
+              },
+            );
             outcome = llmResult.outcome;
             currentModelMessageEventId = llmResult.modelMessageEventId;
             pendingRetryModelMessageEventId = llmResult.retryModelMessageEventId;

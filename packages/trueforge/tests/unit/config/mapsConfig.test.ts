@@ -51,6 +51,11 @@ describe('maps config', () => {
     await expect(loadConfig()).rejects.toThrow('MAPS_TILE_URL must not include a query or hash');
   });
 
+  it('rejects a tile URL missing a placeholder', async () => {
+    process.env['MAPS_TILE_URL'] = 'https://tiles.example/{z}/{x}/tile.png';
+    await expect(loadConfig()).rejects.toThrow('MAPS_TILE_URL must include the {y} placeholder');
+  });
+
   it('rejects unknown router providers', async () => {
     process.env['MAPS_ROUTER_PROVIDER'] = 'trafficorp';
     await expect(loadConfig()).rejects.toThrow('MAPS_ROUTER_PROVIDER must be "osrm"');

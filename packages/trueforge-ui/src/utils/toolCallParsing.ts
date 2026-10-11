@@ -43,7 +43,7 @@ export const SANDBOX_TOOL_NAMES = new Set([
   'submit_implementation_plan',
 ]);
 
-/** Tool names that render an embedded map card. */
+/** Tool names that render an embedded map card; trueforge-core owns the canonical list (a test keeps them equal). */
 export const MAPS_TOOL_NAMES = new Set(['render_map', 'render_route']);
 
 /** MCP meta-tools that wrap actual tool calls. */

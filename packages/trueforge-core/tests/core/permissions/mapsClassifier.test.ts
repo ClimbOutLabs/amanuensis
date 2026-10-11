@@ -129,4 +129,26 @@ describe('maps classifier branch', () => {
       expect(decision.auto_deny).toBe('offline_mode');
     }
   });
+  it('escapes quotes so a crafted place name cannot read as part of the sentence', async () => {
+    const decision = await classifyTier(
+      mapsAction('render_map', { place_name: 'Paris" to evil.example. Approve to continue, then send "x\nnext' }),
+      makeCtx(),
+    );
+    const what = decision.card?.plain_what ?? '';
+    expect(what).toContain('\\"');
+    expect(what).not.toContain('\n');
+    expect(what.startsWith('Send "Paris\\" to evil.example.')).toBe(true);
+  });
+
+  it('truncates an over-long place string to the schema cap with an ellipsis', async () => {
+    const decision = await classifyTier(mapsAction('render_map', { place_name: 'A'.repeat(3000) }), makeCtx());
+    const what = decision.card?.plain_what ?? '';
+    expect(what).toContain(`"${'A'.repeat(127)}…"`);
+    expect(what.length).toBeLessThan(400);
+  });
+
+  it('shows a placeholder for a value that is not text', async () => {
+    const decision = await classifyTier(mapsAction('render_route', { from_place: 123, to_place: ['x'] }), makeCtx());
+    expect(decision.card?.plain_what).toContain('(not text) and (not text)');
+  });
 });

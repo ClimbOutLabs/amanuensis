@@ -8,7 +8,15 @@ export { InMemoryApprovalTokenStore } from './approvalTokens';
 export type { ApprovalTokenStore } from './approvalTokens';
 export { recordClassificationAudit, recordStandingTrustRun } from './audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './audit';
-export { canonicalShellForm, classifyHostToolCall, classifyTier, shellBindingFromForm } from './classifier';
+export {
+  MAPS_TOOL_NAMES,
+  RENDER_MAP_TOOL_NAME,
+  RENDER_ROUTE_TOOL_NAME,
+  canonicalShellForm,
+  classifyHostToolCall,
+  classifyTier,
+  shellBindingFromForm,
+} from './classifier';
 export type { ClassifyContext, SentinelAction } from './classifier';
 export {
   DEFAULT_PINNED_PATH,

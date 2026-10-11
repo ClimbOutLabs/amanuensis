@@ -375,10 +375,12 @@ function parseMapsUrl({
   envKey,
   raw,
   defaultValue,
+  requiredPlaceholders = [],
 }: {
   envKey: string;
   raw: string | undefined;
   defaultValue: string;
+  requiredPlaceholders?: readonly string[];
 }): string {
   const value = raw === undefined || raw.trim() === '' ? defaultValue : raw.trim();
   let parsed: URL;
@@ -392,6 +394,11 @@ function parseMapsUrl({
   }
   if (parsed.search !== '' || parsed.hash !== '') {
     throw new Error(`${envKey} must not include a query or hash`);
+  }
+  for (const placeholder of requiredPlaceholders) {
+    if (!value.includes(placeholder)) {
+      throw new Error(`${envKey} must include the ${placeholder} placeholder`);
+    }
   }
   return value.endsWith('/') && value.length > 1 ? value.slice(0, -1) : value;
 }
@@ -1594,6 +1601,7 @@ const shared: SharedServerConfiguration = {
     envKey: 'MAPS_TILE_URL',
     raw: getEnv('MAPS_TILE_URL'),
     defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    requiredPlaceholders: ['{z}', '{x}', '{y}'],
   }),
   MAPS_USER_AGENT:
     getEnv('MAPS_USER_AGENT', { required: false }) ??

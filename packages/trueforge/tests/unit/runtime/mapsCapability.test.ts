@@ -120,7 +120,7 @@ describe('GeocodeCache', () => {
 });
 
 describe('OsrmRoutingProvider', () => {
-  it('rounds the origin before the request leaves', async () => {
+  it('builds the route URL from the coordinates it is given', async () => {
     const seen: string[] = [];
     const provider = createMapsRoutingProvider({
       provider_id: 'osrm',
@@ -134,8 +134,7 @@ describe('OsrmRoutingProvider', () => {
     });
     const result = await provider.route({ from_lat: 48.8588444, from_lng: 2.2944811, to_lat: 48.86, to_lng: 2.3 });
     expect(seen).toHaveLength(1);
-    // Origin rounded to 3 decimals; destination untouched.
-    expect(seen[0]).toContain('/2.294,48.859;2.3,48.86');
+    expect(seen[0]).toContain('/2.2944811,48.8588444;2.3,48.86');
     expect(result.distance_km).toBe(1.2);
     expect(result.duration_min).toBe(10);
     expect(result.traffic).toBe(false);
@@ -242,5 +241,32 @@ describe('MapsService.geocode', () => {
     const place = (await service.geocode('Paris'))!;
     const pins = await service.searchPoi(place, 'coffee');
     expect(pins).toEqual([]);
+  });
+});
+
+describe('MapsService.route origin privacy', () => {
+  it('hands every provider a rounded origin and an untouched destination', async () => {
+    const received: { from_lat: number; from_lng: number; to_lat: number; to_lng: number }[] = [];
+    const service = new MapsService({
+      geocoder_url: 'https://geocode.example',
+      router_provider: {
+        provider_id: 'recording',
+        route: input => {
+          received.push(input);
+          return Promise.resolve({ distance_km: 1, duration_min: 1, geometry: '_p~iF~ps|U', traffic: false });
+        },
+      },
+      logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } as never,
+      fetch_limited: () => Promise.reject(new Error('unused')),
+    });
+    const place = (lat: number, lng: number) => ({
+      resolved_name: 'x',
+      address: null,
+      lat,
+      lng,
+      bounding_box: null,
+    });
+    await service.route(place(48.8588444, 2.2944811), place(48.8606111, 2.3376222));
+    expect(received).toEqual([{ from_lat: 48.859, from_lng: 2.294, to_lat: 48.8606111, to_lng: 2.3376222 }]);
   });
 });

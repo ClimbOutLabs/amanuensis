@@ -3,26 +3,35 @@
  *
  * Serves GET /api/maps/tiles/{z}/{x}/{y}.png. The browser never contacts the
  * tile host directly: the server fetches from the configured MAPS_TILE_URL,
- * forwards only image/* bodies, and sends no cookies or Referer upstream.
+ * forwards only raster image bodies up to a size cap, and sends no cookies or
+ * Referer upstream.
  *
- * Limits: at most 4 upstream fetches in flight; at most 128 upstream tiles per
- * card per minute (429 above). Tiles are cached in memory (2,000 entries,
- * honouring upstream Cache-Control/Expires up to 7 days). Answers 503 while
+ * Limits: at most 4 upstream fetches in flight with a bounded wait queue, and
+ * a per-user budget of upstream fetches per minute (429 above; cache hits are
+ * free). Tiles are cached in memory, bounded by entry count and total bytes,
+ * honouring upstream Cache-Control/Expires up to 7 days. Answers 503 while
  * offline mode is on or when upstream fails.
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
-import type { Context } from 'hono';
 import type { Logger } from 'winston';
+import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
+import { fetchSameOrigin } from '../runtime/mapsUpstream';
+import { TENANT_ID } from '../tenancy';
 
 const MAX_IN_FLIGHT = 4;
-const MAX_TILES_PER_CARD_PER_MINUTE = 128;
+const MAX_WAITING = 32;
+export const MAX_UPSTREAM_TILES_PER_USER_PER_MINUTE = 240;
+const RATE_BUCKET_MAX_ENTRIES = 1000;
 const TILE_CACHE_MAX_ENTRIES = 2000;
+export const TILE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+export const TILE_MAX_BODY_BYTES = 512 * 1024;
 const MAX_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const UPSTREAM_TIMEOUT_MS = 10_000;
+const RATE_WINDOW_MS = 60_000;
 /** Never let a browser sniff an upstream body into something executable. */
-const TILE_SECURITY_HEADERS = { 'X-Content-Type-Options': 'nosniff' };
+const TILE_RESPONSE_HEADERS = { 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff' };
 
 interface TileCacheEntry {
   body: Uint8Array;
@@ -37,16 +46,24 @@ interface RateBucket {
 
 export interface MapsRouterDeps {
   sentinelSettingsStore: ISentinelSettingsStore;
-  resolveRequestContext: (c: Context) => { subject: { id: string } };
+  resolveRequestContext: ResolveRequestContext;
   logger: Logger;
   now?: () => number;
 }
 
-/** In-memory tile cache shared by the proxy. */
+/** In-memory tile cache shared by the proxy, bounded by entry count and total bytes. */
 export class TileCache {
   private readonly entries = new Map<string, TileCacheEntry>();
+  private bytes = 0;
+  private readonly maxEntries: number;
+  private readonly maxBytes: number;
+  private readonly now: () => number;
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(options: { now?: () => number; maxEntries?: number; maxBytes?: number } = {}) {
+    this.now = options.now ?? Date.now;
+    this.maxEntries = options.maxEntries ?? TILE_CACHE_MAX_ENTRIES;
+    this.maxBytes = options.maxBytes ?? TILE_CACHE_MAX_BYTES;
+  }
 
   get(key: string): TileCacheEntry | undefined {
     const entry = this.entries.get(key);
@@ -54,20 +71,92 @@ export class TileCache {
       return undefined;
     }
     if (entry.expires_at <= this.now()) {
-      this.entries.delete(key);
+      this.remove(key);
       return undefined;
     }
     return entry;
   }
 
   set(key: string, entry: TileCacheEntry): void {
-    if (this.entries.size >= TILE_CACHE_MAX_ENTRIES && !this.entries.has(key)) {
+    if (entry.body.byteLength > this.maxBytes) {
+      return;
+    }
+    this.remove(key);
+    while (this.entries.size >= this.maxEntries || this.bytes + entry.body.byteLength > this.maxBytes) {
       const oldest = this.entries.keys().next();
-      if (!oldest.done) {
-        this.entries.delete(oldest.value);
+      if (oldest.done) {
+        break;
       }
+      this.remove(oldest.value);
     }
     this.entries.set(key, entry);
+    this.bytes += entry.body.byteLength;
+  }
+
+  get totalBytes(): number {
+    return this.bytes;
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+
+  private remove(key: string): void {
+    const existing = this.entries.get(key);
+    if (existing !== undefined) {
+      this.bytes -= existing.body.byteLength;
+      this.entries.delete(key);
+    }
+  }
+}
+
+/** Per-key fixed-window counter whose key table is capped: expired windows go first, then the oldest key. */
+export class UpstreamBudget {
+  private readonly buckets = new Map<string, RateBucket>();
+
+  constructor(
+    private readonly now: () => number,
+    private readonly limit: number = MAX_UPSTREAM_TILES_PER_USER_PER_MINUTE,
+    private readonly maxKeys: number = RATE_BUCKET_MAX_ENTRIES,
+  ) {}
+
+  /** Spends one unit for `key`; false when the key's budget for this window is gone. */
+  take(key: string): boolean {
+    const windowStart = this.now() - (this.now() % RATE_WINDOW_MS);
+    let bucket = this.buckets.get(key);
+    if (bucket?.window_start !== windowStart) {
+      this.buckets.delete(key);
+      this.makeRoom(windowStart);
+      bucket = { window_start: windowStart, count: 0 };
+      this.buckets.set(key, bucket);
+    }
+    if (bucket.count >= this.limit) {
+      return false;
+    }
+    bucket.count += 1;
+    return true;
+  }
+
+  get size(): number {
+    return this.buckets.size;
+  }
+
+  private makeRoom(windowStart: number): void {
+    if (this.buckets.size < this.maxKeys) {
+      return;
+    }
+    for (const [key, bucket] of this.buckets) {
+      if (bucket.window_start < windowStart) {
+        this.buckets.delete(key);
+      }
+    }
+    while (this.buckets.size >= this.maxKeys) {
+      const oldest = this.buckets.keys().next();
+      if (oldest.done) {
+        return;
+      }
+      this.buckets.delete(oldest.value);
+    }
   }
 }
 
@@ -115,43 +204,67 @@ export function validTileCoords({ z, x, y }: { z: number; x: number; y: number }
   return x >= 0 && x <= max && y >= 0 && y <= max;
 }
 
-/**
- * Resolve a redirect target, returning null when it points at another host.
- * The proxy never follows the browser to a host outside the configured tile URL.
- */
-export function safeRedirectTarget({
-  upstreamUrl,
-  location,
+/** Read a body without ever holding more than `maxBytes`; null when it is larger. */
+export async function readCappedBody({
+  response,
+  maxBytes,
 }: {
-  upstreamUrl: string;
-  location: string;
-}): string | null {
-  let target: URL;
-  try {
-    target = new URL(location, upstreamUrl);
-  } catch {
+  response: Response;
+  maxBytes: number;
+}): Promise<Uint8Array | null> {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel();
     return null;
   }
-  const upstreamHost = new URL(upstreamUrl).host;
-  return target.host === upstreamHost ? target.toString() : null;
+  const reader = response.body?.getReader();
+  if (reader === undefined) {
+    return new Uint8Array();
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
 }
 
 export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
   const now = deps.now ?? Date.now;
-  const cache = new TileCache(now);
+  const cache = new TileCache({ now });
+  const budget = new UpstreamBudget(now);
   let inFlight = 0;
   const waiting: (() => void)[] = [];
-  const rateBuckets = new Map<string, RateBucket>();
 
-  async function acquireSlot(): Promise<void> {
+  /** False when the wait queue is full: shed load instead of queueing without bound. */
+  async function acquireSlot(): Promise<boolean> {
     if (inFlight < MAX_IN_FLIGHT) {
       inFlight += 1;
-      return;
+      return true;
+    }
+    if (waiting.length >= MAX_WAITING) {
+      return false;
     }
     await new Promise<void>(resolve => {
       waiting.push(resolve);
     });
     inFlight += 1;
+    return true;
   }
 
   function releaseSlot(): void {
@@ -162,26 +275,12 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
     }
   }
 
-  function checkRateLimit(key: string): boolean {
-    const windowStart = now() - (now() % 60_000);
-    let bucket = rateBuckets.get(key);
-    if (bucket?.window_start !== windowStart) {
-      bucket = { window_start: windowStart, count: 0 };
-      rateBuckets.set(key, bucket);
-    }
-    if (bucket.count >= MAX_TILES_PER_CARD_PER_MINUTE) {
-      return false;
-    }
-    bucket.count += 1;
-    return true;
-  }
-
   const app = new OpenAPIHono();
 
   // Note: the route omits the `.png` suffix because Hono does not extract
   // params correctly from patterns like `:y.png`; the suffix is stripped below.
   app.get('/tiles/:z/:x/:y', async c => {
-    const subject = deps.resolveRequestContext(c).subject;
+    const requestContext = deps.resolveRequestContext(c);
     const z = parseTileIndex(c.req.param('z'));
     const x = parseTileIndex(c.req.param('x'));
     const yRaw = c.req.param('y');
@@ -190,17 +289,13 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
       return c.json({ error: { message: 'Invalid tile coordinates.' } }, 400);
     }
 
-    // Offline mode: refuse.
-    const settings = await deps.sentinelSettingsStore.get({ tenant_id: 'default', created_by: subject.id });
+    // Offline mode: refuse. The toggle is stored under the default tenant by the settings API.
+    const settings = await deps.sentinelSettingsStore.get({
+      tenant_id: TENANT_ID,
+      created_by: requestContext.subject.id,
+    });
     if (settings.offline_mode) {
       return c.json({ error: { message: 'Map tiles unavailable while offline.' } }, 503);
-    }
-
-    // Rate limit: per card (tool call id) when the UI passes it, else per user.
-    const card = c.req.query('card');
-    const rateKey = card !== undefined && card !== '' ? `card:${card}` : `user:${subject.id}`;
-    if (!checkRateLimit(rateKey)) {
-      return c.json({ error: { message: 'Tile rate limit exceeded.' } }, 429);
     }
 
     const cacheKey = `${String(z)}/${String(x)}/${String(y)}`;
@@ -208,68 +303,42 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
     if (cached !== undefined) {
       return new Response(cached.body, {
         status: 200,
-        headers: {
-          'Content-Type': cached.content_type,
-          'Cache-Control': 'public, max-age=86400',
-          ...TILE_SECURITY_HEADERS,
-        },
+        headers: { 'Content-Type': cached.content_type, ...TILE_RESPONSE_HEADERS },
       });
+    }
+
+    // Budget upstream fetches per authenticated user; never per client-supplied value.
+    if (!budget.take(JSON.stringify([requestContext.tenant_id, requestContext.subject.id]))) {
+      return c.json({ error: { message: 'Tile rate limit exceeded.' } }, 429);
     }
 
     const upstreamUrl = configuration.MAPS_TILE_URL.replace('{z}', String(z))
       .replace('{x}', String(x))
       .replace('{y}', String(y));
-    await acquireSlot();
+    if (!(await acquireSlot())) {
+      return c.json({ error: { message: 'Tile proxy is busy.' } }, 429);
+    }
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => {
-        controller.abort();
-      }, UPSTREAM_TIMEOUT_MS);
-      let upstream: Response;
-      try {
-        upstream = await fetch(upstreamUrl, {
-          signal: controller.signal,
-          headers: { 'User-Agent': configuration.MAPS_USER_AGENT },
-          // Follow redirects manually so a redirect to another host is rejected.
-          redirect: 'manual',
-        });
-      } finally {
-        clearTimeout(timeout);
-      }
-      if (upstream.status >= 300 && upstream.status < 400) {
-        const location = upstream.headers.get('location');
-        const target = location === null ? null : safeRedirectTarget({ upstreamUrl, location });
-        if (target === null) {
-          deps.logger.warn('maps tile proxy dropped redirect to another host', { location });
-          return c.json({ error: { message: 'Tile upstream returned an unexpected redirect.' } }, 503);
-        }
-        // Same-host redirect: follow once.
-        const retryController = new AbortController();
-        const retryTimeout = setTimeout(() => {
-          retryController.abort();
-        }, UPSTREAM_TIMEOUT_MS);
-        try {
-          upstream = await fetch(target, {
-            signal: retryController.signal,
-            headers: { 'User-Agent': configuration.MAPS_USER_AGENT },
-            redirect: 'manual',
-          });
-        } finally {
-          clearTimeout(retryTimeout);
-        }
-        if (upstream.status >= 300 && upstream.status < 400) {
-          return c.json({ error: { message: 'Tile upstream returned an unexpected redirect.' } }, 503);
-        }
-      }
+      const upstream = await fetchSameOrigin({
+        url: upstreamUrl,
+        headers: { 'User-Agent': configuration.MAPS_USER_AGENT, Accept: 'image/png,image/*' },
+        timeoutMs: UPSTREAM_TIMEOUT_MS,
+      });
       if (!upstream.ok) {
+        await upstream.body?.cancel();
         return c.json({ error: { message: 'Tile upstream unavailable.' } }, 503);
       }
       const contentType = upstream.headers.get('content-type') ?? '';
       if (!isServableTileType(contentType)) {
         deps.logger.warn('maps tile proxy dropped non-image upstream body', { contentType });
+        await upstream.body?.cancel();
         return c.json({ error: { message: 'Tile upstream returned a non-image response.' } }, 503);
       }
-      const body = new Uint8Array(await upstream.arrayBuffer());
+      const body = await readCappedBody({ response: upstream, maxBytes: TILE_MAX_BODY_BYTES });
+      if (body === null) {
+        deps.logger.warn('maps tile proxy dropped oversize upstream body', { limit: TILE_MAX_BODY_BYTES });
+        return c.json({ error: { message: 'Tile upstream returned an oversize response.' } }, 503);
+      }
       const maxAge = parseCacheMaxAge(upstream.headers.get('cache-control'));
       const expiresHeader = upstream.headers.get('expires');
       let ttl = maxAge ?? 24 * 60 * 60 * 1000;
@@ -284,7 +353,7 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
       cache.set(cacheKey, { body, content_type: mimeType, expires_at: now() + ttl });
       return new Response(body, {
         status: 200,
-        headers: { 'Content-Type': mimeType, 'Cache-Control': 'public, max-age=86400', ...TILE_SECURITY_HEADERS },
+        headers: { 'Content-Type': mimeType, ...TILE_RESPONSE_HEADERS },
       });
     } catch (error) {
       deps.logger.warn('maps tile proxy upstream failure', { error });

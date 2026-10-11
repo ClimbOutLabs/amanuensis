@@ -97,8 +97,28 @@ export interface ClassifyContext extends SentinelCallIdentity {
   services: SentinelServices;
 }
 
-/** Tool names for the embedded maps feature. */
-export const MAPS_TOOL_NAMES = ['render_map', 'render_route'] as const;
+/** Canonical owner of the embedded maps tool names; the server tools and the UI mirror these. */
+export const RENDER_MAP_TOOL_NAME = 'render_map';
+export const RENDER_ROUTE_TOOL_NAME = 'render_route';
+export const MAPS_TOOL_NAMES = [RENDER_MAP_TOOL_NAME, RENDER_ROUTE_TOOL_NAME] as const;
+
+/** Longest place string the approval card shows; the tool schemas cap the same fields at this length. */
+const MAPS_CARD_PLACE_MAX_CHARS = 128;
+
+/**
+ * One call parameter as the card shows it: quoted with escapes so a crafted name cannot close the
+ * quote and read as part of the sentence, truncated to the schema cap, and a visible placeholder for
+ * a value that is not text (the tool rejects it after approval, but the card must not lie).
+ */
+function mapsCardLabel(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '(not text)';
+  }
+  const chars = Array.from(value);
+  const shown =
+    chars.length > MAPS_CARD_PLACE_MAX_CHARS ? `${chars.slice(0, MAPS_CARD_PLACE_MAX_CHARS - 1).join('')}…` : value;
+  return JSON.stringify(shown);
+}
 
 /**
  * Single predicate owning the maps approval policy. Both maps tools are Tier 3
@@ -131,30 +151,28 @@ function mapsDestination(action: SentinelAction): string | null {
   return [...new Set(parts)].join(', ');
 }
 
-/** Card plain_what naming the place strings verbatim and the configured hosts. */
+/** Card plain_what naming the quoted place strings and the configured hosts. */
 function mapsPlainWhat(action: SentinelAction): string {
   const params = action.canonical_params;
   const hosts = action.maps_hosts;
   const geocoder = mapsHost(hosts?.geocoder);
   const router = mapsHost(hosts?.router);
   const tile = mapsHost(hosts?.tile);
-  const placeName = typeof params['place_name'] === 'string' ? params['place_name'] : '';
-  const poi = typeof params['poi'] === 'string' && params['poi'] !== '' ? params['poi'] : null;
-  if (action.tool_name === 'render_route') {
-    const fromPlace = typeof params['from_place'] === 'string' ? params['from_place'] : '';
-    const toPlace = typeof params['to_place'] === 'string' ? params['to_place'] : '';
+  if (action.tool_name === RENDER_ROUTE_TOOL_NAME) {
     return (
-      `Send "${fromPlace}" and "${toPlace}" to ${geocoder}, ask ${router} for a driving route ` +
-      `between them, then load map tiles for that area from ${tile}.`
+      `Send ${mapsCardLabel(params['from_place'])} and ${mapsCardLabel(params['to_place'])} to ${geocoder}, ` +
+      `ask ${router} for a driving route between them, then load map tiles for that area from ${tile}.`
     );
   }
-  if (poi !== null) {
+  const placeName = mapsCardLabel(params['place_name']);
+  if (params['poi'] !== undefined && params['poi'] !== '') {
+    const poi = mapsCardLabel(params['poi']);
     return (
-      `Send "${placeName}" and "${poi}" to ${geocoder} to find ${poi} near it, ` +
+      `Send ${placeName} and ${poi} to ${geocoder} to find ${poi} near it, ` +
       `then load map tiles for that area from ${tile}.`
     );
   }
-  return `Send "${placeName}" to ${geocoder} to find it, then load map tiles for that area from ${tile}.`;
+  return `Send ${placeName} to ${geocoder} to find it, then load map tiles for that area from ${tile}.`;
 }
 
 const SENSITIVE_PATH_PATTERNS = [

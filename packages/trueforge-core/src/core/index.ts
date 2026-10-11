@@ -382,7 +382,15 @@ export type {
 } from './permissions/approvalTokens';
 export { recordClassificationAudit } from './permissions/audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './permissions/audit';
-export { canonicalShellForm, classifyHostToolCall, classifyTier, shellBindingFromForm } from './permissions/classifier';
+export {
+  MAPS_TOOL_NAMES,
+  RENDER_MAP_TOOL_NAME,
+  RENDER_ROUTE_TOOL_NAME,
+  canonicalShellForm,
+  classifyHostToolCall,
+  classifyTier,
+  shellBindingFromForm,
+} from './permissions/classifier';
 export type { ClassifyContext, SentinelAction } from './permissions/classifier';
 export {
   DEFAULT_PINNED_PATH,

@@ -12,19 +12,26 @@
  * them from the model's tool list and auto-denies stale calls.
  */
 import type { AgentCapability, AgentTracing } from '@truefoundry/trueforge-core/core';
-import { defineTool, LocalToolMCP, toolResultResponse, type ToolDefinition } from '@truefoundry/trueforge-core/core';
+import {
+  defineTool,
+  LocalToolMCP,
+  RENDER_MAP_TOOL_NAME,
+  RENDER_ROUTE_TOOL_NAME,
+  toolResultResponse,
+  type ToolDefinition,
+} from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import configuration from '../config';
+import { fetchSameOrigin } from './mapsUpstream';
 
 export const MAPS_SERVER_ID = 'maps';
-export const RENDER_MAP_TOOL_NAME = 'render_map';
-export const RENDER_ROUTE_TOOL_NAME = 'render_route';
 
 /**
- * Origin privacy: coordinates sent to the routing provider for the origin are
+ * Origin privacy: coordinates sent to a routing provider for the origin are
  * rounded to this many decimal places (3 is about 100 m). The destination is
- * not rounded. One constant controls the precision.
+ * not rounded. One constant controls the precision, applied in MapsService so
+ * every provider receives a rounded origin.
  */
 export const MAPS_ORIGIN_COORDINATE_PRECISION = 3;
 
@@ -84,6 +91,7 @@ export interface GeocodedPlace {
 }
 
 /** Routing provider interface: the provider id plus URL come from config. */
+/** Origin coordinates arrive already rounded by MapsService. */
 export interface MapsRouteRequest {
   from_lat: number;
   from_lng: number;
@@ -115,11 +123,8 @@ class OsrmRoutingProvider implements MapsRoutingProvider {
   ) {}
 
   async route(input: MapsRouteRequest): Promise<MapsRouteResult> {
-    // Origin privacy: round the origin before the request leaves the server.
-    const from_lat = roundOriginCoordinate(input.from_lat);
-    const from_lng = roundOriginCoordinate(input.from_lng);
     const url =
-      `${this.base_url}/route/v1/driving/${String(from_lng)},${String(from_lat)};${String(input.to_lng)},${String(input.to_lat)}` +
+      `${this.base_url}/route/v1/driving/${String(input.from_lng)},${String(input.from_lat)};${String(input.to_lng)},${String(input.to_lat)}` +
       `?overview=simplified&geometries=polyline`;
     let response: Response;
     try {
@@ -451,8 +456,9 @@ export class MapsService {
     try {
       return await this.routeLimiter.run(() =>
         this.deps.router_provider.route({
-          from_lat: from.lat,
-          from_lng: from.lng,
+          // Origin privacy: round the origin before any provider can send it off the machine.
+          from_lat: roundOriginCoordinate(from.lat),
+          from_lng: roundOriginCoordinate(from.lng),
           to_lat: to.lat,
           to_lng: to.lng,
         }),
@@ -621,9 +627,10 @@ export function mapsCapability(options: MapsCapabilityOptions): AgentCapability 
   // The fetch wrapper attaches the identifying User-Agent and strips nothing
   // else: these are server-to-upstream requests, never browser requests.
   const fetch_limited = (url: string): Promise<Response> =>
-    fetch(url, {
+    fetchSameOrigin({
+      url,
       headers: { 'User-Agent': user_agent, Accept: 'application/json' },
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      timeoutMs: UPSTREAM_TIMEOUT_MS,
     });
   const router_provider = createMapsRoutingProvider({
     provider_id: configuration.MAPS_ROUTER_PROVIDER,

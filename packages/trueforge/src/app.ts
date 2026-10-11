@@ -43,6 +43,7 @@ import {
   createAdminAuthMiddleware,
   createApiKeyAuthMiddleware,
   createAuthMiddleware,
+  createUiSessionAuthMiddleware,
   truefoundryAdminMiddleware,
 } from './auth/middleware';
 import type { McpCatalog } from './catalog/McpCatalog';
@@ -508,8 +509,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       authMiddleware,
     ),
   );
-  // Same-origin tile proxy for embedded maps. UI session auth only; the agent
-  // and sandbox contexts cannot reach it.
+  // Same-origin tile proxy for embedded maps. Browser session only: bearer
+  // credentials (agents, sandboxes, API clients) are refused.
   app.route(
     '/api/maps',
     withAuth(
@@ -518,7 +519,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveRequestContext,
         logger: deps.logger,
       }),
-      authMiddleware,
+      createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
   app.route(
