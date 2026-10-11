@@ -90,7 +90,7 @@ export function SideDrawer({
       data-compact={compact ? '' : undefined}
       className={cn(
         'aui-side-drawer bg-card-bg text-text-primary border-border open:flex open:flex-col overflow-hidden rounded-none p-0 shadow-xl',
-        'backdrop:bg-black/50 backdrop:backdrop-blur-[2px] dark:backdrop:bg-black/70',
+        'backdrop:bg-[var(--overlay)] backdrop:backdrop-blur-[2px]',
         compact
           ? 'm-0 mt-auto h-[min(85dvh,40rem)] w-full max-w-none border-t pb-[env(safe-area-inset-bottom)]'
           : cn(
