@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { WaitQueueIndicator } from '@/atoms/WaitQueueIndicator.js';
-import { LONG_WAIT_MS, type TurnSpriteId, type WaitQueueSnapshot } from '@/utils/waitQueueJourney.js';
+import { deriveWaitQueue, LONG_WAIT_MS, type TurnSpriteId, type WaitQueueSnapshot } from '@/utils/waitQueueJourney.js';
 
 const SPRITES: TurnSpriteId[] = ['listening', 'remembering', 'found-memories', 'doing', 'writing', 'still-writing'];
 
@@ -137,15 +137,16 @@ describe('WaitQueueIndicator', () => {
   });
 
   it('keeps a recall that lands after the first part out of found-memories', () => {
-    // recallJustLanded is already false once parts exist (see deriveWaitQueue),
-    // so the indicator never shows found-memories for a late recall.
-    render(
-      <WaitQueueIndicator
-        snapshot={snapshot({ activeStation: 'doing', recallJustLanded: false })}
-        elapsedMs={0}
-        reducedMotion={false}
-      />,
-    );
+    // Real snapshot: recall landed, then a tool started. deriveWaitQueue
+    // clears recallJustLanded once a part exists, so the indicator never
+    // shows found-memories for a late recall.
+    const late = deriveWaitQueue({
+      isRunning: true,
+      parts: [{ type: 'tool-call', statusType: 'running', toolName: 'web_search' }],
+      memory: { available: true, landed: true, items: 2, outcome: 'ok' },
+    });
+    expect(late.recallJustLanded).toBe(false);
+    render(<WaitQueueIndicator snapshot={late} elapsedMs={0} reducedMotion={false} />);
     expect(document.querySelector('.aui-state-sprite--doing')).not.toBeNull();
     expect(document.querySelector('.aui-state-sprite--found-memories')).toBeNull();
   });
