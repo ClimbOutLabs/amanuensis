@@ -162,7 +162,8 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		env = append(env, name+"="+value)
 	}
 	spec := guest.Spec{
-		ID:     "exec-" + req.SessionID,
+		// Unique per call, so a guest whose cleanup stalled can never block the next call of the session.
+		ID:     fmt.Sprintf("exec-%s-%d", req.SessionID[:12], time.Now().UnixNano()),
 		RootFS: s.RootFS,
 		Argv:   req.Argv,
 		Env:    env,

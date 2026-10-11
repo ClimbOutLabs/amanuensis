@@ -31,6 +31,16 @@ Code the assistant writes with `run_code` (Python and Node.js) runs in an isolat
 
 Settings no longer offers a choice of sandbox provider. Docker is the only option offered there.
 
+## Sandbox slots (preview)
+
+A second backend runs `run_code` and the shell and file tools in four hardened slot containers instead of Docker containers started by the server. Each slot runs a small agent as PID 1, and every call starts in a fresh gVisor guest with no network. The server holds no Docker socket: it reaches a slot only through a read-only control volume.
+
+- Start the slots from a checkout with `pnpm sandbox:slots`. It builds the image, starts the slots and checks each one; the agent refuses to run anything unless every safety check passes (user, capabilities, no-new-privileges, seccomp, read-only root, loopback only, no Docker socket, cgroup limits, AppArmor where the host has it, and a working gVisor guest).
+- Join an existing Compose deploy by adding `-f docker-compose.slots-app.yml` to its command. That file sets `SANDBOX_BACKEND=slots`, `SANDBOX_SLOTS_DIR` and mounts the control volumes. The default backend stays `docker`.
+- The guest image has Python 3 with pypdf, pdfplumber, reportlab, python-docx, openpyxl, pandas, matplotlib and Pillow; Node.js with TypeScript; bash and coreutils; git; and gcc, g++ and make. Packages cannot be downloaded.
+- Files in a chat's `/workspace` persist between commands. Processes do not: a background process ends when its command returns.
+- Skills and git over the network are not available on slots yet, and no token is ever placed in a slot.
+
 ## Enabling the sandbox on an agent
 
 The sandbox is **off by default** per agent. Turn it on in the agent builder when you need code execution, skills, or Code Mode. You can also set `config.sandbox.enabled` in the [agent spec](/create-agent/overview#config) when creating agents via the SDK.

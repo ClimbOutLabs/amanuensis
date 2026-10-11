@@ -297,7 +297,7 @@ func (s *Server) runCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	spec := guest.Spec{
-		ID:     "lease-" + req.RunID,
+		ID:     fmt.Sprintf("lease-%s-%d", req.RunID[:12], time.Now().UnixNano()),
 		RootFS: s.RootFS,
 		Argv:   req.Argv,
 		Env:    guestEnv(),
