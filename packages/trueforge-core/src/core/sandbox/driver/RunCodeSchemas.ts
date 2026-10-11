@@ -32,18 +32,29 @@ export const RUN_CODE_SETUP_ERROR_CODES = [
 ] as const satisfies readonly RunCodeErrorCode[];
 
 /**
- * Basename-only: no separators, no traversal, 1-256 chars.
- * The three alternatives enumerate the `.`/`..` rejection without lookahead:
- * xgrammar (vLLM's grammar compiler) cannot compile lookahead assertions,
- * so `(?!.{1,2}$)` would crash EngineCore. Each branch carries its own tail
- * bound so the total length never exceeds 256.
+ * Length caps are enforced with `refine`, which the emitted JSON Schema omits: xgrammar (vLLM's
+ * grammar compiler) asserts on any bounded repetition above 128, and `.max()` on a string is
+ * emitted as `maxLength`, which compiles to one.
  */
-export const FILE_BASENAME_PATTERN = /^([^./\\][^/\\]{0,255}|\.[^./\\][^/\\]{0,254}|\.\.[^/\\][^/\\]{0,253})$/;
+const FILE_NAME_MAX_LENGTH = 256;
+const CODE_MAX_LENGTH = 512 * 1024;
+
+/**
+ * Basename-only: no separators, no `.`/`..`. The alternatives reject `.`/`..` without
+ * lookahead, which xgrammar cannot compile, and carry no length bound for the reason above.
+ */
+const FILE_BASENAME_PATTERN = /^([^./\\][^/\\]*|\.[^./\\][^/\\]*|\.\.[^/\\][^/\\]*)$/;
+
+export const RunCodeFileNameSchema = z
+  .string()
+  .min(1)
+  .regex(FILE_BASENAME_PATTERN, 'must be a basename (no separators or traversal)')
+  .refine(name => name.length <= FILE_NAME_MAX_LENGTH, `must be at most ${String(FILE_NAME_MAX_LENGTH)} characters`);
 
 export const RunCodeLanguageSchema = z.enum(['python', 'node']);
 
 const RunCodeFileInSchema = z.object({
-  name: z.string().min(1).max(256).regex(FILE_BASENAME_PATTERN, 'must be a basename (no separators or traversal)'),
+  name: RunCodeFileNameSchema,
   content_base64: z.string().min(1),
 });
 
@@ -52,7 +63,7 @@ export const RunCodeInputSchema = z.object({
   code: z
     .string()
     .min(1)
-    .max(512 * 1024),
+    .refine(code => code.length <= CODE_MAX_LENGTH, `must be at most ${String(CODE_MAX_LENGTH)} characters`),
   // Model-authored content only (e.g. CSV text the model composes). Conversation
   // attachments are staged into ingress automatically by the harness and
   // advertised in the tool description — the model never base64-encodes them.
@@ -97,3 +108,23 @@ export const RunCodeSetupFailureSchema = z.object({
 });
 
 export type RunCodeSetupFailure = z.infer<typeof RunCodeSetupFailureSchema>;
+
+/** Why the run_code sandbox can or cannot run code right now, as Settings reports it. */
+export const RUN_CODE_STATUS_STATES = [
+  'ready',
+  'not_configured',
+  'docker_unavailable',
+  'daemon_unavailable',
+  'image_missing',
+  'signature_unverified',
+  'image_unavailable',
+  'isolation_refused',
+  'unsupported_platform',
+] as const;
+
+export const RunCodeStatusSchema = z.object({
+  state: z.enum(RUN_CODE_STATUS_STATES).describe('Whether run_code can execute code, or the reason it cannot.'),
+  detail: z.string().optional().describe('Technical detail from the sandbox check. Absent when the state says it all.'),
+});
+
+export type RunCodeStatus = z.infer<typeof RunCodeStatusSchema>;

@@ -183,7 +183,7 @@ export function CatalogRow({
 }
 
 const SANDBOX_DESCRIPTION = 'Give the agent an isolated workspace to run code, read documents and use skills.';
-const SANDBOX_UNAVAILABLE_REASON = 'No sandbox provider configured';
+const SANDBOX_UNAVAILABLE_REASON = 'The sandbox is not available on this server';
 
 function SandboxToggleRow({
   enabled,
@@ -331,7 +331,6 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
   const settingsEnabled = capabilities?.settings?.enabled !== false;
   const canConfigureConnectors = settingsEnabled && settingsCatalog?.connectorCatalog != null;
   const canConfigureSkills = settingsEnabled && settingsCatalog?.skillCatalog != null;
-  const canConfigureSandbox = settingsEnabled && settingsCatalog?.sandboxCatalog != null;
 
   const specMcp = useMemo(() => draftMountsFromSpec(agentSpec?.mcpServers), [agentSpec?.mcpServers]);
   const specSkills = useMemo(() => draftMountsFromSpec(agentSpec?.skills), [agentSpec?.skills]);
@@ -707,10 +706,10 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
                   <DraftCatalogEmptyState
                     loading={loading}
                     emptyLabel="No skills"
-                    settingsTarget={needsSandbox ? 'a Sandbox' : 'Skills'}
+                    settingsTarget="Skills"
                     onOpenSettings={
-                      skills.length === 0 && shell && (needsSandbox ? canConfigureSandbox : canConfigureSkills)
-                        ? () => openSettings(needsSandbox ? 'sandbox' : 'skills')
+                      skills.length === 0 && shell && !needsSandbox && canConfigureSkills
+                        ? () => openSettings('skills')
                         : undefined
                     }
                   />

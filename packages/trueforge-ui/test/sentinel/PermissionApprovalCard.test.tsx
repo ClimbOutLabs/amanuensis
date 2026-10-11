@@ -2,7 +2,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Tier3ApprovalCard } from '@/sentinel/Tier3ApprovalCard.js';
+import { PermissionApprovalCard, type PermissionApprovalCardProps } from '@/sentinel/PermissionApprovalCard.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
 
 function baseCard(): SentinelApprovalCard {
@@ -20,15 +20,17 @@ function baseCard(): SentinelApprovalCard {
   };
 }
 
-function renderCard(overrides: Partial<SentinelApprovalCard> = {}) {
+function renderCard(overrides: Partial<SentinelApprovalCard> = {}, props: Partial<PermissionApprovalCardProps> = {}) {
   const card: SentinelApprovalCard = { ...baseCard(), ...overrides };
   const onApprove = vi.fn();
   const onDeny = vi.fn();
-  render(<Tier3ApprovalCard toolName="payment" card={card} onApprove={onApprove} onDeny={onDeny} />);
+  render(
+    <PermissionApprovalCard toolName="payment" card={card} tier={3} onApprove={onApprove} onDeny={onDeny} {...props} />,
+  );
   return { onApprove, onDeny };
 }
 
-describe('Tier3ApprovalCard', () => {
+describe('PermissionApprovalCard', () => {
   it('renders the server-supplied what, why, and details', () => {
     renderCard({
       destination: 'acme-corp',
@@ -61,25 +63,41 @@ describe('Tier3ApprovalCard', () => {
     expect(screen.queryByText('Command')).not.toBeInTheDocument();
     expect(screen.queryByText(/Cannot be undone/)).not.toBeInTheDocument();
     expect(screen.queryByText('Sends to')).not.toBeInTheDocument();
-    expect(screen.queryByText('Outbound data')).not.toBeInTheDocument();
+    expect(screen.queryByText('Exactly what will be sent')).not.toBeInTheDocument();
   });
 
-  it('renders the outbound query and host for connector tools', () => {
+  it('renders the outbound arguments and connector host for connector tools', () => {
     renderCard({
-      outbound_text: 'sensitive internal project name',
-      destination_host: 'www.google.com',
+      outbound_text: 'query: sensitive internal project name',
+      destination_host: 'mcp.exa.ai',
     });
     expect(screen.getByText('Sends to')).toBeInTheDocument();
-    expect(screen.getByText('www.google.com')).toBeInTheDocument();
-    expect(screen.getByText('Outbound data')).toBeInTheDocument();
-    expect(screen.getByText('sensitive internal project name')).toBeInTheDocument();
+    expect(screen.getByText('mcp.exa.ai')).toBeInTheDocument();
+    expect(screen.getByText('Exactly what will be sent')).toBeInTheDocument();
+    expect(screen.getByText('query: sensitive internal project name')).toBeInTheDocument();
   });
 
   it('renders outbound text in a monospace block', () => {
-    renderCard({ outbound_text: 'https://example.com/fetch?x=1' });
-    const block = screen.getByText('https://example.com/fetch?x=1');
+    renderCard({ outbound_text: 'url: https://example.com/fetch?x=1' });
+    const block = screen.getByText('url: https://example.com/fetch?x=1');
     expect(block.tagName.toLowerCase()).toBe('pre');
     expect(block.className).toContain('font-mono');
+  });
+
+  it('shows short outbound text whole with no show-all control', () => {
+    renderCard({ outbound_text: 'query: short' });
+    expect(screen.queryByRole('button', { name: /show all/i })).not.toBeInTheDocument();
+  });
+
+  it('folds long outbound text and reveals all of it on Show all', () => {
+    const text = `body: ${'a'.repeat(600)}END`;
+    renderCard({ outbound_text: text });
+    const folded = screen.getByText(/^body: a+\.\.\.$/);
+    expect(folded.textContent).not.toContain('END');
+    fireEvent.click(screen.getByRole('button', { name: /show all \(\d+ more characters\)/i }));
+    expect(screen.getByText(text)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /show less/i }));
+    expect(screen.queryByText(text)).not.toBeInTheDocument();
   });
 
   it('calls Approve and Deny', () => {
@@ -88,5 +106,30 @@ describe('Tier3ApprovalCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(onDeny).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels the tier the server sent', () => {
+    renderCard({}, { tier: 2 });
+    expect(screen.getByText('Needs your OK')).toBeInTheDocument();
+    expect(screen.queryByText('Review carefully')).not.toBeInTheDocument();
+  });
+
+  it('labels a Tier 3 card for careful review without tier jargon', () => {
+    renderCard({}, { tier: 3 });
+    expect(screen.getByText('Review carefully')).toBeInTheDocument();
+    expect(screen.queryByText(/Tier \d/)).not.toBeInTheDocument();
+  });
+
+  it('offers Approve all only when the container passes a batch handler', () => {
+    renderCard();
+    expect(screen.queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
+  });
+
+  it('calls the batch handler from Approve all and shows how many calls it covers', () => {
+    const onApproveAll = vi.fn();
+    const { onApprove } = renderCard({}, { tier: 2, onApproveAll, batchSize: 3 });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve all (3)' }));
+    expect(onApproveAll).toHaveBeenCalledTimes(1);
+    expect(onApprove).not.toHaveBeenCalled();
   });
 });

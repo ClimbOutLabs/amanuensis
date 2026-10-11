@@ -16,16 +16,14 @@ function stubApi(settings: SentinelUserSettings): { api: SentinelApi; updateUser
     listAuditEntries: vi.fn(async () => []),
     getUserSettings: vi.fn(async () => settings),
     updateUserSettings,
-    undoTier2Action: vi.fn(async () => {}),
-    stopTier2Action: vi.fn(async () => {}),
-    listSentinelSessionContext: vi.fn(async () => ({ approvals: [], notices: [] })),
+    listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
   };
   return { api, updateUserSettings };
 }
 
 describe('OfflineIndicator', () => {
   it('shows while the server settings say offline mode is on', async () => {
-    const { api } = stubApi({ offline_mode: true, tier2_always_ask: [] });
+    const { api } = stubApi({ offline_mode: true, tier2_auto_allow: [] });
     render(
       <SentinelApiProvider api={api}>
         <OfflineIndicator />
@@ -35,7 +33,7 @@ describe('OfflineIndicator', () => {
   });
 
   it('hides while offline mode is off', () => {
-    const { api } = stubApi({ offline_mode: false, tier2_always_ask: [] });
+    const { api } = stubApi({ offline_mode: false, tier2_auto_allow: [] });
     const { container } = render(
       <SentinelApiProvider api={api}>
         <OfflineIndicator />
@@ -48,7 +46,7 @@ describe('OfflineIndicator', () => {
 
 describe('SentinelSettings', () => {
   it('flips the offline mode switch and writes it through the API', async () => {
-    const { api, updateUserSettings } = stubApi({ offline_mode: false, tier2_always_ask: [] });
+    const { api, updateUserSettings } = stubApi({ offline_mode: false, tier2_auto_allow: [] });
     render(
       <SentinelApiProvider api={api}>
         <SentinelSettings />
@@ -57,7 +55,9 @@ describe('SentinelSettings', () => {
     const toggle = await screen.findByRole('switch', { name: 'Offline mode' });
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
-    expect(updateUserSettings).toHaveBeenCalledWith({ offline_mode: true });
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenCalledWith({ offline_mode: true });
+    });
     // The provider applies the updated settings, so the switch follows.
     await waitFor(() => {
       expect(screen.getByRole('switch', { name: 'Offline mode' })).toBeChecked();

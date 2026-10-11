@@ -12,13 +12,7 @@ const INVOCATION_KEY = 'evt-0\u0000call-9';
 function ApprovalProbe({ toolCallId }: { toolCallId: string }) {
   const sentinel = useOptionalSentinelState();
   const approval = sentinel?.approvalFor(toolCallId);
-  const notice = sentinel?.noticeFor(toolCallId);
-  return (
-    <div>
-      <span data-testid="approval">{approval === undefined ? 'none' : approval.card.plain_what}</span>
-      <span data-testid="notice">{notice === undefined ? 'none' : notice.message}</span>
-    </div>
-  );
+  return <span data-testid="approval">{approval === undefined ? 'none' : approval.card.plain_what}</span>;
 }
 
 function renderProbe(toolCallId: string) {
@@ -45,32 +39,27 @@ const CARD = {
 describe('SentinelStateProvider', () => {
   it('finds an approval filed under the server id when looked up by the invocation key', () => {
     renderProbe(INVOCATION_KEY);
-    act(() => publishSentinelEvent({ kind: 'approval', info: { toolCallId: 'call-9', tier: 3, card: CARD } }));
+    act(() => publishSentinelEvent({ toolCallId: 'call-9', tier: 3, card: CARD, eventId: null, threadId: null }));
     expect(screen.getByTestId('approval')).toHaveTextContent('Run code in the sandbox');
   });
 
-  it('finds a Tier 2 notice filed under the server id when looked up by the invocation key', () => {
+  it('finds a Tier 2 approval filed under the server id when looked up by the invocation key', () => {
     renderProbe(INVOCATION_KEY);
     act(() =>
       publishSentinelEvent({
-        kind: 'notice',
-        notice: {
-          toolCallId: 'call-9',
-          notice_id: 'notice-1',
-          message: 'Edited a tracked file',
-          kind: null,
-          undoable: false,
-          stoppable: false,
-          tracked_files: [],
-        },
+        toolCallId: 'call-9',
+        tier: 2,
+        card: { ...CARD, plain_what: 'Edit notes.md' },
+        eventId: null,
+        threadId: null,
       }),
     );
-    expect(screen.getByTestId('notice')).toHaveTextContent('Edited a tracked file');
+    expect(screen.getByTestId('approval')).toHaveTextContent('Edit notes.md');
   });
 
   it('still finds an approval looked up by the bare server id', () => {
     renderProbe('call-9');
-    act(() => publishSentinelEvent({ kind: 'approval', info: { toolCallId: 'call-9', tier: 3, card: CARD } }));
+    act(() => publishSentinelEvent({ toolCallId: 'call-9', tier: 3, card: CARD, eventId: null, threadId: null }));
     expect(screen.getByTestId('approval')).toHaveTextContent('Run code in the sandbox');
   });
 });

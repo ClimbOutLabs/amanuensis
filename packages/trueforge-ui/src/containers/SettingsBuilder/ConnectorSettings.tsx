@@ -66,24 +66,10 @@ function mountMatchesConnector({ mount, connector }: { mount: object; connector:
   return id === connector.id || name === connector.name;
 }
 
-function withConnectorEnabled({
-  spec,
-  connector,
-  enabled,
-}: {
-  spec: AgentSpec;
-  connector: ConnectorBase;
-  enabled: boolean;
-}): AgentSpec {
+function withoutConnector({ spec, connector }: { spec: AgentSpec; connector: ConnectorBase }): AgentSpec {
   const current = spec.mcpServers ?? [];
-  const exists = current.some(mount => mountMatchesConnector({ mount, connector }));
-  const mcpServers = enabled
-    ? exists
-      ? current
-      : [...current, { id: connector.id, name: connector.name }]
-    : current.filter(mount => !mountMatchesConnector({ mount, connector }));
-
-  return mcpServers === current ? spec : { ...spec, mcpServers };
+  const mcpServers = current.filter(mount => !mountMatchesConnector({ mount, connector }));
+  return mcpServers.length === current.length ? spec : { ...spec, mcpServers };
 }
 
 const ConnectorSettings = () => {
@@ -359,7 +345,7 @@ const ConnectorSettings = () => {
       // Drop it from the current chat's spec first so the spec never points at
       // a connector that no longer exists.
       if (canUpdateChat && agentSpec != null && updateAgentSpec != null) {
-        const nextSpec = withConnectorEnabled({ spec: agentSpec, connector, enabled: false });
+        const nextSpec = withoutConnector({ spec: agentSpec, connector });
         if (nextSpec !== agentSpec) {
           updateAgentSpec({ mcpServers: nextSpec.mcpServers });
         }
@@ -682,8 +668,8 @@ const ConnectorSettings = () => {
     <>
       <h3 className="text-xl font-semibold tracking-tight text-text-primary">Connectors</h3>
       <p className="mt-1 text-sm text-text-secondary">
-        Connected tools are ready to use. Add one to the current chat when you want Aman to use it. Test connection
-        dials a connector and reports the tools it answered with.
+        Connected tools are ready to use. Choose the ones a chat uses from the composer. Test connection dials a
+        connector and reports the tools it answered with.
       </p>
       {isPlainDraft ? (
         <p className="mt-1 text-xs text-text-secondary">
@@ -702,7 +688,7 @@ const ConnectorSettings = () => {
               Find a connector in <span className="font-medium text-text-primary">Available</span> below and choose
               Connect — most need an API key or token from that service.
             </li>
-            <li>Add it to the current chat from the connector row so Aman can use its tools.</li>
+            <li>Choose it in the composer so Aman can use its tools in that chat.</li>
             <li>
               Use <span className="font-medium text-text-primary">Test connection</span> to dial the connector and see
               which tools answered.

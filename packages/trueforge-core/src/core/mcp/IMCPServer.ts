@@ -158,6 +158,8 @@ export interface ToolSource {
   readonly name: string;
   readonly id: string;
   readonly description?: string | undefined;
+  /** Host of the remote server's configured URL, shown on approval cards; absent for local sources. */
+  readonly serverHost?: string | undefined;
 
   listTools(): Promise<ListToolsResolvedResponse | AuthRequiredResponse>;
 

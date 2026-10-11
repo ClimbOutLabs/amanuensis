@@ -29,6 +29,7 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // createToolCallMemoState below); every entry written by this version of the host already
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
+import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryUnwrapCallToolInput } from '../runtime/DeferredTool';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
@@ -44,7 +45,6 @@ import {
   toolResultResponse,
 } from './IMCPServer';
 import { deniedToolCallText } from './ToolSet';
-import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
 
 export interface ToolCallResult {
   message: LLMToolMessage;
@@ -480,7 +480,8 @@ function parseToolArguments(argumentsJson: string): Record<string, unknown> {
 }
 
 /**
- * Sentinel pre-dispatch verification for an approved Tier 3 call. Returns an
+ * Sentinel pre-dispatch verification for an approved Tier 3 call or a Tier 2
+ * call (containment, plus the token when it asked). Returns an
  * error message when the call must not execute (stale offline context,
  * invalid or already-used approval token, parameters changed since
  * approval), or undefined when cleared. A valid tracked-execution approval
@@ -496,10 +497,12 @@ async function verifySentinelPreDispatch(input: {
     return undefined;
   }
   const info = toolCall.tool_info;
-  if (info.tier !== 3 && info.tier !== 2) {
+  // A silent Tier 1 call only needs the dispatch re-check when it is a shell command.
+  if (info.tier === undefined || (info.tier === 1 && (info.mint_tool_name ?? info.original_tool_name) !== 'exec')) {
     return undefined;
   }
-  if (info.tier === 3 && approvalDecisions.get(toolCall.id)?.status !== 'allow') {
+  const needsApproval = info.tier === 3 || (info.approval_token_id ?? null) !== null;
+  if (needsApproval && approvalDecisions.get(toolCall.id)?.status !== 'allow') {
     return undefined;
   }
   let canonicalParams: Record<string, unknown>;
@@ -527,7 +530,7 @@ async function verifySentinelPreDispatch(input: {
     tenant_id: sentinel.identity.tenant_id,
     created_by: sentinel.identity.created_by,
   });
-  return verifyPreDispatch({
+  return await verifyPreDispatch({
     call: {
       tool_name: info.mint_tool_name ?? info.original_tool_name,
       tool_type: info.type,
@@ -1696,27 +1699,37 @@ export async function executeToolCalls({
     }
     return outcome;
   });
-  // Sentinel: record Tier 3 carded outcomes. Auto-denied calls were recorded
-  // at classify time; 'approved'/'denied' land here once the user decided.
+  // Sentinel: record outcomes once dispatch is settled. Auto-denied calls were
+  // recorded at classify time; carded calls record the user's decision and
+  // relaxed Tier 2 calls record that they ran.
   if (sentinel?.services.audit !== null && sentinel?.services.audit !== undefined) {
     const audit = sentinel.services.audit;
-    for (const toolCall of assistantMessage.tool_calls ?? []) {
+    for (const { toolCall, disposition } of results) {
       const info = toolCall.tool_info;
-      if (info.tier !== 3 || info.tier3_card === null) {
+      if ((info.tier !== 2 && info.tier !== 3) || info.tier3_card === null) {
         continue;
       }
       const status = approvalDecisions.get(toolCall.id)?.status;
-      if (status !== 'allow' && status !== 'deny') {
+      const asked = info.tier === 3 || (info.approval_token_id ?? null) !== null;
+      let outcome: 'approved' | 'denied' | 'ran';
+      if (asked) {
+        if (status !== 'allow' && status !== 'deny') {
+          continue;
+        }
+        outcome = status === 'allow' ? 'approved' : 'denied';
+      } else if (disposition === 'executed_ok' || disposition === 'executed_nonzero') {
+        outcome = 'ran';
+      } else {
         continue;
       }
       await audit.record({
         tenant_id: sentinel.identity.tenant_id,
         created_by: sentinel.identity.created_by,
         conversation_id: sentinel.identity.conversation_id,
-        tier: 3,
+        tier: info.tier,
         tool_name: info.original_tool_name,
         description: info.tier3_card?.plain_what ?? info.original_tool_name,
-        outcome: status === 'allow' ? 'approved' : 'denied',
+        outcome,
         auto_deny_reason: null,
       });
     }

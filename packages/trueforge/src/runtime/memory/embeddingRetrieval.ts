@@ -556,6 +556,9 @@ export class EmbeddingSubsystem {
   }
 }
 
+/** Picks the subsystem for one vault namespace; each vault keeps its own embedding store. */
+export type EmbeddingSubsystemResolver = (namespace: string) => EmbeddingSubsystem;
+
 const subsystems = new Map<string, EmbeddingSubsystem>();
 
 /**

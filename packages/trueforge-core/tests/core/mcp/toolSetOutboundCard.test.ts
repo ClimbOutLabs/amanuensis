@@ -1,0 +1,136 @@
+import { createLogger } from 'winston';
+import { RemoteMCP, ToolSet, createSentinelHostContext, defaultSentinelServices } from '../../../src/core';
+import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
+import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
+import type { ToolSelectorConfig } from '../../../src/core/mcp/ToolSelectorPolicy';
+import { DeferredTool } from '../../../src/core/runtime/DeferredTool';
+import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
+
+jest.mock('../../../src/core/mcp/remoteMcpClient', () => {
+  const actual = jest.requireActual<typeof import('../../../src/core/mcp/remoteMcpClient')>(
+    '../../../src/core/mcp/remoteMcpClient',
+  );
+  return { __esModule: true as const, ...actual, connectRemoteMcp: jest.fn() };
+});
+
+const mockConnect = jest.mocked(connectRemoteMcp);
+const noopLogger = createLogger({ silent: true });
+const schema = { type: 'object' as const, properties: {} };
+
+const webSearch: ToolSchema = {
+  name: 'web_search',
+  description: 'Search the web.',
+  inputSchema: schema,
+  annotations: { readOnlyHint: true },
+};
+const sendEmail: ToolSchema = { name: 'send_email', description: 'Send an email.', inputSchema: schema };
+const mystery: ToolSchema = { name: 'frobnicate', description: 'Does something.', inputSchema: schema };
+
+function makeToolSet(input: { name: string; url: string; tools: ToolSchema[] }): ToolSet {
+  mockConnect.mockImplementation(() =>
+    Promise.resolve({
+      transportType: 'streamable-http' as const,
+      sessionId: null,
+      listTools: () => Promise.resolve({ tools: input.tools }),
+      callTool: () => Promise.resolve({ content: [{ type: 'text', text: 'ok' }] }),
+      close: () => Promise.resolve(),
+    }),
+  );
+  const remote = new RemoteMCP({
+    name: input.name,
+    id: input.name,
+    url: input.url,
+    headers: {},
+    logger: noopLogger,
+    tracing: NOOP_AGENT_TRACING,
+    requestTimeoutMs: 60_000,
+    connectTimeoutMs: 5_000,
+    signal: new AbortController().signal,
+  });
+  const selectors: ToolSelectorConfig = { enableTools: ['@all'], disableTools: [], preloadTools: [] };
+  return new ToolSet({
+    source: remote,
+    selectors,
+    preload: false,
+    sentinel: createSentinelHostContext({
+      tenant_id: 't1',
+      created_by: 'u1',
+      conversation_id: 'c1',
+      services: defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    }),
+  });
+}
+
+describe('approval card for connector calls', () => {
+  it('shows a direct web search in plain words with the connector host and the exact query', async () => {
+    const toolSet = makeToolSet({ name: 'exa', url: 'https://mcp.exa.ai/mcp?exaApiKey=secret', tools: [webSearch] });
+    const info = await toolSet.toolCallInfo({ name: 'web_search', arguments: { query: 'my salary history' } });
+    expect(info.tier).toBe(3);
+    expect(info.is_approval_required).toBe(true);
+    expect(info.tier3_card).toMatchObject({
+      plain_what: 'Search the web with `web_search` on exa.',
+      destination_host: 'mcp.exa.ai',
+      outbound_text: 'query: my salary history',
+    });
+  });
+
+  it('never puts the connector URL path or query string on the card', async () => {
+    const toolSet = makeToolSet({ name: 'exa', url: 'https://mcp.exa.ai/mcp?exaApiKey=secret', tools: [webSearch] });
+    const info = await toolSet.toolCallInfo({ name: 'web_search', arguments: { query: 'q' } });
+    expect(JSON.stringify(info.tier3_card)).not.toContain('exaApiKey');
+    expect(JSON.stringify(info.tier3_card)).not.toContain('secret');
+  });
+
+  it('shows the same card when the model reaches the search through call_tool', async () => {
+    const toolSet = makeToolSet({ name: 'exa', url: 'https://mcp.exa.ai/mcp', tools: [webSearch] });
+    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const info = await deferred.toolCallInfo({
+      name: 'call_tool',
+      arguments: { mcp_server: 'exa', tool_name: 'web_search', input: { query: 'my salary history' } },
+    });
+    expect(info.is_deferred).toBe(true);
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card).toMatchObject({
+      plain_what: 'Search the web with `web_search` on exa.',
+      destination_host: 'mcp.exa.ai',
+      outbound_text: 'query: my salary history',
+    });
+  });
+
+  it('shows a Gmail send through call_tool with recipients, subject and body', async () => {
+    const toolSet = makeToolSet({ name: 'gmail', url: 'https://gmail.example.com/mcp', tools: [sendEmail] });
+    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const info = await deferred.toolCallInfo({
+      name: 'call_tool',
+      arguments: {
+        mcp_server: 'gmail',
+        tool_name: 'send_email',
+        input: { to: ['alice@example.com'], subject: 'Plan', body: 'See attached.' },
+      },
+    });
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card).toMatchObject({
+      plain_what: 'Send an email to alice@example.com.',
+      recipient: 'alice@example.com',
+      destination_host: 'gmail.example.com',
+    });
+    expect(info.tier3_card?.outbound_text).toContain('subject: Plan');
+    expect(info.tier3_card?.outbound_text).toContain('body: See attached.');
+  });
+
+  it('keeps an unknown connector tool on the fail-closed card, through call_tool too', async () => {
+    const toolSet = makeToolSet({ name: 'misc', url: 'https://misc.example.com/mcp', tools: [mystery] });
+    const direct = await toolSet.toolCallInfo({ name: 'frobnicate', arguments: { id: '7' } });
+    const deferred = new DeferredTool([toolSet], { tracing: NOOP_AGENT_TRACING, logger: noopLogger });
+    const wrapped = await deferred.toolCallInfo({
+      name: 'call_tool',
+      arguments: { mcp_server: 'misc', tool_name: 'frobnicate', input: { id: '7' } },
+    });
+    for (const info of [direct, wrapped]) {
+      expect(info.tier).toBe(3);
+      expect(info.tier3_card?.plain_what).toBe('Run `frobnicate`, which the classifier does not recognize.');
+      expect(info.tier3_card?.destination_host).toBe('misc.example.com');
+      expect(info.tier3_card?.outbound_text).toBe('id: 7');
+    }
+  });
+});

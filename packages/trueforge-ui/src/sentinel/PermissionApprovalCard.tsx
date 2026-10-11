@@ -1,16 +1,32 @@
 'use client';
 
-import type { FC } from 'react';
+import { useState, type FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import type { SentinelApprovalCard } from './types.js';
 
-export type Tier3ApprovalCardProps = {
+type ApprovalCardTier = 2 | 3;
+
+/** Characters of the outbound arguments shown before "Show all". */
+const OUTBOUND_PREVIEW_CHARS = 500;
+
+const TIER_LABELS: Record<ApprovalCardTier, string> = { 2: 'Needs your OK', 3: 'Review carefully' };
+
+export type PermissionApprovalCardProps = {
   toolName: string;
   card: SentinelApprovalCard;
+  /** Tier the server sent; it only changes the badge, never the controls. */
+  tier: ApprovalCardTier;
   onApprove: () => void;
   onDeny: () => void;
+  /**
+   * Approves every pending Tier 2 call in one step. Only the container passes it, and
+   * only for a Tier 2 card with other Tier 2 calls waiting; Tier 3 never gets it.
+   */
+  onApproveAll?: (() => void) | undefined;
+  /** How many Tier 2 calls "Approve all" covers, shown on its button. */
+  batchSize?: number | undefined;
   disabled?: boolean;
 };
 
@@ -23,18 +39,48 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
   );
 }
 
+function OutboundBlock({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > OUTBOUND_PREVIEW_CHARS;
+  const shown = isLong && !expanded ? text.slice(0, OUTBOUND_PREVIEW_CHARS) : text;
+  return (
+    <div className="rounded border border-border bg-primary-bg px-3 py-2">
+      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
+      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-text-primary">
+        {shown}
+        {isLong && !expanded ? '...' : ''}
+      </pre>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => {
+            setExpanded(!expanded);
+          }}
+          aria-expanded={expanded}
+          className="mt-1 text-xs font-medium text-text-secondary underline hover:text-text-primary"
+        >
+          {expanded ? 'Show less' : `Show all (${String(text.length - OUTBOUND_PREVIEW_CHARS)} more characters)`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
- * Plain-language Tier 3 approval card. Every row renders only what the server sent:
+ * Plain-language approval card for Tier 3 actions and Tier 2 actions that ask. Every row renders only what the server sent:
  * `plain_what` is always present, everything else renders when non-null. The parsed
  * command renders whenever the card carries one; the server only attaches it to shell
  * cards, so the card never needs to know which tool it is. The card never infers the
- * tier; the container only mounts it for an explicit Tier 3 approval.
+ * tier; the container only mounts it for an explicit Tier 2 or Tier 3 approval.
  */
-export const Tier3ApprovalCard: FC<Tier3ApprovalCardProps> = ({
+export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   toolName,
   card,
+  tier,
   onApprove,
   onDeny,
+  onApproveAll,
+  batchSize,
   disabled = false,
 }) => {
   const hasDetails =
@@ -55,7 +101,7 @@ export const Tier3ApprovalCard: FC<Tier3ApprovalCardProps> = ({
           </span>
         </div>
         <span className="shrink-0 rounded border border-primary-button-bg/40 bg-primary-bg px-2 py-0.5 text-[0.6875rem] font-medium text-text-secondary">
-          Tier 3 review
+          {TIER_LABELS[tier]}
         </span>
       </div>
 
@@ -87,12 +133,7 @@ export const Tier3ApprovalCard: FC<Tier3ApprovalCardProps> = ({
           </dl>
         )}
 
-        {card.outbound_text !== null && (
-          <div className="rounded border border-border bg-primary-bg px-3 py-2">
-            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Outbound data</p>
-            <pre className="whitespace-pre-wrap break-all font-mono text-xs text-text-primary">{card.outbound_text}</pre>
-          </div>
-        )}
+        {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} />}
 
         <div className="flex gap-2">
           <Button variant="primary" size="small" onClick={onApprove} disabled={disabled} className="flex-1">
@@ -102,6 +143,11 @@ export const Tier3ApprovalCard: FC<Tier3ApprovalCardProps> = ({
             Deny
           </Button>
         </div>
+        {onApproveAll !== undefined && (
+          <Button variant="secondary" size="small" onClick={onApproveAll} disabled={disabled} className="w-full">
+            {batchSize === undefined ? 'Approve all' : `Approve all (${String(batchSize)})`}
+          </Button>
+        )}
       </div>
     </div>
   );

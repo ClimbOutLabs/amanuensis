@@ -391,6 +391,7 @@ function createTurnResolver(deps: {
             headers: connection.headers,
             metadataHeaders,
           }),
+          first_party: connection.first_party,
         };
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
@@ -1558,10 +1559,21 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             logger: deps.logger,
           })
         : undefined;
+    const vaultScope =
+      persona?.kind === 'persona'
+        ? { personaName: persona.persona.display_name, personaId: persona.persona.id }
+        : undefined;
+    // The previous turn's retain lives in the vault that turn ran under. Verifying or recovering
+    // it through another vault's client would copy that exchange across vaults, so only a turn
+    // in the same vault hands its id to memory.
+    const previousTurnPersonaName =
+      previousTurnCustom?.persona?.persona_name ?? legacyParentActivation?.persona_name ?? null;
+    const memoryPreviousTurnId = previousTurnPersonaName === (vaultScope?.personaName ?? null) ? previousTurnId : null;
     const memoryClient = createMemoryClient({
       backend: configuration.MEMORY_BACKEND,
       markdownDir: configuration.MEMORY_MARKDOWN_DIR,
       namespace: requestContext.tenant_id,
+      vaultScope,
       hindsight:
         memoryProvider === undefined
           ? undefined
@@ -1581,8 +1593,16 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           }
         : undefined,
     });
+    // The title comes from the session's first message, so it may only ride along in the vault
+    // that first turn ran under; in any other vault it would carry that turn's text across.
+    const firstTurn =
+      session.record.last_turn_id === null ? undefined : (await session.listTurns({ limit: 1 })).data[0];
+    const titleSharesVault =
+      session.record.last_turn_id === null ||
+      (firstTurn !== undefined &&
+        (firstTurn.custom?.persona?.persona_name ?? null) === (vaultScope?.personaName ?? null));
     const sessionTitleForMemory = chatTitleContext({
-      title: session.record.title ?? deriveSessionTitle(body.input),
+      title: titleSharesVault ? (session.record.title ?? deriveSessionTitle(body.input)) : undefined,
       assistantNames: [
         profile?.assistant_name,
         ...(await deps.personaStore.listPersonas({ tenant_id: requestContext.tenant_id, created_by: userRef })).flatMap(
@@ -1680,13 +1700,14 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       turnId,
       personalizationProfile: profile,
       personaContext: persona?.kind === 'persona' ? persona.context : undefined,
+      switchNotice: persona?.switchNotice,
       boundRepository,
       repositoryStore: deps.repositoryStore,
       sessionStore: deps.sessionStore,
       memoryClient,
       memoryProviderServerName: memoryProvider?.serverName,
       memorySettings: effectiveMemorySettings,
-      previousTurnId,
+      previousTurnId: memoryPreviousTurnId,
       sessionTitle: sessionTitleForMemory,
       spaceStore: deps.spaceStore,
       clientTimezone: body.client_timezone,
@@ -1876,7 +1897,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           model_name: persona.kind === 'persona' ? persona.persona.model_name : null,
           source: persona.source,
         };
-        if (persona.selection === 'direct') {
+        // A no-op switch (the invocation named the already-active identity, or an ambiguous
+        // request failed closed onto the already-active default) changes no state, so the
+        // activation log records nothing while the turn still runs under that identity.
+        if (persona.skipActivationWrite === true) {
+          activationRecorded = true;
+        } else if (persona.selection === 'direct') {
           await deps.personaStore.recordPersonaActivation(activation);
           activationRecorded = true;
         } else {

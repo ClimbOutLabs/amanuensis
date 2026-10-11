@@ -20,6 +20,12 @@ Transcription runs fully on your own hardware. The browser encodes the recording
 
 The server reads the sidecar address from `STT_URL` (default `http://aman-stt:8001`; compose sets it explicitly). The server does not wait for the sidecar to be healthy before starting: typed chat stays available when transcription is down.
 
+## Host development
+
+`pnpm dev:infra` starts `aman-stt` from `docker-compose.dev.yml` next to Postgres and Redis, while the server and UI run on the host with `pnpm dev`. The service uses the same build, image, memory limit and thread count as the full stack, with two differences: it publishes `127.0.0.1:8001` (loopback only, since the sidecar has no authentication) and it has no `cpuset` pin, because the host-run server cannot be pinned to a disjoint core set and a fixed range would fail on hosts with fewer than 20 cores. The first `pnpm dev:infra` builds the image and downloads the model (~464 MB) into the dev project's own `stt-model-cache` volume, separate from the full stack's.
+
+Point the server at the published port by setting `STT_URL=http://localhost:8001` in `packages/trueforge/.env` (already present in `packages/trueforge/.env.example`), then restart `pnpm dev`. Without it the server looks for `http://aman-stt:8001`, which only resolves inside the compose network, and the mic button stays hidden.
+
 ## Tuning
 
 **Fewer or more CPU cores.** The `16-19` / `0-15` split assumes a 20-core host. On a host with a different core count, move both pins together and keep them disjoint: give the sidecar 4 cores and the server the rest. For example, on a 12-core host, pin `aman-stt` to `8-11` and the server to `0-7`. The server pin lives on the `server` service (`cpuset`), the sidecar pin on `aman-stt`.

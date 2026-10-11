@@ -402,19 +402,14 @@ function publishDocumentIngestionEvent(turnId: string, event: TrueForgeApi.Docum
 }
 
 /**
- * Taps Sentinel permission events off a raw SSE stream item before `toUiStreamingEvent`
+ * Taps Sentinel approval events off a raw SSE stream item before `toUiStreamingEvent`
  * narrows it away: the vendor `TurnStreamingEvent` union has no case for
- * `tool.approval_required` / `tool.tier2_notice`, so they cannot travel the normal chat
- * pipeline. The SDK parser passes unknown event types and fields through, so the raw
- * `type` string is readable here and `extractSentinelFromEvent` parses the rest
- * defensively. Published per tool call; `SentinelStateProvider` subscribes.
+ * `tool.approval_required`, so it cannot travel the normal chat pipeline. The SDK parser
+ * passes unknown event types and fields through, so `extractSentinelFromEvent` parses the
+ * raw item defensively. Published per tool call; `SentinelStateProvider` subscribes.
  */
 function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent): void {
-  const eventType: string = data.type;
-  if (eventType !== 'tool.approval_required' && eventType !== 'tool.tier2_notice') return;
-  const { approvals, notices } = extractSentinelFromEvent(data);
-  for (const info of approvals) publishSentinelEvent({ kind: 'approval', info });
-  for (const notice of notices) publishSentinelEvent({ kind: 'notice', notice });
+  for (const info of extractSentinelFromEvent(data)) publishSentinelEvent(info);
 }
 
 /**

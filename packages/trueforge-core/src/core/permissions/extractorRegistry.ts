@@ -20,9 +20,9 @@ export interface ExtractedCardFields {
   destination: string | null;
   recipient: string | null;
   amount: string | null;
-  /** Exact text leaving the machine (query, URL, message preview), truncated to 500 chars. */
+  /** The call's exact arguments as "name: value" lines; only for connector (MCP) calls. */
   outbound_text: string | null;
-  /** Host the call reaches, from a URL argument or the connector server URL. */
+  /** Host of the connector server that receives the call; only for connector (MCP) calls. */
   destination_host: string | null;
 }
 
@@ -112,149 +112,45 @@ export function genericExtractor(params: Record<string, unknown>): ExtractedCard
   };
 }
 
-/** Max characters for outbound_text; longer text is truncated with a marker. */
-const OUTBOUND_TEXT_MAX_LENGTH = 500;
+/** Longest outbound_text sent to the UI; a cut is marked in the text itself. */
+export const OUTBOUND_TEXT_MAX_CHARS = 20_000;
 
-function truncateOutboundText(text: string): string {
-  if (text.length <= OUTBOUND_TEXT_MAX_LENGTH) {
-    return text;
+function argumentValueText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
   }
-  return text.slice(0, OUTBOUND_TEXT_MAX_LENGTH) + '... (truncated)';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
-/** Extract the host from a URL string, handling protocol-relative URLs. Null when not a URL. */
-function hostFromUrl(value: unknown): string | null {
-  if (typeof value !== 'string' || value.trim() === '') {
+/**
+ * Every argument the connector will receive, verbatim, one "name: value" line each.
+ * Built from the server's canonical params, so a model-written description can never
+ * stand in for what is sent.
+ */
+export function renderOutboundArguments(params: Record<string, unknown>): string | null {
+  const lines = Object.entries(params).map(([key, value]) => `${key}: ${argumentValueText(value)}`);
+  if (lines.length === 0) {
     return null;
   }
-  const trimmed = value.trim();
+  const text = lines.join('\n');
+  if (text.length <= OUTBOUND_TEXT_MAX_CHARS) {
+    return text;
+  }
+  return `${text.slice(0, OUTBOUND_TEXT_MAX_CHARS)}\n... (cut at ${String(OUTBOUND_TEXT_MAX_CHARS)} characters)`;
+}
+
+/** Host (with any port) of an http(s) URL, or null when the value is not one. */
+export function hostFromUrl(value: string): string | null {
   try {
-    const normalized = trimmed.startsWith('//') ? `https:${trimmed}` : trimmed;
-    const url = new URL(normalized);
-    return url.host !== '' ? url.host : null;
+    const url = new URL(value.trim());
+    return (url.protocol === 'https:' || url.protocol === 'http:') && url.host !== '' ? url.host : null;
   } catch {
     return null;
   }
-}
-
-/** First non-empty string value for the given keys, or null. */
-function firstParam(params: Record<string, unknown>, keys: string[]): string | null {
-  return firstOrNull(stringValues(params, keys));
-}
-
-/** Param keys that can carry a search query. */
-const SEARCH_QUERY_KEYS = ['query', 'q', 'search_query', 'text', 'keywords', 'search_text'];
-
-/** Param keys that can carry a URL to fetch. */
-const FETCH_URL_KEYS = ['url', 'link', 'href', 'target_url'];
-
-/**
- * Search tools: any tool whose name indicates search, plus the known search
- * connectors. The outbound text is the query; the destination defaults to
- * 'web search' so the card shows instead of auto-denying (there is no URL or
- * recipient to verify, but the service is known).
- */
-function searchExtractor(params: Record<string, unknown>): ExtractedCardFields {
-  const base = genericExtractor(params);
-  const query = firstParam(params, SEARCH_QUERY_KEYS);
-  return {
-    ...base,
-    destination: base.destination ?? 'web search',
-    outbound_text: query === null ? null : truncateOutboundText(query),
-  };
-}
-
-/**
- * Fetch tools: the outbound text is the URL being fetched, and the host is
- * parsed from it.
- */
-function fetchExtractor(params: Record<string, unknown>): ExtractedCardFields {
-  const base = genericExtractor(params);
-  const url = firstParam(params, FETCH_URL_KEYS);
-  return {
-    ...base,
-    destination: url ?? base.destination,
-    outbound_text: url === null ? null : truncateOutboundText(url),
-    destination_host: hostFromUrl(url),
-  };
-}
-
-/** Param keys for GitHub write tools. */
-const GITHUB_OWNER_KEYS = ['owner'];
-const GITHUB_REPO_KEYS = ['repo', 'repository', 'repository_name'];
-const GITHUB_BRANCH_KEYS = ['branch', 'ref', 'base_branch'];
-const GITHUB_FILE_KEYS = ['path', 'file_path', 'filepath', 'filename'];
-const GITHUB_CONTENT_KEYS = ['content', 'body', 'text'];
-
-/**
- * GitHub writes: owner/repo, branch, visibility, and file paths. The content
- * preview shows what is being written.
- */
-function githubWriteExtractor(params: Record<string, unknown>): ExtractedCardFields {
-  const base = genericExtractor(params);
-  const owner = firstParam(params, GITHUB_OWNER_KEYS);
-  const repo = firstParam(params, GITHUB_REPO_KEYS);
-  const branch = firstParam(params, GITHUB_BRANCH_KEYS);
-  const filePaths = stringValues(params, GITHUB_FILE_KEYS);
-  const visibility = firstParam(params, ['visibility', 'public', 'private']);
-  const content = firstParam(params, GITHUB_CONTENT_KEYS);
-
-  const repoLabel = owner !== null && repo !== null ? `${owner}/${repo}` : (repo ?? owner);
-  const lines: string[] = [];
-  if (repoLabel !== null) {
-    lines.push(`Repository: ${repoLabel}`);
-  }
-  if (branch !== null) {
-    lines.push(`Branch: ${branch}`);
-  }
-  if (visibility !== null) {
-    lines.push(`Visibility: ${visibility}`);
-  }
-  if (filePaths.length > 0) {
-    lines.push(`Files: ${filePaths.join(', ')}`);
-  }
-  if (content !== null) {
-    lines.push(`Content preview: ${content.slice(0, 200)}`);
-  }
-  const outbound = lines.length === 0 ? null : truncateOutboundText(lines.join('\n'));
-
-  return {
-    ...base,
-    destination: repoLabel ?? base.destination,
-    outbound_text: outbound,
-    destination_host: 'github.com',
-  };
-}
-
-/** Param keys for email subject and body. */
-const EMAIL_SUBJECT_KEYS = ['subject', 'title'];
-const EMAIL_BODY_KEYS = ['body', 'message', 'text', 'content', 'html'];
-
-/**
- * Gmail send, reply, forward, and draft: recipients come from the generic
- * extractor; the outbound text adds subject and a body preview.
- */
-function gmailExtractor(params: Record<string, unknown>): ExtractedCardFields {
-  const base = genericExtractor(params);
-  const subject = firstParam(params, EMAIL_SUBJECT_KEYS);
-  const body = firstParam(params, EMAIL_BODY_KEYS);
-
-  const lines: string[] = [];
-  if (base.recipient !== null) {
-    lines.push(`To: ${base.recipient}`);
-  }
-  if (subject !== null) {
-    lines.push(`Subject: ${subject}`);
-  }
-  if (body !== null) {
-    lines.push(`Body preview: ${body.slice(0, 200)}`);
-  }
-  const outbound = lines.length === 0 ? null : truncateOutboundText(lines.join('\n'));
-
-  return {
-    ...base,
-    outbound_text: outbound,
-  };
 }
 
 interface ExtractorEntry {
@@ -277,13 +173,8 @@ function nameIncludes(...fragments: string[]): (toolName: string) => boolean {
  */
 const EXTRACTOR_REGISTRY: ExtractorEntry[] = [
   {
-    match: nameIncludes('send_email', 'sendemail', 'email_send', 'gmail_send', 'gmail_reply', 'gmail_forward'),
-    extract: gmailExtractor,
-    external_service: true,
-  },
-  {
-    match: nameIncludes('create_draft', 'draft_email', 'gmail_draft'),
-    extract: gmailExtractor,
+    match: nameIncludes('send_email', 'sendemail', 'email_send'),
+    extract: genericExtractor,
     external_service: true,
   },
   {
@@ -306,20 +197,115 @@ const EXTRACTOR_REGISTRY: ExtractorEntry[] = [
     extract: genericExtractor,
     external_service: true,
   },
+];
+
+/**
+ * Lower-cased words of a tool name, joined by underscores and bounded by them, so a phrase
+ * matches whole words only: `web_search_exa` has `search`, `research` does not.
+ */
+function nameWords(toolName: string): string {
+  const words = toolName
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(word => word !== '');
+  return `_${words.join('_')}_`;
+}
+
+function hasPhrase(words: string, ...phrases: string[]): boolean {
+  return phrases.some(phrase => words.includes(`_${phrase}_`));
+}
+
+interface ConnectorCallInput {
+  tool_name: string;
+  words: string;
+  /** " on <connector>" when the connector's configured name is known. */
+  where: string;
+  fields: ExtractedCardFields;
+  params: Record<string, unknown>;
+}
+
+interface ConnectorFamily {
+  match: (words: string) => boolean;
+  describe: (input: ConnectorCallInput) => string;
+  /** Replaces the destination when the params name a more precise one. */
+  destination?: (params: Record<string, unknown>) => string | null;
+}
+
+function repositoryLabel(params: Record<string, unknown>): string | null {
+  const owner = firstOrNull(stringValues(params, ['owner']));
+  const repo = firstOrNull(stringValues(params, ['repo', 'repository', 'repository_name']));
+  if (repo === null) {
+    return null;
+  }
+  return owner === null ? repo : `${owner}/${repo}`;
+}
+
+function toRecipient(fields: ExtractedCardFields): string {
+  return fields.recipient === null ? '' : ` to ${fields.recipient}`;
+}
+
+const DESTRUCTIVE_AND_INSTALL_WORDS = ['delete', 'remove', 'uninstall', 'drop', 'destroy', 'erase', 'install'];
+
+/**
+ * Connector actions that are not external-service by name but still send data out. They only
+ * change the card's wording and destination: tiers, auto-deny and offline handling come from
+ * the registry above. Checked in order.
+ */
+const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   {
-    match: nameIncludes('push_files', 'create_or_update_file', 'create_repository', 'create_gist', 'update_gist', 'gist'),
-    extract: githubWriteExtractor,
-    external_service: true,
+    match: words => hasPhrase(words, 'gist'),
+    describe: ({ tool_name, where }) => `Publish a gist with \`${tool_name}\`${where}.`,
   },
   {
-    match: nameIncludes('fetch_url', 'web_fetch', 'fetchurl', 'get_url', 'http_get', 'fetch_page', 'webfetch'),
-    extract: fetchExtractor,
-    external_service: true,
+    match: words => hasPhrase(words, 'push_files', 'create_or_update_file', 'create_repository'),
+    describe: ({ tool_name, where, params }) => {
+      const repo = repositoryLabel(params);
+      return `Write to ${repo === null ? 'a repository' : `repository ${repo}`} with \`${tool_name}\`${where}.`;
+    },
+    destination: repositoryLabel,
   },
   {
-    match: nameIncludes('search', 'exa', 'tavily', 'parallel', 'bright_data', 'brightdata'),
-    extract: searchExtractor,
-    external_service: true,
+    match: words => hasPhrase(words, 'send_draft'),
+    describe: ({ tool_name, where, fields }) =>
+      `Send a saved draft${toRecipient(fields)} with \`${tool_name}\`${where}.`,
+  },
+  {
+    match: words => hasPhrase(words, 'forward'),
+    describe: ({ tool_name, where, fields }) =>
+      `Forward a message${toRecipient(fields)} with \`${tool_name}\`${where}.`,
+  },
+  {
+    match: words => hasPhrase(words, 'reply'),
+    describe: ({ tool_name, where, fields }) => `Send a reply${toRecipient(fields)} with \`${tool_name}\`${where}.`,
+  },
+  {
+    match: words => hasPhrase(words, 'create_draft', 'draft_email', 'update_draft', 'gmail_draft'),
+    describe: ({ tool_name, where, fields }) =>
+      `Save a message draft${toRecipient(fields)} with \`${tool_name}\`${where}.`,
+  },
+  {
+    match: words =>
+      hasPhrase(
+        words,
+        'web_fetch',
+        'fetch_url',
+        'fetch_page',
+        'webfetch',
+        'http_get',
+        'get_url',
+        'scrape',
+        'crawl',
+        'crawling',
+        'tavily_extract',
+        'extract_url',
+      ),
+    describe: ({ tool_name, where }) => `Fetch a web page with \`${tool_name}\`${where}.`,
+  },
+  {
+    match: words => hasPhrase(words, 'search'),
+    describe: ({ tool_name, where, words }) =>
+      `${hasPhrase(words, 'web', 'tavily', 'exa', 'engine') ? 'Search the web' : 'Run a search'} with \`${tool_name}\`${where}.`,
   },
 ];
 
@@ -348,22 +334,64 @@ export interface ExtractionResult {
   /** True when the fallback fired: external-service action, no verifiable destination. */
   destination_unverifiable: boolean;
   external_service: boolean;
+  /** Plain-words description of a known connector action (search, fetch, repo write, mail), or null. */
+  connector_what: string | null;
 }
 
 /**
  * Extract card fields for a Tier 3 action. Never reads agent text: only the
- * canonical params the server parsed.
+ * canonical params the server parsed. For a connector (MCP) call the exact
+ * arguments and the connector server's host are attached so the user sees what leaves.
  */
 export function extractCardFields(input: {
   tool_name: string;
   canonical_params: Record<string, unknown>;
+  tool_type?: 'truefoundry-system' | 'mcp' | undefined;
+  /** Host of the connector's configured server URL. */
+  server_host?: string | undefined;
+  /** The connector's configured name. */
+  server_name?: string | undefined;
 }): ExtractionResult {
   const entry = EXTRACTOR_REGISTRY.find(e => e.match(input.tool_name));
   const externalService =
     entry?.external_service ?? EXTERNAL_SERVICE_FRAGMENTS.some(f => input.tool_name.toLowerCase().includes(f));
-  const fields = entry !== undefined ? entry.extract(input.canonical_params) : genericExtractor(input.canonical_params);
-  const destinationUnverifiable = externalService && fields.destination === null && fields.recipient === null;
-  return { fields, destination_unverifiable: destinationUnverifiable, external_service: externalService };
+  const base = entry !== undefined ? entry.extract(input.canonical_params) : genericExtractor(input.canonical_params);
+  const destinationUnverifiable = externalService && base.destination === null && base.recipient === null;
+  if (input.tool_type !== 'mcp') {
+    return {
+      fields: base,
+      destination_unverifiable: destinationUnverifiable,
+      external_service: externalService,
+      connector_what: null,
+    };
+  }
+  const words = nameWords(input.tool_name);
+  // Deleting or installing is described by the classifier's own destructive and install cards.
+  const family = hasPhrase(words, ...DESTRUCTIVE_AND_INSTALL_WORDS)
+    ? undefined
+    : CONNECTOR_FAMILIES.find(f => f.match(words));
+  const where = input.server_name === undefined || input.server_name === '' ? '' : ` on ${input.server_name}`;
+  const fields: ExtractedCardFields = {
+    ...base,
+    destination: family?.destination?.(input.canonical_params) ?? base.destination,
+    outbound_text: renderOutboundArguments(input.canonical_params),
+    destination_host: input.server_host ?? (base.destination === null ? null : hostFromUrl(base.destination)),
+  };
+  return {
+    fields,
+    destination_unverifiable: destinationUnverifiable,
+    external_service: externalService,
+    connector_what:
+      family === undefined
+        ? null
+        : family.describe({
+            tool_name: input.tool_name,
+            words,
+            where,
+            fields,
+            params: input.canonical_params,
+          }),
+  };
 }
 
 /** True when the tool name denotes an external-service action. */
