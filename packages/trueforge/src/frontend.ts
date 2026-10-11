@@ -30,11 +30,24 @@ function applyShellTokens(options: { html: string; uiBasePath: string }): string
   return options.html.replaceAll(SHELL_BASE_TOKEN, options.uiBasePath);
 }
 
+/**
+ * Image Content-Security-Policy for the app shell. Defined once here and
+ * mirrored in `packages/frontend/index.html`; a test asserts the two stay
+ * equal because the static HTML file cannot import this constant.
+ */
+export const APP_SHELL_IMAGE_CSP = "img-src 'self' data: blob:";
+
 function createShellResponse(options: { html: string; method: string }): Response {
   const headers = new Headers({
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': REVALIDATE_CACHE_CONTROL,
     Vary: 'Accept-Encoding',
+    // Model-authored markdown can hide private data in a remote image URL. The
+    // chat component placeholder is the primary guard; this img-src-only policy
+    // is defense in depth so a slipped-through <img> still cannot fetch.
+    // no-referrer keeps the page URL out of any request that does go out.
+    'Content-Security-Policy': APP_SHELL_IMAGE_CSP,
+    'Referrer-Policy': 'no-referrer',
   });
   if (options.method === 'HEAD') {
     return new Response(null, { status: 200, headers });
