@@ -6,10 +6,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const useAuiState = vi.hoisted(() => vi.fn());
 const useToolResponses = vi.hoisted(() => vi.fn());
 const useApprovals = vi.hoisted(() => vi.fn());
+const newestMessage = vi.hoisted(() => ({ current: undefined as unknown }));
 
 vi.mock('@assistant-ui/react', () => ({
   useAuiState,
 }));
+
+/** Routes the MCP selector to `mcpPending` and the answerable-approvals selector to the newest message. */
+function mockAuiState(mcpPending: boolean) {
+  useAuiState.mockImplementation((selector: (state: unknown) => unknown) =>
+    selector === threadHasPendingMcpAuth ? mcpPending : selector({ thread: { messages: [newestMessage.current] } }),
+  );
+}
+
+/** Pending approvals as the newest assistant message carries them. */
+function pendWith(...ids: string[]) {
+  newestMessage.current = {
+    role: 'assistant',
+    content: ids.map(id => ({ type: 'tool-call', approval: { id, approved: undefined } })),
+  };
+}
 
 vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryToolResponses: useToolResponses,
@@ -84,7 +100,8 @@ describe('threadHasPendingMcpAuth', () => {
 describe('useComposerPauseView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useAuiState.mockReturnValue(false);
+    mockAuiState(false);
+    pendWith();
     useToolResponses.mockReturnValue({ pending: [] });
     useApprovals.mockReturnValue({ pending: [] });
   });
@@ -129,7 +146,7 @@ describe('useComposerPauseView', () => {
   });
 
   it('gives MCP authorization precedence over pending tool responses', () => {
-    useAuiState.mockReturnValue(true);
+    mockAuiState(true);
     useToolResponses.mockReturnValue({
       pending: [{ toolCallId: 'question-1', toolName: 'secret_select' }],
     });
@@ -154,6 +171,7 @@ describe('useComposerPauseView', () => {
   });
 
   it('shows the approval pause when tool approvals are pending', () => {
+    pendWith('appr-1');
     useApprovals.mockReturnValue({
       pending: [{ approvalId: 'appr-1', threadId: 'root', toolName: 'call_tool', args: {}, argsText: '{}' }],
     });
@@ -163,8 +181,20 @@ describe('useComposerPauseView', () => {
     expect(result.current).toEqual({ kind: 'approval' });
   });
 
+  it('keeps the composer open for an approval left pending on an older turn', () => {
+    pendWith();
+    useApprovals.mockReturnValue({
+      pending: [{ approvalId: 'old-1', threadId: 'root', toolName: 'call_tool', args: {}, argsText: '{}' }],
+    });
+
+    const { result } = renderHook(() => useComposerPauseView());
+
+    expect(result.current).toEqual({ kind: 'compose' });
+  });
+
   it('gives ask-user precedence over pending tool approvals', () => {
     useToolResponses.mockReturnValue({ pending: [{ toolCallId: 'question-1', toolName: 'ask_user_question' }] });
+    pendWith('appr-1');
     useApprovals.mockReturnValue({
       pending: [{ approvalId: 'appr-1', threadId: 'root', toolName: 'call_tool', args: {}, argsText: '{}' }],
     });

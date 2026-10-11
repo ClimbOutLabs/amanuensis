@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 
 import { useSlot } from '../theme/SlotsProvider.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
+import { EXPIRED_REQUEST_DESCRIPTION, EXPIRED_REQUEST_TITLE, isStaleApprovalError } from '../utils/staleApproval.js';
 
 const MAX_TOAST_DESCRIPTION_CHARS = 480;
 const MAX_VISIBLE_TOASTS = 5;
@@ -36,6 +37,9 @@ function isHttpLikeError(error: unknown): error is Error & { statusCode?: number
 }
 
 function normalizeError(error: unknown): ToastContent {
+  if (isStaleApprovalError(error)) {
+    return { title: EXPIRED_REQUEST_TITLE, description: EXPIRED_REQUEST_DESCRIPTION };
+  }
   if (isHttpLikeError(error)) {
     const statusCode = error.statusCode;
     if (statusCode != null || error.body != null) {

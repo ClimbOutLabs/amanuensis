@@ -191,7 +191,6 @@ describe('POST /{session_id}/turns approval conflicts', () => {
   });
 
   it.each([
-    [new StaleApprovalContinuationError('turn-old', TIP_TURN_ID), 'stale_approval_continuation'],
     [new PreviousTurnRunningError(TIP_TURN_ID), 'previous_turn_running'],
     [new TurnAlreadyExistsError(TIP_TURN_ID), 'turn_already_exists'],
   ])('maps a store conflict to 409 with code %#', async (error, code) => {
@@ -203,6 +202,51 @@ describe('POST /{session_id}/turns approval conflicts', () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
       error: { message: error.message, type: 'conflict', code },
+    });
+  });
+
+  describe('when the session tip moved after the request read it', () => {
+    const stale = () => new StaleApprovalContinuationError('turn-old', TIP_TURN_ID);
+
+    it('replays a decision the tip already recorded, as a double submit would send it', async () => {
+      const app = await buildApp({ status: 'allow' });
+      rejectCreateTurnWith(stale());
+
+      const response = await postTurn(app, approvalInput({ status: 'allow' }));
+
+      expect(response.status).toBe(200);
+      const body: unknown = await response.json();
+      expect(body).toMatchObject({ data: { id: TIP_TURN_ID, session_id: SESSION_ID } });
+    });
+
+    it('refuses a decision that contradicts the recorded one instead of replaying it', async () => {
+      const app = await buildApp({ status: 'allow' });
+      rejectCreateTurnWith(stale());
+
+      const response = await postTurn(app, approvalInput({ status: 'deny', reason: 'changed my mind' }));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ error: { code: 'approval_conflict' } });
+    });
+
+    it('keeps the stale 409 for a decision the session never recorded', async () => {
+      const app = await buildApp({ status: 'allow' });
+      const error = stale();
+      rejectCreateTurnWith(error);
+
+      const response = await postTurn(app, [
+        {
+          type: EventType.USER_TOOL_APPROVAL,
+          thread_id: MAIN_THREAD_ID,
+          tool_call_id: 'tc-from-an-older-turn',
+          approval: { status: 'allow' },
+        },
+      ]);
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: { message: error.message, type: 'conflict', code: 'stale_approval_continuation' },
+      });
     });
   });
 
