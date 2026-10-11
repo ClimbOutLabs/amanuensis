@@ -21,6 +21,7 @@ import { defaultSentinelServices, type SentinelServices } from '../../../src/cor
 import { verifyPreDispatch, type VerifiableCall } from '../../../src/core/permissions/dispatch';
 import type { ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 import type { Tier, TrackedExecutionBinding } from '../../../src/core/permissions/tier';
+import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';
 
 function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'sentinel-bin-'));
@@ -333,12 +334,14 @@ describe('Suite A - shell parser bypass attempts', () => {
     }
   });
 
-  test('A4 GUARD: backslash-newline folds into a literal operand, still Tier 2', async () => {
+  test('A4 GUARD: backslash-newline folds into a literal operand, still Tier 1', async () => {
     const { services, cleanup } = servicesWithTempAllowlist();
     try {
-      const decision = await classifyTier(action('exec', { command: 'ls \\\n-la' }), makeCtx({ services }));
-      expect(decision.tier).toBe(2);
-      expect(decision.tier2_files).toEqual([]); // unresolvable operand contributes nothing
+      const decision = await classifyTier(
+        action('exec', { command: 'ls \\\n-la' }),
+        makeCtx({ services, workspace_cwd: tmpdir() }),
+      );
+      expect(decision.tier).toBe(1);
     } finally {
       cleanup();
     }
@@ -347,8 +350,11 @@ describe('Suite A - shell parser bypass attempts', () => {
   test('A5 GUARD: env-style token after argv[0] is an inert operand', async () => {
     const { services, cleanup } = servicesWithTempAllowlist();
     try {
-      const decision = await classifyTier(action('exec', { command: 'ls FOO=bar' }), makeCtx({ services }));
-      expect(decision.tier).toBe(2);
+      const decision = await classifyTier(
+        action('exec', { command: 'ls FOO=bar' }),
+        makeCtx({ services, workspace_cwd: tmpdir() }),
+      );
+      expect(decision.tier).toBe(1);
     } finally {
       cleanup();
     }
@@ -723,14 +729,19 @@ describe('Suite D - approval token integrity', () => {
 
   test('D8 GAP: the oldest token is evicted at the 5000-token cap', async () => {
     const store = new InMemoryApprovalTokenStore();
-    const first = store.mint({
+    const first = await store.mint({
+      ...testApprovalOwner(),
       action_id: actionIdFor({ tool_name: 'exec', canonical_params: {} }),
       canonical_params: {},
     });
     for (let i = 0; i < 5000; i += 1) {
-      store.mint({ action_id: actionIdFor({ tool_name: 'exec', canonical_params: { i } }), canonical_params: { i } });
+      await store.mint({
+        ...testApprovalOwner(),
+        action_id: actionIdFor({ tool_name: 'exec', canonical_params: { i } }),
+        canonical_params: { i },
+      });
     }
-    expect(store.redeem({ token_id: first.token_id })).toBeUndefined();
+    expect(await store.redeem({ ...TEST_TOKEN_SCOPE, token_id: first.token_id })).toBeUndefined();
   });
 });
 
@@ -834,26 +845,26 @@ describe('Suite F - tier boundary probes', () => {
     expect(decision.approval_token_id).not.toBeNull();
   });
 
-  test('F2 GUARD: missing binary on the allowlist entry is Tier 3, exact version call is Tier 2', async () => {
+  test('F2 GUARD: missing binary on the allowlist entry is Tier 3, exact version call is Tier 1', async () => {
     const { services, cleanup } = servicesWithSeededTools();
     try {
-      const ctx = makeCtx({ services });
+      const ctx = makeCtx({ services, workspace_cwd: tmpdir() });
       const noBin = await classifyTier(action('exec', { command: 'node script.js' }), ctx);
       expect(noBin.tier).toBe(3);
       const withBin = await classifyTier(action('exec', { command: 'node --version' }), ctx);
-      expect(withBin.tier).toBe(2);
+      expect(withBin.tier).toBe(1);
     } finally {
       cleanup();
     }
   });
 
-  test('F3 GUARD: `git status` is Tier 2, config-injection forms are Tier 3', async () => {
+  test('F3 GUARD: `git status` is Tier 1, config-injection forms are Tier 3', async () => {
     const { services, cleanup } = servicesWithSeededTools();
     try {
-      const ctx = makeCtx({ services });
+      const ctx = makeCtx({ services, workspace_cwd: tmpdir() });
       expect((await classifyTier(action('exec', { command: 'git --config user.x y' }), ctx)).tier).toBe(3);
       expect((await classifyTier(action('exec', { command: 'git -c user.x=y status' }), ctx)).tier).toBe(3);
-      expect((await classifyTier(action('exec', { command: 'git status' }), ctx)).tier).toBe(2);
+      expect((await classifyTier(action('exec', { command: 'git status' }), ctx)).tier).toBe(1);
     } finally {
       cleanup();
     }
@@ -862,7 +873,7 @@ describe('Suite F - tier boundary probes', () => {
   test('F3b GAP: git subcommands outside the read-only list are Tier 3', async () => {
     const { services, cleanup } = servicesWithSeededTools();
     try {
-      const ctx = makeCtx({ services });
+      const ctx = makeCtx({ services, workspace_cwd: tmpdir() });
       const bypasses = [
         'git push origin main',
         'git pull',
@@ -880,7 +891,7 @@ describe('Suite F - tier boundary probes', () => {
         expect((await classifyTier(action('exec', { command }), ctx)).tier).toBe(3);
       }
       for (const command of ['git status', 'git log --oneline -n 5', 'git diff --cached', 'git branch --list']) {
-        expect((await classifyTier(action('exec', { command }), ctx)).tier).toBe(2);
+        expect((await classifyTier(action('exec', { command }), ctx)).tier).toBe(1);
       }
     } finally {
       cleanup();
@@ -957,7 +968,7 @@ describe('Suite G - dispatch time-of-check', () => {
     }
   });
 
-  test('G2 GAP: repointing a symlinked parent for a Tier 2 shell operand fails closed at dispatch', async () => {
+  test('G2 GAP: repointing a symlinked parent for a silent shell operand fails closed at dispatch', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
     const outside = mkdtempSync(join(tmpdir(), 'sentinel-out-'));
     const { services, cleanup } = servicesWithCatAllowlist();
@@ -969,13 +980,13 @@ describe('Suite G - dispatch time-of-check', () => {
       const ctx = makeCtx({ services, workspace_cwd: ws });
       const params = { command: 'cat linkdir/notes.txt', cwd: ws };
       const decision = await classifyTier(action('exec', params), ctx);
-      expect(decision.tier).toBe(2); // classified while the link pointed inside
+      expect(decision.tier).toBe(1); // classified while the link pointed inside
 
       rmSync(join(ws, 'linkdir'));
       symlinkSync(outside, join(ws, 'linkdir')); // repointed outside after classification
 
       const result = await verifyPreDispatch({
-        call: verifiableCall({ canonical_params: params, tier: 2 }),
+        call: verifiableCall({ canonical_params: params, tier: 1 }),
         ctx: { ...ctx, offline: false },
       });
       expect(result).not.toBeUndefined();
@@ -987,7 +998,7 @@ describe('Suite G - dispatch time-of-check', () => {
     }
   });
 
-  test('G2 GUARD: Tier 2 shell dispatch passes when nothing changed', async () => {
+  test('G2 GUARD: silent shell dispatch passes when nothing changed', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
     const { services, cleanup } = servicesWithCatAllowlist();
     try {
@@ -995,10 +1006,10 @@ describe('Suite G - dispatch time-of-check', () => {
       const ctx = makeCtx({ services, workspace_cwd: ws });
       const params = { command: 'cat notes.txt', cwd: ws };
       const decision = await classifyTier(action('exec', params), ctx);
-      expect(decision.tier).toBe(2);
+      expect(decision.tier).toBe(1);
 
       const result = await verifyPreDispatch({
-        call: verifiableCall({ canonical_params: params, tier: 2 }),
+        call: verifiableCall({ canonical_params: params, tier: 1 }),
         ctx: { ...ctx, offline: false },
       });
       expect(result).toBeUndefined();

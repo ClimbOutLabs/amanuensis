@@ -307,7 +307,7 @@ export class OpenUIInstructions extends LocalToolMCP {
         'Call this before emitting any ```openui fenced block. Pass an empty object as arguments: {}.',
       ].join(' '),
       schema: getOpenUIInstructionsInputSchema,
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
       handler: () => Promise.resolve(toolResultResponse({ text: renderOpenUIPrompt() })),
     }),
   ];

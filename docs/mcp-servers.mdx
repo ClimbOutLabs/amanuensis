@@ -38,6 +38,12 @@ The catalog entries under **Settings → Connectors** (Linear, Notion, GitHub, a
 If a server uses OAuth and the user has not yet authorized it, the turn pauses and the chat UI shows a **Connect** button. The user completes OAuth in a popup and continues the conversation — the agent does not fail.
 
 
+## Which tools ask first
+
+A tool on a connector you add asks for approval before it runs, whatever the connector says about it. A tool that declares itself read-only or closed-world can only make a call ask, never skip asking.
+
+The one exception is your own memory provider. When you save a connector as the memory provider and its address is on an origin listed in the server's `FIRST_PARTY_MCP_ORIGINS` setting (see `packages/trueforge/.env.example`), the server treats it as first-party. A tool on it that declares both `readOnlyHint: true` and `openWorldHint: false` then runs without a card, and each run is recorded in the audit log. Everything else on it still asks, and a first-party connector does not follow redirects, so give the address that serves MCP directly. Only whoever runs the server can list an origin: nothing in Settings, the API, or a chat can make a connector first-party, and an empty list, which is the default, means none is.
+
 ## Next steps
 
 - Attach MCP servers when you [create an agent](/create-agent/overview).

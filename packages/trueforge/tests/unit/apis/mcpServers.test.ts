@@ -13,6 +13,7 @@ import type { IMcpServerWithAuthStore } from '../../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
 import {
@@ -84,6 +85,8 @@ function memoryRecallResponse(body: unknown = { results: [], entities: {} }, sta
  */
 let hindsightRecall: () => Response | Promise<Response> = () => memoryRecallResponse();
 const hindsightRecallCalls: string[] = [];
+/** The request options each save-time check was dialed with, in order. */
+const hindsightRecallInits: (RequestInit | undefined)[] = [];
 
 function wrapManifest(manifest: unknown) {
   return { manifest };
@@ -119,6 +122,7 @@ describe('mcp-servers routers', () => {
   let mcpServersRouter: ReturnType<typeof createMcpServersRouter>;
   let mcpServerStore: IMcpServerWithAuthStore;
   let tokenStore: SqliteOAuthTokenStore;
+  let toolGrantStore: SqliteMcpToolGrantStore;
   let withTransaction: <T>(callback: (transaction: unknown) => Promise<T>) => Promise<T>;
   let logger: ReturnType<typeof winston.createLogger>;
   const originalFetch = globalThis.fetch;
@@ -132,6 +136,7 @@ describe('mcp-servers routers', () => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       if (url === HINDSIGHT_RECALL_URL) {
         hindsightRecallCalls.push(url);
+        hindsightRecallInits.push(init);
         return await hindsightRecall();
       }
       if (new URL(url).hostname === '127.0.0.1') {
@@ -142,6 +147,7 @@ describe('mcp-servers routers', () => {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     tokenStore = new SqliteOAuthTokenStore(db);
+    toolGrantStore = new SqliteMcpToolGrantStore(db);
     mcpServerStore = new McpServerWithAuthStore({
       store: new SqliteMcpServerStore(db),
       tokenStore,
@@ -152,6 +158,7 @@ describe('mcp-servers routers', () => {
     settingsRouter = createSettingsMcpServersRouter({
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
+      toolGrantStore,
       withTransaction,
       logger,
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
@@ -165,6 +172,7 @@ describe('mcp-servers routers', () => {
     mcpServersRouter = createMcpServersRouter({
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
+      toolGrantStore,
       withTransaction,
       logger,
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
@@ -177,6 +185,7 @@ describe('mcp-servers routers', () => {
       tenant_id: 'default',
       name: body.name,
       manifest: body,
+      first_party: false,
     });
     await mcpServerStore.saveClient({
       id: record.id,
@@ -218,6 +227,7 @@ describe('mcp-servers routers', () => {
           description: 'Memory provider whose tools listing must stay complete.',
           memory_provider: true,
         },
+        first_party: false,
       });
 
       const response = await mcpServersRouter.request(`/${name}/tools`);
@@ -543,6 +553,7 @@ describe('mcp-servers routers', () => {
         tenant_id: 'default',
         name: putBodyWithDcr.name,
         manifest: putBodyWithDcr,
+        first_party: false,
       });
       await mcpServerStore.saveClient({
         id: record.id,
@@ -835,6 +846,7 @@ describe('mcp-servers routers', () => {
           description: 'Memory provider that must not be offered in chats.',
           memory_provider: true,
         },
+        first_party: false,
       });
 
       const chat = await mcpServersRouter.request('/');
@@ -919,6 +931,7 @@ describe('mcp-servers routers', () => {
     const otherRouter = createMcpServersRouter({
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
+      toolGrantStore,
       withTransaction,
       logger,
       resolveRequestContext: () => ({
@@ -1312,7 +1325,12 @@ describe('mcp-servers routers', () => {
           server.manifest.type === 'remote' && server.manifest.memory_provider === true,
       )) {
         const { memory_provider: _flag, ...withoutFlag } = holder.manifest;
-        await mcpServerStore.upsertServer({ tenant_id: TENANT_ID, name: holder.name, manifest: withoutFlag });
+        await mcpServerStore.upsertServer({
+          tenant_id: TENANT_ID,
+          name: holder.name,
+          manifest: withoutFlag,
+          first_party: false,
+        });
       }
     });
 
@@ -1349,6 +1367,37 @@ describe('mcp-servers routers', () => {
       });
       expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'hindsight-create-401' })).toBeUndefined();
     });
+
+    it.each([
+      ['PUT', putInit],
+      ['POST', postInit],
+    ])(
+      'rejects a %s whose provider answers the check with a redirect, and does not follow it',
+      async (method, init) => {
+        hindsightRecall = () =>
+          new Response(null, {
+            status: 308,
+            headers: { location: 'https://other.example.com/v1/default/banks/aman/memories/recall?key=hunter2' },
+          });
+        const name = `hindsight-redirect-${method.toLowerCase()}`;
+        const dialed = hindsightRecallInits.length;
+
+        const response = await settingsRouter.request(
+          '/',
+          init(wrapManifest(hindsightManifest(name, { memory_provider: true }))),
+        );
+
+        expect(response.status).toBe(422);
+        expect(await response.json()).toEqual({
+          error: {
+            message:
+              'memory provider check failed: recall returned HTTP 308, a redirect to https://other.example.com; redirects are not followed',
+          },
+        });
+        expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name })).toBeUndefined();
+        expect(hindsightRecallInits.slice(dialed)).toEqual([expect.objectContaining({ redirect: 'manual' })]);
+      },
+    );
 
     it('leaves an existing provider untouched when a later edit fails the check', async () => {
       const enable = await settingsRouter.request(
@@ -1489,6 +1538,7 @@ describe('mcp-servers routers', () => {
         tenant_id: TENANT_ID,
         name: dcrProvider.name,
         manifest: dcrProvider,
+        first_party: false,
       });
       await mcpServerStore.saveClient({
         id: record.id,
@@ -1553,7 +1603,7 @@ describe('mcp-servers routers', () => {
       };
       hindsightRecall = async () => {
         // Lands after the unlocked read the check resolved from, before the write txn locks.
-        await mcpServerStore.upsertServer({ tenant_id: TENANT_ID, name, manifest: raced });
+        await mcpServerStore.upsertServer({ tenant_id: TENANT_ID, name, manifest: raced, first_party: false });
         return memoryRecallResponse();
       };
 
@@ -1671,6 +1721,91 @@ describe('mcp-servers routers', () => {
       const list = await settingsRouter.request('/');
       const listBody = (await list.json()) as { data: { name: string }[] };
       expect(listBody.data.find(server => server.name === memoryProviderBody.name)).toBeUndefined();
+    });
+  });
+
+  describe('Always allow tool grants', () => {
+    const OTHER_USER = 'user:someone-else';
+    const notesBody = {
+      type: 'remote' as const,
+      name: 'grant-notes-mcp',
+      url: 'https://notes.example.com/mcp',
+      description: 'Notes connector used by the grant tests.',
+    };
+
+    function grantFor(input: { created_by: string; tool_name: string }) {
+      return { tenant_id: TENANT_ID, mcp_server_name: notesBody.name, ...input };
+    }
+
+    async function listedGrants(): Promise<string[]> {
+      const response = await mcpServersRouter.request(`/${notesBody.name}/tool-grants`);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { data: { tool_name: string; created_at: string }[] };
+      return body.data.map(grant => grant.tool_name);
+    }
+
+    beforeEach(async () => {
+      const put = await settingsRouter.request('/', putInit(wrapManifest(notesBody)));
+      expect(put.status).toBe(200);
+      await toolGrantStore.recordToolGrant(
+        grantFor({ created_by: STANDALONE_REQUEST_CONTEXT.subject.id, tool_name: 'lookup_note' }),
+      );
+      await toolGrantStore.recordToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }));
+    });
+
+    afterEach(async () => {
+      await settingsRouter.request(`/${notesBody.name}`, { method: 'DELETE' });
+    });
+
+    it("lists only the caller's grants", async () => {
+      await toolGrantStore.recordToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'list_notes' }));
+      expect(await listedGrants()).toEqual(['lookup_note']);
+    });
+
+    it("revokes one of the caller's grants and leaves other users' grants alone", async () => {
+      const response = await mcpServersRouter.request(`/${notesBody.name}/tool-grants/lookup_note`, {
+        method: 'DELETE',
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({});
+      expect(await listedGrants()).toEqual([]);
+      expect(await toolGrantStore.hasToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }))).toBe(
+        true,
+      );
+    });
+
+    it('404s for an unknown connector', async () => {
+      const list = await mcpServersRouter.request('/missing-grant-mcp/tool-grants');
+      expect(list.status).toBe(404);
+      const revoke = await mcpServersRouter.request('/missing-grant-mcp/tool-grants/lookup_note', { method: 'DELETE' });
+      expect(revoke.status).toBe(404);
+    });
+
+    it('drops the grants of every user when the connector URL changes, but not on an unrelated edit', async () => {
+      const described = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest({ ...notesBody, description: 'Same server, new words.' })),
+      );
+      expect(described.status).toBe(200);
+      expect(await listedGrants()).toEqual(['lookup_note']);
+
+      const moved = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest({ ...notesBody, url: 'https://elsewhere.example.com/mcp' })),
+      );
+      expect(moved.status).toBe(200);
+      expect(await listedGrants()).toEqual([]);
+      expect(await toolGrantStore.hasToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }))).toBe(
+        false,
+      );
+    });
+
+    it('drops the grants of every user when the connector is deleted', async () => {
+      const response = await settingsRouter.request(`/${notesBody.name}`, { method: 'DELETE' });
+      expect(response.status).toBe(200);
+      for (const created_by of [STANDALONE_REQUEST_CONTEXT.subject.id, OTHER_USER]) {
+        expect(await toolGrantStore.hasToolGrant(grantFor({ created_by, tool_name: 'lookup_note' }))).toBe(false);
+      }
     });
   });
 });

@@ -83,6 +83,14 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
 }
 
 /**
+ * Server-owned eligibility for a standing "Always allow this tool" grant: only a connector tool
+ * that is read-only inspection, for the same argument-blindness reason as a chat grant.
+ */
+export function allowsToolGrant(info: InternalToolCallInfo): boolean {
+  return info.type === 'mcp' && info.effect === 'inspect' && info.implementation_plan_grant === undefined;
+}
+
+/**
  * Durable identity for a chat-scoped approval. The identity is derived by the
  * server from the enriched tool call, never accepted from the browser.
  */

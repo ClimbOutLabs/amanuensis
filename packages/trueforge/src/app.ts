@@ -25,6 +25,7 @@ import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
+import { createSentinelSettingsRouter } from './apis/sentinelSettings';
 import { createSessionFolderAssignmentsRouter, createSessionFoldersRouter } from './apis/sessionFolders';
 import { createInternalMetricsRouter } from './apis/sessionMetrics';
 import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessions';
@@ -58,6 +59,7 @@ import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
+import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
@@ -65,6 +67,7 @@ import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
 import type { ISentinelAuditStore } from './db/sentinelAuditStore';
+import type { ISentinelSettingsStore } from './db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
@@ -222,6 +225,8 @@ export interface ServerDeps<TTransaction> {
   resolveSkillStore: ResolveSkillStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
+  /** Per-user Always allow grants; the same store backs Sentinel classification. */
+  mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
   skillStore: ISkillStore<TTransaction>;
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
   /** Optional host override; the standard resolver remains the production default. */
@@ -234,6 +239,7 @@ export interface ServerDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   sessionMetricsStore: ISessionMetricsStore;
   sentinelAuditStore: ISentinelAuditStore;
+  sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
@@ -360,6 +366,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createMcpServersRouter({
         resolveMcpServerStore: deps.resolveMcpServerStore,
         tokenStore: deps.tokenStore,
+        toolGrantStore: deps.mcpToolGrantStore,
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,
@@ -428,6 +435,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         tokenStore: deps.tokenStore,
+        toolGrantStore: deps.mcpToolGrantStore,
         resolveSkillStore: deps.resolveSkillStore,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
@@ -494,6 +502,16 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createPersonalizationRouter({
         personalizationStore: deps.personalizationStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/settings/sentinel',
+    withAuth(
+      createSentinelSettingsRouter({
+        sentinelSettingsStore: deps.sentinelSettingsStore,
         resolveRequestContext,
       }),
       authMiddleware,

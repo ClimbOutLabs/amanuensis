@@ -8,14 +8,17 @@ import { RequestErrorResponseSchema } from '../schemas/errors';
 import {
   CreateMcpServerRequestSchema,
   DeleteMcpServerResponseSchema,
+  DeleteMcpToolGrantResponseSchema,
   GetAvailableMcpServerResponseSchema,
   GetMcpServerResponseSchema,
   ListAvailableMcpServersResponseSchema,
   ListMcpServersResponseSchema,
   ListMcpServerToolsResponseSchema,
+  ListMcpToolGrantsResponseSchema,
   McpAuthorizeQuerySchema,
   McpAuthStatusSchema,
   McpServerNameParamsSchema,
+  McpToolGrantParamsSchema,
   UpdateMcpServerRequestSchema,
 } from '../schemas/mcpServer';
 import { MemoryProviderCheckResponseSchema } from '../schemas/memoryProvider';
@@ -262,6 +265,64 @@ export const listMcpServerToolsRoute = createRoute({
     502: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'The MCP server could not be reached or returned an error.',
+    },
+  },
+});
+
+export const listMcpToolGrantsRoute = createRoute({
+  method: 'get',
+  path: '/{name}/tool-grants',
+  tags: [OpenApiTag.MCP_SERVERS],
+  summary: 'List always-allowed tools of an MCP server',
+  'x-fern-sdk-group-name': ['mcpServers'],
+  'x-fern-sdk-method-name': 'list_tool_grants',
+  description:
+    'Tools on this MCP server the caller chose Always allow for. Their calls run without an approval prompt ' +
+    'unless a safety rule asks again.',
+  request: {
+    params: McpServerNameParamsSchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: ListMcpToolGrantsResponseSchema } },
+      description: "The caller's always-allowed tools on this MCP server.",
+    },
+    401: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'OIDC is configured and the request has no valid session cookie.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'MCP server not found.',
+    },
+  },
+});
+
+export const deleteMcpToolGrantRoute = createRoute({
+  method: 'delete',
+  path: '/{name}/tool-grants/{tool_name}',
+  tags: [OpenApiTag.MCP_SERVERS],
+  summary: 'Stop always allowing a tool of an MCP server',
+  'x-fern-sdk-group-name': ['mcpServers'],
+  'x-fern-sdk-method-name': 'delete_tool_grant',
+  description:
+    "Revokes the caller's Always allow for one tool, so its next call asks for approval again. " +
+    'A no-op when the tool is not always allowed.',
+  request: {
+    params: McpToolGrantParamsSchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: DeleteMcpToolGrantResponseSchema } },
+      description: 'The tool is no longer always allowed.',
+    },
+    401: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'OIDC is configured and the request has no valid session cookie.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'MCP server not found.',
     },
   },
 });

@@ -86,14 +86,6 @@ export class SentinelAuditStore implements ISentinelAuditStore {
       .execute();
   }
 
-  async updateOutcome(input: { entry_id: string; outcome: AuditOutcome }): Promise<void> {
-    await this.#db
-      .updateTable('sentinel_audit')
-      .set({ outcome: input.outcome })
-      .where('id', '=', input.entry_id)
-      .execute();
-  }
-
   async list(input: ListSentinelAuditInput): Promise<SentinelAuditRecord[]> {
     const rows = await this.#db
       .selectFrom('sentinel_audit')

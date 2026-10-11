@@ -2171,7 +2171,9 @@ export class Sandbox extends LocalToolMCP {
       const sentinelDecision = await classifyHostToolCall({
         sentinel: sentinelHost,
         repository_id: this.boundRepository?.repository_id ?? null,
-        workspace_cwd: this.boundRepository?.workspace_cwd ?? cwd ?? null,
+        // Never the call's own cwd: a model-supplied cwd would make itself the workspace.
+        workspace_cwd:
+          this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null,
         action: {
           tool_name: params.name,
           canonical_params: effectiveArguments ?? {},
@@ -2264,7 +2266,6 @@ export class Sandbox extends LocalToolMCP {
             tier: sentinelStamp.tier,
             tier3_card: sentinelStamp.tier3_card,
             tier2_kind: sentinelStamp.tier2_kind,
-            tier2_files: sentinelStamp.tier2_files,
             approval_token_id: sentinelStamp.approval_token_id,
             approval_binding: sentinelStamp.approval_binding,
             shell_binding: sentinelStamp.shell_binding,

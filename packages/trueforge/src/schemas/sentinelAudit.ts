@@ -7,7 +7,7 @@ export const SentinelAuditRecordSchema = z
     tier: z.number().int().min(1).max(3),
     tool_name: z.string(),
     description: z.string(),
-    outcome: z.enum(['logged', 'ran', 'stopped_by_user', 'undone', 'approved', 'denied', 'auto_denied']),
+    outcome: z.enum(['logged', 'ran', 'approved', 'denied', 'auto_denied']),
     auto_deny_reason: z.string().nullable(),
     created_at: z.string(),
   })
