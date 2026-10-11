@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	agentVersion = "0.2.0"
+	agentVersion = "0.3.0"
 	socketPath   = "/run/aman/agent.sock"
 	volumeDir    = "/workspace"
 	leaseDir     = "/workspace/.leases"
