@@ -471,6 +471,12 @@ export interface SandboxProvider {
    * ordinary tools and `createCodeModeTransport` is never called. Absent means supported.
    */
   readonly supportsCodeMode?: boolean | undefined;
+  /**
+   * Whose filesystem the sandbox's paths live on. `remote` means the server cannot see them, so Sentinel
+   * checks workspace containment on normalized path text and never reads or resolves them on the server.
+   * Absent means the server's own filesystem.
+   */
+  readonly filesystem?: 'host' | 'remote' | undefined;
   /** Present when network git is done by the host; the Sandbox then never puts a token in the sandbox. */
   readonly hostGit?: HostGitCapability | undefined;
   /**

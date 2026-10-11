@@ -55,10 +55,13 @@ import {
   canonicalWriteTarget,
   extractExecutedFileOperand,
   isInsideWorkspace,
+  isUnderRoot,
+  lexicalPath,
   sha256FileContent,
   splitCompoundSegments,
   splitWordsLenient,
   writeTargetTouchesGitControl,
+  type PathResolution,
   type TrackedExecutableScope,
 } from './trackedExecutables';
 
@@ -84,6 +87,8 @@ export interface SentinelAction {
 
 export interface ClassifyContext extends SentinelCallIdentity {
   services: SentinelServices;
+  /** How this call's paths are resolved; set by the sandbox provider. Absent means the server's own filesystem. */
+  path_resolution?: PathResolution | undefined;
 }
 
 const SENSITIVE_PATH_PATTERNS = [
@@ -162,17 +167,25 @@ function workspaceScope(ctx: ClassifyContext): TrackedExecutableScope {
 
 /** Resolve a cwd for identity work: the call cwd, else the workspace, else root. */
 function resolveIdentityCwd(ctx: ClassifyContext, cwd: string | null): string {
+  if (ctx.path_resolution === 'remote' && cwd !== null && ctx.workspace_cwd !== null) {
+    // A relative cwd means "below the workspace" there, as the sandbox itself reads it; one that cannot be read is outside.
+    return lexicalPath({ p: cwd, cwd: ctx.workspace_cwd }) ?? '/';
+  }
   return cwd ?? ctx.workspace_cwd ?? '/';
 }
 
 /** Canonical identities of the non-flag tokens of a parsed simple command. */
-function operandIdentities(parsed: ParsedSimpleCommand, cwd: string): string[] {
+function operandIdentities(input: {
+  parsed: ParsedSimpleCommand;
+  cwd: string;
+  resolution: PathResolution | undefined;
+}): string[] {
   const out: string[] = [];
-  for (const token of parsed.argv.slice(1)) {
+  for (const token of input.parsed.argv.slice(1)) {
     if (token.startsWith('-')) {
       continue;
     }
-    const identity = canonicalFileIdentity({ p: token, cwd });
+    const identity = canonicalFileIdentity({ p: token, cwd: input.cwd, resolution: input.resolution });
     if (identity !== null) {
       out.push(identity);
     }
@@ -192,23 +205,31 @@ function shellOperandsInsideWorkspace(input: {
   parsed: ParsedSimpleCommand;
   cwd: string;
   workspace_root: string;
+  resolution: PathResolution | undefined;
 }): boolean {
-  let root: string;
+  const { resolution } = input;
+  let root: string | null;
   try {
-    root = realpathSync(input.workspace_root);
+    root =
+      resolution === 'remote' ? lexicalPath({ p: input.workspace_root, cwd: '/' }) : realpathSync(input.workspace_root);
   } catch {
     return false;
   }
+  if (root === null) {
+    return false;
+  }
+  const separator = resolution === 'remote' ? '/' : path.sep;
   for (const token of input.parsed.argv.slice(1)) {
     if (token.startsWith('-')) {
       continue;
     }
     const identity =
-      canonicalFileIdentity({ p: token, cwd: input.cwd }) ?? canonicalWriteTarget({ p: token, cwd: input.cwd });
+      canonicalFileIdentity({ p: token, cwd: input.cwd, resolution }) ??
+      canonicalWriteTarget({ p: token, cwd: input.cwd, resolution });
     if (identity === null) {
       return false;
     }
-    if (!(identity === root || identity.startsWith(`${root}${path.sep}`))) {
+    if (!isUnderRoot({ identity, root, separator })) {
       return false;
     }
   }
@@ -242,6 +263,7 @@ function hashInlineCodeOperands(input: {
   cwd: string;
   hashFile: (p: string) => void;
   depth: number;
+  resolution: PathResolution | undefined;
 }): void {
   if (input.depth > 3) {
     return;
@@ -261,13 +283,19 @@ function hashInlineCodeOperands(input: {
       const segArgv = segParsed !== undefined ? segParsed.argv : splitWordsLenient(segment);
       const operand = extractExecutedFileOperand({ argv: segArgv });
       if (operand !== undefined) {
-        const identity = canonicalFileIdentity({ p: operand, cwd: input.cwd });
+        const identity = canonicalFileIdentity({ p: operand, cwd: input.cwd, resolution: input.resolution });
         if (identity !== null) {
           input.hashFile(identity);
         }
       }
       // Recurse for nested -c (e.g. sh -c 'sh -c "sh /ws/x.sh"').
-      hashInlineCodeOperands({ argv: segArgv, cwd: input.cwd, hashFile: input.hashFile, depth: input.depth + 1 });
+      hashInlineCodeOperands({
+        argv: segArgv,
+        cwd: input.cwd,
+        hashFile: input.hashFile,
+        depth: input.depth + 1,
+        resolution: input.resolution,
+      });
     }
     // Also scan raw tokens in the inline code for $(), backticks, <() hidden
     // scripts, mirroring the compound branch's metachar-stripping scan.
@@ -279,7 +307,7 @@ function hashInlineCodeOperands(input: {
       if (cleaned.length === 0) {
         continue;
       }
-      const identity = canonicalFileIdentity({ p: cleaned, cwd: input.cwd });
+      const identity = canonicalFileIdentity({ p: cleaned, cwd: input.cwd, resolution: input.resolution });
       if (identity !== null) {
         input.hashFile(identity);
       }
@@ -293,23 +321,29 @@ export function canonicalShellForm(input: {
   env: Record<string, string> | null;
   allowlist: ShellAllowlistConfig;
   workspace_cwd: string | null;
+  path_resolution?: PathResolution | undefined;
 }): CanonicalShellForm {
+  const resolution = input.path_resolution;
   const parsed = parseSimpleCommand(input.command);
   const identityCwd = input.cwd ?? input.workspace_cwd ?? '/';
   const fileHashes: Record<string, string> = {};
   const hashFile = (p: string): void => {
-    const hash = sha256FileContent(p);
+    const hash = sha256FileContent(p, resolution);
     if (hash !== null) {
       fileHashes[p] = hash;
     }
   };
   const envOverrides: Record<string, string> = input.env ?? {};
-  const cwdResolved = normalizeCwd({ cwd: input.cwd ?? undefined, workspace_root: input.workspace_cwd ?? '/' });
+  const cwdResolved = normalizeCwd({
+    cwd: input.cwd ?? undefined,
+    workspace_root: input.workspace_cwd ?? '/',
+    resolution,
+  });
   if (parsed !== undefined) {
     const matched = matchAllowlist(parsed, input.allowlist);
     if (matched !== undefined) {
       hashFile(matched.argv0_resolved);
-      for (const operand of operandIdentities(parsed, identityCwd)) {
+      for (const operand of operandIdentities({ parsed, cwd: identityCwd, resolution })) {
         hashFile(operand);
       }
       return {
@@ -326,7 +360,7 @@ export function canonicalShellForm(input: {
     // These go to Tier 3, and the content binding must apply to all Tier 3 forms.
     const simpleOperand = extractExecutedFileOperand({ argv: parsed.argv });
     if (simpleOperand !== undefined) {
-      const simpleIdentity = canonicalFileIdentity({ p: simpleOperand, cwd: identityCwd });
+      const simpleIdentity = canonicalFileIdentity({ p: simpleOperand, cwd: identityCwd, resolution });
       if (simpleIdentity !== null) {
         hashFile(simpleIdentity);
       }
@@ -334,7 +368,7 @@ export function canonicalShellForm(input: {
     // Recurse into -c style inline code: `sh -c 'sh /ws/payload.sh'` hides
     // the inner script from extractExecutedFileOperand (which bails on -c).
     // An unbound inner script is a post-approval rewrite waiting to happen.
-    hashInlineCodeOperands({ argv: parsed.argv, cwd: identityCwd, hashFile, depth: 0 });
+    hashInlineCodeOperands({ argv: parsed.argv, cwd: identityCwd, hashFile, depth: 0, resolution });
     return {
       kind: 'simple',
       argv: parsed.argv,
@@ -362,7 +396,7 @@ export function canonicalShellForm(input: {
       // waiting to happen.
       const hashes: Record<string, string> = {};
       const hashSegFile = (p: string): void => {
-        const hash = sha256FileContent(p);
+        const hash = sha256FileContent(p, resolution);
         if (hash !== null) {
           hashes[p] = hash;
         }
@@ -372,13 +406,13 @@ export function canonicalShellForm(input: {
         const argv = segParsed !== undefined ? segParsed.argv : splitWordsLenient(segment);
         const operand = extractExecutedFileOperand({ argv });
         if (operand !== undefined) {
-          const identity = canonicalFileIdentity({ p: operand, cwd: identityCwd });
+          const identity = canonicalFileIdentity({ p: operand, cwd: identityCwd, resolution });
           if (identity !== null) {
             hashSegFile(identity);
           }
         }
         // Recurse into -c inline code within compound segments too.
-        hashInlineCodeOperands({ argv, cwd: identityCwd, hashFile: hashSegFile, depth: 0 });
+        hashInlineCodeOperands({ argv, cwd: identityCwd, hashFile: hashSegFile, depth: 0, resolution });
       }
       for (const token of splitWordsLenient(input.command)) {
         if (token.startsWith('-')) {
@@ -390,7 +424,7 @@ export function canonicalShellForm(input: {
         if (cleaned.length === 0) {
           continue;
         }
-        const identity = canonicalFileIdentity({ p: cleaned, cwd: identityCwd });
+        const identity = canonicalFileIdentity({ p: cleaned, cwd: identityCwd, resolution });
         if (identity !== null) {
           hashSegFile(identity);
         }
@@ -444,6 +478,7 @@ async function mintShellApproval(input: {
     env: input.env,
     allowlist: ctx.services.shell_allowlist,
     workspace_cwd: ctx.workspace_cwd,
+    path_resolution: ctx.path_resolution,
   });
   const { token_id, binding } = await mintShellToken({ ctx, tool_name: action.tool_name, form });
   return { approval_token_id: token_id, shell_binding: binding };
@@ -520,7 +555,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       continue;
     }
     const identityCwd = resolveIdentityCwd(ctx, cwd);
-    const identity = canonicalFileIdentity({ p: executedOperand, cwd: identityCwd });
+    const identity = canonicalFileIdentity({ p: executedOperand, cwd: identityCwd, resolution: ctx.path_resolution });
     if (identity === null) {
       return tier3Decision({
         card: {
@@ -540,7 +575,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       });
     }
     if (services.tracked_store.isTracked({ scope: workspaceScope(ctx), file_identity: identity })) {
-      const contentHash = sha256FileContent(identity);
+      const contentHash = sha256FileContent(identity, ctx.path_resolution);
       const argvHash = hashArgv(argvForHash);
       const grantParams =
         contentHash === null
@@ -613,7 +648,12 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           ...(await mintShellApproval({ ctx, action, command, cwd, env })),
         });
       }
-      const cwdInside = isInsideWorkspace({ p: identityCwd, cwd: '/', workspace_root: workspaceRoot });
+      const cwdInside = isInsideWorkspace({
+        p: identityCwd,
+        cwd: '/',
+        workspace_root: workspaceRoot,
+        resolution: ctx.path_resolution,
+      });
       if (!cwdInside) {
         return tier3Decision({
           card: {
@@ -632,7 +672,14 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           ...(await mintShellApproval({ ctx, action, command, cwd, env })),
         });
       }
-      if (!shellOperandsInsideWorkspace({ parsed, cwd: identityCwd, workspace_root: workspaceRoot })) {
+      if (
+        !shellOperandsInsideWorkspace({
+          parsed,
+          cwd: identityCwd,
+          workspace_root: workspaceRoot,
+          resolution: ctx.path_resolution,
+        })
+      ) {
         return tier3Decision({
           card: {
             plain_what: `Access a file outside the workspace with \`${command}\`.`,
@@ -667,6 +714,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     env,
     allowlist: services.shell_allowlist,
     workspace_cwd: ctx.workspace_cwd,
+    path_resolution: ctx.path_resolution,
   });
   const { token_id, binding } = await mintShellToken({ ctx, tool_name: action.tool_name, form });
   return tier3Decision({
@@ -731,9 +779,13 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   // not exist yet, and resolving it directly would misread every new-file
   // write as outside the workspace.
   const inside = (() => {
-    const identity = canonicalWriteTarget({ p: target, cwd: identityCwd });
+    const identity = canonicalWriteTarget({ p: target, cwd: identityCwd, resolution: ctx.path_resolution });
     if (identity === null) {
       return false;
+    }
+    if (ctx.path_resolution === 'remote') {
+      const root = lexicalPath({ p: ctx.workspace_cwd, cwd: '/' });
+      return root !== null && isUnderRoot({ identity, root, separator: '/' });
     }
     try {
       const root = realpathSync(ctx.workspace_cwd);
@@ -765,7 +817,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
     });
   }
   // Git control files can make later allowlisted git commands run code.
-  if (writeTargetTouchesGitControl({ p: target, cwd: identityCwd })) {
+  if (writeTargetTouchesGitControl({ p: target, cwd: identityCwd, resolution: ctx.path_resolution })) {
     return tier3Decision({
       card: {
         plain_what: `Write Git control file \`${target}\`.`,
@@ -1134,6 +1186,8 @@ export async function classifyHostToolCall(input: {
   repository_id: string | null;
   workspace_cwd: string | null;
   action: SentinelAction;
+  /** How the calling tool's paths are resolved; absent means the server's own filesystem. */
+  path_resolution?: PathResolution | undefined;
 }): Promise<TierDecision> {
   // Normalize canonical params to JSON form once, here, so every caller mints
   // approval tokens over the same value the verify path re-parses from the
@@ -1147,7 +1201,7 @@ export async function classifyHostToolCall(input: {
     repository_id: input.repository_id,
     workspace_cwd: input.workspace_cwd,
   });
-  const decision = await classifyTier(action, ctx);
+  const decision = await classifyTier(action, { ...ctx, path_resolution: input.path_resolution });
   await recordClassificationAudit({
     services: ctx.services,
     identity: {

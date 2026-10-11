@@ -2177,6 +2177,9 @@ export class Sandbox extends LocalToolMCP {
         // Never the call's own cwd: a model-supplied cwd would make itself the workspace.
         workspace_cwd:
           this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null,
+        // Chosen by the provider, never by a path. A remote sandbox's paths are judged by name because the server
+        // cannot follow its symlinks; the slot agent's O_NOFOLLOW walk and the guest's own view contain those.
+        path_resolution: this.provider.filesystem,
         action: {
           tool_name: params.name,
           canonical_params: effectiveArguments ?? {},
@@ -2244,6 +2247,7 @@ export class Sandbox extends LocalToolMCP {
       // verification hashes the same values.
       mint_tool_name: params.name,
       mint_canonical_params: toJsonSafeParams(effectiveArguments ?? {}),
+      ...(this.provider.filesystem === undefined ? {} : { path_resolution: this.provider.filesystem }),
       original_tool_name:
         params.name === SANDBOX_EXEC_TOOL_NAME
           ? purpose === undefined
@@ -4323,6 +4327,7 @@ export class Sandbox extends LocalToolMCP {
       repository_id: this.boundRepository?.repository_id ?? null,
       workspace_cwd: this.boundRepository?.workspace_cwd ?? null,
     });
+    const resolution = this.provider.filesystem;
     const store = ctx.services.tracked_store;
     const scope = {
       tenant_id: ctx.tenant_id,
@@ -4331,7 +4336,9 @@ export class Sandbox extends LocalToolMCP {
       workspace_cwd: ctx.workspace_cwd,
     };
     for (const p of input.paths) {
-      const identity = canonicalFileIdentity({ p, cwd: input.cwd }) ?? canonicalWriteTarget({ p, cwd: input.cwd });
+      const identity =
+        canonicalFileIdentity({ p, cwd: input.cwd, resolution }) ??
+        canonicalWriteTarget({ p, cwd: input.cwd, resolution });
       if (identity === null) {
         continue;
       }

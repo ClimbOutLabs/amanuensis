@@ -540,7 +540,7 @@ async function verifySentinelPreDispatch(input: {
       approval_binding: info.approval_binding ?? null,
       shell_binding: info.shell_binding ?? null,
     },
-    ctx: { ...sentinel.identity, services: sentinel.services, offline },
+    ctx: { ...sentinel.identity, services: sentinel.services, offline, path_resolution: info.path_resolution },
   });
 }
 

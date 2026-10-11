@@ -114,11 +114,38 @@ function grantKey(input: { conversation_id: string; file_identity: string }): st
 }
 
 /**
+ * Where the paths of a tool call live. `host` is the server's own filesystem, resolved with realpath. `remote`
+ * is a sandbox the server cannot see (sandbox slots): paths are normalized lexically, and the server never
+ * reads them. It is chosen by the sandbox provider, never from a path or a model input. Symlinks cannot be
+ * followed from the server in `remote`; escapes through them are stopped by the sandbox itself (the slot
+ * agent walks every path component with O_NOFOLLOW, and the guest sees only its own workspace).
+ */
+export type PathResolution = 'host' | 'remote';
+
+/**
+ * Absolute POSIX path with `.` and `..` collapsed, resolved against an absolute cwd. Null for a NUL byte or a
+ * cwd that is not absolute. A path that climbs above the root stays at the root, which is outside any workspace.
+ */
+export function lexicalPath(input: { p: string; cwd: string }): string | null {
+  if (input.p.includes('\0') || input.cwd.includes('\0') || !path.posix.isAbsolute(input.cwd)) {
+    return null;
+  }
+  return path.posix.resolve(input.cwd, input.p);
+}
+
+/**
  * Canonical file identity: absolute path with all symlinks resolved,
  * normalized against the resolved cwd. Returns null when the path cannot be
  * resolved; callers fail closed (escalate) on null.
  */
-export function canonicalFileIdentity(input: { p: string; cwd: string }): string | null {
+export function canonicalFileIdentity(input: {
+  p: string;
+  cwd: string;
+  resolution?: PathResolution | undefined;
+}): string | null {
+  if (input.resolution === 'remote') {
+    return lexicalPath(input);
+  }
   try {
     const absolute = path.isAbsolute(input.p) ? input.p : path.resolve(input.cwd, input.p);
     return realpathSync(absolute);
@@ -132,7 +159,14 @@ export function canonicalFileIdentity(input: { p: string; cwd: string }): string
  * parent directory's symlinks and append the basename. Null when the parent
  * cannot be resolved.
  */
-export function canonicalWriteTarget(input: { p: string; cwd: string }): string | null {
+export function canonicalWriteTarget(input: {
+  p: string;
+  cwd: string;
+  resolution?: PathResolution | undefined;
+}): string | null {
+  if (input.resolution === 'remote') {
+    return lexicalPath(input);
+  }
   try {
     const absolute = path.isAbsolute(input.p) ? input.p : path.resolve(input.cwd, input.p);
     const parent = path.dirname(absolute);
@@ -161,9 +195,17 @@ export function isGitControlPath(p: string): boolean {
  * state. Checks the path as written and its resolved identities (parent
  * directory, and the final component when it already exists).
  */
-export function writeTargetTouchesGitControl(input: { p: string; cwd: string }): boolean {
+export function writeTargetTouchesGitControl(input: {
+  p: string;
+  cwd: string;
+  resolution?: PathResolution | undefined;
+}): boolean {
   if (isGitControlPath(input.p)) {
     return true;
+  }
+  if (input.resolution === 'remote') {
+    const identity = lexicalPath(input);
+    return identity === null || isGitControlPath(identity);
   }
   const identities = [canonicalWriteTarget(input), canonicalFileIdentity(input)];
   return identities.some(identity => identity !== null && isGitControlPath(identity)) || isDanglingSymlink(input);
@@ -179,8 +221,14 @@ function isDanglingSymlink(input: { p: string; cwd: string }): boolean {
   }
 }
 
-/** sha256 of current file content. Null when the file cannot be read: fail closed. */
-export function sha256FileContent(filePath: string): string | null {
+/**
+ * sha256 of current file content. Null when the file cannot be read: fail closed. Files of a remote sandbox
+ * cannot be read from the server, and a same-named file on the server must never stand in for them.
+ */
+export function sha256FileContent(filePath: string, resolution?: PathResolution): string | null {
+  if (resolution === 'remote') {
+    return null;
+  }
   try {
     return createHash('sha256').update(readFileSync(filePath)).digest('hex');
   } catch {
@@ -188,8 +236,23 @@ export function sha256FileContent(filePath: string): string | null {
   }
 }
 
-/** True when the path resolves inside the workspace root (symlinks resolved). */
-export function isInsideWorkspace(input: { p: string; cwd: string; workspace_root: string }): boolean {
+/** True when an identity is the root or below it, comparing whole path components. */
+export function isUnderRoot(input: { identity: string; root: string; separator: string }): boolean {
+  return input.identity === input.root || input.identity.startsWith(`${input.root}${input.separator}`);
+}
+
+/** True when the path resolves inside the workspace root (symlinks resolved, or normalized lexically in a remote sandbox). */
+export function isInsideWorkspace(input: {
+  p: string;
+  cwd: string;
+  workspace_root: string;
+  resolution?: PathResolution | undefined;
+}): boolean {
+  if (input.resolution === 'remote') {
+    const identity = lexicalPath({ p: input.p, cwd: input.cwd });
+    const root = lexicalPath({ p: input.workspace_root, cwd: '/' });
+    return identity !== null && root !== null && isUnderRoot({ identity, root, separator: '/' });
+  }
   const identity = canonicalFileIdentity({ p: input.p, cwd: input.cwd });
   if (identity === null) {
     return false;

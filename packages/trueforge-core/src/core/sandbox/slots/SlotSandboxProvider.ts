@@ -88,6 +88,8 @@ export class SlotSandboxProvider implements SandboxProvider {
   readonly type = 'slots';
   /** The slots are offline, so sandbox code cannot reach connectors through a bridge. */
   readonly supportsCodeMode = false;
+  /** The workspace exists only inside the slot; the slot agent walks every path with O_NOFOLLOW. */
+  readonly filesystem: 'host' | 'remote' = 'remote';
 
   private readonly clients: SlotClient[];
   private readonly defaultExecTimeoutSeconds: number;
