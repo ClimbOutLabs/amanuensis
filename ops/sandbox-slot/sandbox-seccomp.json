@@ -407,7 +407,7 @@
       "action": "SCMP_ACT_ALLOW"
     },
     {
-      "names": ["process_vm_readv", "process_vm_writev", "ptrace"],
+      "names": ["ptrace"],
       "action": "SCMP_ACT_ALLOW",
       "includes": {
         "minKernel": "4.8"
@@ -841,41 +841,7 @@
       }
     },
     {
-      "names": ["open_by_handle_at"],
-      "action": "SCMP_ACT_ALLOW",
-      "includes": {
-        "caps": ["CAP_DAC_READ_SEARCH"]
-      }
-    },
-    {
-      "names": [
-        "bpf",
-        "clone",
-        "clone3",
-        "fanotify_init",
-        "fsconfig",
-        "fsmount",
-        "fsopen",
-        "fspick",
-        "lookup_dcookie",
-        "lsm_get_self_attr",
-        "lsm_list_modules",
-        "lsm_set_self_attr",
-        "mount",
-        "mount_setattr",
-        "move_mount",
-        "open_tree",
-        "perf_event_open",
-        "quotactl",
-        "quotactl_fd",
-        "setdomainname",
-        "sethostname",
-        "setns",
-        "syslog",
-        "umount",
-        "umount2",
-        "unshare"
-      ],
+      "names": ["clone", "mount", "setns", "umount", "umount2", "unshare"],
       "action": "SCMP_ACT_ALLOW",
       "includes": {
         "caps": ["CAP_SYS_ADMIN"]
@@ -923,13 +889,6 @@
       }
     },
     {
-      "names": ["reboot"],
-      "action": "SCMP_ACT_ALLOW",
-      "includes": {
-        "caps": ["CAP_SYS_BOOT"]
-      }
-    },
-    {
       "names": ["chroot"],
       "action": "SCMP_ACT_ALLOW",
       "includes": {
@@ -937,73 +896,10 @@
       }
     },
     {
-      "names": ["delete_module", "init_module", "finit_module"],
-      "action": "SCMP_ACT_ALLOW",
-      "includes": {
-        "caps": ["CAP_SYS_MODULE"]
-      }
-    },
-    {
-      "names": ["acct"],
-      "action": "SCMP_ACT_ALLOW",
-      "includes": {
-        "caps": ["CAP_SYS_PACCT"]
-      }
-    },
-    {
-      "names": ["kcmp", "pidfd_getfd", "process_madvise", "process_vm_readv", "process_vm_writev", "ptrace"],
+      "names": ["ptrace"],
       "action": "SCMP_ACT_ALLOW",
       "includes": {
         "caps": ["CAP_SYS_PTRACE"]
-      }
-    },
-    {
-      "names": ["iopl", "ioperm"],
-      "action": "SCMP_ACT_ALLOW",
-      "includes": {
-        "caps": ["CAP_SYS_RAWIO"]
-      }
-    },
-    {
-      "names": ["settimeofday", "stime", "clock_settime", "clock_settime64"],
-      "action": "SCMP_ACT_ALLOW",
-      "includes": {
-        "caps": ["CAP_SYS_TIME"]
-      }
-    },
-    {
-      "names": ["vhangup"],
-      "action": "SCMP_ACT_ALLOW",
-      "includes": {
-        "caps": ["CAP_SYS_TTY_CONFIG"]
-      }
-    },
-    {
-      "names": ["get_mempolicy", "mbind", "set_mempolicy", "set_mempolicy_home_node"],
-      "action": "SCMP_ACT_ALLOW",
-      "includes": {
-        "caps": ["CAP_SYS_NICE"]
-      }
-    },
-    {
-      "names": ["syslog"],
-      "action": "SCMP_ACT_ALLOW",
-      "includes": {
-        "caps": ["CAP_SYSLOG"]
-      }
-    },
-    {
-      "names": ["bpf"],
-      "action": "SCMP_ACT_ALLOW",
-      "includes": {
-        "caps": ["CAP_BPF"]
-      }
-    },
-    {
-      "names": ["perf_event_open"],
-      "action": "SCMP_ACT_ALLOW",
-      "includes": {
-        "caps": ["CAP_PERFMON"]
       }
     },
     {

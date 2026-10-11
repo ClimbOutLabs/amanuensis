@@ -121,3 +121,67 @@ describe('docker-compose.slots-app.yml', () => {
     ]);
   });
 });
+
+describe('ops/sandbox-slot/sandbox-seccomp.json', () => {
+  const ProfileSchema = z.object({
+    defaultAction: z.literal('SCMP_ACT_ERRNO'),
+    syscalls: z.array(z.object({ names: z.array(z.string()), action: z.string() })),
+  });
+  const profile = ProfileSchema.parse(
+    JSON.parse(readFileSync(resolve(REPO_ROOT, 'ops/sandbox-slot/sandbox-seccomp.json'), 'utf8')),
+  );
+  const allowed = new Set(
+    profile.syscalls.filter(rule => rule.action === 'SCMP_ACT_ALLOW').flatMap(rule => rule.names),
+  );
+
+  // gVisor starts its sandbox and gofer from inside the slot, so these must stay allowed; each was
+  // confirmed by removing it and watching the guest canary fail.
+  test.each(['ptrace', 'chroot', 'mount', 'umount2', 'pivot_root', 'clone', 'unshare', 'setns', 'setuid', 'capset'])(
+    'keeps %s, which the gVisor runtime needs to start a guest',
+    name => {
+      expect(allowed.has(name)).toBe(true);
+    },
+  );
+
+  // Docker's default profile grants these once the container has the matching capability. The slots have
+  // none, and gVisor does not use them, so they stay denied rather than relying on the missing capability.
+  test.each([
+    'bpf',
+    'perf_event_open',
+    'open_by_handle_at',
+    'init_module',
+    'finit_module',
+    'delete_module',
+    'kexec_load',
+    'reboot',
+    'acct',
+    'iopl',
+    'ioperm',
+    'settimeofday',
+    'clock_settime',
+    'syslog',
+    'process_vm_readv',
+    'process_vm_writev',
+    'kcmp',
+    'pidfd_getfd',
+    'quotactl',
+    'lookup_dcookie',
+    'fanotify_init',
+    'fsopen',
+    'fsconfig',
+    'fsmount',
+    'fspick',
+    'open_tree',
+    'move_mount',
+    'mount_setattr',
+    'sethostname',
+    'setdomainname',
+  ])('denies %s', name => {
+    expect(allowed.has(name)).toBe(false);
+  });
+
+  test('answers clone3 with an error so libc falls back to clone', () => {
+    const clone3 = profile.syscalls.filter(rule => rule.names.includes('clone3'));
+    expect(clone3.map(rule => rule.action)).toEqual(['SCMP_ACT_ERRNO']);
+  });
+});
