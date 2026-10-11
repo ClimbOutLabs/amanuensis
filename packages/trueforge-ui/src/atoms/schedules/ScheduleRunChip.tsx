@@ -8,8 +8,8 @@ import { formatScheduleRunInstant, runChipKind, runStatusLabel } from './schedul
 import { ScheduleRunTooltip } from './ScheduleRunTooltip.js';
 
 const CHIP_STYLES = {
-  success: 'border-success-bg/30 bg-success-bg/10 text-success-bg',
-  failed: 'border-failure-bg/30 bg-failure-bg/10 text-failure-bg',
+  success: 'border-success/30 bg-success/10 text-success',
+  failed: 'border-danger/30 bg-danger/10 text-danger',
 } as const;
 
 export function ScheduleRunChip({ run }: { run: ScheduleRun }) {

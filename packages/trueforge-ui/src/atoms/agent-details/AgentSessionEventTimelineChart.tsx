@@ -17,11 +17,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import { Chart } from 'react-chartjs-2';
 
 import { useThemeMode } from '../../theme/SlotsProvider.js';
+import { CHART_CHROME_FALLBACKS, readThemeColor } from '../../utils/chartThemeColors.js';
 import { roundDurationMsToSecond } from '../../utils/sessionDisplayFormat.js';
 import {
-  getSessionEventColor,
-  getSessionEventHoverColor,
   getSessionEventLabel,
+  resolveSessionEventColor,
+  resolveSessionEventHoverColor,
   MAIN_THREAD_ID,
   type SessionEventTimelineSegment,
 } from '../../utils/sessionEventTimeline.js';
@@ -98,10 +99,10 @@ export function AgentSessionEventTimelineChart({
 }: AgentSessionEventTimelineChartProps) {
   const mode = useThemeMode();
   const isDark = mode === 'dark';
-  const axis = isDark ? '#8c8c92' : '#71717a';
-  const grid = isDark ? '#27272a' : '#e4e4e7';
-  const turnFill = isDark ? '#3f3f46' : '#E0ECFD';
-  const turnHover = isDark ? '#52525b' : '#E0ECFD';
+  const axis = readThemeColor('--text-secondary', isDark ? CHART_CHROME_FALLBACKS.axis.dark : CHART_CHROME_FALLBACKS.axis.light);
+  const grid = readThemeColor('--border', isDark ? CHART_CHROME_FALLBACKS.grid.dark : CHART_CHROME_FALLBACKS.grid.light);
+  const turnFill = readThemeColor('--secondary-bg', isDark ? CHART_CHROME_FALLBACKS.turnFill.dark : CHART_CHROME_FALLBACKS.turnFill.light);
+  const turnHover = readThemeColor('--secondary-bg', isDark ? CHART_CHROME_FALLBACKS.turnHover.dark : CHART_CHROME_FALLBACKS.turnHover.light);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [widthPx, setWidthPx] = useState(0);
   const [overheadPx, setOverheadPx] = useState(OVERHEAD_PX);
@@ -304,7 +305,7 @@ export function AgentSessionEventTimelineChart({
         ),
         ...markerGroups.map(group => {
           const type = group.segments.length === 1 ? group.segments[0]?.type : 'system';
-          const color = getSessionEventColor(type ?? 'system', isDark);
+          const color = resolveSessionEventColor(type ?? 'system', isDark);
           return {
             type: 'scatter' as const,
             label: group.segments.map(segment => getSessionEventLabel(segment.type)).join(', '),
@@ -314,7 +315,7 @@ export function AgentSessionEventTimelineChart({
             pointHoverRadius: 6,
             clip: false,
             backgroundColor: color,
-            hoverBackgroundColor: getSessionEventHoverColor(type ?? 'system', isDark),
+            hoverBackgroundColor: resolveSessionEventHoverColor(type ?? 'system', isDark),
             borderWidth: 0,
             order: 0,
           } satisfies ChartDataset<'scatter', MarkerPoint[]>;
@@ -325,8 +326,8 @@ export function AgentSessionEventTimelineChart({
               label: `${getSessionEventLabel(segment.type)}: ${segment.title}`,
               range: segment,
               y: centers[eventRow + 1 + lane.lane] ?? 0,
-              color: getSessionEventColor(segment.type, isDark),
-              hover: getSessionEventHoverColor(segment.type, isDark),
+              color: resolveSessionEventColor(segment.type, isDark),
+              hover: resolveSessionEventHoverColor(segment.type, isDark),
               thickness: 12,
               order: eventOrder(segment.type),
               inflateAmount: 0.5,
@@ -338,8 +339,8 @@ export function AgentSessionEventTimelineChart({
             label: `${getSessionEventLabel(segment.type)}: ${segment.title}`,
             range: segment,
             y: centers[eventRow] ?? 0,
-            color: getSessionEventColor(segment.type, isDark),
-            hover: getSessionEventHoverColor(segment.type, isDark),
+            color: resolveSessionEventColor(segment.type, isDark),
+            hover: resolveSessionEventHoverColor(segment.type, isDark),
             thickness: 28,
             order: eventOrder(segment.type),
             inflateAmount: 0.5,
@@ -350,8 +351,8 @@ export function AgentSessionEventTimelineChart({
             label: 'Parallel tool calls',
             range: group,
             y: centers[eventRow] ?? 0,
-            color: getSessionEventColor('tool_call', isDark),
-            hover: getSessionEventHoverColor('tool_call', isDark),
+            color: resolveSessionEventColor('tool_call', isDark),
+            hover: resolveSessionEventHoverColor('tool_call', isDark),
             thickness: 28,
             order: eventOrder('tool_call'),
             inflateAmount: 0.5,

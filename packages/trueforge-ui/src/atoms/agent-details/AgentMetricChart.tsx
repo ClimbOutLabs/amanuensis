@@ -15,13 +15,17 @@ import { useMemo, type ComponentType } from 'react';
 import { Line } from 'react-chartjs-2';
 
 import { useThemeMode } from '../../theme/SlotsProvider.js';
+import {
+  CHART_CHROME_FALLBACKS,
+  CHART_COLOR_FALLBACKS_DARK,
+  CHART_COLOR_FALLBACKS_LIGHT,
+  readChartThemeColors,
+  readThemeColor,
+} from '../../utils/chartThemeColors.js';
 import { formatCostUsd, formatDurationMs } from '../../utils/sessionDisplayFormat.js';
 import type { AgentMetricChartProps } from './types.js';
 
 ChartJS.register(CategoryScale, LinearScale, LineElement, PointElement, Legend, Tooltip);
-
-const LIGHT_COLORS = ['#6366F1', '#2563eb', '#0EA5E9'];
-const DARK_COLORS = ['#6366F1', '#60a5fa', '#38BDF8'];
 const numberFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
 const timestampFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
@@ -43,9 +47,15 @@ function formatTimestamp(timestamp: string): string {
 
 export function AgentMetricChart({ graph, definition, error, colorIndex = 0 }: AgentMetricChartProps) {
   const mode = useThemeMode();
-  const colors = mode === 'dark' ? DARK_COLORS : LIGHT_COLORS;
-  const axisColor = mode === 'dark' ? '#71717a' : '#a1a1aa';
-  const gridColor = mode === 'dark' ? '#27272a' : '#e4e4e7';
+  const isDark = mode === 'dark';
+  // Series colors come from the theme (--chart-1 …); the fallbacks match the
+  // default theme so the chart renders before themes load or in tests.
+  const colors = readChartThemeColors({
+    count: 8,
+    fallbacks: isDark ? CHART_COLOR_FALLBACKS_DARK : CHART_COLOR_FALLBACKS_LIGHT,
+  });
+  const axisColor = readThemeColor('--text-secondary', isDark ? CHART_CHROME_FALLBACKS.axis.dark : CHART_CHROME_FALLBACKS.axis.light);
+  const gridColor = readThemeColor('--border', isDark ? CHART_CHROME_FALLBACKS.grid.dark : CHART_CHROME_FALLBACKS.grid.light);
   const labels = useMemo(
     () =>
       graph == null

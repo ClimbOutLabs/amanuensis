@@ -6,9 +6,7 @@
 packages/trueforge-ui/src/github-markdown-bridge.css :: vendored github-markdown-css theme variables with light/dark variants (the markdown theme definition)
 packages/trueforge-ui/src/containers/spacePageBase.ts :: documented fallback palette for standalone space pages; live values come from the app theme tokens via the getComputedStyle cascade
 packages/trueforge-ui/src/containers/SpacesView.tsx :: getComputedStyle fallback values used when reading the app theme tokens for space pages
-packages/trueforge-ui/src/atoms/agent-details/AgentMetricChart.tsx :: chart data-series identity colors with light/dark variants (no chart-series theme tokens exist)
-packages/trueforge-ui/src/atoms/agent-details/AgentSessionEventTimelineChart.tsx :: chart data-series identity colors with light/dark variants (no chart-series theme tokens exist)
-packages/trueforge-ui/src/utils/sessionEventTimeline.ts :: timeline event-type identity colors with dark variants (no event-color theme tokens exist)
-packages/trueforge-ui/src/server/imageAttachmentAdapter.ts :: canvas fill for image export compositing, not UI chrome
+packages/trueforge-ui/src/utils/chartThemeColors.ts :: getComputedStyle fallback values used when reading the --chart-N theme tokens for canvas charts
+packages/trueforge-ui/src/server/imageAttachmentAdapter.ts :: white matte for JPEG export compositing (file has no transparency); not UI chrome and must stay neutral white regardless of theme
 packages/frontend/src/App.tsx :: host ThemeConfig token overrides; values flow through the theme token system
 packages/frontend/src/index.css :: pre-hydration body paint, host brand gradient, and boot-screen var() fallbacks

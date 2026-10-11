@@ -251,7 +251,7 @@ function VoiceInputButtonInner({ api, disabled }: { api: VoiceInputApi; disabled
           )}
         >
           {phase === 'recording' ? (
-            <span aria-hidden="true" className="block h-2.5 w-2.5 animate-pulse rounded-full bg-failure-bg" />
+            <span aria-hidden="true" className="block h-2.5 w-2.5 animate-pulse rounded-full bg-recording" />
           ) : phase === 'denied' ? (
             <span className="relative inline-flex" aria-hidden="true">
               <Icon name="mic" />

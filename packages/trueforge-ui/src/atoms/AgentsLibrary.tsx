@@ -139,7 +139,7 @@ function AgentSchedulesBadge({
     >
       {activeCount > 0 ? (
         <Tooltip content={scheduleNamesTooltip(summary.activeNames)} className="whitespace-normal">
-          <span className="inline-flex items-center gap-1 rounded-md border border-success-bg/30 bg-success-bg/10 px-2 py-0.5 text-xs font-medium text-success-bg">
+          <span className="inline-flex items-center gap-1 rounded-md border border-success/30 bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
             <Icon name="calendar-clock" className="size-3.5 shrink-0" />
             <span>{activeCount} Active</span>
           </span>
@@ -147,7 +147,7 @@ function AgentSchedulesBadge({
       ) : null}
       {pausedCount > 0 ? (
         <Tooltip content={scheduleNamesTooltip(summary.pausedNames)} className="whitespace-normal">
-          <span className="inline-flex items-center gap-1 rounded-md border border-warning-bg/30 bg-warning-bg/10 px-2 py-0.5 text-xs font-medium text-warning-bg">
+          <span className="inline-flex items-center gap-1 rounded-md border border-warning/30 bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
             {activeCount === 0 ? <Icon name="calendar-clock" className="size-3.5 shrink-0" /> : null}
             <span>{pausedCount} Paused</span>
             <Icon name="triangle-exclamation" className="size-3.5 shrink-0" />

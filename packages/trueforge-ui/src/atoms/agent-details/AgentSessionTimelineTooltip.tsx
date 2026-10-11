@@ -4,7 +4,7 @@ import { useThemeMode } from '../../theme/SlotsProvider.js';
 import { formatCostUsd, formatDurationMs, formatTokenCount } from '../../utils/sessionDisplayFormat.js';
 import {
   formatTimelineDuration,
-  getSessionEventColor,
+  getSessionEventChartVar,
   getSessionEventTooltipHeading,
   SESSION_EVENT_TOOLTIP_HIDE_DURATION,
   type SessionEventTimelineSegment,
@@ -86,7 +86,7 @@ export function SessionTurnTooltip({
             <div key={segment.id} className="flex min-w-0 items-center gap-1.5">
               <span
                 className="size-1.5 shrink-0 rounded-full"
-                style={{ backgroundColor: getSessionEventColor(segment.type, isDark) }}
+                style={{ backgroundColor: getSessionEventChartVar(segment.type) }}
               />
               <span className="min-w-0 flex-1 truncate">{label}</span>
               {segment.isMarker ? null : (
@@ -138,7 +138,7 @@ export function SessionMarkerGroupTooltip({ group }: { group: TimelineMarkerGrou
           <div key={segment.id} className="flex min-w-0 items-start gap-1.5 py-0.5">
             <span
               className="mt-1 size-1.5 shrink-0 rounded-full"
-              style={{ backgroundColor: getSessionEventColor(segment.type, isDark) }}
+              style={{ backgroundColor: getSessionEventChartVar(segment.type) }}
             />
             <div className="min-w-0">
               <div className="font-medium text-text-secondary">{getSessionEventTooltipHeading(segment.type)}</div>

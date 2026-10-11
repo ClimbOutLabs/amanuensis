@@ -6,6 +6,8 @@
  * correlation out of the chart component and makes atoms easy to override.
  */
 
+import { TIMELINE_EVENT_FALLBACKS } from './chartThemeColors.js';
+
 /** Events without a thread id belong to the root agent conversation. */
 export const MAIN_THREAD_ID = 'main';
 
@@ -39,17 +41,43 @@ export type SessionEventTimelineSegment = {
   isMarker?: boolean;
 };
 
-/** Canonical legend order, labels, and base colours for timeline event types. */
+/**
+ * Canonical legend order, labels, and base colours for timeline event types.
+ * The hex values are fallbacks for SSR/tests; the themed colors come from
+ * --chart-N via getSessionEventChartVar / resolveSessionEventColor.
+ */
 export const SESSION_EVENT_TYPES: SessionEventTypeDefinition[] = [
-  { id: 'system', label: 'System', color: '#94a3b8' },
-  { id: 'user', label: 'User', color: '#34d399' },
-  { id: 'model', label: 'Model', color: '#3b82f6', darkColor: '#6366f1' },
-  { id: 'tool_call', label: 'Tool call', color: '#f59e0b' },
-  { id: 'approval', label: 'Approval / HITL', color: '#f472b6' },
-  { id: 'sub_agent', label: 'Sub-agent', color: '#e2e8f0', darkColor: '#3f3f46' },
-  { id: 'waiting_on_human', label: 'Waiting on human', color: '#22d3ee' },
-  { id: 'error', label: 'Error', color: '#f87171' },
+  { id: 'system', label: 'System', ...TIMELINE_EVENT_FALLBACKS.system },
+  { id: 'user', label: 'User', ...TIMELINE_EVENT_FALLBACKS.user },
+  { id: 'model', label: 'Model', ...TIMELINE_EVENT_FALLBACKS.model },
+  { id: 'tool_call', label: 'Tool call', ...TIMELINE_EVENT_FALLBACKS.tool_call },
+  { id: 'approval', label: 'Approval / HITL', ...TIMELINE_EVENT_FALLBACKS.approval },
+  { id: 'sub_agent', label: 'Sub-agent', ...TIMELINE_EVENT_FALLBACKS.sub_agent },
+  { id: 'waiting_on_human', label: 'Waiting on human', ...TIMELINE_EVENT_FALLBACKS.waiting_on_human },
+  { id: 'error', label: 'Error', ...TIMELINE_EVENT_FALLBACKS.error },
 ];
+
+/**
+ * The `--chart-N` variable carrying this event type's themed color. Event
+ * types map to chart tokens in canonical legend order, so themes control the
+ * timeline palette through the same tokens as the data-series charts.
+ */
+export function getSessionEventChartVar(type: SessionEventType): string {
+  const index = SESSION_EVENT_TYPES.findIndex(eventType => eventType.id === type);
+  return `var(--chart-${index === -1 ? 1 : index + 1})`;
+}
+
+/** Resolve a segment's color from the theme for canvas/Chart.js, which cannot read `var()` itself. */
+export function resolveSessionEventColor(type: SessionEventType, isDarkMode = false): string {
+  const fallback = getSessionEventColor(type, isDarkMode);
+  if (typeof document === 'undefined') return fallback;
+  const index = SESSION_EVENT_TYPES.findIndex(eventType => eventType.id === type);
+  const root = document.querySelector('.aui-theme-root') ?? document.documentElement;
+  const value = getComputedStyle(root)
+    .getPropertyValue(`--chart-${index === -1 ? 1 : index + 1}`)
+    .trim();
+  return value === '' ? fallback : value;
+}
 
 /** Marker-like events have no meaningful elapsed duration in their tooltip. */
 export const SESSION_EVENT_TOOLTIP_HIDE_DURATION = new Set<SessionEventType>(['system', 'user', 'error']);
@@ -71,12 +99,21 @@ export function formatTimelineDuration(durationMs: number): string {
 /** Resolve a segment's color from the same registry used to build the legend. */
 export function getSessionEventColor(type: SessionEventType, isDarkMode = false): string {
   const eventType = SESSION_EVENT_TYPES.find(eventType => eventType.id === type);
-  return (isDarkMode ? eventType?.darkColor : undefined) ?? eventType?.color ?? '#94a3b8';
+  return (isDarkMode ? eventType?.darkColor : undefined) ?? eventType?.color ?? TIMELINE_EVENT_FALLBACKS.system.color;
 }
 
 /** Darken the base color by 10% so hover remains recognizable in either theme. */
 export function getSessionEventHoverColor(type: SessionEventType, isDarkMode = false): string {
   const color = getSessionEventColor(type, isDarkMode);
+  return darkenHex(color);
+}
+
+/** Themed hover color for canvas/Chart.js: resolves the theme color, then darkens it. */
+export function resolveSessionEventHoverColor(type: SessionEventType, isDarkMode = false): string {
+  return darkenHex(resolveSessionEventColor(type, isDarkMode));
+}
+
+function darkenHex(color: string): string {
   const hex = color.replace('#', '');
   const normalized =
     hex.length === 3

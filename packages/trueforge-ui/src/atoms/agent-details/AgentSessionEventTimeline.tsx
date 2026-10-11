@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState, type ComponentType } from 'react';
 
 import { useSlot, useThemeMode } from '../../theme/SlotsProvider.js';
-import { getSessionEventColor, SESSION_EVENT_TYPES, type SessionEventType } from '../../utils/sessionEventTimeline.js';
+import { getSessionEventChartVar, SESSION_EVENT_TYPES, type SessionEventType } from '../../utils/sessionEventTimeline.js';
 import { cn } from '../lib/cn.js';
 import type { AgentSessionEventTimelineProps } from './types.js';
 
@@ -51,7 +51,7 @@ export function AgentSessionEventTimeline({ turns, segments, onSelectTurn }: Age
               >
                 <span
                   className="size-2 rounded-sm"
-                  style={{ backgroundColor: getSessionEventColor(eventType.id, isDark) }}
+                  style={{ backgroundColor: getSessionEventChartVar(eventType.id) }}
                 />
                 {eventType.label}
               </button>
