@@ -162,7 +162,7 @@ function operandsAreValid(input: { shape: OperandShape; operands: readonly strin
  */
 export function planHostAuthenticatedGit(input: { command: string }): HostAuthenticatedGitPlan | undefined {
   const parsed = parseSimpleCommand(input.command);
-  if (parsed === undefined || parsed.wrapper !== null) {
+  if (parsed?.wrapper !== null) {
     return undefined;
   }
   const [name, subcommand, ...tokens] = parsed.argv;
