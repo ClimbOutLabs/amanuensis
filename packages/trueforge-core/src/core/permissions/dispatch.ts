@@ -1,6 +1,6 @@
 /**
  * Sentinel pre-dispatch verification, run immediately before invocation of an
- * approved Tier 3 call.
+ * approved Tier 3 call or a Tier 2 call that asked.
  *
  * Re-verifies single-use approval tokens byte-for-byte against the exact
  * parameters about to be executed (rebuilding the canonical shell form with
@@ -11,8 +11,8 @@
  * within the conversation does not re-escalate.
  *
  * Also enforces the stale-context guard: if offline mode was enabled between
- * classification and dispatch, network-required and external-service Tier 3
- * actions auto-deny even with an approval.
+ * classification and dispatch, network-required and external-service actions
+ * that need approval auto-deny even with an approval.
  */
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -90,8 +90,9 @@ function offlineViolation(call: VerifiableCall, ctx: DispatchCheckContext): stri
 }
 
 /**
- * Tier 2 decisions are notice-only, but they still promise workspace
- * containment: the classifier escalates out-of-workspace cwd and operands.
+ * Tier 2 decisions and silent (Tier 1) shell commands promise workspace
+ * containment whether or not they asked: the classifier escalates
+ * out-of-workspace cwd and operands.
  * Re-verify that containment against the current filesystem state, because a
  * symlinked parent repointed between classification and dispatch could
  * otherwise turn an in-workspace operation into an out-of-workspace one.
@@ -152,24 +153,34 @@ function verifyTier2Containment(input: { call: VerifiableCall; workspace_root: s
 
 /**
  * Returns an error message when the call must not execute, or undefined when
- * it is cleared to run. Tier 3 calls are verified against their approval
- * token; Tier 2 calls get a workspace-containment re-check; Tier 1 passes
- * through.
+ * it is cleared to run. Tier 3 calls and Tier 2 calls that asked are verified
+ * against their approval token; every Tier 2 call and every silent shell
+ * command also gets a workspace-containment re-check; other Tier 1 calls and
+ * relaxed Tier 2 pass through.
  */
 export function verifyPreDispatch(input: { call: VerifiableCall; ctx: DispatchCheckContext }): string | undefined {
   const { call, ctx } = input;
   const { services } = ctx;
 
-  if (call.tier === 2) {
-    const workspaceRoot = ctx.workspace_cwd;
-    if (workspaceRoot === null) {
+  if (call.tier === 1) {
+    // Only shell commands are silent because of a containment rule that can change underfoot.
+    if (call.tool_name !== 'exec') {
       return undefined;
     }
-    return verifyTier2Containment({ call, workspace_root: workspaceRoot });
+    const workspaceRoot = ctx.workspace_cwd;
+    // Silent only because it was contained; with no workspace there is nothing to check against.
+    return workspaceRoot === null
+      ? 'No workspace is set for this shell command at dispatch; request approval again.'
+      : verifyTier2Containment({ call, workspace_root: workspaceRoot });
   }
 
-  if (call.tier !== 3) {
-    return undefined;
+  if (call.tier === 2) {
+    const workspaceRoot = ctx.workspace_cwd;
+    const containmentError =
+      workspaceRoot === null ? undefined : verifyTier2Containment({ call, workspace_root: workspaceRoot });
+    if (containmentError !== undefined || call.approval_token_id === null) {
+      return containmentError;
+    }
   }
 
   // Stale-context guard: offline since classification auto-denies.

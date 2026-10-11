@@ -2,7 +2,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Tier3ApprovalCard } from '@/sentinel/Tier3ApprovalCard.js';
+import { PermissionApprovalCard, type PermissionApprovalCardProps } from '@/sentinel/PermissionApprovalCard.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
 
 function baseCard(): SentinelApprovalCard {
@@ -18,15 +18,17 @@ function baseCard(): SentinelApprovalCard {
   };
 }
 
-function renderCard(overrides: Partial<SentinelApprovalCard> = {}) {
+function renderCard(overrides: Partial<SentinelApprovalCard> = {}, props: Partial<PermissionApprovalCardProps> = {}) {
   const card: SentinelApprovalCard = { ...baseCard(), ...overrides };
   const onApprove = vi.fn();
   const onDeny = vi.fn();
-  render(<Tier3ApprovalCard toolName="payment" card={card} onApprove={onApprove} onDeny={onDeny} />);
+  render(
+    <PermissionApprovalCard toolName="payment" card={card} tier={3} onApprove={onApprove} onDeny={onDeny} {...props} />,
+  );
   return { onApprove, onDeny };
 }
 
-describe('Tier3ApprovalCard', () => {
+describe('PermissionApprovalCard', () => {
   it('renders the server-supplied what, why, and details', () => {
     renderCard({
       destination: 'acme-corp',
@@ -66,5 +68,30 @@ describe('Tier3ApprovalCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(onDeny).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels the tier the server sent', () => {
+    renderCard({}, { tier: 2 });
+    expect(screen.getByText('Needs your OK')).toBeInTheDocument();
+    expect(screen.queryByText('Review carefully')).not.toBeInTheDocument();
+  });
+
+  it('labels a Tier 3 card for careful review without tier jargon', () => {
+    renderCard({}, { tier: 3 });
+    expect(screen.getByText('Review carefully')).toBeInTheDocument();
+    expect(screen.queryByText(/Tier \d/)).not.toBeInTheDocument();
+  });
+
+  it('offers Approve all only when the container passes a batch handler', () => {
+    renderCard();
+    expect(screen.queryByRole('button', { name: /Approve all/ })).not.toBeInTheDocument();
+  });
+
+  it('calls the batch handler from Approve all and shows how many calls it covers', () => {
+    const onApproveAll = vi.fn();
+    const { onApprove } = renderCard({}, { tier: 2, onApproveAll, batchSize: 3 });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve all (3)' }));
+    expect(onApproveAll).toHaveBeenCalledTimes(1);
+    expect(onApprove).not.toHaveBeenCalled();
   });
 });

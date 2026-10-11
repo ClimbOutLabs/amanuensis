@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { createLogger } from 'winston';
 import { TENANT_ID } from '../../src/apis/sessions';
 import { createServerApp } from '../../src/app';
+import type { Authenticator } from '../../src/auth/authenticator';
 import { TrueForgeAuthorizer } from '../../src/auth/authorizer';
 import { createAuthenticator } from '../../src/auth/createAuthenticator';
 import { McpCatalog } from '../../src/catalog/McpCatalog';
@@ -42,6 +43,7 @@ import { SqlitePersonalizationStore } from '../../src/db/sqlite/personalization-
 import { SqliteRepositoryStore } from '../../src/db/sqlite/repository-store/SqliteRepositoryStore';
 import { SqliteSandboxProviderStore } from '../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteScheduleStore } from '../../src/db/sqlite/schedule-store/SqliteScheduleStore';
+import { SqliteSentinelSettingsStore } from '../../src/db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore';
 import { SqliteSessionMetricsStore } from '../../src/db/sqlite/session-metrics/SqliteSessionMetricsStore';
 import { SqliteSessionStore } from '../../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSkillStore } from '../../src/db/sqlite/skill-store/SqliteSkillStore';
@@ -50,6 +52,7 @@ import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAu
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
+import { sentinelSettingsServices } from '../../src/runtime/sentinelSettingsServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
 import { INERT_SERVER_NAME, startInertMcpServer, type InertMcpServer } from './inertMcpServer';
 import { startScriptedModelServer, type ScriptedModelServer } from './scriptedModelServer';
@@ -73,12 +76,19 @@ export interface ApprovalTestServer {
   close: () => Promise<void>;
 }
 
-function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): OpenAPIHono {
+function buildApp(input: {
+  db: SqliteDb;
+  sandboxProvider: SandboxProvider | undefined;
+  authenticator: Authenticator;
+}): OpenAPIHono {
+  const { db, sandboxProvider, authenticator } = input;
   const sessionStore = new SqliteSessionStore(db);
   const sentinelAuditStore = new SentinelAuditStore(db);
+  const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
   const sentinelServices: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     audit: sentinelAuditStore,
+    ...sentinelSettingsServices(sentinelSettingsStore),
   };
   const tokenStore = new SqliteOAuthTokenStore(db);
   const agentStore = new SqliteAgentStore(db);
@@ -112,6 +122,7 @@ function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): O
     globalSettingsStore,
     sessionStore,
     sentinelAuditStore,
+    sentinelSettingsStore,
     sessions: new Sessions({ sessionStore, sentinelServices }),
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),
@@ -119,7 +130,7 @@ function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): O
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
     oidcClient: undefined,
-    authenticator: createAuthenticator({ mode: TrueForgeAuthMode.Standalone }),
+    authenticator,
     authorizer: new TrueForgeAuthorizer(),
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
@@ -132,7 +143,10 @@ function buildApp(db: SqliteDb, sandboxProvider: SandboxProvider | undefined): O
 
 export async function startApprovalTestServer(options?: {
   sandboxProvider?: SandboxProvider | undefined;
+  /** Replaces the standalone authenticator, for tests that need distinct or unauthenticated callers. */
+  authenticator?: Authenticator | undefined;
 }): Promise<ApprovalTestServer> {
+  const authenticator = options?.authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
   const mcp = await startInertMcpServer();
   const model = await startScriptedModelServer();
   const directory = await mkdtemp(join(tmpdir(), 'tfy-approval-'));
@@ -193,7 +207,7 @@ export async function startApprovalTestServer(options?: {
     },
   });
 
-  let app = buildApp(db, options?.sandboxProvider);
+  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator });
 
   return {
     // Hono's request() is sync-or-async depending on the route; the fixture
@@ -202,7 +216,7 @@ export async function startApprovalTestServer(options?: {
     restart: async () => {
       await db.destroy();
       db = createSqliteDb(databaseFile);
-      app = buildApp(db, options?.sandboxProvider);
+      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator });
     },
     mcp,
     model,

@@ -5,24 +5,23 @@ import { useState, type FC } from 'react';
 import { Switch } from '../atoms/primitives/Switch.js';
 import type { Tier2ActionKind } from './types.js';
 
-export type Tier2EscalationToggleProps = {
+export type Tier2RelaxationToggleProps = {
   /** Exact Tier 2 action kind this toggle controls. */
   actionType: Tier2ActionKind;
-  /** Whether the server currently escalates this kind to always ask. */
-  escalated: boolean;
-  onChange: (input: { actionType: Tier2ActionKind; escalated: boolean }) => Promise<void>;
+  /** Whether the server currently lets this kind run without asking. */
+  relaxed: boolean;
+  onChange: (input: { actionType: Tier2ActionKind; relaxed: boolean }) => Promise<void>;
   disabled?: boolean;
 };
 
 /**
- * "Always ask me" switch for one Tier 2 action kind. Off by default; the checked
- * state always reflects the server settings, and flipping it writes through the user
- * settings API. Lives in the audit feed next to the kind it controls, never in
- * Settings.
+ * "Run without asking" switch for one Tier 2 action kind. Off by default, so Tier 2
+ * asks; the checked state always reflects the server settings, and flipping it writes
+ * through the user settings API. Lives in the audit feed next to the kind it controls.
  */
-export const Tier2EscalationToggle: FC<Tier2EscalationToggleProps> = ({
+export const Tier2RelaxationToggle: FC<Tier2RelaxationToggleProps> = ({
   actionType,
-  escalated,
+  relaxed,
   onChange,
   disabled = false,
 }) => {
@@ -33,7 +32,7 @@ export const Tier2EscalationToggle: FC<Tier2EscalationToggleProps> = ({
     setBusy(true);
     setError(null);
     try {
-      await onChange({ actionType, escalated: next });
+      await onChange({ actionType, relaxed: next });
     } catch (err) {
       setError(err instanceof Error && err.message !== '' ? err.message : 'Request failed.');
     } finally {
@@ -46,12 +45,12 @@ export const Tier2EscalationToggle: FC<Tier2EscalationToggleProps> = ({
       <span className="inline-flex items-center gap-1.5">
         <Switch
           size="sm"
-          checked={escalated}
+          checked={relaxed}
           disabled={disabled || busy}
           onCheckedChange={handleChange}
-          aria-label={`Always ask before ${actionType}`}
+          aria-label={`Run without asking: ${actionType}`}
         />
-        <span className="text-[0.6875rem] text-text-secondary">Always ask</span>
+        <span className="text-[0.6875rem] text-text-secondary">Run without asking</span>
       </span>
       {error !== null && (
         <span className="text-[0.6875rem] text-failure-bg" role="alert">

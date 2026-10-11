@@ -26,6 +26,7 @@ import type {
   SandboxInfo,
   SubAgentCompletionMarker,
   TaskStateSnapshot,
+  Tier2ActionKind,
   ToolCallMemoSnapshot,
 } from '@truefoundry/trueforge-core/core';
 import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
@@ -165,9 +166,20 @@ export interface SentinelAuditTable {
   tier: number;
   tool_name: string;
   description: string;
-  outcome: 'logged' | 'ran' | 'stopped_by_user' | 'undone' | 'approved' | 'denied' | 'auto_denied';
+  outcome: 'logged' | 'ran' | 'approved' | 'denied' | 'auto_denied';
   auto_deny_reason: string | null;
   created_at: string;
+}
+
+/** Per-user Sentinel preferences. PRIMARY KEY (tenant_id, created_by). */
+export interface SentinelUserSettingsTable {
+  tenant_id: string;
+  created_by: string;
+  /** SQLite's 0/1 integer boolean. */
+  offline_mode: number;
+  tier2_auto_allow: JsonbColumn<Tier2ActionKind[]>;
+  created_at: string;
+  updated_at: string;
 }
 
 /** Content-addressed artifact bytes, deduplicated by digest within a tenant. PRIMARY KEY (tenant_id, digest). */
@@ -627,6 +639,7 @@ export interface Database {
   space: SpaceTable;
   space_revision: SpaceRevisionTable;
   sentinel_audit: SentinelAuditTable;
+  sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;
   implementation_plan_dispatch: ImplementationPlanDispatchTable;
   turn: TurnTable;

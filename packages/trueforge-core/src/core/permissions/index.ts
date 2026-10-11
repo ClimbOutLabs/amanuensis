@@ -1,7 +1,7 @@
 /**
  * Sentinel three-tier permission system: server-side classification of every
- * tool action into Tier 1 (silent), Tier 2 (inline notice), or Tier 3
- * (approval card), with single-use approval tokens and tracked-executable
+ * tool action into Tier 1 (silent), Tier 2 (asks unless the user relaxed its
+ * kind), or Tier 3 (always asks), with single-use approval tokens and tracked-executable
  * grants.
  */
 export { InMemoryApprovalTokenStore } from './approvalTokens';
@@ -16,6 +16,7 @@ export {
   createSentinelHostContext,
   defaultSentinelServices,
   toDispatchSentinelContext,
+  withoutTier2Relaxations,
 } from './context';
 export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './context';
 export { verifyPreDispatch } from './dispatch';
