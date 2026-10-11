@@ -1,6 +1,8 @@
 # Joins the app service of an existing Compose deploy to the sandbox slots: add this file with `-f` to the
 # deploy's command. The slots themselves are started by `pnpm sandbox:slots` (docker-compose.slots.yml);
-# this file only mounts their control volumes, read-only, and switches the app to the slot backend. The
+# this file only mounts their control volumes and switches the app to the slot backend. The mounts are read-only
+# so the app cannot alter the volumes; connecting to a slot's socket still works, so these volumes belong to the app
+# service alone and must not be mounted anywhere else. The
 # app service must be named `server`. No Docker socket is mounted.
 services:
   server:

@@ -39,6 +39,7 @@ FROM ${NODE_IMAGE} AS node
 # The guest root filesystem: what model-written code sees. Nothing here can reach a network at run time.
 FROM ${UBUNTU_IMAGE} AS guest
 ENV DEBIAN_FRONTEND=noninteractive
+# apt packages come from the Ubuntu archive at build time, verified by apt's signatures; only the base image is pinned.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       bash coreutils findutils grep sed gawk diffutils patch tar gzip unzip zip \
@@ -52,9 +53,14 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
  && ln -s python3 /usr/bin/python
 
+# Python wheels and npm packages are installed only if they match the hashes in the checked-in lock files
+# (`pnpm sandbox:slots:lock-python` and `npm install --package-lock-only` in guest/ regenerate them).
 COPY guest/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir --break-system-packages --no-deps -r /tmp/requirements.txt \
- && npm install -g --no-audit --no-fund typescript@7.0.2 tsx@4.23.15 \
+COPY guest/package.json guest/package-lock.json /opt/sandbox-tools/
+RUN pip install --no-cache-dir --break-system-packages --no-deps --require-hashes --only-binary=:all: -r /tmp/requirements.txt \
+ && npm ci --prefix /opt/sandbox-tools --omit=dev --ignore-scripts --no-audit --no-fund \
+ && ln -s /opt/sandbox-tools/node_modules/.bin/tsc /usr/local/bin/tsc \
+ && ln -s /opt/sandbox-tools/node_modules/.bin/tsx /usr/local/bin/tsx \
  && npm cache clean --force \
  && rm -rf /tmp/* /root/.npm /root/.cache
 

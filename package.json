@@ -36,6 +36,7 @@
     "postinstall": "pnpm --filter @truefoundry/trueforge-core build:gen",
     "pre-push": "node scripts/pre-push.mjs",
     "prepare": "husky || true",
+    "sandbox:slots:lock-python": "cd ops/sandbox-slot/guest && uv pip compile requirements.in --universal --generate-hashes --python-version 3.12 -o requirements.txt",
     "sandbox:slots": "pnpm --filter @truefoundry/trueforge sandbox:slots",
     "test:sandbox-slot-agent": "cd ops/sandbox-slot/agent && go test ./test/...",
     "sdk:generate": "bash scripts/generate-sdk.sh",

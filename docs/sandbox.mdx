@@ -33,7 +33,7 @@ Settings no longer offers a choice of sandbox provider. Docker is the only optio
 
 ## Sandbox slots (preview)
 
-A second backend runs `run_code` and the shell and file tools in four hardened slot containers instead of Docker containers started by the server. Each slot runs a small agent as PID 1, and every call starts in a fresh gVisor guest with no network. The server holds no Docker socket: it reaches a slot only through a read-only control volume.
+A second backend runs `run_code` and the shell and file tools in four hardened slot containers instead of Docker containers started by the server. Each slot runs a small agent as PID 1, and every call starts in a fresh gVisor guest with no network. The server holds no Docker socket: it reaches a slot through a Unix socket in a small control volume that only the server mounts. The volume is mounted read-only so the server cannot change what is in it; that does not limit what the server can ask the slot to do, because connecting to the socket is all it takes. Keep the control volumes out of every other container.
 
 - Start the slots from a checkout with `pnpm sandbox:slots`. It builds the image, starts the slots and checks each one; the agent refuses to run anything unless every safety check passes (user, capabilities, no-new-privileges, seccomp, read-only root, loopback only, no Docker socket, cgroup limits, AppArmor where the host has it, and a working gVisor guest).
 - Join an existing Compose deploy by adding `-f docker-compose.slots-app.yml` to its command. That file sets `SANDBOX_BACKEND=slots`, `SANDBOX_SLOTS_DIR` and mounts the control volumes. The default backend stays `docker`.
