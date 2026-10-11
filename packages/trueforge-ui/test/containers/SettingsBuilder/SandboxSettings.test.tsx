@@ -1,432 +1,236 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { SandboxRuntimeUpgradeProvider } from '@/components/SandboxRuntimeUpgradeContext.js';
+import { RunCodeStatusProvider, type RunCodeStatus } from '@/components/RunCodeStatusContext.js';
 import SandboxSettings from '@/containers/SettingsBuilder/SandboxSettings.js';
 import { ServerProvider } from '@/server/ServerContext.js';
-import type {
-  CreateSandboxProviderRequest,
-  SandboxProviderBase,
-  SandboxProviderCatalogEntry,
-  SandboxProviderListEntry,
-  SandboxSnapshotSyncStatus,
-  UpdateSandboxProviderRequest,
-} from '@/server/types.js';
-import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
+import type { AgentUIServer } from '@/server/types.js';
+import { createMockAgentUIServer } from '../../server/mockServer.js';
 
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function showModal() {
-    this.setAttribute('open', '');
-  };
-  HTMLDialogElement.prototype.close = function close() {
-    this.removeAttribute('open');
-  };
-});
+const IMAGE = 'ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0@sha256:' + 'a'.repeat(64);
 
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-const catalogEntry: SandboxProviderCatalogEntry & { apiUrl: string } = {
-  id: 'cat-daytona',
-  name: 'Daytona',
-  type: 'daytona',
-  apiUrl: 'http://host.docker.internal:3000/api',
-  execTimeoutMs: 300000,
-  autoStopIntervalInMinutes: 15,
-  autoArchiveIntervalInMinutes: 10080,
-  autoDeleteIntervalInMinutes: 43200,
+const limits = {
+  isolation_driver: 'docker',
+  image: IMAGE,
+  default_timeout_seconds: 60,
+  max_timeout_seconds: 600,
+  memory_mb: 2048,
+  disk_mb: 1024,
+  stdout_stderr_cap_kb: 256,
+  image_pull_timeout_seconds: 600,
+  network_egress: false,
+  cosign_key_configured: true,
 };
 
-function sandboxEntry({
-  provider,
-  status = 'ready',
-  statusReason,
-}: {
-  provider: SandboxProviderBase;
-  status?: SandboxSnapshotSyncStatus['status'];
-  statusReason?: string;
-}): SandboxProviderListEntry {
-  return {
-    data: provider,
-    snapshotSyncStatus: {
-      status,
-      ...(statusReason ? { statusReason } : {}),
-    },
-  };
-}
-
-function createFakeHost(initial: SandboxProviderListEntry[] = []) {
-  let providers = [...initial];
-  let listCalls = 0;
-  const created: CreateSandboxProviderRequest[] = [];
-  const updated: UpdateSandboxProviderRequest[] = [];
-
-  const sandboxCatalog = {
-    getSandboxProviderCatalog: async () => [catalogEntry],
-    listSandboxProviders: async () => {
-      listCalls += 1;
-      return providers;
-    },
-    createSandboxProvider: async (req: CreateSandboxProviderRequest) => {
-      created.push(req);
-      const provider: SandboxProviderBase = {
-        id: `sb-${req.catalogId}`,
-        name: req.name,
-        catalogId: req.catalogId,
-        isConnected: true,
-        execTimeoutMs: req.execTimeoutMs,
-        autoStopIntervalInMinutes: req.autoStopIntervalInMinutes,
-        autoArchiveIntervalInMinutes: req.autoArchiveIntervalInMinutes,
-        autoDeleteIntervalInMinutes: req.autoDeleteIntervalInMinutes,
-      };
-      providers = [...providers, sandboxEntry({ provider, status: 'pending' })];
-      return provider;
-    },
-    updateSandboxProvider: async (req: UpdateSandboxProviderRequest) => {
-      updated.push(req);
-      providers = providers.map(entry =>
-        entry.data.id === req.id
-          ? {
-              ...entry,
-              data: {
-                ...entry.data,
-                execTimeoutMs: req.execTimeoutMs,
-                autoStopIntervalInMinutes: req.autoStopIntervalInMinutes,
-                autoArchiveIntervalInMinutes: req.autoArchiveIntervalInMinutes,
-                autoDeleteIntervalInMinutes: req.autoDeleteIntervalInMinutes,
-              },
-            }
-          : entry,
-      );
-      const next = providers.find(entry => entry.data.id === req.id);
-      if (next === undefined) {
-        throw new Error(`Sandbox provider "${req.id}" not found`);
-      }
-      return next.data;
-    },
-  };
-
-  const server = createMockAgentUIServer({
-    catalog: createMockCatalog({ sandboxCatalog }),
+function serverWith(sandboxIsolation: unknown): AgentUIServer {
+  return createMockAgentUIServer({
+    getCapabilities: async () => ({
+      data: {
+        sandbox: { enabled: true },
+        skill: { enabled: true },
+        settings: { enabled: true },
+        memoryScreen: { enabled: false },
+        toolOutputScreen: { enabled: false },
+        sandbox_isolation: sandboxIsolation,
+      },
+    }),
   });
-
-  return {
-    created,
-    updated,
-    getListCalls: () => listCalls,
-    getProviders: () => providers,
-    setProviders: (next: SandboxProviderListEntry[]) => {
-      providers = next;
-    },
-    wrapper: ({ children }: { children: ReactNode }) => <ServerProvider server={server}>{children}</ServerProvider>,
-  };
 }
+
+function renderPage({
+  getRunCodeStatus,
+  sandboxIsolation = limits,
+}: {
+  getRunCodeStatus: () => Promise<RunCodeStatus>;
+  sandboxIsolation?: unknown;
+}) {
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <ServerProvider server={serverWith(sandboxIsolation)}>
+      <RunCodeStatusProvider api={{ getRunCodeStatus }}>{children}</RunCodeStatusProvider>
+    </ServerProvider>
+  );
+  return render(<SandboxSettings />, { wrapper });
+}
+
+/** The card under a heading, looked up fresh because the card is replaced as the check settles. */
+function cardOf(name: string) {
+  const card = screen.getByRole('heading', { name }).closest('section');
+  if (card === null) {
+    throw new Error(`Heading "${name}" is not inside a card`);
+  }
+  return within(card);
+}
+
+const STATES: Array<{ status: RunCodeStatus; headline: string; fix: RegExp | null; pill: string }> = [
+  { status: { state: 'ready' }, headline: 'Code execution is on', fix: null, pill: 'Ready' },
+  {
+    status: { state: 'not_configured' },
+    headline: 'Code execution is off: no sandbox image is configured',
+    fix: /Set SANDBOX_IMAGE/,
+    pill: 'Off',
+  },
+  {
+    status: { state: 'docker_unavailable' },
+    headline: 'Code execution is off: Docker is not available to the server',
+    fix: /Docker socket/,
+    pill: 'Off',
+  },
+  {
+    status: { state: 'daemon_unavailable', detail: 'docker info failed' },
+    headline: 'Code execution is off: Docker is not responding',
+    fix: /Start or restart the Docker daemon/,
+    pill: 'Off',
+  },
+  {
+    status: { state: 'image_missing' },
+    headline: 'Sandbox image not downloaded yet',
+    fix: /run some code/,
+    pill: 'Setting up',
+  },
+  {
+    status: { state: 'signature_unverified', detail: 'cosign signature verification failed' },
+    headline: "Code execution is off: the sandbox image's signature could not be verified",
+    fix: /SANDBOX_COSIGN_PUBLIC_KEY_PATH/,
+    pill: 'Off',
+  },
+  {
+    status: { state: 'image_unavailable', detail: 'digest mismatch' },
+    headline: 'Code execution is off: the sandbox image does not match this release',
+    fix: /exact image for this release/,
+    pill: 'Off',
+  },
+  {
+    status: { state: 'isolation_refused', detail: 'canary refused' },
+    headline: 'Code execution is off: the sandbox could not apply its safety limits',
+    fix: /Update Docker/,
+    pill: 'Off',
+  },
+  {
+    status: { state: 'unsupported_platform', detail: 'needs Linux' },
+    headline: "Code execution is off: this server's system is not supported",
+    fix: /Run the server on Linux/,
+    pill: 'Off',
+  },
+];
 
 describe('SandboxSettings', () => {
-  it('autofills create form from catalog except apiKey', async () => {
-    const host = createFakeHost();
-    const { wrapper: Wrapper } = host;
-    render(
-      <Wrapper>
-        <SandboxSettings />
-      </Wrapper>,
-    );
+  it('names the page and says what the sandbox is for', async () => {
+    renderPage({ getRunCodeStatus: async () => ({ state: 'ready' }) });
 
-    await waitFor(() => {
-      expect(screen.getByText('Daytona')).toBeTruthy();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Advanced settings/ })).toBeTruthy();
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Advanced settings/ }));
-    expect(screen.getByLabelText('Exec timeout (ms)')).toHaveProperty('value', '300000');
-    expect(screen.getByLabelText('Auto-stop interval (minutes)')).toHaveProperty('value', '15');
-    expect(screen.getByLabelText('Auto-archive interval (minutes)')).toHaveProperty('value', '10080');
-    expect(screen.getByLabelText('Auto-delete interval (minutes)')).toHaveProperty('value', '43200');
-    expect(screen.getByLabelText('API key')).toHaveProperty('value', '');
-    expect(screen.getByLabelText('API URL')).toHaveProperty('value', 'http://host.docker.internal:3000/api');
-
-    fireEvent.change(screen.getByLabelText('API key'), {
-      target: { value: 'dtn_secret' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    await waitFor(() => {
-      expect(host.created).toHaveLength(1);
-    });
-    expect(host.created[0]).toMatchObject({
-      catalogId: 'cat-daytona',
-      name: 'Daytona',
-      type: 'daytona',
-      execTimeoutMs: 300000,
-      autoStopIntervalInMinutes: 15,
-      autoArchiveIntervalInMinutes: 10080,
-      autoDeleteIntervalInMinutes: 43200,
-      apiKey: 'dtn_secret',
-      apiUrl: 'http://host.docker.internal:3000/api',
-    });
+    expect(screen.getByRole('heading', { name: 'Sandbox' })).toBeInTheDocument();
+    expect(screen.getByText(/isolated Docker container with no network access/)).toBeInTheDocument();
+    await screen.findByText('Code execution is on');
   });
 
-  it('prefills update form and allows saving without re-entering apiKey', async () => {
-    const upgradeCalls: string[] = [];
-    const existing: SandboxProviderBase = {
-      id: 'sb-1',
-      name: 'Daytona',
-      catalogId: 'cat-daytona',
-      isConnected: true,
-      execTimeoutMs: 60000,
-      autoStopIntervalInMinutes: 30,
-      autoArchiveIntervalInMinutes: 1440,
-      autoDeleteIntervalInMinutes: 10080,
-    };
-    const host = createFakeHost([sandboxEntry({ provider: existing })]);
-    const { wrapper: Wrapper } = host;
-    render(
-      <SandboxRuntimeUpgradeProvider
-        upgrade={async providerId => {
-          upgradeCalls.push(providerId);
-        }}
-      >
-        <Wrapper>
-          <SandboxSettings />
-        </Wrapper>
-      </SandboxRuntimeUpgradeProvider>,
-    );
+  it.each(STATES)('explains the $status.state state in plain language', async ({ status, headline, fix, pill }) => {
+    renderPage({ getRunCodeStatus: async () => status });
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Update' })).toBeTruthy();
-    });
-    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Update' }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Advanced settings/ })).toBeTruthy();
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Advanced settings/ }));
-    expect(screen.getByLabelText('Exec timeout (ms)')).toHaveProperty('value', '60000');
-    expect(screen.getByLabelText('Auto-stop interval (minutes)')).toHaveProperty('value', '30');
-    expect(screen.getByLabelText(/API key/)).toHaveProperty('value', '');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    await waitFor(() => {
-      expect(host.updated).toHaveLength(1);
-    });
-    expect(host.updated[0]).toEqual({
-      id: 'sb-1',
-      execTimeoutMs: 60000,
-      autoStopIntervalInMinutes: 30,
-      autoArchiveIntervalInMinutes: 1440,
-      autoDeleteIntervalInMinutes: 10080,
-      apiUrl: 'https://app.daytona.io/api',
-    });
-    expect(host.updated[0]).not.toHaveProperty('apiKey');
-    expect(upgradeCalls).toEqual([]);
+    await screen.findByText(headline);
+    const card = cardOf('Status');
+    expect(card.getByRole('status')).toHaveTextContent(pill);
+    if (fix === null) {
+      expect(card.queryByText('What to do')).not.toBeInTheDocument();
+    } else {
+      expect(card.getByText('What to do')).toBeInTheDocument();
+      expect(card.getByText(fix)).toBeInTheDocument();
+    }
+    if (status.detail === undefined) {
+      expect(card.queryByText('Technical details')).not.toBeInTheDocument();
+    } else {
+      expect(card.getByText('Technical details')).toBeInTheDocument();
+      expect(card.getByText(status.detail)).toBeInTheDocument();
+    }
+    expect(screen.queryByText(/unavailable\.$/)).not.toBeInTheDocument();
   });
 
-  it('upgrades the runtime only through the explicit action', async () => {
-    const provider: SandboxProviderBase = {
-      id: 'sb-1',
-      name: 'Daytona',
-      catalogId: 'cat-daytona',
-      isConnected: true,
-      execTimeoutMs: 60000,
-      autoStopIntervalInMinutes: 30,
-      autoArchiveIntervalInMinutes: 1440,
-      autoDeleteIntervalInMinutes: 10080,
-    };
-    const host = createFakeHost([sandboxEntry({ provider })]);
-    const { wrapper: Wrapper } = host;
-    const upgradeCalls: string[] = [];
-    render(
-      <SandboxRuntimeUpgradeProvider
-        upgrade={async providerId => {
-          upgradeCalls.push(providerId);
-        }}
-      >
-        <Wrapper>
-          <SandboxSettings />
-        </Wrapper>
-      </SandboxRuntimeUpgradeProvider>,
-    );
+  it('shows the image and signature checks that follow from the state', async () => {
+    renderPage({ getRunCodeStatus: async () => ({ state: 'signature_unverified', detail: 'bad signature' }) });
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Upgrade runtime' })).toBeTruthy();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Upgrade runtime' }));
-
-    await waitFor(() => {
-      expect(upgradeCalls).toEqual(['sb-1']);
-    });
-    expect(host.updated).toHaveLength(0);
+    await screen.findByRole('heading', { name: 'Image' });
+    const image = cardOf('Image');
+    expect(image.getByText(IMAGE)).toBeInTheDocument();
+    expect(image.getByText('Downloaded')).toBeInTheDocument();
+    expect(image.getByText('Not verified')).toBeInTheDocument();
   });
 
-  it('hides other catalog providers once one is configured', async () => {
-    const existing: SandboxProviderBase = {
-      id: 'sb-1',
-      name: 'Daytona',
-      catalogId: 'cat-daytona',
-      isConnected: true,
-      execTimeoutMs: 60000,
-      autoStopIntervalInMinutes: 30,
-      autoArchiveIntervalInMinutes: 1440,
-      autoDeleteIntervalInMinutes: 10080,
-    };
-    const host = createFakeHost([sandboxEntry({ provider: existing })]);
-    const { wrapper: Wrapper } = host;
-    render(
-      <Wrapper>
-        <SandboxSettings />
-      </Wrapper>,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Sandbox providers')).toBeTruthy();
+  it('says there is no image when the server has none configured', async () => {
+    renderPage({
+      getRunCodeStatus: async () => ({ state: 'not_configured' }),
+      sandboxIsolation: { ...limits, image: '' },
     });
-    expect(screen.queryByRole('button', { name: 'Configure' })).toBeNull();
-    // Once a provider is configured, the whole "Available" section is hidden (heading + message).
-    expect(screen.queryByText(/^Available ·/)).toBeNull();
-    expect(screen.queryByText('One provider is set up. Update it or remove it to switch.')).toBeNull();
+
+    await screen.findByRole('heading', { name: 'Image' });
+    const image = cardOf('Image');
+    expect(image.getByText('Not configured')).toBeInTheDocument();
+    expect(image.queryByText('Version')).not.toBeInTheDocument();
   });
 
-  it('renders pending and ready snapshot status badges', async () => {
-    const provider: SandboxProviderBase = {
-      id: 'sb-1',
-      name: 'Daytona',
-      catalogId: 'cat-daytona',
-      isConnected: true,
-      execTimeoutMs: 60000,
-      autoStopIntervalInMinutes: 30,
-      autoArchiveIntervalInMinutes: 1440,
-      autoDeleteIntervalInMinutes: 10080,
-    };
-    const host = createFakeHost([
-      sandboxEntry({
-        provider,
-        status: 'pending',
-        statusReason: 'Snapshot build is queued',
-      }),
-      sandboxEntry({
-        provider: { ...provider, id: 'sb-2', name: 'Daytona ready' },
-        status: 'ready',
-      }),
-    ]);
-    const { wrapper: Wrapper } = host;
-    render(
-      <Wrapper>
-        <SandboxSettings />
-      </Wrapper>,
-    );
+  it('lists the limits that matter: time, memory, disk and network off', async () => {
+    renderPage({ getRunCodeStatus: async () => ({ state: 'ready' }) });
 
+    await screen.findByText('Code execution is on');
+    const card = cardOf('Limits for each run');
     await waitFor(() => {
-      expect(screen.getByText('Syncing image...')).toBeTruthy();
-      expect(screen.getByText('Connected')).toBeTruthy();
+      expect(card.getByText('1 min by default, at most 10 min')).toBeInTheDocument();
     });
-    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
-
-    fireEvent.mouseEnter(screen.getByLabelText('Snapshot sync status details'));
-    await waitFor(() => {
-      expect(screen.getByRole('tooltip')).toHaveTextContent('Snapshot build is queued');
-    });
+    expect(card.getByText('2 GiB')).toBeInTheDocument();
+    expect(card.getByText(/1 GiB for files the code writes/)).toBeInTheDocument();
+    expect(card.getByText(/Off\. Code cannot reach the internet/)).toBeInTheDocument();
   });
 
-  it('polls pending snapshot status every ten seconds until it changes', async () => {
-    vi.useFakeTimers();
-    const provider: SandboxProviderBase = {
-      id: 'sb-1',
-      name: 'Daytona',
-      catalogId: 'cat-daytona',
-      isConnected: true,
-      execTimeoutMs: 60000,
-      autoStopIntervalInMinutes: 30,
-      autoArchiveIntervalInMinutes: 1440,
-      autoDeleteIntervalInMinutes: 10080,
-    };
-    const host = createFakeHost([sandboxEntry({ provider, status: 'pending' })]);
-    const { wrapper: Wrapper } = host;
-    render(
-      <Wrapper>
-        <SandboxSettings />
-      </Wrapper>,
-    );
+  it('keeps showing the status when the server did not report its limits', async () => {
+    renderPage({ getRunCodeStatus: async () => ({ state: 'ready' }), sandboxIsolation: null });
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    expect(host.getListCalls()).toBe(1);
-
-    host.setProviders([sandboxEntry({ provider, status: 'ready' })]);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(9_999);
-    });
-    expect(host.getListCalls()).toBe(1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-    expect(host.getListCalls()).toBe(2);
-    expect(screen.getByText('Connected')).toBeTruthy();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(20_000);
-    });
-    expect(host.getListCalls()).toBe(2);
+    expect(await screen.findByText('Code execution is on')).toBeInTheDocument();
+    expect(screen.getByText(/did not report its limits/)).toBeInTheDocument();
   });
 
-  it('renders snapshot status badges and exposes failed status reason in a tooltip', async () => {
-    const provider: SandboxProviderBase = {
-      id: 'sb-1',
-      name: 'Daytona',
-      catalogId: 'cat-daytona',
-      isConnected: true,
-      execTimeoutMs: 60000,
-      autoStopIntervalInMinutes: 30,
-      autoArchiveIntervalInMinutes: 1440,
-      autoDeleteIntervalInMinutes: 10080,
-    };
-    const host = createFakeHost([
-      sandboxEntry({
-        provider,
-        status: 'failed',
-        statusReason: 'Snapshot image could not be built',
-      }),
-    ]);
-    const { wrapper: Wrapper } = host;
-    render(
-      <Wrapper>
-        <SandboxSettings />
-      </Wrapper>,
-    );
+  it('checks again when Re-check is pressed', async () => {
+    const getRunCodeStatus = vi
+      .fn<() => Promise<RunCodeStatus>>()
+      .mockResolvedValueOnce({ state: 'docker_unavailable' })
+      .mockResolvedValueOnce({ state: 'ready' });
+    renderPage({ getRunCodeStatus });
 
-    await waitFor(() => {
-      expect(screen.getByText('Sync failed')).toBeTruthy();
-    });
-    expect(screen.queryByText('Connected')).toBeNull();
+    expect(await screen.findByText(/Docker is not available to the server/)).toBeInTheDocument();
 
-    fireEvent.mouseEnter(screen.getByLabelText('Snapshot sync status details'));
-    await waitFor(() => {
-      expect(screen.getByRole('tooltip')).toHaveTextContent('Snapshot image could not be built');
-    });
+    fireEvent.click(cardOf('Status').getByRole('button', { name: 'Re-check' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    await waitFor(() => {
-      expect(host.updated).toHaveLength(1);
-    });
-    expect(host.updated[0]).toEqual({
-      id: 'sb-1',
-      execTimeoutMs: 60000,
-      autoStopIntervalInMinutes: 30,
-      autoArchiveIntervalInMinutes: 1440,
-      autoDeleteIntervalInMinutes: 10080,
-    });
-    expect(host.updated[0]).not.toHaveProperty('apiKey');
+    expect(await screen.findByText('Code execution is on')).toBeInTheDocument();
+    expect(getRunCodeStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows a clear error with a retry when the status cannot be fetched', async () => {
+    const getRunCodeStatus = vi
+      .fn<() => Promise<RunCodeStatus>>()
+      .mockRejectedValueOnce(new Error('Request failed (502).'))
+      .mockResolvedValueOnce({ state: 'ready' });
+    renderPage({ getRunCodeStatus });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not check the sandbox status');
+    expect(screen.getByRole('alert')).toHaveTextContent('Request failed (502).');
+    expect(screen.getByRole('alert')).toHaveTextContent('Nothing about the sandbox has changed');
+    expect(screen.queryByText('Code execution is on')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByText('Code execution is on')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('says what it is doing while the first check runs', async () => {
+    renderPage({ getRunCodeStatus: () => new Promise<RunCodeStatus>(() => {}) });
+
+    expect(await screen.findByText(/Checking Docker, the sandbox image and its signature/)).toBeInTheDocument();
+  });
+
+  it('no longer offers sandbox providers or a runtime upgrade', async () => {
+    renderPage({ getRunCodeStatus: async () => ({ state: 'ready' }) });
+    await screen.findByText('Code execution is on');
+
+    expect(screen.queryByText(/provider/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /upgrade/i })).not.toBeInTheDocument();
   });
 });
