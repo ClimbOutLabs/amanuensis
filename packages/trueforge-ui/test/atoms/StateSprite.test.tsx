@@ -38,6 +38,19 @@ function noPreferenceRanges(css: string): Array<{ start: number; end: number }> 
   return ranges;
 }
 
+/** Selectors of every rule whose body declares `animation:`, read from the nearest opening brace. */
+function animatedRuleSelectors(css: string): string[] {
+  const selectors: string[] = [];
+  let at = css.indexOf('animation:');
+  while (at >= 0) {
+    const open = css.lastIndexOf('{', at);
+    const start = Math.max(css.lastIndexOf('{', open - 1), css.lastIndexOf('}', open - 1)) + 1;
+    selectors.push(css.slice(start, open).trim());
+    at = css.indexOf('animation:', at + 1);
+  }
+  return selectors;
+}
+
 describe('StateSprite', () => {
   it.each(STATES)('renders the %s panda as inline SVG, not an image', state => {
     const { container } = render(<StateSprite state={state} />);
@@ -105,6 +118,16 @@ describe('StateSprite', () => {
       if (!inside) violations.push(selector.trim());
     }
     expect(violations).toEqual([]);
+  });
+
+  it('turns every sprite animation off for the static queue', () => {
+    const css = readFileSync(stylesPath, 'utf8');
+    const selectors = animatedRuleSelectors(css).filter(selector => selector.includes('.aui-state-sprite'));
+    expect(selectors.length).toBeGreaterThan(0);
+    // The static class is the same switch WaitQueueIndicator sets under reduced motion.
+    for (const selector of selectors) {
+      expect(selector.startsWith('.aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--')).toBe(true);
+    }
   });
 
   it('shows the state accents only for their states', () => {

@@ -90,8 +90,8 @@
     --shadow-color: #2c2a26;
     --scrollbar-thumb: #bda886;
     --chat-font-size: 0.875rem;
-    /* Turn-status panda sprite palette: flat shapes, theme-aware. The face
-     * stays a soft off-white in both modes so it never glows in the dark. */
+    /* Turn-status panda sprite palette: flat shapes, theme-aware. The face is
+     * off-white in light mode and muted cream in dark mode, so it never glows. */
     --sprite-face: #fffdf8;
     --sprite-dark: #2c2a26;
     --sprite-accent: #b5894c;
@@ -876,7 +876,7 @@
 
 /* Static pose for the remembering state: pupils look up. */
 .aui-state-sprite--remembering .panda-pupils {
-  transform: translateY(-1.6px);
+  transform: translateY(-0.1rem);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -965,7 +965,7 @@
     transform: translateY(0);
   }
   50% {
-    transform: translateY(-2.5px);
+    transform: translateY(-0.15rem);
   }
 }
 
@@ -975,7 +975,7 @@
     transform: translateY(0);
   }
   50% {
-    transform: translateY(1.8px);
+    transform: translateY(0.11rem);
   }
 }
 
