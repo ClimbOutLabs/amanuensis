@@ -1,10 +1,12 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { HTTPException } from 'hono/http-exception';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
+import { timingSafeEqual } from 'node:crypto';
 import type { Configuration } from 'openid-client';
 import type { Authenticator } from '../../../src/auth/authenticator';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import {
+  apiKeysEqual,
   createAdminAuthMiddleware,
   createApiKeyAuthMiddleware,
   createAuthMiddleware,
@@ -416,5 +418,20 @@ describe('createApiKeyAuthMiddleware', () => {
       ...(authorization === undefined ? {} : { headers: { Authorization: authorization } }),
     });
     expect(response.status).toBe(401);
+  });
+
+  it('compares keys in constant time via timingSafeEqual', () => {
+    const spy = jest.fn(timingSafeEqual);
+    expect(apiKeysEqual('service-key', 'service-key', spy)).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const spy2 = jest.fn(timingSafeEqual);
+    expect(apiKeysEqual('service-key', 'service-keY', spy2)).toBe(false);
+    expect(spy2).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects different-length keys without calling timingSafeEqual', () => {
+    const spy = jest.fn(timingSafeEqual);
+    expect(apiKeysEqual('short', 'service-key', spy)).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
   });
 });

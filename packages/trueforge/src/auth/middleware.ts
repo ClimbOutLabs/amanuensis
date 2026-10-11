@@ -1,7 +1,7 @@
-import { timingSafeEqual } from 'node:crypto';
 import type { Context, MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { jwtVerify } from 'jose';
+import { timingSafeEqual } from 'node:crypto';
 
 import configuration from '../config';
 import type { Authenticator } from './authenticator';
@@ -31,13 +31,17 @@ export function createAdminAuthMiddleware(authenticator: Authenticator): Middlew
 }
 
 /** Constant-time API key comparison; different lengths reject without throwing. */
-function apiKeysEqual(provided: string, expected: string): boolean {
+export function apiKeysEqual(
+  provided: string,
+  expected: string,
+  timingSafeEqualFn: typeof timingSafeEqual = timingSafeEqual,
+): boolean {
   const providedBytes = Buffer.from(provided, 'utf8');
   const expectedBytes = Buffer.from(expected, 'utf8');
   if (providedBytes.length !== expectedBytes.length) {
     return false;
   }
-  return timingSafeEqual(providedBytes, expectedBytes);
+  return timingSafeEqualFn(providedBytes, expectedBytes);
 }
 
 /** Bearer API-key gate for service-only routes. */

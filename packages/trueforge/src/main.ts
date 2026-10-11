@@ -695,7 +695,11 @@ try {
 
   if (configuration.STANDALONE) {
     printStandaloneStartupBanner({ version: PACKAGE_VERSION, color: shouldColorize() });
-    await prepareCodeModeSocketParent({ path: configuration.CODE_MODE_SOCKET_PARENT, logger });
+    await prepareCodeModeSocketParent({
+      path: configuration.CODE_MODE_SOCKET_PARENT,
+      logger,
+      port: configuration.PORT,
+    });
     await ensureLocalSandboxRootParent(configuration.LOCAL_SANDBOX_ROOT_PARENT);
     const { LocalSandboxProvider } = await import('./sandbox/local/provider/LocalSandboxProvider');
     const support = await LocalSandboxProvider.isSupported({

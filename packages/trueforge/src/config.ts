@@ -32,6 +32,7 @@ import {
 
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
+import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 
 const DEFAULT_PORT = 8790;
 /** Loopback default; container images set HOST=0.0.0.0 so probes and Service traffic reach the process. */
@@ -57,14 +58,6 @@ const DEFAULT_POSTGRES_DB = 'trueforge';
 const DEFAULT_POSTGRES_HOST = 'localhost';
 const DEFAULT_POSTGRES_PORT = 5432;
 const DEFAULT_REDIS_URL = 'redis://localhost:6379';
-/**
- * Legacy fixed local service credential for `STANDALONE=true`.
- * Kept exported for compatibility; standalone now generates a fresh random key
- * at process start when `TRUEFORGE_API_KEY` is unset (see `resolveTrueForgeApiKey`).
- * Local testing only — not for distributed deployments.
- */
-export const STANDALONE_TRUEFORGE_API_KEY = process.env['TRUEFORGE_API_KEY'] ?? 'dev-only-placeholder';
-
 /** Generate a fresh random standalone scheduler key (32 random bytes, hex). */
 export function generateStandaloneSchedulerKey(): string {
   return randomBytes(32).toString('hex');
@@ -79,6 +72,12 @@ export function generateStandaloneSchedulerKey(): string {
 export function resolveTrueForgeApiKey({ standalone }: { standalone: boolean }): string {
   const fromEnv = getEnv('TRUEFORGE_API_KEY');
   if (fromEnv !== undefined && fromEnv !== '') {
+    if (fromEnv === 'dev-only-placeholder' || fromEnv === 'placeholder-value-please-generate-your-own') {
+      throw new Error(
+        'Environment variable TRUEFORGE_API_KEY is set to a placeholder value. ' +
+          'Generate a real key, or unset it so standalone generates a random key at startup.',
+      );
+    }
     return fromEnv;
   }
   if (standalone) {
@@ -447,17 +446,20 @@ function resolveLocalSandboxRootParent(appDataDir: string): string {
   return path.join(appDataDir, 'sandboxes');
 }
 
-/** Max realpath bytes for the Code Mode socket parent (matches the transport seatbelt). */
-const MAX_CODE_MODE_SOCKET_PARENT_BYTES = 65;
-
 /**
  * Per-port tmp parent for Code Mode UDS socks, so multiple standalone instances
  * on one machine neither share nor wipe each other's sockets.
  * Fails clearly when the realpath would exceed the 65-byte socket budget.
  */
-export function resolveCodeModeSocketParent({ port }: { port: number }): string {
+export function resolveCodeModeSocketParent({
+  port,
+  realpathFn = realpathSync,
+}: {
+  port: number;
+  realpathFn?: (path: string) => string;
+}): string {
   const parent = path.join(os.tmpdir(), `tf_cms_${String(port)}`);
-  const realParent = path.join(realpathSync(os.tmpdir()), `tf_cms_${String(port)}`);
+  const realParent = path.join(realpathFn(os.tmpdir()), `tf_cms_${String(port)}`);
   const bytes = Buffer.byteLength(realParent, 'utf8');
   if (bytes > MAX_CODE_MODE_SOCKET_PARENT_BYTES) {
     throw new Error(
@@ -1130,7 +1132,7 @@ export interface SharedServerConfiguration {
   /**
    * Service credential for controller calls.
    * Env: `TRUEFORGE_API_KEY`. Required and non-empty when `STANDALONE=false`.
-   * Standalone defaults to {@link STANDALONE_TRUEFORGE_API_KEY} (local testing only).
+   * Standalone generates a fresh random key at process start when unset (local only).
    */
   TRUEFORGE_API_KEY: string;
   /**

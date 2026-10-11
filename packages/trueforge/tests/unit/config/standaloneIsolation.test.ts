@@ -1,24 +1,17 @@
 import * as fs from 'node:fs';
 import { rm } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger } from 'winston';
-import {
-  resolveCodeModeSocketParent,
-  resolveTrueForgeApiKey,
-} from '../../../src/config';
-import {
-  prepareCodeModeSocketParent,
-  removeCodeModeSocketParent,
-} from '../../../src/sandbox/localLifecycle';
+import { resolveCodeModeSocketParent, resolveTrueForgeApiKey } from '../../../src/config';
+import { prepareCodeModeSocketParent, removeCodeModeSocketParent } from '../../../src/sandbox/localLifecycle';
 
 const logger = createLogger();
 
 describe('per-port Code Mode socket folders', () => {
   it('gives a distinct folder per port', () => {
-    const folders = [48711, 48712, 48713].map(port =>
-      resolveCodeModeSocketParent({ port }),
-    );
+    const folders = [48711, 48712, 48713].map(port => resolveCodeModeSocketParent({ port }));
     expect(new Set(folders).size).toBe(3);
     expect(folders[0]).toContain('tf_cms_48711');
     expect(folders[1]).toContain('tf_cms_48712');
@@ -45,16 +38,27 @@ describe('per-port Code Mode socket folders', () => {
     }
   });
 
+  it('refuses to remove a socket folder when its port is in use', async () => {
+    const port = 48729;
+    const folder = resolveCodeModeSocketParent({ port });
+    const blocker = createServer();
+    await new Promise<void>(resolve => blocker.listen(port, '127.0.0.1', resolve));
+    try {
+      await prepareCodeModeSocketParent({ path: folder, logger, port });
+      expect(fs.existsSync(folder)).toBe(true);
+      await expect(prepareCodeModeSocketParent({ path: folder, logger, port })).rejects.toThrow(/in use/);
+      expect(fs.existsSync(folder)).toBe(true);
+    } finally {
+      await new Promise<void>(resolve => blocker.close(() => resolve()));
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
   it('fails clearly when the realpath would exceed the socket byte budget', () => {
     const longTmp = join(tmpdir(), 'x'.repeat(80));
-    const spy = jest.spyOn(fs, 'realpathSync').mockReturnValue(longTmp);
-    try {
-      expect(() => resolveCodeModeSocketParent({ port: 48731 })).toThrow(
-        /too long after realpath/,
-      );
-    } finally {
-      spy.mockRestore();
-    }
+    expect(() => resolveCodeModeSocketParent({ port: 48731, realpathFn: () => longTmp })).toThrow(
+      /too long after realpath/,
+    );
   });
 });
 
@@ -98,8 +102,15 @@ describe('standalone scheduler key', () => {
   });
 
   it('throws for distributed mode when the env var is unset', () => {
-    expect(() => resolveTrueForgeApiKey({ standalone: false })).toThrow(
-      /TRUEFORGE_API_KEY/,
-    );
+    expect(() => resolveTrueForgeApiKey({ standalone: false })).toThrow(/TRUEFORGE_API_KEY/);
   });
+
+  it.each(['dev-only-placeholder', 'placeholder-value-please-generate-your-own'])(
+    'refuses placeholder key %s when set explicitly',
+    placeholder => {
+      process.env[ENV_KEY] = placeholder;
+      expect(() => resolveTrueForgeApiKey({ standalone: true })).toThrow(/placeholder/);
+      expect(() => resolveTrueForgeApiKey({ standalone: false })).toThrow(/placeholder/);
+    },
+  );
 });
