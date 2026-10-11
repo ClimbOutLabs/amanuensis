@@ -16,7 +16,7 @@ A three-tier permission system. Tier 1 runs silently. Tier 2 asks by default but
 
 Runs without asking:
 
-- Read-only allowlisted shell commands inside the workspace. The server parses the command: it must be a single simple command (no pipes, redirects, or chaining), argv[0] must match the allowlist exactly, and arguments must match the command's enumerated flag list.
+- Read-only allowlisted shell commands inside the workspace. The server parses the command: it must be a single simple command (no pipes, redirects, or chaining), argv[0] must match the allowlist exactly, flags must be on the command's enumerated flag list, and positional operands are allowed only where the command's own policy permits them (workspace-relative paths).
 - Local read-only system tools (first-party tools that only read, never write or reach outside the machine).
 
 These are the agent doing its job. Reads of sensitive paths (SSH keys, credential files, .env) are logged in the audit feed even when silent.
@@ -53,7 +53,7 @@ Web search and other connector tools always ask. They are never Tier 1, even for
 
 ## Durable Approvals
 
-Approvals survive restarts. When the user approves a Tier 2 or Tier 3 action, the approval is recorded in persistent storage keyed by the action's parameters. If the server restarts, the approval still stands for the action it covered. A changed action (different parameters) requires a fresh approval.
+Approvals survive restarts. When the user approves a Tier 2 or Tier 3 action, the approval is recorded in persistent storage keyed by the action's parameters. If the server restarts, the approval still stands for the action it covered. A changed action (different parameters) requires a fresh approval. Approvals are single-use: each approval covers one call and cannot be replayed for a later action.
 
 ## Classification
 
@@ -62,7 +62,7 @@ Classification is computed once, server-side, at action invocation. The tier tra
 ## Privacy
 
 - Approval history and the audit log are stored in the server's database
-- Every Tier 2 and Tier 3 action appears in the audit feed with its outcome
+- Every Tier 2 and Tier 3 action that is decided or runs appears in the audit feed with its outcome
 - Tier 1 reads of sensitive paths are logged
 
 ## Testing
@@ -79,3 +79,4 @@ Classification is computed once, server-side, at action invocation. The tier tra
 
 - Per-task auto-approval for Tier 3
 - Granular per-command allowlist editing in the UI
+- Offline mode: a separate switch in Sentinel settings, not part of the tier system
