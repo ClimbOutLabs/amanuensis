@@ -8,7 +8,12 @@
  */
 import type { OpenAPIHono } from '@hono/zod-openapi';
 import { Sessions, type TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import type { SandboxProvider } from '@truefoundry/trueforge-core/core';
+import {
+  DEFAULT_PINNED_PATH,
+  defaultSentinelServices,
+  type SandboxProvider,
+  type SentinelServices,
+} from '@truefoundry/trueforge-core/core';
 import { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -47,6 +52,7 @@ import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAu
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
+import { sentinelSettingsServices } from '../../src/runtime/sentinelSettingsServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
 import { INERT_SERVER_NAME, startInertMcpServer, type InertMcpServer } from './inertMcpServer';
 import { startScriptedModelServer, type ScriptedModelServer } from './scriptedModelServer';
@@ -77,6 +83,13 @@ function buildApp(input: {
 }): OpenAPIHono {
   const { db, sandboxProvider, authenticator } = input;
   const sessionStore = new SqliteSessionStore(db);
+  const sentinelAuditStore = new SentinelAuditStore(db);
+  const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
+  const sentinelServices: SentinelServices = {
+    ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
+    audit: sentinelAuditStore,
+    ...sentinelSettingsServices(sentinelSettingsStore),
+  };
   const tokenStore = new SqliteOAuthTokenStore(db);
   const agentStore = new SqliteAgentStore(db);
   const modelProviderStore = new SqliteModelProviderStore(db);
@@ -108,9 +121,9 @@ function buildApp(input: {
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore,
     sessionStore,
-    sentinelAuditStore: new SentinelAuditStore(db),
-    sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
-    sessions: new Sessions({ sessionStore }),
+    sentinelAuditStore,
+    sentinelSettingsStore,
+    sessions: new Sessions({ sessionStore, sentinelServices }),
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),
     requestReplyRouter: new RequestReplyRouter(),

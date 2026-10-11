@@ -2,24 +2,33 @@
  * Unit tests for the Docker isolation driver. No daemon: every docker/cosign
  * interaction is scripted through a fake DockerCommandRunner.
  */
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { createHash, generateKeyPairSync } from 'node:crypto';
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
+  checkContainerIsolation,
+  detectDocker,
   DOCKER_UNAVAILABLE_MESSAGE,
   DockerDriver,
   ISOLATION_REFUSED_MESSAGE,
-  checkContainerIsolation,
-  detectDocker,
   resetDockerDetectionForTests,
   type DockerCommandResult,
   type DockerCommandRunner,
   type DockerDriverOptions,
 } from '../../../../src/core/sandbox/driver/DockerDriver';
+import {
+  imageVerificationRecordPath,
+  readImageVerificationRecord,
+} from '../../../../src/core/sandbox/driver/ImageVerificationRecord';
 import { ISOLATION_REFUSED_MARKER, type DriverRunParams } from '../../../../src/core/sandbox/driver/IsolationDriver';
+import { stageRunDirs } from '../../../../src/core/sandbox/driver/RunStaging';
+import { makeSilentLogger } from '../../harnessMocks';
+import { FakeSandboxContainers } from './FakeSandboxContainers';
 
 const DIGEST = 'sha256:' + 'a'.repeat(64);
 const IMAGE = `ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0@${DIGEST}`;
+const IMAGE_ID = 'sha256:' + '1'.repeat(64);
 const KEY_PATH = '/etc/amanuensis/cosign.pub';
 
 interface RecordedCall {
@@ -81,11 +90,14 @@ function driverOptions(): DockerDriverOptions {
   return {
     image: IMAGE,
     cosignPublicKeyPath: KEY_PATH,
+    stateDir,
     dockerBinary: undefined,
     cosignBinary: undefined,
     dockerSocketPath: fakeSocketPath,
+    dataDir: fakeDataDir,
     commandTimeoutMs: undefined,
     createTimeoutMs: undefined,
+    logger: makeSilentLogger(),
   };
 }
 
@@ -95,13 +107,24 @@ function driverOptions(): DockerDriverOptions {
  * tests so each test's detection is independent.
  */
 let fakeSocketPath: string | undefined;
+let fakeDataDir = '';
+/** Per-test driver state dir, so a verification record never leaks between tests. */
+let stateDir = '';
 beforeAll(async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tf-docker-socket-'));
   fakeSocketPath = join(dir, 'docker.sock');
   await writeFile(fakeSocketPath, '');
+  fakeDataDir = await mkdtemp(join(tmpdir(), 'tf-docker-data-'));
 });
-beforeEach(() => {
+afterAll(async () => {
+  await rm(fakeDataDir, { recursive: true, force: true });
+});
+beforeEach(async () => {
   resetDockerDetectionForTests();
+  stateDir = await mkdtemp(join(tmpdir(), 'tf-docker-state-'));
+});
+afterEach(async () => {
+  await rm(stateDir, { recursive: true, force: true });
 });
 
 function runParams(overrides: { signal?: AbortSignal | undefined } = {}): DriverRunParams {
@@ -117,40 +140,52 @@ function runParams(overrides: { signal?: AbortSignal | undefined } = {}): Driver
     diskMb: 1024,
     runId: 'run-123',
     env: { PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8', HOME: '/scratch' },
+    sandboxIdentity: { uid: 65532, gid: 65532, chownRunDirs: true },
     signal: overrides.signal,
     harvestGraceMs: 2000,
   };
 }
 
-/** ensureReady happy path: info, inspect (pinned digest), cosign, create probe, ownership probe. */
-function scriptReadyPath(runner: FakeRunner, digest = DIGEST): void {
-  runner.runHandler = async (binary, args) => {
+/** `docker image inspect` output for the pinned image as the daemon reports it. */
+function inspectOutput({ digest, imageId }: { digest: string; imageId: string }): string {
+  return JSON.stringify([{ Id: imageId, RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${digest}`] }]);
+}
+
+/**
+ * ensureReady happy path: info, inspect (pinned digest), cosign, create probe,
+ * then the canary run (create, isolation inspect, attach, kill, rm). The canary
+ * container is the DAC-enforcing fake, so a staging/uid mismatch fails it.
+ */
+function scriptReadyPath(runner: FakeRunner, digest = DIGEST, containers = new FakeSandboxContainers(undefined)): void {
+  runner.attachHandler = input =>
+    containers.attach({
+      containerId: input.containerId,
+      onStderr: chunk => {
+        input.onStderr(chunk);
+      },
+    });
+  runner.runHandler = (binary, args) => {
     if (binary === 'docker' && args[0] === 'info') {
       return okResult;
     }
     if (binary === 'docker' && args[0] === 'image') {
-      return {
-        ...okResult,
-        stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${digest}`] }]),
-      };
+      return { ...okResult, stdout: inspectOutput({ digest, imageId: IMAGE_ID }) };
     }
     if (binary === 'cosign') {
       return okResult;
     }
     if (binary === 'docker' && args[0] === 'create') {
-      return { ...okResult, stdout: 'probe-container-id\n' };
+      // The wedged-daemon probe carries --entrypoint; anything else is the canary run.
+      const id = args.includes('--entrypoint') ? 'probe-container-id' : containers.create(args);
+      return { ...okResult, stdout: `${id}\n` };
     }
-    if (binary === 'docker' && args[0] === 'run') {
-      // Simulate the daemon's bind-mount write as the sandbox uid: the probe
-      // container touches /probe/write-test, which must appear on the host.
-      const volume = args.find(arg => arg.endsWith(':/probe:rw'));
-      const hostDir = volume?.split(':')[0];
-      if (hostDir !== undefined) {
-        await writeFile(join(hostDir, 'write-test'), 'probe');
-      }
-      return { ...okResult, stdout: 'PROBE_OK\n' };
+    if (binary === 'docker' && args[0] === 'inspect' && args.length === 2) {
+      return { ...okResult, stdout: JSON.stringify([goodInspectEntry(containers.userOf(args[1] ?? ''))]) };
     }
-    if (binary === 'docker' && args[0] === 'rm') {
+    if (binary === 'docker' && (args[0] === 'rm' || args[0] === 'kill')) {
+      return okResult;
+    }
+    if (binary === 'docker' && args[0] === 'ps') {
       return okResult;
     }
     throw new Error(`unexpected call: ${binary} ${args.join(' ')}`);
@@ -158,9 +193,9 @@ function scriptReadyPath(runner: FakeRunner, digest = DIGEST): void {
 }
 
 /** A `docker inspect` entry carrying every mandatory isolation flag. */
-function goodInspectEntry(): Record<string, unknown> {
+function goodInspectEntry(user = '65532:65532'): Record<string, unknown> {
   return {
-    Config: { User: '65532:65532' },
+    Config: { User: user },
     HostConfig: {
       NetworkMode: 'none',
       ReadonlyRootfs: true,
@@ -255,6 +290,22 @@ describe('DockerDriver.create', () => {
       'python3',
       '/ingress/__runcode_main.py',
     ]);
+  });
+
+  test('runs as the numeric server uid:gid with no supplementary groups', async () => {
+    const runner = new FakeRunner();
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-1\n' };
+      }
+      return okResult;
+    };
+    scriptIsolationInspect(runner);
+    const driver = new DockerDriver(driverOptions(), runner);
+    await driver.run({ ...runParams(), sandboxIdentity: { uid: 1000, gid: 1001, chownRunDirs: false } });
+    const args = runner.callsFor('create')[0]?.args ?? [];
+    expect(args[args.indexOf('--user') + 1]).toBe('1000:1001');
+    expect(args.some(arg => arg.startsWith('--group-add'))).toBe(false);
   });
 
   test('node runs the staged .mjs program', async () => {
@@ -440,28 +491,24 @@ describe('DockerDriver.ensureReady', () => {
     scriptReadyPath(runner);
     const driver = new DockerDriver(driverOptions(), runner);
     await expect(driver.ensureReady()).resolves.toEqual({ ready: true });
-    const rms = runner.callsFor('rm');
-    expect(rms).toHaveLength(1);
-    expect(rms[0]?.args).toContain('probe-container-id');
+    // Both throwaway containers are removed: the wedged-daemon probe and the canary run.
+    expect(runner.callsFor('rm').map(call => call.args[2])).toEqual(['probe-container-id', 'fake-container-1']);
   });
 
-  test('bind-mount ownership probe failure is daemon_unavailable', async () => {
+  test('a canary container that cannot write is daemon_unavailable', async () => {
     const runner = new FakeRunner();
     scriptReadyPath(runner);
-    const readyPath = runner.runHandler;
-    runner.runHandler = async (binary, args) => {
-      if (binary === 'docker' && args[0] === 'run') {
-        return { ...okResult, exitCode: 1, stderr: 'touch: /probe/write-test: Permission denied' };
-      }
-      return readyPath(binary, args);
+    runner.attachHandler = input => {
+      input.onStderr(Buffer.from("PermissionError: [Errno 13] Permission denied: '/egress/out'\n"));
+      return Promise.resolve(1);
     };
     const driver = new DockerDriver(driverOptions(), runner);
     const readiness = await driver.ensureReady();
     expect(readiness.ready).toBe(false);
     if (!readiness.ready) {
       expect(readiness.error_code).toBe('daemon_unavailable');
-      expect(readiness.error).toMatch(/ownership probe failed/);
-      expect(readiness.error).toMatch(/virtiofs/);
+      expect(readiness.error).toMatch(/canary run failed/);
+      expect(readiness.error).toMatch(/Permission denied/);
     }
   });
 
@@ -557,10 +604,7 @@ describe('DockerDriver.ensureReady', () => {
         return okResult;
       }
       if (binary === 'docker' && args[0] === 'image') {
-        return {
-          ...okResult,
-          stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${DIGEST}`] }]),
-        };
+        return { ...okResult, stdout: inspectOutput({ digest: DIGEST, imageId: IMAGE_ID }) };
       }
       if (binary === 'cosign') {
         return { ...okResult, exitCode: 1, stderr: 'no matching signatures' };
@@ -585,10 +629,7 @@ describe('DockerDriver.ensureReady', () => {
         return okResult;
       }
       if (binary === 'docker' && args[0] === 'image') {
-        return {
-          ...okResult,
-          stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${DIGEST}`] }]),
-        };
+        return { ...okResult, stdout: inspectOutput({ digest: DIGEST, imageId: IMAGE_ID }) };
       }
       if (binary === 'cosign') {
         // cosign echoes the missing/unreadable key path in stderr.
@@ -612,10 +653,7 @@ describe('DockerDriver.ensureReady', () => {
         return okResult;
       }
       if (binary === 'docker' && args[0] === 'image') {
-        return {
-          ...okResult,
-          stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${DIGEST}`] }]),
-        };
+        return { ...okResult, stdout: inspectOutput({ digest: DIGEST, imageId: IMAGE_ID }) };
       }
       if (binary === 'cosign') {
         return okResult;
@@ -691,6 +729,320 @@ describe('DockerDriver.provision', () => {
   });
 });
 
+describe('DockerDriver image verification record', () => {
+  const OTHER_DIGEST = 'sha256:' + 'b'.repeat(64);
+  const OTHER_IMAGE_ID = 'sha256:' + '2'.repeat(64);
+  const OFFLINE: DockerCommandResult = {
+    stdout: '',
+    stderr: 'Error: getting signature: Get "https://ghcr.io/v2/": dial tcp: lookup ghcr.io: no such host',
+    exitCode: 1,
+    timedOut: false,
+  };
+  const BAD_SIGNATURE: DockerCommandResult = { ...okResult, exitCode: 1, stderr: 'no matching signatures' };
+
+  /** What the daemon and the registry say right now; tests mutate it between probes. */
+  interface World {
+    digest: string;
+    imageId: string;
+    cosign: DockerCommandResult;
+  }
+
+  let keyDir = '';
+  let keyPath = '';
+
+  function publicKeyPem(): string {
+    const { publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    return publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  }
+
+  function expectedFingerprint(pem: string): string {
+    const body = pem.replace(/-----[A-Z ]+-----/g, '').replace(/\s+/g, '');
+    return `sha256:${createHash('sha256').update(Buffer.from(body, 'base64')).digest('hex')}`;
+  }
+
+  beforeEach(async () => {
+    keyDir = await mkdtemp(join(tmpdir(), 'tf-docker-key-'));
+    keyPath = join(keyDir, 'cosign.pub');
+    await writeFile(keyPath, publicKeyPem());
+  });
+  afterEach(async () => {
+    await rm(keyDir, { recursive: true, force: true });
+  });
+
+  function scriptWorld(runner: FakeRunner, world: World): void {
+    scriptReadyPath(runner);
+    const ready = runner.runHandler;
+    runner.runHandler = (binary, args) => {
+      if (binary === 'docker' && args[0] === 'image') {
+        return { ...okResult, stdout: inspectOutput({ digest: world.digest, imageId: world.imageId }) };
+      }
+      if (binary === 'cosign') {
+        return world.cosign;
+      }
+      return ready(binary, args);
+    };
+  }
+
+  function newDriver(runner: FakeRunner, overrides: Partial<DockerDriverOptions> = {}): DockerDriver {
+    return new DockerDriver({ ...driverOptions(), cosignPublicKeyPath: keyPath, ...overrides }, runner);
+  }
+
+  function cosignCalls(runner: FakeRunner): number {
+    return runner.calls.filter(call => call.binary === 'cosign').length;
+  }
+
+  /** A runner whose first probe verified online and recorded; the network is down afterwards. */
+  async function recordedThenOffline(): Promise<{ runner: FakeRunner; world: World }> {
+    const runner = new FakeRunner();
+    const world: World = { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult };
+    scriptWorld(runner, world);
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(1);
+    world.cosign = OFFLINE;
+    return { runner, world };
+  }
+
+  test('the first probe verifies online and records the result bound to digest, image ID, and key', async () => {
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    const record = await readImageVerificationRecord({ stateDir });
+    expect(record).toMatchObject({
+      image_ref: IMAGE,
+      image_digest: DIGEST,
+      image_id: IMAGE_ID,
+      key_fingerprint: expectedFingerprint(await readFile(keyPath, 'utf8')),
+    });
+    expect(Number.isNaN(Date.parse(record?.verified_at ?? ''))).toBe(false);
+  });
+
+  test('readiness passes offline after a recorded verification, even from a fresh driver', async () => {
+    const { runner } = await recordedThenOffline();
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(1);
+  });
+
+  test('offline readiness still enforces the RepoDigest pin', async () => {
+    const { runner, world } = await recordedThenOffline();
+    world.digest = OTHER_DIGEST;
+    const readiness = await newDriver(runner).ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_unavailable');
+      expect(readiness.error).toContain('mismatch');
+    }
+    expect(cosignCalls(runner)).toBe(1);
+  });
+
+  test('a changed local image ID forces re-verification and the new result is recorded', async () => {
+    const { runner, world } = await recordedThenOffline();
+    world.imageId = OTHER_IMAGE_ID;
+    const offline = await newDriver(runner).ensureReady();
+    expect(offline.ready).toBe(false);
+    expect(cosignCalls(runner)).toBe(2);
+
+    world.cosign = okResult;
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(3);
+    expect((await readImageVerificationRecord({ stateDir }))?.image_id).toBe(OTHER_IMAGE_ID);
+
+    world.cosign = OFFLINE;
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(3);
+  });
+
+  test('a changed pinned digest forces re-verification', async () => {
+    const { runner, world } = await recordedThenOffline();
+    world.digest = OTHER_DIGEST;
+    const driver = newDriver(runner, { image: `ghcr.io/climboutlabs/amanuensis-sandbox:0.1.0@${OTHER_DIGEST}` });
+    const offline = await driver.ensureReady();
+    expect(offline.ready).toBe(false);
+    expect(cosignCalls(runner)).toBe(2);
+
+    world.cosign = okResult;
+    await expect(driver.ensureReady()).resolves.toEqual({ ready: true });
+    expect((await readImageVerificationRecord({ stateDir }))?.image_digest).toBe(OTHER_DIGEST);
+  });
+
+  test('a record made under a different key fingerprint is ignored', async () => {
+    const { runner } = await recordedThenOffline();
+    await writeFile(keyPath, publicKeyPem());
+    const readiness = await newDriver(runner).ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_unavailable');
+    }
+    expect(cosignCalls(runner)).toBe(2);
+  });
+
+  test('an unreadable key never lets a record stand in for verification', async () => {
+    const { runner } = await recordedThenOffline();
+    const readiness = await newDriver(runner, { cosignPublicKeyPath: join(keyDir, 'missing.pub') }).ensureReady();
+    expect(readiness.ready).toBe(false);
+    expect(cosignCalls(runner)).toBe(2);
+  });
+
+  test('an unrecordable key re-verifies on every probe', async () => {
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
+    const driver = newDriver(runner, { cosignPublicKeyPath: join(keyDir, 'missing.pub') });
+    await driver.ensureReady();
+    await driver.ensureReady();
+    expect(cosignCalls(runner)).toBe(2);
+    expect(await readImageVerificationRecord({ stateDir })).toBeUndefined();
+  });
+
+  const tamperings: [string, () => Promise<void>][] = [
+    ['a missing record', () => rm(imageVerificationRecordPath({ stateDir }))],
+    ['a record that is not JSON', () => writeFile(imageVerificationRecordPath({ stateDir }), 'not json')],
+    ['a record of the wrong shape', () => writeFile(imageVerificationRecordPath({ stateDir }), '{"image_id":"x"}')],
+    [
+      'a record whose image ID was edited',
+      async () => {
+        const record = await readImageVerificationRecord({ stateDir });
+        await writeFile(
+          imageVerificationRecordPath({ stateDir }),
+          JSON.stringify({ ...record, image_id: OTHER_IMAGE_ID }),
+        );
+      },
+    ],
+    [
+      'a record whose image reference was edited',
+      async () => {
+        const record = await readImageVerificationRecord({ stateDir });
+        await writeFile(
+          imageVerificationRecordPath({ stateDir }),
+          JSON.stringify({ ...record, image_ref: `registry.example/other@${DIGEST}` }),
+        );
+      },
+    ],
+  ];
+
+  test.each(tamperings)('%s re-verifies', async (_name, tamper) => {
+    const { runner, world } = await recordedThenOffline();
+    await tamper();
+    const offline = await newDriver(runner).ensureReady();
+    expect(offline.ready).toBe(false);
+    expect(cosignCalls(runner)).toBe(2);
+
+    world.cosign = okResult;
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(3);
+
+    world.cosign = OFFLINE;
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(3);
+  });
+
+  test('provisioning re-verifies even when a matching record exists', async () => {
+    const { runner, world } = await recordedThenOffline();
+    world.cosign = okResult;
+    await newDriver(runner).provision({ signal: undefined, onProgress: () => undefined, timeoutSeconds: 600 });
+    expect(cosignCalls(runner)).toBe(2);
+  });
+
+  test('a provisioned image is recorded so later probes pass offline', async () => {
+    const runner = new FakeRunner();
+    const world: World = { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult };
+    scriptWorld(runner, world);
+    await newDriver(runner).provision({ signal: undefined, onProgress: () => undefined, timeoutSeconds: 600 });
+    world.cosign = OFFLINE;
+    await expect(newDriver(runner).ensureReady()).resolves.toEqual({ ready: true });
+    expect(cosignCalls(runner)).toBe(1);
+  });
+
+  test('verification needed while offline is image_unavailable with actionable text', async () => {
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: OFFLINE });
+    const readiness = await newDriver(runner, { cosignPublicKeyPath: keyPath }).ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_unavailable');
+      expect(readiness.error).toContain('could not reach the image registry');
+      expect(readiness.error).toContain('connect to the internet once');
+      expect(readiness.error).not.toContain(keyPath);
+    }
+    expect(runner.callsFor('create')).toHaveLength(0);
+  });
+
+  test('a cosign timeout is reported as an unreachable registry, not a bad signature', async () => {
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: { ...okResult, exitCode: -1, timedOut: true } });
+    const readiness = await newDriver(runner).ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).toContain('could not reach the image registry');
+    }
+  });
+
+  test('a rejected signature keeps the verification-failed wording and writes no record', async () => {
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: BAD_SIGNATURE });
+    const readiness = await newDriver(runner).ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).toContain('cosign signature verification failed');
+      expect(readiness.error).not.toContain('could not reach');
+    }
+    expect(await readImageVerificationRecord({ stateDir })).toBeUndefined();
+  });
+
+  test('an unwritable state dir does not fail an otherwise verified readiness', async () => {
+    const blocker = join(keyDir, 'not-a-directory');
+    await writeFile(blocker, '');
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
+    await expect(newDriver(runner, { stateDir: blocker }).ensureReady()).resolves.toEqual({ ready: true });
+  });
+
+  test('an unwritable state dir is logged by errno code, without the host path', async () => {
+    const blocker = join(keyDir, 'not-a-directory');
+    await writeFile(blocker, '');
+    const logger = makeSilentLogger();
+    const warn = jest.spyOn(logger, 'warn');
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
+    await newDriver(runner, { stateDir: join(blocker, 'state'), logger }).ensureReady();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('verification record could not be saved'), {
+      errorCode: 'ENOTDIR',
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(keyDir);
+  });
+
+  test('a saved record logs nothing', async () => {
+    const logger = makeSilentLogger();
+    const warn = jest.spyOn(logger, 'warn');
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
+    await newDriver(runner, { logger }).ensureReady();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test('an image whose inspect reports no ID is refused', async () => {
+    const runner = new FakeRunner();
+    scriptWorld(runner, { digest: DIGEST, imageId: IMAGE_ID, cosign: okResult });
+    const ready = runner.runHandler;
+    runner.runHandler = (binary, args) => {
+      if (binary === 'docker' && args[0] === 'image') {
+        return {
+          ...okResult,
+          stdout: JSON.stringify([{ RepoDigests: [`ghcr.io/climboutlabs/amanuensis-sandbox@${DIGEST}`] }]),
+        };
+      }
+      return ready(binary, args);
+    };
+    const readiness = await newDriver(runner).ensureReady();
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('image_unavailable');
+      expect(readiness.error).toContain('no image ID');
+    }
+    expect(cosignCalls(runner)).toBe(0);
+  });
+});
+
 describe('DockerDriver.reapStale', () => {
   test('removes only labeled containers older than 30 minutes', async () => {
     const runner = new FakeRunner();
@@ -722,6 +1074,74 @@ describe('DockerDriver.reapStale', () => {
     runner.runHandler = () => ({ ...okResult, exitCode: 1, stderr: 'daemon down' });
     const driver = new DockerDriver(driverOptions(), runner);
     await expect(driver.reapStale()).resolves.toBeUndefined();
+  });
+});
+
+describe('DockerDriver.isRunGone', () => {
+  const gone = async (result: DockerCommandResult | Error): Promise<boolean> => {
+    const runner = new FakeRunner();
+    runner.runHandler = () => {
+      if (result instanceof Error) {
+        throw result;
+      }
+      return result;
+    };
+    return new DockerDriver(driverOptions(), runner).isRunGone('run-1');
+  };
+
+  test('asks for containers of that run in any state, under the label the run was created with', async () => {
+    const runner = new FakeRunner();
+    await new DockerDriver(driverOptions(), runner).isRunGone('run/1 x');
+    expect(runner.callsFor('ps')[0]?.args).toEqual([
+      'ps',
+      '-a',
+      '--filter',
+      'label=tf.sandbox.run=run_1_x',
+      '--format',
+      '{{.ID}}',
+    ]);
+  });
+
+  test('is gone when no container carries the label', async () => {
+    await expect(gone(okResult)).resolves.toBe(true);
+  });
+
+  test('is not gone while a container still carries the label', async () => {
+    await expect(gone({ ...okResult, stdout: 'abc123\n' })).resolves.toBe(false);
+  });
+
+  test.each([
+    ['the query fails', { ...okResult, exitCode: 1, stderr: 'daemon down' }],
+    ['the query times out', { ...okResult, timedOut: true }],
+    ['the runner throws', new Error('spawn failed')],
+  ])('is not gone when %s, because it cannot be confirmed', async (_name, result) => {
+    await expect(gone(result)).resolves.toBe(false);
+  });
+});
+
+describe('DockerDriver.ensureReady canary cleanup', () => {
+  const fsPromises: typeof import('node:fs/promises') = jest.requireActual('node:fs/promises');
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const readyWithPs = async (psStdout: string): Promise<jest.SpyInstance> => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const ready = runner.runHandler;
+    runner.runHandler = (binary, args) => (args[0] === 'ps' ? { ...okResult, stdout: psStdout } : ready(binary, args));
+    const chmodSpy = jest.spyOn(fsPromises, 'chmod');
+    await expect(new DockerDriver(driverOptions(), runner).ensureReady()).resolves.toEqual({ ready: true });
+    return chmodSpy;
+  };
+
+  test('restores permissions on the canary tree once its container is gone', async () => {
+    expect(await readyWithPs('')).toHaveBeenCalled();
+  });
+
+  test('leaves the canary tree permissions alone while its container may be alive', async () => {
+    expect(await readyWithPs('canary-container\n')).not.toHaveBeenCalled();
   });
 });
 
@@ -824,20 +1244,24 @@ describe('DockerDriver.ensureReady docker detection', () => {
 });
 
 describe('checkContainerIsolation', () => {
+  const SANDBOX_IDENTITY = { uid: 65532, gid: 65532, chownRunDirs: true };
+
   test('accepts a fully hardened container', () => {
-    expect(checkContainerIsolation({ inspectJson: JSON.stringify([goodInspectEntry()]) })).toEqual({ ok: true });
+    expect(
+      checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([goodInspectEntry()]) }),
+    ).toEqual({ ok: true });
   });
 
   test('rejects malformed inspect output', () => {
-    expect(checkContainerIsolation({ inspectJson: 'not json' }).ok).toBe(false);
-    expect(checkContainerIsolation({ inspectJson: '[]' }).ok).toBe(false);
-    expect(checkContainerIsolation({ inspectJson: '{}' }).ok).toBe(false);
+    expect(checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: 'not json' }).ok).toBe(false);
+    expect(checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: '[]' }).ok).toBe(false);
+    expect(checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: '{}' }).ok).toBe(false);
   });
 
   test('rejects a container with network access', () => {
     const entry = goodInspectEntry();
     (entry['HostConfig'] as Record<string, unknown>)['NetworkMode'] = 'bridge';
-    const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
+    const result = checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toMatch(/NetworkMode/);
@@ -847,29 +1271,59 @@ describe('checkContainerIsolation', () => {
   test('rejects a writable root filesystem', () => {
     const entry = goodInspectEntry();
     (entry['HostConfig'] as Record<string, unknown>)['ReadonlyRootfs'] = false;
-    const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
+    const result = checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toMatch(/read-only/);
     }
   });
 
+  test.each([
+    [1000, 1001],
+    [65532, 65532],
+  ])('accepts a container running as the expected user %p:%p', (uid, gid) => {
+    expect(
+      checkContainerIsolation({
+        identity: { uid, gid, chownRunDirs: false },
+        inspectJson: JSON.stringify([goodInspectEntry(`${String(uid)}:${String(gid)}`)]),
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  test.each(['1000:1001', '65532', '4242:65532', '65532:4242', 'nobody'])(
+    'rejects the non-root user %p when the container was created for 65532:65532',
+    user => {
+      const result = checkContainerIsolation({
+        identity: SANDBOX_IDENTITY,
+        inspectJson: JSON.stringify([goodInspectEntry(user)]),
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe(`container user is '${user}', expected '65532:65532'`);
+      }
+    },
+  );
+
   test.each(['0', 'root', '0:0', ''])('rejects root user %p', user => {
     const entry = goodInspectEntry();
     (entry['Config'] as Record<string, unknown>)['User'] = user;
-    expect(checkContainerIsolation({ inspectJson: JSON.stringify([entry]) }).ok).toBe(false);
+    expect(checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) }).ok).toBe(
+      false,
+    );
   });
 
   test('rejects missing capability drop', () => {
     const entry = goodInspectEntry();
     (entry['HostConfig'] as Record<string, unknown>)['CapDrop'] = [];
-    expect(checkContainerIsolation({ inspectJson: JSON.stringify([entry]) }).ok).toBe(false);
+    expect(checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) }).ok).toBe(
+      false,
+    );
   });
 
   test('rejects missing no-new-privileges', () => {
     const entry = goodInspectEntry();
     (entry['HostConfig'] as Record<string, unknown>)['SecurityOpt'] = ['seccomp=default'];
-    const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
+    const result = checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toMatch(/no-new-privileges/);
@@ -879,7 +1333,7 @@ describe('checkContainerIsolation', () => {
   test('rejects missing seccomp profile', () => {
     const entry = goodInspectEntry();
     (entry['HostConfig'] as Record<string, unknown>)['SecurityOpt'] = ['no-new-privileges:true'];
-    const result = checkContainerIsolation({ inspectJson: JSON.stringify([entry]) });
+    const result = checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toMatch(/seccomp/);
@@ -888,6 +1342,10 @@ describe('checkContainerIsolation', () => {
 });
 
 describe('DockerDriver.run isolation refusal', () => {
+  test('the refusal message uses plain punctuation, with no em dashes', () => {
+    expect(ISOLATION_REFUSED_MESSAGE).not.toContain('\u2014');
+  });
+
   test('refuses the run when the created container lacks network isolation', async () => {
     const runner = new FakeRunner();
     let attached = false;
@@ -916,6 +1374,30 @@ describe('DockerDriver.run isolation refusal', () => {
     expect(runner.callsFor('rm').length).toBeGreaterThan(0);
   });
 
+  test('refuses the run when the created container runs as a different non-root user than requested', async () => {
+    const runner = new FakeRunner();
+    let attached = false;
+    runner.runHandler = (_binary, args) => {
+      if (args[0] === 'create') {
+        return { ...okResult, stdout: 'cid-wronguser\n' };
+      }
+      if (args[0] === 'inspect' && args.length === 2) {
+        return { ...okResult, stdout: JSON.stringify([goodInspectEntry('4242:4242')]) };
+      }
+      return okResult;
+    };
+    runner.attachHandler = () => {
+      attached = true;
+      return Promise.resolve(0);
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+    const result = await driver.run(runParams());
+    expect(result.terminatedBy).toBe('internal');
+    expect(result.internalError).toBe(`${ISOLATION_REFUSED_MARKER}${ISOLATION_REFUSED_MESSAGE}`);
+    expect(attached).toBe(false);
+    expect(runner.callsFor('rm').length).toBeGreaterThan(0);
+  });
+
   test('refuses the run when the verification inspect itself fails', async () => {
     const runner = new FakeRunner();
     runner.runHandler = (_binary, args) => {
@@ -931,5 +1413,315 @@ describe('DockerDriver.run isolation refusal', () => {
     const result = await driver.run(runParams());
     expect(result.terminatedBy).toBe('internal');
     expect(result.internalError).toBe(`${ISOLATION_REFUSED_MARKER}${ISOLATION_REFUSED_MESSAGE}`);
+  });
+});
+
+describe('DockerDriver.ensureReady canary', () => {
+  const fsPromises: typeof import('node:fs/promises') = jest.requireActual('node:fs/promises');
+  let chownSpy: jest.SpyInstance;
+  let geteuidSpy: jest.SpyInstance;
+  let getegidSpy: jest.SpyInstance;
+
+  /** The server process acts as this uid:gid; every chown is recorded on the fake host instead of applied. */
+  function actAsServer(input: { server: { uid: number; gid: number }; containers: FakeSandboxContainers }): void {
+    geteuidSpy.mockReturnValue(input.server.uid);
+    getegidSpy.mockReturnValue(input.server.gid);
+    chownSpy.mockImplementation((path: string, uid: number, gid: number) => {
+      input.containers.recordChown({ path, owner: { uid, gid } });
+      return Promise.resolve();
+    });
+  }
+
+  function canaryCreate(runner: FakeRunner): string[] {
+    const canary = runner.callsFor('create').find(call => !call.args.includes('--entrypoint'));
+    if (canary === undefined) {
+      throw new Error('expected a canary docker create');
+    }
+    return canary.args;
+  }
+
+  function flagValues(args: string[], flag: string): string[] {
+    return args.flatMap((arg, index) => (arg === flag ? [args[index + 1] ?? ''] : []));
+  }
+
+  /** Host dir behind one of the canary container's bind mounts. */
+  function hostDirOf(runner: FakeRunner, containerPath: string): string {
+    const mount = flagValues(canaryCreate(runner), '-v').find(value => value.split(':')[1] === containerPath);
+    const hostDir = mount?.split(':')[0];
+    if (hostDir === undefined) {
+      throw new Error(`expected a canary mount at ${containerPath}`);
+    }
+    return hostDir;
+  }
+
+  async function runDirEntries(): Promise<string[]> {
+    return readdir(join(fakeDataDir, 'sandbox-runs')).catch(() => []);
+  }
+
+  beforeEach(() => {
+    chownSpy = jest.spyOn(fsPromises, 'chown');
+    geteuidSpy = jest.spyOn(process, 'geteuid');
+    getegidSpy = jest.spyOn(process, 'getegid');
+  });
+
+  afterEach(async () => {
+    chownSpy.mockRestore();
+    geteuidSpy.mockRestore();
+    getegidSpy.mockRestore();
+    // A failed canary must not leave its run root behind for the next test's assertions.
+    for (const entry of await runDirEntries()) {
+      await rm(join(fakeDataDir, 'sandbox-runs', entry), { recursive: true, force: true });
+    }
+  });
+
+  test('non-root server: canary runs as its own uid:gid, unchowned, under the runs dir, and cleans up', async () => {
+    const server = { uid: 4242, gid: 4343 };
+    const containers = new FakeSandboxContainers(server);
+    const runner = new FakeRunner();
+    scriptReadyPath(runner, DIGEST, containers);
+    actAsServer({ server, containers });
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    await expect(driver.ensureReady()).resolves.toEqual({ ready: true });
+
+    expect(chownSpy).not.toHaveBeenCalled();
+    const args = canaryCreate(runner);
+    expect(flagValues(args, '--user')).toEqual(['4242:4343']);
+    expect(args.some(arg => arg.startsWith('--group-add'))).toBe(false);
+    const env = flagValues(args, '-e');
+    expect(env).toEqual(expect.arrayContaining(['USER=sandbox', 'LOGNAME=sandbox', 'HOME=/scratch']));
+    // The canary is staged beside real runs, never in os.tmpdir().
+    const runsDir = join(await realpath(fakeDataDir), 'sandbox-runs');
+    const mounts = flagValues(args, '-v');
+    expect(mounts).toHaveLength(3);
+    for (const mount of mounts) {
+      expect(mount.startsWith(`${runsDir}/canary-`)).toBe(true);
+    }
+    expect(await runDirEntries()).toEqual([]);
+  });
+
+  test('a non-root server in group 0 is not ready and starts no canary container', async () => {
+    const containers = new FakeSandboxContainers(undefined);
+    const runner = new FakeRunner();
+    scriptReadyPath(runner, DIGEST, containers);
+    geteuidSpy.mockReturnValue(4242);
+    getegidSpy.mockReturnValue(0);
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('daemon_unavailable');
+      expect(readiness.error).toMatch(/gid 0/);
+    }
+    // Only the wedged-daemon probe created a container.
+    expect(runner.callsFor('create')).toHaveLength(1);
+    expect(await runDirEntries()).toEqual([]);
+  });
+
+  test('root server: canary runs as the image uid after handing every dir and file to it', async () => {
+    const server = { uid: 0, gid: 0 };
+    const containers = new FakeSandboxContainers(server);
+    const runner = new FakeRunner();
+    scriptReadyPath(runner, DIGEST, containers);
+    actAsServer({ server, containers });
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    await expect(driver.ensureReady()).resolves.toEqual({ ready: true });
+
+    const args = canaryCreate(runner);
+    expect(flagValues(args, '--user')).toEqual(['65532:65532']);
+    const chowned = chownSpy.mock.calls.map(call => ({ path: String(call[0]), uid: call[1], gid: call[2] }));
+    expect(chowned.every(call => call.uid === 65532 && call.gid === 65532)).toBe(true);
+    const chownedNames = chowned.map(call => basename(call.path));
+    expect(chownedNames).toEqual(
+      expect.arrayContaining(['ingress', 'scratch', 'egress', 'canary_in', '__runcode_main.py']),
+    );
+    expect(await runDirEntries()).toEqual([]);
+  });
+
+  test('root server: a failing chown handoff is not ready and starts no canary container', async () => {
+    const containers = new FakeSandboxContainers({ uid: 0, gid: 0 });
+    const runner = new FakeRunner();
+    scriptReadyPath(runner, DIGEST, containers);
+    geteuidSpy.mockReturnValue(0);
+    getegidSpy.mockReturnValue(0);
+    chownSpy.mockRejectedValue(new Error('EPERM: operation not permitted, chown'));
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error_code).toBe('daemon_unavailable');
+      expect(readiness.error).toMatch(/could not hand the run directories to sandbox uid 65532:65532/);
+      expect(readiness.error).toMatch(/EPERM/);
+    }
+    // Only the wedged-daemon probe created a container.
+    expect(runner.callsFor('create')).toHaveLength(1);
+    expect(await runDirEntries()).toEqual([]);
+  });
+
+  test('root server: a chown that is silently ignored fails the canary instead of passing', async () => {
+    const containers = new FakeSandboxContainers({ uid: 0, gid: 0 });
+    const runner = new FakeRunner();
+    scriptReadyPath(runner, DIGEST, containers);
+    geteuidSpy.mockReturnValue(0);
+    getegidSpy.mockReturnValue(0);
+    chownSpy.mockResolvedValue(undefined);
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).toMatch(/canary run failed as 65532:65532/);
+      expect(readiness.error).toMatch(/Permission denied/);
+      expect(readiness.error).not.toContain(fakeDataDir);
+    }
+    // The failed canary container is still killed and removed.
+    expect(runner.callsFor('rm').map(call => call.args[2])).toContain('fake-container-1');
+  });
+
+  test('regression: the image uid against 0700 dirs owned by another server uid is denied, the server uid is not', async () => {
+    // Pre-fix shape: the container always ran as 65532 and the dirs belonged to the server.
+    const server = { uid: 4242, gid: 4343 };
+    const stagedForServer = await stageRunDirs({
+      runRoot: join(fakeDataDir, 'legacy-run'),
+      language: 'python',
+      code: 'pass',
+      files: [{ name: 'canary_in', bytes: Buffer.from('token') }],
+      identity: { ...server, chownRunDirs: false },
+    });
+    const mounts = [
+      '-v',
+      `${stagedForServer.ingressDir}:/ingress:ro`,
+      '-v',
+      `${stagedForServer.scratchDir}:/scratch:rw`,
+      '-v',
+      `${stagedForServer.egressDir}:/egress:rw`,
+    ];
+    const containers = new FakeSandboxContainers(server);
+    const denied: string[] = [];
+    const legacy = containers.create(['create', '--user', '65532:65532', ...mounts]);
+    const legacyExit = await containers.attach({
+      containerId: legacy,
+      onStderr: chunk => denied.push(chunk.toString()),
+    });
+    expect(legacyExit).toBe(1);
+    expect(denied.join('')).toMatch(/Permission denied/);
+
+    const asServer = containers.create(['create', '--user', '4242:4343', ...mounts]);
+    const serverExit = await containers.attach({ containerId: asServer, onStderr: () => undefined });
+    expect(serverExit).toBe(0);
+    expect(await readFile(join(stagedForServer.egressDir, 'out'), 'utf8')).toBe('token');
+  });
+
+  test('a canary that wrote nothing to egress is not ready', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    runner.attachHandler = () => Promise.resolve(0);
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).toMatch(/could not read the file the container wrote to egress/);
+    }
+  });
+
+  test('a canary whose egress output differs from its ingress input is not ready', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    runner.attachHandler = async () => {
+      await writeFile(join(hostDirOf(runner, '/egress'), 'out'), 'stale');
+      return 0;
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).toMatch(/does not match what the container read from ingress/);
+    }
+  });
+
+  test('the canary run root is removed even when the program stripped its own permissions', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const runCanaryProgram = runner.attachHandler;
+    runner.attachHandler = async input => {
+      const exitCode = await runCanaryProgram(input);
+      const locked = join(hostDirOf(runner, '/scratch'), 'locked');
+      await mkdir(join(locked, 'inner'), { recursive: true });
+      await writeFile(join(locked, 'inner', 'f'), 'x');
+      await chmod(join(locked, 'inner'), 0o000);
+      await chmod(locked, 0o000);
+      return exitCode;
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    // du may legitimately fail on the sealed dir; the cleanup itself must not.
+    if (!readiness.ready) {
+      expect(readiness.error).not.toMatch(/remove the run directory|still exists/);
+    }
+    expect(await runDirEntries()).toEqual([]);
+  });
+
+  test('a canary whose directories du cannot account for is not ready', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const runCanaryProgram = runner.attachHandler;
+    runner.attachHandler = async input => {
+      const exitCode = await runCanaryProgram(input);
+      // du fails closed on a dir it cannot read; a vanished dir stands in for an unreadable one.
+      await rm(hostDirOf(runner, '/scratch'), { recursive: true, force: true });
+      return exitCode;
+    };
+    const driver = new DockerDriver(driverOptions(), runner);
+
+    const readiness = await driver.ensureReady();
+
+    expect(readiness.ready).toBe(false);
+    if (!readiness.ready) {
+      expect(readiness.error).toMatch(/could not measure the canary directories with du/);
+    }
+  });
+
+  test('a run root that survives removal is not ready', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const rmSpy = jest.spyOn(fsPromises, 'rm').mockResolvedValue(undefined);
+    const driver = new DockerDriver(driverOptions(), runner);
+    try {
+      const readiness = await driver.ensureReady();
+      expect(readiness.ready).toBe(false);
+      if (!readiness.ready) {
+        expect(readiness.error).toMatch(/run directory still exists after removal/);
+      }
+    } finally {
+      rmSpy.mockRestore();
+    }
+  });
+
+  test('a failing run root removal is not ready', async () => {
+    const runner = new FakeRunner();
+    scriptReadyPath(runner);
+    const rmSpy = jest.spyOn(fsPromises, 'rm').mockRejectedValue(new Error('EACCES: permission denied, rmdir'));
+    const driver = new DockerDriver(driverOptions(), runner);
+    try {
+      const readiness = await driver.ensureReady();
+      expect(readiness.ready).toBe(false);
+      if (!readiness.ready) {
+        expect(readiness.error).toMatch(/could not remove the run directory: EACCES/);
+      }
+    } finally {
+      rmSpy.mockRestore();
+    }
   });
 });

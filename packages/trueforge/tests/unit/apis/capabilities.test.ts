@@ -66,6 +66,20 @@ const expectedMemoryDefaults = {
   reflect_timeout_ms: configuration.MEMORY_REFLECT_TIMEOUT_MS,
 };
 
+/** The resolved SANDBOX_* settings, as the capability reports them for every caller. */
+const expectedSandboxIsolation = {
+  isolation_driver: configuration.SANDBOX_ISOLATION_DRIVER,
+  image: configuration.SANDBOX_IMAGE,
+  default_timeout_seconds: configuration.SANDBOX_DEFAULT_TIMEOUT_SECONDS,
+  max_timeout_seconds: configuration.SANDBOX_MAX_TIMEOUT_SECONDS,
+  memory_mb: configuration.SANDBOX_MEMORY_MB,
+  disk_mb: configuration.SANDBOX_DISK_MB,
+  stdout_stderr_cap_kb: configuration.SANDBOX_STDOUT_STDERR_CAP_KB,
+  image_pull_timeout_seconds: configuration.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS,
+  network_egress: configuration.SANDBOX_NETWORK_EGRESS,
+  cosign_key_configured: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() !== '',
+};
+
 /**
  * The exact `memory_embeddings` shape when the subsystem was never warmed: the
  * model is idle, so the status is `starting` with nothing indexed. The
@@ -165,6 +179,8 @@ describe('capabilities routers', () => {
         memory_screen: memoryScreenNotConfigured,
         tool_output_screen: toolOutputScreenNotConfigured,
         memory_defaults: expectedMemoryDefaults,
+        sandbox_isolation: expectedSandboxIsolation,
+        voice: { enabled: false },
         memory_embeddings: memoryEmbeddingsStarting,
         build: expectedBuild,
       },
@@ -192,6 +208,8 @@ describe('capabilities routers', () => {
         memory_screen: memoryScreenNotConfigured,
         tool_output_screen: toolOutputScreenNotConfigured,
         memory_defaults: expectedMemoryDefaults,
+        sandbox_isolation: expectedSandboxIsolation,
+        voice: { enabled: false },
         memory_embeddings: memoryEmbeddingsStarting,
         build: expectedBuild,
       },
@@ -213,6 +231,8 @@ describe('capabilities routers', () => {
         memory_screen: memoryScreenNotConfigured,
         tool_output_screen: toolOutputScreenNotConfigured,
         memory_defaults: expectedMemoryDefaults,
+        sandbox_isolation: expectedSandboxIsolation,
+        voice: { enabled: false },
         memory_embeddings: memoryEmbeddingsStarting,
         build: expectedBuild,
       },
@@ -373,6 +393,8 @@ describe('capabilities routers', () => {
           memory_screen: memoryScreenNotConfigured,
           tool_output_screen: toolOutputScreenNotConfigured,
           memory_defaults: expectedMemoryDefaults,
+          sandbox_isolation: expectedSandboxIsolation,
+          voice: { enabled: false },
           memory_embeddings: memoryEmbeddingsStarting,
           build: expectedBuild,
         },
@@ -409,6 +431,8 @@ describe('capabilities routers', () => {
             reflect_max_tokens: expectedMemoryDefaults.reflect_max_tokens,
             reflect_timeout_ms: expectedMemoryDefaults.reflect_timeout_ms,
           },
+          sandbox_isolation: expectedSandboxIsolation,
+          voice: { enabled: false },
           memory_embeddings: memoryEmbeddingsStarting,
           build: expectedBuild,
         },
