@@ -19,11 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 import envPaths from 'env-paths';
 
-import {
-  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
-  TOKEN_FACTORY_DEFAULT_BASE_URL,
-  validateRunCodeStartupConfig,
-} from '@truefoundry/trueforge-core/core';
+import { TOKEN_FACTORY_DEFAULT_BASE_URL, validateRunCodeStartupConfig } from '@truefoundry/trueforge-core/core';
 import {
   MEMORY_PROVIDER_MAX_TIMEOUT_MS,
   MEMORY_SETTINGS_LIMITS,
@@ -198,6 +194,14 @@ export function parsePositiveInt(options: {
     throw new Error(`Environment variable ${envKey} must be at most ${String(maxValue)}, got "${raw}"`);
   }
   return value;
+}
+
+/** Like parsePositiveInt, but an unset or blank value stays undefined instead of taking a default. */
+export function parseOptionalPositiveInt(options: { envKey: string; raw: string | undefined }): number | undefined {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return undefined;
+  }
+  return parsePositiveInt({ envKey: options.envKey, raw: options.raw, defaultValue: 1 });
 }
 
 /** Parses a float env var constrained to the closed interval [0, 1]; unset/blank falls back to `defaultValue`. */
@@ -745,12 +749,13 @@ export interface SharedServerConfiguration {
    */
   MAX_REQUEST_BODY_BYTES: number;
   /**
-   * Default context size in tokens that triggers compaction, used whenever an agent spec does
-   * not set `config.context_management.compaction.compaction_threshold_tokens` itself; an
-   * explicit spec value always wins over this instance-wide default.
-   * Env: `CONTEXT_COMPACTION_THRESHOLD_TOKENS`. Default 50000.
+   * Instance-wide context size in tokens that triggers compaction, used whenever an agent spec
+   * does not set `config.context_management.compaction.trigger` itself; an explicit spec value
+   * always wins. Unset leaves the threshold to the model's context length (80% of it), with a
+   * fixed 50000-token fallback when that length is unknown.
+   * Env: `CONTEXT_COMPACTION_THRESHOLD_TOKENS`.
    */
-  CONTEXT_COMPACTION_THRESHOLD_TOKENS: number;
+  CONTEXT_COMPACTION_THRESHOLD_TOKENS: number | undefined;
   /**
    * Max seconds to wait for turn cancellation + connection drain on SIGTERM/SIGINT.
    * Env: `GRACEFUL_TIMEOUT_SECONDS`. Default 30.
@@ -1358,10 +1363,9 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MAX_REQUEST_BODY_BYTES'),
     defaultValue: DEFAULT_MAX_REQUEST_BODY_BYTES,
   }),
-  CONTEXT_COMPACTION_THRESHOLD_TOKENS: parsePositiveInt({
+  CONTEXT_COMPACTION_THRESHOLD_TOKENS: parseOptionalPositiveInt({
     envKey: 'CONTEXT_COMPACTION_THRESHOLD_TOKENS',
     raw: getEnv('CONTEXT_COMPACTION_THRESHOLD_TOKENS'),
-    defaultValue: DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
   }),
   GRACEFUL_TIMEOUT_SECONDS: parsePositiveInt({
     envKey: 'GRACEFUL_TIMEOUT_SECONDS',

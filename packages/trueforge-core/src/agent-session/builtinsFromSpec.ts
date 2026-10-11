@@ -41,9 +41,9 @@ export function builtinsFromSpec(input: {
   logger: Logger;
   compactionContext?: TaskChecklistAccess | undefined;
   /**
-   * Host instance-wide default for compaction_threshold_tokens (from ITurnResourceResolver),
-   * used only when the spec itself leaves compaction_threshold_tokens unset; an explicit spec
-   * value always wins over this. Undefined falls back to contextCompaction's own built-in default.
+   * Host instance-wide compaction trigger (from ITurnResourceResolver), used only when the spec
+   * sets no compaction trigger; an explicit spec value always wins over this. Undefined leaves
+   * the threshold to contextCompaction, which derives it from the model's context length.
    */
   compactionThresholdTokensDefault?: number | undefined;
   boundRepository?: BoundRepository | undefined;
@@ -90,7 +90,7 @@ export function builtinsFromSpec(input: {
         definition,
         compactionModel,
         // An explicit spec value always wins; only an unset spec value falls through to the
-        // host's instance-wide default, which itself falls through to the built-in default.
+        // host's instance-wide value, which itself falls through to the context-length ratio.
         compactionThresholdTokens:
           config.context_management.compaction.trigger?.value ?? compactionThresholdTokensDefault,
         checklist: compactionContext,

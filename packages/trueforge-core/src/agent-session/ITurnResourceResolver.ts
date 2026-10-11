@@ -36,9 +36,9 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
   /** Host-owned durable task state shared by the root thread's checklist and compaction. */
   readonly compactionContext?: TaskChecklistAccess | undefined;
   /**
-   * Host instance-wide default for `config.context_management.compaction.compaction_threshold_tokens`,
-   * used only when the agent spec leaves that field unset; an explicit spec value always wins.
-   * Undefined falls back to the built-in default (see DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS).
+   * Host instance-wide compaction trigger in tokens, used only when the agent spec sets no
+   * `config.context_management.compaction.trigger`; an explicit spec value always wins.
+   * Undefined leaves the threshold to the model's context length (see resolveCompactionThresholdTokens).
    */
   readonly compactionThresholdTokensDefault?: number | undefined;
   /**
