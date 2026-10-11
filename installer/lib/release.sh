@@ -94,9 +94,22 @@ release_load() {
 
 build_app_image() {
   [ -f "$REPO_ROOT/Dockerfile.dev" ] || die "Dockerfile.dev not found in $REPO_ROOT; run the installer from a checkout of the repository"
+  local log rc=0
+  log=$(umask 077 && mktemp "${TMPDIR:-/tmp}/aman-build.XXXXXX")
   say "Building the app image $REL_APP_TAG (this is the long step)"
-  D build -f "$REPO_ROOT/Dockerfile.dev" --build-arg "BUILD_REF=$REL_REF" -t "$REL_APP_TAG" "$REPO_ROOT" ||
+  # The log is read back to tell an out-of-memory kill (exit 137) from other failures.
+  if ! D build -f "$REPO_ROOT/Dockerfile.dev" --build-arg "BUILD_REF=$REL_REF" -t "$REL_APP_TAG" "$REPO_ROOT" 2>&1 | tee "$log"; then
+    rc=${PIPESTATUS[0]}
+  fi
+  if [ "$rc" != 0 ]; then
+    if [ "$rc" = 137 ] || grep -Eq 'exit code: 137|signal: killed' "$log"; then
+      rm -f "$log"
+      die "the app image build ran out of memory. Docker needs at least 6 GB: raise it in Docker Desktop under Settings, Resources, Memory (on Linux, free up memory or add swap), then run the installer again. Nothing was changed on the running stack."
+    fi
+    rm -f "$log"
     die "the app image build failed; nothing was changed on the running stack"
+  fi
+  rm -f "$log"
 }
 
 build_stt_image() {

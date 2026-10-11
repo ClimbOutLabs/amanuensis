@@ -25,6 +25,7 @@ case "$cmd" in
       secopts=$(printf '[name=seccomp,profile=builtin%s]' "${STUB_ROOTLESS:+ name=rootless}")
       case "${2:-}" in
         *ServerVersion*) printf '27.1.1|x86_64|%s|/nonexistent|%s|Docker Engine\n' "$secopts" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ;;
+        *MemTotal*) printf '%s\n' "${STUB_DOCKER_MEM_BYTES:-17179869184}" ;;
         *DockerRootDir*) printf '%s\n' "${STUB_DOCKER_ROOT:-}" ;;
         *) printf '%s\n' "$secopts" ;;
       esac
@@ -61,6 +62,10 @@ case "$cmd" in
       if [ "$1" = -t ]; then tag=$2; fi
       shift
     done
+    if [ -n "${STUB_BUILD_OOM:-}" ]; then
+      echo 'ERROR: process "/bin/sh -c pnpm --filter frontend build" did not complete successfully: exit code: 137' >&2
+      exit 1
+    fi
     if [ -n "${STUB_BUILD_FAIL:-}" ]; then
       echo "build failed" >&2
       exit 1

@@ -17,7 +17,7 @@ DEEP=0
 ONLY=""
 ONLY_INSTANCE=""
 
-MACHINE_IDS="docker runtime credentials images disk clock backup"
+MACHINE_IDS="docker runtime credentials images disk docker_memory clock backup"
 INSTANCE_IDS="config containers ports service login database disk clock run_code attachments"
 IN_IMAGE_IDS="service login database disk clock run_code attachments"
 
@@ -25,6 +25,9 @@ BACKUP_WARN_DAYS=7
 GIB=$((1024 * 1024 * 1024))
 CLOCK_WARN_SECONDS=60
 CLOCK_FAIL_SECONDS=300
+# The app image build peaks near 5 GB across its parallel stages.
+DOCKER_MEM_FAIL_BYTES=$((6 * GIB))
+DOCKER_MEM_WARN_BYTES=$((8 * GIB))
 
 RECORDS=""
 CLEANED=""
@@ -35,6 +38,7 @@ DOCKER_ROOT=""
 DOCKER_SYSTEM_TIME=""
 DOCKER_SECURITY=""
 DOCKER_OS=""
+DOCKER_MEM=""
 APP_CONTAINER=""
 
 usage() {
@@ -170,13 +174,13 @@ json_value() { # file key
 # ---------------------------------------------------------------- machine checks
 
 check_docker() {
-  local out rc version arch security root systime os compose compose_major
+  local out rc version arch security root systime os mem compose compose_major
   if ! command -v docker >/dev/null 2>&1; then
     record machine docker fail "Docker is not installed, or its command is not on PATH." \
       "Install Docker: on Linux follow https://docs.docker.com/engine/install/ (or let install.sh do it); on macOS or Windows install Docker Desktop. Then run install.sh again."
     return
   fi
-  out=$(bounded "$PROBE_SECONDS" docker info --format '{{.ServerVersion}}|{{.Architecture}}|{{.SecurityOptions}}|{{.DockerRootDir}}|{{.SystemTime}}|{{.OperatingSystem}}' 2>&1)
+  out=$(bounded "$PROBE_SECONDS" docker info --format '{{.ServerVersion}}|{{.Architecture}}|{{.SecurityOptions}}|{{.DockerRootDir}}|{{.SystemTime}}|{{.OperatingSystem}}|{{.MemTotal}}' 2>&1)
   rc=$?
   if [ "$rc" -ne 0 ]; then
     case "$out" in
@@ -195,12 +199,13 @@ check_docker() {
     esac
     return
   fi
-  IFS='|' read -r version arch security root systime os <<<"$out"
+  IFS='|' read -r version arch security root systime os mem <<<"$out"
   DOCKER_ARCH=$(normalize_arch "$arch")
   DOCKER_ROOT=$root
   DOCKER_SYSTEM_TIME=$systime
   DOCKER_SECURITY=$security
   DOCKER_OS=$os
+  DOCKER_MEM=$mem
   compose=$(bounded "$PROBE_SECONDS" docker compose version --short 2>&1)
   rc=$?
   compose=${compose#v}
@@ -339,6 +344,29 @@ check_disk() {
       "Free space with \"docker system prune\" (removes stopped containers and unused images) or by removing old backups."
   else
     record machine disk ok "$(format_gb "$kb") is free for Docker data." ""
+  fi
+}
+
+check_docker_memory() {
+  local mem_fix="Raise it in Docker Desktop under Settings, Resources, Memory. On Linux, free up memory or add swap."
+  if [ "$DOCKER_OK" != 1 ]; then
+    record machine docker_memory off "Skipped: Docker is not reachable." ""
+    return
+  fi
+  case "$DOCKER_MEM" in
+    '' | *[!0-9]*)
+      record machine docker_memory off "Skipped: Docker did not report how much memory it has." ""
+      return
+      ;;
+  esac
+  local gb
+  gb=$(awk -v b="$DOCKER_MEM" 'BEGIN { printf "%.1f GB", b / 1073741824 }')
+  if [ "$DOCKER_MEM" -lt "$DOCKER_MEM_FAIL_BYTES" ]; then
+    record machine docker_memory fail "Docker has only ${gb} of memory; building the app needs at least 6 GB." "$mem_fix"
+  elif [ "$DOCKER_MEM" -lt "$DOCKER_MEM_WARN_BYTES" ]; then
+    record machine docker_memory warn "Docker has ${gb} of memory; 8 GB is recommended for builds and upgrades." "$mem_fix"
+  else
+    record machine docker_memory ok "Docker has ${gb} of memory." ""
   fi
 }
 
@@ -655,6 +683,7 @@ check_runtime
 check_credentials
 check_images
 check_disk
+check_docker_memory
 check_clock
 check_backup
 for instance_name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do

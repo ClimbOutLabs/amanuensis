@@ -3,7 +3,7 @@ import { chmodSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
-import { DAEMON_TIME, GIB_KB, HEALTHY_INSTANCE_CHECKS, createWorld, find, sanitize } from './world.mjs';
+import { DAEMON_TIME, GIB, GIB_KB, HEALTHY_INSTANCE_CHECKS, createWorld, find, sanitize } from './world.mjs';
 
 let world;
 const make = options => (world = createWorld(options));
@@ -41,6 +41,7 @@ describe('document and exit codes', () => {
         ['credentials', 'ok'],
         ['images', 'ok'],
         ['disk', 'ok'],
+        ['docker_memory', 'ok'],
         ['clock', 'ok'],
         ['backup', 'ok'],
       ],
@@ -238,7 +239,7 @@ describe('docker check', () => {
     make();
     world.set('info', { err: 'Cannot connect to the Docker daemon', rc: 1 });
     const result = world.json();
-    for (const id of ['runtime', 'images', 'disk', 'clock']) {
+    for (const id of ['runtime', 'images', 'disk', 'docker_memory', 'clock']) {
       assert.equal(machine(result, id).state, 'off', id);
     }
     const service = find(result.doc.instances.main, 'service');
@@ -379,6 +380,49 @@ describe('disk check', () => {
     make();
     world.install('df', '#!/usr/bin/env bash\nexit 1\n');
     assert.equal(machine(world.json(), 'disk').state, 'warn');
+  });
+});
+
+describe('docker memory check', () => {
+  const at = memGib => {
+    world.info({ memGib });
+    return machine(world.json(), 'docker_memory');
+  };
+
+  it('fails at 4 GiB with the Docker setting named in the fix', () => {
+    make();
+    const check = at(4);
+    assert.equal(check.state, 'fail');
+    assert.match(check.detail, /only 4\.0 GB/);
+    assert.match(check.fix, /Settings, Resources, Memory/);
+    assert.equal(world.json().code, 1);
+  });
+
+  it('warns at 7 GiB and is ok at 16 GiB', () => {
+    make();
+    const warn = at(7);
+    assert.equal(warn.state, 'warn');
+    assertFixed(warn);
+    assert.equal(world.json().code, 0);
+    assert.equal(at(16).state, 'ok');
+  });
+
+  it('switches state exactly at 6 and 8 GiB', () => {
+    make();
+    world.info({});
+    world.set('info', {
+      out: `27.1.1|x86_64|[]|${world.dockerRoot}|${DAEMON_TIME}|Ubuntu|${6 * GIB - 1}\n`,
+      rc: 0,
+    });
+    assert.equal(machine(world.json(), 'docker_memory').state, 'fail');
+    assert.equal(at(6).state, 'warn');
+    assert.equal(at(8).state, 'ok');
+  });
+
+  it('is off when Docker reports no memory figure', () => {
+    make();
+    world.set('info', { out: `27.1.1|x86_64|[]|${world.dockerRoot}|${DAEMON_TIME}|Ubuntu\n`, rc: 0 });
+    assert.equal(machine(world.json(), 'docker_memory').state, 'off');
   });
 });
 

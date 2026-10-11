@@ -18,6 +18,7 @@ const DOCTOR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 
 export const NOW = 1791633600; // 2026-10-10T12:00:00Z
 export const DAEMON_TIME = '2026-10-10T12:00:00.123456789Z';
 export const GIB_KB = 1024 * 1024;
+export const GIB = 1024 * 1024 * 1024;
 
 const SYSTEM_TOOLS = ['bash', 'sed', 'awk', 'tr', 'cut', 'head', 'date', 'stat', 'timeout', 'cat', 'env', 'dirname'];
 
@@ -103,8 +104,12 @@ export function createWorld({ instances = ['main'] } = {}) {
       security = '[name=seccomp,profile=builtin]',
       systime = DAEMON_TIME,
       os = 'Ubuntu 24.04',
+      memGib = 16,
     } = {}) {
-      world.set('info', { out: `${version}|${arch}|${security}|${dockerRoot}|${systime}|${os}\n`, rc: 0 });
+      world.set('info', {
+        out: `${version}|${arch}|${security}|${dockerRoot}|${systime}|${os}|${memGib * GIB}\n`,
+        rc: 0,
+      });
     },
     uninstall(name) {
       rmSync(path.join(bin, name), { force: true });

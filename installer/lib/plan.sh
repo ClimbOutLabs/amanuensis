@@ -2,6 +2,9 @@
 # The default command: preflight, printed plan, confirmation, then execution.
 
 MIN_FREE_KB=$((10 * 1024 * 1024))
+# The frontend and core builds run side by side and peak near 5 GB together.
+DOCKER_MEM_BLOCK_BYTES=$((6 * 1024 * 1024 * 1024))
+DOCKER_MEM_WARN_BYTES=$((8 * 1024 * 1024 * 1024))
 
 PLAN_LINES=
 PLAN_TODO=0
@@ -72,6 +75,20 @@ preflight_docker_space() {
       fi
       ;;
   esac
+}
+
+# The app image build is killed without a clear message when Docker has too little memory.
+preflight_docker_memory() {
+  local bytes gb
+  case "$DOCKER_ACCESS" in direct | sg) ;; *) return 0 ;; esac
+  bytes=$(D info --format '{{.MemTotal}}' 2>/dev/null || true)
+  case "${bytes:-}" in '' | *[!0-9]*) return 0 ;; esac
+  gb=$(awk -v b="$bytes" 'BEGIN {printf "%.1f", b / 1073741824}')
+  if [ "$bytes" -lt "$DOCKER_MEM_BLOCK_BYTES" ]; then
+    plan_add blocked "Docker has only $gb GB of memory and needs at least 6 GB to build the app. Raise it in Docker Desktop under Settings, Resources, Memory. On Linux, free up memory or add swap."
+  elif [ "$bytes" -lt "$DOCKER_MEM_WARN_BYTES" ]; then
+    warn "Docker has $gb GB of memory. The first build needs at least 6 GB and may be slow or run out of memory; 8 GB or more is recommended. Raise it in Docker Desktop under Settings, Resources, Memory."
+  fi
 }
 
 preflight_system() {
@@ -186,6 +203,7 @@ plan_build() {
   case "$DOCKER_ACCESS" in direct | sg) AMAN_DOCKER_MODE=$DOCKER_ACCESS ;; esac
   if [ -z "$PLAN_BLOCKERS" ]; then
     preflight_docker_space
+    preflight_docker_memory
   fi
 
   if [ -f "$RELEASE_DIR/release.json" ]; then

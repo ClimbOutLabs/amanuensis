@@ -23,6 +23,41 @@ test_docker_data_disk_is_checked() {
   sandbox_drop
 }
 
+test_docker_memory_is_checked() {
+  t_begin "Docker memory under 6 GB blocks, 6 to 8 GB warns, 16 GB is quiet"
+  sandbox_new
+  STUB_DOCKER_MEM_BYTES=4294967296
+  run_install --dry-run
+  assert_rc 1
+  assert_contains "$OUT$ERR" "Docker has only 4.0 GB of memory and needs at least 6 GB to build the app"
+  assert_contains "$OUT$ERR" "Settings, Resources, Memory"
+  assert_contains "$OUT$ERR" "add swap"
+  STUB_DOCKER_MEM_BYTES=7516192768
+  run_install --dry-run
+  assert_rc 0
+  assert_contains "$ERR" "Docker has 7.0 GB of memory"
+  assert_not_contains "$OUT$ERR" "[blocked]"
+  STUB_DOCKER_MEM_BYTES=17179869184
+  run_install --dry-run
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "of memory"
+  sandbox_drop
+}
+
+test_out_of_memory_build_points_at_docker_memory() {
+  t_begin "a build killed with exit 137 says to raise Docker's memory"
+  sandbox_new
+  STUB_BUILD_OOM=1
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email owner@example.invalid
+  assert_rc 1
+  assert_contains "$ERR" "ran out of memory"
+  assert_contains "$ERR" "Settings, Resources, Memory"
+  clear_input
+  sandbox_drop
+}
+
 test_password_length_is_checked_up_front() {
   t_begin "a password over 72 bytes is refused before anything is built"
   sandbox_new
@@ -179,6 +214,8 @@ test_upgrade_says_what_it_does() {
 }
 
 test_docker_data_disk_is_checked
+test_docker_memory_is_checked
+test_out_of_memory_build_points_at_docker_memory
 test_password_length_is_checked_up_front
 test_password_stdin_is_read_before_any_prompt
 test_password_in_the_environment_is_ignored
