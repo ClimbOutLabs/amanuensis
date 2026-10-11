@@ -50,7 +50,7 @@ Besides the `OIDC_*` lines from `pnpm dev:login`, the defaults in `packages/true
 
 | Variable | Default | What it is |
 | --- | --- | --- |
-| `TRUEFORGE_API_KEY` | `placeholder-value-please-generate-your-own` | Shared secret the internal schedule controller uses to call the server. Standalone defaults to a local-only value, so this is fine as-is for personal use; generate your own (`openssl rand -hex 32`) before a shared deployment. |
+| `TRUEFORGE_API_KEY` | unset (commented out in `.env.example`) | Shared secret the internal schedule controller uses to call the server. Standalone generates a random key for each process when it is unset, and refuses placeholder values such as `placeholder-value-please-generate-your-own`. Leave it unset, or pin your own key (`openssl rand -hex 32`). |
 | <Tooltip tip="Public origin at which users and external services reach the app. Used to build MCP OAuth and OIDC login callbacks." cta="See the FAQ" href="/quickstart#faq">`PUBLIC_BASE_URL`</Tooltip> | `http://localhost:<port>` | Standalone takes an origin with no path. Set it to `http://localhost:3000` for `pnpm standalone:dev` (the Vite address), or to your HTTPS origin behind a reverse proxy. |
 
 <Note>
@@ -161,7 +161,7 @@ None of these are required to chat with a model. Each is one sentence plus where
     | --- | --- | --- |
     | `POSTGRES_USER` / `POSTGRES_DB` | `trueforge` / `trueforge` | Credentials for the Postgres container this stack starts for you. |
     | `POSTGRES_PASSWORD` | `trueforge` | Change it before running on any shared machine. |
-    | `TRUEFORGE_API_KEY` | `placeholder-value-please-generate-your-own` | Shared secret the internal schedule controller uses to call the server. Fine as-is for a local, single-machine install; generate your own (`openssl rand -hex 32`) before a shared deployment. |
+    | `TRUEFORGE_API_KEY` | unset (commented out in `.env.example`) | Shared secret the internal schedule controller uses to call the server. This stack runs hosted mode, which requires it: set your own (`openssl rand -hex 32`). Only standalone generates a random key for each process and refuses placeholder values. |
     | `PUBLIC_BASE_URL` | `http://localhost:8791` | Set by `docker-compose.yml` for this stack (the `.env.example` entry is commented out). Only needs changing if you put the app behind a different host or port. |
     | Host ports | `8791`, `5433`, `6380` | App, Postgres, and Redis, all bound to `127.0.0.1` only by this Compose file — not reachable from other machines by default. |
 
