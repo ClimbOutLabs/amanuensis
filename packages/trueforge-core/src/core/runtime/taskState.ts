@@ -46,11 +46,20 @@ export const TaskFindingSchema = z.object({
   /** Short beat or area label, e.g. "Spain/Madrid". */
   label: z.string().min(1).max(120),
   /** The fact itself, in one or two sentences. */
-  headline: z.string().min(1).max(300),
+  headline: z
+    .string()
+    .min(1)
+    .refine(v => v.length <= 300, 'must be at most 300 characters'),
   /** Why this fact matters for the user's request. */
-  why_it_matters: z.string().min(1).max(500),
+  why_it_matters: z
+    .string()
+    .min(1)
+    .refine(v => v.length <= 500, 'must be at most 500 characters'),
   /** Source URL. */
-  url: z.string().min(1).max(2000),
+  url: z
+    .string()
+    .min(1)
+    .refine(v => v.length <= 2000, 'must be at most 2000 characters'),
 });
 export type TaskFinding = z.infer<typeof TaskFindingSchema>;
 
