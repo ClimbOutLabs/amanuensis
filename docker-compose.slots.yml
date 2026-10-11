@@ -46,6 +46,8 @@ services:
     # One build tags the image all four slots run.
     build:
       context: ops/sandbox-slot
+      args:
+        AMAN_PACKS: ${AMAN_SLOTS_PACKS:-}
     volumes:
       - slot_ws_1:/workspace
       - slot_ctl_1:/run/aman

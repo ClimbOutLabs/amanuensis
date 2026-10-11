@@ -3,6 +3,7 @@
  * isolated code execution with one command. Safe to re-run; changes no file of the user's.
  */
 import { join } from 'node:path';
+import { PackError, toPackArch, type PackName, type PacksPort } from './packs.js';
 
 export interface CommandResult {
   stdout: string;
@@ -46,7 +47,7 @@ const DISK_SCRIPT = join('ops', 'sandbox-slot', 'disks', 'setup-disks.sh');
 const PROFILE_PATH = join('ops', 'sandbox-slot', 'apparmor', APPARMOR_PROFILE);
 const UP_TIMEOUT_SECONDS = 300;
 
-export type SlotsStep = 'docker' | 'compose' | 'apparmor' | 'disk' | 'build' | 'start' | 'attest';
+export type SlotsStep = 'docker' | 'compose' | 'apparmor' | 'disk' | 'packs' | 'build' | 'start' | 'attest';
 
 /** `hard`: each slot has its own fixed-size disk. `vm`: Docker's VM bounds the disk. `off`: only the soft per-chat limit. */
 export type DiskMode = 'hard' | 'vm' | 'off';
@@ -69,6 +70,7 @@ export type SlotsResult =
       image_size_mb: number | undefined;
       app_compose_file: string;
       disk: { mode: DiskMode; bytes: number | undefined };
+      packs: PackName[];
     }
   | { ok: false; checks: SlotsCheck[]; step: SlotsStep; error: string; fix: string };
 
@@ -87,6 +89,11 @@ export interface SlotsOptions {
   diskGb: number;
   /** False skips the per-slot disks; the per-chat soft limit still applies. */
   hardDiskLimit: boolean;
+  /** Where optional toolchain packs are chosen and downloaded. */
+  packsPort: PacksPort;
+  /** Packs to add to the image and packs to take out of it, from --add and --remove. */
+  addPacks: PackName[];
+  removePacks: PackName[];
   /** Asks the person to agree before system files are touched; false when they decline or cannot be asked. */
   confirm: (question: string) => Promise<boolean>;
   onCheck: ((check: SlotsCheck) => void) | undefined;
@@ -113,6 +120,7 @@ class Slots {
   private diskBytes: number | undefined;
   /** Set once the disks are mounted; from then on every compose call carries the disk file. */
   private disksReady = false;
+  private packs: PackName[] = [];
 
   constructor(private readonly options: SlotsOptions) {}
 
@@ -138,7 +146,10 @@ class Slots {
   }
 
   private composeEnv(): Record<string, string> {
-    const env: Record<string, string> = { [INSTANCE_ENV]: this.options.instance };
+    const env: Record<string, string> = {
+      [INSTANCE_ENV]: this.options.instance,
+      AMAN_SLOTS_PACKS: this.packs.join(','),
+    };
     if (this.disksReady && this.diskBytes !== undefined) {
       env['AMAN_SLOTS_DISK_DIR'] = diskRoot(this.options.instance);
       env['AMAN_SLOTS_DISK_BYTES'] = String(this.diskBytes);
@@ -165,6 +176,7 @@ class Slots {
       await this.checkDocker();
       const appArmor = await this.detectAppArmor();
       this.diskMode = await this.detectDiskMode();
+      await this.preparePacks();
       await this.build();
       if (appArmor) {
         await this.ensureProfile();
@@ -186,6 +198,7 @@ class Slots {
       image_size_mb: await this.imageSizeMb(),
       app_compose_file: join(this.options.repoRoot, APP_COMPOSE_FILE),
       disk: { mode: this.diskMode, bytes: this.diskBytes },
+      packs: this.packs,
     };
   }
 
@@ -389,6 +402,26 @@ class Slots {
       status: 'ok',
       message: `Created ${String(SLOT_COUNT)} slot disks of ${String(Math.round(after / 2 ** 30))} GB under ${root}`,
     });
+  }
+
+  /** Downloads and checks what the chosen packs need, before the image build uses them. */
+  private async preparePacks(): Promise<void> {
+    const info = await this.run({ args: ['info', '--format', '{{.Architecture}}'] });
+    try {
+      this.packs = await this.options.packsPort.prepare({
+        add: this.options.addPacks,
+        remove: this.options.removePacks,
+        arch: toPackArch(info.stdout),
+      });
+    } catch (error: unknown) {
+      if (error instanceof PackError) {
+        throw new StepFailure('packs', error.message, error.fix, error);
+      }
+      throw error;
+    }
+    if (this.packs.length > 0) {
+      this.record({ step: 'packs', status: 'ok', message: `Toolchain packs in the image: ${this.packs.join(', ')}` });
+    }
   }
 
   private async build(): Promise<void> {

@@ -235,9 +235,17 @@ func TestRunCodeStagesInputsRunsAndCollectsOutputs(t *testing.T) {
 	if e.runner.spec.UID != 0 || e.runner.opts.StreamCap != api.StreamCapBytes {
 		t.Fatalf("spec=%+v opts=%+v", e.runner.spec, e.runner.opts)
 	}
+	have := map[string]bool{}
 	for _, kv := range e.runner.spec.Env {
+		have[kv] = true
 		if strings.HasPrefix(kv, "AMAN_") || strings.Contains(kv, "TOKEN") {
 			t.Fatalf("unexpected env %q", kv)
+		}
+	}
+	// Optional toolchains write only to /tmp and never reach for the network.
+	for _, want := range []string{"GOPROXY=off", "GOTOOLCHAIN=local", "GOCACHE=/tmp/go-cache", "CARGO_NET_OFFLINE=true", "CARGO_HOME=/tmp/cargo"} {
+		if !have[want] {
+			t.Errorf("the guest environment is missing %s", want)
 		}
 	}
 	if entries, _ := os.ReadDir(e.srv.LeaseDir); len(entries) != 0 {

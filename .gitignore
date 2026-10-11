@@ -80,3 +80,7 @@ pr_body*
 # in temp dirs by design; never commit these if a build drops them at the root.
 sbom-*.spdx.json
 requirements.hashed.txt
+# Toolchain archives that `pnpm sandbox:slots --add` downloads for the sandbox image, and which packs are chosen.
+ops/sandbox-slot/packs/archives/*
+!ops/sandbox-slot/packs/archives/.gitkeep
+ops/sandbox-slot/packs/selected.json

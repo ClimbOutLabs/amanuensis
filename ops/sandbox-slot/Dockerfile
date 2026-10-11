@@ -64,6 +64,11 @@ RUN pip install --no-cache-dir --break-system-packages --no-deps --require-hashe
  && npm cache clean --force \
  && rm -rf /tmp/* /root/.npm /root/.cache
 
+# Optional toolchains chosen with `pnpm sandbox:slots --add`; none by default. The archives are mounted from the
+# build context, not copied, so they add nothing to the image beyond the installed toolchain.
+ARG AMAN_PACKS=""
+RUN --mount=type=bind,source=packs,target=/tmp/packs sh /tmp/packs/install-packs.sh /tmp/packs "${AMAN_PACKS}"
+
 # Mount points for the call directories.
 RUN mkdir -p /ingress /scratch /egress /workspace /tmp \
  && chmod 1777 /tmp

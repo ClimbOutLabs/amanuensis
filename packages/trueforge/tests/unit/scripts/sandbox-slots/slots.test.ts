@@ -1,3 +1,4 @@
+import { PackError, type PacksPort } from '../../../../scripts/sandbox-slots/packs';
 import {
   CommandNotFoundError,
   runSandboxSlots,
@@ -64,6 +65,12 @@ const BASE_OPTIONS: Omit<SlotsOptions, 'run' | 'fix'> = {
   isRoot: false,
   diskGb: 16,
   hardDiskLimit: true,
+  packsPort: {
+    selected: () => Promise.resolve([]),
+    prepare: ({ add, remove }) => Promise.resolve(add.filter(name => !remove.includes(name))),
+  },
+  addPacks: [],
+  removePacks: [],
   confirm: () => Promise.resolve(true),
   onCheck: undefined,
 };
@@ -127,7 +134,7 @@ describe('runSandboxSlots', () => {
     expect(compose.length).toBeGreaterThan(0);
     for (const entry of compose) {
       expect(entry.args).toEqual(expect.arrayContaining(['-p', 'lab-slots']));
-      expect(entry.env).toEqual({ AMAN_SLOTS_INSTANCE: 'lab' });
+      expect(entry.env).toEqual({ AMAN_SLOTS_INSTANCE: 'lab', AMAN_SLOTS_PACKS: '' });
     }
   });
 
@@ -223,6 +230,45 @@ describe('runSandboxSlots', () => {
     );
     expect(result).toMatchObject({ ok: false, step: 'attest' });
     expect(!result.ok && result.error).toContain('Slot 3');
+  });
+});
+
+describe('toolchain packs', () => {
+  test('the chosen packs reach the image build and every later compose call, and the result lists them', async () => {
+    const asked: { add: string[]; remove: string[]; arch: string | undefined }[] = [];
+    const packsPort: PacksPort = {
+      selected: () => Promise.resolve([]),
+      prepare: input => {
+        asked.push({ add: input.add, remove: input.remove, arch: input.arch });
+        return Promise.resolve(['go', 'rust']);
+      },
+    };
+    const { result, calls } = await run(
+      call => (joined(call).startsWith('info --format {{.Architecture}}') ? { stdout: 'aarch64\n' } : undefined),
+      false,
+      { packsPort, addPacks: ['go'], removePacks: ['java'] },
+    );
+    expect(result).toMatchObject({ ok: true, packs: ['go', 'rust'] });
+    expect(asked).toEqual([{ add: ['go'], remove: ['java'], arch: 'aarch64' }]);
+    const compose = calls.filter(call => call.args[0] === 'compose' && call.args[1] !== 'version');
+    expect(compose.length).toBeGreaterThan(0);
+    for (const call of compose) {
+      expect(call.env['AMAN_SLOTS_PACKS']).toBe('go,rust');
+    }
+    expect(calls.findIndex(call => joined(call).startsWith('info --format {{.Architecture}}'))).toBeLessThan(
+      calls.findIndex(call => joined(call).includes(' build ')),
+    );
+  });
+
+  test('a pack that cannot be downloaded or verified stops before the build', async () => {
+    const packsPort: PacksPort = {
+      selected: () => Promise.resolve([]),
+      prepare: () =>
+        Promise.reject(new PackError('go-1.27.2-linux-amd64.zip does not match its pinned checksum', 'Run it again.')),
+    };
+    const { result, calls } = await run(() => undefined, false, { packsPort, addPacks: ['go'] });
+    expect(result).toMatchObject({ ok: false, step: 'packs', fix: 'Run it again.' });
+    expect(calls.some(call => joined(call).includes(' build '))).toBe(false);
   });
 });
 
