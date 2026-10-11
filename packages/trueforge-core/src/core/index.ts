@@ -273,6 +273,7 @@ export type {
   DriverTermination,
   IsolationDriver,
   RunCodeLanguage,
+  SandboxIdentity,
 } from './sandbox/driver/IsolationDriver';
 export { RUN_CODE_ERROR_CODES, RunCodeInputSchema, RunCodeResultSchema } from './sandbox/driver/RunCodeSchemas';
 export type { RunCodeErrorCode, RunCodeInput, RunCodeResult } from './sandbox/driver/RunCodeSchemas';

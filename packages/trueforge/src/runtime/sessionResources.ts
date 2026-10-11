@@ -619,15 +619,19 @@ function getSharedRunCodeService(logger: Logger): RunCodeService {
         `run_code isolation driver "${configuration.SANDBOX_ISOLATION_DRIVER}" is not implemented in this build — refusing to dispatch.`,
       );
     }
+    const runCodeLogger = logger.child({ module: 'run-code' });
     const driver = new DockerDriver(
       {
         image: configuration.SANDBOX_IMAGE,
         cosignPublicKeyPath: configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH,
+        stateDir: configuration.SANDBOX_STATE_DIR,
         dockerBinary: undefined,
         cosignBinary: undefined,
         dockerSocketPath: undefined,
+        dataDir: configuration.SANDBOX_RUNS_DIR,
         commandTimeoutMs: undefined,
         createTimeoutMs: undefined,
+        logger: runCodeLogger,
       },
       undefined,
     );
@@ -643,7 +647,7 @@ function getSharedRunCodeService(logger: Logger): RunCodeService {
       imagePullTimeoutSeconds: configuration.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS,
       // Docker ignores the FC pull-before-kill grace.
       harvestGraceMs: 0,
-      logger: logger.child({ module: 'run-code' }),
+      logger: runCodeLogger,
       now: undefined,
       sleepMs: undefined,
     });

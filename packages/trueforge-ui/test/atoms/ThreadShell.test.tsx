@@ -67,7 +67,7 @@ describe('ThreadViewportShell', () => {
         <p>Messages</p>
       </ThreadViewportShell>,
     );
-    expect(viewport.firstElementChild).toHaveClass('pb-32');
+    expect(viewport.firstElementChild).toHaveClass('pb-24');
     expect(viewport.firstElementChild).not.toHaveClass('justify-center');
   });
 });
