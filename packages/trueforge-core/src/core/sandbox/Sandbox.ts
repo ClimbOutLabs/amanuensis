@@ -857,7 +857,7 @@ function injectMCPClientEnv(params: {
   };
 }
 
-const sandboxExecSchema = z.object({
+export const sandboxExecSchema = z.object({
   intent: z.string().describe('Why you are running this command (user-facing).'),
   purpose: z
     .enum(SANDBOX_INVOCATION_PURPOSES)
@@ -871,7 +871,12 @@ const sandboxExecSchema = z.object({
     .object({
       head_lines: z.number().int().min(1).max(1000).optional(),
       tail_lines: z.number().int().min(1).max(1000).optional(),
-      grep: z.string().min(1).max(256).optional().describe('Filter lines containing this text.'),
+      grep: z
+        .string()
+        .min(1)
+        .refine(grep => grep.length <= 256, 'must be at most 256 characters')
+        .optional()
+        .describe('Filter lines containing this text.'),
     })
     .refine(value => value.head_lines !== undefined || value.tail_lines !== undefined || value.grep !== undefined, {
       message: 'output must specify head_lines, tail_lines, or grep',
@@ -879,7 +884,7 @@ const sandboxExecSchema = z.object({
     .optional(),
 });
 
-const sandboxRunRegisteredCommandSchema = z.object({
+export const sandboxRunRegisteredCommandSchema = z.object({
   intent: z.string().describe('A brief, user-facing explanation of why the registered repository check is being run.'),
   command_id: z.string().min(1).describe('Stable ID of a host-confirmed repository command.'),
 });
@@ -921,7 +926,7 @@ function resolveOrFailLineArrayField(input: {
   return resolved.value;
 }
 
-const sandboxApplyPatchSchema = z
+export const sandboxApplyPatchSchema = z
   .object({
     intent: z.string().describe('Why you are making this change (user-facing).'),
     cwd: z.string().min(1).describe('Repository root path.'),
@@ -955,7 +960,7 @@ const sandboxApplyPatchSchema = z
     return { ...rest, patch };
   });
 
-const sandboxReplaceTextSchema = z
+export const sandboxReplaceTextSchema = z
   .object({
     intent: z.string().describe('Why you are making this change (user-facing).'),
     cwd: z.string().min(1).describe('Repository root path.'),
@@ -1005,7 +1010,7 @@ const sandboxReplaceTextSchema = z
     return { ...rest, old_text: oldText, new_text: newText };
   });
 
-const sandboxWriteFileSchema = z
+export const sandboxWriteFileSchema = z
   .object({
     intent: z.string().describe('Why you are creating this file (user-facing).'),
     cwd: z
