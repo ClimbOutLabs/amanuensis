@@ -90,6 +90,11 @@
     --shadow-color: #2c2a26;
     --scrollbar-thumb: #bda886;
     --chat-font-size: 0.875rem;
+    /* Turn-status panda sprite palette: flat shapes, theme-aware. The face
+     * stays a soft off-white in both modes so it never glows in the dark. */
+    --sprite-face: #fffdf8;
+    --sprite-dark: #2c2a26;
+    --sprite-accent: #b5894c;
   }
 
   .aui-theme-root *,
@@ -151,6 +156,10 @@
     --overlay: rgb(0 0 0 / 0.65);
     --shadow-color: #000000;
     --scrollbar-thumb: #6e6350;
+    /* Turn-status panda sprite palette for dark mode: muted cream face. */
+    --sprite-face: #ddd2b8;
+    --sprite-dark: #171310;
+    --sprite-accent: #c69c5d;
   }
 }
 
@@ -804,12 +813,13 @@
   }
 }
 
-/* -- Turn-status sprite: panda images, one per state -----------------------
+/* -- Turn-status sprite: panda drawn in code --------------------------------
  * A 2rem box shared by all six states so the row never shifts between them.
- * The image is decorative (aria-hidden, empty alt); the role="status"
- * microcopy line stays the accessible signal. Motion is a small hop on the
- * root, only when the user has no reduced-motion preference and the queue
- * is not marked static.
+ * One inline SVG; per-state pose accents are SVG parts toggled by the state
+ * modifier class. The panda is decorative (aria-hidden); the role="status"
+ * microcopy line stays the accessible signal. Motion runs only when the user
+ * has no reduced-motion preference and the queue is not marked static;
+ * otherwise the panda holds its static pose.
  */
 .aui-state-sprite {
   display: inline-block;
@@ -818,25 +828,164 @@
   flex: none;
 }
 
-.aui-state-sprite img {
+.aui-state-sprite svg {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: contain;
+}
+
+/* Theme-aware flat palette. Fallbacks keep the panda readable where the
+ * theme root is not an ancestor (e.g. isolated previews). */
+.aui-state-sprite .panda-face {
+  fill: var(--sprite-face, #fffdf8);
+}
+.aui-state-sprite .panda-dark {
+  fill: var(--sprite-dark, #2c2a26);
+}
+.aui-state-sprite .panda-accent {
+  fill: var(--sprite-accent, #b5894c);
+}
+.aui-state-sprite .panda-mouth {
+  stroke: var(--sprite-dark, #2c2a26);
+}
+
+/* State accents: hidden unless their state is showing. */
+.aui-state-sprite .panda-sparkle,
+.aui-state-sprite .panda-pencil {
+  display: none;
+}
+.aui-state-sprite--found-memories .panda-sparkle {
+  display: block;
+}
+.aui-state-sprite--writing .panda-pencil,
+.aui-state-sprite--still-writing .panda-pencil {
+  display: block;
+}
+
+/* SVG parts animate around their own centers. */
+.aui-state-sprite .panda-head,
+.aui-state-sprite .panda-ear,
+.aui-state-sprite .panda-pupils,
+.aui-state-sprite .panda-eyes,
+.aui-state-sprite .panda-paw,
+.aui-state-sprite .panda-sparkle,
+.aui-state-sprite .panda-pencil {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Static pose for the remembering state: pupils look up. */
+.aui-state-sprite--remembering .panda-pupils {
+  transform: translateY(-1.6px);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite {
-    animation: aui-sprite-hop 1.2s ease-in-out infinite;
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--listening .panda-head {
+    animation: aui-panda-tilt 2.4s ease-in-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--listening .panda-ear {
+    animation: aui-panda-perk 2.4s ease-in-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--remembering .panda-head {
+    animation: aui-panda-sway 3.2s ease-in-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--found-memories .panda-sparkle {
+    animation: aui-panda-pop 2.6s ease-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--doing .panda-paw-l {
+    animation: aui-panda-tap 0.9s ease-in-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--doing .panda-paw-r {
+    animation: aui-panda-tap 0.9s ease-in-out -0.45s infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--writing .panda-pencil {
+    animation: aui-panda-bob 0.7s ease-in-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--still-writing .panda-pencil {
+    animation: aui-panda-bob 2s ease-in-out infinite;
+  }
+  .aui-wait-queue:not(.aui-wait-queue--static) .aui-state-sprite--still-writing .panda-eyes {
+    animation: aui-panda-blink 3.4s ease-in-out infinite;
   }
 }
 
-@keyframes aui-sprite-hop {
+@keyframes aui-panda-tilt {
+  0%,
+  100% {
+    transform: rotate(-3deg);
+  }
+  50% {
+    transform: rotate(3deg);
+  }
+}
+
+@keyframes aui-panda-perk {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+
+@keyframes aui-panda-sway {
+  0%,
+  100% {
+    transform: rotate(-5deg);
+  }
+  50% {
+    transform: rotate(5deg);
+  }
+}
+
+@keyframes aui-panda-pop {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  12% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+  24% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  40%,
+  100% {
+    transform: scale(0);
+    opacity: 0;
+  }
+}
+
+@keyframes aui-panda-tap {
   0%,
   100% {
     transform: translateY(0);
   }
   50% {
-    transform: translateY(-0.25rem);
+    transform: translateY(-2.5px);
+  }
+}
+
+@keyframes aui-panda-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(1.8px);
+  }
+}
+
+@keyframes aui-panda-blink {
+  0%,
+  88%,
+  100% {
+    transform: scaleY(1);
+  }
+  94% {
+    transform: scaleY(0.08);
   }
 }
