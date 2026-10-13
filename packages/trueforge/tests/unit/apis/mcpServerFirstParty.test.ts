@@ -9,6 +9,7 @@ import winston from 'winston';
 import { createSettingsMcpServersRouter } from '../../../src/apis/mcpServers';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import configuration from '../../../src/config';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import type { IMcpServerWithAuthStore } from '../../../src/db/mcpServerStore';
@@ -73,6 +74,7 @@ describe('first-party marker on stored connectors', () => {
       clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
     });
     router = createSettingsMcpServersRouter({
+      mcpCatalog: McpCatalog.load(),
       resolveMcpServerStore: () => store,
       tokenStore,
       toolGrantStore: new SqliteMcpToolGrantStore(db),
@@ -151,6 +153,21 @@ describe('first-party marker on stored connectors', () => {
       expect([created.status, replaced.status, onListedOrigin.status]).toEqual([201, 200, 201]);
       expect(await firstPartyOf('notes')).toBe(false);
       expect(await firstPartyOf('docs')).toBe(false);
+    });
+
+    it('never marks the search provider first-party, even on a listed origin: the role is a different trust', async () => {
+      const created = await save(
+        'POST',
+        manifestOf('finder', { url: `${LISTED_ORIGIN}/mcp/finder`, search_provider: true }),
+      );
+      const replaced = await save(
+        'PUT',
+        manifestOf('finder', { url: `${LISTED_ORIGIN}/mcp/finder`, search_provider: true, description: 'Edited.' }),
+      );
+
+      expect([created.status, replaced.status]).toEqual([201, 200]);
+      expect(await firstPartyOf('finder')).toBe(false);
+      expect(await firstPartyForTurn('finder')).toBe(false);
     });
 
     it('does not carry the marker on the wire', async () => {

@@ -149,7 +149,7 @@ export const createMcpServerRoute = createRoute({
     409: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description:
-        'An MCP server with this name already exists, or `manifest.memory_provider: true` is set while another server already holds it.',
+        'An MCP server with this name already exists, or `manifest.memory_provider` or `manifest.search_provider` is set to true while another server already holds it.',
     },
     422: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
@@ -192,7 +192,7 @@ export const putMcpServerRoute = createRoute({
     409: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description:
-        '`manifest.memory_provider: true` is set while another server already holds it, or the connector changed ' +
+        '`manifest.memory_provider` or `manifest.search_provider` is set to true while another server already holds it, or the connector changed ' +
         'while its memory-provider connection check was running, so the save must be retried.',
     },
     422: {

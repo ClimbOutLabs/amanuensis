@@ -29,8 +29,14 @@ import {
   type SentinelHostContext,
   type SentinelServices,
 } from './context';
-import { extractCardFields } from './extractorRegistry';
+import { extractCardFields, type ExtractionResult } from './extractorRegistry';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
+import {
+  checkOutboundStrings,
+  collectOutboundStrings,
+  describeOutboundRule,
+  type OutboundStrings,
+} from './outboundGuard';
 import { isRunnerWorkflow } from './runner';
 import {
   hashArgv,
@@ -61,6 +67,13 @@ import {
   writeTargetTouchesGitControl,
   type TrackedExecutableScope,
 } from './trackedExecutables';
+import {
+  SEARCH_SILENT_REASON,
+  SILENT_SEARCH_LIMIT,
+  unreturnedUrls,
+  type SearchAskReason,
+  type WebSearchTurnState,
+} from './webSearch';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
@@ -75,6 +88,10 @@ export interface SentinelAction {
   mcp_server_name?: string | undefined;
   /** The host provisioned this connector itself. Never derived from tool metadata or client input. */
   mcp_first_party?: boolean | undefined;
+  /** The user designated this connector as their search provider. Set by the host from the connector record only. */
+  mcp_search_provider?: boolean | undefined;
+  /** The host's own list for the designated provider names this tool as a search tool. Never from tool metadata. */
+  mcp_search_tool?: boolean | undefined;
   mcp_hints: {
     read_only_hint?: boolean | undefined;
     destructive_hint?: boolean | undefined;
@@ -84,6 +101,8 @@ export interface SentinelAction {
 
 export interface ClassifyContext extends SentinelCallIdentity {
   services: SentinelServices;
+  /** Host state for the turn's silent web searches. */
+  web_search: WebSearchTurnState;
 }
 
 const SENSITIVE_PATH_PATTERNS = [
@@ -903,6 +922,120 @@ function externalServiceWhat(input: {
 const DESTRUCTIVE_FRAGMENTS = ['delete', 'remove', 'uninstall', 'drop', 'destroy', 'erase'];
 const INSTALL_FRAGMENTS = ['install'];
 
+/** Most characters of query text an approval card shows. */
+const SEARCH_CARD_TEXT_MAX = 1000;
+
+function searchQueryText(strings: OutboundStrings): string {
+  return strings.values
+    .map(value => value.trim())
+    .filter(value => value !== '')
+    .join(' | ');
+}
+
+/**
+ * A designated-provider call that stops for approval, or is denied while nobody watches. The card
+ * shows the exact text the call would send; the audit row of a denial names only the rule that fired.
+ */
+async function holdSearchCall(input: {
+  action: SentinelAction;
+  ctx: ClassifyContext;
+  reason: SearchAskReason;
+  why: string;
+  queryText: string;
+  denyWhenUnattended: boolean;
+}): Promise<TierDecision> {
+  const { action, ctx } = input;
+  if (input.denyWhenUnattended && ctx.services.unattended) {
+    return autoDenyDecision({
+      reason: 'outbound_guard',
+      reason_detail: `Web search denied: ${input.why}.`,
+      sensitive_read: false,
+    });
+  }
+  const shown =
+    input.queryText.length > SEARCH_CARD_TEXT_MAX
+      ? `${input.queryText.slice(0, SEARCH_CARD_TEXT_MAX)}...`
+      : input.queryText;
+  const server = action.mcp_server_name ?? 'the search provider';
+  return tier3Decision({
+    card: {
+      plain_what: `Search the web through ${server} for: ${shown}`,
+      plain_why: plainWhy(ctx.agent_intent),
+      cannot_be_undone: 'Once a query leaves this machine it cannot be taken back.',
+      why_asked_again: input.why === '' ? null : `Held for approval: ${input.why}.`,
+      destination: action.mcp_server_name ?? null,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+    },
+    reason: input.reason,
+    reason_detail: input.why === '' ? 'Searches are set to ask.' : `Web search held: ${input.why}.`,
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
+/**
+ * The designated search provider's call. Runs without asking unless the user switched searches to
+ * ask, the outbound secret guard trips, the turn already ran its allowance of silent searches, or
+ * the call names a URL no search result of this turn returned. Returns undefined, leaving the call
+ * to the ordinary rules, for a tool that the server did not declare read-only and the host's list
+ * does not name as a search tool, that declares itself destructive or not read-only, falls in a
+ * name-based escalation class, or touches a sensitive path: the role never lowers those, so
+ * designating a connector that can write does not make its unannotated tools silent.
+ */
+async function classifySearchProviderTool(input: {
+  action: SentinelAction;
+  ctx: ClassifyContext;
+  extraction: ExtractionResult;
+}): Promise<TierDecision | undefined> {
+  const { action, ctx, extraction } = input;
+  const name = action.tool_name.toLowerCase();
+  if (
+    (action.mcp_hints.read_only_hint !== true && action.mcp_search_tool !== true) ||
+    action.mcp_hints.destructive_hint === true ||
+    action.mcp_hints.read_only_hint === false ||
+    extraction.external_service ||
+    DESTRUCTIVE_FRAGMENTS.some(fragment => name.includes(fragment)) ||
+    INSTALL_FRAGMENTS.some(fragment => name.includes(fragment)) ||
+    sensitiveReadHit(action.canonical_params)
+  ) {
+    return undefined;
+  }
+  const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
+  const strings = collectOutboundStrings(action.canonical_params);
+  const queryText = strings === undefined ? '' : searchQueryText(strings);
+  const held = (reason: SearchAskReason, why: string, denyWhenUnattended = true): Promise<TierDecision> =>
+    holdSearchCall({ action, ctx, reason, why, queryText, denyWhenUnattended });
+
+  if (!(await ctx.services.searchWithoutAsking(owner))) {
+    return held('mcp_search_setting_ask', '', false);
+  }
+  const verdict =
+    strings === undefined
+      ? ({ ok: false, rule: 'uninspectable' } as const)
+      : checkOutboundStrings({
+          strings,
+          secrets: await ctx.services.outboundSecrets(owner),
+          earlier: ctx.web_search.sentText,
+        });
+  if (!verdict.ok) {
+    return held('mcp_search_guard', describeOutboundRule(verdict.rule));
+  }
+  if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
+    return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
+  }
+  if (strings !== undefined && unreturnedUrls({ values: strings.values, state: ctx.web_search }).length > 0) {
+    return held('mcp_search_unreturned_url', 'it names a link that no search result this turn returned');
+  }
+  return tier1Decision({
+    reason: SEARCH_SILENT_REASON,
+    reason_detail: `Searched: ${queryText}`,
+    sensitive_read: false,
+    silent_search_query: queryText,
+  });
+}
+
 async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const name = action.tool_name.toLowerCase();
@@ -935,6 +1068,14 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason_detail: 'External-service action with no verifiable destination; never carded.',
       sensitive_read: false,
     });
+  }
+
+  // The user's designated search provider runs without asking behind the outbound secret guard.
+  if (action.tool_type === 'mcp' && action.mcp_search_provider === true) {
+    const searchDecision = await classifySearchProviderTool({ action, ctx, extraction });
+    if (searchDecision !== undefined) {
+      return searchDecision;
+    }
   }
 
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.

@@ -14,6 +14,7 @@ import { seedShellAllowlist, type ShellAllowlistConfig } from './shellAllowlist'
 import type { Tier2ActionKind } from './tier';
 import { InMemoryToolGrantStore, type ToolGrantStore } from './toolGrants';
 import { InMemoryTrackedExecutableStore, type TrackedExecutableStore } from './trackedExecutables';
+import { createWebSearchTurnState, type WebSearchTurnState } from './webSearch';
 
 export interface SentinelServices {
   tracked_store: TrackedExecutableStore;
@@ -24,6 +25,12 @@ export interface SentinelServices {
   isOffline: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Tier 2 kinds the user relaxed to run without asking. */
   tier2AutoAllow: (input: { tenant_id: string; created_by: string }) => Promise<ReadonlySet<Tier2ActionKind>>;
+  /** Whether the user lets the designated search provider run without asking. Default on. */
+  searchWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
+  /** Exact secret values the host holds for this user, for the outbound secret guard. */
+  outboundSecrets: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
+  /** True when no person watches the session (a scheduled run), so a call that would ask is denied instead. */
+  unattended: boolean;
 }
 
 /** Server-owned identity for one tool call. Never agent-supplied. */
@@ -52,15 +59,19 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     tool_grants: new InMemoryToolGrantStore(),
     isOffline: () => Promise.resolve(false),
     tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
+    searchWithoutAsking: () => Promise.resolve(true),
+    outboundSecrets: () => Promise.resolve([]),
+    unattended: false,
   };
 }
 
 /**
  * Services for unattended sessions: user relaxations never apply, so a Tier 2
- * action parks for approval instead of running while nobody watches.
+ * action parks for approval instead of running while nobody watches, and a web
+ * search the outbound guard holds back is denied instead of asked.
  */
-export function withoutTier2Relaxations(services: SentinelServices): SentinelServices {
-  return { ...services, tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()) };
+export function forUnattendedRun(services: SentinelServices): SentinelServices {
+  return { ...services, tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()), unattended: true };
 }
 
 /**
@@ -75,6 +86,8 @@ export interface SentinelHostContext {
   conversation_id: string;
   /** Workspace root for boundary checks; null when the session has no workspace. */
   workspace_cwd: string | null;
+  /** Host state for the turn's silent web searches. Shared by every thread of the turn. */
+  web_search: WebSearchTurnState;
 }
 
 /**
@@ -91,6 +104,8 @@ export function createSentinelHostContext(input: {
   conversation_id: string;
   workspace_cwd?: string | null | undefined;
   services?: SentinelServices | undefined;
+  /** The turn's search state; omit for a context that is its own turn. */
+  web_search?: WebSearchTurnState | undefined;
 }): SentinelHostContext {
   return {
     services: input.services ?? defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
@@ -98,6 +113,7 @@ export function createSentinelHostContext(input: {
     created_by: input.created_by,
     conversation_id: input.conversation_id,
     workspace_cwd: input.workspace_cwd ?? null,
+    web_search: input.web_search ?? createWebSearchTurnState(),
   };
 }
 
@@ -139,6 +155,7 @@ export function classifyContextFor(input: {
   repository_id: string | null;
   workspace_cwd: string | null;
   agent_intent: string | null;
+  web_search: WebSearchTurnState;
 } {
   const host = input.host;
   return {
@@ -149,5 +166,6 @@ export function classifyContextFor(input: {
     repository_id: input.repository_id,
     workspace_cwd: input.workspace_cwd,
     agent_intent: input.agent_intent ?? null,
+    web_search: host?.web_search ?? createWebSearchTurnState(),
   };
 }

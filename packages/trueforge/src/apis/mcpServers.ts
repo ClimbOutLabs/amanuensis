@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import { safeReturnTo } from '../auth/safeReturnTo';
+import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration from '../config';
 import {
   McpServerNameConflictError,
@@ -109,25 +110,30 @@ function redactMcpServerManifest(manifest: McpServerManifest): McpServerManifest
   return manifest;
 }
 
+/** Connector roles of which exactly one configured server may hold the flag. */
+type SingleHolderRole = 'memory_provider' | 'search_provider';
+
 /**
- * Only one configured server may hold `manifest.memory_provider === true` (the host recalls
- * from and retains to exactly one connector). `excludeName` skips the row being written itself,
- * so re-saving the server that already holds the flag is not treated as a conflict with itself.
- * Returns the first other flagged server found, or undefined when there is none.
+ * Only one configured server may hold each single-holder role: the host recalls from and retains to
+ * exactly one memory connector, and routes the user's silent searches through exactly one search
+ * connector. `excludeName` skips the row being written itself, so re-saving the server that already
+ * holds the flag is not treated as a conflict with itself. Returns the first other flagged server
+ * found, or undefined when there is none.
  */
-async function findOtherMemoryProviderServer({
+async function findOtherRoleHolder({
   mcpServerStore,
   tenant_id,
   excludeName,
+  role,
 }: {
   mcpServerStore: IMcpServerStore;
   tenant_id: string;
   excludeName: string;
+  role: SingleHolderRole;
 }): Promise<McpServerRecord | undefined> {
   const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
   return servers.find(
-    server =>
-      server.name !== excludeName && server.manifest.type === 'remote' && server.manifest.memory_provider === true,
+    server => server.name !== excludeName && server.manifest.type === 'remote' && server.manifest[role] === true,
   );
 }
 
@@ -355,7 +361,27 @@ async function resolveAvailableMcpServer<TTransaction>(params: {
 }
 
 /** Admin/settings MCP CRUD (mounted at /api/v1/settings/mcp-servers). */
-export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<TTransaction>) {
+/**
+ * `search_tools` is the shipped catalog's say alone: whatever the request carried is replaced, so a
+ * client cannot widen what runs without asking. Only the web search provider carries the list.
+ */
+function withCatalogSearchTools({
+  manifest,
+  mcpCatalog,
+}: {
+  manifest: McpServerManifest;
+  mcpCatalog: McpCatalog;
+}): McpServerManifest {
+  if (manifest.type !== 'remote') {
+    return manifest;
+  }
+  const tools = manifest.search_provider === true ? mcpCatalog.searchToolsForUrl(manifest.url) : [];
+  return { ...manifest, search_tools: tools.length > 0 ? [...tools] : undefined };
+}
+
+export function createSettingsMcpServersRouter<TTransaction>(
+  deps: McpServersRouterDeps<TTransaction> & { mcpCatalog: McpCatalog },
+) {
   /**
    * The message to reject a memory-provider write with, or undefined when the check passed.
    * Callers run this only for a manifest that sets the flag: a connector that is not the memory
@@ -441,13 +467,25 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
     const incomingManifest = body.manifest;
 
     if (incomingManifest.type === 'remote' && incomingManifest.memory_provider === true) {
-      const conflict = await findOtherMemoryProviderServer({
+      const conflict = await findOtherRoleHolder({
         mcpServerStore: deps.resolveMcpServerStore(c),
         tenant_id: requestContext.tenant_id,
         excludeName: incomingManifest.name,
+        role: 'memory_provider',
       });
       if (conflict !== undefined) {
         return c.json({ error: { message: `memory provider already set on ${conflict.name}; disable it first` } }, 409);
+      }
+    }
+    if (incomingManifest.type === 'remote' && incomingManifest.search_provider === true) {
+      const conflict = await findOtherRoleHolder({
+        mcpServerStore: deps.resolveMcpServerStore(c),
+        tenant_id: requestContext.tenant_id,
+        excludeName: incomingManifest.name,
+        role: 'search_provider',
+      });
+      if (conflict !== undefined) {
+        return c.json({ error: { message: `search provider already set on ${conflict.name}; disable it first` } }, 409);
       }
     }
 
@@ -473,9 +511,12 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
 
     let manifest: McpServerManifest;
     try {
-      manifest = resolveMcpServerManifestForWrite({
-        incoming: incomingManifest,
-        existing: undefined,
+      manifest = withCatalogSearchTools({
+        manifest: resolveMcpServerManifestForWrite({
+          incoming: incomingManifest,
+          existing: undefined,
+        }),
+        mcpCatalog: deps.mcpCatalog,
       });
     } catch (error) {
       if (error instanceof MissingStoredSecretError) {
@@ -549,13 +590,25 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
     const incomingManifest = body.manifest;
 
     if (incomingManifest.type === 'remote' && incomingManifest.memory_provider === true) {
-      const conflict = await findOtherMemoryProviderServer({
+      const conflict = await findOtherRoleHolder({
         mcpServerStore: deps.resolveMcpServerStore(c),
         tenant_id: requestContext.tenant_id,
         excludeName: incomingManifest.name,
+        role: 'memory_provider',
       });
       if (conflict !== undefined) {
         return c.json({ error: { message: `memory provider already set on ${conflict.name}; disable it first` } }, 409);
+      }
+    }
+    if (incomingManifest.type === 'remote' && incomingManifest.search_provider === true) {
+      const conflict = await findOtherRoleHolder({
+        mcpServerStore: deps.resolveMcpServerStore(c),
+        tenant_id: requestContext.tenant_id,
+        excludeName: incomingManifest.name,
+        role: 'search_provider',
+      });
+      if (conflict !== undefined) {
+        return c.json({ error: { message: `search provider already set on ${conflict.name}; disable it first` } }, 409);
       }
     }
 
@@ -593,9 +646,12 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
         const existing = await deps
           .resolveMcpServerStore(c)
           .getServerForUpdate({ tenant_id: requestContext.tenant_id, name: incomingManifest.name }, transaction);
-        const manifest = resolveMcpServerManifestForWrite({
-          incoming: incomingManifest,
-          existing: existing?.manifest,
+        const manifest = withCatalogSearchTools({
+          manifest: resolveMcpServerManifestForWrite({
+            incoming: incomingManifest,
+            existing: existing?.manifest,
+          }),
+          mcpCatalog: deps.mcpCatalog,
         });
         // A concurrent update between the unlocked check above and this lock could otherwise
         // commit a URL and credential pair the provider never answered for.

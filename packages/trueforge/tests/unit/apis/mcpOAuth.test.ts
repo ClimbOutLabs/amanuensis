@@ -6,6 +6,7 @@ import winston from 'winston';
 import { createMcpOAuthRouter } from '../../../src/apis/mcpOAuth';
 import { createMcpServersRouter, createSettingsMcpServersRouter } from '../../../src/apis/mcpServers';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import configuration from '../../../src/config';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import type { IMcpServerWithAuthStore } from '../../../src/db/mcpServerStore';
@@ -98,6 +99,7 @@ describe('MCP OAuth authorize + callback', () => {
     withTransaction = callback => db.transaction().execute(callback);
     logger = winston.createLogger({ silent: true });
     settingsRouter = createSettingsMcpServersRouter({
+      mcpCatalog: McpCatalog.load(),
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
       toolGrantStore,

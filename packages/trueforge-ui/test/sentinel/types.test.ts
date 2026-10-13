@@ -297,8 +297,8 @@ describe('parseAuditEntries', () => {
 });
 
 describe('parseUserSettings', () => {
-  it('defaults to offline off and nothing relaxed', () => {
-    const defaults = { offline_mode: false, tier2_auto_allow: [] };
+  it('defaults to offline off, nothing relaxed and searches running without asking', () => {
+    const defaults = { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
     expect(parseUserSettings(null)).toEqual(defaults);
     expect(parseUserSettings({})).toEqual(defaults);
     expect(parseUserSettings({ data: null })).toEqual(defaults);
@@ -312,13 +312,19 @@ describe('parseUserSettings', () => {
       parseUserSettings({
         data: { offline_mode: true, tier2_auto_allow: ['shell', 'file_write', 'nope', 'file_write'] },
       }),
-    ).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'] });
+    ).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'], search_without_asking: true });
+  });
+
+  it('reads the search setting, and falls back to running without asking when it is not a boolean', () => {
+    expect(parseUserSettings({ data: { search_without_asking: false } }).search_without_asking).toBe(false);
+    expect(parseUserSettings({ data: { search_without_asking: 'no' } }).search_without_asking).toBe(true);
   });
 
   it('does not read a bare settings object', () => {
     expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['file_write'] })).toEqual({
       offline_mode: false,
       tier2_auto_allow: [],
+      search_without_asking: true,
     });
   });
 });

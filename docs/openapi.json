@@ -1159,6 +1159,20 @@
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
+          "search_provider": {
+            "description": "When true, adding this preset offers to make it the web search provider.",
+            "type": "boolean"
+          },
+          "search_tools": {
+            "description": "Search tools of this server that run without asking when it is the web search provider.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
           "type": {
             "$ref": "#/components/schemas/CatalogMCPServerType"
           },
@@ -4691,6 +4705,10 @@
             "description": "Configured MCP server name.",
             "type": "string"
           },
+          "silent_search_query": {
+            "description": "Text of a web search the host ran without asking, for the Searched chip.",
+            "type": "string"
+          },
           "type": {
             "description": "Tool hosted on an MCP server.",
             "enum": [
@@ -6735,6 +6753,20 @@
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
+          "search_provider": {
+            "description": "When true, this connector is the web search provider: its read-only tools run without asking, behind an outbound secret check, unless the user switched searches to Ask. At most one connector holds it.",
+            "type": "boolean"
+          },
+          "search_tools": {
+            "description": "Tools that run without asking as the web search provider even when the server does not declare them read-only. Set by the server for a known provider; a value sent is replaced.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
           "type": {
             "enum": [
               "remote"
@@ -7461,6 +7493,10 @@
             "description": "While on, actions that reach outside this machine are denied automatically.",
             "type": "boolean"
           },
+          "search_without_asking": {
+            "description": "While on, your designated search provider runs web searches without asking. Off asks for each one.",
+            "type": "boolean"
+          },
           "tier2_auto_allow": {
             "description": "Tier 2 action kinds that run without asking. Kinds not listed ask for approval.",
             "items": {
@@ -7474,7 +7510,8 @@
         },
         "required": [
           "offline_mode",
-          "tier2_auto_allow"
+          "tier2_auto_allow",
+          "search_without_asking"
         ],
         "type": "object"
       },
@@ -10767,6 +10804,10 @@
         "properties": {
           "offline_mode": {
             "description": "New offline mode value; omitted keeps the current value.",
+            "type": "boolean"
+          },
+          "search_without_asking": {
+            "description": "New search setting; omitted keeps the current value.",
             "type": "boolean"
           },
           "tier2_auto_allow": {
@@ -18249,7 +18290,7 @@
                 }
               }
             },
-            "description": "An MCP server with this name already exists, or `manifest.memory_provider: true` is set while another server already holds it."
+            "description": "An MCP server with this name already exists, or `manifest.memory_provider` or `manifest.search_provider` is set to true while another server already holds it."
           },
           "422": {
             "content": {
@@ -18323,7 +18364,7 @@
                 }
               }
             },
-            "description": "`manifest.memory_provider: true` is set while another server already holds it, or the connector changed while its memory-provider connection check was running, so the save must be retried."
+            "description": "`manifest.memory_provider` or `manifest.search_provider` is set to true while another server already holds it, or the connector changed while its memory-provider connection check was running, so the save must be retried."
           },
           "422": {
             "content": {
@@ -19973,7 +20014,7 @@
     },
     "/api/v1/user/settings/sentinel": {
       "get": {
-        "description": "Returns the authenticated user’s offline mode and the Tier 2 action kinds that run without asking.",
+        "description": "Returns the authenticated user’s offline mode, the Tier 2 action kinds that run without asking, and whether web searches run without asking.",
         "responses": {
           "200": {
             "content": {

@@ -18,7 +18,8 @@ export const getSentinelUserSettingsRoute = createRoute({
   path: '/',
   tags: [OpenApiTag.PERSONALIZATION],
   summary: 'Get Sentinel permission settings',
-  description: 'Returns the authenticated user’s offline mode and the Tier 2 action kinds that run without asking.',
+  description:
+    'Returns the authenticated user’s offline mode, the Tier 2 action kinds that run without asking, and whether web searches run without asking.',
   'x-fern-sdk-group-name': ['personalization'],
   'x-fern-sdk-method-name': 'get_sentinel_settings',
   responses: {

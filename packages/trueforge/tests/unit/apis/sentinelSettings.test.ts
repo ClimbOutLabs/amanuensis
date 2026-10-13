@@ -65,7 +65,11 @@ describe('Sentinel user settings routes', () => {
   });
 
   it('reads the defaults for a user who saved nothing', async () => {
-    expect(await read('fresh-user')).toEqual({ offline_mode: false, tier2_auto_allow: [] });
+    expect(await read('fresh-user')).toEqual({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+    });
   });
 
   it('saves a patch, merges later patches and keeps users isolated', async () => {
@@ -74,18 +78,26 @@ describe('Sentinel user settings routes', () => {
     expect(GetSentinelUserSettingsResponseSchema.parse(await saved.json()).data).toEqual({
       offline_mode: false,
       tier2_auto_allow: ['file_write'],
+      search_without_asking: true,
     });
 
     await server.request(SETTINGS_PATH, patch('alice', { offline_mode: true }));
-    expect(await read('alice')).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'] });
-    expect(await read('bob')).toEqual({ offline_mode: false, tier2_auto_allow: [] });
+    await server.request(SETTINGS_PATH, patch('alice', { search_without_asking: false }));
+    expect(await read('alice')).toEqual({
+      offline_mode: true,
+      tier2_auto_allow: ['file_write'],
+      search_without_asking: false,
+    });
+    expect(await read('bob')).toEqual({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true });
   });
 
-  it('rejects an unknown Tier 2 kind and a non-boolean offline mode', async () => {
+  it('rejects an unknown Tier 2 kind and a non-boolean offline or search setting', async () => {
     const unknownKind = await server.request(SETTINGS_PATH, patch('carol', { tier2_auto_allow: ['reformat_disk'] }));
     expect(unknownKind.status).toBe(400);
     const badOffline = await server.request(SETTINGS_PATH, patch('carol', { offline_mode: 'yes' }));
     expect(badOffline.status).toBe(400);
-    expect(await read('carol')).toEqual({ offline_mode: false, tier2_auto_allow: [] });
+    const badSearch = await server.request(SETTINGS_PATH, patch('carol', { search_without_asking: 'no' }));
+    expect(badSearch.status).toBe(400);
+    expect(await read('carol')).toEqual({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true });
   });
 });

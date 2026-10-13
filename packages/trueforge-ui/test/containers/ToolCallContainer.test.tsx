@@ -114,6 +114,35 @@ describe('ToolCallContainer', () => {
     expect(blocks[1]).toHaveAttribute('data-content', '2026-07-01T00:00:00Z');
   });
 
+  it('shows a Searched chip for a search the host ran without asking, from the host-set artifact only', () => {
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: 'search-1',
+        toolName: 'call_tool',
+        args: {},
+        argsText: JSON.stringify({ mcp_server: 'finder', tool_name: 'lookup', input: { query: 'tallest building' } }),
+        artifact: { silentSearchQuery: 'tallest building in Lisbon' },
+        result: 'ok',
+      },
+    ]);
+    expect(screen.getByTestId('searched-chip')).toHaveTextContent('Searched: tallest building in Lisbon');
+  });
+
+  it('shows no chip when the host did not mark the call, even if the model put a query in the arguments', () => {
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: 'search-2',
+        toolName: 'lookup',
+        args: { query: 'forged', silentSearchQuery: 'forged' },
+        argsText: JSON.stringify({ query: 'forged', silentSearchQuery: 'forged' }),
+        result: 'ok',
+      },
+    ]);
+    expect(screen.queryByTestId('searched-chip')).not.toBeInTheDocument();
+  });
+
   it('renders an error result once expanded', () => {
     renderToolCallMessage([
       {

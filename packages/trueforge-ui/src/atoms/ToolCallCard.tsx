@@ -30,6 +30,8 @@ export type ToolCallCardProps = {
   highlightCard?: boolean;
   className?: string;
   mcpServerName?: string;
+  /** Text of a web search the host ran without asking; shown as a "Searched" chip beside the title. */
+  searchedQuery?: string;
   dataTestPrefix?: string;
   /** When set, this card is the scroll/flash target for approval banner navigation. */
   approvalId?: string;
@@ -74,6 +76,7 @@ export function ToolCallCard({
   highlightCard = false,
   className,
   mcpServerName,
+  searchedQuery,
   dataTestPrefix,
   approvalId,
 }: ToolCallCardProps) {
@@ -117,7 +120,20 @@ export function ToolCallCard({
         iconClassName={iconClassName}
         iconVariant={derivedIconVariant}
         iconSize={derivedIconSize}
-        title={<span title={toolName}>{displayLabel}</span>}
+        title={
+          <>
+            <span title={toolName}>{displayLabel}</span>
+            {searchedQuery === undefined ? null : (
+              <span
+                className="ml-2 inline-block max-w-[20rem] truncate rounded-full border border-border bg-secondary-bg/40 px-2 py-0.5 align-middle text-[0.6875rem] font-medium leading-4 text-text-secondary"
+                title={searchedQuery}
+                data-testid={dataTestPrefix ? `${dataTestPrefix}-searched-chip` : 'searched-chip'}
+              >
+                Searched: {searchedQuery}
+              </span>
+            )}
+          </>
+        }
         expandable={isExpandable}
         expanded={expanded}
         onToggle={onToggle}

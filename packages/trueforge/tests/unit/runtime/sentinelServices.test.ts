@@ -33,6 +33,7 @@ function composeOver(db: ReturnType<typeof createSqliteDb>): SentinelServices {
     settings: new SqliteSentinelSettingsStore(db),
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: new SqliteMcpToolGrantStore(db),
+    outboundSecrets: () => Promise.resolve([]),
   });
 }
 
@@ -65,6 +66,7 @@ describe('createSentinelServices', () => {
         settings: new SqliteSentinelSettingsStore(db),
         approvalTokens,
         toolGrants,
+        outboundSecrets: () => Promise.resolve([]),
       });
       expect(services.token_store).toBe(approvalTokens);
       expect(services.tool_grants).toBe(toolGrants);

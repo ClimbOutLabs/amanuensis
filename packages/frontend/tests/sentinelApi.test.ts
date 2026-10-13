@@ -58,8 +58,14 @@ test('audit entries list parses the envelope and pages by limit', async () => {
 });
 
 test('user settings read and patch the server envelope', async () => {
-  const { api, seen } = recordingApi(() => ({ data: { offline_mode: false, tier2_auto_allow: ['file_write'] } }));
-  assert.deepEqual(await api.getUserSettings(), { offline_mode: false, tier2_auto_allow: ['file_write'] });
+  const { api, seen } = recordingApi(() => ({
+    data: { offline_mode: false, tier2_auto_allow: ['file_write'], search_without_asking: false },
+  }));
+  assert.deepEqual(await api.getUserSettings(), {
+    offline_mode: false,
+    tier2_auto_allow: ['file_write'],
+    search_without_asking: false,
+  });
   assert.equal(seen[0]?.url, '/api/v1/user/settings/sentinel');
   assert.equal(seen[0]?.method, 'GET');
 

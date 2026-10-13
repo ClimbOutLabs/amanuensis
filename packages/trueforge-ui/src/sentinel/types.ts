@@ -108,6 +108,8 @@ export type SentinelUserSettings = {
   offline_mode: boolean;
   /** Tier 2 action kinds that run without asking. Default: none, so Tier 2 asks. */
   tier2_auto_allow: Tier2ActionKind[];
+  /** While on, the search provider you designated runs web searches without asking. Default: on. */
+  search_without_asking: boolean;
 };
 
 /**
@@ -294,9 +296,10 @@ export function parseAuditEntries(body: unknown): SentinelAuditEntry[] {
 /** Parses a settings response body (`{ data: settings }`); absent fields fall back to safe defaults. */
 export function parseUserSettings(body: unknown): SentinelUserSettings {
   const settings = isRecord(body) ? body.data : undefined;
-  if (!isRecord(settings)) return { offline_mode: false, tier2_auto_allow: [] };
+  if (!isRecord(settings)) return { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
   return {
     offline_mode: optionalBoolean(settings, 'offline_mode') ?? false,
     tier2_auto_allow: tier2ActionKindArray(settings.tier2_auto_allow),
+    search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
   };
 }
