@@ -13,6 +13,7 @@ import {
   renderOutboundArguments,
 } from '../../../src/core/permissions/extractorRegistry';
 import type { Tier3Card, TierDecision } from '../../../src/core/permissions/tier';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(agentIntent: string | null = null): ClassifyContext {
   return {
@@ -23,6 +24,7 @@ function makeCtx(agentIntent: string | null = null): ClassifyContext {
     repository_id: 'r1',
     workspace_cwd: null,
     agent_intent: agentIntent,
+    web_search: createWebSearchTurnState(),
   };
 }
 

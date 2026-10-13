@@ -1010,9 +1010,10 @@ async function holdSearchCall(input: {
   reason: SearchAskReason;
   why: string;
   queryText: string;
+  fields: ExtractionResult['fields'];
   denyWhenUnattended: boolean;
 }): Promise<TierDecision> {
-  const { action, ctx } = input;
+  const { action, ctx, fields } = input;
   if (input.denyWhenUnattended && ctx.services.unattended) {
     return autoDenyDecision({
       reason: 'outbound_guard',
@@ -1035,11 +1036,19 @@ async function holdSearchCall(input: {
       recipient: null,
       amount: null,
       parsed_command: null,
+      outbound_text: fields.outbound_text,
+      destination_host: fields.destination_host,
+      outbound_truncated: fields.outbound_truncated,
     },
     reason: input.reason,
     reason_detail: input.why === '' ? 'Searches are set to ask.' : `Web search held: ${input.why}.`,
     sensitive_read: false,
-    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+    approval_token_id: await mintPlainToken({
+      ctx,
+      tool_name: action.tool_name,
+      params: action.canonical_params,
+      connector: connectorBindingFor(action),
+    }),
   });
 }
 
@@ -1074,7 +1083,7 @@ async function classifySearchProviderTool(input: {
   const strings = collectOutboundStrings(action.canonical_params);
   const queryText = strings === undefined ? '' : searchQueryText(strings);
   const held = (reason: SearchAskReason, why: string, denyWhenUnattended = true): Promise<TierDecision> =>
-    holdSearchCall({ action, ctx, reason, why, queryText, denyWhenUnattended });
+    holdSearchCall({ action, ctx, reason, why, queryText, fields: extraction.fields, denyWhenUnattended });
 
   if (!(await ctx.services.searchWithoutAsking(owner))) {
     return held('mcp_search_setting_ask', '', false);
