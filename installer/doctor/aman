@@ -28,6 +28,7 @@ CLOCK_FAIL_SECONDS=300
 # The app image build peaks near 5 GB across its parallel stages.
 DOCKER_MEM_FAIL_BYTES=$((6 * GIB))
 DOCKER_MEM_WARN_BYTES=$((8 * GIB))
+DOCKER_MIN_COMPOSE_MAJOR=2
 
 RECORDS=""
 CLEANED=""
@@ -209,12 +210,13 @@ check_docker() {
   compose=$(bounded "$PROBE_SECONDS" docker compose version --short 2>&1)
   rc=$?
   compose=${compose#v}
-  compose_major=${compose%%.*}
-  case "$compose_major" in
-    '' | *[!0-9]*) rc=1 ;;
-  esac
-  if [ "$rc" -ne 0 ] || [ "$compose_major" -lt 2 ]; then
-    record machine docker fail "Docker ${version} is running, but Docker Compose v2 is missing." \
+  if [ "$rc" -eq 0 ] && [[ $compose =~ ^([0-9]+)\.[0-9]+ ]]; then
+    compose_major=$((10#${BASH_REMATCH[1]}))
+  else
+    compose_major=0
+  fi
+  if [ "$compose_major" -lt "$DOCKER_MIN_COMPOSE_MAJOR" ]; then
+    record machine docker fail "Docker ${version} is running, but Docker Compose v${DOCKER_MIN_COMPOSE_MAJOR} or newer is missing (found: ${compose:-none})." \
       "Install the Compose plugin (Linux: sudo apt-get install docker-compose-plugin; Docker Desktop already includes it), then run doctor again."
     return
   fi

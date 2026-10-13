@@ -232,7 +232,7 @@ case "$cmd" in
     ;;
   compose)
     if [ "${1:-}" = version ]; then
-      echo "${STUB_COMPOSE_VERSION:-2.29.1}"
+      echo "${STUB_COMPOSE_VERSION-2.29.1}"
       exit 0
     fi
     proj=

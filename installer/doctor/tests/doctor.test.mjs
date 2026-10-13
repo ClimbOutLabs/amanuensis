@@ -225,7 +225,7 @@ describe('docker check', () => {
     assert.doesNotMatch(check.detail, /second line/);
   });
 
-  it('fails when Compose v2 is missing', () => {
+  it('fails when Compose v2 or newer is missing', () => {
     make();
     world.set('compose_version', { err: 'docker: unknown command: docker compose', rc: 1 });
     assert.equal(machine(world.json(), 'docker').state, 'fail');
@@ -233,6 +233,22 @@ describe('docker check', () => {
     const check = machine(world.json(), 'docker');
     assert.equal(check.state, 'fail');
     assertFixed(check);
+  });
+
+  it('accepts Compose v2 and newer, with or without a leading v', () => {
+    for (const out of ['v5.2.0', '5.2.0', '2.29.1', 'v2.40.0']) {
+      make();
+      world.set('compose_version', { out: `${out}\n`, rc: 0 });
+      assert.equal(machine(world.json(), 'docker').state, 'ok', out);
+    }
+  });
+
+  it('rejects an empty or unreadable Compose version', () => {
+    for (const out of ['', 'garbage']) {
+      make();
+      world.set('compose_version', { out: `${out}\n`, rc: 0 });
+      assert.equal(machine(world.json(), 'docker').state, 'fail', out);
+    }
   });
 
   it('marks dependent checks off, and each instance service failed, when docker is unreachable', () => {

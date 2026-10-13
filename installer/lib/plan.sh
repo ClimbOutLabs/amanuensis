@@ -175,9 +175,8 @@ print_plan() {
   say "Run code and attachment extraction stay off in this version."
 }
 
-# Read-only look at what exists, turned into plan lines and download entries.
-plan_build() {
-  local name have_release=0 expected_app expected_stt
+# Machine checks that need no answers from the user, so a blocker can stop the run before any prompt.
+plan_preflight() {
   PLAN_LINES=
   PLAN_TODO=0
   PLAN_ROOT=0
@@ -205,7 +204,17 @@ plan_build() {
     preflight_docker_space
     preflight_docker_memory
   fi
+}
 
+report_blockers_and_exit() {
+  say ""
+  say "This machine cannot be set up yet:$PLAN_BLOCKERS" >&2
+  exit 1
+}
+
+# Read-only look at what exists, turned into plan lines and download entries. Runs after plan_preflight.
+plan_build() {
+  local name have_release=0 expected_app expected_stt
   if [ -f "$RELEASE_DIR/release.json" ]; then
     have_release=1
   fi
@@ -288,6 +297,10 @@ cmd_install() {
   DL_HOSTS=
   release_resolve
   AMAN_PASSWORD=
+  plan_preflight
+  if [ "$DRY_RUN" != 1 ] && [ -n "$PLAN_BLOCKERS" ]; then
+    report_blockers_and_exit
+  fi
   if need_new_instance; then
     read_password_first
     instance_collect main
@@ -296,9 +309,7 @@ cmd_install() {
   plan_build
   print_plan
   if [ -n "$PLAN_BLOCKERS" ]; then
-    say ""
-    say "This machine cannot be set up yet:$PLAN_BLOCKERS" >&2
-    exit 1
+    report_blockers_and_exit
   fi
   if [ "$DRY_RUN" = 1 ]; then
     say ""

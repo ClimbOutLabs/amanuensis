@@ -36,7 +36,49 @@ test_old_engine_and_compose_v1() {
   STUB_COMPOSE_VERSION=1.29.2
   run_install --dry-run
   assert_rc 1
-  assert_contains "$OUT$ERR" "Compose v2 is required"
+  assert_contains "$OUT$ERR" "Compose 1.29.2 is too old; v2 or newer is required"
+  sandbox_drop
+}
+
+test_compose_v2_or_newer_passes() {
+  local version
+  t_begin "Compose v2 and newer pass, with or without a leading v"
+  for version in v5.2.0 5.2.0 2.29.1 v2.40.0 5.2.0-desktop.1; do
+    sandbox_new
+    STUB_COMPOSE_VERSION=$version
+    run_install --dry-run
+    assert_not_contains "$OUT$ERR" "Docker Compose" "$version"
+    assert_contains "$OUT" "Compose ${version#v}" "$version"
+    sandbox_drop
+  done
+}
+
+test_unreadable_compose_version_is_named() {
+  local version
+  t_begin "an empty or garbage Compose version is rejected and named"
+  for version in "" garbage "unknown command"; do
+    sandbox_new
+    STUB_COMPOSE_VERSION=$version
+    run_install --dry-run
+    assert_rc 1
+    assert_contains "$OUT$ERR" "Could not read the Docker Compose version (got '$version')"
+    sandbox_drop
+  done
+}
+
+test_blocker_stops_before_any_prompt() {
+  t_begin "a runtime blocker exits non-zero before the instance prompts"
+  sandbox_new
+  STUB_COMPOSE_VERSION=1.29.2
+  run_install_tty "Instance name=>
+Owner email=>owner@example.invalid
+"
+  assert_eq "$RC" 1
+  assert_contains "$OUT" "This machine cannot be set up yet"
+  assert_contains "$OUT" "Compose 1.29.2 is too old"
+  assert_not_contains "$OUT" "Instance name"
+  assert_not_contains "$OUT" "Password"
+  assert_no_path "$AMAN_HOME"
   sandbox_drop
 }
 
@@ -264,6 +306,9 @@ test_print_root_steps() {
 test_rootless_is_unsupported
 test_podman_is_unsupported
 test_old_engine_and_compose_v1
+test_compose_v2_or_newer_passes
+test_unreadable_compose_version_is_named
+test_blocker_stops_before_any_prompt
 test_daemon_down
 test_group_member_without_relogin_uses_sg
 test_non_member_is_added_then_sg

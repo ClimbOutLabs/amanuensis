@@ -4,6 +4,7 @@
 # Vendor repository signing key; the installer refuses the repository on any other fingerprint.
 DOCKER_APT_KEY_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 DOCKER_MIN_ENGINE_MAJOR=23
+DOCKER_MIN_COMPOSE_MAJOR=2
 
 AMAN_DOCKER_MODE=direct
 DOCKER_STATE=ok
@@ -221,7 +222,7 @@ docker_install_hint() {
   if docker_install_supported; then
     echo "Run install.sh --print-root-steps to see the install steps, or let this installer run them."
   else
-    echo "Install Docker Engine with Compose v2 (Linux) or Docker Desktop (macOS, Windows), then run this again."
+    echo "Install Docker Engine with Compose v2 or newer (Linux) or Docker Desktop (macOS, Windows), then run this again."
   fi
 }
 
@@ -258,13 +259,14 @@ docker_runtime_problem() {
   fi
   compose=$(D compose version --short 2>/dev/null || true)
   compose=${compose#v}
-  case "$compose" in
-    2.*) ;;
-    *)
-      RUNTIME_PROBLEM="Docker Compose v2 is required (docker compose). Install the docker-compose-plugin package, then run this again."
-      return 0
-      ;;
-  esac
+  if [[ ! $compose =~ ^([0-9]+)\.[0-9]+ ]]; then
+    RUNTIME_PROBLEM="Could not read the Docker Compose version (got '${compose}'). Docker Compose v$DOCKER_MIN_COMPOSE_MAJOR or newer is required (docker compose). Install the docker-compose-plugin package, then run this again."
+    return 0
+  fi
+  if [ "$((10#${BASH_REMATCH[1]}))" -lt "$DOCKER_MIN_COMPOSE_MAJOR" ]; then
+    RUNTIME_PROBLEM="Docker Compose $compose is too old; v$DOCKER_MIN_COMPOSE_MAJOR or newer is required (docker compose). Install the docker-compose-plugin package, then run this again."
+    return 0
+  fi
   DOCKER_ENGINE_VERSION=$engine
   DOCKER_COMPOSE_VERSION=$compose
 }
