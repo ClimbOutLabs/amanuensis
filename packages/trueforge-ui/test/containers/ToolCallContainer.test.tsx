@@ -894,8 +894,16 @@ describe('ToolCallContainer', () => {
       });
       const api: SentinelApi = {
         listAuditEntries: vi.fn(async () => []),
-        getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [] })),
-        updateUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [] })),
+        getUserSettings: vi.fn(async () => ({
+          offline_mode: false,
+          tier2_auto_allow: [],
+          search_without_asking: true,
+        })),
+        updateUserSettings: vi.fn(async () => ({
+          offline_mode: false,
+          tier2_auto_allow: [],
+          search_without_asking: true,
+        })),
         listSentinelSessionContext: vi.fn(async () => ({
           approvals: [approval('old', 'old.example.com'), approval('now', 'now.example.com')],
         })),
