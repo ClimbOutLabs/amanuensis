@@ -3,10 +3,16 @@
 export interface Tier3Card {
     /** Verifiable amount, or null. */
     amount: string | null;
-    /** What cannot be undone, or null when fully reversible. */
+    /** A short note on what can't be reversed, or null. */
     cannotBeUndone: string | null;
     /** Verifiable destination (URL, service name), or null. */
     destination: string | null;
+    /** Host of the connector server that receives the call, or null when it is not a remote server. */
+    destinationHost: string | null;
+    /** Exact arguments sent to a connector, one "name: value" line each. Long values are cut with a marker. */
+    outboundText: string | null;
+    /** True when part of outbound_text is cut and not shown in full. */
+    outboundTruncated: boolean;
     /** Server-parsed command structure for shell actions, or null. */
     parsedCommand: string | null;
     /** One plain-language sentence describing what will happen. No jargon. */

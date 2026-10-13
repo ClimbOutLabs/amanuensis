@@ -32,12 +32,21 @@ export const Tier3CardSchema = z
       .string()
       .nullable()
       .describe('One sentence on why the agent wants this, from agent intent when available.'),
-    cannot_be_undone: z.string().nullable().describe('What cannot be undone, or null when fully reversible.'),
+    cannot_be_undone: z.string().nullable().describe("A short note on what can't be reversed, or null."),
     why_asked_again: z.string().nullable().describe('Actual cause of re-escalation, or null on first ask.'),
     destination: z.string().nullable().describe('Verifiable destination (URL, service name), or null.'),
     recipient: z.string().nullable().describe('Verifiable recipient (address, handle), or null.'),
     amount: z.string().nullable().describe('Verifiable amount, or null.'),
     parsed_command: z.string().nullable().describe('Server-parsed command structure for shell actions, or null.'),
+    outbound_text: z
+      .string()
+      .nullable()
+      .describe('Exact arguments sent to a connector, one "name: value" line each. Long values are cut with a marker.'),
+    destination_host: z
+      .string()
+      .nullable()
+      .describe('Host of the connector server that receives the call, or null when it is not a remote server.'),
+    outbound_truncated: z.boolean().describe('True when part of outbound_text is cut and not shown in full.'),
   })
   .openapi('Tier3Card');
 

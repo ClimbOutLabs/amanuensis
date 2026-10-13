@@ -8755,7 +8755,7 @@
             ]
           },
           "cannot_be_undone": {
-            "description": "What cannot be undone, or null when fully reversible.",
+            "description": "A short note on what can't be reversed, or null.",
             "type": [
               "string",
               "null"
@@ -8767,6 +8767,24 @@
               "string",
               "null"
             ]
+          },
+          "destination_host": {
+            "description": "Host of the connector server that receives the call, or null when it is not a remote server.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outbound_text": {
+            "description": "Exact arguments sent to a connector, one \"name: value\" line each. Long values are cut with a marker.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outbound_truncated": {
+            "description": "True when part of outbound_text is cut and not shown in full.",
+            "type": "boolean"
           },
           "parsed_command": {
             "description": "Server-parsed command structure for shell actions, or null.",
@@ -8809,7 +8827,10 @@
           "destination",
           "recipient",
           "amount",
-          "parsed_command"
+          "parsed_command",
+          "outbound_text",
+          "destination_host",
+          "outbound_truncated"
         ],
         "type": "object"
       },

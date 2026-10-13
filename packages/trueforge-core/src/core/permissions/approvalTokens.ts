@@ -64,10 +64,24 @@ export function toJsonSafeParams(params: Record<string, unknown>): Record<string
   return JSON.parse(JSON.stringify(params)) as Record<string, unknown>;
 }
 
-/** Deterministic action id over tool name + canonical params. */
-export function actionIdFor(input: { tool_name: string; canonical_params: unknown }): string {
+/** The connector an approval was granted for: its server id and the host its URL points at. */
+export interface ConnectorBinding {
+  server_id: string;
+  destination_host: string | null;
+}
+
+/**
+ * Deterministic action id over tool name + canonical params, plus the connector for a connector
+ * call so an approval cannot be replayed against a connector that now points somewhere else.
+ */
+export function actionIdFor(input: {
+  tool_name: string;
+  canonical_params: unknown;
+  connector?: ConnectorBinding | undefined;
+}): string {
+  const connector = input.connector === undefined ? '' : `\n${stableStringify(input.connector)}`;
   return createHash('sha256')
-    .update(`${input.tool_name}\n${stableStringify(input.canonical_params)}`)
+    .update(`${input.tool_name}\n${stableStringify(input.canonical_params)}${connector}`)
     .digest('hex');
 }
 

@@ -19,6 +19,7 @@ import {
   normalizeCwd,
   toJsonSafeParams,
   type ApprovalTokenScope,
+  type ConnectorBinding,
   type ShellApprovalBinding,
 } from './approvalTokens';
 import { recordClassificationAudit } from './audit';
@@ -29,7 +30,7 @@ import {
   type SentinelHostContext,
   type SentinelServices,
 } from './context';
-import { extractCardFields, type ExtractionResult } from './extractorRegistry';
+import { escapeDisplayText, extractCardFields, type ExtractionResult } from './extractorRegistry';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
 import {
   checkOutboundStrings,
@@ -52,6 +53,7 @@ import {
   tier2Decision,
   tier3Decision,
   type Tier2ActionKind,
+  type Tier3Card,
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
@@ -86,6 +88,10 @@ export interface SentinelAction {
   sandbox_effect?: string | undefined;
   /** Connector serving an MCP tool; keys the user's standing tool grants. */
   mcp_server_name?: string | undefined;
+  /** Connector's server id; with `mcp_server_host` it is bound into the approval token. */
+  mcp_server_id?: string | undefined;
+  /** Host of the connector's configured server URL, for the approval card. Never derived from tool arguments. */
+  mcp_server_host?: string | undefined;
   /** The host provisioned this connector itself. Never derived from tool metadata or client input. */
   mcp_first_party?: boolean | undefined;
   /** The user designated this connector as their search provider. Set by the host from the connector record only. */
@@ -158,9 +164,10 @@ function firstSentence(text: string): string {
   return (match !== null ? match[0] : trimmed).trim().slice(0, 280);
 }
 
-function plainWhy(agentIntent: string | null): string {
+/** Null when the agent gave no reason, so the card shows no line instead of an empty one. */
+function plainWhy(agentIntent: string | null): string | null {
   if (agentIntent === null || agentIntent.trim() === '') {
-    return 'The agent did not state a reason.';
+    return null;
   }
   return firstSentence(agentIntent);
 }
@@ -492,12 +499,15 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       card: {
         plain_what: `Run \`${command}\` with custom environment variables.`,
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: 'Environment variables like LD_PRELOAD can inject code into the command.',
+        cannot_be_undone: 'This changes how programs start, which can make them run other code.',
         why_asked_again: null,
         destination: null,
         recipient: null,
         amount: null,
         parsed_command: command,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
       },
       reason: 'env_overrides_present',
       reason_detail: 'Custom environment variables require approval.',
@@ -545,12 +555,15 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         card: {
           plain_what: `Execute \`${basenameOf(executedOperand)}\`, which the server cannot resolve to a workspace file.`,
           plain_why: plainWhy(ctx.agent_intent),
-          cannot_be_undone: 'The executed file could do anything once it runs.',
+          cannot_be_undone: 'This runs a file, and it can do anything once started.',
           why_asked_again: null,
           destination: null,
           recipient: null,
           amount: null,
           parsed_command: command,
+          outbound_text: null,
+          destination_host: null,
+          outbound_truncated: false,
         },
         reason: 'tracked_check_unresolvable',
         reason_detail: 'The executed operand could not be resolved; failing closed.',
@@ -587,12 +600,15 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           card: {
             plain_what: `Execute \`${basenameOf(identity)}\`, a script the agent wrote earlier.`,
             plain_why: plainWhy(ctx.agent_intent),
-            cannot_be_undone: 'The script runs with full shell access once approved.',
+            cannot_be_undone: 'This script gets full access to your shell.',
             why_asked_again: null,
             destination: null,
             recipient: null,
             amount: null,
             parsed_command: command,
+            outbound_text: null,
+            destination_host: null,
+            outbound_truncated: false,
           },
           reason: 'tracked_executable_unapproved',
           reason_detail: 'No matching approval grant for this (content, argv) pair.',
@@ -619,12 +635,15 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           card: {
             plain_what: `Run \`${command}\` where no workspace is set.`,
             plain_why: plainWhy(ctx.agent_intent),
-            cannot_be_undone: 'Without a workspace, nothing limits which files the command can read.',
+            cannot_be_undone: 'No workspace is set, so this command can read any of your files.',
             why_asked_again: null,
             destination: null,
             recipient: null,
             amount: null,
             parsed_command: command,
+            outbound_text: null,
+            destination_host: null,
+            outbound_truncated: false,
           },
           reason: 'workspace_unknown',
           reason_detail: 'There is no workspace to keep the command inside.',
@@ -638,12 +657,15 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           card: {
             plain_what: `Run \`${command}\` from outside the workspace.`,
             plain_why: plainWhy(ctx.agent_intent),
-            cannot_be_undone: 'Running outside the workspace can access system files.',
+            cannot_be_undone: 'This runs outside your workspace and can reach system files.',
             why_asked_again: null,
             destination: null,
             recipient: null,
             amount: null,
             parsed_command: command,
+            outbound_text: null,
+            destination_host: null,
+            outbound_truncated: false,
           },
           reason: 'cwd_outside_workspace',
           reason_detail: 'The working directory is outside the workspace.',
@@ -656,12 +678,15 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           card: {
             plain_what: `Access a file outside the workspace with \`${command}\`.`,
             plain_why: plainWhy(ctx.agent_intent),
-            cannot_be_undone: 'This file is outside the workspace boundary.',
+            cannot_be_undone: 'This file is outside your workspace.',
             why_asked_again: null,
             destination: null,
             recipient: null,
             amount: null,
             parsed_command: command,
+            outbound_text: null,
+            destination_host: null,
+            outbound_truncated: false,
           },
           reason: 'file_outside_workspace',
           reason_detail: 'A file operand resolves outside the workspace.',
@@ -695,12 +720,15 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           ? 'Run a compound shell command (pipes, chaining, or redirects).'
           : `Run \`${form.argv[0] ?? command}\` with arguments the safe list does not allow.`,
       plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'Shell commands can change or delete files once they run.',
+      cannot_be_undone: 'Commands can change or delete files.',
       why_asked_again: null,
       destination: null,
       recipient: null,
       amount: null,
       parsed_command: form.raw_command,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
     },
     reason: 'shell_not_allowlisted',
     reason_detail: 'The command is not on the server-side safe list.',
@@ -710,13 +738,29 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   });
 }
 
-async function mintPlainToken(input: { ctx: ClassifyContext; tool_name: string; params: unknown }): Promise<string> {
+async function mintPlainToken(input: {
+  ctx: ClassifyContext;
+  tool_name: string;
+  params: unknown;
+  connector?: ConnectorBinding | undefined;
+}): Promise<string> {
   const token = await input.ctx.services.token_store.mint({
     ...approvalTokenOwner(input.ctx),
-    action_id: actionIdFor({ tool_name: input.tool_name, canonical_params: input.params }),
+    action_id: actionIdFor({
+      tool_name: input.tool_name,
+      canonical_params: input.params,
+      connector: input.connector,
+    }),
     canonical_params: input.params,
   });
   return token.token_id;
+}
+
+/** The connector an approval is bound to; only a call that came through a configured connector has one. */
+function connectorBindingFor(action: SentinelAction): ConnectorBinding | undefined {
+  return action.mcp_server_id === undefined
+    ? undefined
+    : { server_id: action.mcp_server_id, destination_host: action.mcp_server_host ?? null };
 }
 
 async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
@@ -729,12 +773,15 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       card: {
         plain_what: 'Write a file outside the workspace.',
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: 'The file will exist outside the workspace once written.',
+        cannot_be_undone: 'This file will be saved outside your workspace.',
         why_asked_again: null,
         destination: null,
         recipient: null,
         amount: null,
         parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
       },
       reason: 'write_outside_workspace',
       reason_detail: 'Write target is null or workspace is unknown.',
@@ -766,12 +813,15 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       card: {
         plain_what: `Write a file outside the workspace at \`${target}\`.`,
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: 'The file will exist outside the workspace once written.',
+        cannot_be_undone: 'This file will be saved outside your workspace.',
         why_asked_again: null,
         destination: null,
         recipient: null,
         amount: null,
         parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
       },
       reason: 'write_outside_workspace',
       reason_detail: 'Write targets outside the workspace are never Tier 2.',
@@ -789,12 +839,15 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       card: {
         plain_what: `Write Git control file \`${target}\`.`,
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: 'Git configuration, hooks, and attributes can make Git run programs.',
+        cannot_be_undone: 'Git settings can make Git run other programs.',
         why_asked_again: null,
         destination: null,
         recipient: null,
         amount: null,
         parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
       },
       reason: 'git_control_write',
       reason_detail: 'Writes to .git, .gitattributes, and .gitmodules always require approval.',
@@ -827,12 +880,15 @@ function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierD
     card: {
       plain_what: `Run the \`${workflowName}\` workflow (executes package.json scripts).`,
       plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'The workflow runs scripts that the agent can modify.',
+      cannot_be_undone: 'This workflow runs scripts Aman can edit.',
       why_asked_again: null,
       destination: null,
       recipient: null,
       amount: null,
       parsed_command: `pnpm ${workflowName}`,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
     },
     reason: 'runner_workflow',
     reason_detail: `Run the \`${workflowName}\` workflow requires approval.`,
@@ -865,6 +921,9 @@ async function decideTier2(input: {
     recipient: null,
     amount: null,
     parsed_command: input.parsed_command,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
   };
   const base = {
     kind: input.kind,
@@ -896,6 +955,15 @@ function externalServiceWhat(input: {
   const name = input.tool_name.toLowerCase();
   const where = input.recipient ?? input.destination ?? 'an external destination';
   if (name.includes('email') || name.includes('mail')) {
+    if (name.includes('draft')) {
+      return `Save an email draft for ${where}.`;
+    }
+    if (name.includes('forward')) {
+      return `Forward an email to ${where}.`;
+    }
+    if (name.includes('reply')) {
+      return `Reply to an email, sending it to ${where}.`;
+    }
     return `Send an email to ${where}.`;
   }
   if (name.includes('sms') || name.includes('message') || name.includes('notify')) {
@@ -1043,7 +1111,13 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // Offline: network-required tools are filtered from the list; a stale call
   // that slips through is auto-denied here.
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
-  const extraction = extractCardFields({ tool_name: action.tool_name, canonical_params: action.canonical_params });
+  const extraction = extractCardFields({
+    tool_name: action.tool_name,
+    canonical_params: action.canonical_params,
+    tool_type: action.tool_type,
+    server_host: action.mcp_server_host,
+    server_name: action.mcp_server_name,
+  });
   if (offline) {
     if (extraction.external_service) {
       return autoDenyDecision({
@@ -1086,6 +1160,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     const { fields } = extraction;
     return tier3Decision({
       card: {
+        // The external-service sentence wins: it is the more specific warning about where this goes.
         plain_what: extraction.external_service
           ? externalServiceWhat({
               tool_name: action.tool_name,
@@ -1093,22 +1168,32 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
               recipient: fields.recipient,
               amount: fields.amount,
             })
-          : `Run \`${action.tool_name}\`, flagged as ${destructiveHint ? 'destructive' : 'reaching outside this machine'}.`,
+          : destructiveHint || extraction.connector_what === null
+            ? `Run ${action.tool_name}, flagged as ${destructiveHint ? 'destructive' : 'reaching outside this machine'}.`
+            : extraction.connector_what,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: destructiveHint
-          ? 'The action is flagged as destructive; its effects may not be reversible.'
-          : 'Once data leaves this machine it cannot be taken back.',
+          ? 'This might change or delete something for good.'
+          : "Once this is sent, it can't be unsent.",
         why_asked_again: null,
         destination: fields.destination,
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
+        outbound_text: fields.outbound_text,
+        destination_host: fields.destination_host,
+        outbound_truncated: fields.outbound_truncated,
       },
       reason: destructiveHint ? 'mcp_destructive_hint' : 'mcp_open_world_hint',
       reason_detail: 'MCP annotations flagged the tool; hints escalate only.',
       sensitive_read: sensitiveReadHit(action.canonical_params),
       escalated: true,
-      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
     });
   }
 
@@ -1131,19 +1216,25 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       card: {
         plain_what: what,
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: isDestructive
-          ? 'Deleted data cannot be recovered.'
-          : 'Once this runs it cannot be taken back.',
+        cannot_be_undone: isDestructive ? "Once deleted, it's gone for good." : "Once this runs, it can't be undone.",
         why_asked_again: null,
         destination: fields.destination,
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
+        outbound_text: fields.outbound_text,
+        destination_host: fields.destination_host,
+        outbound_truncated: fields.outbound_truncated,
       },
       reason: extraction.external_service ? 'external_service' : isInstall ? 'install_action' : 'destructive_action',
       reason_detail: 'Name-based Tier 3 class.',
       sensitive_read: sensitiveReadHit(action.canonical_params),
-      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
     });
   }
 
@@ -1193,21 +1284,71 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   }
 
   // Fail closed: anything unrecognized is Tier 3 with a card.
+  const card = connectorApprovalCard({ action, extraction, agent_intent: ctx.agent_intent });
+  const recognized = extraction.connector_what !== null;
   return tier3Decision({
-    card: {
-      plain_what: `Run \`${action.tool_name}\`, which the classifier does not recognize.`,
-      plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'Unrecognized actions are treated as potentially irreversible.',
-      why_asked_again: null,
-      destination: null,
-      recipient: null,
-      amount: null,
-      parsed_command: null,
-    },
-    reason: 'unrecognized_tool',
-    reason_detail: 'Fail-closed: unrecognized tools require approval.',
+    card,
+    reason: recognized ? 'connector_outbound' : 'unrecognized_tool',
+    reason_detail: recognized
+      ? 'Connector call that sends data out; always asks.'
+      : 'Fail-closed: unrecognized tools require approval.',
     sensitive_read: sensitiveReadHit(action.canonical_params),
-    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+    approval_token_id: await mintPlainToken({
+      ctx,
+      tool_name: action.tool_name,
+      params: action.canonical_params,
+      connector: connectorBindingFor(action),
+    }),
+  });
+}
+
+/**
+ * The card for a call that has to ask but matched no more specific class. A connector call shows its
+ * exact arguments and server host, and a known search, fetch, write or mail tool is named in plain
+ * words. Pure: it mints nothing, so it can also describe an approval that was gated some other way.
+ */
+function connectorApprovalCard(input: {
+  action: SentinelAction;
+  extraction: ExtractionResult;
+  agent_intent: string | null;
+}): Tier3Card {
+  const { action, extraction } = input;
+  const { fields } = extraction;
+  return {
+    plain_what: extraction.connector_what ?? `Aman doesn't know this tool yet: ${escapeDisplayText(action.tool_name)}.`,
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone:
+      extraction.connector_what === null
+        ? 'Check the details before you go ahead.'
+        : "Once this is sent, it can't be unsent.",
+    why_asked_again: null,
+    destination: fields.destination,
+    recipient: fields.recipient,
+    amount: fields.amount,
+    parsed_command: null,
+    outbound_text: fields.outbound_text,
+    destination_host: fields.destination_host,
+    outbound_truncated: fields.outbound_truncated,
+  };
+}
+
+/**
+ * The card for an approval that no classifier decision carded, such as a call a selector gates
+ * though Sentinel let it through. It describes the call the same way an unrecognized one is
+ * described, so every approval the user is asked for reads the same.
+ */
+export function approvalCardForGatedCall(input: { action: SentinelAction; agent_intent: string | null }): Tier3Card {
+  const { action } = input;
+  return connectorApprovalCard({
+    action,
+    extraction: extractCardFields({
+      tool_name: action.tool_name,
+      canonical_params: action.canonical_params,
+      tool_type: action.tool_type,
+      server_host: action.mcp_server_host,
+      server_name: action.mcp_server_name,
+    }),
+    agent_intent: input.agent_intent,
   });
 }
 
@@ -1243,12 +1384,15 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
               ? 'Run code the agent wrote in the sandbox.'
               : 'Submit an implementation plan for review.',
           plain_why: plainWhy(ctx.agent_intent),
-          cannot_be_undone: 'Execution cannot be taken back once it runs.',
+          cannot_be_undone: "Once this runs, it can't be undone.",
           why_asked_again: null,
           destination: null,
           recipient: null,
           amount: null,
           parsed_command: null,
+          outbound_text: null,
+          destination_host: null,
+          outbound_truncated: false,
         },
         reason: name === 'run_code' ? 'arbitrary_code_execution' : 'plan_submission',
         reason_detail: 'Always Tier 3 by policy.',

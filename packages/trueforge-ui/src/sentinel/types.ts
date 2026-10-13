@@ -44,6 +44,7 @@ export function parseTier2ActionKind(value: unknown): Tier2ActionKind | undefine
  * Server-rendered approval card for Tier 2 and Tier 3 actions. Mirrors the backend `Tier3Card` schema:
  * destination/recipient/amount come from the server-side extractor registry over
  * canonical params, never agent text. Shell cards carry the server-parsed command.
+ * Connector cards carry the exact arguments sent and the connector server's host.
  */
 export type SentinelApprovalCard = {
   /** One plain-language sentence describing what will happen. No jargon. Always present. */
@@ -62,6 +63,12 @@ export type SentinelApprovalCard = {
   amount: string | null;
   /** Server-parsed command structure for shell actions, or null. */
   parsed_command: string | null;
+  /** Exact arguments sent to a connector, one "name: value" line each, or null. */
+  outbound_text: string | null;
+  /** Host of the connector server that receives the call, or null. */
+  destination_host: string | null;
+  /** True when part of outbound_text is cut and not shown in full. */
+  outbound_truncated: boolean;
 };
 
 /** Everything the UI needs to render a Tier 2 or Tier 3 approval, keyed to one tool call. */
@@ -174,6 +181,10 @@ function cardString(
   return nullableString(record, snake) ?? nullableString(record, camel);
 }
 
+function cardFlag(record: Record<string, unknown>, { snake, camel }: { snake: string; camel: string }): boolean {
+  return record[snake] === true || record[camel] === true;
+}
+
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
   const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
@@ -187,6 +198,9 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     recipient: cardString(value, { snake: 'recipient', camel: 'recipient' }),
     amount: cardString(value, { snake: 'amount', camel: 'amount' }),
     parsed_command: cardString(value, { snake: 'parsed_command', camel: 'parsedCommand' }),
+    outbound_text: cardString(value, { snake: 'outbound_text', camel: 'outboundText' }),
+    destination_host: cardString(value, { snake: 'destination_host', camel: 'destinationHost' }),
+    outbound_truncated: cardFlag(value, { snake: 'outbound_truncated', camel: 'outboundTruncated' }),
   };
 }
 
