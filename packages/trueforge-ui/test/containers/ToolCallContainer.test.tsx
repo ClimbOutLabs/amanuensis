@@ -788,4 +788,55 @@ describe('ToolCallContainer', () => {
     if (!call) throw new Error('Expected ToolCallCard to render');
     expect(call[0].mcpServerName).toBeUndefined();
   });
+
+  describe('a chat that moved past the turn that asked', () => {
+    function pendingCall(id: string): Exclude<ThreadMessageLike['content'], string>[number] {
+      return {
+        type: 'tool-call',
+        toolCallId: id,
+        toolName: 'web_search',
+        args: {},
+        interrupt: { type: 'human', payload: {} },
+        approval: {
+          id,
+          approved: undefined,
+          options: [
+            { id: 'allow-once', kind: 'allow-once' as const },
+            { id: 'deny', kind: 'reject-once' as const, confirm: {} },
+          ],
+        },
+      };
+    }
+
+    function renderChat(messages: ThreadMessageLike[]) {
+      return render(
+        <RuntimeHarness messages={messages}>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </RuntimeHarness>,
+      );
+    }
+
+    it('shows an older pending card as expired, with no buttons', () => {
+      renderChat([
+        { role: 'assistant', content: [pendingCall('old')], status: { type: 'requires-action', reason: 'tool-calls' } },
+        { role: 'user', content: 'next question' },
+        { role: 'assistant', content: 'an answer' },
+      ]);
+
+      expect(screen.getByText('This request expired.')).toBeInTheDocument();
+      expect(screen.queryByRole('radio', { name: 'Allow once' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('radio', { name: 'Deny' })).not.toBeInTheDocument();
+    });
+
+    it('still lets the newest pending card be answered', () => {
+      renderChat([
+        { role: 'assistant', content: [pendingCall('old')], status: { type: 'requires-action', reason: 'tool-calls' } },
+        { role: 'user', content: 'next question' },
+        { role: 'assistant', content: [pendingCall('now')], status: { type: 'requires-action', reason: 'tool-calls' } },
+      ]);
+
+      expect(screen.getAllByText('This request expired.')).toHaveLength(1);
+      expect(screen.getAllByRole('radio', { name: 'Allow once' })).toHaveLength(1);
+    });
+  });
 });
