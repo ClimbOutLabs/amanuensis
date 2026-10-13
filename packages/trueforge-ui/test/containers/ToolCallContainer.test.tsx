@@ -8,6 +8,9 @@ import type { SandboxToolCallCardProps } from '@/atoms/SandboxToolCallCard.js';
 import type { SubAgentCardProps } from '@/atoms/SubAgentCard.js';
 import type { ToolCallCardProps } from '@/atoms/ToolCallCard.js';
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
+import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
+import { SentinelStateProvider } from '@/sentinel/SentinelStateProvider.js';
+import type { SentinelApi, SentinelApprovalInfo } from '@/sentinel/types.js';
 import { SlotsProvider, type SlotOverrides } from '@/theme/SlotsProvider.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
@@ -866,6 +869,67 @@ describe('ToolCallContainer', () => {
 
       expect(screen.getAllByText('This request expired.')).toHaveLength(1);
       expect(screen.getAllByRole('radio', { name: 'Allow once' })).toHaveLength(1);
+    });
+
+    it('expires the older connector card read back from saved history, and keeps the newest one answerable', async () => {
+      const outboundCard = (host: string): SentinelApprovalInfo['card'] => ({
+        plain_what: 'Send a message through a connector.',
+        plain_why: null,
+        cannot_be_undone: null,
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: null,
+        outbound_text: 'text: hello',
+        destination_host: host,
+        outbound_truncated: false,
+      });
+      const approval = (toolCallId: string, host: string): SentinelApprovalInfo => ({
+        toolCallId,
+        tier: 3,
+        card: outboundCard(host),
+        eventId: null,
+        threadId: null,
+      });
+      const api: SentinelApi = {
+        listAuditEntries: vi.fn(async () => []),
+        getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [] })),
+        updateUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [] })),
+        listSentinelSessionContext: vi.fn(async () => ({
+          approvals: [approval('old', 'old.example.com'), approval('now', 'now.example.com')],
+        })),
+      };
+      render(
+        <RuntimeHarness
+          threadId="local-1"
+          remoteId="session-1"
+          messages={[
+            {
+              role: 'assistant',
+              content: [pendingCall('old')],
+              status: { type: 'requires-action', reason: 'tool-calls' },
+            },
+            { role: 'user', content: 'next question' },
+            {
+              role: 'assistant',
+              content: [pendingCall('now')],
+              status: { type: 'requires-action', reason: 'tool-calls' },
+            },
+          ]}
+        >
+          <SentinelApiProvider api={api}>
+            <SentinelStateProvider>
+              <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+            </SentinelStateProvider>
+          </SentinelApiProvider>
+        </RuntimeHarness>,
+      );
+
+      expect(await screen.findByText('now.example.com')).toBeInTheDocument();
+      expect(screen.queryByText('old.example.com')).not.toBeInTheDocument();
+      expect(screen.getAllByText('Sends to')).toHaveLength(1);
+      expect(screen.getAllByText('This request expired.')).toHaveLength(1);
     });
   });
 });

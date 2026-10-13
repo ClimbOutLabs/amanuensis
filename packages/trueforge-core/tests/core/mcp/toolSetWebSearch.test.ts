@@ -13,6 +13,7 @@ import {
   type ToolSchema,
 } from '../../../src/core/mcp/IMCPServer';
 import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
+import { actionIdFor } from '../../../src/core/permissions/approvalTokens';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { forUnattendedRun, type SentinelServices } from '../../../src/core/permissions/context';
 import { SILENT_SEARCH_LIMIT } from '../../../src/core/permissions/webSearch';
@@ -421,9 +422,14 @@ describe('Tavily as the designated search provider', () => {
   // The open-source Tavily server publishes no annotations on any tool, so only the host's list
   // lets its search run silently.
   const named = (name: string): ToolSchema => ({ name, description: name, inputSchema: schema });
-  const tools = ['tavily_search', 'tavily_extract', 'tavily_crawl', 'tavily_map', 'tavily_research', 'tavily_feedback'].map(
-    named,
-  );
+  const tools = [
+    'tavily_search',
+    'tavily_extract',
+    'tavily_crawl',
+    'tavily_map',
+    'tavily_research',
+    'tavily_feedback',
+  ].map(named);
   const searchTools = ['tavily_search', 'tavily_extract'];
   const page = 'https://docs.example.net/guides/oslo';
   const results = (name: string): string =>
@@ -568,7 +574,9 @@ describe('admission of a batch of searches', () => {
     );
     expect(h.dispatched).toHaveLength(SILENT_SEARCH_LIMIT);
     expect(h.host.web_search.silentSearches).toBe(SILENT_SEARCH_LIMIT);
-    const refused = responses.filter(response => isCallToolResponseResult(response) && response.result.isError === true);
+    const refused = responses.filter(
+      response => isCallToolResponseResult(response) && response.result.isError === true,
+    );
     expect(refused).toHaveLength(5);
     expect(h.audit).toHaveLength(SILENT_SEARCH_LIMIT);
     const text = JSON.stringify(refused[0]);
@@ -589,7 +597,9 @@ describe('admission of a batch of searches', () => {
     const key = ['AKI', 'A', 'ABCDEFGH', 'IJKLMNOP'].join('');
     const [first, second] = await Promise.all([runSearch(h, key.slice(0, 9)), runSearch(h, key.slice(9))]);
     // Which of the two went first is up to the connection, so only that one of them was held matters.
-    const held = [first, second].filter(response => isCallToolResponseResult(response) && response.result.isError === true);
+    const held = [first, second].filter(
+      response => isCallToolResponseResult(response) && response.result.isError === true,
+    );
     expect(held).toHaveLength(1);
     expect(h.dispatched).toHaveLength(1);
   });
@@ -638,5 +648,57 @@ describe('a call the host auto-denied', () => {
     expect(h.dispatched).toEqual([]);
     expect(h.audit.every(row => row.outcome === 'auto_denied')).toBe(true);
     expect(JSON.stringify(h.audit)).not.toContain(secret);
+  });
+});
+
+describe('approval cards beside the designated provider', () => {
+  const query = 'weather in Oslo';
+
+  async function boundTokenAction(h: Harness, tokenId: string | null | undefined) {
+    if (tokenId === null || tokenId === undefined) {
+      throw new Error('expected an approval token');
+    }
+    const token = await h.host.services.token_store.peek({ tenant_id: 't1', created_by: 'u1', token_id: tokenId });
+    return token?.action_id;
+  }
+
+  it('runs a silent search with no card and no token, and audits it', async () => {
+    const h = harness({ searchProvider: true });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query } });
+    expect(info.tier).toBe(1);
+    expect(info.tier3_card).toBeNull();
+    expect(info.approval_token_id).toBeNull();
+
+    const response = await runSearch(h, query);
+    expect(isApprovalRequiredResponse(response)).toBe(false);
+    expect(h.dispatched).toHaveLength(1);
+    expect(h.audit).toEqual([expect.objectContaining({ tier: 1, outcome: 'logged' })]);
+  });
+
+  it('cards the same call on a connector that is not designated, with where it goes and what it sends', async () => {
+    const h = harness({ searchProvider: false });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query } });
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card?.destination_host).toBe('search.example.com');
+    expect(info.tier3_card?.outbound_text).toContain(`query: ${query}`);
+
+    const connector = h.toolSet.resolveConnector();
+    expect(await boundTokenAction(h, info.approval_token_id)).toBe(
+      actionIdFor({ tool_name: 'lookup', canonical_params: { query }, connector }),
+    );
+  });
+
+  it('cards a held designated search with the same payload, bound to the connector it will run on', async () => {
+    const h = harness({ searchProvider: true, searchWithoutAsking: false });
+    const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query } });
+    expect(info.tier).toBe(3);
+    expect(info.tier3_card?.destination_host).toBe('search.example.com');
+    expect(info.tier3_card?.outbound_text).toContain(`query: ${query}`);
+
+    // Dispatch re-derives the id with the connector, so a token minted without it would never redeem.
+    const connector = h.toolSet.resolveConnector();
+    expect(await boundTokenAction(h, info.approval_token_id)).toBe(
+      actionIdFor({ tool_name: 'lookup', canonical_params: { query }, connector }),
+    );
   });
 });
