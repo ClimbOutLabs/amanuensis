@@ -13,6 +13,7 @@ interface MockMap {
   remove: () => void;
   setView: () => void;
   fitBounds: () => void;
+  invalidateSize: () => void;
   on: (event: string, handler: () => void) => void;
   scrollWheelZoom: { enable: () => void; disable: () => void };
 }
@@ -45,6 +46,7 @@ vi.mock('leaflet', () => {
       remove: vi.fn(),
       setView: vi.fn(),
       fitBounds: vi.fn(),
+      invalidateSize: vi.fn(),
       on: vi.fn(),
       scrollWheelZoom: { enable: vi.fn(), disable: vi.fn() },
     };
@@ -390,5 +392,39 @@ describe('MapCard', () => {
     expect(screen.getByText('The map could not be drawn.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
     expect(document.querySelector('.maps-card-map')).not.toBeInTheDocument();
+  });
+
+  it('re-measures and re-frames the map when its container resizes, until the user takes over', async () => {
+    let resizeCallback: ResizeObserverCallback = () => {};
+    class MockResizeObserver implements ResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+    }
+    vi.stubGlobal('ResizeObserver', MockResizeObserver);
+    try {
+      renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
+      await waitFor(() => expect(mapInstances.length).toBe(1));
+      const mapInstance = mapInstances.at(0);
+      if (mapInstance === undefined) throw new Error('Expected a map instance');
+      const resize = () => resizeCallback([], new MockResizeObserver(resizeCallback));
+      resize();
+      expect(mapInstance.invalidateSize).toHaveBeenCalledTimes(1);
+      expect(mapInstance.setView).toHaveBeenCalledTimes(2);
+      const clickHandler = vi
+        .mocked(mapInstance.on)
+        .mock.calls.find(([event]) => event === 'click')
+        ?.at(1);
+      if (typeof clickHandler !== 'function') throw new Error('Expected a click handler');
+      clickHandler();
+      resize();
+      expect(mapInstance.invalidateSize).toHaveBeenCalledTimes(2);
+      expect(mapInstance.setView).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

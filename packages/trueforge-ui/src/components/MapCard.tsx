@@ -1,6 +1,6 @@
 'use client';
 
-import type { Map as LeafletMap, TileLayer } from 'leaflet';
+import type { FitBoundsOptions, Map as LeafletMap, TileLayer } from 'leaflet';
 import { useEffect, useRef, useState } from 'react';
 
 export interface MapPin {
@@ -43,6 +43,8 @@ interface MapCardProps {
 const TILE_ERROR_THRESHOLD = 3;
 /** Ms to wait for the first tile before declaring the map unloadable. */
 const TILE_LOAD_TIMEOUT_MS = 10_000;
+/** Keeps the end pins clear of the card edge and the zoom control; Leaflet takes pixel padding. */
+const ROUTE_FIT_OPTIONS: FitBoundsOptions = { padding: [48, 48] };
 /**
  * Two coordinates closer than this (degrees) are the same spot on the map.
  * A POI result that coincides with the place itself draws one pin, not two.
@@ -138,6 +140,7 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
     let tileLayer: TileLayer | null = null;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let observer: IntersectionObserver | undefined;
+    let resizeObserver: ResizeObserver | undefined;
 
     async function init() {
       if (cancelled || containerRef.current === null) {
@@ -174,7 +177,10 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
         // scrolling the chat never gets trapped inside the map.
         scrollWheelZoom: false,
       });
+      // Once the user takes the map over, a container resize no longer re-frames it.
+      let userInteracted = false;
       const enableWheelZoom = () => {
+        userInteracted = true;
         map?.scrollWheelZoom.enable();
       };
       map.on('click', enableWheelZoom);
@@ -205,6 +211,17 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
       timeout = setTimeout(fail, TILE_LOAD_TIMEOUT_MS);
       tileLayer.addTo(map);
 
+      // The card can change width after the map is built (layout settling, window or panel resize);
+      // Leaflet only listens to window resizes, so re-measure and re-frame until the user takes over.
+      let frame: () => void = () => undefined;
+      if (typeof ResizeObserver !== 'undefined') {
+        resizeObserver = new ResizeObserver(() => {
+          map?.invalidateSize();
+          if (!userInteracted) frame();
+        });
+        resizeObserver.observe(containerRef.current);
+      }
+
       // Circle markers: no image assets to bundle or fail. Colors come from the theme through CSS classes.
       const pinStyle = { radius: 8, weight: 2, className: 'maps-card-pin' };
       if (mapData.kind === 'route' && mapData.route_geometry !== undefined) {
@@ -220,9 +237,12 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
         );
         bindTextPopup(fromMarker, mapData.from_name ?? 'Origin');
         bindTextPopup(toMarker, mapData.to_name ?? 'Destination');
-        map.fitBounds(L.latLngBounds(latlngs));
+        const bounds = L.latLngBounds(latlngs);
+        map.fitBounds(bounds, ROUTE_FIT_OPTIONS);
+        frame = () => map?.fitBounds(bounds, ROUTE_FIT_OPTIONS);
       } else {
         map.setView([mapData.lat, mapData.lng], mapData.zoom);
+        frame = () => map?.setView([mapData.lat, mapData.lng], mapData.zoom);
         const mainMarker = L.circleMarker([mapData.lat, mapData.lng], pinStyle).addTo(map);
         bindTextPopup(mainMarker, mapData.resolved_name);
         for (const pin of mapData.pins) {
@@ -260,6 +280,7 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
     return () => {
       cancelled = true;
       observer?.disconnect();
+      resizeObserver?.disconnect();
       if (timeout !== undefined) {
         clearTimeout(timeout);
       }
