@@ -427,9 +427,58 @@ export interface SandboxBuild {
   metadata: SandboxBuildMetadata | null;
 }
 
+/** What a network `git push` from the sandbox would send, as worked out by the host before approval. */
+export interface HostGitPushPreview {
+  /** `owner/repo`. */
+  repository: string;
+  remote_name: string;
+  remote_url: string;
+  source_branch: string;
+  branch: string;
+  tip: string;
+  base: string | undefined;
+  commit_count: number;
+  commits: { sha: string; subject: string }[];
+  dry_run: boolean;
+  set_upstream: boolean;
+}
+
+export type HostGitPushPreviewResult =
+  { status: 'ok'; preview: HostGitPushPreview } | { status: 'refused'; message: string };
+
+/**
+ * Network git carried out by the host for a sandbox that has no network: the sandbox never receives a token
+ * and never contacts GitHub.
+ */
+export interface HostGitCapability {
+  /** The host's GitHub token for this turn, or null when no connector provides one. */
+  setToken(token: string | null): void;
+  /** True when `command` is one plain `git push` this capability would carry out. */
+  isPush(command: string): boolean;
+  previewPush(input: {
+    sandboxId: string;
+    command: string;
+    cwd: string | undefined;
+    signal: AbortSignal | undefined;
+  }): Promise<HostGitPushPreviewResult>;
+}
+
 export interface SandboxProvider {
   /** Stable provider kind used in fancy sandbox ids and carry-forward (plain string). */
   readonly type: string;
+  /**
+   * False when the provider offers no Code Mode bridge: the agent then keeps its connector tools as
+   * ordinary tools and `createCodeModeTransport` is never called. Absent means supported.
+   */
+  readonly supportsCodeMode?: boolean | undefined;
+  /**
+   * Whose filesystem the sandbox's paths live on. `remote` means the server cannot see them, so Sentinel
+   * checks workspace containment on normalized path text and never reads or resolves them on the server.
+   * Absent means the server's own filesystem.
+   */
+  readonly filesystem?: 'host' | 'remote' | undefined;
+  /** Present when network git is done by the host; the Sandbox then never puts a token in the sandbox. */
+  readonly hostGit?: HostGitCapability | undefined;
   /**
    * Ensures the release image is being built into the provider's backing store and
    * returns its current status. Idempotent: an already-built image reports `ready`;
@@ -466,6 +515,8 @@ export interface SandboxProvider {
   downloadFile(params: SandboxDownloadFileParams): Promise<Buffer>;
   /** Uploads a file to the sandbox. */
   uploadFile(params: SandboxUploadFileParams): Promise<void>;
+  /** Removes a sandbox's stored workspace when its chat is deleted. Absent when the provider keeps nothing per chat. */
+  destroySandbox?(params: { sandboxId: string }): Promise<void>;
 
   /**
    * Construct a Code Mode transport for this provider (no connect/listen yet).

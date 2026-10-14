@@ -19,7 +19,12 @@ import { fileURLToPath } from 'node:url';
 
 import envPaths from 'env-paths';
 
-import { TOKEN_FACTORY_DEFAULT_BASE_URL, validateRunCodeStartupConfig } from '@truefoundry/trueforge-core/core';
+import {
+  GIT_NETWORK_ENV_NAMES,
+  pickGitNetworkEnv,
+  TOKEN_FACTORY_DEFAULT_BASE_URL,
+  validateRunCodeStartupConfig,
+} from '@truefoundry/trueforge-core/core';
 import {
   MEMORY_PROVIDER_MAX_TIMEOUT_MS,
   MEMORY_SETTINGS_LIMITS,
@@ -281,6 +286,23 @@ function parseIsolationDriver(options: {
   }
   throw new Error(`${options.envKey} must be one of docker, firecracker; got ${JSON.stringify(options.raw)}`);
 }
+
+/** Where `run_code` and the shell tools execute: Docker containers, or the gVisor sandbox slots. */
+export type SandboxBackend = 'docker' | 'slots';
+
+function parseSandboxBackend(options: { envKey: string; raw: string | undefined }): SandboxBackend {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return 'docker';
+  }
+  const value = options.raw.trim().toLowerCase();
+  if (value === 'docker' || value === 'slots') {
+    return value;
+  }
+  throw new Error(`${options.envKey} must be one of docker, slots; got ${JSON.stringify(options.raw)}`);
+}
+
+/** Most slot services the compose files define. */
+export const SANDBOX_MAX_SLOTS = 4;
 
 /** Which long-term memory backend Aman uses. */
 export type MemoryBackend = 'markdown' | 'hindsight';
@@ -714,6 +736,20 @@ export interface SharedServerConfiguration {
    */
   SANDBOX_ISOLATION_DRIVER: SandboxIsolationDriver;
   /**
+   * Where sandboxed code runs. Env: `SANDBOX_BACKEND`. Default 'docker'; 'slots' sends run_code and the
+   * shell and file tools to the gVisor sandbox slots, and then ignores SANDBOX_IMAGE and the cosign key.
+   */
+  SANDBOX_BACKEND: SandboxBackend;
+  /** Number of slot agents to use, 1 to 4. Env: `SANDBOX_SLOTS`. Default 4. */
+  SANDBOX_SLOTS: number;
+  /**
+   * Directory holding one control directory per slot (`<dir>/<n>/agent.sock`). Env: `SANDBOX_SLOTS_DIR`.
+   * Required when SANDBOX_BACKEND=slots.
+   */
+  SANDBOX_SLOTS_DIR: string;
+  /** Disk quota of one chat's sandbox workspace on a slot, MiB. Env: `SANDBOX_SESSION_DISK_MB`. Default 2048. */
+  SANDBOX_SESSION_DISK_MB: number;
+  /**
    * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
    * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
    * Blank (the default) leaves run_code dormant — existing standalone installs
@@ -734,6 +770,17 @@ export interface SharedServerConfiguration {
    * Derived: `{env-paths data}/sandbox-state`.
    */
   SANDBOX_STATE_DIR: string;
+  /**
+   * Scratch directory for the server's own git work on behalf of sandbox slots (clone, fetch, push). Every
+   * operation uses a fresh subdirectory and removes it. Derived: `{env-paths data}/git-bridge`.
+   */
+  SANDBOX_GIT_BRIDGE_DIR: string;
+  /**
+   * Proxy and certificate settings the server's own git (for sandbox slots) may use, copied from the process
+   * environment: HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE, SSL_CERT_DIR, GIT_SSL_CAINFO, GIT_SSL_CAPATH and
+   * CURL_CA_BUNDLE. Nothing else of the environment reaches git.
+   */
+  SANDBOX_GIT_NETWORK_ENV: Readonly<Record<string, string>>;
   /**
    * Default per-run timeout for run_code, seconds. Env: `SANDBOX_DEFAULT_TIMEOUT_SECONDS`. Default 60.
    */
@@ -1366,9 +1413,25 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_ISOLATION_DRIVER'),
     defaultValue: 'docker',
   }),
+  SANDBOX_BACKEND: parseSandboxBackend({ envKey: 'SANDBOX_BACKEND', raw: getEnv('SANDBOX_BACKEND') }),
+  SANDBOX_SLOTS: parsePositiveInt({
+    envKey: 'SANDBOX_SLOTS',
+    raw: getEnv('SANDBOX_SLOTS'),
+    defaultValue: SANDBOX_MAX_SLOTS,
+  }),
+  SANDBOX_SLOTS_DIR: getEnv('SANDBOX_SLOTS_DIR', { defaultValue: '' }) ?? '',
+  SANDBOX_SESSION_DISK_MB: parsePositiveInt({
+    envKey: 'SANDBOX_SESSION_DISK_MB',
+    raw: getEnv('SANDBOX_SESSION_DISK_MB'),
+    defaultValue: 2048,
+  }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
+  SANDBOX_GIT_BRIDGE_DIR: path.join(appDataDir, 'git-bridge'),
+  SANDBOX_GIT_NETWORK_ENV: pickGitNetworkEnv(
+    Object.fromEntries(GIT_NETWORK_ENV_NAMES.map(name => [name, getEnv(name)])),
+  ),
   SANDBOX_DEFAULT_TIMEOUT_SECONDS: parsePositiveInt({
     envKey: 'SANDBOX_DEFAULT_TIMEOUT_SECONDS',
     raw: getEnv('SANDBOX_DEFAULT_TIMEOUT_SECONDS'),
@@ -2038,7 +2101,15 @@ if (isTrueFoundryModeEnabled(configuration)) {
 // for existing standalone installs) leaves run_code dormant — Docker is
 // required only when run_code executes (plan §2.8), not at boot — while a
 // configured image gets the full fail-closed validation.
-const runCodeConfigured = configuration.SANDBOX_IMAGE.trim() !== '';
+const runCodeConfigured = configuration.SANDBOX_BACKEND === 'docker' && configuration.SANDBOX_IMAGE.trim() !== '';
+if (configuration.SANDBOX_BACKEND === 'slots') {
+  if (configuration.SANDBOX_SLOTS_DIR.trim() === '') {
+    throw new Error('SANDBOX_SLOTS_DIR is required when SANDBOX_BACKEND=slots: it holds the slot control directories.');
+  }
+  if (configuration.SANDBOX_SLOTS > SANDBOX_MAX_SLOTS) {
+    throw new Error(`SANDBOX_SLOTS must be at most ${String(SANDBOX_MAX_SLOTS)}.`);
+  }
+}
 validateRunCodeStartupConfig({
   networkEgress: configuration.SANDBOX_NETWORK_EGRESS,
   isolationDriver: configuration.SANDBOX_ISOLATION_DRIVER,

@@ -1,0 +1,89 @@
+# Sandbox slots: four hardened services, each with a PID 1 agent that starts every call in a fresh gVisor
+# guest with no network. They form their own Compose project (aman-slots, or <instance>-slots when a second install
+# on the same Docker host sets AMAN_SLOTS_INSTANCE), so this file is run from this
+# checkout with `pnpm sandbox:slots`, which also builds the image (the services never pull). An app deploy
+# joins them with docker-compose.slots-app.yml. There is no Docker socket anywhere; the hardening below is
+# verified at run time by the agent's attestation and in tests by composeSlots.test.ts.
+name: ${AMAN_SLOTS_INSTANCE:-aman}-slots
+
+x-sandbox-slot: &sandbox-slot
+  image: amanuensis-sandbox-slot:local
+  pull_policy: never
+  init: false
+  user: '65532:65532'
+  read_only: true
+  network_mode: none
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+    - seccomp=./ops/sandbox-slot/sandbox-seccomp.json
+    # Where the host has AppArmor the agent refuses to start calls unless this profile is enforced.
+    # Where it does not (Docker Desktop), Docker ignores the line and the agent records that.
+    - apparmor=aman-sandbox-slot
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    - /run/runsc:rw,nosuid,size=16m,uid=65532,gid=65532,mode=0700
+  mem_limit: 2g
+  memswap_limit: 2g
+  cpus: 2
+  pids_limit: 512
+  cgroup: private
+  ipc: private
+  environment:
+    # Declared by pnpm sandbox:slots: vm when Docker's virtual machine bounds the disk, otherwise none.
+    AMAN_WORKSPACE_DISK_MODE: ${AMAN_SLOTS_DISK_MODE:-none}
+  healthcheck:
+    test: ['CMD', '/usr/local/bin/aman-slot-agent', 'healthcheck']
+    interval: 30s
+    timeout: 90s
+    start_period: 120s
+    retries: 3
+  restart: unless-stopped
+  labels:
+    com.amanuensis.role: slot
+    com.amanuensis.instance: ${AMAN_SLOTS_INSTANCE:-aman}
+
+services:
+  sandbox-1:
+    <<: *sandbox-slot
+    # One build tags the image all four slots run.
+    build:
+      context: ops/sandbox-slot
+      args:
+        AMAN_PACKS: ${AMAN_SLOTS_PACKS:-}
+    volumes:
+      - slot_ws_1:/workspace
+      - slot_ctl_1:/run/aman
+  sandbox-2:
+    <<: *sandbox-slot
+    volumes:
+      - slot_ws_2:/workspace
+      - slot_ctl_2:/run/aman
+  sandbox-3:
+    <<: *sandbox-slot
+    volumes:
+      - slot_ws_3:/workspace
+      - slot_ctl_3:/run/aman
+  sandbox-4:
+    <<: *sandbox-slot
+    volumes:
+      - slot_ws_4:/workspace
+      - slot_ctl_4:/run/aman
+
+volumes:
+  slot_ws_1:
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_1
+  slot_ws_2:
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_2
+  slot_ws_3:
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_3
+  slot_ws_4:
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ws_4
+  slot_ctl_1:
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_1
+  slot_ctl_2:
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_2
+  slot_ctl_3:
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_3
+  slot_ctl_4:
+    name: ${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_4

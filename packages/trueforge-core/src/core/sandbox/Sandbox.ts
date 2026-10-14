@@ -47,6 +47,7 @@ import {
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { gitLocalConfigIsSafe, hardenAllowlistedGit } from '../permissions/shellAllowlist';
+import type { Tier3Card } from '../permissions/tier';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
 import {
   DEFERRED_TOOLS_SERVER_ID,
@@ -90,6 +91,7 @@ import {
 import { ensureExecSuccess, shellEscape, type ExecResult, type SandboxProvider } from './provider/Provider';
 import { SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
+import { pushCardFields } from './slots/git/pushCard';
 // Import submodules, not the ./skills barrel, to avoid a cycle (the mounters import from Sandbox).
 import { createHash, randomUUID } from 'node:crypto';
 import { accessSync, constants as fsConstants, readFileSync } from 'node:fs';
@@ -842,9 +844,10 @@ function injectMCPClientEnv(params: {
       // W3C trace context captured per-exec so each Code Mode request carries the originating
       // Sandbox: exec span as parent.
       ...injectTraceContextEnv(),
+      // Approvals are always enabled: destructive tools cannot run in code mode. The client
+      // defaults to enabled, so a sandbox without a Code Mode bridge needs no variable.
+      TFY_ENABLE_AGENT_APPROVALS: 'true',
     }),
-    // Approvals are always enabled: destructive tools cannot run in code mode.
-    TFY_ENABLE_AGENT_APPROVALS: 'true',
   };
 }
 
@@ -1966,6 +1969,7 @@ export class Sandbox extends LocalToolMCP {
     this.requestTimeoutSeconds = Math.ceil(mcpBoundTimeoutMs / 1000) + NATS_REQUEST_TIMEOUT_BUFFER_SECONDS;
     this.logger = options.logger.child({ module: 'Sandbox' });
     this.githubGitToken = options.githubGitToken ?? null;
+    this.provider.hostGit?.setToken(this.githubGitToken);
     this.githubConnectorAttached = options.githubConnectorAttached ?? false;
     this.webConnectorAttached = options.webConnectorAttached ?? false;
     this.runCodeService = options.runCodeService;
@@ -2173,6 +2177,10 @@ export class Sandbox extends LocalToolMCP {
         // Never the call's own cwd: a model-supplied cwd would make itself the workspace.
         workspace_cwd:
           this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null,
+        // Chosen by the provider, never by a path. A remote sandbox's paths are judged by name because the server
+        // cannot follow its symlinks; the slot agent's O_NOFOLLOW walk and the guest's own view contain those.
+        path_resolution: this.provider.filesystem,
+        ...(this.provider.filesystem === 'remote' ? { file_digest: (path: string) => this.fileDigest(path) } : {}),
         action: {
           tool_name: params.name,
           canonical_params: effectiveArguments ?? {},
@@ -2187,7 +2195,38 @@ export class Sandbox extends LocalToolMCP {
       });
       sentinelStamp = stampSentinelDecision({ decision: sentinelDecision });
     }
+    // A push that leaves through the host: show what it would send, worked out by the host from the sandbox's
+    // commits, and refuse before any approval card when it cannot be carried out.
+    let hostGitPushFailure: string | undefined;
+    let hostGitCard: ReturnType<typeof pushCardFields> | undefined;
+    const hostGit = this.provider.hostGit;
+    if (
+      hostGit !== undefined &&
+      params.name === SANDBOX_EXEC_TOOL_NAME &&
+      !invalidExecPreflight &&
+      hostGit.isPush(command)
+    ) {
+      try {
+        const { sandboxInfo } = await this.ensureReadySandbox();
+        const preview = await hostGit.previewPush({
+          sandboxId: this.providerSandboxId(sandboxInfo.sandbox_id),
+          command,
+          cwd,
+          signal: undefined,
+        });
+        if (preview.status === 'ok') {
+          hostGitCard = pushCardFields({ preview: preview.preview, command });
+        } else {
+          hostGitPushFailure = preview.message;
+        }
+      } catch (error) {
+        hostGitPushFailure = `The host could not work out what this push would send: ${
+          error instanceof Error ? error.message : 'unknown failure'
+        }`;
+      }
+    }
     const invalidCall =
+      hostGitPushFailure !== undefined ||
       invalidGitMetadataEdit ||
       invalidExecPreflight ||
       invalidWriteFilePath ||
@@ -2209,6 +2248,7 @@ export class Sandbox extends LocalToolMCP {
       // verification hashes the same values.
       mint_tool_name: params.name,
       mint_canonical_params: toJsonSafeParams(effectiveArguments ?? {}),
+      ...(this.provider.filesystem === undefined ? {} : { path_resolution: this.provider.filesystem }),
       original_tool_name:
         params.name === SANDBOX_EXEC_TOOL_NAME
           ? purpose === undefined
@@ -2253,17 +2293,19 @@ export class Sandbox extends LocalToolMCP {
                 ? structuredEditPrecondition.summary
                 : `${info.description} ${structuredEditPrecondition.summary}`,
           }),
-      ...(sentinelStamp?.pre_dispatch_failure === undefined
-        ? structuredEditPreDispatchFailure === undefined
-          ? {}
-          : { pre_dispatch_failure: structuredEditPreDispatchFailure }
-        : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
+      ...(hostGitPushFailure !== undefined
+        ? { pre_dispatch_failure: { kind: 'policy_blocked' as const, message: hostGitPushFailure } }
+        : sentinelStamp?.pre_dispatch_failure === undefined
+          ? structuredEditPreDispatchFailure === undefined
+            ? {}
+            : { pre_dispatch_failure: structuredEditPreDispatchFailure }
+          : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
       is_approval_required: invalidCall ? false : (sentinelStamp?.is_approval_required ?? legacyApprovalRequired),
       ...(sentinelStamp === undefined
         ? {}
         : {
             tier: sentinelStamp.tier,
-            tier3_card: sentinelStamp.tier3_card,
+            tier3_card: withHostGitCard({ card: sentinelStamp.tier3_card, hostGitCard }),
             tier2_kind: sentinelStamp.tier2_kind,
             approval_token_id: sentinelStamp.approval_token_id,
             approval_binding: sentinelStamp.approval_binding,
@@ -2712,7 +2754,7 @@ export class Sandbox extends LocalToolMCP {
   }
 
   configureCodeMode(servers: readonly IToolSet[]): void {
-    if (!servers.length) {
+    if (!servers.length || this.provider.supportsCodeMode === false) {
       return;
     }
     if (this.codeModeDispatcher !== undefined || this.codeModeTransport !== undefined) {
@@ -3020,6 +3062,20 @@ export class Sandbox extends LocalToolMCP {
    * Create or reattach, then init. A missing same-type sandbox throws
    * `SandboxNotAvailableError` from the provider; reattach then recreates.
    */
+  /** Digest of a file in the sandbox, read through the provider, for approvals that bind to file content. */
+  async fileDigest(absolutePath: string): Promise<string | null> {
+    try {
+      const { sandboxInfo } = await this.ensureReadySandbox();
+      const content = await this.provider.downloadFile({
+        sandboxId: this.providerSandboxId(sandboxInfo.sandbox_id),
+        path: absolutePath,
+      });
+      return createHash('sha256').update(content).digest('hex');
+    } catch {
+      return null;
+    }
+  }
+
   private async ensureReadySandbox(signal?: AbortSignal): Promise<{
     sandboxInfo: SandboxInfo;
     sandboxCreated: SandboxInfo | undefined;
@@ -4286,6 +4342,7 @@ export class Sandbox extends LocalToolMCP {
       repository_id: this.boundRepository?.repository_id ?? null,
       workspace_cwd: this.boundRepository?.workspace_cwd ?? null,
     });
+    const resolution = this.provider.filesystem;
     const store = ctx.services.tracked_store;
     const scope = {
       tenant_id: ctx.tenant_id,
@@ -4294,7 +4351,9 @@ export class Sandbox extends LocalToolMCP {
       workspace_cwd: ctx.workspace_cwd,
     };
     for (const p of input.paths) {
-      const identity = canonicalFileIdentity({ p, cwd: input.cwd }) ?? canonicalWriteTarget({ p, cwd: input.cwd });
+      const identity =
+        canonicalFileIdentity({ p, cwd: input.cwd, resolution }) ??
+        canonicalWriteTarget({ p, cwd: input.cwd, resolution });
       if (identity === null) {
         continue;
       }
@@ -4364,7 +4423,8 @@ export class Sandbox extends LocalToolMCP {
       }
     | undefined {
     const token = this.githubGitToken;
-    if (token === null || Object.keys(input.exec.env ?? {}).length > 0) {
+    // A provider with its own host-side git never lets the token into the sandbox environment.
+    if (this.provider.hostGit !== undefined || token === null || Object.keys(input.exec.env ?? {}).length > 0) {
       return undefined;
     }
     const plan = planHostAuthenticatedGit({ command: input.exec.command });
@@ -6012,4 +6072,24 @@ export class Sandbox extends LocalToolMCP {
       this.logger.warn('Error stopping Code Mode transport', extractErrorLogFields(e));
     }
   }
+}
+
+/** The Sentinel card with the host's own account of a push in place of its generic wording. */
+function withHostGitCard(input: {
+  card: Tier3Card | null | undefined;
+  hostGitCard: ReturnType<typeof pushCardFields> | undefined;
+}): Tier3Card | null | undefined {
+  if (input.card === null || input.card === undefined || input.hostGitCard === undefined) {
+    return input.card;
+  }
+  return {
+    plain_what: input.hostGitCard.plain_what,
+    plain_why: input.card.plain_why,
+    cannot_be_undone: input.hostGitCard.cannot_be_undone,
+    why_asked_again: input.card.why_asked_again,
+    destination: input.hostGitCard.destination,
+    recipient: input.card.recipient,
+    amount: input.card.amount,
+    parsed_command: input.hostGitCard.parsed_command,
+  };
 }

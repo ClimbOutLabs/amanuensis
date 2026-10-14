@@ -2694,6 +2694,14 @@
         "properties": {
           "data": {
             "properties": {
+              "backend": {
+                "description": "Which backend runs code: docker, or the isolated sandbox slots.",
+                "enum": [
+                  "docker",
+                  "slots"
+                ],
+                "type": "string"
+              },
               "detail": {
                 "description": "Technical detail from the sandbox check. Absent when the state says it all.",
                 "type": "string"
@@ -2709,7 +2717,8 @@
                   "signature_unverified",
                   "image_unavailable",
                   "isolation_refused",
-                  "unsupported_platform"
+                  "unsupported_platform",
+                  "slots_unavailable"
                 ],
                 "type": "string"
               }
