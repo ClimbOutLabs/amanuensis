@@ -8,15 +8,21 @@ export { InMemoryApprovalTokenStore } from './approvalTokens';
 export type { ApprovalTokenStore } from './approvalTokens';
 export { recordClassificationAudit, recordStandingTrustRun } from './audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './audit';
-export { canonicalShellForm, classifyHostToolCall, classifyTier, shellBindingFromForm } from './classifier';
+export {
+  approvalCardForGatedCall,
+  canonicalShellForm,
+  classifyHostToolCall,
+  classifyTier,
+  shellBindingFromForm,
+} from './classifier';
 export type { ClassifyContext, SentinelAction } from './classifier';
 export {
   DEFAULT_PINNED_PATH,
   classifyContextFor,
   createSentinelHostContext,
   defaultSentinelServices,
+  forUnattendedRun,
   toDispatchSentinelContext,
-  withoutTier2Relaxations,
 } from './context';
 export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './context';
 export { verifyPreDispatch } from './dispatch';
@@ -53,3 +59,5 @@ export {
   workspaceKey,
 } from './trackedExecutables';
 export type { TrackApprovalGrantInput, TrackedExecutableScope, TrackedExecutableStore } from './trackedExecutables';
+export { createWebSearchTurnState } from './webSearch';
+export type { WebSearchTurnState } from './webSearch';

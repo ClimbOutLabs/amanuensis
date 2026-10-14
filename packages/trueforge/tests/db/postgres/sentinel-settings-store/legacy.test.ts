@@ -38,6 +38,7 @@ describePg('PostgresSentinelSettingsStore with a legacy stored row', () => {
     expect(await store.get({ tenant_id: 't1', created_by: 'alice' })).toEqual({
       offline_mode: true,
       tier2_auto_allow: ['file_write'],
+      search_without_asking: true,
     });
   });
 

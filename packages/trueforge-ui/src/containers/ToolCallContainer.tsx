@@ -55,9 +55,10 @@ function NestedReasoningContainer() {
   return isRunning ? <ReasoningCard content="" isStreaming headingText="Thinking…" /> : null;
 }
 
-function hostObservedTargetSummary(artifact: unknown): string | undefined {
+/** A host-set text fact on the tool-call part (the model cannot forge these), or undefined. */
+function artifactText(artifact: unknown, name: 'hostObservedTargetSummary' | 'silentSearchQuery'): string | undefined {
   if (artifact === null || typeof artifact !== 'object' || Array.isArray(artifact)) return undefined;
-  const value = Object.entries(artifact).find(([key]) => key === 'hostObservedTargetSummary')?.[1];
+  const value = Object.entries(artifact).find(([key]) => key === name)?.[1];
   return typeof value === 'string' ? value : undefined;
 }
 
@@ -92,6 +93,14 @@ function collectAllowOnceIds(messages: readonly ThreadMessage[], into: Map<strin
       if (part.messages != null) collectAllowOnceIds(part.messages, into);
     }
   }
+}
+
+function ExpiredApprovalNote() {
+  return (
+    <p data-role="approval-expired" className="text-text-secondary px-3 py-2 text-sm">
+      This request expired.
+    </p>
+  );
 }
 
 function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
@@ -214,7 +223,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     <ToolApprovalContainer
       toolName={part.toolName}
       argsText={part.argsText}
-      hostObservedTargetSummary={hostObservedTargetSummary(part.artifact)}
+      hostObservedTargetSummary={artifactText(part.artifact, 'hostObservedTargetSummary')}
       options={buildApprovalOptions(part.approval?.options)}
       onSelectOption={onSelectOption}
     />
@@ -263,7 +272,15 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
     if (isRequiresAction) setExpanded(true);
   }
 
-  const showApproval = hasPendingToolApproval(approval);
+  // Only the newest message can still be answered: the server refuses a decision once the chat
+  // has moved past the turn that asked, so an older pending card is shown as expired instead.
+  // Sub-agent messages live inside their parent's message and follow it.
+  const isNestedMessage = useNestedApprovalBridge();
+  const isNewestMessage = useAuiState(s => s.message.isLast);
+  const hasPendingApproval = hasPendingToolApproval(approval);
+  const approvalExpired = hasPendingApproval && !isNestedMessage && !isNewestMessage;
+  const showApproval = hasPendingApproval && !approvalExpired;
+  const expiredNote = approvalExpired ? <ExpiredApprovalNote /> : undefined;
 
   const durationText = elapsedMs === undefined ? undefined : formatDuration(elapsedMs);
   const disposition = parseToolResultDisposition(part.result);
@@ -360,7 +377,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         argsJson={argsJson}
         resultText={resultText}
         resultJson={resultJson}
-        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
         approvalId={showApproval ? approval?.id : undefined}
       />
     );
@@ -389,7 +406,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
           showResponseLine={status !== 'running' && !!resultDisplay.data}
           mcpServerName={mcpServer}
           {...slots}
-          approvalSlot={showApproval ? <ToolApprovalSlot part={part} /> : undefined}
+          approvalSlot={showApproval ? <ToolApprovalSlot part={part} /> : expiredNote}
           approvalId={showApproval ? part.approval?.id : undefined}
         />
       );
@@ -413,8 +430,9 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         status={status}
         showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
         mcpServerName={mcpServer}
+        searchedQuery={artifactText(part.artifact, 'silentSearchQuery')}
         {...slots}
-        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
         approvalId={showApproval ? approval?.id : undefined}
       />
     );
@@ -437,8 +455,9 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
       outcomeText={outcomeText}
       status={status}
       showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
+      searchedQuery={artifactText(part.artifact, 'silentSearchQuery')}
       {...slots}
-      approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+      approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
       approvalId={showApproval ? approval?.id : undefined}
     />
   );

@@ -106,7 +106,9 @@ import { isGithubFileRead } from '../mcp/githubFileContents';
 import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
 import { stampSentinelDecision } from '../mcp/ToolSet';
 import type { SentinelHostContext } from '../permissions';
-import { classifyHostToolCall, toDispatchSentinelContext } from '../permissions';
+import { approvalCardForGatedCall, classifyHostToolCall, toDispatchSentinelContext } from '../permissions';
+import type { ConnectorBinding } from '../permissions/approvalTokens';
+import type { Tier, Tier3Card } from '../permissions/tier';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -876,6 +878,36 @@ function getPendingApprovalToolCalls(input: {
   );
 }
 
+/**
+ * The tier and card an approval request carries. Every approval the user is asked for gets a card:
+ * one that Sentinel did not card (a call a selector gates though it let it through) is described
+ * from its own arguments, and shows as a review card because it asks all the same.
+ */
+function approvalCardFields(toolCall: InternalEnrichedToolCall): { tier?: Tier; tier3_card: Tier3Card } {
+  const { tool_info } = toolCall;
+  if (tool_info.tier3_card !== undefined && tool_info.tier3_card !== null) {
+    return { ...(tool_info.tier === undefined ? {} : { tier: tool_info.tier }), tier3_card: tool_info.tier3_card };
+  }
+  const args = tryParseToolArgs(toolCall.function.arguments);
+  const unwrapped =
+    tool_info.is_deferred === true && tool_info.original_tool_name !== CALL_TOOL_NAME
+      ? (tryUnwrapCallToolInput(args) ?? args)
+      : args;
+  return {
+    tier: 3,
+    tier3_card: approvalCardForGatedCall({
+      agent_intent: null,
+      action: {
+        tool_name: tool_info.original_tool_name,
+        canonical_params: unwrapped,
+        tool_type: tool_info.type,
+        mcp_server_name: tool_info.mcp_server_name,
+        mcp_hints: {},
+      },
+    }),
+  };
+}
+
 function getPendingClientSideToolCalls(context: ContextMessage[]): InternalEnrichedToolCall[] {
   const openToolCallIds = getOpenToolCallIds(context);
   const assistant = lastAssistantInContext(context);
@@ -1145,8 +1177,10 @@ export async function classifyUnstampedToolCall(input: {
   sentinel: SentinelHostContext | undefined;
   canonical_params: Record<string, unknown>;
   info: InternalToolCallInfo;
+  /** The connector the call goes to, bound into the approval token; absent when the tool set has none. */
+  connector?: ConnectorBinding | undefined;
 }): Promise<InternalToolCallInfo> {
-  const { sentinel, canonical_params, info } = input;
+  const { sentinel, canonical_params, info, connector } = input;
   if (
     sentinel === undefined ||
     info.tier !== undefined ||
@@ -1164,6 +1198,12 @@ export async function classifyUnstampedToolCall(input: {
       tool_name: info.original_tool_name,
       canonical_params,
       tool_type: info.type,
+      ...(connector === undefined
+        ? {}
+        : {
+            mcp_server_id: connector.server_id,
+            ...(connector.destination_host === null ? {} : { mcp_server_host: connector.destination_host }),
+          }),
       mcp_hints: {
         read_only_hint: info.read_only_hint,
         destructive_hint: info.destructive_hint,
@@ -1238,6 +1278,13 @@ async function enrichAssistantMessage({
       sentinel,
       canonical_params: params.arguments ?? {},
       info: policed,
+      connector:
+        policed.type === 'mcp'
+          ? toolInfo.toolSet.resolveConnector?.({
+              name: toolInfo.originalToolName,
+              arguments: tryParseToolArgs(toolCall.function.arguments),
+            })
+          : undefined,
     });
     enrichedToolCalls.push({ ...toolCall, tool_info });
   }
@@ -3869,12 +3916,11 @@ export class AgentThread {
         id: newEventId(),
         created_at: new Date().toISOString(),
         thread_id: this.threadId,
-        tool_calls: pendingApprovalToolCalls.map(({ id, tool_info }) => ({
-          id,
+        tool_calls: pendingApprovalToolCalls.map(toolCall => ({
+          id: toolCall.id,
           source_event_id: modelMessageEventId,
           // Tier and card ride on the approval event because the wire tool_info omits them.
-          ...(tool_info.tier === undefined ? {} : { tier: tool_info.tier }),
-          ...(tool_info.tier3_card === undefined ? {} : { tier3_card: tool_info.tier3_card }),
+          ...approvalCardFields(toolCall),
         })),
       };
       yield event;

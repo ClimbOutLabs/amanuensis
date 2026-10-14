@@ -192,6 +192,8 @@ export interface SentinelUserSettingsTable {
   /** SQLite's 0/1 integer boolean. */
   offline_mode: number;
   tier2_auto_allow: JsonbColumn<Tier2ActionKind[]>;
+  /** SQLite's 0/1 integer boolean. */
+  search_without_asking: number;
   created_at: string;
   updated_at: string;
 }

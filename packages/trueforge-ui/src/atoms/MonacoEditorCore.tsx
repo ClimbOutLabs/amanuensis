@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { useOptionalContentClassNames, useOptionalThemeMode } from '../theme/ThemeProvider.js';
+import { useOptionalContentClassNames, useOptionalThemeMode, useOptionalThemePreset } from '../theme/ThemeProvider.js';
+import { TOKEN_CSS_VARS, type SemanticTokens } from '../theme/types.js';
 import { cn } from './lib/cn.js';
 
 export type MonacoEditorCoreProps = {
@@ -64,8 +65,26 @@ const DEFAULT_LINE_HEIGHT = 18;
 const DEFAULT_VERTICAL_PADDING = 8;
 const DEFAULT_MAX_HEIGHT = '10.5rem';
 
-function defineAuiThemes(monaco: MonacoModule) {
-  const sharedColors = {
+// Monaco only parses hex and rgb()/rgba(); anything else is skipped so the base theme default applies.
+const MONACO_PARSEABLE_COLOR = /^(#[0-9a-f]{3,8}|rgba?\([^)]*\))$/i;
+
+function readTokenColor(styles: CSSStyleDeclaration, token: keyof SemanticTokens): string | undefined {
+  const value = styles.getPropertyValue(TOKEN_CSS_VARS[token]).trim();
+  return MONACO_PARSEABLE_COLOR.test(value) ? value : undefined;
+}
+
+/**
+ * Monaco themes are global, so they are redefined from the live token values (not only the
+ * base `vs`/`vs-dark` palette) whenever the mode or preset changes. Plain text and gutter
+ * numbers then follow the app instead of the base theme's fixed black or light grey.
+ */
+function defineAuiThemes({ monaco, source }: { monaco: MonacoModule; source: HTMLElement }) {
+  const styles = getComputedStyle(source);
+  const textPrimary = readTokenColor(styles, 'textPrimary');
+  const textSecondary = readTokenColor(styles, 'textSecondary');
+  const border = readTokenColor(styles, 'border');
+
+  const sharedColors: Record<string, string> = {
     'editor.background': TRANSPARENT,
     'editor.lineHighlightBackground': TRANSPARENT,
     'editor.lineHighlightBorder': TRANSPARENT,
@@ -75,6 +94,9 @@ function defineAuiThemes(monaco: MonacoModule) {
     'scrollbar.shadow': TRANSPARENT,
     'editorOverviewRuler.border': TRANSPARENT,
     'editorOverviewRuler.background': TRANSPARENT,
+    ...(textPrimary && { 'editor.foreground': textPrimary, 'editorLineNumber.activeForeground': textPrimary }),
+    ...(textSecondary && { 'editorLineNumber.foreground': textSecondary }),
+    ...(border && { 'editorIndentGuide.background1': border, 'editorIndentGuide.activeBackground1': border }),
   };
 
   monaco.editor.defineTheme(AUI_MONACO_LIGHT, {
@@ -167,6 +189,7 @@ export function MonacoEditorCore({
   minHeight,
 }: MonacoEditorCoreProps) {
   const mode = useOptionalThemeMode();
+  const preset = useOptionalThemePreset();
   const classNames = useOptionalContentClassNames();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -176,6 +199,9 @@ export function MonacoEditorCore({
   const onMountRef = useRef(onMount);
   const beforeMountRef = useRef(beforeMount);
   const onAutoHeightChangeRef = useRef(onAutoHeightChange);
+  // Mount is async (dynamic import), so creation must read the latest value and theme, not the first render's.
+  const valueRef = useRef(value);
+  valueRef.current = value;
   onChangeRef.current = onChange;
   onMountRef.current = onMount;
   beforeMountRef.current = beforeMount;
@@ -189,6 +215,8 @@ export function MonacoEditorCore({
   const [autoPx, setAutoPx] = useState(() => (autoHeight ? estimateHeightFromValue(value, minPx, maxPx) : 0));
 
   const resolvedTheme = resolveThemeName(theme, classNames.monaco?.monacoTheme, mode);
+  const resolvedThemeRef = useRef(resolvedTheme);
+  resolvedThemeRef.current = resolvedTheme;
 
   const syncAutoHeight = () => {
     const editor = editorRef.current;
@@ -215,13 +243,13 @@ export function MonacoEditorCore({
 
       const monaco = mod as unknown as MonacoModule;
       monacoRef.current = monaco;
-      defineAuiThemes(monaco);
+      defineAuiThemes({ monaco, source: containerRef.current });
       beforeMountRef.current?.(monaco);
 
       editor = monaco.editor.create(containerRef.current, {
-        value,
+        value: valueRef.current,
         language,
-        theme: resolvedTheme,
+        theme: resolvedThemeRef.current,
         ...EMBEDDED_DEFAULTS,
         ...options,
       });
@@ -272,10 +300,14 @@ export function MonacoEditorCore({
     }
   }, [autoHeight, minPx, maxPx]);
 
-  // Follow light/dark (and host theme overrides) after mount.
+  // Follow light/dark, preset and host theme overrides after mount.
   useEffect(() => {
-    monacoRef.current?.editor.setTheme(resolvedTheme);
-  }, [resolvedTheme]);
+    const monaco = monacoRef.current;
+    const source = containerRef.current;
+    if (!monaco || !source) return;
+    defineAuiThemes({ monaco, source });
+    monaco.editor.setTheme(resolvedTheme);
+  }, [resolvedTheme, preset]);
 
   const styleHeight = autoHeight ? autoPx : typeof height === 'number' ? height : height;
 

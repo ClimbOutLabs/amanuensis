@@ -9,6 +9,10 @@ export interface CatalogMcpServer {
     /** URL of the MCP server logo asset. */
     logo?: string;
     name: TrueForge.ResourceName;
+    /** When true, adding this preset offers to make it the web search provider. */
+    searchProvider?: boolean;
+    /** Search tools of this server that run without asking when it is the web search provider. */
+    searchTools?: string[];
     type: TrueForge.CatalogMcpServerType;
     /** URL of the remote MCP server. */
     url: string;

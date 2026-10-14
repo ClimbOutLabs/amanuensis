@@ -98,6 +98,7 @@ async function createRouters(): Promise<{
   const tokenStore = new SqliteOAuthTokenStore(db);
   return {
     settingsRouter: createSettingsRouter({
+      mcpCatalog: McpCatalog.load(),
       resolveModelProviderStore: () => modelProviderStore,
       resolveMcpServerStore: () =>
         new McpServerWithAuthStore({

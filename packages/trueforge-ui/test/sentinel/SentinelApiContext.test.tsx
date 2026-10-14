@@ -9,7 +9,7 @@ import {
 } from '@/sentinel/SentinelApiContext.js';
 import type { SentinelApi, SentinelUserSettings } from '@/sentinel/types.js';
 
-const INITIAL: SentinelUserSettings = { offline_mode: false, tier2_auto_allow: [] };
+const INITIAL: SentinelUserSettings = { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
 
 function Capture({ into }: { into: { current: SentinelApiState | null } }) {
   into.current = useOptionalSentinelApiState();
@@ -96,9 +96,17 @@ describe('SentinelApiProvider.updateSettings', () => {
     });
 
     // The failed edit never reached the stored settings, and the next edit built on the last good ones.
-    expect(state.stored).toEqual({ offline_mode: false, tier2_auto_allow: ['file_write'] });
+    expect(state.stored).toEqual({
+      offline_mode: false,
+      tier2_auto_allow: ['file_write'],
+      search_without_asking: true,
+    });
     await waitFor(() => {
-      expect(sentinel().settings).toEqual({ offline_mode: false, tier2_auto_allow: ['file_write'] });
+      expect(sentinel().settings).toEqual({
+        offline_mode: false,
+        tier2_auto_allow: ['file_write'],
+        search_without_asking: true,
+      });
     });
     expect(api.updateUserSettings).toHaveBeenCalledTimes(2);
 
@@ -106,6 +114,6 @@ describe('SentinelApiProvider.updateSettings', () => {
     await act(async () => {
       await sentinel().updateSettings(current => ({ offline_mode: !current.offline_mode }));
     });
-    expect(state.stored).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'] });
+    expect(state.stored).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'], search_without_asking: true });
   });
 });

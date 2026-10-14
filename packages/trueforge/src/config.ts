@@ -1740,6 +1740,54 @@ const configuration: ServerConfiguration = standalone
       TRUEFOUNDRY_SANDBOX_SETTINGS: getEnv('TRUEFOUNDRY_SANDBOX_SETTINGS', { required: false }),
     };
 
+/** The password a connection URL carries, decoded, or undefined when it has none or is not a URL. */
+function urlPassword(raw: string): string | undefined {
+  try {
+    const password = decodeURIComponent(new URL(raw).password);
+    return password === '' ? undefined : password;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The settings that carry secrets: what {@link getConfiguredSecretValues} reads, so a test can supply just these. */
+export type ConfiguredSecretSettings = Pick<
+  SharedServerConfiguration,
+  'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN'
+> &
+  (
+    | { STANDALONE: true }
+    | ({ STANDALONE: false } & Pick<
+        DistributedServerConfiguration,
+        'OIDC' | 'TRUEFOUNDRY_API_KEY' | 'TRUEFOUNDRY_SANDBOX_API_KEY' | 'DATABASE_URL' | 'REDIS_URL'
+      >)
+  );
+
+/**
+ * Secret values this process holds from its own configuration, for the outbound secret guard:
+ * service credentials, the OIDC client secret, and the passwords inside connection URLs. The one
+ * place to extend when a new secret setting is added.
+ */
+export function getConfiguredSecretValues(config: ConfiguredSecretSettings = configuration): string[] {
+  const candidates: (string | undefined)[] = [
+    config.TRUEFORGE_API_KEY,
+    config.NEBIUS_API_KEY,
+    config.MEMORY_SCREEN_AUTH_TOKEN,
+  ];
+  if (!config.STANDALONE) {
+    candidates.push(
+      config.OIDC?.OIDC_CLIENT_SECRET,
+      config.TRUEFOUNDRY_API_KEY,
+      config.TRUEFOUNDRY_SANDBOX_API_KEY,
+      config.DATABASE_URL,
+      urlPassword(config.DATABASE_URL),
+      config.REDIS_URL,
+      urlPassword(config.REDIS_URL),
+    );
+  }
+  return candidates.filter((value): value is string => value !== undefined && value !== '');
+}
+
 export function isOidcConfigured(
   value: ServerConfiguration,
 ): value is DistributedServerConfiguration & { OIDC: OIDCConfig } {

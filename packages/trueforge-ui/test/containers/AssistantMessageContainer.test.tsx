@@ -352,6 +352,74 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByTestId('assistant-message-agent-internals-attention')).not.toBeInTheDocument();
   });
 
+  describe('answer text written before a tool call', () => {
+    const SUMMARY = 'The PDF covers three topics: pricing, onboarding, and the support model, with details for each.';
+    const toolCall = {
+      type: 'tool-call' as const,
+      toolCallId: 'tool-search',
+      toolName: 'web_search',
+      args: {},
+      argsText: '{}',
+      result: { ok: true },
+    };
+
+    it('keeps substantive text outside the collapsed internals, in order', () => {
+      renderAssistantMessage([
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: SUMMARY }, toolCall, { type: 'text', text: 'Confirmed.' }],
+        },
+      ]);
+
+      const summary = screen.getByText(SUMMARY);
+      const internals = getAgentInternals();
+      const confirmed = screen.getByText('Confirmed.');
+      expect(summary.closest('[hidden]')).toBeNull();
+      expect(internals).toHaveTextContent(/1 step · 1 tool/);
+      expect(internals.querySelector('[hidden]')).not.toBeNull();
+      expect(summary.compareDocumentPosition(internals) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(internals.compareDocumentPosition(confirmed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('keeps short narration folded and hidden', () => {
+      renderAssistantMessage([
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Let me search for that.' },
+            toolCall,
+            { type: 'text', text: 'Here you go.' },
+          ],
+        },
+      ]);
+
+      const narration = screen.getByText('Let me search for that.');
+      expect(narration.closest('[hidden]')).not.toBeNull();
+      expect(screen.getByText('Here you go.').closest('[hidden]')).toBeNull();
+    });
+
+    it('renders one disclosure per folded run with its own counts', () => {
+      renderAssistantMessage([
+        {
+          role: 'assistant',
+          content: [
+            toolCall,
+            { type: 'text', text: SUMMARY },
+            { ...toolCall, toolCallId: 'tool-2' },
+            { ...toolCall, toolCallId: 'tool-3' },
+            { type: 'text', text: 'Done.' },
+          ],
+        },
+      ]);
+
+      const disclosures = screen.getAllByTestId('assistant-message-agent-internals');
+      expect(disclosures).toHaveLength(2);
+      expect(disclosures[0]).toHaveTextContent(/1 step · 1 tool/);
+      expect(disclosures[1]).toHaveTextContent(/2 steps · 2 tools/);
+      expect(screen.getByText(SUMMARY).closest('[hidden]')).toBeNull();
+    });
+  });
+
   it('collapses the content but keeps the attention dot when a completed turn has a tool error', () => {
     renderAssistantMessage([erroredToolCallMessage()]);
 

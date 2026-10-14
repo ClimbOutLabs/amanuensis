@@ -423,6 +423,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/settings',
     withAdminAuth(
       createSettingsRouter({
+        mcpCatalog: deps.mcpCatalog,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         tokenStore: deps.tokenStore,

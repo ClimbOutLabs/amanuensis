@@ -3,6 +3,8 @@
 export interface SentinelUserSettings {
     /** While on, actions that reach outside this machine are denied automatically. */
     offlineMode: boolean;
+    /** While on, your designated search provider runs web searches without asking. Off asks for each one. */
+    searchWithoutAsking: boolean;
     /** Tier 2 action kinds that run without asking. Kinds not listed ask for approval. */
     tier2AutoAllow: "file_write"[];
 }
