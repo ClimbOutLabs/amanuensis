@@ -93,7 +93,13 @@ describe('tile proxy route', () => {
   let fetchSpy: jest.SpyInstance<Promise<Response>, Parameters<typeof fetch>>;
 
   beforeEach(async () => {
-    await store.patch({ tenant_id: TENANT_ID, created_by: USER.subject.id, offline_mode: false, tier2_auto_allow: [] });
+    await store.patch({
+      tenant_id: TENANT_ID,
+      created_by: USER.subject.id,
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: false,
+    });
     app = new Hono();
     app.use('*', createUiSessionAuthMiddleware(cookieAuthenticator));
     app.route(
@@ -150,7 +156,13 @@ describe('tile proxy route', () => {
   it('answers 503 while offline, even for a cached tile', async () => {
     fetchSpy.mockImplementation(() => Promise.resolve(pngResponse()));
     expect((await get('3/2/2.png')).status).toBe(200);
-    await store.patch({ tenant_id: TENANT_ID, created_by: USER.subject.id, offline_mode: true, tier2_auto_allow: [] });
+    await store.patch({
+      tenant_id: TENANT_ID,
+      created_by: USER.subject.id,
+      offline_mode: true,
+      tier2_auto_allow: [],
+      search_without_asking: false,
+    });
     expect((await get('3/2/2.png')).status).toBe(503);
     expect((await get('3/3/3.png')).status).toBe(503);
     expect(fetchSpy).toHaveBeenCalledTimes(1);

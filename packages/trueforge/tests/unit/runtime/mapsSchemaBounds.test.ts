@@ -8,6 +8,11 @@ import { mapsCapability } from '../../../src/runtime/mapsCapability';
  * (maxLength/maxItems/minLength/minItems, regex quantifiers). Every maps tool
  * schema bound must stay at or under 128.
  */
+const PropertiesSchema = z.record(
+  z.string(),
+  z.object({ maxLength: z.number().optional(), maximum: z.number().optional(), minimum: z.number().optional() }),
+);
+
 describe('maps tool schema bounds', () => {
   const tracing = NOOP_AGENT_TRACING;
   const logger = createLogger({ silent: true });
@@ -39,24 +44,14 @@ describe('maps tool schema bounds', () => {
     });
   });
 
-  async function renderMapProperties(): Promise<
-    Record<string, { maxLength?: number; maximum?: number; minimum?: number }>
-  > {
+  async function renderMapProperties(): Promise<z.infer<typeof PropertiesSchema>> {
     const response = await getServer().listTools();
     const tools = 'result' in response ? response.result.tools : [];
     const renderMap = tools.find(t => t.name === 'render_map');
     if (renderMap === undefined) {
       throw new Error('render_map is not listed');
     }
-    const properties: unknown = renderMap.inputSchema.properties;
-    return z
-      .record(
-        z.string(),
-        z
-          .object({ maxLength: z.number().optional(), maximum: z.number().optional(), minimum: z.number().optional() })
-          .passthrough(),
-      )
-      .parse(properties);
+    return PropertiesSchema.parse(renderMap.inputSchema.properties);
   }
 
   it('render_map schema caps place_name at 128 and poi at 64', async () => {
