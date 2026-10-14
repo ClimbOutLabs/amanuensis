@@ -19,6 +19,7 @@ import {
   sha256FileContent,
   type PathResolution,
 } from '../../../src/core/permissions/trackedExecutables';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { testApprovalOwner } from './approvalTokenFixtures';
 
 /** A sandbox whose files the server cannot see: nothing at /workspace exists on this machine. */
@@ -48,6 +49,7 @@ function ctxFor(input: {
     repository_id: null,
     workspace_cwd: input.root,
     agent_intent: null,
+    web_search: createWebSearchTurnState(),
     path_resolution: input.resolution,
   };
 }
