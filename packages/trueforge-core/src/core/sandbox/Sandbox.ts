@@ -6083,13 +6083,10 @@ function withHostGitCard(input: {
     return input.card;
   }
   return {
+    ...input.card,
     plain_what: input.hostGitCard.plain_what,
-    plain_why: input.card.plain_why,
     cannot_be_undone: input.hostGitCard.cannot_be_undone,
-    why_asked_again: input.card.why_asked_again,
     destination: input.hostGitCard.destination,
-    recipient: input.card.recipient,
-    amount: input.card.amount,
     parsed_command: input.hostGitCard.parsed_command,
   };
 }
