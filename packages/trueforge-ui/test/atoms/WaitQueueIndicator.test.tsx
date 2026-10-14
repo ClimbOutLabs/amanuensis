@@ -66,10 +66,11 @@ describe('WaitQueueIndicator', () => {
     expect(document.querySelector('.aui-wait-queue')).toHaveClass('aui-wait-queue--static');
   });
 
-  it('keeps the sprite an image for reduced-motion users', () => {
+  it('keeps the sprite drawn in code for reduced-motion users', () => {
     render(<WaitQueueIndicator snapshot={snapshot()} elapsedMs={0} reducedMotion />);
 
-    expect(document.querySelector('.aui-state-sprite--doing img')).not.toBeNull();
+    expect(document.querySelector('.aui-state-sprite--doing svg')).not.toBeNull();
+    expect(document.querySelector('.aui-state-sprite--doing img')).toBeNull();
   });
 
   it('marks the Writing station as arriving when the first tokens land', () => {
@@ -196,9 +197,10 @@ describe('WaitQueueIndicator', () => {
 
     const el = document.querySelector(`.aui-state-sprite--${sprite}`);
     expect(el).not.toBeNull();
-    // Same single-box structure in every state: one img, no size variants.
+    // Same single-box structure in every state: one inline SVG, no size variants.
     expect(el?.tagName).toBe('SPAN');
-    expect(el?.querySelectorAll('img')).toHaveLength(1);
+    expect(el?.querySelectorAll('svg')).toHaveLength(1);
+    expect(el?.querySelectorAll('img')).toHaveLength(0);
     unmount();
   });
 

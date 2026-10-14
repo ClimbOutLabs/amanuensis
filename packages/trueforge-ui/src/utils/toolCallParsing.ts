@@ -43,9 +43,6 @@ export const SANDBOX_TOOL_NAMES = new Set([
   'submit_implementation_plan',
 ]);
 
-/** Tool names that render an embedded map card; mirrors the list trueforge-core owns (the UI takes no runtime import of core). */
-export const MAPS_TOOL_NAMES = new Set(['render_map', 'render_route']);
-
 /** MCP meta-tools that wrap actual tool calls. */
 export const MCP_META_TOOLS = new Set(['call_tool', 'list_tools', 'get_tool_info']);
 

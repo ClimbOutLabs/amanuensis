@@ -360,6 +360,74 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByTestId('assistant-message-agent-internals-attention')).not.toBeInTheDocument();
   });
 
+  describe('answer text written before a tool call', () => {
+    const SUMMARY = 'The PDF covers three topics: pricing, onboarding, and the support model, with details for each.';
+    const toolCall = {
+      type: 'tool-call' as const,
+      toolCallId: 'tool-search',
+      toolName: 'web_search',
+      args: {},
+      argsText: '{}',
+      result: { ok: true },
+    };
+
+    it('keeps substantive text outside the collapsed internals, in order', () => {
+      renderAssistantMessage([
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: SUMMARY }, toolCall, { type: 'text', text: 'Confirmed.' }],
+        },
+      ]);
+
+      const summary = screen.getByText(SUMMARY);
+      const internals = getAgentInternals();
+      const confirmed = screen.getByText('Confirmed.');
+      expect(summary.closest('[hidden]')).toBeNull();
+      expect(internals).toHaveTextContent(/1 step · 1 tool/);
+      expect(internals.querySelector('[hidden]')).not.toBeNull();
+      expect(summary.compareDocumentPosition(internals) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(internals.compareDocumentPosition(confirmed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('keeps short narration folded and hidden', () => {
+      renderAssistantMessage([
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Let me search for that.' },
+            toolCall,
+            { type: 'text', text: 'Here you go.' },
+          ],
+        },
+      ]);
+
+      const narration = screen.getByText('Let me search for that.');
+      expect(narration.closest('[hidden]')).not.toBeNull();
+      expect(screen.getByText('Here you go.').closest('[hidden]')).toBeNull();
+    });
+
+    it('renders one disclosure per folded run with its own counts', () => {
+      renderAssistantMessage([
+        {
+          role: 'assistant',
+          content: [
+            toolCall,
+            { type: 'text', text: SUMMARY },
+            { ...toolCall, toolCallId: 'tool-2' },
+            { ...toolCall, toolCallId: 'tool-3' },
+            { type: 'text', text: 'Done.' },
+          ],
+        },
+      ]);
+
+      const disclosures = screen.getAllByTestId('assistant-message-agent-internals');
+      expect(disclosures).toHaveLength(2);
+      expect(disclosures[0]).toHaveTextContent(/1 step · 1 tool/);
+      expect(disclosures[1]).toHaveTextContent(/2 steps · 2 tools/);
+      expect(screen.getByText(SUMMARY).closest('[hidden]')).toBeNull();
+    });
+  });
+
   it('collapses the content but keeps the attention dot when a completed turn has a tool error', () => {
     renderAssistantMessage([erroredToolCallMessage()]);
 
@@ -642,17 +710,25 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     }
   });
 
+  type ToolCallPart = Extract<Exclude<ThreadMessageLike['content'], string>[number], { type: 'tool-call' }>;
+
+  function mapsCallPart(extra: Pick<ToolCallPart, 'toolCallId'> & Partial<Pick<ToolCallPart, 'result' | 'approval'>>) {
+    return {
+      type: 'tool-call',
+      toolName: 'render_map',
+      args: { place_name: 'Paris' },
+      argsText: '{"place_name":"Paris"}',
+      ...extra,
+    } satisfies ToolCallPart;
+  }
+
   it('renders a completed maps result inline, outside the agent internals', () => {
     renderAssistantMessage([
       {
         role: 'assistant',
         content: [
-          {
-            type: 'tool-call',
+          mapsCallPart({
             toolCallId: 'tool-map-1',
-            toolName: 'render_map',
-            args: { place_name: 'Paris' },
-            argsText: '{"place_name":"Paris"}',
             result: JSON.stringify({
               status: 'ok',
               resolved_name: 'Paris, France',
@@ -663,15 +739,14 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
               pins: [],
               attribution: '© OpenStreetMap contributors',
             }),
-          },
+          }),
           { type: 'text', text: 'Here is the map of Paris.' },
         ],
       },
     ]);
 
-    const internals = getAgentInternals();
-    // The map is not inside the collapsed agent details.
-    expect(within(internals).queryByTestId('mock-map-card')).not.toBeInTheDocument();
+    // The map call is not folded into agent details, so the turn has no internals row at all.
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
     // It renders inline in the conversation, before the assistant text.
     const mapCard = screen.getByTestId('mock-map-card');
     expect(mapCard).toHaveTextContent('Paris, France');
@@ -684,12 +759,8 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
       {
         role: 'assistant',
         content: [
-          {
-            type: 'tool-call',
+          mapsCallPart({
             toolCallId: 'tool-map-approval',
-            toolName: 'render_map',
-            args: { place_name: 'Paris' },
-            argsText: '{"place_name":"Paris"}',
             approval: {
               id: 'approval-map',
               options: [
@@ -697,15 +768,14 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
                 { id: 'deny', kind: 'reject-once' },
               ],
             },
-          },
+          }),
         ],
         status: { type: 'requires-action', reason: 'tool-calls' },
       },
     ]);
 
-    const internals = getAgentInternals();
-    // The approval card stays inside the disclosure (lockOpen keeps it visible).
-    expect(within(internals).getByRole('radiogroup', { name: 'Approval options for render_map' })).toBeInTheDocument();
+    // The approval card sits inline with the call, not behind a collapsed disclosure.
+    expect(screen.getByRole('radiogroup', { name: 'Approval options for render_map' })).toBeInTheDocument();
     // No map card and no loading state anywhere while approval is pending.
     expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
     expect(screen.queryByTestId('map-card-loading')).not.toBeInTheDocument();
@@ -715,21 +785,39 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     renderAssistantMessage([
       {
         role: 'assistant',
-        content: [
-          {
-            type: 'tool-call',
-            toolCallId: 'tool-map-running',
-            toolName: 'render_map',
-            args: { place_name: 'Paris' },
-            argsText: '{"place_name":"Paris"}',
-            status: { type: 'running' },
-          },
-        ],
+        content: [mapsCallPart({ toolCallId: 'tool-map-running' })],
         status: { type: 'running' },
       },
     ]);
 
     expect(screen.getByTestId('map-card-loading')).toBeInTheDocument();
     expect(screen.queryByTestId('mock-map-card')).not.toBeInTheDocument();
+  });
+
+  it('expires the approval card of a maps call once the chat has moved on', () => {
+    renderAssistantMessage([
+      {
+        role: 'assistant',
+        content: [
+          mapsCallPart({
+            toolCallId: 'tool-map-old',
+            approval: {
+              id: 'approval-map-old',
+              options: [
+                { id: 'allow-once', kind: 'allow-once' },
+                { id: 'deny', kind: 'reject-once' },
+              ],
+            },
+          }),
+        ],
+        status: { type: 'requires-action', reason: 'tool-calls' },
+      },
+      { role: 'user', content: [{ type: 'text', text: 'never mind' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Okay.' }] },
+    ]);
+
+    expect(screen.getByText('This request expired.')).toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Approval options for render_map' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('map-card-loading')).not.toBeInTheDocument();
   });
 });

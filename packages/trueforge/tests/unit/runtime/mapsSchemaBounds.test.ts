@@ -1,4 +1,6 @@
-import type { AgentTracing } from '@truefoundry/trueforge-core/core';
+import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
+import { createLogger } from 'winston';
+import { z } from 'zod';
 import { mapsCapability } from '../../../src/runtime/mapsCapability';
 
 /**
@@ -7,8 +9,8 @@ import { mapsCapability } from '../../../src/runtime/mapsCapability';
  * schema bound must stay at or under 128.
  */
 describe('maps tool schema bounds', () => {
-  const tracing = {} as AgentTracing;
-  const logger = { error: jest.fn(), warn: jest.fn(), info: jest.fn() } as never;
+  const tracing = NOOP_AGENT_TRACING;
+  const logger = createLogger({ silent: true });
 
   function getServer() {
     const capability = mapsCapability({ tracing, logger });
@@ -37,21 +39,34 @@ describe('maps tool schema bounds', () => {
     });
   });
 
-  it('render_map schema caps place_name at 128 and poi at 64', async () => {
+  async function renderMapProperties(): Promise<
+    Record<string, { maxLength?: number; maximum?: number; minimum?: number }>
+  > {
     const response = await getServer().listTools();
     const tools = 'result' in response ? response.result.tools : [];
-    const renderMap = tools.find(t => t.name === 'render_map')!;
-    const props = (renderMap.inputSchema as { properties: Record<string, { maxLength?: number }> }).properties;
+    const renderMap = tools.find(t => t.name === 'render_map');
+    if (renderMap === undefined) {
+      throw new Error('render_map is not listed');
+    }
+    const properties: unknown = renderMap.inputSchema.properties;
+    return z
+      .record(
+        z.string(),
+        z
+          .object({ maxLength: z.number().optional(), maximum: z.number().optional(), minimum: z.number().optional() })
+          .passthrough(),
+      )
+      .parse(properties);
+  }
+
+  it('render_map schema caps place_name at 128 and poi at 64', async () => {
+    const props = await renderMapProperties();
     expect(props['place_name']?.maxLength).toBe(128);
     expect(props['poi']?.maxLength).toBe(64);
   });
 
   it('zoom is an integer 1..18', async () => {
-    const response = await getServer().listTools();
-    const tools = 'result' in response ? response.result.tools : [];
-    const renderMap = tools.find(t => t.name === 'render_map')!;
-    const props = (renderMap.inputSchema as { properties: Record<string, { maximum?: number; minimum?: number }> })
-      .properties;
+    const props = await renderMapProperties();
     expect(props['zoom']?.minimum).toBe(1);
     expect(props['zoom']?.maximum).toBe(18);
   });

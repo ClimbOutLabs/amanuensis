@@ -11,10 +11,11 @@
  * tools are registered in FIRST_PARTY_REQUIRES_NETWORK, so offline mode filters
  * them from the model's tool list and auto-denies stale calls.
  */
-import type { AgentCapability, AgentTracing } from '@truefoundry/trueforge-core/core';
+import type { AgentCapability, AgentTracing, ConnectorBinding } from '@truefoundry/trueforge-core/core';
 import {
   defineTool,
   LocalToolMCP,
+  mapsDestinationHosts,
   RENDER_MAP_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
   toolResultResponse,
@@ -23,7 +24,7 @@ import {
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import configuration from '../config';
-import { fetchSameOrigin } from './mapsUpstream';
+import { fetchSameOrigin, readCappedJson } from './mapsUpstream';
 
 export const MAPS_SERVER_ID = 'maps';
 
@@ -138,8 +139,11 @@ class OsrmRoutingProvider implements MapsRoutingProvider {
     if (!response.ok) {
       throw new MapsUpstreamError('service_unavailable', 'router');
     }
-    const body: unknown = await response.json();
-    const parsed = osrmRouteSchema.safeParse(body);
+    const body = await readCappedJson(response);
+    if (body === null) {
+      throw new MapsUpstreamError('service_unavailable', 'router');
+    }
+    const parsed = osrmRouteSchema.safeParse(body.value);
     if (!parsed.success || parsed.data.code === 'NoRoute' || parsed.data.routes.length === 0) {
       throw new MapsUpstreamError('no_route');
     }
@@ -396,7 +400,11 @@ export class MapsService {
     if (!response.ok) {
       throw new MapsUpstreamError('service_unavailable', 'geocoder');
     }
-    const body: unknown = await response.json();
+    const json = await readCappedJson(response);
+    if (json === null) {
+      throw new MapsUpstreamError('service_unavailable', 'geocoder');
+    }
+    const body = json.value;
     if (!Array.isArray(body) || body.length === 0) {
       return null;
     }
@@ -436,7 +444,8 @@ export class MapsService {
     if (!response.ok) {
       throw new MapsUpstreamError('service_unavailable', 'geocoder');
     }
-    const body: unknown = await response.json();
+    const json = await readCappedJson(response);
+    const body = json?.value;
     if (!Array.isArray(body)) {
       throw new MapsUpstreamError('service_unavailable', 'geocoder');
     }
@@ -518,6 +527,19 @@ class MapsTool extends LocalToolMCP {
     super({ tracing });
   }
 
+  private upstreamHosts() {
+    return {
+      geocoder: configuration.MAPS_GEOCODER_URL,
+      router: configuration.MAPS_ROUTER_URL,
+      tile: configuration.MAPS_TILE_URL,
+    };
+  }
+
+  /** Rebuilt from config at dispatch, so an approval stops working once an upstream host changes. */
+  resolveConnector(): ConnectorBinding {
+    return { server_id: MAPS_SERVER_ID, destination_host: mapsDestinationHosts(this.upstreamHosts()) };
+  }
+
   /** Stamp the configured upstream hosts for the classifier card destination. */
   override async toolCallInfo(
     params: Parameters<LocalToolMCP['toolCallInfo']>[0],
@@ -526,11 +548,7 @@ class MapsTool extends LocalToolMCP {
     const info = await super.toolCallInfo(params, resolveUnderlyingTool);
     return {
       ...info,
-      maps_hosts: {
-        geocoder: configuration.MAPS_GEOCODER_URL,
-        router: configuration.MAPS_ROUTER_URL,
-        tile: configuration.MAPS_TILE_URL,
-      },
+      maps_hosts: this.upstreamHosts(),
     };
   }
 

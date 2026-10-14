@@ -24,6 +24,7 @@ let configuration: typeof import('./config').default;
 let isOidcConfigured: typeof import('./config').isOidcConfigured;
 let isTrueFoundryModeEnabled: typeof import('./config').isTrueFoundryModeEnabled;
 let getTrueForgeAuthMode: typeof import('./config').getTrueForgeAuthMode;
+let getConfiguredSecretValues: typeof import('./config').getConfiguredSecretValues;
 let assertNetworkAuthRequirement: typeof import('./config').assertNetworkAuthRequirement;
 let getPublicUiBasePath: typeof import('./config').getPublicUiBasePath;
 let TrueForgeAuthMode: typeof import('./config').TrueForgeAuthMode;
@@ -34,6 +35,7 @@ try {
     isOidcConfigured,
     isTrueFoundryModeEnabled,
     getTrueForgeAuthMode,
+    getConfiguredSecretValues,
     assertNetworkAuthRequirement,
     getPublicUiBasePath,
     TrueForgeAuthMode,
@@ -102,6 +104,7 @@ import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { TurnDrainRegistry } from './runtime/turnDrains';
 import { printStandaloneStartupBanner } from './startupBanner';
@@ -118,6 +121,7 @@ import { TrueFoundryModelProviderStore } from './truefoundry/TrueFoundryModelPro
 import { TrueFoundrySandboxProviderStore } from './truefoundry/TrueFoundrySandboxProviderStore';
 import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundryServiceFoundryServerClient';
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
+import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
 
 /** Persistence + optional Redis wired for the selected topology. */
@@ -128,6 +132,8 @@ interface ServerPersistence<TTransaction> {
   tokenStore: IOAuthTokenStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
   mcpOAuthStore: IMcpServerWithAuthStore<TTransaction>;
+  /** The stored providers themselves, for host checks that need every secret the server holds. */
+  modelProviderStore: IModelProviderStore<TTransaction>;
   resolveModelProviderStore: (rc: RequestContext, runAsAgent?: AgentRecord) => IModelProviderStore<TTransaction>;
   resolveMcpServerStore: (
     rc: RequestContext,
@@ -380,6 +386,7 @@ async function createStandalonePersistence(options: {
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
+    modelProviderStore,
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
     resolveSandboxProviderStore: () => sandboxProviderStore,
@@ -536,6 +543,7 @@ async function createDistributedPersistence(options: {
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
+    modelProviderStore,
     resolveModelProviderStore,
     resolveMcpServerStore,
     resolveSandboxProviderStore,
@@ -557,6 +565,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     tokenStore,
     scheduleStore,
     mcpOAuthStore,
+    modelProviderStore,
     resolveImportAgentStore,
     agentStore,
     skillStore,
@@ -599,6 +608,13 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     settings: sentinelSettingsStore,
     approvalTokens: approvalTokenStore,
     toolGrants: mcpToolGrantStore,
+    outboundSecrets: createOutboundSecretSource({
+      configured: () => getConfiguredSecretValues(configuration),
+      modelProviders: modelProviderStore,
+      sandboxProviders: sandboxProviderStore,
+      mcpServers: mcpOAuthStore,
+      tokens: tokenStore,
+    }),
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
 
@@ -723,6 +739,21 @@ try {
     standalone: configuration.STANDALONE,
     version: PACKAGE_VERSION,
   });
+
+  // Fail fast on unwritable data directories: the persona knowledge library and
+  // (with the markdown backend) the memory store write here at query time, and
+  // a bare EACCES mid-request is a silent production outage. This throws a
+  // configuration-shaped error naming the env var instead.
+  await ensureWritableDataDir({
+    dir: configuration.PERSONA_KNOWLEDGE_DIR,
+    envVar: 'PERSONA_KNOWLEDGE_DIR',
+  });
+  if (configuration.MEMORY_BACKEND === 'markdown') {
+    await ensureWritableDataDir({
+      dir: configuration.MEMORY_MARKDOWN_DIR,
+      envVar: 'MEMORY_MARKDOWN_DIR',
+    });
+  }
 
   if (configuration.STANDALONE) {
     printStandaloneStartupBanner({ version: PACKAGE_VERSION, color: shouldColorize() });

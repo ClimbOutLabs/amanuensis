@@ -16,7 +16,7 @@
  */
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
-import type { ShellApprovalBinding } from './approvalTokens';
+import type { ConnectorBinding, ShellApprovalBinding } from './approvalTokens';
 import { actionIdFor, verifyApprovalToken, type ApprovalToken } from './approvalTokens';
 import { canonicalShellForm } from './classifier';
 import type { SentinelCallIdentity, SentinelServices } from './context';
@@ -41,6 +41,8 @@ export interface VerifiableCall {
   approval_token_id: string | null;
   approval_binding: TrackedExecutionBinding | null;
   shell_binding: ShellApprovalBinding | null;
+  /** The connector as it is now, rebuilt at dispatch; absent when the call has no connector binding. */
+  connector?: ConnectorBinding | undefined;
 }
 
 export interface DispatchCheckContext extends SentinelCallIdentity {
@@ -265,7 +267,11 @@ export async function verifyPreDispatch(input: {
 
   const verification = verifyApprovalToken({
     token,
-    action_id: actionIdFor({ tool_name: call.tool_name, canonical_params: call.canonical_params }),
+    action_id: actionIdFor({
+      tool_name: call.tool_name,
+      canonical_params: call.canonical_params,
+      connector: call.connector,
+    }),
     canonical_params: call.canonical_params,
   });
   return verification.valid ? undefined : `Approval invalid: ${verification.reason}; request approval again.`;

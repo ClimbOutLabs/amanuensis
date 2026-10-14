@@ -574,7 +574,7 @@ describe('EmbeddingSubsystem', () => {
       const client = new MarkdownMemoryClient({
         baseDir: fixture.baseDir,
         namespace: fixture.namespace,
-        embeddings: fixture.subsystem,
+        embeddings: () => fixture.subsystem,
       });
       await client.retain({
         items: [{ content: 'gamma entry', timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-g' }],
@@ -726,7 +726,7 @@ describe('EmbeddingSubsystem', () => {
       const client = new MarkdownMemoryClient({
         baseDir: fixture.baseDir,
         namespace: fixture.namespace,
-        embeddings: fixture.subsystem,
+        embeddings: () => fixture.subsystem,
       });
       const outcome = await client.recall({
         query: 'accommodation in Spain',
@@ -757,7 +757,7 @@ describe('EmbeddingSubsystem', () => {
       const client = new MarkdownMemoryClient({
         baseDir: fixture.baseDir,
         namespace: fixture.namespace,
-        embeddings: fixture.subsystem,
+        embeddings: () => fixture.subsystem,
       });
       await client.retain({
         items: [{ content: 'second memory', timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-9' }],

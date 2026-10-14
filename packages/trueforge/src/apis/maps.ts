@@ -17,7 +17,7 @@ import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
-import { fetchSameOrigin } from '../runtime/mapsUpstream';
+import { fetchSameOrigin, readCappedBody } from '../runtime/mapsUpstream';
 import { TENANT_ID } from '../tenancy';
 
 const MAX_IN_FLIGHT = 4;
@@ -202,51 +202,6 @@ export function validTileCoords({ z, x, y }: { z: number; x: number; y: number }
   }
   const max = 2 ** z - 1;
   return x >= 0 && x <= max && y >= 0 && y <= max;
-}
-
-/** Read a body without ever holding more than `maxBytes`; null when it is larger. */
-export async function readCappedBody({
-  response,
-  maxBytes,
-}: {
-  response: Response;
-  maxBytes: number;
-}): Promise<Uint8Array | null> {
-  const declared = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > maxBytes) {
-    await response.body?.cancel();
-    return null;
-  }
-  const reader = response.body?.getReader();
-  if (reader === undefined) {
-    return new Uint8Array();
-  }
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const read: { done: boolean; value?: unknown } = await reader.read();
-    if (read.done) {
-      break;
-    }
-    const value = read.value;
-    if (!(value instanceof Uint8Array)) {
-      await reader.cancel();
-      return null;
-    }
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
 }
 
 export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {

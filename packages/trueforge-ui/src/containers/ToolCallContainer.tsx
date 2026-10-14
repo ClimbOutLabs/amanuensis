@@ -12,6 +12,7 @@ import {
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
+import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { useCallback, useState } from 'react';
 
 import { MapCard } from '../components/MapCard.js';
@@ -20,7 +21,6 @@ import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import {
   ASK_USER_TOOL_NAME,
-  MAPS_TOOL_NAMES,
   MCP_META_TOOLS,
   SANDBOX_TOOL_NAMES,
   SUB_AGENT_TOOL_NAME,
@@ -58,9 +58,10 @@ function NestedReasoningContainer() {
   return isRunning ? <ReasoningCard content="" isStreaming headingText="Thinking…" /> : null;
 }
 
-function hostObservedTargetSummary(artifact: unknown): string | undefined {
+/** A host-set text fact on the tool-call part (the model cannot forge these), or undefined. */
+function artifactText(artifact: unknown, name: 'hostObservedTargetSummary' | 'silentSearchQuery'): string | undefined {
   if (artifact === null || typeof artifact !== 'object' || Array.isArray(artifact)) return undefined;
-  const value = Object.entries(artifact).find(([key]) => key === 'hostObservedTargetSummary')?.[1];
+  const value = Object.entries(artifact).find(([key]) => key === name)?.[1];
   return typeof value === 'string' ? value : undefined;
 }
 
@@ -95,6 +96,14 @@ function collectAllowOnceIds(messages: readonly ThreadMessage[], into: Map<strin
       if (part.messages != null) collectAllowOnceIds(part.messages, into);
     }
   }
+}
+
+function ExpiredApprovalNote() {
+  return (
+    <p data-role="approval-expired" className="text-text-secondary px-3 py-2 text-sm">
+      This request expired.
+    </p>
+  );
 }
 
 function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
@@ -217,44 +226,18 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     <ToolApprovalContainer
       toolName={part.toolName}
       argsText={part.argsText}
-      hostObservedTargetSummary={hostObservedTargetSummary(part.artifact)}
+      hostObservedTargetSummary={artifactText(part.artifact, 'hostObservedTargetSummary')}
       options={buildApprovalOptions(part.approval?.options)}
       onSelectOption={onSelectOption}
     />
   );
 }
 
-/** The approval state for a tool-call part, preferring live runtime state. */
-function useResolvedToolApproval(part: ToolCallMessagePartProps) {
-  const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
-  return stateApproval ?? part.approval;
-}
-
 /**
- * The pending-approval card for a maps tool call. Rendered inside the agent
- * internals disclosure; renders nothing once the approval is decided, because
- * the result itself lives inline in the conversation.
+ * The user-facing result of a maps tool call, rendered inline in the conversation. Shows a quiet
+ * loading state while the call runs and the map card once the result is in.
  */
-export function MapsApprovalCard({ part }: { part: ToolCallMessagePartProps }) {
-  const approval = useResolvedToolApproval(part);
-  const approvalPart = approval === part.approval ? part : { ...part, approval };
-  if (!hasPendingToolApproval(approval)) {
-    return null;
-  }
-  return <ToolApprovalSlot part={approvalPart} />;
-}
-
-/**
- * The user-facing result of a maps tool call, rendered inline in the
- * conversation (never inside the collapsed agent internals). Renders nothing
- * while the approval is pending, a quiet loading state while the call runs,
- * and the map card once the result is in.
- */
-export function MapsResultCard({ part }: { part: ToolCallMessagePartProps }) {
-  const approval = useResolvedToolApproval(part);
-  if (hasPendingToolApproval(approval)) {
-    return null;
-  }
+function MapsResult({ part }: { part: ToolCallMessagePartProps }) {
   const resultString =
     part.result === undefined
       ? undefined
@@ -309,7 +292,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const approvalPart = approval === part.approval ? part : { ...part, approval };
   const isSubAgent = part.toolName === SUB_AGENT_TOOL_NAME;
   const isSandbox = SANDBOX_TOOL_NAMES.has(part.toolName);
-  const isMaps = MAPS_TOOL_NAMES.has(part.toolName);
+  const isMaps = isMapsToolName(part.toolName);
   const [expanded, setExpanded] = useState(isRequiresAction);
   const [prevRequiresAction, setPrevRequiresAction] = useState(isRequiresAction);
   if (isRequiresAction !== prevRequiresAction) {
@@ -317,7 +300,15 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
     if (isRequiresAction) setExpanded(true);
   }
 
-  const showApproval = hasPendingToolApproval(approval);
+  // Only the newest message can still be answered: the server refuses a decision once the chat
+  // has moved past the turn that asked, so an older pending card is shown as expired instead.
+  // Sub-agent messages live inside their parent's message and follow it.
+  const isNestedMessage = useNestedApprovalBridge();
+  const isNewestMessage = useAuiState(s => s.message.isLast);
+  const hasPendingApproval = hasPendingToolApproval(approval);
+  const approvalExpired = hasPendingApproval && !isNestedMessage && !isNewestMessage;
+  const showApproval = hasPendingApproval && !approvalExpired;
+  const expiredNote = approvalExpired ? <ExpiredApprovalNote /> : undefined;
 
   const durationText = elapsedMs === undefined ? undefined : formatDuration(elapsedMs);
   const disposition = parseToolResultDisposition(part.result);
@@ -414,7 +405,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         argsJson={argsJson}
         resultText={resultText}
         resultJson={resultJson}
-        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
         approvalId={showApproval ? approval?.id : undefined}
       />
     );
@@ -423,8 +414,8 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   if (isMaps) {
     return (
       <div data-slot="tool-call-card" data-variant="map" className="w-full">
-        <MapsApprovalCard part={part} />
-        <MapsResultCard part={part} />
+        {showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
+        {!hasPendingApproval && <MapsResult part={part} />}
       </div>
     );
   }
@@ -452,7 +443,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
           showResponseLine={status !== 'running' && !!resultDisplay.data}
           mcpServerName={mcpServer}
           {...slots}
-          approvalSlot={showApproval ? <ToolApprovalSlot part={part} /> : undefined}
+          approvalSlot={showApproval ? <ToolApprovalSlot part={part} /> : expiredNote}
           approvalId={showApproval ? part.approval?.id : undefined}
         />
       );
@@ -476,8 +467,9 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         status={status}
         showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
         mcpServerName={mcpServer}
+        searchedQuery={artifactText(part.artifact, 'silentSearchQuery')}
         {...slots}
-        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
         approvalId={showApproval ? approval?.id : undefined}
       />
     );
@@ -500,8 +492,9 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
       outcomeText={outcomeText}
       status={status}
       showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
+      searchedQuery={artifactText(part.artifact, 'silentSearchQuery')}
       {...slots}
-      approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+      approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
       approvalId={showApproval ? approval?.id : undefined}
     />
   );

@@ -9,12 +9,11 @@ export type { ApprovalTokenStore } from './approvalTokens';
 export { recordClassificationAudit, recordStandingTrustRun } from './audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './audit';
 export {
-  MAPS_TOOL_NAMES,
-  RENDER_MAP_TOOL_NAME,
-  RENDER_ROUTE_TOOL_NAME,
+  approvalCardForGatedCall,
   canonicalShellForm,
   classifyHostToolCall,
   classifyTier,
+  mapsDestinationHosts,
   shellBindingFromForm,
 } from './classifier';
 export type { ClassifyContext, SentinelAction } from './classifier';
@@ -23,14 +22,15 @@ export {
   classifyContextFor,
   createSentinelHostContext,
   defaultSentinelServices,
+  forUnattendedRun,
   toDispatchSentinelContext,
-  withoutTier2Relaxations,
 } from './context';
 export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './context';
 export { verifyPreDispatch } from './dispatch';
 export type { DispatchCheckContext, VerifiableCall } from './dispatch';
 export { extractCardFields, genericExtractor, isExternalServiceAction } from './extractorRegistry';
 export type { CardFieldExtractor, ExtractedCardFields, ExtractionResult } from './extractorRegistry';
+export { MAPS_TOOL_NAMES, RENDER_MAP_TOOL_NAME, RENDER_ROUTE_TOOL_NAME, isMapsToolName } from './mapsToolNames';
 export { provenanceForToolType, requiresNetwork } from './networkRequirements';
 export type { ToolProvenance } from './networkRequirements';
 export { RUNNER_WORKFLOWS, isRunnerWorkflow } from './runner';
@@ -61,3 +61,5 @@ export {
   workspaceKey,
 } from './trackedExecutables';
 export type { TrackApprovalGrantInput, TrackedExecutableScope, TrackedExecutableStore } from './trackedExecutables';
+export { createWebSearchTurnState } from './webSearch';
+export type { WebSearchTurnState } from './webSearch';

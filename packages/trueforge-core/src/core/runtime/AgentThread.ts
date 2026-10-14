@@ -12,7 +12,6 @@ import type {
   PreSendContextProcessor,
 } from '../capabilities/AgentContextProcessor';
 import { ASK_USER_QUESTION_TOOL_NAME } from '../capabilities/builtins/AskUserQuestion';
-import { resolveMaxOutputTokens } from '../capabilities/builtins/ContextCompaction';
 import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTools';
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
@@ -66,6 +65,7 @@ import {
   type RegisteredCommandExecution,
   type ThinkingBlock,
 } from '../llm/LLMTypes';
+import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
@@ -106,7 +106,14 @@ import { isGithubFileRead } from '../mcp/githubFileContents';
 import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
 import { stampSentinelDecision } from '../mcp/ToolSet';
 import type { SentinelHostContext } from '../permissions';
-import { classifyHostToolCall, requiresNetwork, toDispatchSentinelContext } from '../permissions';
+import {
+  approvalCardForGatedCall,
+  classifyHostToolCall,
+  requiresNetwork,
+  toDispatchSentinelContext,
+} from '../permissions';
+import type { ConnectorBinding } from '../permissions/approvalTokens';
+import type { Tier, Tier3Card } from '../permissions/tier';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
@@ -169,7 +176,8 @@ import {
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
 } from './contextUtils';
-import { DeferredTool } from './DeferredTool';
+import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
+import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import { createEmptyAgentThreadMetrics, updateMetricsFromUsage, type AgentThreadMetrics } from './metrics';
 import {
   getClosableOpenToolCallOutcomes,
@@ -875,6 +883,36 @@ function getPendingApprovalToolCalls(input: {
   );
 }
 
+/**
+ * The tier and card an approval request carries. Every approval the user is asked for gets a card:
+ * one that Sentinel did not card (a call a selector gates though it let it through) is described
+ * from its own arguments, and shows as a review card because it asks all the same.
+ */
+function approvalCardFields(toolCall: InternalEnrichedToolCall): { tier?: Tier; tier3_card: Tier3Card } {
+  const { tool_info } = toolCall;
+  if (tool_info.tier3_card !== undefined && tool_info.tier3_card !== null) {
+    return { ...(tool_info.tier === undefined ? {} : { tier: tool_info.tier }), tier3_card: tool_info.tier3_card };
+  }
+  const args = tryParseToolArgs(toolCall.function.arguments);
+  const unwrapped =
+    tool_info.is_deferred === true && tool_info.original_tool_name !== CALL_TOOL_NAME
+      ? (tryUnwrapCallToolInput(args) ?? args)
+      : args;
+  return {
+    tier: 3,
+    tier3_card: approvalCardForGatedCall({
+      agent_intent: null,
+      action: {
+        tool_name: tool_info.original_tool_name,
+        canonical_params: unwrapped,
+        tool_type: tool_info.type,
+        mcp_server_name: tool_info.mcp_server_name,
+        mcp_hints: {},
+      },
+    }),
+  };
+}
+
 function getPendingClientSideToolCalls(context: ContextMessage[]): InternalEnrichedToolCall[] {
   const openToolCallIds = getOpenToolCallIds(context);
   const assistant = lastAssistantInContext(context);
@@ -1144,8 +1182,10 @@ export async function classifyUnstampedToolCall(input: {
   sentinel: SentinelHostContext | undefined;
   canonical_params: Record<string, unknown>;
   info: InternalToolCallInfo;
+  /** The connector the call goes to, bound into the approval token; absent when the tool set has none. */
+  connector?: ConnectorBinding | undefined;
 }): Promise<InternalToolCallInfo> {
-  const { sentinel, canonical_params, info } = input;
+  const { sentinel, canonical_params, info, connector } = input;
   if (
     sentinel === undefined ||
     info.tier !== undefined ||
@@ -1163,6 +1203,12 @@ export async function classifyUnstampedToolCall(input: {
       tool_name: info.original_tool_name,
       canonical_params,
       tool_type: info.type,
+      ...(connector === undefined
+        ? {}
+        : {
+            mcp_server_id: connector.server_id,
+            ...(connector.destination_host === null ? {} : { mcp_server_host: connector.destination_host }),
+          }),
       mcp_hints: {
         read_only_hint: info.read_only_hint,
         destructive_hint: info.destructive_hint,
@@ -1179,11 +1225,15 @@ async function enrichAssistantMessage({
   toolMapping,
   resolveUnderlyingTool,
   sentinel,
+  toolCallPolicy,
+  logger,
 }: {
   assistantMessage: RawAssistantMessage;
   toolMapping: Map<string, MappedMCPTool>;
   resolveUnderlyingTool: boolean;
   sentinel: SentinelHostContext | undefined;
+  toolCallPolicy: HostToolCallPolicy | undefined;
+  logger: HostToolCallPolicyLogger | undefined;
 }): Promise<InternalEnrichedAssistantMessage> {
   // Omit tool_calls when empty; OpenAI rejects `tool_calls: []` on replay.
   if (!assistantMessage.tool_calls?.length) {
@@ -1207,10 +1257,37 @@ async function enrichAssistantMessage({
       ...(resolveUnderlyingTool ? { arguments: tryParseToolArgs(toolCall.function.arguments) } : {}),
     };
     const resolved = await resolveToolCallInfo({ toolInfo, params, resolveUnderlyingTool });
+    // The host policy runs before Sentinel classification so a call it blocks
+    // never reaches the permission layer. It sees the effective call: the
+    // underlying tool (e.g. `web_search` reached through `call_tool`) with its
+    // args unwrapped from the dispatcher's envelope.
+    let policed = resolved;
+    if (toolCallPolicy !== undefined) {
+      const underlyingToolName = resolved.type === 'mcp' ? resolved.original_tool_name : undefined;
+      const parsedArgs = params.arguments ?? tryParseToolArgs(toolCall.function.arguments);
+      const viaCallTool =
+        toolInfo.originalToolName === CALL_TOOL_NAME &&
+        underlyingToolName !== undefined &&
+        underlyingToolName !== CALL_TOOL_NAME;
+      policed = applyHostToolCallPolicy({
+        call: {
+          functionName: toolCall.function.name,
+          underlyingToolName,
+          args: viaCallTool ? (tryUnwrapCallToolInput(parsedArgs) ?? parsedArgs) : parsedArgs,
+        },
+        toolInfo: resolved,
+        policy: toolCallPolicy,
+        logger,
+      });
+    }
     const tool_info = await classifyUnstampedToolCall({
       sentinel,
       canonical_params: params.arguments ?? {},
-      info: resolved,
+      info: policed,
+      connector: toolInfo.toolSet.resolveConnector?.({
+        name: toolInfo.originalToolName,
+        arguments: tryParseToolArgs(toolCall.function.arguments),
+      }),
     });
     enrichedToolCalls.push({ ...toolCall, tool_info });
   }
@@ -1353,6 +1430,7 @@ export class AgentThread {
   private readonly toolCallTimeoutMs?: number | undefined;
   private readonly runCodeToolCallTimeoutMs?: number | undefined;
   private readonly modelFirstResponseTimeoutMs: number;
+  private readonly toolCallPolicy: HostToolCallPolicy | undefined;
   private readonly preLLMProcessorsTimeoutMs: number;
   private readonly sandboxRefreshTimeoutMs: number;
   private readonly sentinel?: SentinelHostContext | undefined;
@@ -1401,6 +1479,7 @@ export class AgentThread {
     this.toolCallTimeoutMs = input.toolCallTimeoutMs;
     this.runCodeToolCallTimeoutMs = input.runCodeToolCallTimeoutMs;
     this.modelFirstResponseTimeoutMs = input.modelFirstResponseTimeoutMs ?? DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
+    this.toolCallPolicy = input.toolCallPolicy;
     this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
     this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
     this.sentinel = input.sentinel;
@@ -2839,6 +2918,8 @@ export class AgentThread {
       // Hence, we resolve the underlying tool to get the tool information.
       resolveUnderlyingTool: true,
       sentinel: this.sentinel,
+      toolCallPolicy: this.toolCallPolicy,
+      logger: this.logger,
     });
     const finishReason = result.value.finish_reason;
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the
@@ -3865,12 +3946,11 @@ export class AgentThread {
         id: newEventId(),
         created_at: new Date().toISOString(),
         thread_id: this.threadId,
-        tool_calls: pendingApprovalToolCalls.map(({ id, tool_info }) => ({
-          id,
+        tool_calls: pendingApprovalToolCalls.map(toolCall => ({
+          id: toolCall.id,
           source_event_id: modelMessageEventId,
           // Tier and card ride on the approval event because the wire tool_info omits them.
-          ...(tool_info.tier === undefined ? {} : { tier: tool_info.tier }),
-          ...(tool_info.tier3_card === undefined ? {} : { tier3_card: tool_info.tier3_card }),
+          ...approvalCardFields(toolCall),
         })),
       };
       yield event;

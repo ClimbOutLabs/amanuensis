@@ -1,10 +1,13 @@
 import {
   classifyTier,
   isMapsToolAlwaysTier3,
+  mapsDestinationHosts,
   type ClassifyContext,
   type SentinelAction,
 } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
+import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(services?: SentinelServices): ClassifyContext {
   return {
@@ -15,8 +18,15 @@ function makeCtx(services?: SentinelServices): ClassifyContext {
     repository_id: 'r1',
     workspace_cwd: null,
     agent_intent: 'show the user a map',
+    web_search: createWebSearchTurnState(),
   };
 }
+
+const DEFAULT_MAPS_HOSTS = {
+  geocoder: 'https://nominatim.openstreetmap.org',
+  router: 'https://router.project-osrm.org',
+  tile: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+};
 
 function mapsAction(tool_name: string, canonical_params: Record<string, unknown>): SentinelAction {
   return {
@@ -26,11 +36,7 @@ function mapsAction(tool_name: string, canonical_params: Record<string, unknown>
     mcp_server_name: 'maps',
     mcp_first_party: true,
     mcp_hints: {},
-    maps_hosts: {
-      geocoder: 'https://nominatim.openstreetmap.org',
-      router: 'https://router.project-osrm.org',
-      tile: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    },
+    maps_hosts: DEFAULT_MAPS_HOSTS,
   };
 }
 
@@ -87,14 +93,62 @@ describe('maps classifier branch', () => {
     expect(decision.card?.plain_what).toContain('"coffee shop"');
   });
 
-  it('sets the destination from the configured hosts, not params', async () => {
+  it('sets the sending hosts from the configured hosts, not params', async () => {
     const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx());
-    const destination = decision.card?.destination ?? '';
-    expect(destination).toContain('nominatim.openstreetmap.org');
-    expect(destination).toContain('router.project-osrm.org');
-    expect(destination).toContain('tile.openstreetmap.org');
+    const hosts = decision.card?.destination_host ?? '';
+    expect(hosts).toContain('nominatim.openstreetmap.org');
+    expect(hosts).toContain('router.project-osrm.org');
+    expect(hosts).toContain('tile.openstreetmap.org');
     // Never echoes the place string as the destination.
-    expect(destination).not.toContain('Paris');
+    expect(hosts).not.toContain('Paris');
+    expect(decision.card?.destination).toBeNull();
+  });
+
+  it('shows the exact arguments that leave, like any other outbound card', async () => {
+    const decision = await classifyTier(
+      mapsAction('render_route', { from_place: 'Madrid', to_place: 'Barcelona' }),
+      makeCtx(),
+    );
+    expect(decision.card?.outbound_text).toContain('from_place: Madrid');
+    expect(decision.card?.outbound_text).toContain('to_place: Barcelona');
+    expect(decision.card?.outbound_truncated).toBe(false);
+  });
+
+  it('binds the approval to the configured hosts', async () => {
+    const hosts = mapsDestinationHosts(DEFAULT_MAPS_HOSTS);
+    const connector = { server_id: 'maps', destination_host: hosts };
+    const action: SentinelAction = {
+      ...mapsAction('render_map', { place_name: 'Paris' }),
+      mcp_server_id: connector.server_id,
+      mcp_server_host: connector.destination_host,
+    };
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    // Approval tokens are single use, so each verdict mints its own.
+    const verdict = async (host: string) =>
+      verifyPreDispatch({
+        call: {
+          tool_name: 'render_map',
+          tool_type: 'truefoundry-system',
+          canonical_params: { place_name: 'Paris' },
+          tier: 3,
+          approval_token_id: (await classifyTier(action, makeCtx(services))).approval_token_id,
+          approval_binding: null,
+          shell_binding: null,
+          connector: { ...connector, destination_host: host },
+        },
+        ctx: {
+          tenant_id: 't1',
+          created_by: 'u1',
+          conversation_id: 'conv-1',
+          repository_id: 'r1',
+          workspace_cwd: null,
+          agent_intent: null,
+          services,
+          offline: false,
+        },
+      });
+    expect(await verdict('geocode.moved.example')).toContain('Approval invalid');
+    expect(await verdict(hosts)).toBeUndefined();
   });
 
   it('sets cannot_be_undone and null recipient/amount/parsed_command', async () => {
@@ -113,7 +167,7 @@ describe('maps classifier branch', () => {
       tile: 'https://tiles.example.internal/{z}/{x}/{y}.png',
     };
     const decision = await classifyTier(action, makeCtx());
-    expect(decision.card?.destination).toContain('geocode.example.internal');
+    expect(decision.card?.destination_host).toContain('geocode.example.internal');
     expect(decision.card?.plain_what).toContain('geocode.example.internal');
   });
   it('auto-denies with offline_mode instead of asking while offline', async () => {

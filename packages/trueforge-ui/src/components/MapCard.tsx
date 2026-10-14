@@ -37,11 +37,6 @@ interface MapCardProps {
   data: MapCardData | null;
   state: MapCardState;
   blockedMessage?: string;
-  /**
-   * Called when the user clicks Retry on a blocked or tile-failed panel.
-   * When omitted, Retry re-attempts the tile layer once (one-shot, no auto-retry).
-   */
-  onRetry?: () => void;
 }
 
 /** Tile errors with zero successful loads before the card gives up and shows the unavailable panel. */
@@ -114,21 +109,24 @@ function mapSetupKey(data: MapCardData): string {
  *
  * A blank map never ships: when tiles fail to load, the card shows the
  * "Map tiles unavailable" panel with a one-shot Retry instead of a grey box.
+ * A result the tool already settled (not found, no route, rate limited,
+ * offline) or a route that cannot be drawn has nothing to retry, so its panel
+ * has no Retry button.
  */
-export function MapCard({ data, state, blockedMessage, onRetry }: MapCardProps) {
+export function MapCard({ data, state, blockedMessage }: MapCardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // The effect below keys on the stable setup key, so it reads the latest
   // data through a ref instead of closing over a fresh object each render.
   const dataRef = useRef(data);
   dataRef.current = data;
-  // Set when tile loading fails; the card renders the unavailable panel.
-  const [tilesFailed, setTilesFailed] = useState(false);
+  // Set when the map cannot be shown; the card renders the unavailable panel for it.
+  const [failure, setFailure] = useState<'tiles' | 'draw' | null>(null);
   // Bumped by Retry to re-create the tile layer exactly once per click.
   const [retryKey, setRetryKey] = useState(0);
   const setupKey = data === null ? null : mapSetupKey(data);
 
   useEffect(() => {
-    if (setupKey === null || state !== 'ready' || tilesFailed) {
+    if (setupKey === null || state !== 'ready' || failure !== null) {
       return;
     }
     const el = containerRef.current;
@@ -142,6 +140,20 @@ export function MapCard({ data, state, blockedMessage, onRetry }: MapCardProps) 
     let observer: IntersectionObserver | undefined;
 
     async function init() {
+      if (cancelled || containerRef.current === null) {
+        return;
+      }
+      try {
+        await draw();
+      } catch {
+        // A bad polyline or a failed Leaflet load must show the panel, not a blank map.
+        if (!cancelled) {
+          setFailure('draw');
+        }
+      }
+    }
+
+    async function draw() {
       if (cancelled || containerRef.current === null) {
         return;
       }
@@ -178,7 +190,7 @@ export function MapCard({ data, state, blockedMessage, onRetry }: MapCardProps) 
       let errored = 0;
       const fail = () => {
         if (!cancelled && loaded === 0) {
-          setTilesFailed(true);
+          setFailure('tiles');
         }
       };
       tileLayer.on('tileload', () => {
@@ -193,12 +205,12 @@ export function MapCard({ data, state, blockedMessage, onRetry }: MapCardProps) 
       timeout = setTimeout(fail, TILE_LOAD_TIMEOUT_MS);
       tileLayer.addTo(map);
 
-      // Circle markers: no image assets to bundle or fail.
-      const pinStyle = { radius: 8, color: '#ffffff', weight: 2, fillColor: '#dc2626', fillOpacity: 1 };
+      // Circle markers: no image assets to bundle or fail. Colors come from the theme through CSS classes.
+      const pinStyle = { radius: 8, weight: 2, className: 'maps-card-pin' };
       if (mapData.kind === 'route' && mapData.route_geometry !== undefined) {
         const points = decodePolyline(mapData.route_geometry);
         const latlngs = points.map(([lat, lng]) => L.latLng(lat, lng));
-        L.polyline(latlngs, { color: '#2563eb', weight: 4 }).addTo(map);
+        L.polyline(latlngs, { weight: 4, className: 'maps-card-route' }).addTo(map);
         const fromMarker = L.circleMarker(
           [mapData.from_lat ?? mapData.lat, mapData.from_lng ?? mapData.lng],
           pinStyle,
@@ -255,26 +267,23 @@ export function MapCard({ data, state, blockedMessage, onRetry }: MapCardProps) 
       map = null;
       tileLayer = null;
     };
-  }, [setupKey, state, tilesFailed, retryKey]);
+  }, [setupKey, state, failure, retryKey]);
 
   const handleRetry = () => {
-    if (onRetry !== undefined) {
-      onRetry();
-      return;
-    }
     // One-shot: re-create the tile layer once. If tiles fail again the
     // unavailable panel returns; the card never auto-retries.
-    setTilesFailed(false);
+    setFailure(null);
     setRetryKey(key => key + 1);
   };
 
-  const showPanel = state === 'blocked' || state === 'unavailable' || data === null || tilesFailed;
-  const panelTitle = state === 'blocked' && !tilesFailed ? 'Map unavailable' : 'Map tiles unavailable';
-  const panelBody =
-    tilesFailed || state === 'unavailable'
-      ? (blockedMessage ?? 'The map tiles could not be loaded. Your place search was not sent again.')
-      : (blockedMessage ??
-        'This map is blocked right now. Tiles are unavailable while offline or over the rate limit.');
+  const showPanel = state === 'blocked' || state === 'unavailable' || data === null || failure !== null;
+  const tilesFailed = failure === 'tiles';
+  const panelTitle = tilesFailed ? 'Map tiles unavailable' : 'Map unavailable';
+  const panelBody = tilesFailed
+    ? 'The map tiles could not be loaded. Your place search was not sent again.'
+    : failure === 'draw'
+      ? 'The map could not be drawn.'
+      : (blockedMessage ?? 'The map is not available right now.');
 
   // Every state shares the same .maps-card frame: identical width and radius.
   return (
@@ -283,9 +292,11 @@ export function MapCard({ data, state, blockedMessage, onRetry }: MapCardProps) 
         <div className="maps-card-blocked" role="status">
           <p className="maps-card-blocked-title">{panelTitle}</p>
           <p className="maps-card-blocked-body">{panelBody}</p>
-          <button type="button" className="maps-card-retry" onClick={handleRetry}>
-            Retry
-          </button>
+          {tilesFailed && (
+            <button type="button" className="maps-card-retry" onClick={handleRetry}>
+              Retry
+            </button>
+          )}
         </div>
       ) : (
         <>

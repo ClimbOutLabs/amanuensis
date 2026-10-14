@@ -9,6 +9,17 @@ type MapCardProps = Parameters<typeof MapCard>[0];
 /** Handlers registered via tileLayer.on(event, handler) in the current render. */
 let tileHandlers: Record<string, Array<() => void>>;
 
+interface MockMap {
+  remove: () => void;
+  setView: () => void;
+  fitBounds: () => void;
+  on: (event: string, handler: () => void) => void;
+  scrollWheelZoom: { enable: () => void; disable: () => void };
+}
+
+/** Maps created through the mocked leaflet.map, in creation order. */
+let mapInstances: MockMap[];
+
 interface MockLayer {
   addTo: (map: unknown) => MockLayer;
   bindPopup?: (el: HTMLElement) => void;
@@ -29,13 +40,17 @@ vi.mock('leaflet', () => {
     }),
     addTo: vi.fn(),
   });
-  const makeMap = () => ({
-    remove: vi.fn(),
-    setView: vi.fn(),
-    fitBounds: vi.fn(),
-    on: vi.fn(),
-    scrollWheelZoom: { enable: vi.fn(), disable: vi.fn() },
-  });
+  const makeMap = (): MockMap => {
+    const instance: MockMap = {
+      remove: vi.fn(),
+      setView: vi.fn(),
+      fitBounds: vi.fn(),
+      on: vi.fn(),
+      scrollWheelZoom: { enable: vi.fn(), disable: vi.fn() },
+    };
+    mapInstances.push(instance);
+    return instance;
+  };
   return {
     map: vi.fn(makeMap),
     tileLayer: vi.fn(makeTileLayer),
@@ -78,6 +93,7 @@ const placeData: MapCardData = {
 
 beforeEach(() => {
   tileHandlers = {};
+  mapInstances = [];
   vi.clearAllMocks();
 });
 
@@ -128,17 +144,19 @@ describe('MapCard', () => {
     expect(screen.getByText(/621.5 km/)).toBeInTheDocument();
   });
 
-  it('renders the blocked state with a message and Retry', () => {
+  it('renders the blocked state with a message and no Retry, since the call already settled', () => {
     renderCard({ data: null, state: 'blocked', blockedMessage: 'Rate limited.' });
     expect(screen.getByRole('status')).toBeInTheDocument();
     expect(screen.getByText('Map unavailable')).toBeInTheDocument();
     expect(screen.getByText('Rate limited.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
   });
 
-  it('renders the unavailable state', () => {
-    renderCard({ data: null, state: 'unavailable' });
-    expect(screen.getByText('Map tiles unavailable')).toBeInTheDocument();
+  it('renders the unavailable state without a Retry', () => {
+    renderCard({ data: null, state: 'unavailable', blockedMessage: 'The place could not be found.' });
+    expect(screen.getByText('Map unavailable')).toBeInTheDocument();
+    expect(screen.getByText('The place could not be found.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
   });
 
   it('renders blocked when data is null even in ready state', () => {
@@ -185,13 +203,6 @@ describe('MapCard', () => {
     // No further tile layers appear without another click: no auto-retry.
     await new Promise(resolve => setTimeout(resolve, 100));
     expect(vi.mocked(leaflet.tileLayer).mock.calls.length).toBe(callsAfterFailure + 1);
-  });
-
-  it('calls onRetry when provided instead of retrying tiles internally', async () => {
-    const onRetry = vi.fn();
-    renderCard({ data: null, state: 'blocked', blockedMessage: 'Rate limited.', onRetry });
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   it('draws exactly one pin for render_map without poi', async () => {
@@ -241,7 +252,7 @@ describe('MapCard', () => {
   it('requests tiles through the proxy without a card query parameter', async () => {
     renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
     await waitFor(() => expect(leaflet.tileLayer).toHaveBeenCalled());
-    expect(vi.mocked(leaflet.tileLayer).mock.calls[0][0]).toBe('/api/maps/tiles/{z}/{x}/{y}.png');
+    expect(vi.mocked(leaflet.tileLayer).mock.calls.at(0)?.[0]).toBe('/api/maps/tiles/{z}/{x}/{y}.png');
   });
 
   it('does not re-create the map when the data object changes identity', async () => {
@@ -272,12 +283,10 @@ describe('MapCard', () => {
   it('keeps scroll wheel zoom off until the map is clicked or focused', async () => {
     renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
     await waitFor(() => expect(leaflet.map).toHaveBeenCalled());
-    expect(vi.mocked(leaflet.map).mock.calls[0][1]).toMatchObject({ scrollWheelZoom: false });
-    const mapInstance = vi.mocked(leaflet.map).mock.results[0].value as {
-      on: ReturnType<typeof vi.fn>;
-      scrollWheelZoom: { enable: ReturnType<typeof vi.fn> };
-    };
-    const calls = vi.mocked(mapInstance.on).mock.calls as Array<[string, () => void]>;
+    expect(vi.mocked(leaflet.map).mock.calls.at(0)?.[1]).toMatchObject({ scrollWheelZoom: false });
+    const mapInstance = mapInstances.at(0);
+    if (mapInstance === undefined) throw new Error('Expected a map instance');
+    const calls = vi.mocked(mapInstance.on).mock.calls;
     const clickHandler = calls.find(([event]) => event === 'click')?.[1];
     const focusHandler = calls.find(([event]) => event === 'focus')?.[1];
     expect(clickHandler).toBeDefined();
@@ -305,30 +314,81 @@ describe('MapCard', () => {
   it('does not add a dark tile filter class', async () => {
     renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
     await waitFor(() => expect(leaflet.tileLayer).toHaveBeenCalled());
-    expect(vi.mocked(leaflet.tileLayer).mock.calls[0][1]).not.toHaveProperty('className');
+    expect(vi.mocked(leaflet.tileLayer).mock.calls.at(0)?.[1]).not.toHaveProperty('className');
   });
 
   it('waits for the container to become visible before creating the map', async () => {
-    const observe = vi.fn();
+    const observe = vi.fn<(target: Element) => void>();
     let observerCallback: IntersectionObserverCallback = () => {};
-    class MockIntersectionObserver {
+    class MockIntersectionObserver implements IntersectionObserver {
+      readonly root = null;
+      readonly rootMargin = '';
+      readonly thresholds = [0];
       constructor(callback: IntersectionObserverCallback) {
         observerCallback = callback;
       }
       observe = observe;
       disconnect = vi.fn();
       unobserve = vi.fn();
+      takeRecords = () => [];
     }
     vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
     try {
       renderCard({ data: { ...placeData, pins: [] }, state: 'ready' });
       await waitFor(() => expect(observe).toHaveBeenCalled());
       expect(leaflet.map).not.toHaveBeenCalled();
+      const target = observe.mock.calls.at(0)?.[0];
+      if (target === undefined) throw new Error('Expected an observed element');
+      const rect = target.getBoundingClientRect();
+      const entry: IntersectionObserverEntry = {
+        isIntersecting: true,
+        target,
+        time: 0,
+        intersectionRatio: 1,
+        boundingClientRect: rect,
+        intersectionRect: rect,
+        rootBounds: null,
+      };
       // The container scrolls into view: the map is created exactly once.
-      observerCallback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+      observerCallback([entry], new MockIntersectionObserver(observerCallback));
       await waitFor(() => expect(leaflet.map).toHaveBeenCalledTimes(1));
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('paints pins and the route through theme classes, never fixed colors', async () => {
+    renderCard({
+      data: {
+        ...placeData,
+        kind: 'route',
+        from_name: 'Madrid',
+        to_name: 'Barcelona',
+        route_geometry: '_p~iF~ps|U_ulLnnqC',
+      },
+      state: 'ready',
+    });
+    await waitFor(() => expect(leaflet.polyline).toHaveBeenCalled());
+    expect(vi.mocked(leaflet.polyline).mock.calls.at(0)?.[1]).toMatchObject({ className: 'maps-card-route' });
+    expect(vi.mocked(leaflet.polyline).mock.calls.at(0)?.[1]).not.toHaveProperty('color');
+    for (const call of vi.mocked(leaflet.circleMarker).mock.calls) {
+      expect(call[1]).toMatchObject({ className: 'maps-card-pin' });
+      expect(call[1]).not.toHaveProperty('color');
+      expect(call[1]).not.toHaveProperty('fillColor');
+    }
+  });
+
+  it('shows the panel without Retry when the route cannot be drawn', async () => {
+    vi.mocked(leaflet.latLng).mockImplementationOnce(() => {
+      throw new Error('Invalid LatLng object: (NaN, NaN)');
+    });
+    renderCard({
+      data: { ...placeData, kind: 'route', from_name: 'Madrid', to_name: 'Barcelona', route_geometry: '_p~iF~ps|U' },
+      state: 'ready',
+    });
+    await waitFor(() => expect(screen.getByText('Map unavailable')).toBeInTheDocument());
+    expect(screen.getByText('The map could not be drawn.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(document.querySelector('.maps-card-map')).not.toBeInTheDocument();
   });
 });

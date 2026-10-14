@@ -108,3 +108,23 @@ export const RunCodeSetupFailureSchema = z.object({
 });
 
 export type RunCodeSetupFailure = z.infer<typeof RunCodeSetupFailureSchema>;
+
+/** Why the run_code sandbox can or cannot run code right now, as Settings reports it. */
+export const RUN_CODE_STATUS_STATES = [
+  'ready',
+  'not_configured',
+  'docker_unavailable',
+  'daemon_unavailable',
+  'image_missing',
+  'signature_unverified',
+  'image_unavailable',
+  'isolation_refused',
+  'unsupported_platform',
+] as const;
+
+export const RunCodeStatusSchema = z.object({
+  state: z.enum(RUN_CODE_STATUS_STATES).describe('Whether run_code can execute code, or the reason it cannot.'),
+  detail: z.string().optional().describe('Technical detail from the sandbox check. Absent when the state says it all.'),
+});
+
+export type RunCodeStatus = z.infer<typeof RunCodeStatusSchema>;

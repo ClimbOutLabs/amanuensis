@@ -44,6 +44,12 @@ A tool on a connector you add asks for approval before it runs, whatever the con
 
 The one exception is your own memory provider. When you save a connector as the memory provider and its address is on an origin listed in the server's `FIRST_PARTY_MCP_ORIGINS` setting (see `packages/trueforge/.env.example`), the server treats it as first-party. A tool on it that declares both `readOnlyHint: true` and `openWorldHint: false` then runs without a card, and each run is recorded in the audit log. Everything else on it still asks, and a first-party connector does not follow redirects, so give the address that serves MCP directly. Only whoever runs the server can list an origin: nothing in Settings, the API, or a chat can make a connector first-party, and an empty list, which is the default, means none is.
 
+## Web search provider
+
+You can pick one connector as your web search provider, either from its details page or by adding the Parallel preset, which is free and needs no API key. Searches through it run without asking, in chats and in scheduled runs, and each one shows a **Searched** chip in the chat and a row in the audit log. Only a tool the connector declares read-only runs this way, or one that the shipped preset for a known provider (Parallel, Tavily, Exa) lists as a search tool. Every other tool on the connector, and the same tool on any other connector, still asks, so picking a connector that can write does not let its write tools run silently.
+
+Before a search leaves the server, a fixed check looks for secrets in the query: any key, token or password the server holds, private keys, API keys, long encoded strings, password labels, card numbers, and anything over 200 characters. It reads the query after normalizing look-alike characters and decoding percent escapes, and it also reads the turn's earlier searches, so a secret split over two searches is still caught. A query that trips the check asks, with the exact query on the card. In a scheduled run it is denied and recorded in the audit log, and the run continues. After 20 searches in one turn the next one asks, and the provider can only fetch a link that one of its own search results returned. To approve every search yourself, turn off **Settings → Permissions → Web searches**.
+
 ## Next steps
 
 - Attach MCP servers when you [create an agent](/create-agent/overview).

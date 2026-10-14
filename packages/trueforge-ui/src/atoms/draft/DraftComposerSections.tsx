@@ -4,7 +4,11 @@ import { Icon } from '../../icons/Icon.js';
 import { shellIsCreateAgent, useOptionalShellMode } from '../../server/ShellModeContext.js';
 import { useSlot } from '../../theme/SlotsProvider.js';
 import { ActivePersonaIndicator } from '../ActivePersonaIndicator.js';
-import type { ComposerLeftSectionProps, ComposerRightSectionProps } from '../ComposerSections.js';
+import {
+  ComposerRightSection,
+  type ComposerLeftSectionProps,
+  type ComposerRightSectionProps,
+} from '../ComposerSections.js';
 import { auiButtonClass } from '../lib/buttonClasses.js';
 import { useCompactLayout } from '../lib/CompactLayoutContext.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -76,6 +80,8 @@ export function DraftComposerRightSection({ disabled, isRunning }: ComposerRight
     <div className="flex min-w-0 items-center gap-1">
       {!isBuilder ? <DraftModelSelector disabled={disabled} isRunning={isRunning} /> : null}
       <DraftReasoningEffortSelector disabled={disabled} isRunning={isRunning} />
+      {/* Default trailing controls (mic) go last, beside Send, as in the plain composer. */}
+      <ComposerRightSection disabled={disabled} isRunning={isRunning} />
     </div>
   );
 }

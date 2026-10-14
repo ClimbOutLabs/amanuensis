@@ -6,7 +6,6 @@ import {
   isServableTileType,
   MAX_UPSTREAM_TILES_PER_USER_PER_MINUTE,
   parseTileIndex,
-  readCappedBody,
   TILE_MAX_BODY_BYTES,
   TileCache,
   UpstreamBudget,
@@ -260,13 +259,5 @@ describe('TileCache bounds', () => {
       small.set(key, entry(1));
     }
     expect(small.size).toBe(2);
-  });
-});
-
-describe('readCappedBody', () => {
-  it('returns the body when it fits and null when it does not', async () => {
-    const fits = await readCappedBody({ response: new Response(new Uint8Array(10)), maxBytes: 10 });
-    expect(fits?.byteLength).toBe(10);
-    expect(await readCappedBody({ response: new Response(new Uint8Array(11)), maxBytes: 10 })).toBeNull();
   });
 });

@@ -17,7 +17,7 @@ export const TIER2_ACTION_KINDS = ['file_write'] as const;
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 
 /** Machine-readable reasons a Tier 3 action is auto-denied without a card. */
-export const AUTO_DENY_REASONS = ['destination_unverifiable', 'offline_mode'] as const;
+export const AUTO_DENY_REASONS = ['destination_unverifiable', 'offline_mode', 'outbound_guard'] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
 
 /**
@@ -32,12 +32,21 @@ export const Tier3CardSchema = z
       .string()
       .nullable()
       .describe('One sentence on why the agent wants this, from agent intent when available.'),
-    cannot_be_undone: z.string().nullable().describe('What cannot be undone, or null when fully reversible.'),
+    cannot_be_undone: z.string().nullable().describe("A short note on what can't be reversed, or null."),
     why_asked_again: z.string().nullable().describe('Actual cause of re-escalation, or null on first ask.'),
     destination: z.string().nullable().describe('Verifiable destination (URL, service name), or null.'),
     recipient: z.string().nullable().describe('Verifiable recipient (address, handle), or null.'),
     amount: z.string().nullable().describe('Verifiable amount, or null.'),
     parsed_command: z.string().nullable().describe('Server-parsed command structure for shell actions, or null.'),
+    outbound_text: z
+      .string()
+      .nullable()
+      .describe('Exact arguments sent to a connector, one "name: value" line each. Long values are cut with a marker.'),
+    destination_host: z
+      .string()
+      .nullable()
+      .describe('Host of the connector server that receives the call, or null when it is not a remote server.'),
+    outbound_truncated: z.boolean().describe('True when part of outbound_text is cut and not shown in full.'),
   })
   .openapi('Tier3Card');
 
@@ -68,6 +77,8 @@ export interface TierDecision {
   approval_binding: TrackedExecutionBinding | null;
   /** Single-use approval token id minted for actions that need approval, or null (Tier 1, relaxed Tier 2). */
   approval_token_id: string | null;
+  /** Text of a web search that runs without asking, for the chat chip and the audit row; null otherwise. */
+  silent_search_query: string | null;
   /**
    * Full parsed shell binding for shell actions that need approval (or null).
    * Re-verified byte-for-byte immediately before invocation.
@@ -103,6 +114,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     tier2_kind: null,
     approval_binding: null,
     approval_token_id: null,
+    silent_search_query: null,
     shell_binding: null,
   };
 }
@@ -116,6 +128,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     tier2_kind: null,
     approval_binding: null,
     approval_token_id: null,
+    silent_search_query: null,
     shell_binding: null,
   };
 }
@@ -125,6 +138,7 @@ export function tier1Decision(input: {
   reason: string;
   reason_detail: string | null;
   sensitive_read: boolean;
+  silent_search_query?: string | null | undefined;
 }): TierDecision {
   return {
     ...baseDecision(),
@@ -132,6 +146,7 @@ export function tier1Decision(input: {
     reason: input.reason,
     reason_detail: input.reason_detail,
     sensitive_read: input.sensitive_read,
+    silent_search_query: input.silent_search_query ?? null,
   };
 }
 

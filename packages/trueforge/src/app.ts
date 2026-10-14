@@ -23,6 +23,7 @@ import { createMcpServersRouter } from './apis/mcpServers';
 import { createMemoryVaultRouter } from './apis/memoryVault';
 import { createModelsRouter } from './apis/models';
 import { createPermissionsRouter } from './apis/permissions';
+import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
@@ -424,6 +425,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/settings',
     withAdminAuth(
       createSettingsRouter({
+        mcpCatalog: deps.mcpCatalog,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         tokenStore: deps.tokenStore,
@@ -529,6 +531,20 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         personaStore: deps.personaStore,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveRequestContext,
+        knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/personas',
+    withAuth(
+      createPersonaKnowledgeRouter({
+        personaStore: deps.personaStore,
+        resolveRequestContext,
+        knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+        modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+        logger: deps.logger,
       }),
       authMiddleware,
     ),

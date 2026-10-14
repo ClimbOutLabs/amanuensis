@@ -1,15 +1,21 @@
+import { mapsDestinationHosts } from '@truefoundry/trueforge-core/core';
+import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
+import { createLogger } from 'winston';
 import {
   GeocodeCache,
   MAPS_ORIGIN_COORDINATE_PRECISION,
+  MAPS_SERVER_ID,
   MapsService,
   MapsUpstreamError,
   UpstreamLimiter,
   createMapsRoutingProvider,
   decodePolyline,
   encodePolyline,
+  mapsCapability,
   roundOriginCoordinate,
   thinPolyline,
 } from '../../../src/runtime/mapsCapability';
+import { UPSTREAM_JSON_MAX_BODY_BYTES } from '../../../src/runtime/mapsUpstream';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -101,7 +107,7 @@ describe('GeocodeCache', () => {
     let now = 0;
     const cache = new GeocodeCache(() => now);
     const places = [
-      { resolved_name: 'Paris, France', address: 'Paris, France', lat: 48.85, lng: 2.35, bounding_box: null as never },
+      { resolved_name: 'Paris, France', address: 'Paris, France', lat: 48.85, lng: 2.35, bounding_box: null },
     ];
     cache.set('search:Paris', places);
     expect(cache.get('search:Paris')).toEqual(places);
@@ -163,6 +169,19 @@ describe('OsrmRoutingProvider', () => {
     });
   });
 
+  it('treats an oversize router body as service_unavailable', async () => {
+    const provider = createMapsRoutingProvider({
+      provider_id: 'osrm',
+      router_url: 'https://router.example',
+      fetch_limited: () =>
+        Promise.resolve(new Response('x', { headers: { 'Content-Length': String(UPSTREAM_JSON_MAX_BODY_BYTES + 1) } })),
+    });
+    await expect(provider.route({ from_lat: 0, from_lng: 0, to_lat: 1, to_lng: 1 })).rejects.toMatchObject({
+      code: 'service_unavailable',
+      service: 'router',
+    });
+  });
+
   it('rejects unknown provider ids', () => {
     expect(() =>
       createMapsRoutingProvider({
@@ -194,7 +213,7 @@ describe('MapsService.geocode', () => {
         router_url: 'https://router.example',
         fetch_limited: () => Promise.reject(new Error('unused')),
       }),
-      logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } as never,
+      logger: createLogger({ silent: true }),
       fetch_limited: url => {
         seen.push(url);
         return fetch_limited(url);
@@ -202,6 +221,21 @@ describe('MapsService.geocode', () => {
     });
     return { service, seen };
   }
+
+  it('treats an oversize or unparseable geocoder body as service_unavailable', async () => {
+    const oversize = serviceWith(() =>
+      Promise.resolve(new Response('[]', { headers: { 'Content-Length': String(UPSTREAM_JSON_MAX_BODY_BYTES + 1) } })),
+    );
+    await expect(oversize.service.geocode('Paris')).rejects.toMatchObject({
+      code: 'service_unavailable',
+      service: 'geocoder',
+    });
+    const garbled = serviceWith(() => Promise.resolve(new Response('<html>')));
+    await expect(garbled.service.geocode('Paris')).rejects.toMatchObject({ code: 'service_unavailable' });
+    const poi = serviceWith(() => Promise.resolve(new Response('<html>')));
+    const place = { resolved_name: 'Paris', address: null, lat: 48.85, lng: 2.35, bounding_box: null };
+    await expect(poi.service.searchPoi(place, 'cafe')).rejects.toMatchObject({ code: 'service_unavailable' });
+  });
 
   it('returns the top match and caches the exact request', async () => {
     const { service, seen } = serviceWith(() => Promise.resolve(jsonResponse([nominatimHit])));
@@ -256,7 +290,7 @@ describe('MapsService.route origin privacy', () => {
           return Promise.resolve({ distance_km: 1, duration_min: 1, geometry: '_p~iF~ps|U', traffic: false });
         },
       },
-      logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } as never,
+      logger: createLogger({ silent: true }),
       fetch_limited: () => Promise.reject(new Error('unused')),
     });
     const place = (lat: number, lng: number) => ({
@@ -268,5 +302,21 @@ describe('MapsService.route origin privacy', () => {
     });
     await service.route(place(48.8588444, 2.2944811), place(48.8606111, 2.3376222));
     expect(received).toEqual([{ from_lat: 48.859, from_lng: 2.294, to_lat: 48.8606111, to_lng: 2.3376222 }]);
+  });
+});
+
+describe('maps connector binding', () => {
+  it('binds approvals to the configured upstream hosts, matching what the approval card names', async () => {
+    const capability = mapsCapability({ tracing: NOOP_AGENT_TRACING, logger: createLogger({ silent: true }) });
+    const toolSet = capability.systemToolSets?.[0];
+    if (toolSet === undefined) {
+      throw new Error('maps capability has no tool sets');
+    }
+    const binding = toolSet.resolveConnector?.({ name: 'render_map', arguments: { place_name: 'Paris' } });
+    const info = await toolSet.toolCallInfo({ name: 'render_map', arguments: { place_name: 'Paris' } });
+    if (info.maps_hosts === undefined) {
+      throw new Error('maps hosts were not stamped');
+    }
+    expect(binding).toEqual({ server_id: MAPS_SERVER_ID, destination_host: mapsDestinationHosts(info.maps_hosts) });
   });
 });

@@ -122,6 +122,7 @@ function main() {
   console.log(`pre-push: ${changed.files.length} file(s) changed since origin/main.`);
 
   runPnpm(['run', 'test:private-data', '--tree', pushedHead]);
+  runPnpm(['run', 'lint:theme']);
 
   const existingFormatFiles = changed.formatFiles.filter(existsSync);
   if (existingFormatFiles.length > 0 && !runBroadChecks) {

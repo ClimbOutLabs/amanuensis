@@ -20,7 +20,9 @@ The card uses the existing Tier3Card fields:
 
 - plain_what, render_map: Send "<place_name>" to <geocoder host> to find it, then load map tiles for that area from <tile host>. With poi: Send "<place_name>" and "<poi>" to <geocoder host> to find <poi> near it, then load map tiles for that area from <tile host>.
 - plain_what, render_route: Send "<from_place>" and "<to_place>" to <geocoder host>, ask <router host> for a driving route between them, then load map tiles for that area from <tile host>.
-- destination: the configured hosts, comma separated, read from server config and never from params, so it is always verifiable and the destination_unverifiable fallback never fires.
+- destination_host: the configured hosts, comma separated, read from server config and never from params, so it is always verifiable. destination: null.
+- outbound_text: the exact arguments of the call, one "name: value" line each, rendered by the same function as every other outbound card. The approval is rendered by the shared approval card; there is no maps-specific card component.
+- Approval binding: the approval token is bound to a connector binding of server id "maps" and the same host string, rebuilt from server config at dispatch, so an approval stops working once any maps upstream points elsewhere.
 - cannot_be_undone: Once the place names leave this machine they cannot be taken back.
 - plain_why: agent intent, as for every other tool. recipient, amount, parsed_command: null.
 
@@ -142,7 +144,7 @@ MapCard is a tool-result renderer in @truefoundry/trueforge-ui, selected by tool
 - Header: resolved name (bold) and address. Route card: both endpoint labels, the polyline, the map fitted to the route bounds, and a caption "621 km, about 6 h 10 min". POI pins and route lines never share a card.
 - Attribution always visible, --text-xs: "© OpenStreetMap contributors" linking to the OSM copyright page, plus "Search: Nominatim" or "Routing: OSRM" as used. Links open in a new tab.
 - Untrusted text: resolved_name, address, and pin names are third-party data. Popup content is set as a DOM text node; strings are never passed to bindPopup.
-- States: loading (after approval, while the tool runs); ok; blocked (the proxy answered 503 or 429, or offline mode is on): the card keeps the header, address, and coordinates and shows a sunk panel "Map tiles unavailable" with the reason and a Retry button. Retry is one user-initiated fetch; the card never auto-retries. Error results render no card; the tool-call card shows the failure tone and the model explains in text.
+- States: loading (after approval, while the tool runs); ok; blocked (the proxy answered 503 or 429, or offline mode is on): the card keeps the header, address, and coordinates and shows a sunk panel with the reason. Only a tile failure shows "Map tiles unavailable" with a Retry button; the tool call already settled for every other state (not found, no route, rate limited, offline, a route that cannot be drawn), so those panels have no Retry. Retry is one user-initiated fetch; the card never auto-retries. Error results render no card; the tool-call card shows the failure tone and the model explains in text.
 - Cards re-rendered from history request tiles through the proxy again, mostly from cache, under the original approval.
 
 ## Privacy
@@ -176,7 +178,7 @@ What never leaves: the user's own location (never collected), memory, calendar d
 
 Synthetic place names only; no real user location or calendar data. Tests stub the geocoder, router, and tile upstreams; CI never calls the public services.
 
-- Classifier: render_map and render_route are Tier 3 with the maps card text, the configured hosts as destination, and the place strings verbatim; a readOnlyHint on either tool does not lower the tier; offline mode auto-denies a stale call with offline_mode and the tools are absent from the model's list.
+- Classifier: render_map and render_route are Tier 3 with the maps card text, the configured hosts as destination_host, the exact arguments as outbound_text, an approval bound to those hosts, and the place strings verbatim; a readOnlyHint on either tool does not lower the tier; offline mode auto-denies a stale call with offline_mode and the tools are absent from the model's list.
 - Schemas: every bound is 128 or under and no field has a regex pattern; place_name over 128 chars and zoom of 0 or 19 are rejected before any upstream call.
 - Tile proxy: rejects z outside 0..18 and x, y outside range with 400; forwards no cookies or Referer; drops a non-image upstream body; answers 503 while offline; answers 429 above the per-user budget while cache hits stay free, whatever card id the request carries; drops an oversize body; refuses a bearer credential and a missing session; follows no redirect to another host; the rendered tile URLs are same-origin so the app shell CSP is unchanged.
 - Limiter: two geocode calls in one second run one second apart; a 429 upstream becomes rate_limited with service.

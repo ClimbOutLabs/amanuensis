@@ -23,7 +23,7 @@ import type { ISandboxProviderStore } from '../../../src/db/sandboxProviderStore
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { checkSnapshotStatus, toDaytonaSandboxProvider } from '../../../src/sandbox/providerUtils';
-import { toRedactedSecretValue } from '../../../src/utils/secretRedaction';
+import { SECRET_REDACTION } from '../../../src/utils/secretRedaction';
 
 const mockProviderFactory = toDaytonaSandboxProvider as jest.Mock;
 const mockCheckStatus = checkSnapshotStatus as jest.Mock;
@@ -61,7 +61,7 @@ function wireResponse(manifest: Record<string, unknown>) {
 
 const putBodyWire = wireResponse({
   ...putBody,
-  auth: { api_key: toRedactedSecretValue(putBody.auth.api_key) },
+  auth: { api_key: SECRET_REDACTION },
 });
 
 function stubProvider(overrides: { buildImage?: jest.Mock; getImageBuildStatus?: jest.Mock } = {}) {
@@ -310,7 +310,7 @@ describe('sandbox-provider secret redaction and strict PUT', () => {
       '/',
       putInit({
         ...putBody,
-        auth: { api_key: toRedactedSecretValue(putBody.auth.api_key) },
+        auth: { api_key: SECRET_REDACTION },
       }),
     );
     expect(response.status).toBe(400);
@@ -324,7 +324,7 @@ describe('sandbox-provider secret redaction and strict PUT', () => {
     const redactedKeep = {
       ...putBody,
       exec_timeout_ms: 120000,
-      auth: { api_key: toRedactedSecretValue(putBody.auth.api_key) },
+      auth: { api_key: SECRET_REDACTION },
     };
     const update = await settingsRouter.request('/', putInit(redactedKeep));
     expect(update.status).toBe(200);
@@ -345,7 +345,7 @@ describe('sandbox-provider secret redaction and strict PUT', () => {
     const response = await settingsRouter.request('/', putInit(keep));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      data: wireResponse({ ...keep, auth: { api_key: toRedactedSecretValue(putBody.auth.api_key) } }),
+      data: wireResponse({ ...keep, auth: { api_key: SECRET_REDACTION } }),
     });
 
     const stored = await sandboxProviderStore.getSandboxProvider('default');
@@ -361,7 +361,7 @@ describe('sandbox-provider secret redaction and strict PUT', () => {
     const update = await settingsRouter.request('/', putInit(rotated));
     expect(update.status).toBe(200);
     expect(await update.json()).toEqual({
-      data: wireResponse({ ...rotated, auth: { api_key: toRedactedSecretValue(rotatedKey) } }),
+      data: wireResponse({ ...rotated, auth: { api_key: SECRET_REDACTION } }),
     });
 
     const stored = await sandboxProviderStore.getSandboxProvider('default');

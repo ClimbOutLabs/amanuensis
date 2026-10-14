@@ -19,11 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 import envPaths from 'env-paths';
 
-import {
-  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
-  TOKEN_FACTORY_DEFAULT_BASE_URL,
-  validateRunCodeStartupConfig,
-} from '@truefoundry/trueforge-core/core';
+import { TOKEN_FACTORY_DEFAULT_BASE_URL, validateRunCodeStartupConfig } from '@truefoundry/trueforge-core/core';
 import {
   MEMORY_PROVIDER_MAX_TIMEOUT_MS,
   MEMORY_SETTINGS_LIMITS,
@@ -227,6 +223,14 @@ export function parsePositiveInt(options: {
     throw new Error(`Environment variable ${envKey} must be at most ${String(maxValue)}, got "${raw}"`);
   }
   return value;
+}
+
+/** Like parsePositiveInt, but an unset or blank value stays undefined instead of taking a default. */
+export function parseOptionalPositiveInt(options: { envKey: string; raw: string | undefined }): number | undefined {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return undefined;
+  }
+  return parsePositiveInt({ envKey: options.envKey, raw: options.raw, defaultValue: 1 });
 }
 
 /** Parses a float env var constrained to the closed interval [0, 1]; unset/blank falls back to `defaultValue`. */
@@ -733,6 +737,14 @@ export interface SharedServerConfiguration {
    */
   TOOL_CALL_TIMEOUT_MS: number;
   /**
+   * Bound in milliseconds on waiting for a model call's first output before
+   * the turn fails visibly instead of hanging. A provider that accepts the
+   * request but never produces a first chunk would otherwise leave the turn
+   * active indefinitely. Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default
+   * 600000 (10 minutes).
+   */
+  MODEL_FIRST_RESPONSE_TIMEOUT_MS: number;
+  /**
    * Client name used for Dynamic Client Registration (DCR) of MCP servers.
    * This is the client name shown on authorization-server consent screens.
    * Env: `MCP_DCR_OAUTH_CLIENT_NAME`. Default: "truefoundry-harness".
@@ -829,12 +841,14 @@ export interface SharedServerConfiguration {
    */
   MAX_REQUEST_BODY_BYTES: number;
   /**
-   * Default context size in tokens that triggers compaction, used whenever an agent spec does
-   * not set `config.context_management.compaction.compaction_threshold_tokens` itself; an
-   * explicit spec value always wins over this instance-wide default.
-   * Env: `CONTEXT_COMPACTION_THRESHOLD_TOKENS`. Default 50000.
+   * Instance-wide context size in tokens that triggers compaction, used whenever an agent spec
+   * does not set `config.context_management.compaction.trigger` itself; an explicit spec value
+   * always wins. Unset leaves the threshold to the model's context length (80% of it, lowered so
+   * input plus the configured max output tokens fit, never below 4000), with a fixed 50000-token
+   * fallback when that length is unknown.
+   * Env: `CONTEXT_COMPACTION_THRESHOLD_TOKENS`.
    */
-  CONTEXT_COMPACTION_THRESHOLD_TOKENS: number;
+  CONTEXT_COMPACTION_THRESHOLD_TOKENS: number | undefined;
   /**
    * Max seconds to wait for turn cancellation + connection drain on SIGTERM/SIGINT.
    * Env: `GRACEFUL_TIMEOUT_SECONDS`. Default 30.
@@ -1161,6 +1175,14 @@ export interface SharedServerConfiguration {
    */
   MEMORY_EMBEDDINGS_MODEL_DIR: string;
   /**
+   * Root directory for persona knowledge libraries. Each persona gets its own
+   * SQLite database file under a sanitized tenant subdirectory, so knowledge
+   * can never leak across personas. Persist it (Docker volume) or libraries
+   * vanish on container recreate.
+   * Env: `PERSONA_KNOWLEDGE_DIR`. Default `./data/persona-knowledge` (relative to the process cwd).
+   */
+  PERSONA_KNOWLEDGE_DIR: string;
+  /**
    * Memories embedded per background-backfill batch. Smaller batches yield to the
    * event loop more often; larger batches finish sooner.
    * Env: `MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE`. Default 8.
@@ -1400,6 +1422,13 @@ const shared: SharedServerConfiguration = {
     // to the one tool that needs it instead of every tool.
     defaultValue: 240_000,
   }),
+  MODEL_FIRST_RESPONSE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_FIRST_RESPONSE_TIMEOUT_MS',
+    raw: getEnv('MODEL_FIRST_RESPONSE_TIMEOUT_MS'),
+    // Literal mirror of DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS in
+    // trueforge-core's AgentThread.ts (the canonical owner).
+    defaultValue: 600_000,
+  }),
   MCP_DCR_OAUTH_CLIENT_NAME:
     getEnv('MCP_DCR_OAUTH_CLIENT_NAME', { defaultValue: 'truefoundry-harness' }) ?? 'truefoundry-harness',
   SANDBOX_FILE_MAX_BYTES_FOR_DOWNLOAD: parsePositiveInt({
@@ -1469,10 +1498,9 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MAX_REQUEST_BODY_BYTES'),
     defaultValue: DEFAULT_MAX_REQUEST_BODY_BYTES,
   }),
-  CONTEXT_COMPACTION_THRESHOLD_TOKENS: parsePositiveInt({
+  CONTEXT_COMPACTION_THRESHOLD_TOKENS: parseOptionalPositiveInt({
     envKey: 'CONTEXT_COMPACTION_THRESHOLD_TOKENS',
     raw: getEnv('CONTEXT_COMPACTION_THRESHOLD_TOKENS'),
-    defaultValue: DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
   }),
   GRACEFUL_TIMEOUT_SECONDS: parsePositiveInt({
     envKey: 'GRACEFUL_TIMEOUT_SECONDS',
@@ -1712,6 +1740,8 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE'),
     defaultValue: 8,
   }),
+  PERSONA_KNOWLEDGE_DIR:
+    getEnv('PERSONA_KNOWLEDGE_DIR', { defaultValue: './data/persona-knowledge' }) ?? './data/persona-knowledge',
   MEMORY_REFLECT_MAX_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_REFLECT_MAX_TOKENS',
     raw: getEnv('MEMORY_REFLECT_MAX_TOKENS'),
@@ -1804,6 +1834,54 @@ const configuration: ServerConfiguration = standalone
       TRUEFOUNDRY_SANDBOX_SERVER_URL: getEnv('TRUEFOUNDRY_SANDBOX_SERVER_URL', { required: false }),
       TRUEFOUNDRY_SANDBOX_SETTINGS: getEnv('TRUEFOUNDRY_SANDBOX_SETTINGS', { required: false }),
     };
+
+/** The password a connection URL carries, decoded, or undefined when it has none or is not a URL. */
+function urlPassword(raw: string): string | undefined {
+  try {
+    const password = decodeURIComponent(new URL(raw).password);
+    return password === '' ? undefined : password;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The settings that carry secrets: what {@link getConfiguredSecretValues} reads, so a test can supply just these. */
+export type ConfiguredSecretSettings = Pick<
+  SharedServerConfiguration,
+  'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN'
+> &
+  (
+    | { STANDALONE: true }
+    | ({ STANDALONE: false } & Pick<
+        DistributedServerConfiguration,
+        'OIDC' | 'TRUEFOUNDRY_API_KEY' | 'TRUEFOUNDRY_SANDBOX_API_KEY' | 'DATABASE_URL' | 'REDIS_URL'
+      >)
+  );
+
+/**
+ * Secret values this process holds from its own configuration, for the outbound secret guard:
+ * service credentials, the OIDC client secret, and the passwords inside connection URLs. The one
+ * place to extend when a new secret setting is added.
+ */
+export function getConfiguredSecretValues(config: ConfiguredSecretSettings = configuration): string[] {
+  const candidates: (string | undefined)[] = [
+    config.TRUEFORGE_API_KEY,
+    config.NEBIUS_API_KEY,
+    config.MEMORY_SCREEN_AUTH_TOKEN,
+  ];
+  if (!config.STANDALONE) {
+    candidates.push(
+      config.OIDC?.OIDC_CLIENT_SECRET,
+      config.TRUEFOUNDRY_API_KEY,
+      config.TRUEFOUNDRY_SANDBOX_API_KEY,
+      config.DATABASE_URL,
+      urlPassword(config.DATABASE_URL),
+      config.REDIS_URL,
+      urlPassword(config.REDIS_URL),
+    );
+  }
+  return candidates.filter((value): value is string => value !== undefined && value !== '');
+}
 
 export function isOidcConfigured(
   value: ServerConfiguration,
