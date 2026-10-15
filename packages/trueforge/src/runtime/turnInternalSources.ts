@@ -11,6 +11,7 @@ import {
   PERSONA_LIBRARY_NEAR_MISS_MARKER,
   type InternalSourceState,
 } from './internalSourceGuard';
+import type { TurnModelUsage } from './modelUsage';
 import type { TokenFactoryBudget } from './tokenFactoryBudget';
 
 /** Internal-source facts for one turn, resolved before the turn exists. */
@@ -87,6 +88,7 @@ export async function resolveTurnInternalSources(input: {
   modelDir: string;
   modelProviderStore: IModelProviderStore;
   tokenFactoryBudget: TokenFactoryBudget;
+  modelUsage: TurnModelUsage;
   logger: Logger;
 }): Promise<TurnInternalSources> {
   const internalSourceState = createInternalSourceState();
@@ -122,6 +124,7 @@ export async function resolveTurnInternalSources(input: {
       modelName: input.persona.modelName,
       modelProviderStore: input.modelProviderStore,
       tokenFactoryBudget: input.tokenFactoryBudget,
+      modelUsage: input.modelUsage,
       logger: input.logger,
     }),
     sourceState: internalSourceState,

@@ -32,6 +32,7 @@ import { createTokenFactoryBudget } from '../../../src/runtime/tokenFactoryBudge
 import { ensureEnvManagedTokenFactoryProvider } from '../../../src/runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
+import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
 import { startModelEndpointStub } from '../../fixtures/modelEndpointStub';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
@@ -353,6 +354,7 @@ describe('submitProfileLearning', () => {
       eventStore,
       modelProviderStore: new SqliteModelProviderStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
+      modelUsage: discardedModelUsage,
       memoryClient,
       tenantId: 'default',
       createdBy: 'user-a',
@@ -605,6 +607,7 @@ describe('submitProfileLearning', () => {
           resolveLlm: undefined,
           modelProviderStore,
           tokenFactoryBudget: createTokenFactoryBudget({ store: usageStore, cap: CAP, now: () => NOW }),
+          modelUsage: discardedModelUsage,
           turnModelFqn:
             providerType === 'tokenfactory' ? 'tokenfactory/nemotron-3-super-120b-a12b' : 'local-vllm/local-model',
           ...turnFields(),
@@ -624,7 +627,12 @@ describe('submitProfileLearning', () => {
 
     it('skips the pass, without a call, once the cap is reached', async () => {
       const { harness, submit, usageStore } = await tokenFactoryHarness('tokenfactory');
-      await usageStore.addUsage({ usage_date: TODAY, tokens: CAP });
+      await usageStore.addUsage({
+        usage_date: TODAY,
+        model_id: 'nvidia/nemotron-3-super-120b-a12b',
+        input_tokens: CAP,
+        output_tokens: 0,
+      });
 
       await submit();
 
@@ -998,6 +1006,7 @@ describe('drainTurnEvents profile learning trigger', () => {
       eventStore: new RecordingEventStore(),
       modelProviderStore: new SqliteModelProviderStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,
+      modelUsage: discardedModelUsage,
       memoryClient: undefined,
       tenantId: 'default',
       createdBy: 'user-a',

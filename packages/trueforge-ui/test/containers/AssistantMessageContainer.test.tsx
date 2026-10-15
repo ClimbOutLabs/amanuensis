@@ -5,11 +5,15 @@ import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MemoryRecallProvider } from '@/components/MemoryRecallContext.js';
+import { ModelUsageProvider, type ModelUsageTurnContext } from '@/components/ModelUsageContext.js';
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
 import { MemoryTurnContextProvider } from '@/containers/MemoryTurnContextProvider.js';
+import { ModelUsageTurnProvider } from '@/containers/ModelUsageTurnProvider.js';
 import { resetWaitQueueTurnClocks } from '@/hooks/useWaitQueue.js';
 import { AgentDetailsPreferenceProvider } from '@/server/AgentDetailsPreferenceContext.js';
 import { ServerProvider } from '@/server/ServerContext.js';
+import { setModelUsageVisible } from '@/utils/modelUsageDisplayPreference.js';
+import { NANO_COMPACTION_EVENT, NANO_SUMMARY_EVENT, SUPER_EVENT } from '../fixtures/modelUsageEvents.js';
 import { createMockAgentUIServer } from '../server/mockServer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
@@ -819,5 +823,168 @@ describe('AssistantMessageContainer wait queue (production path)', () => {
     expect(screen.getByText('This request expired.')).toBeInTheDocument();
     expect(screen.queryByRole('radiogroup', { name: 'Approval options for render_map' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('map-card-loading')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssistantMessageContainer model and cost line', () => {
+  const messages: ThreadMessageLike[] = [
+    { role: 'assistant', content: 'here you go', metadata: { custom: { turnId: 'trn_1' } } },
+  ];
+
+  beforeEach(() => {
+    setModelUsageVisible(true);
+  });
+
+  async function renderWithUsage(options: {
+    usage: ModelUsageTurnContext[];
+    agentDetails?: 'expanded' | 'collapsed';
+    isRunning?: boolean;
+    threadMessages?: ThreadMessageLike[];
+  }) {
+    const { usage, agentDetails = 'collapsed', isRunning = false, threadMessages = messages } = options;
+    const session = {
+      id: 'sess-1',
+      isMutable: true,
+      createdAt: '2026-10-15T00:00:00.000Z',
+      updatedAt: '2026-10-15T00:00:00.000Z',
+      metadata: { agent_details: agentDetails },
+    };
+    const server = createMockAgentUIServer({
+      getSession: vi.fn(async () => session),
+      updateSession: vi.fn(async () => session),
+    });
+    const listModelUsage = vi.fn(async () => usage);
+
+    const result = render(
+      <ServerProvider server={server}>
+        <AgentDetailsPreferenceProvider>
+          <ModelUsageProvider api={{ listModelUsage }}>
+            <RuntimeHarness messages={threadMessages} threadId="t1" remoteId="sess-1" isRunning={isRunning}>
+              <ModelUsageTurnProvider>
+                <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+              </ModelUsageTurnProvider>
+            </RuntimeHarness>
+          </ModelUsageProvider>
+        </AgentDetailsPreferenceProvider>
+      </ServerProvider>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    return { ...result, listModelUsage };
+  }
+
+  it('shows the model, provider, tokens and cost of the turn under the answer', async () => {
+    await renderWithUsage({ usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }] });
+
+    expect(screen.getByTestId('model-usage-line')).toHaveTextContent(
+      'Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0008',
+    );
+  });
+
+  it('folds helper calls into the total and names the model they ran on', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT, NANO_COMPACTION_EVENT] }],
+    });
+
+    expect(screen.getByTestId('model-usage-line')).toHaveTextContent('6,990 tokens');
+    expect(screen.getByTestId('model-usage-helpers')).toHaveTextContent('+ 2 helper calls on Nemotron 3 Nano');
+  });
+
+  it('lists the helper calls with their model, tokens and cost in the agent details when they are on', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT, NANO_COMPACTION_EVENT] }],
+      agentDetails: 'expanded',
+    });
+
+    const internals = getAgentInternals();
+    expect(within(internals).getByText(/2 helper calls/)).toBeInTheDocument();
+    const rows = within(internals).getAllByTestId('model-usage-row');
+    expect(rows.map(row => row.textContent)).toEqual([
+      expect.stringContaining('Answer·Nemotron 3 Super'),
+      expect.stringContaining('Memory summary'),
+      expect.stringContaining('Compaction'),
+    ]);
+    expect(rows[2]).toHaveTextContent('4,300 tokens (4,000 in, 300 out) · $0.0003');
+  });
+
+  it('keeps the helper rows out of the details while agent details are off, leaving the line', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT] }],
+      agentDetails: 'collapsed',
+    });
+
+    expect(screen.queryByTestId('model-usage-row')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+    expect(screen.getByTestId('model-usage-helpers')).toBeInTheDocument();
+  });
+
+  it('adds no details row for a turn that had only its answer', async () => {
+    await renderWithUsage({ usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }], agentDetails: 'expanded' });
+
+    expect(screen.queryByTestId('assistant-message-agent-internals')).not.toBeInTheDocument();
+  });
+
+  it('says usage was not reported when the provider reported none', async () => {
+    await renderWithUsage({
+      usage: [
+        {
+          turnId: 'trn_1',
+          events: [{ ...SUPER_EVENT, reportedCalls: 0, inputTokens: 0, outputTokens: 0, costUsd: null }],
+        },
+      ],
+    });
+
+    expect(screen.getByTestId('model-usage-line')).toHaveTextContent(
+      'Nemotron 3 Super · Token Factory · usage not reported',
+    );
+  });
+
+  it('shows nothing for a turn with no recorded usage', async () => {
+    await renderWithUsage({ usage: [{ turnId: 'trn_other', events: [SUPER_EVENT] }] });
+
+    expect(screen.queryByTestId('model-usage-line')).not.toBeInTheDocument();
+  });
+
+  it('hides the line and the helper rows when the display switch is off', async () => {
+    setModelUsageVisible(false);
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT] }],
+      agentDetails: 'expanded',
+    });
+
+    expect(screen.queryByTestId('model-usage-line')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-usage-row')).not.toBeInTheDocument();
+  });
+
+  it('does not draw the line while the turn is still running', async () => {
+    await renderWithUsage({
+      usage: [{ turnId: 'trn_1', events: [SUPER_EVENT] }],
+      isRunning: true,
+      threadMessages: [
+        {
+          role: 'assistant',
+          content: 'here you go',
+          status: { type: 'running' },
+          metadata: { custom: { turnId: 'trn_1' } },
+        },
+      ],
+    });
+
+    expect(screen.queryByTestId('model-usage-line')).not.toBeInTheDocument();
+  });
+
+  it('draws no line without a host usage provider', async () => {
+    render(
+      <RuntimeHarness messages={messages} threadId="t1" remoteId="sess-1">
+        <ModelUsageTurnProvider>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </ModelUsageTurnProvider>
+      </RuntimeHarness>,
+    );
+
+    expect(screen.queryByTestId('model-usage-line')).not.toBeInTheDocument();
   });
 });

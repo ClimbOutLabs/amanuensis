@@ -8,6 +8,7 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { SummarizeTurnContext } from './memory/memoryRetain';
 import { resolveSummarizationModelFqn } from './memory/memorySummarize';
+import type { TurnModelUsage } from './modelUsage';
 import type { TokenFactoryBudget } from './tokenFactoryBudget';
 
 /**
@@ -122,6 +123,7 @@ export interface ResolveTurnSummarizeContextParams {
   tenantId: string;
   modelProviderStore: IModelProviderStore;
   tokenFactoryBudget: TokenFactoryBudget;
+  modelUsage: TurnModelUsage;
   agentStore: IAgentStore;
   personaModelName: string | undefined;
   sessionAgent: SessionAgent;
@@ -152,6 +154,7 @@ export async function resolveTurnSummarizeContext(
     tenantId,
     modelProviderStore,
     tokenFactoryBudget,
+    modelUsage,
     agentStore,
     personaModelName,
     sessionAgent,
@@ -196,7 +199,7 @@ export async function resolveTurnSummarizeContext(
       return undefined;
     }
     logger.debug('Turn summarization is active for this turn', { sessionId, summarizationModelFqn });
-    return { tenantId, modelProviderStore, summarizationModelFqn, tokenFactoryBudget };
+    return { tenantId, modelProviderStore, summarizationModelFqn, tokenFactoryBudget, modelUsage };
   } catch (error) {
     logger.debug('Memory summarization disabled for this turn: the model FQN did not resolve', {
       sessionId,

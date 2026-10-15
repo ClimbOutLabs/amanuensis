@@ -1,9 +1,11 @@
 'use client';
 
 import { cn } from '@/atoms/lib/cn.js';
+import { Switch } from '@/atoms/primitives/Switch.js';
 import { useTheme } from '@/theme/ThemeProvider.js';
 import { PRESETS } from '@/theme/presets/index.js';
 import type { ThemePreset } from '@/theme/types.js';
+import { useModelUsageVisible } from '@/utils/modelUsageDisplayPreference.js';
 
 /** Display metadata for each theme preset. */
 const PRESET_META: Record<ThemePreset, { label: string; description: string }> = {
@@ -43,6 +45,7 @@ function PresetSwatches({ preset, mode }: { preset: ThemePreset; mode: 'light' |
 
 const ThemeSettings = () => {
   const { preset, setPreset, mode, preference, setTheme, isDark } = useTheme();
+  const { visible: modelUsageVisible, setVisible: setModelUsageVisible } = useModelUsageVisible();
 
   return (
     <div className="flex flex-col gap-6">
@@ -73,6 +76,27 @@ const ThemeSettings = () => {
               {option === 'light' ? 'Light' : option === 'dark' ? 'Dark' : 'System'}
             </button>
           ))}
+        </div>
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-sm font-medium text-text-primary">Answers</h3>
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card-bg p-3">
+          <div className="min-w-0">
+            <p id="model-usage-display-label" className="text-sm font-medium text-text-primary">
+              Show model and cost under answers
+            </p>
+            <p id="model-usage-display-hint" className="mt-0.5 text-xs text-text-secondary">
+              The model, provider, tokens and cost of each answer, with the helper calls behind it. Hiding it only
+              changes what you see here; usage is still counted.
+            </p>
+          </div>
+          <Switch
+            checked={modelUsageVisible}
+            onCheckedChange={setModelUsageVisible}
+            aria-labelledby="model-usage-display-label"
+            aria-describedby="model-usage-display-hint"
+          />
         </div>
       </div>
 

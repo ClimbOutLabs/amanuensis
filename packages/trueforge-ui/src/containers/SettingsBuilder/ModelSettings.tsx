@@ -21,6 +21,7 @@ import {
 import { useCatalogServer } from '@/server/ServerContext.js';
 import type { ModelEntry, ModelProviderBase, ModelProviderCatalogEntry } from '@/server/types.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
+import { TokenFactoryUsagePanel } from './TokenFactoryUsagePanel.js';
 
 function catalogBaseUrl(provider: ModelProviderCatalogEntry): string {
   if ('baseUrl' in provider && typeof provider.baseUrl === 'string') {
@@ -284,6 +285,8 @@ const ModelSettings = () => {
       <p className="mt-1 text-sm text-text-secondary">
         Connect providers and choose which models are available. Assign models to roles under Model roles.
       </p>
+
+      <TokenFactoryUsagePanel providerConfigured={configuredTypes.has('tokenfactory')} />
 
       {error ? (
         <p className="mt-3 rounded-md border border-failure-bg/30 bg-failure-bg/10 px-3 py-2 text-sm text-failure-bg">

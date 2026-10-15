@@ -9,6 +9,7 @@ describe('token factory config', () => {
     delete process.env['TOKEN_FACTORY_MODEL'];
     delete process.env['TOKEN_FACTORY_CHEAPER_MODEL'];
     delete process.env['TOKEN_FACTORY_DAILY_TOKEN_CAP'];
+    delete process.env['TOKEN_FACTORY_PRICES'];
   });
 
   afterAll(() => {
@@ -49,5 +50,24 @@ describe('token factory config', () => {
   it.each(['0', '-5', '1.5', 'lots'])('rejects the daily cap %s', async raw => {
     process.env['TOKEN_FACTORY_DAILY_TOKEN_CAP'] = raw;
     await expect(loadConfig()).rejects.toThrow('TOKEN_FACTORY_DAILY_TOKEN_CAP must be an integer of at least 1');
+  });
+
+  it('has no price overrides by default', async () => {
+    const config = await loadConfig();
+    expect(config.TOKEN_FACTORY_PRICES).toEqual({});
+  });
+
+  it('reads price overrides from TOKEN_FACTORY_PRICES', async () => {
+    process.env['TOKEN_FACTORY_PRICES'] =
+      '{"nvidia/nemotron-3-super-120b-a12b":{"input_per_million":0.25,"output_per_million":0.8}}';
+    const config = await loadConfig();
+    expect(config.TOKEN_FACTORY_PRICES).toEqual({
+      'nvidia/nemotron-3-super-120b-a12b': { input_per_million: 0.25, output_per_million: 0.8 },
+    });
+  });
+
+  it.each(['{nope', '{"m":{"input_per_million":1}}'])('rejects the price overrides %s at startup', async raw => {
+    process.env['TOKEN_FACTORY_PRICES'] = raw;
+    await expect(loadConfig()).rejects.toThrow('TOKEN_FACTORY_PRICES must');
   });
 });

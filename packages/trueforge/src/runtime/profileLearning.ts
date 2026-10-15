@@ -56,6 +56,7 @@ import type { EventSubscription } from './event-subscription';
 import type { MemoryClient } from './memory/memoryClient';
 import { AMAN_MEMORY_NAMESPACE } from './memory/memoryRetain';
 import { uuidv5 } from './memory/uuidv5';
+import { modelIdentity, type TurnModelUsage } from './modelUsage';
 import { getModelDetails } from './sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from './tokenFactoryBudget';
 
@@ -341,6 +342,7 @@ export interface ProfileLearningDrainMember {
   eventStore: ICompletedTurnEventStore;
   modelProviderStore: IModelProviderStore;
   tokenFactoryBudget: TokenFactoryBudget;
+  modelUsage: TurnModelUsage;
   memoryClient: MemoryClient | undefined;
   tenantId: string;
   createdBy: string;
@@ -475,8 +477,10 @@ async function distillProfile(params: SubmitProfileLearningParams): Promise<void
           signal: AbortSignal.timeout(DISTILLATION_TIMEOUT_MS),
           streamTimeout,
         }),
-        providerType: providerConfig.provider.type,
+        identity: modelIdentity({ name, providerConfig }),
+        role: 'profile_learning',
         budget: params.tokenFactoryBudget,
+        usage: params.modelUsage,
         logger: params.logger,
       });
     });

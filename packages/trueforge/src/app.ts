@@ -458,6 +458,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveSkillStore: deps.resolveSkillStore,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
+        tokenFactoryBudget: deps.tokenFactoryBudget,
         envManagedModelProviderNames: envManagedProviders,
         withTransaction: deps.withTransaction,
         logger: deps.logger,

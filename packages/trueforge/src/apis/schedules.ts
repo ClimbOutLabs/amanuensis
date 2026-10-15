@@ -26,6 +26,7 @@ import {
   startScheduleRun,
 } from '../controller/scheduleDispatch';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
+import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
@@ -95,7 +96,7 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
    */
   tokenStore: IOAuthTokenStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
-  sessionStore: ISessionStore<SessionCustom, TurnCustom>;
+  sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   spaceStore: ISpaceStore<TTransaction>;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
   turnArtifactStore: ITurnArtifactStore<TTransaction>;

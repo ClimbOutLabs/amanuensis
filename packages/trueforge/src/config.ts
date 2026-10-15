@@ -35,6 +35,7 @@ import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
+import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL, DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 
@@ -1325,6 +1326,14 @@ export interface SharedServerConfiguration {
    */
   TOKEN_FACTORY_DAILY_TOKEN_CAP: number | undefined;
   /**
+   * Price overrides in USD per million tokens, as JSON keyed by upstream model id, for example
+   * `{"nvidia/nemotron-3-super-120b-a12b":{"input_per_million":0.3,"output_per_million":0.9}}`.
+   * Adds to, and wins over, the built-in Token Factory defaults; an entry also gives a model on any
+   * other provider a cost. Without a price a model shows tokens only.
+   * Env: `TOKEN_FACTORY_PRICES`. Unset means the built-in defaults only.
+   */
+  TOKEN_FACTORY_PRICES: ModelPrices;
+  /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
    * memories by meaning in addition to keyword overlap. Everything runs on the
@@ -1911,6 +1920,7 @@ const shared: SharedServerConfiguration = {
     envKey: 'TOKEN_FACTORY_DAILY_TOKEN_CAP',
     raw: getEnv('TOKEN_FACTORY_DAILY_TOKEN_CAP'),
   }),
+  TOKEN_FACTORY_PRICES: parseModelPrices({ envKey: 'TOKEN_FACTORY_PRICES', raw: getEnv('TOKEN_FACTORY_PRICES') }),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
     raw: getEnv('MEMORY_EMBEDDINGS_ENABLED'),

@@ -1815,18 +1815,25 @@ describe('TurnResourceResolver caches', () => {
     expect(creates).toBe(1);
   });
 
-  it('getModel single-flights by model name', async () => {
+  it('getModel single-flights by model name and role, and tells the host the role', async () => {
     const logger = makeSilentLogger();
     let llmCalls = 0;
+    const roles: string[] = [];
     const modelClient = makeMockILLM();
     const resolver = new (class extends TurnResourceResolver {
       async resolveTwice() {
-        const [a, b] = await Promise.all([this.getModel('acct/model-a'), this.getModel('acct/model-a')]);
+        const [a, b, other] = await Promise.all([
+          this.getModel({ modelName: 'acct/model-a', role: 'chat' }),
+          this.getModel({ modelName: 'acct/model-a', role: 'chat' }),
+          this.getModel({ modelName: 'acct/model-a', role: 'delegation' }),
+        ]);
         expect(a).toBe(b);
+        expect(other).not.toBe(a);
       }
     })({
-      llm: async () => {
+      llm: async (_name, role) => {
         llmCalls += 1;
+        roles.push(role);
         await new Promise(r => setTimeout(r, 10));
         return { modelClient, defaultModelParams: {}, modelId: undefined, modelSupportsVision: false };
       },
@@ -1836,7 +1843,8 @@ describe('TurnResourceResolver caches', () => {
       logger,
     });
     await resolver.resolveTwice();
-    expect(llmCalls).toBe(1);
+    expect(llmCalls).toBe(2);
+    expect(roles).toEqual(['chat', 'delegation']);
   });
 
   it('resolveSandbox called once per run via SessionHandle.createTurn', async () => {
