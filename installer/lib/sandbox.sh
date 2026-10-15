@@ -1,15 +1,18 @@
 # shellcheck shell=bash
 # The sandbox slots of an instance: preflight, plan lines, and running the slot setup. The setup logic has one
 # owner, packages/trueforge/scripts/sandbox-slots (also behind `pnpm sandbox:slots`); the installer takes a
-# copy of it out of the app image it just built and runs it on the host with Node, because loading the AppArmor
-# profile and mounting disks cannot be done from inside a container. This file decides when to run it and asks
-# before any sudo.
+# copy of it out of the app image it just built and runs it on the host, because loading the AppArmor profile and
+# mounting disks cannot be done from inside a container. It runs on a pinned Node.js the installer downloads (the
+# host needs only Docker and git), or on the host's own Node.js when the owner passes --use-host-node. This file
+# decides when to run it and asks before any sudo.
 
 SLOT_IMAGE=amanuensis-sandbox-slot:local
 SLOT_COUNT=4
 SLOT_DISK_ROOT=/var/lib/aman-slots
 SLOT_DISK_GB=16
 SLOT_MIN_FREE_KB=$((20 * 1024 * 1024))
+SLOT_APPARMOR_FILE=/etc/apparmor.d/aman-sandbox-slot
+SANDBOX_DOCKER_BOOT_CHECKED=0
 SANDBOX_NODE_MAJOR=22
 SANDBOX_NODE_MINOR=14
 SANDBOX_BUNDLE_IN_IMAGE=/app/packages/trueforge/dist/sandbox-slots.js
@@ -46,7 +49,97 @@ sandbox_node_ok() {
 }
 
 sandbox_node_text() {
-  echo "The sandbox setup runs on Node.js $SANDBOX_NODE_MAJOR.$SANDBOX_NODE_MINOR or newer, which this computer does not have. Install Node.js (https://nodejs.org or your package manager) and run this again, or pass --no-sandbox to install without run code."
+  echo "--use-host-node needs Node.js $SANDBOX_NODE_MAJOR.$SANDBOX_NODE_MINOR or newer on this computer, and it has none. Leave the option out and the installer downloads its own copy, or install Node.js (https://nodejs.org)."
+}
+
+# The pinned runtime lives apart from any Node.js the owner has, and only runs the sandbox setup.
+sandbox_runtime_node() { printf '%s/runtime/node/bin/node' "$AMAN_HOME"; }
+
+# linux-x64, linux-arm64, darwin-x64 or darwin-arm64; empty where nodejs.org has no official build.
+sandbox_node_platform() {
+  local os arch
+  case "$(uname -s)" in
+    Linux) os=linux ;;
+    Darwin) os=darwin ;;
+    *) return 0 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64 | amd64) arch=x64 ;;
+    aarch64 | arm64) arch=arm64 ;;
+    *) return 0 ;;
+  esac
+  printf '%s-%s' "$os" "$arch"
+}
+
+sandbox_use_host_node() { [ "$OPT_HOST_NODE" = 1 ] && sandbox_node_ok; }
+
+# The Node.js that runs the setup: the host's when the owner opted in and it is new enough, else the pinned one.
+sandbox_node() {
+  if sandbox_use_host_node; then
+    command -v node
+  else
+    sandbox_runtime_node
+  fi
+}
+
+sandbox_runtime_present() {
+  local node pinned
+  node=$(sandbox_runtime_node)
+  pinned=$(json_get "$PINS_FILE" node_version)
+  [ -x "$node" ] && [ "$("$node" --version 2>/dev/null || true)" = "v$pinned" ]
+}
+
+sandbox_can_download() { command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; }
+
+download_file() {
+  local url=$1 dest=$2
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --proto '=https' --tlsv1.2 -o "$dest" "$url"
+  else
+    wget -q --https-only -O "$dest" "$url"
+  fi
+}
+
+# Downloads the pinned Node.js from nodejs.org and keeps only its binary. The tarball must match the pinned SHA-256
+# for this platform before anything is unpacked.
+sandbox_runtime_install() {
+  local platform version file expected tmp sum member dest
+  platform=$(sandbox_node_platform)
+  [ -n "$platform" ] || die "nodejs.org has no official Node.js build for this computer ($(uname -s) $(uname -m)). Use --use-host-node with your own Node.js $SANDBOX_NODE_MAJOR.$SANDBOX_NODE_MINOR or newer, or pass --no-sandbox."
+  version=$(json_get "$PINS_FILE" node_version)
+  file=node-v$version-$platform.tar.gz
+  expected=$(json_get "$PINS_FILE" "node_sha256_${platform//-/_}")
+  tmp=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/aman-node.XXXXXX")
+  say "Downloading Node.js v$version for $platform from nodejs.org (it only runs the sandbox setup)"
+  if ! download_file "https://nodejs.org/dist/v$version/$file" "$tmp/$file"; then
+    rm -rf "$tmp"
+    die "could not download https://nodejs.org/dist/v$version/$file. Check this computer's network access to nodejs.org (install.sh --print-network lists every host), then run this again."
+  fi
+  sum=$(sha256_stdin <"$tmp/$file")
+  if [ "$sum" != "$expected" ]; then
+    rm -rf "$tmp"
+    die "the downloaded $file does not match the pinned SHA-256 ($expected, got $sum), so it was not used. Run this again; if it keeps failing, the download is being altered on the way."
+  fi
+  member=node-v$version-$platform/bin/node
+  if ! tar -xzf "$tmp/$file" -C "$tmp" "$member"; then
+    rm -rf "$tmp"
+    die "could not unpack $file"
+  fi
+  dest=$(sandbox_runtime_node)
+  ensure_private_dir "$AMAN_HOME/runtime"
+  ensure_private_dir "$AMAN_HOME/runtime/node"
+  ensure_private_dir "$AMAN_HOME/runtime/node/bin"
+  mv -f "$tmp/$member" "$dest.new"
+  chmod 755 "$dest.new"
+  mv -f "$dest.new" "$dest"
+  rm -rf "$tmp"
+  sandbox_runtime_present || die "the downloaded Node.js does not run on this computer; use --use-host-node with your own Node.js $SANDBOX_NODE_MAJOR.$SANDBOX_NODE_MINOR or newer, or pass --no-sandbox."
+}
+
+sandbox_runtime_ensure() {
+  if sandbox_use_host_node; then return 0; fi
+  if [ "$OPT_HOST_NODE" = 1 ]; then die "$(sandbox_node_text)"; fi
+  sandbox_runtime_present || sandbox_runtime_install
 }
 
 # Native Docker on Linux: the slots get disks of their own and may need the AppArmor profile loaded.
@@ -62,8 +155,14 @@ sandbox_native_linux() {
 preflight_sandbox() {
   local cgroup free
   sandbox_needed || return 0
-  if ! sandbox_node_ok; then
-    plan_add blocked "$(sandbox_node_text)"
+  if [ "$OPT_HOST_NODE" = 1 ]; then
+    if ! sandbox_node_ok; then plan_add blocked "$(sandbox_node_text)"; fi
+  elif ! sandbox_runtime_present; then
+    if [ -z "$(sandbox_node_platform)" ]; then
+      plan_add blocked "nodejs.org has no official Node.js build for this computer ($(uname -s) $(uname -m)), which the sandbox setup needs. Pass --use-host-node with your own Node.js $SANDBOX_NODE_MAJOR.$SANDBOX_NODE_MINOR or newer, or --no-sandbox to install without run code."
+    elif ! sandbox_can_download; then
+      plan_add blocked "Downloading the Node.js the sandbox setup runs on needs curl or wget, and this computer has neither. Install curl, or pass --use-host-node with your own Node.js $SANDBOX_NODE_MAJOR.$SANDBOX_NODE_MINOR or newer."
+    fi
   fi
   if docker_available_for_probes; then
     # The slot agent reads the limits of either cgroup version, so v1 is no blocker; it only reports a different line.
@@ -100,6 +199,14 @@ sandbox_slots_running() {
 plan_sandbox() {
   local name pending=0
   sandbox_needed || return 0
+  if sandbox_use_host_node; then
+    plan_add have "Node.js on this computer runs the sandbox setup (--use-host-node)"
+  elif sandbox_runtime_present; then
+    plan_add have "Pinned Node.js v$(json_get "$PINS_FILE" node_version) for the sandbox setup at $(sandbox_runtime_node)"
+  else
+    plan_add todo "Download Node.js v$(json_get "$PINS_FILE" node_version) from nodejs.org, checked against a pinned SHA-256, into $AMAN_HOME/runtime/node (it only runs the sandbox setup; the host needs no Node.js)"
+    dl_add node-runtime
+  fi
   plan_image "$SLOT_IMAGE" "Build the sandbox slot image $SLOT_IMAGE from ops/sandbox-slot (gVisor guest, Ubuntu packages)" slot-image
   for name in $(reg_names); do
     instance_sandbox_wanted "$name" || continue
@@ -115,7 +222,7 @@ plan_sandbox() {
     plan_add todo "Start the $SLOT_COUNT sandbox slots of instance $I_NAME and connect its app (run code, Python, shell, files)"
   fi
   if [ "$pending" = 1 ] && sandbox_native_linux; then
-    plan_add root "Sandbox host setup, each part only if not already in place: load the AppArmor profile aman-sandbox-slot, create $SLOT_COUNT slot disk files of $SLOT_DISK_GB GB under $SLOT_DISK_ROOT (they use real space only as the slots write), add $SLOT_COUNT lines to /etc/fstab and mount them"
+    plan_add root "Sandbox host setup, each part only if not already in place: install the AppArmor profile as $SLOT_APPARMOR_FILE and load it (it loads again at every boot), create $SLOT_COUNT slot disk files of $SLOT_DISK_GB GB under $SLOT_DISK_ROOT (they use real space only as the slots write), add $SLOT_COUNT lines to /etc/fstab and mount them"
   fi
 }
 
@@ -142,7 +249,7 @@ sandbox_install_bundle() {
 
 # Runs the slot setup with the Docker access of this run. Build output goes to a log file, progress lines to the terminal.
 sandbox_run() {
-  as_docker_user env DOCKER_BUILDKIT=1 node "$(sandbox_bundle)" "$@" \
+  as_docker_user env DOCKER_BUILDKIT=1 "$(sandbox_node)" "$(sandbox_bundle)" "$@" \
     --repo-root "$REPO_ROOT" --log-file "$(sandbox_log)" --command-name "$(doctor_shim) doctor sandbox"
 }
 
@@ -150,7 +257,7 @@ sandbox_run() {
 sandbox_images_ensure() {
   sandbox_needed || return 0
   [ "$DRY_RUN" != 1 ] || return 0
-  sandbox_node_ok || die "$(sandbox_node_text)"
+  sandbox_runtime_ensure
   sandbox_install_bundle
   say "Building the sandbox slot image $SLOT_IMAGE (a few minutes the first time; the build log is $(sandbox_log))"
   sandbox_run --build-only --instance "$(sandbox_first_instance)" ||
@@ -171,7 +278,9 @@ sandbox_print_root_steps() {
   local step=$1 repo=$REPO_ROOT
   say "The sandbox needs these steps as root on this computer:"
   if [ "$step" = apparmor ]; then
-    say "  sudo apparmor_parser -r -W $repo/ops/sandbox-slot/apparmor/aman-sandbox-slot"
+    say "  sudo install -m 0644 $repo/ops/sandbox-slot/apparmor/aman-sandbox-slot $SLOT_APPARMOR_FILE"
+    say "  sudo apparmor_parser -r -W $SLOT_APPARMOR_FILE"
+    say "    (a file in /etc/apparmor.d is loaded again by the system at every boot)"
   fi
   say "  sudo sh $repo/ops/sandbox-slot/disks/setup-disks.sh setup $SLOT_DISK_ROOT/<instance> $SLOT_DISK_GB $SLOT_COUNT"
   say "    (creates $SLOT_COUNT sparse disk files, adds $SLOT_COUNT lines to /etc/fstab, mounts them; each only if missing)"
@@ -182,7 +291,7 @@ sandbox_print_root_steps() {
 # the running slots (an upgrade).
 sandbox_ensure() {
   local name=$1 refresh=${2:-} out step='' fix_args=()
-  sandbox_node_ok || die "$(sandbox_node_text)"
+  sandbox_runtime_ensure
   [ -f "$(sandbox_bundle)" ] || sandbox_install_bundle
   out=$(sandbox_run --check --json --instance "$name" 2>/dev/null || true)
   if printf '%s' "$out" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
@@ -204,6 +313,24 @@ sandbox_ensure() {
   say "Starting the $SLOT_COUNT sandbox slots of instance $name"
   sandbox_run --instance "$name" ${fix_args[@]+"${fix_args[@]}"} ||
     die "the sandbox slots of instance $name did not come up. The fix: $(sandbox_repair_command)   (build log: $(sandbox_log))"
+  sandbox_docker_boot_ensure
+}
+
+# The slots restart with Docker (restart: unless-stopped), so Docker itself has to start at boot.
+sandbox_docker_boot_ensure() {
+  [ "$SANDBOX_DOCKER_BOOT_CHECKED" = 0 ] || return 0
+  SANDBOX_DOCKER_BOOT_CHECKED=1
+  sandbox_native_linux || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+  systemctl cat docker.service >/dev/null 2>&1 || return 0
+  if systemctl is-enabled --quiet docker 2>/dev/null; then return 0; fi
+  say "Docker does not start at boot here, so the sandbox would stay down after a restart. This needs root:"
+  say "  sudo systemctl enable docker"
+  if consent_root "Run it now?" "$OPT_SANDBOX_ROOT"; then
+    run_root systemctl enable docker || warn "could not enable Docker at boot; run: sudo systemctl enable docker"
+  else
+    warn "Docker was left as it was; after a restart the sandbox stays down until you run: sudo systemctl enable docker"
+  fi
 }
 
 # After the instance is up: every slot's attestation, then a real call through the app's own slot driver.
@@ -226,8 +353,8 @@ sandbox_finish() {
 # Stops (and with --purge-data deletes) the slots of an instance that is being removed.
 sandbox_down() {
   local name=$1 purge=${2:-0} args=(--down)
-  if [ ! -f "$(sandbox_bundle)" ] || ! sandbox_node_ok; then
-    warn "could not stop the sandbox slots of $name (no sandbox setup or no Node.js here); stop them with: docker compose -p $name-slots down"
+  if [ ! -f "$(sandbox_bundle)" ] || [ ! -x "$(sandbox_node)" ]; then
+    warn "could not stop the sandbox slots of $name (no sandbox setup or Node.js runtime here); stop them with: docker compose -p $name-slots down"
     return 0
   fi
   if [ "$purge" = 1 ]; then args+=(--purge); fi

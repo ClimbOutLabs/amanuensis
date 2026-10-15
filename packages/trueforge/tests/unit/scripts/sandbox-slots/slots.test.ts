@@ -180,7 +180,7 @@ describe('runSandboxSlots', () => {
       expect(calls.some(call => joined(call).includes('up -d'))).toBe(false);
     });
 
-    test('--fix loads the profile with sudo and continues once the probe passes', async () => {
+    test('--fix installs the profile in /etc/apparmor.d so it loads at boot, loads it, and continues once the probe passes', async () => {
       let loaded = false;
       const { result, calls } = await run(call => {
         if (call.command === 'sudo') {
@@ -193,8 +193,48 @@ describe('runSandboxSlots', () => {
         return appArmorHost(call);
       }, true);
       expect(result.ok).toBe(true);
-      const sudo = calls.find(call => call.command === 'sudo');
-      expect(sudo?.args).toEqual(['apparmor_parser', '-r', '-W', '/repo/ops/sandbox-slot/apparmor/aman-sandbox-slot']);
+      expect(calls.filter(call => call.command === 'sudo').map(call => call.args)).toEqual([
+        [
+          'install',
+          '-m',
+          '0644',
+          '/repo/ops/sandbox-slot/apparmor/aman-sandbox-slot',
+          '/etc/apparmor.d/aman-sandbox-slot',
+        ],
+        ['apparmor_parser', '-r', '-W', '/etc/apparmor.d/aman-sandbox-slot'],
+      ]);
+    });
+
+    test('as root the profile is installed and loaded without sudo', async () => {
+      let loaded = false;
+      const { result, calls } = await run(
+        call => {
+          if (call.command === 'apparmor_parser') {
+            loaded = true;
+            return undefined;
+          }
+          if (joined(call).includes('apparmor=aman-sandbox-slot')) {
+            return loaded ? undefined : { exitCode: 125 };
+          }
+          return appArmorHost(call);
+        },
+        true,
+        { isRoot: true },
+      );
+      expect(result.ok).toBe(true);
+      expect(calls.some(call => call.command === 'sudo')).toBe(false);
+      expect(calls.find(call => call.command === 'install')?.args).toContain('/etc/apparmor.d/aman-sandbox-slot');
+    });
+
+    test('a profile that cannot be copied into place is a failure that names the fix', async () => {
+      const { result, calls } = await run(call => {
+        if (call.command === 'sudo') {
+          return { exitCode: 1, stderr: 'permission denied' };
+        }
+        return joined(call).includes('apparmor=aman-sandbox-slot') ? { exitCode: 125 } : appArmorHost(call);
+      }, true);
+      expect(result).toMatchObject({ ok: false, step: 'apparmor' });
+      expect(calls.some(call => call.args[0] === 'apparmor_parser')).toBe(false);
     });
 
     test('a profile that still does not load after sudo is a failure', async () => {

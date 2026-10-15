@@ -45,6 +45,8 @@ const SLOTS_COMPOSE_FILE = 'docker-compose.slots.yml';
 const DISKS_COMPOSE_FILE = 'docker-compose.slots-disks.yml';
 const DISK_SCRIPT = join('ops', 'sandbox-slot', 'disks', 'setup-disks.sh');
 const PROFILE_PATH = join('ops', 'sandbox-slot', 'apparmor', APPARMOR_PROFILE);
+/** Where the system loads profiles from at boot; a profile loaded only with apparmor_parser is gone after a restart. */
+export const APPARMOR_INSTALLED_PATH = join('/etc', 'apparmor.d', APPARMOR_PROFILE);
 const UP_TIMEOUT_SECONDS = 300;
 
 /** What a run does: `up` builds and starts, `build` only builds the image, `check` only reads. */
@@ -515,20 +517,33 @@ class Slots {
         `Run ${this.options.command} --fix. It asks for your password once to load the profile.`,
       );
     }
-    const loaded = await this.run({
-      command: 'sudo',
-      args: ['apparmor_parser', '-r', '-W', profile],
-      interactive: true,
+    const asRoot = (args: string[]): { command: string; args: string[] } =>
+      this.options.isRoot ? { command: args[0] ?? '', args: args.slice(1) } : { command: 'sudo', args };
+    const installed = await this.run({
+      ...asRoot(['install', '-m', '0644', profile, APPARMOR_INSTALLED_PATH]),
+      interactive: !this.options.isRoot,
       echo: true,
     });
+    const loaded =
+      installed.exitCode === 0
+        ? await this.run({
+            ...asRoot(['apparmor_parser', '-r', '-W', APPARMOR_INSTALLED_PATH]),
+            interactive: !this.options.isRoot,
+            echo: true,
+          })
+        : installed;
     if (loaded.exitCode !== 0 || !(await this.profileLoaded())) {
       throw new StepFailure(
         'apparmor',
-        `Loading the AppArmor profile failed: ${tail(loaded.stderr)}`,
+        `Installing and loading the AppArmor profile failed: ${tail(loaded.stderr)}`,
         `Make sure apparmor_parser is installed (sudo apt install apparmor) and that your account may use sudo, then run ${this.options.command} --fix again.`,
       );
     }
-    this.record({ step: 'apparmor', status: 'ok', message: `Loaded the AppArmor profile ${APPARMOR_PROFILE}` });
+    this.record({
+      step: 'apparmor',
+      status: 'ok',
+      message: `Installed the AppArmor profile ${APPARMOR_PROFILE} in /etc/apparmor.d and loaded it (it loads again at boot)`,
+    });
   }
 
   private async start(): Promise<void> {

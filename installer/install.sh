@@ -48,6 +48,7 @@ PASSWORD_FROM_STDIN=0
 OPT_INSTALL_DOCKER=0
 OPT_ADD_DOCKER_GROUP=0
 OPT_NO_SANDBOX=0
+OPT_HOST_NODE=0
 OPT_SANDBOX_ROOT=0
 PRINT_ROOT_STEPS=0
 PRINT_NETWORK=0
@@ -87,6 +88,7 @@ Options
   --add-docker-group    let the installer add your user to the docker group (needs sudo)
   --sandbox-root        let the installer run the printed root steps for the sandbox (AppArmor profile, slot disks) without asking
   --no-sandbox          install without the gVisor sandbox (run code stays off)
+  --use-host-node       run the sandbox setup on this computer's Node.js 22.14 or newer instead of downloading a pinned copy
   --dry-run             stop after printing the plan
   --name NAME           first instance name (default main)
   --email ADDRESS       owner email
@@ -129,6 +131,7 @@ parse_args() {
       --add-docker-group) OPT_ADD_DOCKER_GROUP=1 ;;
       --sandbox-root) OPT_SANDBOX_ROOT=1 ;;
       --no-sandbox) OPT_NO_SANDBOX=1 ;;
+      --use-host-node) OPT_HOST_NODE=1 ;;
       --print-root-steps) PRINT_ROOT_STEPS=1 ;;
       --print-network) PRINT_NETWORK=1 ;;
       --print-proxy-requirements) PRINT_PROXY=1 ;;

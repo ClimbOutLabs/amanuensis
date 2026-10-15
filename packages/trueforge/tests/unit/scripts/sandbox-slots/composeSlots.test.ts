@@ -22,7 +22,7 @@ const ServiceSchema = z.object({
   cgroup: z.literal('private'),
   ipc: z.literal('private'),
   volumes: z.array(z.string()),
-  restart: z.string(),
+  restart: z.literal('unless-stopped'),
   healthcheck: z.object({ test: z.array(z.string()) }),
   privileged: z.never().optional(),
   cap_add: z.never().optional(),
