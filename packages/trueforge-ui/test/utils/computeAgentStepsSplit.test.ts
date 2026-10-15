@@ -10,6 +10,10 @@ function tool(): AgentStepPart {
   return { type: 'tool-call' };
 }
 
+function mapsTool(): AgentStepPart {
+  return { type: 'tool-call', toolName: 'render_route' };
+}
+
 function reasoning(): AgentStepPart {
   return { type: 'reasoning', text: 'thinking' };
 }
@@ -106,5 +110,17 @@ describe('computeAgentStepsSplit', () => {
     const longTrailing = computeAgentStepsSplit([text(LONG_TEXT), tool(), text('y'.repeat(500))], true);
     expect(longTrailing.hasFinal).toBe(true);
     expect(longTrailing.runs).toEqual([run(1, 2, { tools: 1 })]);
+  });
+
+  it('never folds a maps call, and splits the steps around it into separate runs', () => {
+    const parts = [tool(), mapsTool(), reasoning(), tool(), text('x'.repeat(500))];
+    const result = computeAgentStepsSplit(parts, false);
+    expect(result.runs).toEqual([run(0, 1, { tools: 1 }), run(2, 4, { tools: 1, thinking: 1 })]);
+  });
+
+  it('streams text after a lone maps call directly instead of holding it back', () => {
+    const result = computeAgentStepsSplit([mapsTool(), text('Here is the route.')], true);
+    expect(result.runs).toEqual([]);
+    expect(result.hasFinal).toBe(true);
   });
 });

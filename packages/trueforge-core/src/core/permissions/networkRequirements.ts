@@ -37,6 +37,9 @@ const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
   replace_task_checklist: false,
   // Networked builtins.
   web_search: true,
+  // Embedded maps: geocoding, routing, and tiles all leave the machine.
+  render_map: true,
+  render_route: true,
 };
 
 /**

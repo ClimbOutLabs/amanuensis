@@ -31,6 +31,7 @@ import {
   SpaceFormatSchema,
   SpaceSchema,
 } from '../schemas/space';
+import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 
 export const SPACE_SERVER_ID = 'space';
@@ -1272,6 +1273,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       extraCapabilities: [
         ...(resolved.extraCapabilities ?? []),
         spaceCapability({ ...this.#space, tracing: input.tracing }),
+        mapsCapability({ tracing: input.tracing, logger: this.#space.logger }),
       ],
     };
   }

@@ -534,10 +534,10 @@ async function verifySentinelPreDispatch(input: {
   });
   // Rebuilt from the live tool set, not from the card: a connector that now points elsewhere
   // no longer matches what the user approved.
-  const connector =
-    info.type === 'mcp'
-      ? input.toolInfo.toolSet.resolveConnector?.({ name: input.toolInfo.originalToolName, arguments: wireArguments })
-      : undefined;
+  const connector = input.toolInfo.toolSet.resolveConnector?.({
+    name: input.toolInfo.originalToolName,
+    arguments: wireArguments,
+  });
   return await verifyPreDispatch({
     call: {
       connector,

@@ -1,8 +1,10 @@
 import type { PartState } from '@assistant-ui/core/react';
+import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 
 export type AgentStepPart = {
   type: PartState['type'];
   text?: string;
+  toolName?: string;
 };
 
 /** A contiguous run of parts folded into agent internals; `end` is exclusive. */
@@ -29,6 +31,11 @@ function isShortNarration(text: string): boolean {
   return trimmed.length < SHORT_NARRATION_MAX_CHARS && !trimmed.includes('\n');
 }
 
+/** A map is the answer the user asked to see, so its call never folds into agent internals. */
+function isMapsCall(part: AgentStepPart): boolean {
+  return part.type === 'tool-call' && part.toolName !== undefined && isMapsToolName(part.toolName);
+}
+
 function collectRuns({ parts, folded }: { parts: readonly AgentStepPart[]; folded: readonly boolean[] }) {
   const runs: AgentStepsRun[] = [];
   let current: AgentStepsRun | undefined;
@@ -49,7 +56,7 @@ function collectRuns({ parts, folded }: { parts: readonly AgentStepPart[]; folde
 }
 
 /**
- * Decides which parts fold into agent internals. Tool calls, reasoning and short narration fold;
+ * Decides which parts fold into agent internals. Tool calls (except maps), reasoning and short narration fold;
  * substantive text before a tool call stays in the main flow. The trailing text run is the final
  * answer, held back while streaming until it is long enough to not flicker out of the steps.
  */
@@ -63,13 +70,14 @@ export function computeAgentStepsSplit(parts: readonly AgentStepPart[], isRunnin
   // Pure-text responses are always the final answer and must stream directly, not be held back.
   const hasAgentStepsBeforeTrailing = parts
     .slice(0, trailingStart)
-    .some(part => part.type === 'tool-call' || part.type === 'reasoning');
+    .some(part => (part.type === 'tool-call' && !isMapsCall(part)) || part.type === 'reasoning');
 
   const finalConfirmed =
     trailingChars > 0 && (!isRunning || trailingChars >= FINAL_HOLDBACK_CHARS || !hasAgentStepsBeforeTrailing);
 
   const folded = parts.map((part, index) => {
     if (index >= trailingStart) return !finalConfirmed;
+    if (isMapsCall(part)) return false;
     return part.type !== 'text' || isShortNarration(part.text ?? '');
   });
 
