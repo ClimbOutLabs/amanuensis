@@ -241,9 +241,9 @@ describe('matchPersonaInvocation switch grammar', () => {
         leadInOnly: true,
       }),
     ).toBeUndefined();
-    expect(
-      matchPersonaInvocation({ text: 'switch to Zara', personas: [ZARA], leadInOnly: true })?.persona.id,
-    ).toBe('p-zara');
+    expect(matchPersonaInvocation({ text: 'switch to Zara', personas: [ZARA], leadInOnly: true })?.persona.id).toBe(
+      'p-zara',
+    );
     expect(
       matchPersonaInvocation({ text: 'please switch back to Mannie', personas: [mannie], leadInOnly: true })?.persona
         .id,

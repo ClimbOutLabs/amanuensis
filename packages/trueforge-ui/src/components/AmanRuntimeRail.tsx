@@ -227,11 +227,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
 
           <div className="aman-runtime-rail__avatar-card">
             {avatarMotion ? (
-              <AmanAvatarMotion
-                activity={activity}
-                sources={avatarMotion}
-                className="aman-runtime-rail__avatar"
-              />
+              <AmanAvatarMotion activity={activity} sources={avatarMotion} className="aman-runtime-rail__avatar" />
             ) : avatarSrc ? (
               <img src={avatarSrc} alt="Amanuensis avatar" className="aman-runtime-rail__avatar" />
             ) : (

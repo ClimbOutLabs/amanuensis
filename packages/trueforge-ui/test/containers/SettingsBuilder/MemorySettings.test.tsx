@@ -8,9 +8,8 @@ import { ServerProvider, useOptionalRefreshServerCapabilities } from '@/server/S
 import type { AgentBuilderCapabilitiesResponse, AgentUIServer } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
-/** Memory-defaults fields per the generated SDK type (still the pre-regen shape). The page only
- * reads `backend` from it now; the tuning fields below are vestigial until the SDK is regenerated
- * with the new `markdown_dir` field (see the changeset). */
+/** Memory-defaults fixture per the generated SDK type. The page only reads `backend` and
+ * `markdownDir` from it; the tuning fields exist to satisfy the type. */
 const MARKDOWN_DEFAULTS = {
   backend: 'markdown',
   recallTimeoutMs: 2500,
@@ -21,18 +20,15 @@ const MARKDOWN_DEFAULTS = {
   curatedEnabled: true,
   curatedMaxModels: 3,
   curatedMaxTokens: 512,
+  prerecallGateEnabled: false,
   reflectEnabled: true,
   reflectBudget: 'low',
   reflectMaxTokens: 512,
   reflectTimeoutMs: 8000,
 } satisfies TrueForgeApi.MemoryDefaultsCapability;
 
-/**
- * The storage directory the new server schema reports. The generated SDK does not know this
- * field yet (it lands in the SDK type on the next `pnpm sdk:generate`); the intersection keeps
- * the fixture assignable to the capability param without a cast.
- */
-const MEMORY_DEFAULTS_WITH_DIR: TrueForgeApi.MemoryDefaultsCapability & { markdownDir: string } = {
+/** The storage directory the server reports for the markdown backend. */
+const MEMORY_DEFAULTS_WITH_DIR: TrueForgeApi.MemoryDefaultsCapability = {
   ...MARKDOWN_DEFAULTS,
   markdownDir: '/srv/aman/data/memory',
 };
@@ -68,9 +64,7 @@ function renderMemory(serverOverrides: Partial<AgentUIServer> = {}) {
 describe('MemorySettings (backend honesty)', () => {
   it('says it is checking while capabilities are unsettled — never claiming on', async () => {
     // A capabilities promise that never resolves: the page must not name a backend.
-    const getCapabilities = vi.fn(
-      (): Promise<AgentBuilderCapabilitiesResponse> => new Promise(() => {}),
-    );
+    const getCapabilities = vi.fn((): Promise<AgentBuilderCapabilitiesResponse> => new Promise(() => {}));
     renderMemory({ getCapabilities });
 
     expect(await screen.findByText('Checking memory status…')).toBeInTheDocument();
@@ -153,7 +147,9 @@ describe('MemorySettings (backend honesty)', () => {
     expect(await screen.findByText('Memory is on')).toBeInTheDocument();
     expect(screen.getByText('Hindsight (experimental)')).toBeInTheDocument();
     expect(screen.getByText(/Markdown file memory.*does not apply here/)).toBeInTheDocument();
-    expect(screen.getByText(/runs the experimental Hindsight memory backend instead of Markdown files/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/runs the experimental Hindsight memory backend instead of Markdown files/),
+    ).toBeInTheDocument();
     expect(screen.queryByText('Markdown (local files)')).not.toBeInTheDocument();
     expect(screen.queryByText('How memory works')).not.toBeInTheDocument();
     expect(screen.queryByText(/Memories live in/)).not.toBeInTheDocument();

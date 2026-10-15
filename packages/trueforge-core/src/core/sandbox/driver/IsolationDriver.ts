@@ -16,18 +16,42 @@ export type RunCodeLanguage = 'python' | 'node';
 export const OUTPUT_EXCEEDED_MARKER = 'output_exceeded:';
 
 /**
+ * Prefix a driver sets on DriverRunResult.internalError when a created
+ * container fails post-create isolation verification. The wrapper maps it
+ * onto `isolation_refused` and surfaces the spec's exact refusal message.
+ * Mirrors the OUTPUT_EXCEEDED_MARKER pattern.
+ */
+export const ISOLATION_REFUSED_MARKER = 'isolation_refused:';
+
+/**
  * Reserved ingress prefix for wrapper-staged files (the program itself).
  * Harvesting skips these; the driver executes the program from this path.
  */
 export const RUN_CODE_RESERVED_PREFIX = '__runcode_';
 
+/** File name of the staged program inside ingress. */
+export function runCodeProgramName(language: RunCodeLanguage): string {
+  return `${RUN_CODE_RESERVED_PREFIX}main.${language === 'python' ? 'py' : 'mjs'}`;
+}
+
 /** Container-side path of the staged program (ingress mounts read-only at /ingress). */
 export function runCodeProgramPath(language: RunCodeLanguage): string {
-  return `/ingress/${RUN_CODE_RESERVED_PREFIX}main.${language === 'python' ? 'py' : 'mjs'}`;
+  return `/ingress/${runCodeProgramName(language)}`;
+}
+
+/** Uid:gid the container runs as, plus whether staged run dirs must be handed to it. */
+export interface SandboxIdentity {
+  uid: number;
+  gid: number;
+  /** True when the server cannot run as `uid`, so it must chown the run dirs to it. */
+  chownRunDirs: boolean;
 }
 
 /** How a driver run ended, before the wrapper maps it onto the error taxonomy. */
 export type DriverTermination = 'completed' | 'timeout' | 'oom' | 'killed' | 'internal';
+
+/** Finer cause behind a failure whose `error_code` is shared with other causes. */
+export type DriverReadinessReason = 'signature_unverified' | 'isolation_refused';
 
 export type DriverReadiness =
   | { ready: true }
@@ -38,9 +62,16 @@ export type DriverReadiness =
        * explicit bounded provisioning step. Every other code is terminal
        * for the call.
        */
-      error_code: 'daemon_unavailable' | 'image_unavailable' | 'image_missing' | 'kvm_unavailable' | 'unsupported_platform';
+      error_code:
+        | 'daemon_unavailable'
+        | 'docker_unavailable'
+        | 'image_unavailable'
+        | 'image_missing'
+        | 'kvm_unavailable'
+        | 'unsupported_platform';
       /** Human-actionable remediation text, shown to the user. */
       error: string;
+      reason?: DriverReadinessReason | undefined;
     };
 
 export interface DriverRunParams {
@@ -64,10 +95,13 @@ export interface DriverRunParams {
   /** Label/tracking for reaping. */
   runId: string;
   /**
-   * Curated environment only (PATH, LANG, HOME=/scratch, PIP_NO_INDEX=1,
-   * npm_config_registry dead-end). The host process env is never passed through.
+   * Curated environment only (PATH, LANG, HOME=/scratch, USER/LOGNAME,
+   * PIP_NO_INDEX=1, npm_config_registry dead-end). The host process env is never
+   * passed through.
    */
   env: Readonly<Record<string, string>>;
+  /** Container user; the wrapper stages the run dirs so this uid can use them. */
+  sandboxIdentity: SandboxIdentity;
   /** Cancels the run: the driver must kill the container/VM on abort. */
   signal: AbortSignal | undefined;
   /** FC pull-before-kill best-effort grace in ms (Docker ignores it). */
@@ -97,7 +131,11 @@ export interface DriverRunResult {
 
 export interface IsolationDriver {
   readonly kind: 'docker' | 'firecracker';
-  /** Idempotent readiness: image present, daemon/KVM reachable. Fast; no side effects. */
+  /**
+   * Idempotent readiness: image present and verified, daemon/KVM reachable. Never pulls the
+   * image, but it is neither quick nor read-only: the Docker driver also creates and removes
+   * probe containers and stages, runs and deletes a canary run.
+   */
   ensureReady(signal?: AbortSignal): Promise<DriverReadiness>;
   /**
    * Explicit provisioning step: pull/prepare the image inside
@@ -111,6 +149,12 @@ export interface IsolationDriver {
   }): Promise<void>;
   /** One execution. The driver owns ALL isolation; the wrapper owns contract + bounds. */
   run(params: DriverRunParams): Promise<DriverRunResult>;
+  /**
+   * True only when no container or VM for this run exists any more. False when
+   * one is still there or the answer could not be confirmed; the wrapper
+   * touches a run tree's permissions only after a true.
+   */
+  isRunGone(runId: string): Promise<boolean>;
   /**
    * Reaper support: kill labeled containers/VMs older than the abandon
    * deadline. Called on the 5-minute cadence and at startup (crash recovery).

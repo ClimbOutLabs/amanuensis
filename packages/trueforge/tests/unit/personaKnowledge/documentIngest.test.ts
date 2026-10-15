@@ -326,9 +326,7 @@ describe('extractTextFromUpload', () => {
   });
 
   it('rejects empty and unsupported uploads with plain-English errors', async () => {
-    await expect(extractTextFromUpload({ filename: 'empty.txt', bytes: new Uint8Array(0) })).rejects.toThrow(
-      /empty/,
-    );
+    await expect(extractTextFromUpload({ filename: 'empty.txt', bytes: new Uint8Array(0) })).rejects.toThrow(/empty/);
     await expect(
       extractTextFromUpload({ filename: 'photo.png', bytes: textBytes('not an image really') }),
     ).rejects.toThrow(/PDF, Word/);
@@ -357,9 +355,9 @@ describe('fetchUrlSnapshot SSRF guards', () => {
     const echoResolver = async (hostname: string) => [hostname];
     // CGNAT, IETF protocol assignments, benchmarking, reserved, docs ranges…
     for (const host of ['100.64.0.1', '192.0.0.1', '198.18.0.1', '240.0.0.1', '203.0.113.7']) {
-      await expect(
-        fetchUrlSnapshot(`http://${host}/`, { fetchImpl, resolveAddresses: echoResolver }),
-      ).rejects.toThrow(/private or internal/);
+      await expect(fetchUrlSnapshot(`http://${host}/`, { fetchImpl, resolveAddresses: echoResolver })).rejects.toThrow(
+        /private or internal/,
+      );
     }
     // …and their IPv6 counterparts: NAT64 prefix, 6to4, discard, mapped v4.
     for (const host of ['64:ff9b::808:808', '2002::1', '::ffff:93.184.216.34', 'fe80::1']) {
@@ -431,7 +429,7 @@ describe('fetchUrlSnapshot SSRF guards', () => {
       res.writeHead(200, { 'content-type': 'text/plain' });
       res.end('pinned-ok');
     });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as AddressInfo).port;
     const dispatcher = pinnedDispatcher('127.0.0.1');
     try {
@@ -444,11 +442,11 @@ describe('fetchUrlSnapshot SSRF guards', () => {
             method: 'GET',
           },
           {
-            onConnect: (abort) => {
+            onConnect: abort => {
               void abort;
             },
             onHeaders: () => true,
-            onData: (chunk) => {
+            onData: chunk => {
               chunks.push(Buffer.from(chunk));
               return true;
             },
@@ -460,7 +458,7 @@ describe('fetchUrlSnapshot SSRF guards', () => {
       expect(body).toBe('pinned-ok');
     } finally {
       await dispatcher.close().catch(() => undefined);
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await new Promise<void>(resolve => server.close(() => resolve()));
     }
   });
 });

@@ -13,6 +13,8 @@ import type {
   AgentTracing,
   CallToolResponse,
 } from '@truefoundry/trueforge-core/core';
+import { Writable } from 'stream';
+import { createLogger, format, transports, type Logger } from 'winston';
 import {
   SpaceAggregateRevisionConflictError,
   SpaceNotFoundError,
@@ -37,8 +39,6 @@ import {
   spaceCapability,
   type SpaceToolStore,
 } from '../../../src/runtime/spaceCapability';
-import { Writable } from 'stream';
-import { createLogger, format, transports, type Logger } from 'winston';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),
@@ -249,10 +249,7 @@ let sessionCounter = 0;
  * with a unique session id — mirroring production, where the breaker map is keyed per
  * session and survives turn boundaries.
  */
-function makeHarness(
-  logger?: Logger,
-  overrides?: { tenantId?: string; userRef?: string; sessionId?: string },
-) {
+function makeHarness(logger?: Logger, overrides?: { tenantId?: string; userRef?: string; sessionId?: string }) {
   const store = new InMemorySpaceStore();
   sessionCounter += 1;
   const sessionId = overrides?.sessionId ?? `reliability-session-${String(sessionCounter)}`;
@@ -267,8 +264,7 @@ function makeHarness(
   if (toolSet === undefined) {
     throw new Error('expected space tool set');
   }
-  const callTool = (name: string, args: Record<string, unknown>) =>
-    toolSet.callTool({ name, arguments: args });
+  const callTool = (name: string, args: Record<string, unknown>) => toolSet.callTool({ name, arguments: args });
   return { store, callTool, sessionId };
 }
 
@@ -526,8 +522,7 @@ describe('Phase 1: consecutive-failure circuit breaker', () => {
         }
       })
       .filter(
-        (entry): entry is Record<string, unknown> =>
-          entry !== null && entry['message'] === 'space delta edit failed',
+        (entry): entry is Record<string, unknown> => entry !== null && entry['message'] === 'space delta edit failed',
       );
     // Visible at failure #1, not discovered at #8.
     expect(entries.length).toBe(3);
@@ -570,9 +565,7 @@ describe('Phase 2: semantic block anchors', () => {
     const parsed = resultJson(updated);
     // The newline immediately after the marker is layout, not content: it is preserved, so
     // the stored block content (and its echoed length) is the separator plus new_content.
-    expect(parsed.block_results).toEqual([
-      { anchor: 'stats', new_length: newStats.length + 1, deleted: false },
-    ]);
+    expect(parsed.block_results).toEqual([{ anchor: 'stats', new_length: newStats.length + 1, deleted: false }]);
 
     const body = await readBody(callTool, spaceId);
     expect(body).toContain('MOVED to Sep 23');
@@ -623,9 +616,7 @@ describe('Phase 2: semantic block anchors', () => {
 
     // list_blocks reports the duplication honestly.
     const listed = await callTool(LIST_BLOCKS_TOOL_NAME, { space_id: spaceId });
-    expect(expectBlocks(listed)).toEqual([
-      { anchor: 'dup', preview: '<p>first</p>', occurrences: 2 },
-    ]);
+    expect(expectBlocks(listed)).toEqual([{ anchor: 'dup', preview: '<p>first</p>', occurrences: 2 }]);
   });
 
   it('an anchorless space gets the stable auto-body block', async () => {
@@ -663,9 +654,7 @@ describe('Phase 2: semantic block anchors', () => {
       block_edits: [{ anchor: 'notes', new_content: '' }],
     });
     expect(isErrorResponse(updated)).toBe(false);
-    expect(resultJson(updated).block_results).toEqual([
-      { anchor: 'notes', new_length: 0, deleted: true },
-    ]);
+    expect(resultJson(updated).block_results).toEqual([{ anchor: 'notes', new_length: 0, deleted: true }]);
 
     const body = await readBody(callTool, spaceId);
     expect(body).not.toContain('@block:notes');
@@ -849,14 +838,9 @@ describe('fix-pass: reliability hardening', () => {
 
   it('markers inside <pre> elements are documentation, not addressable blocks', async () => {
     const { callTool } = makeHarness();
-    const body = [
-      '<pre>',
-      '<!-- @block:fake -->',
-      'sample code',
-      '</pre>',
-      '<!-- @block:real -->',
-      '<p>hi</p>',
-    ].join('\n');
+    const body = ['<pre>', '<!-- @block:fake -->', 'sample code', '</pre>', '<!-- @block:real -->', '<p>hi</p>'].join(
+      '\n',
+    );
     const created = await callTool(CREATE_SPACE_TOOL_NAME, { ...BOARD_META, body });
     const spaceId = expectSpaceId(created);
 
@@ -1059,7 +1043,8 @@ describe('fix-pass: reliability hardening', () => {
 
   it('the duplicate-anchor error no longer lists the duplicated anchor as unique', async () => {
     const { callTool } = makeHarness();
-    const body = '<!-- @block:alpha -->\n<p>one</p>\n<!-- @block:beta -->\n<p>two</p>\n<!-- @block:beta -->\n<p>three</p>';
+    const body =
+      '<!-- @block:alpha -->\n<p>one</p>\n<!-- @block:beta -->\n<p>two</p>\n<!-- @block:beta -->\n<p>three</p>';
     const created = await callTool(CREATE_SPACE_TOOL_NAME, { ...BOARD_META, body });
     const spaceId = expectSpaceId(created);
 

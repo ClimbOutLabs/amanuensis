@@ -27,9 +27,17 @@ function recordColumns(eb: ExpressionBuilder<Database, 'mcp_server'>) {
     'tenant_id' as const,
     'name' as const,
     jsonText<McpServerManifest>(eb.ref('manifest')).as('manifest'),
+    'first_party' as const,
     'created_at' as const,
     'updated_at' as const,
   ];
+}
+
+/** A selected row, with SQLite's 0/1 integer standing in for the boolean column. */
+type McpServerRow = Omit<McpServerRecord, 'first_party'> & { first_party: number };
+
+function toRecord(row: McpServerRow): McpServerRecord {
+  return { ...row, first_party: row.first_party === 1 };
 }
 
 export class SqliteMcpServerStore implements IMcpServerStore<Transaction<Database>> {
@@ -48,17 +56,18 @@ export class SqliteMcpServerStore implements IMcpServerStore<Transaction<Databas
     if (input.names !== undefined) {
       query = query.where('name', 'in', [...input.names]);
     }
-    return await query.orderBy('name').execute();
+    return (await query.orderBy('name').execute()).map(toRecord);
   }
 
   async getServer(input: GetMcpServerInput, transaction?: Transaction<Database>): Promise<McpServerRecord | undefined> {
     const db = transaction ?? this.#db;
-    return await db
+    const row = await db
       .selectFrom('mcp_server')
       .select(recordColumns)
       .where('tenant_id', '=', input.tenant_id)
       .where('name', '=', input.name)
       .executeTakeFirst();
+    return row === undefined ? undefined : toRecord(row);
   }
 
   /**
@@ -69,32 +78,36 @@ export class SqliteMcpServerStore implements IMcpServerStore<Transaction<Databas
     input: GetMcpServerInput,
     transaction: Transaction<Database>,
   ): Promise<McpServerRecord | undefined> {
-    return await transaction
+    const row = await transaction
       .selectFrom('mcp_server')
       .select(recordColumns)
       .where('tenant_id', '=', input.tenant_id)
       .where('name', '=', input.name)
       .executeTakeFirst();
+    return row === undefined ? undefined : toRecord(row);
   }
 
   async createServer(input: CreateMcpServerInput, transaction?: Transaction<Database>): Promise<McpServerRecord> {
     const db = transaction ?? this.#db;
     const timestamp = nowIso();
     try {
-      return await db
-        .insertInto('mcp_server')
-        .values({
-          id: newId(),
-          tenant_id: input.tenant_id,
-          name: input.name,
-          manifest: jsonbBind(input.manifest),
-          oauth_server: null,
-          oauth_client: null,
-          created_at: timestamp,
-          updated_at: timestamp,
-        })
-        .returning(recordColumns)
-        .executeTakeFirstOrThrow();
+      return toRecord(
+        await db
+          .insertInto('mcp_server')
+          .values({
+            id: newId(),
+            tenant_id: input.tenant_id,
+            name: input.name,
+            manifest: jsonbBind(input.manifest),
+            oauth_server: null,
+            oauth_client: null,
+            first_party: input.first_party ? 1 : 0,
+            created_at: timestamp,
+            updated_at: timestamp,
+          })
+          .returning(recordColumns)
+          .executeTakeFirstOrThrow(),
+      );
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new McpServerNameConflictError({ tenant_id: input.tenant_id, name: input.name }, { cause: error });
@@ -106,26 +119,31 @@ export class SqliteMcpServerStore implements IMcpServerStore<Transaction<Databas
   async upsertServer(input: UpsertMcpServerInput, transaction?: Transaction<Database>): Promise<McpServerRecord> {
     const db = transaction ?? this.#db;
     const timestamp = nowIso();
-    return await db
-      .insertInto('mcp_server')
-      .values({
-        id: newId(),
-        tenant_id: input.tenant_id,
-        name: input.name,
-        manifest: jsonbBind(input.manifest),
-        oauth_server: null,
-        oauth_client: null,
-        created_at: timestamp,
-        updated_at: timestamp,
-      })
-      .onConflict(oc =>
-        oc.columns(['tenant_id', 'name']).doUpdateSet({
+    const firstParty = input.first_party ? 1 : 0;
+    return toRecord(
+      await db
+        .insertInto('mcp_server')
+        .values({
+          id: newId(),
+          tenant_id: input.tenant_id,
+          name: input.name,
           manifest: jsonbBind(input.manifest),
+          oauth_server: null,
+          oauth_client: null,
+          first_party: firstParty,
+          created_at: timestamp,
           updated_at: timestamp,
-        }),
-      )
-      .returning(recordColumns)
-      .executeTakeFirstOrThrow();
+        })
+        .onConflict(oc =>
+          oc.columns(['tenant_id', 'name']).doUpdateSet({
+            manifest: jsonbBind(input.manifest),
+            first_party: firstParty,
+            updated_at: timestamp,
+          }),
+        )
+        .returning(recordColumns)
+        .executeTakeFirstOrThrow(),
+    );
   }
 
   async deleteServer(input: DeleteMcpServerInput, transaction?: Transaction<Database>): Promise<boolean> {

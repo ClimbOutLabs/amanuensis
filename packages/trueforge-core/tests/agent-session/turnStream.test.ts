@@ -14,6 +14,11 @@ import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '
 import { getEmptyUsage } from '../../src/core/llm/LLMTypes';
 import { toolResultResponse } from '../../src/core/mcp/IMCPServer';
 import { RemoteMCP } from '../../src/core/mcp/RemoteMCP';
+import {
+  DEFAULT_PINNED_PATH,
+  defaultSentinelServices,
+  type SentinelHostContext,
+} from '../../src/core/permissions/context';
 import { InternalEventType } from '../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../src/core/runtime/contextUsage';
 import { withTimeout } from '../../src/core/util/promiseUtils';
@@ -856,6 +861,11 @@ describe('TurnHandle.stream()', () => {
       mcp_server_name: toolSet.name,
       original_tool_name: 'tool_a',
       is_approval_required: false,
+      // The turn classifies unstamped tool calls through Sentinel, which fails
+      // closed to Tier 3: without this stamp the tool parks behind an approval
+      // card and the postToolCall processor never starts. Stamp the fixture as
+      // already classified so the test exercises cancellation, not admission.
+      tier: 1,
     });
     jest.mocked(toolSet.callTool).mockResolvedValue(toolResultResponse({ text: 'tool complete' }));
     const toolCall = {
@@ -1889,5 +1899,113 @@ describe('TurnResourceResolver caches', () => {
     expect(constructionRefresh).toBeLessThan(requestRefresh);
     const stored = await store.getTurn({ session_id: 's', turn_id: turn.id });
     expect(stored?.snapshot.sandbox_info).toEqual({ sandbox_id: 'v1:test:bound-sandbox' });
+  });
+
+  it('hands the session Sentinel services to the sandbox factory', async () => {
+    // Approval tokens are minted and verified against these services; a sandbox
+    // built with any other instance rejects every approved call.
+    const sandbox = makeStubPublicSandbox();
+    jest.spyOn(sandbox, 'close').mockResolvedValue(undefined);
+    const sentinelServices = defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH });
+    const received: SentinelHostContext[] = [];
+    const resolver = new TurnResourceResolver({
+      llm: () =>
+        Promise.resolve({
+          modelClient: makeMockILLM({ create: jest.fn().mockImplementation(() => emptyLlmStream()) }),
+          defaultModelParams: {},
+          modelId: undefined,
+          modelSupportsVision: false,
+        }),
+      mcp: () => Promise.resolve({ url: 'http://localhost' }),
+      mcpRequestTimeoutMs: 60_000,
+      mcpConnectTimeoutMs: 5_000,
+      sandboxProvider: input => {
+        received.push(input.sentinel);
+        return Promise.resolve(sandbox);
+      },
+      logger: makeSilentLogger(),
+    });
+    const sessions = new Sessions({ sessionStore: new InMemorySessionStore(), sentinelServices });
+    const session = await sessions.create({
+      tenant_id: 't',
+      session_id: 's',
+      created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+      agent: {
+        type: 'inline',
+        spec: makeAgentSpec({ config: { sandbox: { enabled: true, file_downloads: true } } }),
+      },
+      external_id: null,
+    });
+    const turn = await session.createTurn({
+      turn_id: mintTestTurnId(),
+      input: [{ type: EventType.USER_MESSAGE, content: 'hi' }],
+      previous_turn_id: 'none',
+      signal: new AbortController().signal,
+      resolver,
+    });
+    for await (const event of turn.stream()) {
+      void event;
+    }
+    expect(received).toHaveLength(1);
+    expect(received[0]?.services).toBe(sentinelServices);
+    expect(received[0]?.tenant_id).toBe('t');
+    expect(received[0]?.created_by).toBe('user-1');
+    expect(received[0]?.conversation_id).toBe('s');
+  });
+
+  it.each([
+    { source: { type: 'schedule' as const, id: 'sched-1', run_id: 'run-1' }, relaxed: [], unattended: true },
+    { source: null, relaxed: ['file_write'], unattended: false },
+  ])('applies relaxations only when attended (source: $source)', async ({ source, relaxed, unattended }) => {
+    const sandbox = makeStubPublicSandbox();
+    jest.spyOn(sandbox, 'close').mockResolvedValue(undefined);
+    const sentinelServices = {
+      ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
+      tier2AutoAllow: () => Promise.resolve(new Set<'file_write'>(['file_write'])),
+    };
+    const received: SentinelHostContext[] = [];
+    const resolver = new TurnResourceResolver({
+      llm: () =>
+        Promise.resolve({
+          modelClient: makeMockILLM({ create: jest.fn().mockImplementation(() => emptyLlmStream()) }),
+          defaultModelParams: {},
+          modelId: undefined,
+          modelSupportsVision: false,
+        }),
+      mcp: () => Promise.resolve({ url: 'http://localhost' }),
+      mcpRequestTimeoutMs: 60_000,
+      mcpConnectTimeoutMs: 5_000,
+      sandboxProvider: input => {
+        received.push(input.sentinel);
+        return Promise.resolve(sandbox);
+      },
+      logger: makeSilentLogger(),
+    });
+    const sessions = new Sessions({ sessionStore: new InMemorySessionStore(), sentinelServices });
+    const session = await sessions.create({
+      tenant_id: 't',
+      session_id: 's',
+      created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+      agent: {
+        type: 'inline',
+        spec: makeAgentSpec({ config: { sandbox: { enabled: true, file_downloads: true } } }),
+      },
+      external_id: null,
+      source,
+    });
+    const turn = await session.createTurn({
+      turn_id: mintTestTurnId(),
+      input: [{ type: EventType.USER_MESSAGE, content: 'hi' }],
+      previous_turn_id: 'none',
+      signal: new AbortController().signal,
+      resolver,
+    });
+    for await (const event of turn.stream()) {
+      void event;
+    }
+    const granted = await received[0]?.services.tier2AutoAllow({ tenant_id: 't', created_by: 'user-1' });
+    expect([...(granted ?? [])]).toEqual(relaxed);
+    // A held-back web search is denied instead of asked only while nobody watches.
+    expect(received[0]?.services.unattended).toBe(unattended);
   });
 });

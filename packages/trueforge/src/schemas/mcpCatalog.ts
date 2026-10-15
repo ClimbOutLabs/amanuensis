@@ -4,7 +4,12 @@
  */
 import { z } from '@hono/zod-openapi';
 import { NameSchema, uniqueNames } from './common';
-import { McpServerDescriptionSchema, McpServerManifestAuthSchema, McpServerTypeSchema } from './mcpServer';
+import {
+  McpSearchToolsSchema,
+  McpServerDescriptionSchema,
+  McpServerManifestAuthSchema,
+  McpServerTypeSchema,
+} from './mcpServer';
 
 /**
  * Catalog presets are user-savable `remote` entries only.
@@ -21,6 +26,13 @@ export const CatalogMcpServerSchema = z
     url: z.url().describe('URL of the remote MCP server.'),
     description: McpServerDescriptionSchema,
     auth: McpServerManifestAuthSchema.optional(),
+    search_provider: z
+      .boolean()
+      .optional()
+      .describe('When true, adding this preset offers to make it the web search provider.'),
+    search_tools: McpSearchToolsSchema.optional().describe(
+      'Search tools of this server that run without asking when it is the web search provider.',
+    ),
   })
   .strict()
   .openapi('CatalogMCPServer');

@@ -3,11 +3,11 @@ import {
   cleanExcerpt,
   isTextLike,
   looksLikeJsonObjectOrArray,
+  OVERSIZED_RESULT_PARSE_MAX_BYTES,
   oversizedResultFingerprint,
   renderOversizedResultSummary,
   summarizeGenericTextResult,
   summarizeOversizedResult,
-  OVERSIZED_RESULT_PARSE_MAX_BYTES,
 } from '../../../../src/core/capabilities/builtins/OversizedResult';
 
 const NEXT = 'Re-run example_tool with maxResults=10 and pageToken="tok" to fetch the next page.';

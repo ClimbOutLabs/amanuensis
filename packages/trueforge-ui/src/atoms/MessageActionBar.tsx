@@ -19,7 +19,10 @@ export function MessageActionBar({ isCopied, onCopy, createdAt, className }: Mes
 
   return (
     <div
-      className={cn('aui-assistant-action-bar-root animate-in fade-in flex items-center gap-1 opacity-0 transition-opacity duration-200 group-hover/assistant:opacity-100 focus-within:opacity-100', className)}
+      className={cn(
+        'aui-assistant-action-bar-root animate-in fade-in flex items-center gap-1 opacity-0 transition-opacity duration-200 group-hover/assistant:opacity-100 focus-within:opacity-100',
+        className,
+      )}
     >
       <MessageTimestamp createdAt={createdAt} className="mr-1" />
       <IconButton aria-label="Copy" tooltip="Copy" variant="ghost" className={actionBtnClass} onClick={onCopy}>

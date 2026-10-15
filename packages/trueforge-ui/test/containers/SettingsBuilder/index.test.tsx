@@ -5,12 +5,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { PersonaProvider, type PersonaApi } from '@/components/PersonaContext.js';
-import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
 import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
+import { RunCodeStatusProvider } from '@/components/RunCodeStatusContext.js';
 import TruefoundrySettingsBuilder from '@/containers/SettingsBuilder/index.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
-import type { AgentUIServer, SandboxCatalogServer, SkillCatalogServer } from '@/server/types.js';
+import type { AgentUIServer, SkillCatalogServer } from '@/server/types.js';
+import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
 vi.mock('@/containers/SettingsBuilder/ModelSettings.js', () => ({
@@ -51,21 +52,13 @@ const skillCatalog: SkillCatalogServer = {
   createSkill: unavailable,
 };
 
-const sandboxCatalog: SandboxCatalogServer = {
-  getSandboxProviderCatalog: async () => [],
-  listSandboxProviders: async () => [],
-  createSandboxProvider: unavailable,
-  updateSandboxProvider: unavailable,
-};
-
-function createServer(options: { catalog?: boolean; skills?: boolean; sandbox?: boolean } = {}): AgentUIServer {
+function createServer(options: { catalog?: boolean; skills?: boolean } = {}): AgentUIServer {
   if (options.catalog === false) {
     return createMockAgentUIServer();
   }
   return createMockAgentUIServer({
     catalog: createMockCatalog({
       ...(options.skills ? { skillCatalog } : {}),
-      ...(options.sandbox ? { sandboxCatalog } : {}),
     }),
   });
 }
@@ -89,11 +82,13 @@ function TestShell({
   children,
   personalization = false,
   personas = false,
+  runCodeStatus = false,
 }: {
   server?: AgentUIServer;
   children?: ReactNode;
   personalization?: boolean;
   personas?: boolean;
+  runCodeStatus?: boolean;
 }) {
   const content = (
     <DraftCatalogProvider>
@@ -131,7 +126,14 @@ function TestShell({
   ) : (
     personalizedContent
   );
-  return server === undefined ? personaContent : <ServerProvider server={server}>{personaContent}</ServerProvider>;
+  const runCodeContent = runCodeStatus ? (
+    <RunCodeStatusProvider api={{ getRunCodeStatus: async () => ({ state: 'ready' }) }}>
+      {personaContent}
+    </RunCodeStatusProvider>
+  ) : (
+    personaContent
+  );
+  return server === undefined ? runCodeContent : <ServerProvider server={server}>{runCodeContent}</ServerProvider>;
 }
 
 async function openSettings() {
@@ -156,7 +158,7 @@ describe('TruefoundrySettingsBuilder', () => {
     expect(screen.queryByRole('heading', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
-  it('only exposes optional sections backed by catalogs', async () => {
+  it('only exposes optional sections the host backs', async () => {
     const { rerender } = render(<TestShell server={createServer()} />);
     await openSettings();
 
@@ -168,14 +170,16 @@ describe('TruefoundrySettingsBuilder', () => {
       expect(screen.getByText('Model settings content')).toBeInTheDocument();
     });
 
-    rerender(<TestShell server={createServer({ skills: true, sandbox: true })} />);
+    // The status provider wraps the tree, so adding it remounts the shell; reopen settings.
+    rerender(<TestShell server={createServer({ skills: true })} runCodeStatus />);
+    await openSettings();
 
     fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
     await waitFor(() => {
       expect(screen.getByText('Skill settings content')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sandbox providers' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sandbox' }));
     await waitFor(() => {
       expect(screen.getByText('Sandbox settings content')).toBeInTheDocument();
     });
@@ -191,11 +195,11 @@ describe('TruefoundrySettingsBuilder', () => {
     await openSettings();
 
     // Roles are assigned here, not on the page that manages provider connections.
-    fireEvent.click(screen.getByRole('button', { name: 'Model roles' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Roles and Personas' }));
     await waitFor(() => {
       expect(screen.getByText('Model role settings content')).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Model roles' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: 'Roles and Personas' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByText('Model settings content')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Models' }));
@@ -205,7 +209,7 @@ describe('TruefoundrySettingsBuilder', () => {
     expect(screen.queryByText('Model role settings content')).not.toBeInTheDocument();
   });
 
-  it('has no Personas section of its own: personas live under Model roles, not in the nav', async () => {
+  it('has no Personas section of its own: personas live under Roles and Personas, not in the nav', async () => {
     const { unmount } = render(<TestShell server={createServer()} />);
     await openSettings();
 
@@ -213,7 +217,7 @@ describe('TruefoundrySettingsBuilder', () => {
     unmount();
 
     // Even with a persona API wired up, Settings still has no standalone Personas
-    // tab or content here — PersonaSettings is only ever reached via Model roles.
+    // tab or content here: PersonaSettings is only ever reached via Roles and Personas.
     render(<TestShell server={createServer()} personas />);
     await openSettings();
 

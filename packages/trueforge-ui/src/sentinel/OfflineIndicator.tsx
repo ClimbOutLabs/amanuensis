@@ -7,7 +7,7 @@ import { useOptionalSentinelApiState } from './SentinelApiContext.js';
 
 /**
  * Persistent app-shell indicator, visible only while the user has offline mode on.
- * Offline mode auto-denies external Tier 3 actions without showing an approval card.
+ * Offline mode auto-denies external actions without showing an approval card.
  */
 export const OfflineIndicator: FC = () => {
   const offline = useOptionalSentinelApiState()?.settings?.offline_mode ?? false;

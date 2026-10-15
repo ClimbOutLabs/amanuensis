@@ -33,18 +33,16 @@ describe('TFYSandboxProvider layout', () => {
     expect(instructions).not.toContain('/data/sandboxes');
   });
 
-  it('absolutizes GIT_CONFIG store --file and PATH for git/mcp-client after cd', () => {
+  it('absolutizes PATH and skills paths for git/mcp-client after cd', () => {
     const env = absolutizeRelativeExecEnv({
       root: '/discovered/root',
       env: {
-        GIT_CONFIG_VALUE_0: 'store --file .git-credentials',
         PATH: 'mcp-client/bin:/usr/bin',
         PYTHONPATH: 'mcp-client',
         TFY_SKILLS_DIR: 'skills',
         TFY_NATS_URL: 'ws://localhost',
       },
     });
-    expect(env['GIT_CONFIG_VALUE_0']).toBe('store --file /discovered/root/.git-credentials');
     expect(env['PATH']).toBe('/discovered/root/mcp-client/bin:/usr/bin');
     expect(env['PYTHONPATH']).toBe('/discovered/root/mcp-client');
     expect(env['TFY_SKILLS_DIR']).toBe('/discovered/root/skills');

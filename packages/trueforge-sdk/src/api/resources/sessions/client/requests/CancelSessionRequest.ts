@@ -4,4 +4,5 @@
  * @example
  *     {}
  */
-export type CancelSessionRequest = {};
+export interface CancelSessionRequest {
+}

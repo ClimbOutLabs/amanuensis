@@ -1,7 +1,4 @@
-import type {
-  ChatCompletionContentPartRefusal,
-  ChatCompletionContentPartText,
-} from '@truefoundry/trueforge-core/core';
+import type { ChatCompletionContentPartRefusal, ChatCompletionContentPartText } from '@truefoundry/trueforge-core/core';
 import type { PersonaKnowledgeHit } from './knowledgeRetrieval';
 
 /**
@@ -79,21 +76,135 @@ const SAFE_URL_SCHEME_PATTERN = /^https?:\/\//i;
  * not treat "para" or "with" as distinctive.
  */
 const STOPWORDS: ReadonlySet<string> = new Set([
-  'the', 'and', 'for', 'with', 'that', 'this', 'from', 'have', 'has', 'had',
-  'were', 'was', 'are', 'been', 'being', 'will', 'would', 'could', 'should',
-  'there', 'their', 'then', 'than', 'they', 'them', 'your', 'yours', 'about',
-  'into', 'over', 'after', 'before', 'between', 'through', 'during', 'under',
-  'again', 'once', 'here', 'when', 'where', 'which', 'while', 'what', 'whom',
-  'whose', 'how', 'all', 'any', 'both', 'each', 'more', 'most', 'other',
-  'some', 'such', 'only', 'same', 'also', 'just', 'like', 'because', 'until',
-  'very', 'cannot', 'does', 'did', 'doing', 'done',
-  'los', 'las', 'una', 'unos', 'unas', 'del', 'este', 'esta', 'estos',
-  'estas', 'ese', 'esa', 'esos', 'esas', 'aquel', 'para', 'como', 'pero',
-  'porque', 'entre', 'hasta', 'desde', 'sobre', 'cuando', 'donde', 'quien',
-  'cual', 'cada', 'todo', 'toda', 'todos', 'todas', 'esto', 'eso', 'muy',
-  'sin', 'con', 'por', 'son', 'fue', 'fueron', 'están', 'estaba', 'tiene',
-  'tienen', 'hacer', 'hace', 'hacen', 'puede', 'pueden', 'también', 'sólo',
-  'solo', 'pues', 'poco', 'mucho', 'mucha', 'muchos', 'otra', 'otro',
+  'the',
+  'and',
+  'for',
+  'with',
+  'that',
+  'this',
+  'from',
+  'have',
+  'has',
+  'had',
+  'were',
+  'was',
+  'are',
+  'been',
+  'being',
+  'will',
+  'would',
+  'could',
+  'should',
+  'there',
+  'their',
+  'then',
+  'than',
+  'they',
+  'them',
+  'your',
+  'yours',
+  'about',
+  'into',
+  'over',
+  'after',
+  'before',
+  'between',
+  'through',
+  'during',
+  'under',
+  'again',
+  'once',
+  'here',
+  'when',
+  'where',
+  'which',
+  'while',
+  'what',
+  'whom',
+  'whose',
+  'how',
+  'all',
+  'any',
+  'both',
+  'each',
+  'more',
+  'most',
+  'other',
+  'some',
+  'such',
+  'only',
+  'same',
+  'also',
+  'just',
+  'like',
+  'because',
+  'until',
+  'very',
+  'cannot',
+  'does',
+  'did',
+  'doing',
+  'done',
+  'los',
+  'las',
+  'una',
+  'unos',
+  'unas',
+  'del',
+  'este',
+  'esta',
+  'estos',
+  'estas',
+  'ese',
+  'esa',
+  'esos',
+  'esas',
+  'aquel',
+  'para',
+  'como',
+  'pero',
+  'porque',
+  'entre',
+  'hasta',
+  'desde',
+  'sobre',
+  'cuando',
+  'donde',
+  'quien',
+  'cual',
+  'cada',
+  'todo',
+  'toda',
+  'todos',
+  'todas',
+  'esto',
+  'eso',
+  'muy',
+  'sin',
+  'con',
+  'por',
+  'son',
+  'fue',
+  'fueron',
+  'están',
+  'estaba',
+  'tiene',
+  'tienen',
+  'hacer',
+  'hace',
+  'hacen',
+  'puede',
+  'pueden',
+  'también',
+  'sólo',
+  'solo',
+  'pues',
+  'poco',
+  'mucho',
+  'mucha',
+  'muchos',
+  'otra',
+  'otro',
 ]);
 
 const MIN_SIGNATURE_WORD_LENGTH = 4;
@@ -383,9 +494,8 @@ function prettifyUrlDerivedTitle(title: string): string {
 export function formatSourceEntry(hit: PersonaKnowledgeHit): string {
   const rawTitle = cleanFooterText(typeof hit.title === 'string' ? hit.title : '');
   const label = inertFooterText(typeof hit.sourceLabel === 'string' ? hit.sourceLabel : '', LABEL_MAX_LENGTH);
-  const rawUrl = typeof hit.sourceUrl === 'string'
-    ? cleanFooterText(hit.sourceUrl).replace(CITATION_MARKER_PATTERN, '[src]')
-    : '';
+  const rawUrl =
+    typeof hit.sourceUrl === 'string' ? cleanFooterText(hit.sourceUrl).replace(CITATION_MARKER_PATTERN, '[src]') : '';
   const url = SAFE_URL_SCHEME_PATTERN.test(rawUrl)
     ? percentEncodeUrlMarkdownChars(rawUrl.slice(0, URL_MAX_LENGTH))
     : '';
@@ -423,10 +533,7 @@ export function stripCitationMarkers(text: string): string {
  * title past the upstream boundary) are skipped — fail open, never fail the
  * turn.
  */
-export function findUsedKnowledgeHits(
-  answerText: string,
-  hits: readonly PersonaKnowledgeHit[],
-): PersonaKnowledgeHit[] {
+export function findUsedKnowledgeHits(answerText: string, hits: readonly PersonaKnowledgeHit[]): PersonaKnowledgeHit[] {
   const used: PersonaKnowledgeHit[] = [];
   const loweredAnswer = answerText.toLowerCase();
   for (let index = 0; index < hits.length; index += 1) {
@@ -461,10 +568,7 @@ export function findUsedKnowledgeHits(
  * and making its presence depend on prose phrasing would make attribution
  * unpredictable — the opposite of enforcement.
  */
-export function repairKnowledgeAttribution(
-  answerText: string,
-  hits: readonly PersonaKnowledgeHit[],
-): string {
+export function repairKnowledgeAttribution(answerText: string, hits: readonly PersonaKnowledgeHit[]): string {
   if (hits.length === 0) {
     return answerText;
   }
@@ -482,11 +586,7 @@ export type AssistantTextPart = ChatCompletionContentPartText;
 /** Assistant refusal part, as the core message schema defines it. */
 export type AssistantRefusalPart = ChatCompletionContentPartRefusal;
 
-export type RepairableAssistantContent =
-  | string
-  | (AssistantTextPart | AssistantRefusalPart)[]
-  | null
-  | undefined;
+export type RepairableAssistantContent = string | (AssistantTextPart | AssistantRefusalPart)[] | null | undefined;
 
 /**
  * Applies the attribution repair to a model message's content without
@@ -495,10 +595,7 @@ export type RepairableAssistantContent =
  * the identical reference when nothing changed, so callers can tell
  * "repaired" from "untouched" by identity.
  */
-export function repairAssistantMessageContent(
-  content: string,
-  hits: readonly PersonaKnowledgeHit[],
-): string;
+export function repairAssistantMessageContent(content: string, hits: readonly PersonaKnowledgeHit[]): string;
 export function repairAssistantMessageContent(
   content: (AssistantTextPart | AssistantRefusalPart)[],
   hits: readonly PersonaKnowledgeHit[],

@@ -23,12 +23,12 @@ const DEFAULT_MAX_INLINING_BYTES = 4 * 1024 * 1024; // 4 MB
 /**
  * CSP meta tag policy for the sandboxed iframe.
  * - Allows inline scripts and styles from the document itself
- * - Allows images and fonts from data: URIs and https: URLs
+ * - Allows images from data: URIs only; fonts from data: URIs and https: URLs
  * - Blocks all network connections (connect-src none)
  * - Blocks framing
  */
 const CSP_POLICY =
-  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: https:; font-src data: https:; frame-ancestors 'none'";
+  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data: https:; frame-ancestors 'none'";
 
 interface AssetToInline {
   originalUrl: string;
@@ -336,7 +336,7 @@ export function HtmlArtifactPreview({
       </div>
 
       {/* Preview iframe */}
-      <div className="relative min-h-96 bg-white dark:bg-black" style={{ height: previewHeight, overflow: 'auto' }}>
+      <div className="relative min-h-96 bg-card-bg" style={{ height: previewHeight, overflow: 'auto' }}>
         <iframe
           ref={iframeRef}
           srcDoc={srcdoc}

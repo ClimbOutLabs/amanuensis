@@ -6,11 +6,7 @@
  */
 import { z } from '@hono/zod-openapi';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
-import {
-  ALT_MODEL_FQN,
-  MODEL_FQN,
-  startApprovalTestServer,
-} from '../../fixtures/approvalTestServer';
+import { ALT_MODEL_FQN, MODEL_FQN, startApprovalTestServer } from '../../fixtures/approvalTestServer';
 
 const TURN_TIMEOUT_MS = 60_000;
 

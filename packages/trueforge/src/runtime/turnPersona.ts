@@ -286,8 +286,7 @@ export async function resolveTurnPersona(input: {
   if (invoked !== undefined) {
     // A switch to the already-active identity is a no-op: the turn still runs
     // under it, but no new activation row is written and no notice is needed.
-    const alreadyActive =
-      invoked.kind === 'persona' ? sticky?.persona.id === invoked.persona.id : sticky === undefined;
+    const alreadyActive = invoked.kind === 'persona' ? sticky?.persona.id === invoked.persona.id : sticky === undefined;
     resolution =
       invoked.kind === 'persona'
         ? {

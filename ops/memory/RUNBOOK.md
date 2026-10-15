@@ -77,6 +77,38 @@ check: it dials the MCP endpoint through
 endpoint said. On a memory provider, run both: this one clears the MCP surface,
 the memory check clears the REST API.
 
+### First-party status
+
+A memory provider is first-party only when the operator says so in the server
+configuration. Set `FIRST_PARTY_MCP_ORIGINS` to a comma-separated list of exact
+origins (scheme, host and port, no path), for example `https://memory.internal:8443`,
+and restart. The default is empty, which means nothing is first-party. List only an
+origin that serves nothing but your own memory provider.
+
+A save marks the connector first-party when it keeps `memory_provider: true`, the
+check above passes in that same save, and the URL's origin is on the list. The mark
+lives on the stored connector, never in the manifest, and no request can set it. The
+server also reads the list again each time it loads the connector for a turn, so
+removing an origin takes effect after the restart with no save.
+
+On a first-party connector a tool that declares itself read-only and explicitly
+closed-world (`readOnlyHint` true and `openWorldHint` false) runs without an approval
+card, and each run is recorded in the audit log. Everything else keeps asking,
+including a tool that leaves `openWorldHint` out, since an absent hint means open-world.
+
+A first-party connection does not follow redirects, and neither does the check above. A
+provider whose URL answers with a 3xx (for example `http` redirecting to `https`, or a
+trailing slash) fails the check with "recall returned HTTP 308, a redirect to ...", and a
+saved first-party connector that starts redirecting fails its turns with "server answered
+HTTP 302 with a redirect to ...", so that a listed origin cannot hand its mark to another
+host. Save the address that serves the provider directly.
+
+Every save decides the mark afresh. A provider on an origin that is not listed stays
+a user-added connector whatever its URL looks like: another port, `http` instead of
+`https`, a longer host name, or an `@` in the URL each name a different origin. Adding
+an origin to the list does not mark a provider saved earlier. Save the provider again,
+which re-runs the check, to turn the mark on.
+
 ### Per-bank tuning in Settings > Memory
 
 Everything that shapes what the host reads from a bank is set on the bank's row in Settings >

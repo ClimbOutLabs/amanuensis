@@ -185,3 +185,20 @@ describe('HtmlArtifactPreview', () => {
     });
   });
 });
+
+describe('HtmlArtifactPreview image CSP', () => {
+  it('does not allow remote images in the injected CSP', async () => {
+    const htmlBlob = new Blob(['<html><head></head><body><img src="https://evil.example/p.png"></body></html>'], {
+      type: 'text/html',
+    });
+
+    render(<HtmlArtifactPreview content={htmlBlob} filename="test.html" readOnly={false} />);
+
+    await waitFor(() => {
+      const iframe = screen.getByTestId('aui-html-preview-iframe');
+      const srcdoc = iframe.getAttribute('srcdoc') ?? '';
+      expect(srcdoc).toContain('img-src data:;');
+      expect(srcdoc).not.toMatch(/img-src[^;]*https:/);
+    });
+  });
+});

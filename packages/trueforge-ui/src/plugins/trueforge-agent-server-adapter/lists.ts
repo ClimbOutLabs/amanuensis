@@ -49,16 +49,13 @@ const MEMORY_BACKEND_STATUS_NAME = {
  * `memory_defaults` capability. Undefined when the capability is missing, malformed, or
  * names an unknown backend — the caller then reports memory as unknown rather than guessing.
  */
-export function readMemoryBackend(
-  capabilities: unknown,
-): keyof typeof MEMORY_BACKEND_STATUS_NAME | undefined {
+export function readMemoryBackend(capabilities: unknown): keyof typeof MEMORY_BACKEND_STATUS_NAME | undefined {
   if (typeof capabilities !== 'object' || capabilities === null) {
     return undefined;
   }
   // The SDK normalizes wire keys to camelCase; a direct host adapter may expose the raw
   // snake_case payload instead.
-  const defaults: unknown =
-    Reflect.get(capabilities, 'memoryDefaults') ?? Reflect.get(capabilities, 'memory_defaults');
+  const defaults: unknown = Reflect.get(capabilities, 'memoryDefaults') ?? Reflect.get(capabilities, 'memory_defaults');
   if (typeof defaults !== 'object' || defaults === null) {
     return undefined;
   }

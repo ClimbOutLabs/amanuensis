@@ -55,7 +55,7 @@ export function AgentInternalsDisclosure({
           <span
             data-testid={attentionTestId}
             aria-hidden="true"
-            className="inline-block size-1.5 rounded-full bg-amber-500"
+            className="inline-block size-1.5 rounded-full bg-warning"
           />
         )}
         <span className="text-xs text-text-tertiary">

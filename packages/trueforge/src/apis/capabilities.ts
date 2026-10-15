@@ -16,16 +16,20 @@ import { readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { readToolOutputScreenSetting } from '../runtime/toolOutputScreenSettings';
 import { isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { checkSnapshotStatus, readPersistedSnapshotStatus } from '../sandbox/providerUtils';
-import { isVoiceAvailable } from '../voice/sttAvailability';
-import type { BuildIdentity, GetCapabilitiesResponseSchema, MemoryDefaultsCapability } from '../schemas/capability';
+import type {
+  BuildIdentity,
+  GetCapabilitiesResponseSchema,
+  MemoryDefaultsCapability,
+  SandboxIsolationCapability,
+} from '../schemas/capability';
 import {
   MemoryEmbeddingsCapabilitySchema,
   MemoryScreenCapabilitySchema,
   SandboxIsolationCapabilitySchema,
   ToolOutputScreenCapabilitySchema,
 } from '../schemas/capability';
-import type { SandboxIsolationCapability } from '../schemas/capability';
 import type { SandboxBuildStatus } from '../schemas/sandboxProvider';
+import { isVoiceAvailable } from '../voice/sttAvailability';
 import { TENANT_ID } from './sessions';
 
 /** The `data` object every `/capabilities` response carries, computed once and reused wherever capability flags are needed (e.g. the bug-report bundle's `config_flags`). */

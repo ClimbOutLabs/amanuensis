@@ -3,4 +3,7 @@
 /**
  * Defaults to 'auto' (chain to session last turn). Use 'none' for a new root turn.
  */
-export type PreviousTurnIdInput = "auto" | "none" | string;
+export type PreviousTurnIdInput = 
+    | "auto"
+    | "none"
+    | string;

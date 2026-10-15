@@ -45,6 +45,7 @@ import {
   type RawAssistantMessageWithUsage,
   type ThinkingBlock,
 } from './LLMTypes';
+import { resolveMaxOutputTokens } from './maxOutputTokens';
 
 // ---------------------------------------------------------------------------
 // Public config
@@ -605,14 +606,6 @@ export function buildProviderOptions({
 // ---------------------------------------------------------------------------
 // Request conversion (OpenAI → SDK)
 // ---------------------------------------------------------------------------
-
-/** Prefers `max_completion_tokens`, falling back to the deprecated `max_tokens`. */
-export function resolveMaxOutputTokens(
-  body: Pick<ChatCompletionCreateParamsStreaming, 'max_completion_tokens'>,
-): number | undefined {
-  const limit: unknown = body.max_completion_tokens ?? Reflect.get(body, 'max_tokens');
-  return typeof limit === 'number' ? limit : undefined;
-}
 
 /** Parses the MIME type from a data URI (`data:<mime>;base64,...`). */
 export function parseMimeFromDataUri(uri: string): string | undefined {
@@ -1778,6 +1771,22 @@ export class VercelAILLM implements ILLM {
       logger: this.logger,
     });
     const tools = convertTools(body.tools ?? undefined);
+    if (
+      this.logger.isDebugEnabled() &&
+      body.tools !== undefined &&
+      body.messages.some(
+        m => Array.isArray(m.content) && m.content.some(p => p.type === 'image_url' || p.type === 'file'),
+      )
+    ) {
+      this.logger.debug('Multimodal chat completion request payload', {
+        model: model.id,
+        tools: body.tools,
+        messages: body.messages.map(m => ({
+          role: m.role,
+          partTypes: Array.isArray(m.content) ? m.content.map(p => p.type) : typeof m.content,
+        })),
+      });
+    }
     const structuredOutputSpec = toStructuredOutputSpec(body.response_format);
     const output = buildOutput(structuredOutputSpec);
 

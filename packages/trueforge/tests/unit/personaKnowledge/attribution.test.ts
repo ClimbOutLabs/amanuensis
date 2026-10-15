@@ -1,3 +1,4 @@
+import type { AssistantRefusalPart, AssistantTextPart } from '../../../src/personaKnowledge/knowledgeAttribution';
 import {
   dedupeHitsByDocument,
   findUsedKnowledgeHits,
@@ -9,10 +10,6 @@ import {
   passageSignatureTerms,
   repairAssistantMessageContent,
   repairKnowledgeAttribution,
-} from '../../../src/personaKnowledge/knowledgeAttribution';
-import type {
-  AssistantRefusalPart,
-  AssistantTextPart,
 } from '../../../src/personaKnowledge/knowledgeAttribution';
 import type { PersonaKnowledgeHit } from '../../../src/personaKnowledge/knowledgeRetrieval';
 
@@ -134,9 +131,9 @@ describe('isPassageUsedInAnswer', () => {
   });
 
   it('does not fire on an unrelated answer', () => {
-    expect(
-      isPassageUsedInAnswer({ passageText: passage, answerText: 'The best recipe for sourdough bread.' }),
-    ).toBe(false);
+    expect(isPassageUsedInAnswer({ passageText: passage, answerText: 'The best recipe for sourdough bread.' })).toBe(
+      false,
+    );
   });
 
   it('does not fire on an empty answer', () => {
@@ -146,8 +143,7 @@ describe('isPassageUsedInAnswer', () => {
 
 describe('repairKnowledgeAttribution', () => {
   it('appends a Sources line when a paraphrased passage goes unattributed', () => {
-    const answer =
-      'Giant pandas subsist almost entirely on bamboo, eating dozens of pounds every day.';
+    const answer = 'Giant pandas subsist almost entirely on bamboo, eating dozens of pounds every day.';
     const repaired = repairKnowledgeAttribution(answer, [hit()]);
     expect(repaired).toBe(`${answer}\n\nSources: Giant Panda Diet Notes (Panda Care Manual)`);
   });
@@ -203,8 +199,7 @@ describe('repairKnowledgeAttribution', () => {
   });
 
   it('still appends the single canonical footer when the model already named the title', () => {
-    const answer =
-      'According to Giant Panda Diet Notes, giant pandas eat dozens of pounds of bamboo daily.';
+    const answer = 'According to Giant Panda Diet Notes, giant pandas eat dozens of pounds of bamboo daily.';
     const repaired = repairKnowledgeAttribution(answer, [hit()]);
     expect(repaired).toContain('Sources: Giant Panda Diet Notes (Panda Care Manual)');
     expect(repaired.match(/Sources:/g)).toHaveLength(1);
@@ -234,14 +229,8 @@ describe('adversarial same-topic negatives', () => {
       'danger question',
       'Are pandas dangerous? Giant pandas are generally gentle, but they are still bears — a startled panda defending its bamboo patch can be dangerous.',
     ],
-    [
-      'habitat question',
-      "Giant pandas live in the misty bamboo forests of central China's mountain ranges.",
-    ],
-    [
-      'generic diet sentence',
-      'Giant pandas spend most of the day eating bamboo.',
-    ],
+    ['habitat question', "Giant pandas live in the misty bamboo forests of central China's mountain ranges."],
+    ['generic diet sentence', 'Giant pandas spend most of the day eating bamboo.'],
   ];
 
   it.each(cases)('leaves a topically-adjacent answer byte-identical (%s)', (_name, answer) => {
@@ -262,7 +251,8 @@ describe('adversarial same-topic negatives', () => {
 });
 
 describe('formatSourceEntry', () => {
-  it('renders a phishing-shaped title inert: no markdown link can form', () => {    const entry = formatSourceEntry(
+  it('renders a phishing-shaped title inert: no markdown link can form', () => {
+    const entry = formatSourceEntry(
       hit({
         title: 'Password reset — [verify now](https://accounts-verify.example)',
         sourceLabel: 'web',
@@ -288,15 +278,11 @@ describe('formatSourceEntry', () => {
   });
 
   it('neutralizes marker-shaped text in titles, like the injection path does', () => {
-    expect(formatSourceEntry(hit({ title: 'Doc ⟦src:2⟧ notes' }))).toBe(
-      'Doc \\[src\\] notes (Panda Care Manual)',
-    );
+    expect(formatSourceEntry(hit({ title: 'Doc ⟦src:2⟧ notes' }))).toBe('Doc \\[src\\] notes (Panda Care Manual)');
   });
 
   it('omits non-http(s) URLs and falls back to the label', () => {
-    const entry = formatSourceEntry(
-      hit({ title: 'Evil Doc', sourceUrl: 'javascript:alert(document.domain)' }),
-    );
+    const entry = formatSourceEntry(hit({ title: 'Evil Doc', sourceUrl: 'javascript:alert(document.domain)' }));
     expect(entry).not.toContain('javascript:');
     expect(entry).toBe('Evil Doc (Panda Care Manual)');
   });
@@ -330,9 +316,7 @@ describe('formatSourceEntry', () => {
   });
 
   it('percent-encodes brackets and parens in plain URLs without touching the rest', () => {
-    const entry = formatSourceEntry(
-      hit({ title: 'Docs', sourceUrl: 'https://docs.legit.example/path_(v2)/[draft]' }),
-    );
+    const entry = formatSourceEntry(hit({ title: 'Docs', sourceUrl: 'https://docs.legit.example/path_(v2)/[draft]' }));
     expect(entry).toBe('Docs — https://docs.legit.example/path_%28v2%29/%5Bdraft%5D');
   });
 
@@ -375,10 +359,10 @@ describe('findUsedKnowledgeHits', () => {
   it('returns the used hits in injection order', () => {
     const first = hit();
     const second = hit({ title: 'Unrelated Doc', text: 'A treatise on sourdough starters and hydration.' });
-    const used = findUsedKnowledgeHits(
-      'Giant pandas eat almost exclusively bamboo, dozens of pounds daily.',
-      [first, second],
-    );
+    const used = findUsedKnowledgeHits('Giant pandas eat almost exclusively bamboo, dozens of pounds daily.', [
+      first,
+      second,
+    ]);
     expect(used).toEqual([first]);
   });
 });
@@ -479,9 +463,9 @@ describe('formatSourceEntry URL-title rendering', () => {
   });
 
   it('renders a single clean entry when the title is a different URL', () => {
-    expect(
-      formatSourceEntry(hit({ title: 'https://en.wikipedia.org/wiki/Giant_panda_(zoo)', sourceUrl: wiki })),
-    ).toBe(wiki);
+    expect(formatSourceEntry(hit({ title: 'https://en.wikipedia.org/wiki/Giant_panda_(zoo)', sourceUrl: wiki }))).toBe(
+      wiki,
+    );
   });
 
   it('prettifies a URL-slug title with spaces instead of escaped underscores', () => {

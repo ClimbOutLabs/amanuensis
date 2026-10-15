@@ -24,9 +24,10 @@ describe('sanitizeSpaceHtml', () => {
     expect(out).toContain('style="color:blue"');
   });
 
-  it('keeps an <img> with an https src', () => {
+  it('drops an <img> with an https src', () => {
     const out = sanitizeSpaceHtml('<img src="https://example.com/pic.png" alt="pic">');
-    expect(out).toContain('https://example.com/pic.png');
+    expect(out).not.toContain('example.com');
+    expect(out).not.toContain('<img');
   });
 
   it('keeps an <img> with a data: URI src', () => {
@@ -116,6 +117,58 @@ describe('sanitizeSpaceHtml', () => {
     expect(out).not.toContain('evil.example');
     expect(out).toContain('click');
   });
+
+  it('strips srcset from an img even when src is a data: URI', () => {
+    const out = sanitizeSpaceHtml(
+      '<img src="data:image/png;base64,AAAA" srcset="https://evil.example/big.png 2x" alt="pic">',
+    );
+    expect(out).toContain('data:image/png;base64,AAAA');
+    expect(out).not.toContain('srcset');
+    expect(out).not.toContain('evil.example');
+  });
+
+  it('strips srcset from a <source> inside <picture>', () => {
+    const out = sanitizeSpaceHtml(
+      '<picture><source srcset="https://evil.example/big.png 2x"><img src="data:image/png;base64,AAAA"></picture>',
+    );
+    expect(out).not.toContain('srcset');
+    expect(out).not.toContain('evil.example');
+  });
+
+  it('strips href from <image> inside <svg>', () => {
+    const out = sanitizeSpaceHtml('<svg><image href="https://evil.example/pic.png" width="10" height="10"/></svg>');
+    expect(out).not.toContain('evil.example');
+    expect(out).not.toContain('href="https://');
+  });
+
+  it('strips the poster attribute from <video>', () => {
+    const out = sanitizeSpaceHtml('<video poster="https://evil.example/poster.png" controls></video>');
+    expect(out).not.toContain('poster');
+    expect(out).not.toContain('evil.example');
+    expect(out).toContain('<video');
+  });
+
+  it('strips src from <input type=image>', () => {
+    const out = sanitizeSpaceHtml('<input type="image" src="https://evil.example/btn.png" alt="go">');
+    expect(out).not.toContain('evil.example');
+    expect(out).not.toContain('src="https://');
+    expect(out).toContain('<input');
+  });
+
+  it('drops CSS image-set(...) outright', () => {
+    const out = sanitizeSpaceHtml(
+      '<div style="background-image:image-set(url(https://evil.example/a.png) 1x, url(data:image/png;base64,AAAA) 2x)">x</div>',
+    );
+    expect(out).not.toContain('image-set');
+    expect(out).not.toContain('evil.example');
+  });
+
+  it('strips the background attribute from table cells', () => {
+    const out = sanitizeSpaceHtml('<table><tr><td background="https://evil.example/bg.png">hi</td></tr></table>');
+    expect(out).not.toContain('background=');
+    expect(out).not.toContain('evil.example');
+    expect(out).toContain('hi');
+  });
 });
 
 describe('sanitizeSpaceHtml numeric cell classification', () => {
@@ -170,5 +223,42 @@ describe('sanitizeSpaceHtml numeric cell classification', () => {
   it('still classifies a properly balanced accounting negative', () => {
     const out = sanitizeSpaceHtml('<table><tr><td>(123.45)</td></tr></table>');
     expect(out).toContain('<td class="num">(123.45)</td>');
+  });
+
+  it('strips a remote src from <video>', () => {
+    const out = sanitizeSpaceHtml('<video src="https://evil.example/v.mp4" controls></video>');
+    expect(out).not.toContain('evil.example');
+    expect(out).not.toContain('src=');
+    expect(out).toContain('<video');
+  });
+
+  it('keeps a <video> with a data: URI src', () => {
+    const out = sanitizeSpaceHtml('<video src="data:video/mp4;base64,AAAA" controls></video>');
+    expect(out).toContain('data:video/mp4;base64,AAAA');
+  });
+
+  it('strips a remote src from <audio>', () => {
+    const out = sanitizeSpaceHtml('<audio src="https://evil.example/a.mp3" controls></audio>');
+    expect(out).not.toContain('evil.example');
+    expect(out).not.toContain('src=');
+    expect(out).toContain('<audio');
+  });
+
+  it('strips a remote src from <source>', () => {
+    const out = sanitizeSpaceHtml('<video><source src="https://evil.example/v.mp4" type="video/mp4"></video>');
+    expect(out).not.toContain('evil.example');
+    expect(out).not.toContain('src=');
+  });
+
+  it('strips a remote href from <svg><use>', () => {
+    const out = sanitizeSpaceHtml('<svg><use href="https://evil.example/icons.svg#icon"></use></svg>');
+    expect(out).not.toContain('evil.example');
+    expect(out).not.toContain('href=');
+    expect(out).toContain('<use');
+  });
+
+  it('strips a remote xlink:href from <svg><use>', () => {
+    const out = sanitizeSpaceHtml('<svg><use xlink:href="https://evil.example/icons.svg#icon"></use></svg>');
+    expect(out).not.toContain('evil.example');
   });
 });

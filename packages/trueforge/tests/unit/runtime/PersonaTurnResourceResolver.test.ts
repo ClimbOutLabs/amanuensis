@@ -1,16 +1,15 @@
 import { AgentSpecSchema, type AgentSpec } from '@truefoundry/trueforge-core/agent-session';
-import type { AgentCapability, ILLM } from '@truefoundry/trueforge-core/core';
+import type { AgentCapability, ILLM, ModelMessageEvent } from '@truefoundry/trueforge-core/core';
 import { EventType, InstructionBuilder, ModelMessageEventSchema } from '@truefoundry/trueforge-core/core';
-import type { ModelMessageEvent } from '@truefoundry/trueforge-core/core';
 import { createLogger } from 'winston';
-import {
-  personalizationDigest,
-  type PersonalizationProfile,
-} from '../../../src/personalization/profile';
-import type { PersonaKnowledgeHit } from '../../../src/personaKnowledge/knowledgeRetrieval';
 import { findUsedKnowledgeHits } from '../../../src/personaKnowledge/knowledgeAttribution';
+import type { PersonaKnowledgeHit } from '../../../src/personaKnowledge/knowledgeRetrieval';
+import { personalizationDigest, type PersonalizationProfile } from '../../../src/personalization/profile';
 import { buildPersonaContext, type Persona } from '../../../src/personas/persona';
-import { PersonaTurnResourceResolver, type PersonaSwitchNotice } from '../../../src/runtime/PersonaTurnResourceResolver';
+import {
+  PersonaTurnResourceResolver,
+  type PersonaSwitchNotice,
+} from '../../../src/runtime/PersonaTurnResourceResolver';
 
 const CHAT_MODEL = 'scripted/chat-model';
 const PERSONA_MODEL = 'scripted/persona-model';
@@ -98,9 +97,7 @@ function makeResolver(
       mcpRequestTimeoutMs: 1_000,
       logger: createLogger({ silent: true }),
     },
-    personalization === undefined
-      ? undefined
-      : { ...personalization, digest: personalizationDigest(personalization) },
+    personalization === undefined ? undefined : { ...personalization, digest: personalizationDigest(personalization) },
     persona === undefined ? undefined : buildPersonaContext(persona),
     knowledge?.block,
     knowledge?.hits,

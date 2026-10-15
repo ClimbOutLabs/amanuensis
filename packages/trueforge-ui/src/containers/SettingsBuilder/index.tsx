@@ -8,14 +8,15 @@ import { cn } from '@/atoms/lib/cn.js';
 import { useCompactLayout } from '@/atoms/lib/CompactLayoutContext.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { useOptionalPersonalization } from '@/components/PersonalizationContext.js';
+import { useOptionalRunCodeStatus } from '@/components/RunCodeStatusContext.js';
 import { Icon } from '@/icons/Icon.js';
-import { useOptionalCatalogServer, useOptionalRefreshServerCapabilities } from '@/server/ServerContext.js';
 import { useOptionalSentinelApiState } from '@/sentinel/SentinelApiContext.js';
+import { useOptionalCatalogServer, useOptionalRefreshServerCapabilities } from '@/server/ServerContext.js';
 import { useShellMode, type SettingsSection } from '@/server/ShellModeContext.js';
 
 // Section modules (and their list/catalog APIs) load only when that tab mounts.
 const ModelSettings = lazy(() => import('./ModelSettings.js'));
-// Personas live under Model roles (their model bindings sit alongside every other
+// Personas live under Roles and Personas (their model bindings sit alongside every other
 // model role — see docs/model-roles.mdx), not as a section of their own here.
 const ModelRoleSettings = lazy(() => import('./ModelRoleSettings.js'));
 const ConnectorSettings = lazy(() => import('./ConnectorSettings.js'));
@@ -50,7 +51,7 @@ const TruefoundrySettingsBuilder = () => {
   // dock/widget panels are ~mobile width even on a wide viewport — keep Settings stacked.
   const compact = useCompactLayout();
   const hasSkills = catalog?.skillCatalog != null;
-  const hasSandbox = catalog?.sandboxCatalog != null;
+  const hasSandbox = useOptionalRunCodeStatus() != null;
   const hasPersonalization = useOptionalPersonalization() != null;
   const hasSentinel = useOptionalSentinelApiState() != null;
 
@@ -98,36 +99,16 @@ const TruefoundrySettingsBuilder = () => {
     Array<{
       id: SettingsSection;
       label: string;
-      icon:
-        | 'cpu'
-        | 'brain'
-        | 'plug'
-        | 'box-archive'
-        | 'lightbulb'
-        | 'cube'
-        | 'robot'
-        | 'palette'
-        | 'save'
-        | 'lock';
+      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'save' | 'lock';
     }>
   >(() => {
     const baseSections: Array<{
       id: SettingsSection;
       label: string;
-      icon:
-        | 'cpu'
-        | 'brain'
-        | 'plug'
-        | 'box-archive'
-        | 'lightbulb'
-        | 'cube'
-        | 'robot'
-        | 'palette'
-        | 'save'
-        | 'lock';
+      icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'save' | 'lock';
     }> = [
       { id: 'models', label: 'Models', icon: 'cpu' },
-      { id: 'model-roles', label: 'Model roles', icon: 'brain' },
+      { id: 'model-roles', label: 'Roles and Personas', icon: 'brain' },
       { id: 'connectors', label: 'Connectors', icon: 'plug' },
       // Not gated on a capability: memory is configured by pointing at a bank, so the section has
       // to be reachable while none is configured. It reads as off until one is.
@@ -139,7 +120,7 @@ const TruefoundrySettingsBuilder = () => {
       baseSections.push({ id: 'skills', label: 'Skills', icon: 'lightbulb' });
     }
     if (hasSandbox) {
-      baseSections.push({ id: 'sandbox', label: 'Sandbox providers', icon: 'cube' });
+      baseSections.push({ id: 'sandbox', label: 'Sandbox', icon: 'cube' });
     }
     if (hasPersonalization) {
       baseSections.push({ id: 'personalization', label: 'Personalization', icon: 'robot' });

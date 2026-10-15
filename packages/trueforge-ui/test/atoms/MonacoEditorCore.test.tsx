@@ -3,6 +3,7 @@ import { act, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MonacoEditorCore } from '@/atoms/MonacoEditorCore.js';
+import { ThemeProvider } from '@/theme/ThemeProvider.js';
 
 const monacoMocks = vi.hoisted(() => {
   let changeListener: (() => void) | undefined;
@@ -56,7 +57,10 @@ describe('MonacoEditorCore', () => {
     });
   });
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
   it('creates Monaco with consumer options and forwards lifecycle and change callbacks', async () => {
     const beforeMount = vi.fn();
@@ -135,5 +139,71 @@ describe('MonacoEditorCore', () => {
 
     unmount();
     expect(monacoMocks.sizeDisposable.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('creates the editor with the latest value when it changed while Monaco was loading', async () => {
+    const { rerender } = render(<MonacoEditorCore value="first" />);
+    rerender(<MonacoEditorCore value="second" />);
+
+    await waitFor(() => expect(monacoMocks.editorApi.create).toHaveBeenCalledOnce());
+    expect(monacoMocks.editorApi.create).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({ value: 'second' }),
+    );
+  });
+
+  it('creates the editor with the latest theme when the mode changed while Monaco was loading', async () => {
+    const { rerender } = render(
+      <ThemeProvider theme={{ mode: 'light' }}>
+        <MonacoEditorCore value="x" />
+      </ThemeProvider>,
+    );
+    rerender(
+      <ThemeProvider theme={{ mode: 'dark' }}>
+        <MonacoEditorCore value="x" />
+      </ThemeProvider>,
+    );
+
+    await waitFor(() => expect(monacoMocks.editorApi.create).toHaveBeenCalledOnce());
+    expect(monacoMocks.editorApi.create).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({ theme: 'aui-monaco-dark' }),
+    );
+  });
+
+  it('builds the editor theme from the app text and gutter tokens and redefines it on a mode change', async () => {
+    // jsdom does not inherit custom properties, so serve the theme tokens straight from the style lookup.
+    let tokens: Record<string, string> = {
+      '--text-primary': '#2c2a26',
+      '--text-secondary': '#746b5d',
+      '--border': 'not-a-color',
+    };
+    vi.spyOn(CSSStyleDeclaration.prototype, 'getPropertyValue').mockImplementation(name => tokens[name] ?? '');
+
+    function Editor({ mode }: { mode: 'light' | 'dark' }) {
+      return (
+        <ThemeProvider theme={{ mode }}>
+          <MonacoEditorCore value="x" />
+        </ThemeProvider>
+      );
+    }
+
+    const { rerender } = render(<Editor mode="light" />);
+    await waitFor(() => expect(monacoMocks.editorApi.create).toHaveBeenCalledOnce());
+
+    const lightCall = monacoMocks.editorApi.defineTheme.mock.calls.find(([name]) => name === 'aui-monaco-light');
+    expect(lightCall?.[1].colors).toMatchObject({
+      'editor.foreground': '#2c2a26',
+      'editorLineNumber.foreground': '#746b5d',
+    });
+    expect(lightCall?.[1].colors).not.toHaveProperty('editorIndentGuide.background1');
+
+    monacoMocks.editorApi.defineTheme.mockClear();
+    tokens = { ...tokens, '--text-primary': '#f2ecdd' };
+    rerender(<Editor mode="dark" />);
+
+    await waitFor(() => expect(monacoMocks.editorApi.setTheme).toHaveBeenCalledWith('aui-monaco-dark'));
+    const darkCall = monacoMocks.editorApi.defineTheme.mock.calls.find(([name]) => name === 'aui-monaco-dark');
+    expect(darkCall?.[1]).toMatchObject({ base: 'vs-dark', colors: { 'editor.foreground': '#f2ecdd' } });
   });
 });

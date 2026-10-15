@@ -9,13 +9,14 @@ import {
   type MessageStatus,
 } from '@assistant-ui/react';
 import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
+import type { ReactNode } from 'react';
 
 import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js';
 import { AgentInternalsDisclosure } from '../atoms/agent-chat/AgentInternalsDisclosure.js';
 import { MemoryContextCard } from '../atoms/agent-chat/MemoryContextCard.js';
 import { useAgentDetailsVisibility } from '../server/AgentDetailsPreferenceContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
-import { computeAgentStepsSplit } from '../utils/computeAgentStepsSplit.js';
+import { computeAgentStepsSplit, type AgentStepsRun } from '../utils/computeAgentStepsSplit.js';
 import { parseToolResultDisposition } from '../utils/toolCallParsing.js';
 import { AgentStepsContainer } from './AgentStepsContainer.js';
 import { AssistantTextContainer } from './AssistantTextContainer.js';
@@ -23,6 +24,7 @@ import { useDocumentIngestionStatusLine } from './DocumentIngestionStatusProvide
 import { useMemoryTurnContext, useMemoryTurnContextStatus } from './MemoryTurnContextProvider.js';
 import { MessageImageContainer } from './MessageImageContainer.js';
 import { ReasoningContainer } from './ReasoningContainer.js';
+import { RunCodeSetupNoticesContainer } from './RunCodeSetupNoticesContainer.js';
 import { ToolCallContainer } from './ToolCallContainer.js';
 
 /**
@@ -105,6 +107,13 @@ function buildInternalsSummary({
   return segments.join(' · ');
 }
 
+type GroupKey = `group-agentSteps-${number}` | 'group-reasoning';
+
+// Each folded run gets its own group key so interleaved runs stay distinct disclosures.
+function agentStepsGroupKey(runIndex: number): `group-agentSteps-${number}` {
+  return `group-agentSteps-${runIndex}`;
+}
+
 const PHASE_LIVE_LABELS: Record<AgentStepsPhase, string> = {
   'waiting-for-model': 'Waiting for model',
   'executing-tools': 'Executing tools',
@@ -140,11 +149,10 @@ export function AssistantMessageContainer() {
 
   const parts = useAuiState(s => s.message.parts);
 
-  const { cutIndex, hasFinal, toolCount, thinkingCount } = computeAgentStepsSplit(parts, isMessageRunning);
-  const phase = stepPhase(parts, messageStatus);
+  const { runs, hasFinal } = computeAgentStepsSplit(parts, isMessageRunning);
 
   // Progressive disclosure inputs: errors and approvals surface with an amber
-  // dot and auto-expand while the turn is running; a clean completed turn with no tools, no
+  // dot and auto-expand while the turn is running; a clean completed run with no tools, no
   // thinking, no memory, and no errors renders no internals row at all. Completed turns with
   // errors keep the dot and the summary row but follow the chat-level switch (collapsed by
   // default) instead of forcing the content open.
@@ -158,38 +166,88 @@ export function AssistantMessageContainer() {
   const recalledItems = memoryVisible ? (recall?.stats.items ?? 0) : 0;
   const hasMemory = memoryVisible || memoryContext?.profile != null;
   const memoryFailed = memoryContext == null && memoryContextHasError;
-  const hasToolError = parts.some(isToolPartErrored);
-  const attention = hasToolError || recallOutcomeBad || memoryFailed || phase === 'waiting-for-approval';
-  const trivial = !isMessageRunning && toolCount === 0 && thinkingCount === 0 && !hasMemory && !attention;
-  const showInternals = !trivial;
 
-  const summary = buildInternalsSummary({ toolCount, thinkingCount, recalledItems });
-  // A paused-for-approval turn is not "running" but still needs a live label —
-  // it is the one state that requires the user to act.
-  const liveLabel = isMessageRunning
-    ? phase !== undefined
-      ? PHASE_LIVE_LABELS[phase]
-      : 'Thinking…'
-    : phase === 'waiting-for-approval'
-      ? PHASE_LIVE_LABELS['waiting-for-approval']
-      : undefined;
+  // Turn-level state (memory, live label) is hosted by the first run; a turn with no folded run
+  // gets a leading row instead.
+  const renderInternals = ({
+    run,
+    runIndex,
+    children,
+  }: {
+    run: AgentStepsRun;
+    runIndex: number;
+    children?: ReactNode;
+  }) => {
+    const isHost = runIndex === 0;
+    const isLast = runIndex >= runs.length - 1;
+    const runParts = parts.slice(run.start, run.end);
+    const isLive = isMessageRunning && isLast;
+    // Only the last run reflects the running turn; earlier runs have already finished.
+    const phase = stepPhase(runParts, isMessageRunning && !isLast ? undefined : messageStatus);
+    const attention =
+      runParts.some(isToolPartErrored) ||
+      (isHost && (recallOutcomeBad || memoryFailed)) ||
+      phase === 'waiting-for-approval';
+    const showMemory = isHost && hasMemory;
+    const trivial = !isLive && run.toolCount === 0 && run.thinkingCount === 0 && !showMemory && !attention;
+    if (trivial) return null;
 
-  const groupBy = (part: PartState, _context: GroupByContext): readonly `group-${string}`[] | null => {
-    const index = parts.findIndex(p => p === part);
-    if (index === -1) return null;
+    // A paused-for-approval turn is not "running" but still needs a live label —
+    // it is the one state that requires the user to act.
+    const liveLabel = isLive
+      ? phase !== undefined
+        ? PHASE_LIVE_LABELS[phase]
+        : 'Thinking…'
+      : phase === 'waiting-for-approval'
+        ? PHASE_LIVE_LABELS['waiting-for-approval']
+        : undefined;
 
-    if (part.type === 'text' && index >= cutIndex) {
-      return null;
-    }
+    return (
+      <AgentInternalsDisclosure
+        summary={buildInternalsSummary({
+          toolCount: run.toolCount,
+          thinkingCount: run.thinkingCount,
+          recalledItems: isHost ? recalledItems : 0,
+        })}
+        liveLabel={liveLabel}
+        isRunning={isLive}
+        attention={attention}
+        lockOpen={messageStatus === 'requires-action' && (isLast || phase === 'waiting-for-approval')}
+        expanded={agentDetailsVisible}
+        dataTestPrefix="assistant-message"
+      >
+        {showMemory && (
+          <MemoryContextCard
+            recall={memoryContext?.recall}
+            profile={memoryContext?.profile}
+            unavailable={memoryFailed}
+            onRetry={retryMemoryContext}
+            agentDetailsVisible={agentDetailsVisible}
+          />
+        )}
+        {children !== undefined && (
+          <AgentStepsContainer
+            toolCount={run.toolCount}
+            thinkingCount={run.thinkingCount}
+            hasFinal={hasFinal}
+            phase={phase}
+            bare
+          >
+            {children}
+          </AgentStepsContainer>
+        )}
+      </AgentInternalsDisclosure>
+    );
+  };
 
-    if (index < cutIndex) {
-      if (part.type === 'reasoning') {
-        return ['group-agentSteps', 'group-reasoning'];
-      }
-      return ['group-agentSteps'];
-    }
+  const runIndexOfPart = (index: number) => runs.findIndex(run => index >= run.start && index < run.end);
 
-    return null;
+  const groupBy = (part: PartState, _context: GroupByContext): readonly GroupKey[] | null => {
+    const runIndex = runIndexOfPart(parts.findIndex(p => p === part));
+    if (runIndex === -1) return null;
+    return part.type === 'reasoning'
+      ? [agentStepsGroupKey(runIndex), 'group-reasoning']
+      : [agentStepsGroupKey(runIndex)];
   };
 
   return (
@@ -200,64 +258,9 @@ export function AssistantMessageContainer() {
           !isThreadRunning ? <MessageActionBar isCopied={isCopied} onCopy={copy} createdAt={createdAt} /> : undefined
         }
       >
-        {showInternals && (
-          <AgentInternalsDisclosure
-            summary={summary}
-            liveLabel={liveLabel}
-            isRunning={isMessageRunning}
-            attention={attention}
-            lockOpen={messageStatus === 'requires-action'}
-            expanded={agentDetailsVisibility === 'expanded'}
-            dataTestPrefix="assistant-message"
-          >
-            <MemoryContextCard
-              recall={memoryContext?.recall}
-              profile={memoryContext?.profile}
-              unavailable={memoryFailed}
-              onRetry={retryMemoryContext}
-              agentDetailsVisible={agentDetailsVisible}
-            />
-            <MessagePrimitive.GroupedParts groupBy={groupBy}>
-              {({ part, children }) => {
-                switch (part.type) {
-                  case 'group-agentSteps':
-                    return (
-                      <AgentStepsContainer
-                        toolCount={toolCount}
-                        thinkingCount={thinkingCount}
-                        hasFinal={hasFinal}
-                        phase={phase}
-                        bare
-                      >
-                        {children}
-                      </AgentStepsContainer>
-                    );
-                  case 'group-reasoning':
-                    return isMessageRunning ? <ReasoningContainer group={part} /> : null;
-                  case 'text': {
-                    // Intermediate text inside the trace: muted vs the final answer.
-                    // Final text (at/after the cut) belongs to the main flow, not the trace.
-                    const index = parts.findIndex(p => p === part);
-                    if (index < 0 || index >= cutIndex) return null;
-                    return (
-                      <div className="mb-2 text-xs text-text-secondary [&_.markdown-body]:text-inherit">
-                        <AssistantTextContainer />
-                      </div>
-                    );
-                  }
-                  case 'reasoning':
-                    return isMessageRunning ? <AssistantLeafPartContainer part={part} /> : null;
-                  case 'tool-call':
-                  case 'image':
-                  case 'data':
-                    return <AssistantLeafPartContainer part={part} />;
-                  default:
-                    return null;
-                }
-              }}
-            </MessagePrimitive.GroupedParts>
-          </AgentInternalsDisclosure>
-        )}
+        {runs.length === 0 &&
+          renderInternals({ run: { start: 0, end: 0, toolCount: 0, thinkingCount: 0 }, runIndex: 0 })}
+        <RunCodeSetupNoticesContainer parts={parts} />
         {ingestionStatusLine !== undefined && (
           <p className="mb-2 text-xs italic text-text-secondary" data-testid="document-ingestion-status">
             {ingestionStatusLine}
@@ -270,24 +273,19 @@ export function AssistantMessageContainer() {
             which would flicker the queue and reset its elapsed clock across
             the phases of a normal agentic turn. */}
         <MessagePrimitive.GroupedParts groupBy={groupBy} indicator="always">
-          {({ part }) => {
+          {({ part, children }) => {
             switch (part.type) {
-              // Rendered inside the internals disclosure above.
-              case 'group-agentSteps':
-                return null;
               case 'group-reasoning':
                 return isMessageRunning ? <ReasoningContainer group={part} /> : null;
               case 'text': {
                 const index = parts.findIndex(p => p === part);
-                // Intermediate text inside Agent steps: muted + indented vs final answer
-                if (index >= 0 && index < cutIndex) {
-                  return (
-                    <div className="mb-2 ml-[1.75rem] text-xs text-text-secondary [&_.markdown-body]:text-inherit">
-                      <AssistantTextContainer />
-                    </div>
-                  );
-                }
-                return <AssistantTextContainer />;
+                // Folded narration reads muted; text outside every run is answer text.
+                if (runIndexOfPart(index) === -1) return <AssistantTextContainer />;
+                return (
+                  <div className="mb-2 text-xs text-text-secondary [&_.markdown-body]:text-inherit">
+                    <AssistantTextContainer />
+                  </div>
+                );
               }
               case 'reasoning':
                 return isMessageRunning ? <AssistantLeafPartContainer part={part} /> : null;
@@ -297,8 +295,13 @@ export function AssistantMessageContainer() {
                 return <AssistantLeafPartContainer part={part} />;
               case 'indicator':
                 return resumeUnavailable ? null : <MessageIndicator />;
-              default:
-                return null;
+              default: {
+                if (!('indices' in part)) return null;
+                const firstIndex = part.indices[0];
+                const runIndex = firstIndex === undefined ? -1 : runIndexOfPart(firstIndex);
+                const run = runs[runIndex];
+                return run ? renderInternals({ run, runIndex, children }) : null;
+              }
             }
           }}
         </MessagePrimitive.GroupedParts>

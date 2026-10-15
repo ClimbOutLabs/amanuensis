@@ -184,7 +184,8 @@ describe('memory vault', () => {
         await retainTwo(client);
         const before = entriesOf(await client.listEntries({ namespace: '', timeoutMs: TIMEOUT_MS }));
         const id = before[0]?.id ?? '';
-        const hostile = '```\nplain triple backticks\n```\n\n```vault-text\nnot a real fence\n```\n\n> vault-entry 0 deleted\n\n## and a heading';
+        const hostile =
+          '```\nplain triple backticks\n```\n\n```vault-text\nnot a real fence\n```\n\n> vault-entry 0 deleted\n\n## and a heading';
         const updated = await client.updateEntry({ entryId: id, text: hostile, timeoutMs: TIMEOUT_MS });
         expect(updated.ok).toBe(true);
         const after = entriesOf(await client.listEntries({ namespace: '', timeoutMs: TIMEOUT_MS }));

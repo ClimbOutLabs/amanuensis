@@ -40,8 +40,42 @@ function doneTurn(overrides: Partial<TrueForgeApi.Turn> = {}): TrueForgeApi.Turn
 
 interface FakeSessions {
   listTurns: ReturnType<typeof vi.fn>;
+  listEvents: ReturnType<typeof vi.fn>;
   createTurnStream: ReturnType<typeof vi.fn>;
   getTurn: ReturnType<typeof vi.fn>;
+}
+
+/**
+ * A session with these turns in creation order. Mirrors the server: `listTurns` is oldest-first,
+ * the event feed is newest-first on the active branch.
+ */
+function fakeTurns(turns: TrueForgeApi.Turn[]): Partial<FakeSessions> {
+  return {
+    listTurns: vi.fn(async (_sessionId: string, request?: { limit?: number }) => ({
+      data: turns.slice(0, request?.limit ?? turns.length),
+    })),
+    listEvents: vi.fn(async (_sessionId: string, request?: { limit?: number }) => ({
+      data: turns
+        .toReversed()
+        .slice(0, request?.limit ?? turns.length)
+        .map(turn => ({ turnId: turn.id, event: { type: 'turn.created', id: `evt_${turn.id}` } })),
+    })),
+    getTurn: vi.fn(async (_sessionId: string, turnId: string) => ({
+      data: turns.find(turn => turn.id === turnId),
+    })),
+  };
+}
+
+function pausedTurn(id: string): TrueForgeApi.Turn {
+  return doneTurn({
+    id,
+    state: {
+      status: 'done',
+      completedAt: '2026-09-25T00:00:01.000Z',
+      output: null,
+      requiredActions: [approvalRequired('2026-09-25T00:00:00.000Z')],
+    },
+  });
 }
 
 function createFakeClient(sessions: Partial<FakeSessions>): {
@@ -50,6 +84,7 @@ function createFakeClient(sessions: Partial<FakeSessions>): {
 } {
   const full: FakeSessions = {
     listTurns: vi.fn(async () => ({ data: [] })),
+    listEvents: vi.fn(async () => ({ data: [] })),
     createTurnStream: vi.fn(async () => {
       async function* empty(): AsyncGenerator<never> {
         // no events
@@ -68,9 +103,7 @@ function createFakeClient(sessions: Partial<FakeSessions>): {
 describe('isPendingApprovalsError', () => {
   it('matches the server 422 message', () => {
     assert.equal(
-      isPendingApprovalsError(
-        new Error('user message cannot be sent while approvals or questions are pending'),
-      ),
+      isPendingApprovalsError(new Error('user message cannot be sent while approvals or questions are pending')),
       true,
     );
   });
@@ -99,17 +132,24 @@ describe('peekSessionTip', () => {
       },
     });
     const { extensions, sessions } = createFakeClient({
-      listTurns: vi.fn(async () => ({ data: [turn] })),
+      ...fakeTurns([turn]),
     });
     const tip = await extensions.peekSessionTip({ sessionId: 'ses_1' });
     assert.deepEqual(tip, {
       turnId: 'trn_1',
       status: 'done',
-      pendingApprovals: [
-        { toolCallId: 'call_1', threadId: 'main', createdAt: '2026-09-25T00:00:00.000Z' },
-      ],
+      pendingApprovals: [{ toolCallId: 'call_1', threadId: 'main', createdAt: '2026-09-25T00:00:00.000Z' }],
     });
-    assert.deepEqual(sessions.listTurns.mock.calls[0], ['ses_1', { limit: 1 }]);
+    assert.deepEqual(sessions.listEvents.mock.calls[0], ['ses_1', { limit: 1 }]);
+    assert.equal(sessions.listTurns.mock.calls.length, 0);
+  });
+
+  it('reads the newest turn, not the first one', async () => {
+    const { extensions } = createFakeClient(
+      fakeTurns([pausedTurn('trn_1'), doneTurn({ id: 'trn_2' }), doneTurn({ id: 'trn_3' })]),
+    );
+    const tip = await extensions.peekSessionTip({ sessionId: 'ses_1' });
+    assert.deepEqual(tip, { turnId: 'trn_3', status: 'done', pendingApprovals: [] });
   });
 
   it('ignores non-approval required actions and running turns', async () => {
@@ -130,7 +170,7 @@ describe('peekSessionTip', () => {
       },
     });
     const { extensions } = createFakeClient({
-      listTurns: vi.fn(async () => ({ data: [turn] })),
+      ...fakeTurns([turn]),
     });
     const tip = await extensions.peekSessionTip({ sessionId: 'ses_1' });
     assert.deepEqual(tip?.pendingApprovals, []);
@@ -148,7 +188,7 @@ describe('dismissPendingApprovals', () => {
       },
     });
     const { extensions, sessions } = createFakeClient({
-      listTurns: vi.fn(async () => ({ data: [turn] })),
+      ...fakeTurns([turn]),
     });
     const result = await extensions.dismissPendingApprovals({
       sessionId: 'ses_1',
@@ -174,7 +214,7 @@ describe('dismissPendingApprovals', () => {
 
   it('reports alreadyResolved when nothing is pending', async () => {
     const { extensions, sessions } = createFakeClient({
-      listTurns: vi.fn(async () => ({ data: [doneTurn()] })),
+      ...fakeTurns([doneTurn()]),
     });
     const result = await extensions.dismissPendingApprovals({ sessionId: 'ses_1', reason: 'x' });
     assert.deepEqual(result, { dismissed: 0, alreadyResolved: true });
@@ -191,13 +231,86 @@ describe('dismissPendingApprovals', () => {
       },
     });
     const { extensions } = createFakeClient({
-      listTurns: vi.fn(async () => ({ data: [turn] })),
+      ...fakeTurns([turn]),
       createTurnStream: vi.fn(async () => {
         throw new Error('No pending approval for tool call call_1');
       }),
     });
     const result = await extensions.dismissPendingApprovals({ sessionId: 'ses_1', reason: 'x' });
     assert.deepEqual(result, { dismissed: 0, alreadyResolved: true });
+  });
+});
+
+describe('chat whose first turn kept historic required actions', () => {
+  const turns = [pausedTurn('trn_1'), doneTurn({ id: 'trn_2' }), doneTurn({ id: 'trn_3' })];
+
+  it('reports no pending approval on the tip', async () => {
+    const { extensions } = createFakeClient(fakeTurns(turns));
+    const tip = await extensions.peekSessionTip({ sessionId: 'ses_1' });
+    assert.equal(tip?.turnId, 'trn_3');
+    assert.deepEqual(tip?.pendingApprovals, []);
+  });
+
+  it('dismisses nothing and sends no continuation', async () => {
+    const { extensions, sessions } = createFakeClient(fakeTurns(turns));
+    const result = await extensions.dismissPendingApprovals({ sessionId: 'ses_1', reason: 'x' });
+    assert.deepEqual(result, { dismissed: 0, alreadyResolved: true });
+    assert.equal(sessions.createTurnStream.mock.calls.length, 0);
+  });
+
+  it('still denies a real pending approval on the newest turn', async () => {
+    const { extensions, sessions } = createFakeClient(
+      fakeTurns([doneTurn({ id: 'trn_1' }), doneTurn({ id: 'trn_2' }), pausedTurn('trn_3')]),
+    );
+    const result = await extensions.dismissPendingApprovals({ sessionId: 'ses_1', reason: 'x' });
+    assert.deepEqual(result, { dismissed: 1, alreadyResolved: false });
+    const request: unknown = sessions.createTurnStream.mock.calls[0]?.[1];
+    assert.ok(typeof request === 'object' && request !== null);
+    assert.equal(Reflect.get(request, 'previousTurnId'), 'trn_3');
+  });
+});
+
+describe('chat that paused on a card, was approved, then got a follow-up', () => {
+  const approved = doneTurn({
+    id: 'trn_2',
+    previousTurnId: 'trn_1',
+    input: [{ type: 'user.tool_approval', threadId: 'main', toolCallId: 'call_1', approval: { status: 'allow' } }],
+  });
+  const followUp = doneTurn({
+    id: 'trn_3',
+    previousTurnId: 'trn_2',
+    input: [{ type: 'user.message', content: 'and one more thing' }],
+  });
+  const turns = [pausedTurn('trn_1'), approved, followUp];
+
+  it('probes the follow-up as the tip and finds nothing pending', async () => {
+    const { extensions } = createFakeClient(fakeTurns(turns));
+    const tip = await extensions.peekSessionTip({ sessionId: 'ses_1' });
+    assert.deepEqual(tip, { turnId: 'trn_3', status: 'done', pendingApprovals: [] });
+  });
+
+  it('sends no continuation anchored on the turn that asked', async () => {
+    const { extensions, sessions } = createFakeClient(fakeTurns(turns));
+    const result = await extensions.dismissPendingApprovals({ sessionId: 'ses_1', reason: 'x' });
+    assert.deepEqual(result, { dismissed: 0, alreadyResolved: true });
+    assert.equal(sessions.createTurnStream.mock.calls.length, 0);
+  });
+});
+
+describe('getLastTurnInputTokens', () => {
+  it('reads the newest turn metrics', async () => {
+    const newest = doneTurn({
+      id: 'trn_2',
+      state: {
+        status: 'done',
+        completedAt: '2026-09-25T00:00:01.000Z',
+        output: null,
+        requiredActions: [],
+        metrics: { totalInputTokens: 4321 },
+      },
+    });
+    const { extensions } = createFakeClient(fakeTurns([doneTurn({ id: 'trn_1' }), newest]));
+    assert.equal(await extensions.getLastTurnInputTokens({ sessionId: 'ses_1' }), 4321);
   });
 });
 

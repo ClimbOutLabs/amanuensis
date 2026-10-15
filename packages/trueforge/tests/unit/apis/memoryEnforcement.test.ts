@@ -20,6 +20,7 @@
 import { z } from '@hono/zod-openapi';
 import type { Turn, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import configuration from '../../../src/config';
 import { MEMORY_PROBE_QUERY } from '../../../src/runtime/memory/memoryProbe';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetMcpServerResponseSchema } from '../../../src/schemas/mcpServer';
@@ -396,12 +397,17 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
   let turn1: Turn;
   let turn1OperationId: string;
 
+  const originalBackend = configuration.MEMORY_BACKEND;
+
   beforeAll(async () => {
+    // The Hindsight capability is only wired when this backend is selected; the default is markdown.
+    configuration.MEMORY_BACKEND = 'hindsight';
     server = await startApprovalTestServer();
     hindsight = await startFakeHindsightServer();
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {
+    configuration.MEMORY_BACKEND = originalBackend;
     await server.close();
     await hindsight.close();
   });

@@ -141,7 +141,15 @@ async function setup(overrides?: { resolveAddresses?: (hostname: string) => Prom
     }
   };
 
-  return { app, listDocuments, waitForStatus, knowledgeDir, as: (next: RequestContext) => { user = next; } };
+  return {
+    app,
+    listDocuments,
+    waitForStatus,
+    knowledgeDir,
+    as: (next: RequestContext) => {
+      user = next;
+    },
+  };
 }
 
 describe('persona knowledge router', () => {
@@ -150,7 +158,11 @@ describe('persona knowledge router', () => {
 
     const created = await app.request(
       '/persona-zara/knowledge',
-      jsonInit('POST', { kind: 'text', title: 'Exit story', text: 'The solo project sold for twenty million dollars.' }),
+      jsonInit('POST', {
+        kind: 'text',
+        title: 'Exit story',
+        text: 'The solo project sold for twenty million dollars.',
+      }),
     );
     expect(created.status).toBe(201);
     const { data } = (await created.json()) as { data: KnowledgeDocumentWire };
@@ -238,10 +250,7 @@ describe('persona knowledge router', () => {
       'https://user:secret@example.com/story',
       'http://user@example.com/',
     ]) {
-      const rejected = await app.request(
-        '/persona-zara/knowledge',
-        jsonInit('POST', { kind: 'url', url }),
-      );
+      const rejected = await app.request('/persona-zara/knowledge', jsonInit('POST', { kind: 'url', url }));
       expect(rejected.status).toBe(400);
     }
   });

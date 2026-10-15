@@ -17,7 +17,7 @@
  * escalates.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 
 /** Scope key for tracked entries: the session's (repository_id, workspace_cwd) pair. */
@@ -142,6 +142,43 @@ export function canonicalWriteTarget(input: { p: string; cwd: string }): string 
   }
 }
 
+const GIT_CONTROL_FILE_NAMES = new Set(['.gitattributes', '.gitmodules']);
+
+/**
+ * True when a path has a component naming git control state: the `.git`
+ * directory (any case, trailing dots or spaces, 8.3 aliases), `.gitattributes`
+ * or `.gitmodules`. Writing these can make git run agent-chosen programs.
+ */
+export function isGitControlPath(p: string): boolean {
+  return p.split(/[\\/]+/u).some(component => {
+    const name = component.replace(/[. ]+$/u, '').toLowerCase();
+    return name === '.git' || /^(git|gitmod|gitatt)~\d+$/u.test(name) || GIT_CONTROL_FILE_NAMES.has(name);
+  });
+}
+
+/**
+ * True when a write target is, or resolves through symlinks to, git control
+ * state. Checks the path as written and its resolved identities (parent
+ * directory, and the final component when it already exists).
+ */
+export function writeTargetTouchesGitControl(input: { p: string; cwd: string }): boolean {
+  if (isGitControlPath(input.p)) {
+    return true;
+  }
+  const identities = [canonicalWriteTarget(input), canonicalFileIdentity(input)];
+  return identities.some(identity => identity !== null && isGitControlPath(identity)) || isDanglingSymlink(input);
+}
+
+/** A dangling symlink cannot be resolved, so its destination is unknown: fail closed. */
+function isDanglingSymlink(input: { p: string; cwd: string }): boolean {
+  const absolute = path.isAbsolute(input.p) ? input.p : path.resolve(input.cwd, input.p);
+  try {
+    return lstatSync(absolute).isSymbolicLink() && canonicalFileIdentity(input) === null;
+  } catch {
+    return false;
+  }
+}
+
 /** sha256 of current file content. Null when the file cannot be read: fail closed. */
 export function sha256FileContent(filePath: string): string | null {
   try {
@@ -249,7 +286,10 @@ export function skipWrapperPrefix(argv: readonly string[]): readonly string[] {
       let index = 1;
       while (index < rest.length) {
         const token = rest[index];
-        if (token === undefined || (token !== '--' && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(token) && !token.startsWith('-'))) {
+        if (
+          token === undefined ||
+          (token !== '--' && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(token) && !token.startsWith('-'))
+        ) {
           break;
         }
         index += 1;

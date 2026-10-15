@@ -13,6 +13,7 @@ import {
   ListImplementationPlanGrantsResponseSchema,
   RevokeImplementationPlanGrantResponseSchema,
 } from '../schemas/implementationPlanGrant';
+import { ListSessionAuditLogRequestQuerySchema, ListSessionAuditLogResponseSchema } from '../schemas/sentinelAudit';
 import {
   CreateSessionRequestSchema,
   GetOrCreateSessionByExternalIdRequestSchema,
@@ -22,10 +23,6 @@ import {
   SessionIdParamsSchema,
   UpdateSessionRequestSchema,
 } from '../schemas/session';
-import {
-  ListSessionAuditLogRequestQuerySchema,
-  ListSessionAuditLogResponseSchema,
-} from '../schemas/sentinelAudit';
 import { CancelSessionRequestSchema, CancelSessionResponseSchema } from '../schemas/turn';
 import { TOKEN_PAGINATION } from './fernExtensions';
 import { OpenApiTag } from './openapiTags';

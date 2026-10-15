@@ -59,12 +59,7 @@ const filePathListSchema = z
 const extractDocumentTextSchema = z
   .object({
     file_paths: filePathListSchema,
-    page_start: z
-      .number()
-      .int()
-      .positive()
-      .optional()
-      .describe('First PDF page to read (1-based). Defaults to 1.'),
+    page_start: z.number().int().positive().optional().describe('First PDF page to read (1-based). Defaults to 1.'),
     page_end: z
       .number()
       .int()
@@ -114,7 +109,10 @@ const sourceSchema = z
 const netWorthObservationSchema = z
   .object({
     key: z.string().min(1).max(120),
-    label: z.string().min(1).max(160),
+    label: z
+      .string()
+      .min(1)
+      .refine(v => v.length <= 160, 'must be at most 160 characters'),
     classification: z.enum(['asset', 'liability']),
     amount_cents: z.number().int().nonnegative().refine(Number.isSafeInteger),
     source: sourceSchema,
@@ -123,10 +121,10 @@ const netWorthObservationSchema = z
 
 const reportRowSchema = z
   .object({
-    label: z.string().max(160),
-    value: z.string().max(240),
+    label: z.string().refine(v => v.length <= 160, 'must be at most 160 characters'),
+    value: z.string().refine(v => v.length <= 240, 'must be at most 240 characters'),
     status: z.enum(['included', 'conflict', 'uncertain', 'info']),
-    sources: z.array(z.string().max(240)).max(8),
+    sources: z.array(z.string().refine(v => v.length <= 240, 'must be at most 240 characters')).max(8),
   })
   .strict();
 
@@ -146,9 +144,9 @@ const reportSchema = z
           'full renders a multi-page report with no row or section cap, for long reports such as financial plans.',
       ),
     title: z.string().trim().min(1).max(120),
-    summary: z.string().max(500),
+    summary: z.string().refine(v => v.length <= 500, 'must be at most 500 characters'),
     sections: z.array(reportSectionSchema),
-    notes: z.array(z.string().max(500)),
+    notes: z.array(z.string().refine(v => v.length <= 500, 'must be at most 500 characters')),
   })
   .strict();
 

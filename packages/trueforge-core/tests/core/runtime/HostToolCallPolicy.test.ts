@@ -1,9 +1,9 @@
+import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import {
   applyHostToolCallPolicy,
   type HostToolCallPolicy,
   type HostToolCallPolicyCall,
 } from '../../../src/core/runtime/HostToolCallPolicy';
-import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 
 function webSearchToolInfo(): InternalToolCallInfo {
   return {
@@ -52,6 +52,14 @@ describe('applyHostToolCallPolicy', () => {
     expect(result.type).toBe('mcp');
     expect(result.original_tool_name).toBe('web_search');
     expect(result.mcp_server_name).toBe('web');
+  });
+
+  it('clears an approval prompt on a call it blocks, since the call will never run', () => {
+    const toolInfo: InternalToolCallInfo = { ...webSearchToolInfo(), is_approval_required: true };
+    const policy: HostToolCallPolicy = () => ({ message: 'library said no' });
+    const result = applyHostToolCallPolicy({ call: callForWebSearch(), toolInfo, policy, logger: undefined });
+    expect(result.is_approval_required).toBe(false);
+    expect(result.pre_dispatch_failure).toEqual({ kind: 'policy_blocked', message: 'library said no' });
   });
 
   it('never overwrites a pre-existing pre-dispatch failure, even when the policy would block', () => {

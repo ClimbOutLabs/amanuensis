@@ -1,20 +1,27 @@
-import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { chown, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import type { Logger } from 'winston';
 import { onSignalAbort, signalAbortError } from '../../util/abort';
 import { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './errors';
 import type { DriverReadiness, DriverRunParams, DriverRunResult, IsolationDriver } from './IsolationDriver';
-import { OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX } from './IsolationDriver';
+import { ISOLATION_REFUSED_MARKER, OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX } from './IsolationDriver';
 import {
-  FILE_BASENAME_PATTERN,
+  RunCodeFileNameSchema,
   RunCodeInputSchema,
   RunCodeResultSchema,
   type RunCodeErrorCode,
   type RunCodeInput,
   type RunCodeResult,
 } from './RunCodeSchemas';
+import {
+  measureRunDiskUsage,
+  removeRunTree,
+  resolveSandboxIdentity,
+  SANDBOX_RUN_ENV,
+  sandboxRunsDir,
+  stageRunDirs,
+} from './RunStaging';
 
 /**
  * Host wrapper for `run_code` — owns the contract, bounds, mounts, harvest,
@@ -28,28 +35,8 @@ export const RUN_CODE_FILES_IN_MAX_TOTAL_BYTES = 100 * 1024 * 1024;
 export const RUN_CODE_FILES_IN_MAX_COUNT = 32;
 export const RUN_CODE_HARVEST_MAX_FILES = 64;
 export const RUN_CODE_HARVEST_MAX_TOTAL_BYTES = 100 * 1024 * 1024;
-export const RUN_CODE_SANDBOX_UID = 65532;
-export const RUN_CODE_SANDBOX_GID = 65532;
 /** successful readiness probes are trusted for 60s (failures re-probe). */
 export const RUN_CODE_READINESS_CACHE_TTL_MS = 60_000;
-
-/**
- * Ownership handoff (plan E-B1): the sandbox uid must own the run dirs AND the
- * staged files inside them — staged files are root-owned 0400, so chowning
- * only the dirs would leave them unreadable to uid 65532.
- */
-async function chownRecursive(root: string, uid: number, gid: number): Promise<void> {
-  await chown(root, uid, gid);
-  const entries = await readdir(root, { withFileTypes: true });
-  for (const entry of entries) {
-    const full = join(root, entry.name);
-    if (entry.isDirectory()) {
-      await chownRecursive(full, uid, gid);
-    } else {
-      await chown(full, uid, gid);
-    }
-  }
-}
 
 export interface RunCodeServiceOptions {
   driver: IsolationDriver;
@@ -224,8 +211,9 @@ export class RunCodeService implements RunCodeBackend {
   }
 
   /**
-   * Fast readiness probes only — never provisions. A missing image surfaces
-   * as a readiness failure; provisioning is the explicit step below.
+   * Readiness probe that never provisions. It can take seconds and runs a canary
+   * container, so hot paths go through the cached checkReadiness. A missing image
+   * surfaces as a readiness failure; provisioning is the explicit step below.
    */
   async ensureReady(signal?: AbortSignal): Promise<DriverReadiness> {
     return this.driver.ensureReady(signal);
@@ -363,10 +351,14 @@ export class RunCodeService implements RunCodeBackend {
     if (!readiness.ready) {
       // The model-visible taxonomy has no kvm/platform codes: a backend that
       // cannot isolate is daemon_unavailable with actionable detail text.
+      // docker_unavailable keeps its own code so the exact install message
+      // surfaces verbatim instead of being prefixed.
       const code: RunCodeErrorCode =
         readiness.error_code === 'image_unavailable' || readiness.error_code === 'image_missing'
           ? 'image_unavailable'
-          : 'daemon_unavailable';
+          : readiness.error_code === 'docker_unavailable'
+            ? 'docker_unavailable'
+            : 'daemon_unavailable';
       return this.failedResult({
         error_code: code,
         error: errorTextForCode({ error_code: code, detail: readiness.error }),
@@ -386,19 +378,13 @@ export class RunCodeService implements RunCodeBackend {
     }
 
     const runId = randomUUID().replace(/-/g, '');
-    const runRoot = join(this.dataDir, 'sandbox-runs', runId);
-    const ingressDir = join(runRoot, 'ingress');
-    const scratchDir = join(runRoot, 'scratch');
-    const egressDir = join(runRoot, 'egress');
+    const runRoot = join(sandboxRunsDir(this.dataDir), runId);
     this.activeRuns += 1;
     try {
       return await this.executeRun({
         input,
         runId,
         runRoot,
-        ingressDir,
-        scratchDir,
-        egressDir,
         filesIn: staged.files,
         attachments,
         signal: options?.signal,
@@ -423,7 +409,7 @@ export class RunCodeService implements RunCodeBackend {
       });
     } finally {
       this.activeRuns -= 1;
-      await this.removeRunRoot(runRoot);
+      await this.removeRunRoot({ runId, runRoot });
     }
   }
 
@@ -483,9 +469,6 @@ export class RunCodeService implements RunCodeBackend {
     input: RunCodeInput;
     runId: string;
     runRoot: string;
-    ingressDir: string;
-    scratchDir: string;
-    egressDir: string;
     filesIn: { name: string; bytes: Buffer }[];
     attachments: TurnAttachment[];
     signal: AbortSignal | undefined;
@@ -494,39 +477,15 @@ export class RunCodeService implements RunCodeBackend {
     const timeoutSeconds = Math.min(input.input.timeout_seconds ?? this.defaultTimeoutSeconds, this.maxTimeoutSeconds);
     const timeoutMs = timeoutSeconds * 1000;
 
-    // Per-run dirs, 0700. realpath guards against symlink games on the parent.
-    await mkdir(input.ingressDir, { recursive: true, mode: 0o700 });
-    await mkdir(input.scratchDir, { recursive: true, mode: 0o700 });
-    await mkdir(input.egressDir, { recursive: true, mode: 0o700 });
-    const runRoot = await realpath(input.runRoot).catch(() => input.runRoot);
-    const ingressDir = join(runRoot, 'ingress');
-    const scratchDir = join(runRoot, 'scratch');
-    const egressDir = join(runRoot, 'egress');
-
-    // Stage files_in + turn attachments into ingress (read-only inside).
-    for (const file of input.filesIn) {
-      await writeFile(join(ingressDir, file.name), file.bytes, { mode: 0o400 });
-    }
-    for (const attachment of input.attachments) {
-      await writeFile(join(ingressDir, attachment.name), attachment.bytes, { mode: 0o400 });
-    }
-    // The program itself rides in ingress under a reserved name (never harvested).
-    const programName = `${RUN_CODE_RESERVED_PREFIX}main.${input.input.language === 'python' ? 'py' : 'mjs'}`;
-    await writeFile(join(ingressDir, programName), input.input.code, { mode: 0o400 });
-
-    // Ownership handoff (E-B1): the sandbox uid owns the three dirs and every
-    // staged file. Best-effort — the Docker driver probes the mapping at
-    // ensureReady and fails loudly there.
-    try {
-      await chownRecursive(ingressDir, RUN_CODE_SANDBOX_UID, RUN_CODE_SANDBOX_GID);
-      await chownRecursive(scratchDir, RUN_CODE_SANDBOX_UID, RUN_CODE_SANDBOX_GID);
-      await chownRecursive(egressDir, RUN_CODE_SANDBOX_UID, RUN_CODE_SANDBOX_GID);
-    } catch (error) {
-      this.logger.warn('run_code chown of run dirs failed (continuing)', {
-        runId: input.runId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    // Fail closed: a run whose dirs the sandbox uid cannot use must not start.
+    const identity = resolveSandboxIdentity();
+    const { runRoot, ingressDir, scratchDir, egressDir } = await stageRunDirs({
+      runRoot: input.runRoot,
+      language: input.input.language,
+      code: input.input.code,
+      files: [...input.filesIn, ...input.attachments],
+      identity,
+    });
 
     const controller = new AbortController();
     const onAbort = (): void => {
@@ -545,14 +504,8 @@ export class RunCodeService implements RunCodeBackend {
       memoryMb: this.memoryMb,
       diskMb: this.diskMb,
       runId: input.runId,
-      env: {
-        PATH: '/usr/local/bin:/usr/bin:/bin',
-        LANG: 'C.UTF-8',
-        HOME: '/scratch',
-        // Belt-and-braces: offline environment, so stray installs fail fast.
-        PIP_NO_INDEX: '1',
-        npm_config_registry: 'http://127.0.0.1:1/',
-      },
+      env: SANDBOX_RUN_ENV,
+      sandboxIdentity: identity,
       signal: controller.signal,
       // FC pull-before-kill best-effort grace (Docker ignores it).
       harvestGraceMs: this.harvestGraceMs,
@@ -574,7 +527,7 @@ export class RunCodeService implements RunCodeBackend {
     const diskLoop = (async (): Promise<void> => {
       while (!controller.signal.aborted) {
         await this.sleepMs(500);
-        const status = await this.pollDiskUsage(scratchDir, egressDir);
+        const status = await this.pollDiskUsage({ scratchDir, egressDir });
         if (status === 'unknown') {
           // Fail closed: three consecutive unreadable polls means the quota
           // can no longer be verified, so the run is killed, not trusted.
@@ -673,6 +626,23 @@ export class RunCodeService implements RunCodeBackend {
         harvestWarnings,
       });
     }
+    // Fail-closed isolation refusal (spec): the driver verified the created
+    // container and a mandatory guarantee was missing. The detail is the
+    // spec's exact message; errorTextForCode surfaces it verbatim.
+    if (result.internalError?.startsWith(ISOLATION_REFUSED_MARKER) === true) {
+      return this.failedResult({
+        error_code: 'isolation_refused',
+        error: errorTextForCode({
+          error_code: 'isolation_refused',
+          detail: result.internalError.slice(ISOLATION_REFUSED_MARKER.length),
+        }),
+        runRoot,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        filesOut,
+        harvestWarnings,
+      });
+    }
     // A 137 without a timeout abort smells like the kernel OOM-killer, even
     // when the driver only reported 'killed'.
     const oomKilled = result.exitCode === 137 && controller.signal.reason !== TIMEOUT_REASON;
@@ -725,47 +695,20 @@ export class RunCodeService implements RunCodeBackend {
   }
 
   /**
-   * Disk quota covers scratch + egress (the two user-writable dirs, plan D6) —
-   * not ingress (harness-staged inputs and the program file), which the model
-   * cannot grow. Sums both dirs; any unreadable or unparseable reading is
-   * 'unknown' and the caller fails closed after three consecutive unknowns.
+   * Disk quota covers scratch + egress (the two user-writable dirs), not
+   * ingress (harness-staged inputs and the program file), which the model
+   * cannot grow. Any unreadable or unparseable reading is 'unknown' and the
+   * caller fails closed after three consecutive unknowns.
    */
-  private pollDiskUsage(scratchDir: string, egressDir: string): Promise<'ok' | 'exceeded' | 'unknown'> {
-    const parseTotalBytes = (stdout: string, perLineUnitBytes: number): number | undefined => {
-      let total = 0;
-      let lines = 0;
-      for (const line of stdout.split('\n')) {
-        const first = line.split(/\s+/)[0];
-        if (first === undefined || first === '') {
-          continue;
-        }
-        const n = Number.parseInt(first, 10);
-        if (!Number.isFinite(n)) {
-          return undefined;
-        }
-        total += n * perLineUnitBytes;
-        lines += 1;
-      }
-      return lines === 2 ? total : undefined;
-    };
-    const verdict = (bytes: number | undefined): 'ok' | 'exceeded' | 'unknown' =>
-      bytes === undefined ? 'unknown' : bytes > this.diskMb * 1024 * 1024 ? 'exceeded' : 'ok';
-    return new Promise(resolve => {
-      // --apparent-size counts sparse writes honestly; fall back to -sk on BSD du.
-      execFile('du', ['-sb', '--apparent-size', scratchDir, egressDir], { timeout: 5000 }, (error, stdout) => {
-        if (error) {
-          execFile('du', ['-sk', scratchDir, egressDir], { timeout: 5000 }, (fallbackError, fallbackStdout) => {
-            if (fallbackError) {
-              resolve('unknown');
-              return;
-            }
-            resolve(verdict(parseTotalBytes(fallbackStdout, 1024)));
-          });
-          return;
-        }
-        resolve(verdict(parseTotalBytes(stdout, 1)));
-      });
-    });
+  private async pollDiskUsage(input: {
+    scratchDir: string;
+    egressDir: string;
+  }): Promise<'ok' | 'exceeded' | 'unknown'> {
+    const bytes = await measureRunDiskUsage(input);
+    if (bytes === undefined) {
+      return 'unknown';
+    }
+    return bytes > this.diskMb * 1024 * 1024 ? 'exceeded' : 'ok';
   }
 
   /** Harvest egress AND scratch (egress wins on name collision) — wrapper-only (E-H1). */
@@ -799,7 +742,7 @@ export class RunCodeService implements RunCodeBackend {
         }
         const path = entry.path;
         const name = basename(path);
-        if (!FILE_BASENAME_PATTERN.test(name) || name.startsWith(RUN_CODE_RESERVED_PREFIX)) {
+        if (!RunCodeFileNameSchema.safeParse(name).success || name.startsWith(RUN_CODE_RESERVED_PREFIX)) {
           input.harvestWarnings.push(`Skipped result file with an invalid name: ${name}.`);
           continue;
         }
@@ -973,7 +916,7 @@ export class RunCodeService implements RunCodeBackend {
   }
 
   private async sweepRunDirs(): Promise<void> {
-    const parent = join(this.dataDir, 'sandbox-runs');
+    const parent = sandboxRunsDir(this.dataDir);
     let entries;
     try {
       entries = await readdir(parent, { withFileTypes: true });
@@ -989,7 +932,7 @@ export class RunCodeService implements RunCodeBackend {
       try {
         const fileStat = await stat(path);
         if (fileStat.mtimeMs < cutoff) {
-          await rm(path, { recursive: true, force: true });
+          await removeRunTree({ runRoot: path, runStopped: await this.isRunGone(entry.name) });
         }
       } catch {
         // Best-effort sweep; a racing run dir is left for the next pass.
@@ -997,9 +940,18 @@ export class RunCodeService implements RunCodeBackend {
     }
   }
 
-  private async removeRunRoot(runRoot: string): Promise<void> {
+  /** A driver that cannot answer counts as "not gone": the tree's permissions are then left alone. */
+  private async isRunGone(runId: string): Promise<boolean> {
     try {
-      await rm(runRoot, { recursive: true, force: true });
+      return await this.driver.isRunGone(runId);
+    } catch {
+      return false;
+    }
+  }
+
+  private async removeRunRoot({ runId, runRoot }: { runId: string; runRoot: string }): Promise<void> {
+    try {
+      await removeRunTree({ runRoot, runStopped: await this.isRunGone(runId) });
     } catch (error) {
       this.logger.warn('run_code run-root cleanup failed; left for the reaper', {
         runRoot,

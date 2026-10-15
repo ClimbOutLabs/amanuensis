@@ -17,6 +17,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { GIT_HARDENING_ENV, gitHardeningConfigEntries } from './gitHardening';
 
 /** Result of parsing a command that is a single simple command. */
 export interface ParsedSimpleCommand {
@@ -34,6 +35,20 @@ export interface ShellAllowlistEntry {
   operands: 'none' | 'workspace_relative';
   /** True when the command has no network capability (offline-mode subset). */
   offline_ok: boolean;
+  /**
+   * When non-null the command is subcommand-driven: argv[1] must name one of
+   * these and only that subcommand's policy applies; `args`/`operands` are unused.
+   */
+  subcommands: Readonly<Record<string, ShellSubcommandPolicy>> | null;
+}
+
+/** Flags and operands permitted for one subcommand of a subcommand-driven command. */
+export interface ShellSubcommandPolicy {
+  /** Exact flag spellings allowed after the subcommand. */
+  args: readonly string[];
+  operands: 'none' | 'workspace_relative';
+  /** Flags the executor inserts right after the subcommand; never model-supplied. */
+  forced_args: readonly string[];
 }
 
 export interface ShellAllowlistConfig {
@@ -210,6 +225,41 @@ function isWorkspaceRelativeOperand(token: string): boolean {
   return true;
 }
 
+/**
+ * The subcommand must be the first token, so global options (`-c`, `-C`,
+ * `--exec-path`, `--config-env`) and aliases never reach a policy. A `!`
+ * operand is a shell-alias marker and fails closed.
+ */
+function matchSubcommand(input: {
+  tokens: readonly string[];
+  subcommands: Readonly<Record<string, ShellSubcommandPolicy>>;
+}): boolean {
+  const [name, ...rest] = input.tokens;
+  if (name === undefined || !Object.hasOwn(input.subcommands, name)) {
+    return false;
+  }
+  const policy = input.subcommands[name];
+  if (policy === undefined) {
+    return false;
+  }
+  for (const token of rest) {
+    if (token.startsWith('-')) {
+      if (!policy.args.includes(token)) {
+        return false;
+      }
+      continue;
+    }
+    if (token.startsWith('!')) {
+      return false;
+    }
+    if (policy.operands === 'workspace_relative' && isWorkspaceRelativeOperand(token)) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
 export interface AllowlistMatch {
   /** argv with argv[0] resolved to its absolute path at parse time. */
   argv: string[];
@@ -223,10 +273,7 @@ export interface AllowlistMatch {
  * `--flag value` are distinct and must each be listed. Non-flag tokens are
  * allowed only when the entry permits workspace-relative operands.
  */
-export function matchAllowlist(
-  parsed: ParsedSimpleCommand,
-  config: ShellAllowlistConfig,
-): AllowlistMatch | undefined {
+export function matchAllowlist(parsed: ParsedSimpleCommand, config: ShellAllowlistConfig): AllowlistMatch | undefined {
   const argv0 = parsed.argv[0];
   if (argv0 === undefined) {
     return undefined;
@@ -238,6 +285,12 @@ export function matchAllowlist(
   const argv0Resolved = resolveOnPinnedPath(argv0, config.pinned_path);
   if (argv0Resolved === null) {
     return undefined;
+  }
+  if (entry.subcommands !== null) {
+    if (!matchSubcommand({ tokens: parsed.argv.slice(1), subcommands: entry.subcommands })) {
+      return undefined;
+    }
+    return { argv: [argv0Resolved, ...parsed.argv.slice(1)], argv0_resolved: argv0Resolved, wrapper: parsed.wrapper };
   }
   for (const token of parsed.argv.slice(1)) {
     if (token.startsWith('-')) {
@@ -274,55 +327,209 @@ export function seedShellAllowlist(pinnedPath: string): ShellAllowlistConfig {
         args: ['-l', '-a', '-la', '-al', '-lh', '-1', '--all', '--almost-all'],
         operands: 'workspace_relative',
         offline_ok: true,
+        subcommands: null,
       },
       cat: {
         args: ['-n'],
         operands: 'workspace_relative',
         offline_ok: true,
+        subcommands: null,
       },
       pwd: {
         args: [],
         operands: 'none',
         offline_ok: true,
+        subcommands: null,
       },
       git: {
-        // Read-only subcommands only. Mutating subcommands (checkout -b,
-        // branch, commit, push) and `--config`/`-c` overrides are absent by
-        // curation, so they fail closed to Tier 3.
-        args: [
-          'status',
-          '--short',
-          '--porcelain',
-          '--branch',
-          'log',
-          '--oneline',
-          '--stat',
-          '--name-only',
-          '-n',
-          'diff',
-          '--cached',
-          '--staged',
-          'show',
-          '--no-patch',
-          'rev-parse',
-          '--git-dir',
-          '--show-toplevel',
-          'HEAD',
-        ],
-        operands: 'workspace_relative',
+        // Read-only inspection only. Config, remote, network and mutating
+        // subcommands, aliases, and global options are absent so they fall to
+        // Tier 3. Flags that run external programs or write files are never
+        // listed; `forced_args` are added by hardenAllowlistedGit at execution.
+        args: [],
+        operands: 'none',
         offline_ok: true,
+        subcommands: {
+          status: {
+            args: ['--short', '--porcelain', '--branch', '-s', '-b'],
+            operands: 'workspace_relative',
+            forced_args: ['--ignore-submodules=all'],
+          },
+          log: {
+            args: [
+              '--oneline',
+              '--stat',
+              '--name-only',
+              '--name-status',
+              '--graph',
+              '--decorate',
+              '--no-color',
+              '--no-ext-diff',
+              '--no-textconv',
+              '-n',
+              '--',
+            ],
+            operands: 'workspace_relative',
+            forced_args: ['--no-ext-diff', '--no-textconv', '--ignore-submodules=all'],
+          },
+          diff: {
+            args: [
+              '--cached',
+              '--staged',
+              '--stat',
+              '--shortstat',
+              '--numstat',
+              '--name-only',
+              '--name-status',
+              '--no-color',
+              '--no-ext-diff',
+              '--no-textconv',
+              '--',
+            ],
+            operands: 'workspace_relative',
+            forced_args: ['--no-ext-diff', '--no-textconv', '--ignore-submodules=all'],
+          },
+          show: {
+            args: [
+              '--no-patch',
+              '--stat',
+              '--name-only',
+              '--name-status',
+              '--oneline',
+              '--no-color',
+              '--no-ext-diff',
+              '--no-textconv',
+              '--',
+            ],
+            operands: 'workspace_relative',
+            forced_args: ['--no-ext-diff', '--no-textconv', '--ignore-submodules=all'],
+          },
+          branch: {
+            args: ['--list', '--all', '--remotes', '--show-current', '-a', '-r', '-v', '-vv'],
+            operands: 'none',
+            forced_args: [],
+          },
+          'rev-parse': {
+            args: ['--git-dir', '--show-toplevel', '--abbrev-ref', '--short', '--is-inside-work-tree', '--show-prefix'],
+            operands: 'workspace_relative',
+            forced_args: [],
+          },
+          'ls-files': {
+            args: [
+              '--cached',
+              '--modified',
+              '--others',
+              '--deleted',
+              '--stage',
+              '--exclude-standard',
+              '-c',
+              '-m',
+              '-o',
+              '-d',
+              '-s',
+              '--',
+            ],
+            operands: 'workspace_relative',
+            forced_args: [],
+          },
+          blame: {
+            args: ['--porcelain', '--line-porcelain', '-w', '-e', '--'],
+            operands: 'workspace_relative',
+            forced_args: ['--no-textconv'],
+          },
+        },
       },
       node: {
         args: ['--version'],
         operands: 'none',
         offline_ok: true,
+        subcommands: null,
       },
       python3: {
         args: ['--version'],
         operands: 'none',
         offline_ok: true,
+        subcommands: null,
       },
     },
+  };
+}
+
+/** Global git options that disable the known code-running config keys, as defence in depth. */
+function gitHardeningGlobalArgs(workspaceRoot: string): string[] {
+  return [
+    '--no-pager',
+    '--no-optional-locks',
+    ...gitHardeningConfigEntries({ workspaceRoot }).flatMap(([key, value]) => ['-c', `${key}=${value}`]),
+  ];
+}
+
+/**
+ * Local config keys an allowlisted git command may run under. Fail-closed:
+ * every other key (filters, includes, gpg, alternateRefsCommand, hooks, ...)
+ * can make git execute a program, so a repo that sets one is not allowlisted.
+ */
+const SAFE_GIT_LOCAL_CONFIG_KEYS: readonly RegExp[] = [
+  /^core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks)$/u,
+  /^remote\..+\.(url|fetch)$/u,
+  /^branch\..+\.(remote|merge)$/u,
+  /^user\.(name|email)$/u,
+  /^init\.defaultbranch$/u,
+];
+
+/** True when every key printed by `git config --local --list --name-only` is on the safe list. */
+export function gitLocalConfigIsSafe(nameOnlyOutput: string): boolean {
+  return nameOnlyOutput
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line !== '')
+    .every(key => SAFE_GIT_LOCAL_CONFIG_KEYS.some(pattern => pattern.test(key)));
+}
+
+export interface HardenedGitInvocation {
+  /** Argv to execute in place of the model's command. */
+  argv: string[];
+  /** Read-only probe listing the repository's local config key names. */
+  probe_argv: string[];
+  env: Record<string, string>;
+}
+
+/**
+ * Rewrite an allowlisted git command into what the executor must run, or
+ * undefined when the command is not an allowlisted git invocation. Applied at
+ * the execution site so the model's argv and the approval binding stay as
+ * written. The caller must run `probe_argv` and require `gitLocalConfigIsSafe`
+ * on its output before running `argv`.
+ */
+export function hardenAllowlistedGit(input: {
+  command: string;
+  config: ShellAllowlistConfig;
+  workspace_root: string;
+}): HardenedGitInvocation | undefined {
+  const parsed = parseSimpleCommand(input.command);
+  if (parsed === undefined || matchAllowlist(parsed, input.config) === undefined) {
+    return undefined;
+  }
+  const [name, subcommand, ...rest] = parsed.argv;
+  if (name !== 'git' || subcommand === undefined) {
+    return undefined;
+  }
+  const policy = input.config.commands[name]?.subcommands?.[subcommand];
+  if (policy === undefined) {
+    return undefined;
+  }
+  const globalArgs = gitHardeningGlobalArgs(input.workspace_root);
+  return {
+    argv: [
+      ...(parsed.wrapper === null ? [] : [parsed.wrapper]),
+      name,
+      ...globalArgs,
+      subcommand,
+      ...policy.forced_args,
+      ...rest,
+    ],
+    probe_argv: [name, ...globalArgs, 'config', '--local', '--no-includes', '--list', '--name-only'],
+    env: { ...GIT_HARDENING_ENV },
   };
 }
 

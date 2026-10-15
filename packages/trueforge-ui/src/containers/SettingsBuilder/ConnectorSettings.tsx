@@ -11,6 +11,7 @@ import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
 import SearchInput from '@/atoms/primitives/SearchInput.js';
 import { Icon } from '@/icons/Icon.js';
 import { hasConnectorConnectionTest, type ConnectorConnectionFailureKind } from '@/server/connectorChecks.js';
+import { isSearchProvider, type SearchProviderFields } from '@/server/searchProviderTypes.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
 import { shellIsMutable, useShellMode } from '@/server/ShellModeContext.js';
 import type { AgentSpec, ConnectorAuth, ConnectorBase, ConnectorCatalogEntry } from '@/server/types.js';
@@ -20,6 +21,7 @@ import AddMcpServerForm, { type AddMcpServerDraft } from './AddMcpServerForm.js'
 import { AUTH_TYPE_LABELS } from './authTypeLabels.js';
 import ConnectorDetails from './ConnectorDetails.js';
 import { isMemoryProvider, memoryProviderUpdateRequest, withRemediation } from './memoryProvider.js';
+import { searchProviderForNewConnector } from './searchProvider.js';
 
 type ConnectorListItem =
   { connector: ConnectorBase; isConfigured: true } | { connector: ConnectorCatalogEntry; isConfigured: false };
@@ -66,24 +68,10 @@ function mountMatchesConnector({ mount, connector }: { mount: object; connector:
   return id === connector.id || name === connector.name;
 }
 
-function withConnectorEnabled({
-  spec,
-  connector,
-  enabled,
-}: {
-  spec: AgentSpec;
-  connector: ConnectorBase;
-  enabled: boolean;
-}): AgentSpec {
+function withoutConnector({ spec, connector }: { spec: AgentSpec; connector: ConnectorBase }): AgentSpec {
   const current = spec.mcpServers ?? [];
-  const exists = current.some(mount => mountMatchesConnector({ mount, connector }));
-  const mcpServers = enabled
-    ? exists
-      ? current
-      : [...current, { id: connector.id, name: connector.name }]
-    : current.filter(mount => !mountMatchesConnector({ mount, connector }));
-
-  return mcpServers === current ? spec : { ...spec, mcpServers };
+  const mcpServers = current.filter(mount => !mountMatchesConnector({ mount, connector }));
+  return mcpServers.length === current.length ? spec : { ...spec, mcpServers };
 }
 
 const ConnectorSettings = () => {
@@ -254,12 +242,15 @@ const ConnectorSettings = () => {
         : entry.auth.type === 'dcr'
           ? { type: 'dcr' }
           : { type: 'none' });
-    await connectorCatalog.createConnector({
+    const configured = connectors.ordered.flatMap(item => (item.isConfigured ? [item.connector] : []));
+    const request: Parameters<typeof connectorCatalog.createConnector>[0] & SearchProviderFields = {
       name: entry.name,
       description: entry.description ?? entry.url,
       url: entry.url,
       auth,
-    });
+      ...searchProviderForNewConnector({ entry, configured }),
+    };
+    await connectorCatalog.createConnector(request);
   };
 
   const handleConnect = (entry: ConnectorCatalogEntry) => {
@@ -325,7 +316,14 @@ const ConnectorSettings = () => {
     if (!connector) return;
     setFormError(null);
     await runMutation(async () => {
-      const updated = await connectorCatalog.updateConnector({ id: connector.id, ...draft });
+      // updateConnector sends the full manifest, so the search-provider role is resupplied or this
+      // edit would silently clear it.
+      const request: Parameters<typeof connectorCatalog.updateConnector>[0] & SearchProviderFields = {
+        id: connector.id,
+        ...draft,
+        ...(isSearchProvider(connector) ? { searchProvider: true } : {}),
+      };
+      const updated = await connectorCatalog.updateConnector(request);
       setSelectedConnector(current => (current?.id === updated.id ? updated : current));
     }, setFormError);
     setTimeout(() => {
@@ -359,7 +357,7 @@ const ConnectorSettings = () => {
       // Drop it from the current chat's spec first so the spec never points at
       // a connector that no longer exists.
       if (canUpdateChat && agentSpec != null && updateAgentSpec != null) {
-        const nextSpec = withConnectorEnabled({ spec: agentSpec, connector, enabled: false });
+        const nextSpec = withoutConnector({ spec: agentSpec, connector });
         if (nextSpec !== agentSpec) {
           updateAgentSpec({ mcpServers: nextSpec.mcpServers });
         }
@@ -479,7 +477,14 @@ const ConnectorSettings = () => {
         </span>
 
         <div className="min-w-0 flex-1">
-          <h5 className="truncate text-sm font-medium text-text-primary">{connector.name}</h5>
+          <h5 className="flex min-w-0 items-center gap-2 text-sm font-medium text-text-primary">
+            <span className="truncate">{connector.name}</span>
+            {isSearchProvider(connector) ? (
+              <span className="shrink-0 rounded-full border border-border bg-secondary-bg/40 px-2 py-0.5 text-xs font-medium text-text-secondary">
+                Search provider
+              </span>
+            ) : null}
+          </h5>
           <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary sm:truncate">{connector.description}</p>
         </div>
       </>
@@ -682,8 +687,8 @@ const ConnectorSettings = () => {
     <>
       <h3 className="text-xl font-semibold tracking-tight text-text-primary">Connectors</h3>
       <p className="mt-1 text-sm text-text-secondary">
-        Connected tools are ready to use. Add one to the current chat when you want Aman to use it. Test connection
-        dials a connector and reports the tools it answered with.
+        Connected tools are ready to use. Choose the ones a chat uses from the composer. Test connection dials a
+        connector and reports the tools it answered with.
       </p>
       {isPlainDraft ? (
         <p className="mt-1 text-xs text-text-secondary">
@@ -702,7 +707,7 @@ const ConnectorSettings = () => {
               Find a connector in <span className="font-medium text-text-primary">Available</span> below and choose
               Connect — most need an API key or token from that service.
             </li>
-            <li>Add it to the current chat from the connector row so Aman can use its tools.</li>
+            <li>Choose it in the composer so Aman can use its tools in that chat.</li>
             <li>
               Use <span className="font-medium text-text-primary">Test connection</span> to dial the connector and see
               which tools answered.
