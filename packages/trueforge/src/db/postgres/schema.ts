@@ -40,6 +40,8 @@ export const TABLES_TO_MOVE = [
   'session_persona',
   'mcp_server',
   'mcp_tool_grant',
+  'google_connection',
+  'google_oauth_pending',
   'oauth_token',
   'oauth_pending_authorization',
   'repository',
