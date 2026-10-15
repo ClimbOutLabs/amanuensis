@@ -3,11 +3,13 @@
  * instance .env: the role claim is the email, the owner's email is the admin value, and the allowed emails list the
  * owner plus each added member. Members sign in and chat; only the owner is admin.
  */
+import type { OIDCConfig } from '../../../src/config';
+
 const OWNER = 'owner@demo.example';
 const JUDGE = 'judge1@demo.example';
 const OTHER_JUDGE = 'judge2@demo.example';
 
-const MANAGED_KEYS = [
+const SIGN_IN_ENV_KEYS = [
   'STANDALONE',
   'PORT',
   'PUBLIC_BASE_URL',
@@ -38,7 +40,7 @@ const INSTALLER_ENV = {
 /** Fresh config, claims and identity modules under the given env; config reads the environment once at import. */
 async function loadAuth(env: Record<string, string>) {
   jest.resetModules();
-  for (const key of MANAGED_KEYS) {
+  for (const key of SIGN_IN_ENV_KEYS) {
     delete process.env[key];
   }
   Object.assign(process.env, env);
@@ -46,7 +48,7 @@ async function loadAuth(env: Record<string, string>) {
   const claims = await import('../../../src/auth/claims');
   const identity = await import('../../../src/auth/identity');
   const { EmailNotAllowedError } = await import('../../../src/auth/emailAllowlist');
-  const oidc = config.default.OIDC;
+  const oidc: OIDCConfig | undefined = config.default.OIDC;
   if (oidc === undefined) {
     throw new Error('OIDC was not configured from the installer env');
   }
@@ -54,7 +56,7 @@ async function loadAuth(env: Record<string, string>) {
 }
 
 describe('member sign-in with the installer settings', () => {
-  const saved = new Map(MANAGED_KEYS.map(key => [key, process.env[key]]));
+  const saved = new Map(SIGN_IN_ENV_KEYS.map(key => [key, process.env[key]]));
 
   afterAll(() => {
     for (const [key, value] of saved) {
