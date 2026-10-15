@@ -450,6 +450,7 @@ export class ToolSet implements IToolSet {
           destructive_hint: info.destructive_hint,
           open_world_hint: info.open_world_hint,
         },
+        maps_hosts: info.maps_hosts,
       },
     });
     const stamp = stampSentinelDecision({ decision });

@@ -13,6 +13,7 @@ export {
   canonicalShellForm,
   classifyHostToolCall,
   classifyTier,
+  mapsDestinationHosts,
   shellBindingFromForm,
 } from './classifier';
 export type { ClassifyContext, SentinelAction } from './classifier';
@@ -29,6 +30,7 @@ export { verifyPreDispatch } from './dispatch';
 export type { DispatchCheckContext, VerifiableCall } from './dispatch';
 export { extractCardFields, genericExtractor, isExternalServiceAction } from './extractorRegistry';
 export type { CardFieldExtractor, ExtractedCardFields, ExtractionResult } from './extractorRegistry';
+export { MAPS_TOOL_NAMES, RENDER_MAP_TOOL_NAME, RENDER_ROUTE_TOOL_NAME, isMapsToolName } from './mapsToolNames';
 export { provenanceForToolType, requiresNetwork } from './networkRequirements';
 export type { ToolProvenance } from './networkRequirements';
 export { RUNNER_WORKFLOWS, isRunnerWorkflow } from './runner';

@@ -12,8 +12,10 @@ import {
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
+import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { useCallback, useState } from 'react';
 
+import { MapCard } from '../components/MapCard.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSlot } from '../theme/SlotsProvider.js';
@@ -34,6 +36,7 @@ import {
   hasPendingToolApproval,
   mcpDisplayName,
   parseAskUserQuestionArgs,
+  parseMapsResult,
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
@@ -230,6 +233,30 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   );
 }
 
+/**
+ * The user-facing result of a maps tool call, rendered inline in the conversation. Shows a quiet
+ * loading state while the call runs and the map card once the result is in.
+ */
+function MapsResult({ part }: { part: ToolCallMessagePartProps }) {
+  const resultString =
+    part.result === undefined
+      ? undefined
+      : typeof part.result === 'string'
+        ? part.result
+        : JSON.stringify(part.result, null, 2);
+  const mapsResult = parseMapsResult(resultString, part.toolName);
+  if (part.status?.type === 'running' && mapsResult.data === null) {
+    return (
+      <div className="maps-card" data-testid="map-card-loading">
+        <div className="maps-card-loading" role="status" aria-label="Loading map">
+          <span aria-hidden="true" className="maps-card-loading-spinner" />
+        </div>
+      </div>
+    );
+  }
+  return <MapCard data={mapsResult.data} state={mapsResult.state} blockedMessage={mapsResult.blockedMessage} />;
+}
+
 function RequestResponseSlots({
   request,
   response,
@@ -265,6 +292,7 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const approvalPart = approval === part.approval ? part : { ...part, approval };
   const isSubAgent = part.toolName === SUB_AGENT_TOOL_NAME;
   const isSandbox = SANDBOX_TOOL_NAMES.has(part.toolName);
+  const isMaps = isMapsToolName(part.toolName);
   const [expanded, setExpanded] = useState(isRequiresAction);
   const [prevRequiresAction, setPrevRequiresAction] = useState(isRequiresAction);
   if (isRequiresAction !== prevRequiresAction) {
@@ -380,6 +408,15 @@ export const ToolCallContainer: ToolCallMessagePartComponent = part => {
         approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
         approvalId={showApproval ? approval?.id : undefined}
       />
+    );
+  }
+
+  if (isMaps) {
+    return (
+      <div data-slot="tool-call-card" data-variant="map" className="w-full">
+        {showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
+        {!hasPendingApproval && <MapsResult part={part} />}
+      </div>
     );
   }
 

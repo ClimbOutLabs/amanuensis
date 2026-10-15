@@ -13,6 +13,7 @@
  */
 import { realpathSync } from 'fs';
 import path from 'path';
+import type { MapsHosts } from '../llm/LLMTypes';
 import {
   actionIdFor,
   approvalTokenExpiry,
@@ -30,7 +31,13 @@ import {
   type SentinelHostContext,
   type SentinelServices,
 } from './context';
-import { escapeDisplayText, extractCardFields, type ExtractionResult } from './extractorRegistry';
+import {
+  escapeDisplayText,
+  extractCardFields,
+  renderOutboundArguments,
+  type ExtractionResult,
+} from './extractorRegistry';
+import { isMapsToolName, RENDER_ROUTE_TOOL_NAME } from './mapsToolNames';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
 import {
   checkOutboundStrings,
@@ -108,6 +115,11 @@ export interface SentinelAction {
     destructive_hint?: boolean | undefined;
     open_world_hint?: boolean | undefined;
   };
+  /**
+   * Configured maps upstream hosts for the approval card destination. Set by the
+   * server-owned maps tool from server config, never from model params.
+   */
+  maps_hosts?: MapsHosts | undefined;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {
@@ -118,6 +130,79 @@ export interface ClassifyContext extends SentinelCallIdentity {
   path_resolution?: PathResolution | undefined;
   /** Reads file digests from a remote sandbox, so approvals can bind to file content there too. */
   file_digest?: FileDigest | undefined;
+}
+
+/** Longest place string the approval card shows; the tool schemas cap the same fields at this length. */
+const MAPS_CARD_PLACE_MAX_CHARS = 128;
+
+/**
+ * One call parameter as the card shows it: quoted with escapes so a crafted name cannot close the
+ * quote and read as part of the sentence, truncated to the schema cap, and a visible placeholder for
+ * a value that is not text (the tool rejects it after approval, but the card must not lie).
+ */
+function mapsCardLabel(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '(not text)';
+  }
+  const chars = Array.from(value);
+  const shown =
+    chars.length > MAPS_CARD_PLACE_MAX_CHARS ? `${chars.slice(0, MAPS_CARD_PLACE_MAX_CHARS - 1).join('')}…` : value;
+  return JSON.stringify(shown);
+}
+
+/**
+ * Single predicate owning the maps approval policy. Both maps tools are Tier 3
+ * for now; when the policy changes (e.g. approved providers run without asking),
+ * only this predicate changes.
+ */
+export function isMapsToolAlwaysTier3(tool_name: string): boolean {
+  return isMapsToolName(tool_name);
+}
+
+/** Host part of a URL for card display; falls back to the raw value. */
+function mapsHost(url: string | undefined): string {
+  if (url === undefined || url === '') {
+    return 'the configured maps host';
+  }
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * The configured maps hosts as one string, from server config only. It is both the card's
+ * "sends to" line and the connector host the approval token is bound to, so an approval stops
+ * working once any maps upstream points elsewhere.
+ */
+export function mapsDestinationHosts(hosts: MapsHosts): string {
+  const parts = [mapsHost(hosts.geocoder), mapsHost(hosts.router), mapsHost(hosts.tile)];
+  return [...new Set(parts)].join(', ');
+}
+
+/** Card plain_what naming the quoted place strings and the configured hosts. */
+function mapsPlainWhat(action: SentinelAction): string {
+  const params = action.canonical_params;
+  const hosts = action.maps_hosts;
+  const geocoder = mapsHost(hosts?.geocoder);
+  const router = mapsHost(hosts?.router);
+  const tile = mapsHost(hosts?.tile);
+  if (action.tool_name === RENDER_ROUTE_TOOL_NAME) {
+    return (
+      `Send ${mapsCardLabel(params['from_place'])} and ${mapsCardLabel(params['to_place'])} to ${geocoder}, ` +
+      `ask ${router} for a driving route between them, then load map tiles for that area from ${tile}.`
+    );
+  }
+  const placeName = mapsCardLabel(params['place_name']);
+  if (params['poi'] !== undefined && params['poi'] !== '') {
+    const poi = mapsCardLabel(params['poi']);
+    return (
+      `Send ${placeName} and ${poi} to ${geocoder} to find ${poi} near it, ` +
+      `then load map tiles for that area from ${tile}.`
+    );
+  }
+  return `Send ${placeName} to ${geocoder} to find it, then load map tiles for that area from ${tile}.`;
 }
 
 const SENSITIVE_PATH_PATTERNS = [
@@ -1509,6 +1594,44 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           ctx,
           tool_name: action.tool_name,
           params: action.canonical_params,
+        }),
+      });
+    }
+    // Embedded maps: always Tier 3, whatever hints the tool declares. The card
+    // names the place strings verbatim and the configured hosts from server
+    // config; the destination never comes from model params.
+    if (isMapsToolAlwaysTier3(name)) {
+      // Offline outranks the card: a stale call is denied, not offered for approval.
+      if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+        return autoDenyDecision({
+          reason: 'offline_mode',
+          reason_detail: 'Maps need network access, which is disabled while offline.',
+          sensitive_read: false,
+        });
+      }
+      const outbound = renderOutboundArguments(action.canonical_params);
+      return tier3Decision({
+        card: {
+          plain_what: mapsPlainWhat(action),
+          plain_why: plainWhy(ctx.agent_intent),
+          cannot_be_undone: 'Once the place names leave this machine they cannot be taken back.',
+          why_asked_again: null,
+          destination: null,
+          recipient: null,
+          amount: null,
+          parsed_command: null,
+          outbound_text: outbound.text,
+          destination_host: action.maps_hosts === undefined ? null : mapsDestinationHosts(action.maps_hosts),
+          outbound_truncated: outbound.truncated,
+        },
+        reason: 'maps_tool',
+        reason_detail: 'Maps tools are always Tier 3 by policy.',
+        sensitive_read: false,
+        approval_token_id: await mintPlainToken({
+          ctx,
+          tool_name: action.tool_name,
+          params: action.canonical_params,
+          connector: connectorBindingFor(action),
         }),
       });
     }

@@ -19,6 +19,22 @@ export function createAuthMiddleware(authenticator: Authenticator): MiddlewareHa
   };
 }
 
+/**
+ * Browser-session gate for routes only the UI should call (for example the map tile proxy).
+ * Bearer credentials, which agents, sandboxes and API clients use, are refused outright, so the
+ * session cookie is the only way in. Standalone mode has no login, so there every caller that
+ * sends no Authorization header is the default user, as on every other route.
+ */
+export function createUiSessionAuthMiddleware(authenticator: Authenticator): MiddlewareHandler {
+  const authenticate = createAuthMiddleware(authenticator);
+  return async (c, next) => {
+    if (readBearerToken(c) !== undefined) {
+      throw new HTTPException(401, { message: 'A browser session is required' });
+    }
+    return authenticate(c, next);
+  };
+}
+
 export function createAdminAuthMiddleware(authenticator: Authenticator): MiddlewareHandler {
   return async (c, next) => {
     const requestContext = await authenticator.authenticate(c);

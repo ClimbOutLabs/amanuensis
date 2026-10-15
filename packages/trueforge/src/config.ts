@@ -32,6 +32,7 @@ import {
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
 import { normalizedOrigin } from './mcp/firstParty';
+import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
@@ -424,6 +425,54 @@ export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath
   }
   const path = segments.length === 0 ? '' : `/${segments.join('/')}`;
   return `${parsed.origin}${path}`;
+}
+
+/**
+ * Parse a maps upstream URL: must be http(s), no query or hash. Fails fast at
+ * boot like PUBLIC_BASE_URL. Trailing slashes are trimmed; callers join paths.
+ */
+function parseMapsUrl({
+  envKey,
+  raw,
+  defaultValue,
+  requiredPlaceholders = [],
+}: {
+  envKey: string;
+  raw: string | undefined;
+  defaultValue: string;
+  requiredPlaceholders?: readonly string[];
+}): string {
+  const value = raw === undefined || raw.trim() === '' ? defaultValue : raw.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch (error) {
+    throw new Error(`${envKey} must be a valid URL`, { cause: error });
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`${envKey} must be an http(s) URL`);
+  }
+  if (parsed.search !== '' || parsed.hash !== '') {
+    throw new Error(`${envKey} must not include a query or hash`);
+  }
+  for (const placeholder of requiredPlaceholders) {
+    if (!value.includes(placeholder)) {
+      throw new Error(`${envKey} must include the ${placeholder} placeholder`);
+    }
+  }
+  return value.endsWith('/') && value.length > 1 ? value.slice(0, -1) : value;
+}
+
+/** Parses `MAPS_ROUTER_PROVIDER`. Unset/blank → `osrm`. Unknown values throw. */
+function parseMapsRouterProvider(raw: string | undefined): string {
+  if (raw === undefined || raw.trim() === '') {
+    return 'osrm';
+  }
+  const value = raw.trim().toLowerCase();
+  if (value === 'osrm') {
+    return value;
+  }
+  throw new Error(`Environment variable MAPS_ROUTER_PROVIDER must be "osrm", got ${JSON.stringify(raw)}`);
 }
 
 function parseTrueFoundrySandboxProvider(raw: string | undefined): 'daytona' | 'truefoundry' | undefined {
@@ -1096,6 +1145,32 @@ export interface SharedServerConfiguration {
    */
   STT_URL: string;
   /**
+   * Base URL of the Nominatim-compatible geocoder used by the embedded maps tools.
+   * Env: `MAPS_GEOCODER_URL`. Default `https://nominatim.openstreetmap.org`.
+   */
+  MAPS_GEOCODER_URL: string;
+  /**
+   * Routing provider id for the embedded maps tools. Only `osrm` is implemented in v1;
+   * the interface leaves room for a traffic-aware provider later.
+   * Env: `MAPS_ROUTER_PROVIDER`. Default `osrm`.
+   */
+  MAPS_ROUTER_PROVIDER: string;
+  /**
+   * Base URL of the routing provider used by the embedded maps tools.
+   * Env: `MAPS_ROUTER_URL`. Default `https://router.project-osrm.org`.
+   */
+  MAPS_ROUTER_URL: string;
+  /**
+   * Tile URL template used by the same-origin tile proxy, with `{z}`, `{x}`, `{y}` placeholders.
+   * Env: `MAPS_TILE_URL`. Default `https://tile.openstreetmap.org/{z}/{x}/{y}.png`.
+   */
+  MAPS_TILE_URL: string;
+  /**
+   * User-Agent sent to the geocoder, router, and tile upstreams.
+   * Env: `MAPS_USER_AGENT`. Default `Amanuensis/<version> (+https://github.com/ClimbOutLabs/amanuensis)`.
+   */
+  MAPS_USER_AGENT: string;
+  /**
    * Bearer token for the memory recall screen classifier. Distinct from any memory-provider
    * credential. Env: `MEMORY_SCREEN_AUTH_TOKEN`. Default empty.
    */
@@ -1696,6 +1771,26 @@ const shared: SharedServerConfiguration = {
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
   STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
+  MAPS_GEOCODER_URL: parseMapsUrl({
+    envKey: 'MAPS_GEOCODER_URL',
+    raw: getEnv('MAPS_GEOCODER_URL'),
+    defaultValue: 'https://nominatim.openstreetmap.org',
+  }),
+  MAPS_ROUTER_PROVIDER: parseMapsRouterProvider(getEnv('MAPS_ROUTER_PROVIDER', { required: false })),
+  MAPS_ROUTER_URL: parseMapsUrl({
+    envKey: 'MAPS_ROUTER_URL',
+    raw: getEnv('MAPS_ROUTER_URL'),
+    defaultValue: 'https://router.project-osrm.org',
+  }),
+  MAPS_TILE_URL: parseMapsUrl({
+    envKey: 'MAPS_TILE_URL',
+    raw: getEnv('MAPS_TILE_URL'),
+    defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    requiredPlaceholders: ['{z}', '{x}', '{y}'],
+  }),
+  MAPS_USER_AGENT:
+    getEnv('MAPS_USER_AGENT', { required: false }) ??
+    `Amanuensis/${PACKAGE_VERSION} (+https://github.com/ClimbOutLabs/amanuensis)`,
   MEMORY_SCREEN_AUTH_TOKEN: getEnv('MEMORY_SCREEN_AUTH_TOKEN', { defaultValue: '' }) ?? '',
   MEMORY_SCREEN_THRESHOLD: parseUnitInterval({
     envKey: 'MEMORY_SCREEN_THRESHOLD',

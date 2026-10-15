@@ -388,12 +388,19 @@ export type {
   ApprovalToken,
   ApprovalTokenRef,
   ApprovalTokenStore,
+  ConnectorBinding,
   MintApprovalTokenInput,
   ShellApprovalBinding,
 } from './permissions/approvalTokens';
 export { recordClassificationAudit } from './permissions/audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './permissions/audit';
-export { canonicalShellForm, classifyHostToolCall, classifyTier, shellBindingFromForm } from './permissions/classifier';
+export {
+  canonicalShellForm,
+  classifyHostToolCall,
+  classifyTier,
+  mapsDestinationHosts,
+  shellBindingFromForm,
+} from './permissions/classifier';
 export type { ClassifyContext, SentinelAction } from './permissions/classifier';
 export {
   DEFAULT_PINNED_PATH,
@@ -405,6 +412,12 @@ export {
 export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './permissions/context';
 export { verifyPreDispatch } from './permissions/dispatch';
 export type { DispatchCheckContext, VerifiableCall } from './permissions/dispatch';
+export {
+  MAPS_TOOL_NAMES,
+  RENDER_MAP_TOOL_NAME,
+  RENDER_ROUTE_TOOL_NAME,
+  isMapsToolName,
+} from './permissions/mapsToolNames';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,
