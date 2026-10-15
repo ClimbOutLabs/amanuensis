@@ -69,15 +69,27 @@ case "$cmd" in
       exit 1
     fi
     if [ -n "${STUB_BUILD_FAIL:-}" ]; then
+      echo '#0 building with "default" instance using docker driver'
       echo "build failed" >&2
       exit 1
     fi
+    echo '#0 building with "default" instance using docker driver'
+    echo '#1 [internal] load build definition from Dockerfile.dev'
     echo "$tag" >>"$S/images"
     echo "$tag" >>"$S/builds"
     exit 0
     ;;
   pull)
+    echo "sha256:4c1d: Pulling from dexidp/dex"
     echo "$1" >>"$S/images"
+    exit 0
+    ;;
+  logs)
+    printf '%s\n' "${STUB_UP_FAIL_LOG:-}"
+    exit 0
+    ;;
+  inspect)
+    echo "stub exit 1 oom false"
     exit 0
     ;;
   network)
@@ -154,12 +166,18 @@ case "$cmd" in
   ps)
     proj=
     formatted=
+    all=
     for a in "$@"; do
       case "$a" in
+        -a) all=1 ;;
         label=com.docker.compose.project=*) proj=${a#label=com.docker.compose.project=} ;;
         '{{'*) formatted=1 ;;
       esac
     done
+    if [ -n "$all" ] && [ -f "$S/failed/$proj" ]; then
+      echo c-app
+      exit 0
+    fi
     if [ -f "$S/up/$proj" ]; then
       case "$proj" in
         aman-machine) echo c1 ;;
@@ -266,6 +284,12 @@ case "$cmd" in
         missing=$(awk '/^    name: / {n = $2} /external: true/ {print n}' "$file" | while read -r v; do grep -Fxq "$v" "$S/volumes" || echo "$v"; done)
         if [ -n "$missing" ]; then
           echo "external volume \"$missing\" not found" >&2
+          exit 1
+        fi
+        if [ -n "${STUB_UP_FAIL_LOG:-}" ] && [ "$proj" != aman-machine ]; then
+          mkdir -p "$S/failed"
+          : >"$S/failed/$proj"
+          echo "dependency failed to start: container ${proj}-app-1 is unhealthy" >&2
           exit 1
         fi
         if [ -n "${STUB_UP_FAIL_UNLESS_TAG:-}" ] && [ "$img" != "$STUB_UP_FAIL_UNLESS_TAG" ] && [ "$proj" != aman-machine ]; then

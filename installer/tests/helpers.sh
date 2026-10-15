@@ -26,7 +26,7 @@ sandbox_new() {
   done
   for t in "$TESTS_DIR"/stubs/*; do
     case "$(basename "$t")" in
-      aman-doctor | caddy | systemctl) ;;
+      aman-doctor | caddy | systemctl | ip) ;;
       *) cp "$t" "$SB_BIN/" ;;
     esac
   done
@@ -43,9 +43,10 @@ sandbox_new() {
   fixture_node_runtime
   unset STUB_DOCKER_DENIED STUB_DOCKER_DOWN STUB_ROOTLESS STUB_PODMAN STUB_BUILD_FAIL STUB_BUILD_OOM STUB_DOCKER_MEM_BYTES STUB_UP_FAIL_UNLESS_TAG \
     STUB_DOCKER_ROOT STUB_DOCKER_ROOT_KB AMAN_PASSWORD STUB_BUSY_PORTS STUB_BACKUP_FAIL STUB_VOLUME_RM_FAIL STUB_ENGINE_VERSION STUB_COMPOSE_VERSION STUB_DOCTOR_EXIT STUB_VIA_SG STUB_VIA_SUDO \
-    STUB_CURL_FAIL STUB_CURL_CORRUPT STUB_SUDO_SH_FAIL STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_NODE_VERSION STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC STUB_DEMO_FAIL || true
+    STUB_CURL_FAIL STUB_CURL_CORRUPT STUB_SUDO_SH_FAIL STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_UP_FAIL_LOG STUB_PRIMARY_IP STUB_NODE_VERSION STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC STUB_DEMO_FAIL || true
   STUB_DF_KB=50000000
   INSTALL_EXTRA=()
+  RUN_ENV_EXTRA=()
 }
 
 # A copy of the installer with the stub doctor in place of the real shim, so install and upgrade runs
@@ -99,6 +100,12 @@ UNAME
 # Caddy is on the machine; a second call is the same.
 fixture_caddy() {
   cp "$TESTS_DIR/stubs/caddy" "$SB_BIN/caddy"
+}
+
+# This computer has a network address (the source of its default route), so an instance opens on it as well.
+fixture_network() {
+  cp "$TESTS_DIR/stubs/ip" "$SB_BIN/ip"
+  STUB_PRIMARY_IP=$1
 }
 
 # systemctl only logs; "cat" fails so the installer treats the Caddy unit as absent unless a test needs it.
@@ -173,9 +180,9 @@ build_run_env() {
     STUB_ENGINE_VERSION="${STUB_ENGINE_VERSION:-}" ${STUB_COMPOSE_VERSION+STUB_COMPOSE_VERSION="$STUB_COMPOSE_VERSION"}
     STUB_CURL_FAIL="${STUB_CURL_FAIL:-}" STUB_CURL_CORRUPT="${STUB_CURL_CORRUPT:-}" STUB_SUDO_SH_FAIL="${STUB_SUDO_SH_FAIL:-}"
     STUB_APPARMOR="${STUB_APPARMOR:-}" STUB_CGROUP="${STUB_CGROUP:-}" STUB_DOCKER_OS="${STUB_DOCKER_OS:-}" STUB_NO_BUNDLE="${STUB_NO_BUNDLE:-}"
-    STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}" STUB_DEMO_FAIL="${STUB_DEMO_FAIL:-}"
+    STUB_UP_FAIL_LOG="${STUB_UP_FAIL_LOG:-}" STUB_PRIMARY_IP="${STUB_PRIMARY_IP:-}" STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}" STUB_DEMO_FAIL="${STUB_DEMO_FAIL:-}"
     STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" STUB_DOCKER_ROOT="${STUB_DOCKER_ROOT:-}" STUB_DOCKER_ROOT_KB="${STUB_DOCKER_ROOT_KB:-}"
-    AMAN_CADDY_ETC="$SB/etc-caddy" AMAN_EDGE_WAIT_TRIES=1
+    AMAN_CADDY_ETC="$SB/etc-caddy" AMAN_EDGE_WAIT_TRIES=1 ${RUN_ENV_EXTRA[@]+"${RUN_ENV_EXTRA[@]}"}
     ${AMAN_PASSWORD+AMAN_PASSWORD="$AMAN_PASSWORD"})
 }
 
@@ -220,6 +227,8 @@ os_release_ubuntu() {
 # Install with defaults for tests that need an installed machine. Docker stub reachable, one instance "main".
 # INSTALL_EXTRA holds extra install.sh arguments for the call, for example (--add-docker-group).
 INSTALL_EXTRA=()
+# Extra VAR=value settings for the next runs, such as LANG or CLICOLOR_FORCE for the terminal style.
+RUN_ENV_EXTRA=()
 install_machine() {
   with_input "$SENTINEL_PASSWORD
 "

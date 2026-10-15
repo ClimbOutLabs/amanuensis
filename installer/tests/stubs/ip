@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Test double for `ip`: answers only the route lookup the installer uses to find this computer's network address.
+case "$*" in
+  *"route get"*)
+    [ -n "${STUB_PRIMARY_IP:-}" ] || exit 1
+    echo "1.1.1.1 via 192.168.1.1 dev eth0 src $STUB_PRIMARY_IP uid 0"
+    ;;
+  *) exit 1 ;;
+esac
