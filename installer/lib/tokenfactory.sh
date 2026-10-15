@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Optional hosted model (Nebius Token Factory): the key is read hidden or from stdin, kept in shell memory, and written
+# Optional hosted model (Nebius Token Factory): the key is read from stdin, kept in shell memory, and written
 # only to the instance .env. The app derives its default provider from that file; the installer never calls the API.
 
 # Must equal DEFAULT_TOKEN_FACTORY_MODEL in packages/trueforge/src/runtime/tokenFactoryDefaults.ts (contract test).
@@ -23,37 +23,19 @@ read_token_factory_key_stdin() {
   AMAN_TF_KEY=$line
 }
 
-# Optional hidden prompt, for a person at a terminal only. A pipe never answers it (that is what
-# --token-factory-key-stdin is for), so scripted answers to the other prompts keep their order. Enter skips it.
-prompt_token_factory_key() {
-  local line=
-  [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ] && [ -t 0 ] || return 0
-  printf 'Token Factory key (optional, hidden; press Enter to use no hosted model): ' >&2
-  IFS= read -rs line || true
-  printf '\n' >&2
-  [ -n "$line" ] || return 0
-  [ -z "$(tf_key_problem "$line")" ] || usage_die "$(tf_key_problem "$line")"
-  AMAN_TF_KEY=$line
-}
-
-tf_flag_given() { [ "$OPT_TF_KEY_STDIN" = 1 ] || [ -n "$I_TF_MODEL$I_TF_CAP" ]; }
-
-# Sets I_TF (1 when a hosted model is wanted), I_TF_MODEL and I_TF_CAP. A dry run never reads the key, so it
-# plans for one whenever a Token Factory flag is given: the real run asks for it at the hidden prompt.
+# Sets I_TF (1 when a hosted model is wanted), I_TF_MODEL and I_TF_CAP. The key comes only from
+# --token-factory-key-stdin; nothing asks for it. A dry run never reads the key, so it plans for one when the flag is given.
 instance_collect_token_factory() {
   I_TF=0
   I_TF_MODEL=${OPT_TF_MODEL:-}
   I_TF_CAP=${OPT_TF_CAP:-}
   [ -z "$I_TF_MODEL" ] || valid_tf_model "$I_TF_MODEL" || usage_die "--token-factory-model is not a model id"
   [ -z "$I_TF_CAP" ] || valid_tf_cap "$I_TF_CAP" || usage_die "--token-factory-daily-cap must be a whole number of tokens above zero"
-  if [ -z "$AMAN_TF_KEY" ] && [ "$OPT_TF_KEY_STDIN" != 1 ]; then
-    prompt_token_factory_key
-  fi
-  if [ -n "$AMAN_TF_KEY" ] || { [ "$DRY_RUN" = 1 ] && tf_flag_given; }; then
+  if [ -n "$AMAN_TF_KEY" ] || { [ "$DRY_RUN" = 1 ] && [ "$OPT_TF_KEY_STDIN" = 1 ]; }; then
     I_TF=1
     : "${I_TF_MODEL:=$TF_DEFAULT_MODEL}"
   elif [ -n "$I_TF_MODEL$I_TF_CAP" ]; then
-    usage_die "--token-factory-model and --token-factory-daily-cap need a Token Factory key (hidden prompt or --token-factory-key-stdin)"
+    usage_die "--token-factory-model and --token-factory-daily-cap need a Token Factory key (--token-factory-key-stdin)"
   fi
 }
 
@@ -116,30 +98,22 @@ tf_rotation_apply() {
     die "the app of instance $name did not restart healthy with the new key. Look at: docker compose -p aman-$name logs --tail 50 app"
 }
 
-tf_plan_text() {
-  local text="Use Token Factory (model $I_TF_MODEL) as the default model; the key goes only into the instance .env"
-  if [ -n "$I_TF_CAP" ]; then text="$text, capped at $I_TF_CAP tokens per day"; fi
+tf_plan_detail() {
+  local text="The key goes only into the instance .env."
+  if [ -n "$I_TF_CAP" ]; then text="$text Capped at $I_TF_CAP tokens per day."; fi
   printf '%s' "$text"
 }
 
-# Next step for the model, from the registry.
-print_model_hint() {
+# The model row of the summary: a hosted model is the only one chosen at install time; otherwise models are added in the app.
+print_model_row() {
   local name=$1 cap
-  if [ "$(reg_get "$name" token_factory)" = 1 ]; then
-    cap=$(reg_get "$name" tf_cap)
-    say "  Model:    Token Factory, $(reg_get "$name" tf_model), is the default model. Its key is in $(instance_dir "$name")/.env (mode 600)."
-    if [ -n "$cap" ]; then
-      say "            Daily limit: $cap tokens per day."
-    fi
-    say "            Check it any time: $(doctor_shim) doctor --instance $name --only model"
-    return 0
-  fi
-  if [ -n "$(reg_get "$name" model_endpoint)" ]; then
-    say "  Model:    open Settings > Models and enter $(reg_get "$name" model_endpoint)"
-  else
-    say "  Model:    not set yet. Next step: open Settings > Models and add your model server address or a provider key."
-  fi
-  say "            A model server running on this computer must listen on more than 127.0.0.1 to be reachable"
-  say "            from the app, which sees this computer as host.docker.internal. Make it listen on all addresses"
-  say "            (or on the Docker bridge address), then use http://host.docker.internal:<its port>/v1."
+  [ "$(reg_get "$name" token_factory)" = 1 ] || return 0
+  cap=$(reg_get "$name" tf_cap)
+  ui_row "Model" "Token Factory, $(reg_get "$name" tf_model), is the default model. Its key is in $(ui_path "$(instance_dir "$name")")/.env (mode 600).${cap:+ Daily limit: $cap tokens per day.}"
+}
+
+print_model_next() {
+  local name=$1
+  [ "$(reg_get "$name" token_factory)" = 1 ] || return 0
+  ui_line "Check the hosted model any time: $(doctor_shim) doctor --instance $name --only model"
 }

@@ -71,7 +71,7 @@ test_failed_upgrade_restores_database_and_images() {
   STUB_UP_FAIL_UNLESS_TAG=$old
   run_install upgrade
   assert_rc 1
-  assert_contains "$ERR" "restoring the previous version"
+  assert_flat_contains "$ERR" "restoring the previous version"
   assert_contains "$OUT" "Rolled back to the previous version"
   assert_eq "$(app_tag "$AMAN_HOME/release/release.json")" "$old" "release record restored"
   assert_eq "$(compose_image main)" "$old" "compose points at the previous image"
@@ -147,7 +147,7 @@ test_doctor_failure_blocks_unless_forced() {
   STUB_DOCTOR_EXIT=1
   run_install upgrade
   assert_rc 1
-  assert_contains "$ERR" "doctor reports a failure"
+  assert_flat_contains "$ERR" "doctor reports a failure"
   assert_no_path "$AMAN_HOME/backups"
   run_install upgrade --force
   assert_rc 0

@@ -250,6 +250,13 @@ assert_contains() {
   case "$1" in *"$2"*) t_pass ;; *) t_fail "${3:-missing text}: expected to find [$2] in [$(printf '%s' "$1" | head -c 600)]" ;; esac
 }
 
+# The text with every run of whitespace collapsed to one space, so a sentence the plan wrapped still matches.
+flat() { printf '%s' "$1" | tr '\n' ' ' | tr -s ' '; }
+
+assert_flat_contains() {
+  assert_contains "$(flat "$1")" "$2" "${3:-}"
+}
+
 assert_not_contains() {
   case "$1" in *"$2"*) t_fail "${3:-unexpected text}: found [$2]" ;; *) t_pass ;; esac
 }

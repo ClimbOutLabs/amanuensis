@@ -168,9 +168,10 @@ docker_prepare() {
   docker_plan_access
   case "$DOCKER_ACCESS" in
     install)
-      say "Docker is not installed. Installing it needs root and changes this machine:"
+      ui_phase "Installing Docker"
+      ui_line "Docker is not installed. Installing it needs administrator rights (sudo) and changes this computer."
       print_root_steps
-      say "Members of the docker group have root-equivalent access to this machine."
+      ui_hint "Members of the docker group have root-equivalent access to this computer."
       if ! consent_root "Install Docker Engine now?" "$OPT_INSTALL_DOCKER"; then
         die "Docker is required and nothing was installed. Install Docker Engine with the steps above (or: install.sh --print-root-steps), then run this again. To let this installer run them, answer yes when asked, or pass --install-docker; --yes alone never installs software."
       fi
@@ -180,8 +181,9 @@ docker_prepare() {
       ;;
   esac
   if [ "$DOCKER_ACCESS" = add-group ]; then
-    say "Your user cannot reach the Docker socket. Adding it to the docker group needs root."
-    say "Members of the docker group have root-equivalent access to this machine."
+    ui_phase "Docker access"
+    ui_line "Your user cannot reach the Docker socket. Adding it to the docker group needs administrator rights (sudo)."
+    ui_hint "Members of the docker group have root-equivalent access to this computer."
     if ! consent_root "Add $(current_user) to the docker group?" "$OPT_ADD_DOCKER_GROUP"; then
       die "Docker needs access you have not granted, so nothing was changed. Run: sudo usermod -aG docker $(current_user)   then sign out and back in (or run: newgrp docker) and run this again. To let this installer do it, answer yes when asked, or pass --add-docker-group; --yes alone never changes groups."
     fi
@@ -207,13 +209,31 @@ docker_prepare() {
   docker_runtime_check
 }
 
-docker_blocked_text() {
+# Sets DB_HEAD to what is wrong and DB_NEXT to what to do, for the state docker_probe found.
+docker_blocked_parts() {
   case "$DOCKER_STATE" in
-    missing) echo "Docker is not installed. $(docker_install_hint)" ;;
-    down) echo "Docker is installed but not running. Start it (Linux: sudo systemctl start docker; macOS and Windows: open Docker Desktop), then run this again." ;;
-    denied) echo "Your user cannot reach the Docker socket. Add it to the docker group (sudo usermod -aG docker \$USER), sign out and in, then run this again." ;;
-    *) echo "Docker did not answer: ${DOCKER_DETAIL:-unknown error}" ;;
+    missing)
+      DB_HEAD="Docker is not installed"
+      DB_NEXT=$(docker_install_hint)
+      ;;
+    down)
+      DB_HEAD="Docker is installed but not running"
+      DB_NEXT="Start it (Linux: sudo systemctl start docker; macOS and Windows: open Docker Desktop), then run install.sh again."
+      ;;
+    denied)
+      DB_HEAD="Your user cannot reach the Docker socket"
+      DB_NEXT="Add it to the docker group (sudo usermod -aG docker \$USER), sign out and in, then run install.sh again."
+      ;;
+    *)
+      DB_HEAD="Docker did not answer"
+      DB_NEXT="Check that Docker is running with: docker info"
+      ;;
   esac
+}
+
+docker_blocked_text() {
+  docker_blocked_parts
+  echo "$DB_HEAD. $DB_NEXT${DOCKER_DETAIL:+ ($DOCKER_DETAIL)}"
 }
 
 docker_fail_message() { die "$(docker_blocked_text)"; }

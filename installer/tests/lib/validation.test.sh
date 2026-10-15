@@ -32,7 +32,7 @@ test_bad_names_are_refused() {
 }
 
 test_values_with_newlines_are_refused() {
-  t_begin "an email, URL, endpoint or flag value with a second line is refused"
+  t_begin "an email, URL or flag value with a second line is refused"
   sandbox_new
   local bad
   for bad in $'owner@example.invalid\nINJECTED=1' $'x@example.invalid\n'; do
@@ -41,8 +41,6 @@ test_values_with_newlines_are_refused() {
   done
   run_install --dry-run --email owner@example.invalid --public-url $'https://aman.example.invalid\nINJECTED=1' --login-url https://login.example.invalid
   if [ "$RC" != 0 ]; then t_pass; else t_fail "public URL accepted"; fi
-  run_install --dry-run --email owner@example.invalid --model-endpoint $'http://host.docker.internal:11434/v1\nINJECTED=1'
-  if [ "$RC" != 0 ]; then t_pass; else t_fail "model endpoint accepted"; fi
   assert_no_path "$AMAN_HOME"
   sandbox_drop
 }

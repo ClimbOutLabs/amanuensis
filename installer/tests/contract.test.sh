@@ -50,7 +50,7 @@ test_doctor_sandbox_reads_what_the_installer_wrote() {
   local out rc=0
   out=$(real_doctor sandbox) || rc=$?
   assert_eq "$rc" 0 "doctor sandbox exit code right after an install"
-  assert_contains "$out" "Instance main"
+  assert_not_contains "$out" "No instance has the sandbox" "the instance the installer wired is found"
   assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --instance main --repo-root $REPO"
   assert_log_has "--command-name $AMAN_HOME/bin/aman doctor sandbox --check"
   assert_log_has "aman doctor --text --only run_code"

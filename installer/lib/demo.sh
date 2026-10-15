@@ -31,7 +31,7 @@ demo_user() {
 }
 
 demo_plan_text() {
-  printf 'Turn demo mode on for instance %s (DEMO_MODE=true) and seed the synthetic demo world for %s once it is healthy' "$1" "$2"
+  printf 'Turn demo mode on for instance %s and seed the synthetic demo world for %s' "$1" "$2"
 }
 
 # Sets DEMO_MODE=true in the managed block and restarts the app when that changed it.

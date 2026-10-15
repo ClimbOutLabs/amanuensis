@@ -6,5 +6,9 @@ if [ "${2:-}" = sandbox ]; then
   echo "sandbox check stub"
   exit "${STUB_SANDBOX_DOCTOR_EXIT:-0}"
 fi
+if [ "${2:-}" = --summary ]; then
+  echo "  + This computer: 1 checks passed"
+  exit "${STUB_DOCTOR_EXIT:-0}"
+fi
 echo '{"machine":[{"id":"docker","state":"ok","detail":"","fix":""}],"instances":{}}'
 exit "${STUB_DOCTOR_EXIT:-0}"

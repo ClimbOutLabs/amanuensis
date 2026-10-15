@@ -18,8 +18,12 @@ TEMPLATES_DIR=$INSTALLER_DIR/templates
 PINS_FILE=$INSTALLER_DIR/release.json
 DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 
+# shellcheck source=lib/ui.sh
+. "$INSTALLER_DIR/lib/ui.sh"
 # shellcheck source=lib/common.sh
 . "$INSTALLER_DIR/lib/common.sh"
+# shellcheck source=lib/diagnose.sh
+. "$INSTALLER_DIR/lib/diagnose.sh"
 # shellcheck source=lib/docker.sh
 . "$INSTALLER_DIR/lib/docker.sh"
 # shellcheck source=lib/ports.sh
@@ -78,7 +82,6 @@ OPT_PUBLIC_URL=
 OPT_LOGIN_URL=
 OPT_PORT=
 OPT_LOGIN_PORT=
-OPT_MODEL_ENDPOINT=
 OPT_TLS=
 OPT_PUBLIC_IP=
 OPT_TF_MODEL=
@@ -90,6 +93,7 @@ SUBCOMMAND=
 LOCK_HELD=0
 AMAN_PASSWORD=
 AMAN_TF_KEY=
+ui_init
 
 usage() {
   cat <<'USAGE'
@@ -116,6 +120,7 @@ Options
   --tls-root            let the installer run the printed root steps for --tls caddy (install Caddy, apply its configuration) without asking
   --no-sandbox          install without the gVisor sandbox (run code stays off)
   --use-host-node       run the sandbox setup on this computer's Node.js 22.14 or newer instead of downloading a pinned copy
+  --verbose             show technical details and the full list of downloads
   --dry-run             stop after printing the plan
   --name NAME           first instance name (default main)
   --email ADDRESS       owner email (with add-user: the new user's email)
@@ -134,7 +139,6 @@ Options
   --login-port N        port on this computer for the sign-in service
   --tls caddy           serve --public-url and --login-url over https with Caddy on this computer (Ubuntu package, Let's Encrypt)
   --public-ip ADDRESS   this computer's public IPv4 address for the --tls DNS check (default: ask a lookup service)
-  --model-endpoint URL  model server endpoint to remind you of at the end
   --confirm-name NAME   with --purge-data, the instance name typed in advance
   --print-root-steps    print the root steps for installing Docker and stop
   --print-network       print every host the installer may contact and stop
@@ -161,7 +165,11 @@ parse_args() {
         usage
         exit 0
         ;;
-      --yes | -y) ASSUME_YES=1 ;;
+      --yes | -y)
+        ASSUME_YES=1
+        UI_ASSUME_YES=1
+        ;;
+      --verbose) UI_VERBOSE=1 ;;
       --dry-run) DRY_RUN=1 ;;
       --password-stdin) PASSWORD_FROM_STDIN=1 ;;
       --install-docker) OPT_INSTALL_DOCKER=1 ;;
@@ -174,18 +182,18 @@ parse_args() {
       --print-proxy-requirements) PRINT_PROXY=1 ;;
       --tls-root) OPT_TLS_ROOT=1 ;;
       --token-factory-key-stdin) OPT_TF_KEY_STDIN=1 ;;
-      --token-factory-key | --token-factory-key=*) usage_die "the Token Factory key is never taken from the command line; enter it at the hidden prompt or use --token-factory-key-stdin" ;;
+      --token-factory-key | --token-factory-key=*) usage_die "the Token Factory key is never taken from the command line; use --token-factory-key-stdin" ;;
       --check) OPT_CHECK=1 ;;
       --force) OPT_FORCE=1 ;;
       --purge-data) OPT_PURGE=1 ;;
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
-      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --model-endpoint | --confirm-name | --tls | --public-ip | --token-factory-model | --token-factory-daily-cap | --demo-user)
+      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --token-factory-model | --token-factory-daily-cap | --demo-user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --model-endpoint=* | --confirm-name=* | --tls=* | --public-ip=* | --token-factory-model=* | --token-factory-daily-cap=* | --demo-user=*)
+      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --token-factory-model=* | --token-factory-daily-cap=* | --demo-user=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -220,7 +228,6 @@ set_option() {
     --login-url) OPT_LOGIN_URL=$2 ;;
     --port) OPT_PORT=$2 ;;
     --login-port) OPT_LOGIN_PORT=$2 ;;
-    --model-endpoint) OPT_MODEL_ENDPOINT=$2 ;;
     --confirm-name) OPT_CONFIRM_NAME=$2 ;;
     --tls) OPT_TLS=$2 ;;
     --public-ip) OPT_PUBLIC_IP=$2 ;;
@@ -233,9 +240,8 @@ set_option() {
 
 print_signout_note() {
   if [ "$NEEDS_SIGNOUT" = 1 ]; then
-    say ""
-    say "Docker access: this run used your new docker group membership without a re-login."
-    say "Sign out and back in (or run: newgrp docker) once so docker works in your other terminals."
+    ui_newline
+    ui_warn "Docker access: this run used your new docker group membership without a re-login." "Sign out and back in (or run: newgrp docker) once so docker works in your other terminals."
   fi
 }
 
@@ -260,6 +266,7 @@ on_exit() {
   trap - EXIT
   AMAN_PASSWORD=
   AMAN_TF_KEY=
+  ui_step_abort
   upgrade_on_exit
   lock_release
   exit "$rc"

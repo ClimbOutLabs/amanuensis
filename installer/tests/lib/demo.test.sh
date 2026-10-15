@@ -33,8 +33,8 @@ test_demo_install_turns_demo_mode_on_and_seeds_the_owner() {
   assert_contains "$(seed_runs)" "-T app aman demo-seed --user $OWNER"
   assert_contains "$(cat "$STUB_LOG")" "--project-name aman-main" "run through the instance project"
   assert_not_contains "$(seed_runs)" "--reset"
-  assert_contains "$OUT" "Demo:     on (DEMO_MODE=true)"
-  assert_contains "$OUT" "instance demo-seed --instance main"
+  assert_flat_contains "$OUT" "Demo on (DEMO_MODE=true)"
+  assert_flat_contains "$OUT" "instance demo-seed --instance main"
   local up_line seed_line
   up_line=$(grep -n 'up -d --wait' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
   seed_line=$(grep -n 'aman demo-seed' "$STUB_LOG" | head -n 1 | cut -d: -f1)
@@ -86,8 +86,8 @@ test_demo_seed_refuses_a_non_demo_instance() {
   install_machine
   run_install instance demo-seed
   assert_rc 1
-  assert_contains "$ERR" "not a demo instance"
-  assert_contains "$ERR" "install.sh --demo --name main"
+  assert_flat_contains "$ERR" "not a demo instance"
+  assert_flat_contains "$ERR" "install.sh --demo --name main"
   assert_eq "$(seed_count)" 0
   sandbox_drop
 }
@@ -97,7 +97,7 @@ test_demo_seed_before_install_is_refused() {
   sandbox_new
   run_install instance demo-seed
   assert_rc 1
-  assert_contains "$ERR" "not set up yet"
+  assert_flat_contains "$ERR" "not set up yet"
   sandbox_drop
 }
 
@@ -108,7 +108,7 @@ test_demo_seed_needs_a_running_instance() {
   rm -f "$SB_STATE/up/aman-main"
   run_install instance demo-seed
   assert_rc 1
-  assert_contains "$ERR" "is not running"
+  assert_flat_contains "$ERR" "is not running"
   assert_eq "$(seed_count)" 1 "only the install seed"
   sandbox_drop
 }
@@ -150,8 +150,8 @@ test_seed_failure_fails_the_run_and_names_the_command() {
   install_demo
   unset STUB_DEMO_FAIL
   assert_rc 1
-  assert_contains "$ERR" "demo seed failed"
-  assert_contains "$ERR" "instance demo-seed --instance main"
+  assert_flat_contains "$ERR" "demo seed failed"
+  assert_flat_contains "$ERR" "instance demo-seed --instance main"
   assert_contains "$OUT" "Instance main"
   assert_eq "$(env_value main DEMO_MODE)" true
   run_install instance demo-seed
@@ -164,7 +164,7 @@ test_demo_dry_run_changes_nothing() {
   sandbox_new
   run_install --dry-run --demo --email "$OWNER"
   assert_rc 0
-  assert_contains "$OUT" "Turn demo mode on for instance main (DEMO_MODE=true) and seed the synthetic demo world for $OWNER"
+  assert_flat_contains "$OUT" "Turn demo mode on for instance main and seed the synthetic demo world for $OWNER"
   assert_no_path "$AMAN_HOME/instances"
   assert_eq "$(seed_count)" 0
   sandbox_drop
@@ -192,18 +192,18 @@ test_option_validation() {
   install_machine
   run_install --reset
   assert_rc 2
-  assert_contains "$ERR" "--reset applies to instance demo-seed"
+  assert_flat_contains "$ERR" "--reset applies to instance demo-seed"
   run_install backup --demo
   assert_rc 2
-  assert_contains "$ERR" "--demo applies to install and instance add"
+  assert_flat_contains "$ERR" "--demo applies to install and instance add"
   run_install instance demo-seed --demo
   assert_rc 2
   run_install --demo --demo-user not-an-email
   assert_rc 2
-  assert_contains "$ERR" "--demo-user must be an email address"
+  assert_flat_contains "$ERR" "--demo-user must be an email address"
   run_install --demo-user judge@demo.invalid
   assert_rc 2
-  assert_contains "$ERR" "--demo-user applies with --demo"
+  assert_flat_contains "$ERR" "--demo-user applies with --demo"
   run_install instance demo-seed extra
   assert_rc 2
   assert_eq "$(seed_count)" 0
@@ -220,7 +220,7 @@ test_several_instances_need_a_choice() {
   clear_input
   run_install instance demo-seed
   assert_rc 2
-  assert_contains "$ERR" "--instance"
+  assert_flat_contains "$ERR" "--instance"
   run_install instance demo-seed --instance main
   assert_rc 0
   sandbox_drop
@@ -233,7 +233,7 @@ test_demo_install_summary_survives_a_rerun() {
   rm -f "$SB_STATE/up/aman-main"
   run_install --yes
   assert_rc 0
-  assert_contains "$OUT" "Demo:     on (DEMO_MODE=true)"
+  assert_flat_contains "$OUT" "Demo on (DEMO_MODE=true)"
   assert_eq "$(seed_count)" 1 "a plain re-run does not seed"
   sandbox_drop
 }

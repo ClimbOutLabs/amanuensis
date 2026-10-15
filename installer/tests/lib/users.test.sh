@@ -102,7 +102,7 @@ test_short_stdin_password_is_refused_before_any_change() {
   env_before=$(cat "$AMAN_HOME/instances/main/.env")
   add_user_stdin judge1 judge1@demo.invalid "short"
   assert_rc 2
-  assert_contains "$ERR" "at least 8 characters"
+  assert_flat_contains "$ERR" "at least 8 characters"
   assert_eq "$(cat "$AMAN_HOME/instances/main/.env")" "$env_before"
   assert_not_contains "$(registry)" "user_judge1"
   assert_not_contains "$(dex_env)" "JUDGE1"
@@ -158,13 +158,13 @@ test_conflicting_adds_are_refused() {
   add_user judge1 judge1@demo.invalid
   add_user judge1 other@demo.invalid
   assert_rc 1
-  assert_contains "$ERR" "different email"
+  assert_flat_contains "$ERR" "different email"
   add_user judge3 Judge1@Demo.Invalid
   assert_rc 1
-  assert_contains "$ERR" "already signs in as judge1"
+  assert_flat_contains "$ERR" "already signs in as judge1"
   add_user judge3 OWNER@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "already signs in as owner"
+  assert_flat_contains "$ERR" "already signs in as owner"
   assert_not_contains "$(registry)" "judge3"
   sandbox_drop
 }
@@ -187,12 +187,12 @@ test_input_validation() {
   assert_rc 2
   add_user judge1 x@demo.invalid --role admin
   assert_rc 2
-  assert_contains "$ERR" "only admin"
+  assert_flat_contains "$ERR" "only admin"
   add_user judge1 x@demo.invalid --role viewer
   assert_rc 2
   run_install instance add-user judge1
   assert_rc 2
-  assert_contains "$ERR" "usage"
+  assert_flat_contains "$ERR" "usage"
   assert_eq "$(cat "$AMAN_HOME/instances/main/.env")" "$env_before"
   assert_not_contains "$(registry)" "user_"
   assert_eq "$(log_count 'aman hash-password')" 1 "only the owner was ever hashed"
@@ -266,7 +266,7 @@ test_a_user_without_a_hash_does_not_break_the_login() {
   rm -f "$AMAN_HOME/instances/main/dex.env.bak"
   run_install instance add main
   assert_rc 0
-  assert_contains "$ERR" "user judge1"
+  assert_flat_contains "$ERR" "user judge1"
   assert_not_contains "$(dex_yaml)" "JUDGE1"
   assert_contains "$(dex_yaml)" "JUDGE2"
   sandbox_drop
@@ -421,7 +421,7 @@ test_several_instances_need_a_choice() {
   clear_input
   add_user judge1 judge1@demo.invalid
   assert_rc 2
-  assert_contains "$ERR" "--instance"
+  assert_flat_contains "$ERR" "--instance"
   add_user judge1 judge1@demo.invalid --instance second
   assert_rc 0
   assert_contains "$(cat "$AMAN_HOME/state/instances/second.conf")" "user_judge1="
@@ -438,7 +438,7 @@ test_user_commands_before_install_are_refused() {
   sandbox_new
   add_user judge1 judge1@demo.invalid
   assert_rc 1
-  assert_contains "$ERR" "not set up yet"
+  assert_flat_contains "$ERR" "not set up yet"
   sandbox_drop
 }
 

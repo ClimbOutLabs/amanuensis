@@ -12,14 +12,15 @@ test_dry_run_plans_the_sandbox() {
   STUB_APPARMOR=1
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  assert_contains "$OUT" "Build the sandbox slot image amanuensis-sandbox-slot:local"
-  assert_contains "$OUT" "Start the 4 sandbox slots of instance main"
-  assert_contains "$OUT" "[root]"
-  assert_contains "$OUT" "install the AppArmor profile as /etc/apparmor.d/aman-sandbox-slot and load it (it loads again at every boot)"
-  assert_contains "$OUT" "4 slot disk files of 16 GB under /var/lib/aman-slots"
-  assert_contains "$OUT" "--sandbox-root"
-  assert_contains "$OUT" "Run code (Python, shell, files) runs in the gVisor sandbox"
-  assert_contains "$OUT" "Sandbox slot image: base images, Ubuntu packages"
+  assert_flat_contains "$OUT" "Build the sandbox slot image amanuensis-sandbox-slot:local"
+  assert_flat_contains "$OUT" "Start the 4 sandbox slots of instance main"
+  assert_flat_contains "$OUT" "needs admin Set up the sandbox on this computer"
+  assert_flat_contains "$OUT" "Installs the AppArmor profile /etc/apparmor.d/aman-sandbox-slot and loads it, now and at every boot."
+  assert_flat_contains "$OUT" "Creates 4 disk files of 16 GB under /var/lib/aman-slots"
+  assert_flat_contains "$OUT" "--sandbox-root"
+  assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in the gVisor sandbox"
+  run_install --dry-run --verbose --email owner@example.invalid
+  assert_flat_contains "$OUT" "Sandbox slot image: base images, Ubuntu packages"
   assert_log_lacks "aman-sandbox.mjs"
   assert_log_lacks "docker build"
   assert_no_path "$AMAN_HOME"
@@ -32,8 +33,8 @@ test_plan_has_no_root_line_in_docker_desktop() {
   STUB_DOCKER_OS="Docker Desktop"
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  assert_contains "$OUT" "Start the 4 sandbox slots of instance main"
-  assert_not_contains "$OUT" "[root]"
+  assert_flat_contains "$OUT" "Start the 4 sandbox slots of instance main"
+  assert_not_contains "$OUT" "needs admin"
   sandbox_drop
 }
 
@@ -48,7 +49,7 @@ test_no_host_node_is_needed() {
   assert_eq "$("$AMAN_HOME/runtime/node/bin/node" --version)" "v$NODE_PIN_VERSION"
   assert_log_has "curl -fsSL --proto =https --tlsv1.2 -o"
   assert_log_has "https://nodejs.org/dist/v$NODE_PIN_VERSION/node-v$NODE_PIN_VERSION-"
-  assert_contains "$OUT" "Downloading Node.js v$NODE_PIN_VERSION"
+  assert_flat_contains "$OUT$ERR" "Downloading Node.js v$NODE_PIN_VERSION"
   assert_eq "$(log_count 'https://nodejs.org')" 1 "one download"
   assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --build-only"
   assert_no_path "$SB/user/.node"
@@ -61,11 +62,13 @@ test_plan_lists_the_runtime_download() {
   sandbox_new
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  assert_contains "$OUT" "Download Node.js v$NODE_PIN_VERSION ("
-  assert_contains "$OUT" "from nodejs.org, checked against a pinned SHA-256"
-  assert_contains "$OUT" "the host needs no Node.js"
-  assert_contains "$OUT" "Node.js runtime that runs the sandbox setup"
-  assert_contains "$OUT" "nodejs.org"
+  assert_flat_contains "$OUT" "Download Node.js v$NODE_PIN_VERSION ("
+  assert_flat_contains "$OUT" "from nodejs.org"
+  assert_flat_contains "$OUT" "Checked against a pinned SHA-256"
+  assert_flat_contains "$OUT" "this computer needs no Node.js of its own"
+  run_install --dry-run --verbose --email owner@example.invalid
+  assert_flat_contains "$OUT" "Node.js runtime that runs the sandbox setup"
+  assert_flat_contains "$OUT" "nodejs.org"
   assert_log_lacks "curl "
   run_install --print-network
   assert_contains "$OUT" "nodejs.org"
@@ -73,7 +76,7 @@ test_plan_lists_the_runtime_download() {
   : >"$STUB_LOG"
   run_install --dry-run
   assert_rc 0
-  assert_contains "$OUT" "Pinned Node.js v$NODE_PIN_VERSION for the sandbox setup"
+  assert_flat_contains "$OUT" "Pinned Node.js v$NODE_PIN_VERSION for the sandbox setup"
   assert_not_contains "$OUT" "Download Node.js"
   run_install instance add second --yes --password-stdin --email second@example.invalid </dev/null
   assert_log_lacks "https://nodejs.org" "an installed runtime is reused"
@@ -89,7 +92,7 @@ test_platform_selection() {
     fixture_uname "$os" "$arch"
     run_install --dry-run --email owner@example.invalid
     assert_rc 0
-    assert_contains "$OUT" "Download Node.js v$NODE_PIN_VERSION ($plat) from nodejs.org" "$os $arch"
+    assert_flat_contains "$OUT" "Download Node.js v$NODE_PIN_VERSION ($plat) from nodejs.org" "$os $arch"
     sandbox_drop
   done
   sandbox_new
@@ -106,9 +109,9 @@ test_unsupported_machine_is_a_blocker() {
   fixture_uname Linux riscv64
   run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "no official Node.js build for this computer (Linux riscv64)"
-  assert_contains "$ERR" "--use-host-node"
-  assert_contains "$ERR" "--no-sandbox"
+  assert_flat_contains "$OUT$ERR" "no official Node.js build for this computer (Linux riscv64)"
+  assert_flat_contains "$OUT$ERR" "--use-host-node"
+  assert_flat_contains "$OUT$ERR" "--no-sandbox"
   assert_log_lacks "curl "
   sandbox_drop
 }
@@ -119,7 +122,7 @@ test_download_needs_curl_or_wget() {
   rm -f "$SB_BIN/curl"
   run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "needs curl or wget"
+  assert_flat_contains "$OUT$ERR" "needs curl or wget"
   sandbox_drop
 }
 
@@ -132,8 +135,8 @@ test_checksum_mismatch_is_refused() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_contains "$ERR" "does not match the pinned SHA-256"
-  assert_contains "$ERR" "so it was not used"
+  assert_flat_contains "$ERR" "does not match the pinned SHA-256"
+  assert_flat_contains "$ERR" "so it was not used"
   assert_no_path "$AMAN_HOME/runtime/node/bin/node"
   assert_log_lacks "aman-sandbox.mjs"
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
@@ -150,7 +153,7 @@ test_download_failure_is_explained() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_contains "$ERR" "could not download https://nodejs.org/dist/v$NODE_PIN_VERSION/node-v$NODE_PIN_VERSION-"
+  assert_flat_contains "$ERR" "could not download https://nodejs.org/dist/v$NODE_PIN_VERSION/node-v$NODE_PIN_VERSION-"
   assert_no_path "$AMAN_HOME/runtime/node/bin/node"
   sandbox_drop
 }
@@ -179,7 +182,7 @@ test_host_node_opt_in_needs_a_new_enough_node() {
   sandbox_new
   run_install --dry-run --use-host-node --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "--use-host-node needs Node.js 22.14 or newer"
+  assert_flat_contains "$OUT$ERR" "--use-host-node needs Node.js 22.14 or newer"
   fixture_host_node
   STUB_NODE_VERSION=v22.13.1
   run_install --dry-run --use-host-node --email owner@example.invalid
@@ -187,7 +190,7 @@ test_host_node_opt_in_needs_a_new_enough_node() {
   STUB_NODE_VERSION=v22.14.0
   run_install --dry-run --use-host-node --email owner@example.invalid
   assert_rc 0
-  assert_contains "$OUT" "Node.js on this computer runs the sandbox setup (--use-host-node)"
+  assert_flat_contains "$OUT" "Node.js on this computer runs the sandbox setup (--use-host-node)"
   STUB_NODE_VERSION=v24.1.0
   run_install --dry-run --use-host-node --email owner@example.invalid
   assert_rc 0
@@ -200,17 +203,17 @@ test_cgroup_and_low_disk() {
   STUB_CGROUP=1
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  assert_contains "$ERR" "cgroup v1"
+  assert_flat_contains "$OUT$ERR" "cgroup v1"
   STUB_CGROUP=3
   run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "unknown cgroup setup"
-  assert_contains "$ERR" "--no-sandbox"
+  assert_flat_contains "$OUT$ERR" "unknown cgroup setup"
+  assert_flat_contains "$OUT$ERR" "--no-sandbox"
   STUB_CGROUP=2
   STUB_DF_KB=$((15 * 1024 * 1024))
   run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "Less than 20 GB free for the sandbox slot disks under /var/lib/aman-slots"
+  assert_flat_contains "$OUT$ERR" "Less than 20 GB free for the sandbox slot disks under /var/lib/aman-slots"
   run_install --dry-run --no-sandbox --email owner@example.invalid
   assert_rc 0
   assert_not_contains "$OUT" "sandbox slot"
@@ -237,8 +240,8 @@ test_install_builds_then_starts_slots_then_the_instance() {
   if [ "$build" -lt "$slots" ] && [ "$slots" -lt "$up" ]; then t_pass; else t_fail "order: image build $build, slots $slots, instance $up"; fi
   assert_contains "$OUT" "Sandbox check for instance main:"
   assert_log_has "doctor sandbox --instance main"
-  assert_contains "$OUT" "Run code: on, in the gVisor sandbox"
-  assert_contains "$OUT" "aman doctor sandbox --fix"
+  assert_flat_contains "$OUT" "Run code on, in the gVisor sandbox"
+  assert_flat_contains "$OUT" "aman doctor sandbox --fix"
   assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" slots
   sandbox_drop
 }
@@ -276,7 +279,7 @@ test_install_without_sandbox() {
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "SANDBOX_BACKEND"
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "slot_ctl"
   assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" off
-  assert_contains "$OUT" "installed with --no-sandbox"
+  assert_flat_contains "$OUT" "installed with --no-sandbox"
   assert_log_lacks "doctor sandbox"
   # A second run does not bring the sandbox back for that instance.
   run_install --yes
@@ -294,8 +297,8 @@ test_root_steps_need_consent_yes_is_not_enough() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_contains "$ERR" "root steps that were not approved"
-  assert_contains "$ERR" "--sandbox-root"
+  assert_flat_contains "$ERR" "root steps that were not approved"
+  assert_flat_contains "$ERR" "--sandbox-root"
   assert_contains "$OUT" "sudo install -m 0644 $REPO/ops/sandbox-slot/apparmor/aman-sandbox-slot /etc/apparmor.d/aman-sandbox-slot"
   assert_contains "$OUT" "sudo apparmor_parser -r -W /etc/apparmor.d/aman-sandbox-slot"
   assert_contains "$OUT" "loaded again by the system at every boot"
@@ -325,10 +328,7 @@ test_root_steps_answered_yes_on_a_terminal() {
   sandbox_new
   printf 'needs_disk\n' >"$SB_STATE/slots_state"
   run_install_tty "Instance name=>
-Owner email=>owner@example.invalid
-Address you will use=>
-Token Factory key=>
-Model server address=>
+Your email=>owner@example.invalid
 Go ahead?=>y
 Password for the owner account=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD
@@ -346,10 +346,7 @@ test_root_steps_declined_on_a_terminal() {
   sandbox_new
   printf 'needs_apparmor\n' >"$SB_STATE/slots_state"
   run_install_tty "Instance name=>
-Owner email=>owner@example.invalid
-Address you will use=>
-Token Factory key=>
-Model server address=>
+Your email=>owner@example.invalid
 Go ahead?=>y
 Password for the owner account=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD
@@ -383,8 +380,8 @@ test_slot_image_failure_stops_before_anything_runs() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_contains "$ERR" "the sandbox slot image build failed"
-  assert_contains "$ERR" "$AMAN_HOME/state/sandbox.log"
+  assert_flat_contains "$ERR" "the sandbox slot image build failed"
+  assert_flat_contains "$ERR" "$AMAN_HOME/state/sandbox.log"
   assert_log_lacks "docker compose --project-name aman-main"
   sandbox_drop
 }
@@ -398,7 +395,7 @@ test_image_without_the_setup_is_explained() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_contains "$ERR" "has no sandbox setup"
+  assert_flat_contains "$ERR" "has no sandbox setup"
   sandbox_drop
 }
 
@@ -411,7 +408,7 @@ test_failed_verification_fails_the_install_with_the_repair() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_contains "$ERR" "the sandbox of instance main is not ready. The fix: $AMAN_HOME/bin/aman doctor sandbox --fix"
+  assert_flat_contains "$ERR" "the sandbox of instance main is not ready. The fix: $AMAN_HOME/bin/aman doctor sandbox --fix"
   assert_contains "$OUT" "Instance main" "the summary was still printed"
   sandbox_drop
 }
@@ -529,7 +526,7 @@ test_docker_is_enabled_at_boot_with_consent() {
   INSTALL_EXTRA=(--sandbox-root)
   install_machine
   assert_eq "$RC" 0
-  assert_contains "$OUT" "Docker does not start at boot here"
+  assert_flat_contains "$OUT" "Docker does not start at boot here"
   assert_contains "$OUT" "sudo systemctl enable docker"
   assert_log_has "sudo systemctl enable docker"
   sandbox_drop
@@ -542,7 +539,7 @@ test_docker_boot_needs_consent_but_does_not_stop_the_install() {
   install_machine
   assert_eq "$RC" 0
   assert_log_lacks "sudo systemctl enable docker"
-  assert_contains "$ERR$OUT" "after a restart the sandbox stays down until you run: sudo systemctl enable docker"
+  assert_flat_contains "$ERR$OUT" "after a restart the sandbox stays down until you run: sudo systemctl enable docker"
   sandbox_drop
 }
 

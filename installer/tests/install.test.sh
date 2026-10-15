@@ -10,14 +10,20 @@ test_dry_run_changes_nothing() {
   run_install --dry-run
   assert_rc 0
   assert_no_path "$AMAN_HOME"
-  assert_contains "$OUT" "Amanuensis install plan"
+  assert_contains "$OUT" "The plan (3 of 6)"
+  assert_contains "$OUT" "Downloads: about"
+  assert_contains "$OUT" "Full list of downloads and sources: --verbose"
+  assert_not_contains "$OUT" "Whisper small speech model weights" "the long list waits for --verbose"
+  assert_flat_contains "$OUT" "Images are built here and never pushed anywhere"
+  assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in the gVisor sandbox"
+  assert_contains "$OUT" "Dry run: nothing was changed."
+  assert_not_contains "$OUT" "will do" "the plan words are done, to do and needs admin"
+  run_install --dry-run --verbose
+  assert_rc 0
   assert_contains "$OUT" "First-run downloads (approximate)"
   assert_contains "$OUT" "Whisper small speech model weights"
   assert_contains "$OUT" "Search embedding model"
   assert_contains "$OUT" "total: about"
-  assert_contains "$OUT" "Nothing is pushed to any registry"
-  assert_contains "$OUT" "Run code (Python, shell, files) runs in the gVisor sandbox"
-  assert_contains "$OUT" "Dry run: nothing was changed."
   assert_log_lacks "docker build"
   assert_log_lacks "docker pull"
   assert_log_lacks "docker run"
@@ -34,8 +40,9 @@ test_dry_run_without_docker_reports_blocker() {
   rm -f "$SB_BIN/docker"
   run_install --dry-run
   assert_rc 0
-  assert_contains "$OUT" "[root]"
+  assert_contains "$OUT" "needs admin"
   assert_contains "$OUT" "Install Docker Engine"
+  run_install --dry-run --verbose
   assert_contains "$OUT" "Docker Engine, Compose and Buildx packages"
   assert_eq "$(printf '%s\n' "$OUT" | grep -c 'Whisper small speech model weights')" 1 "each download is listed once"
   assert_log_lacks "sudo "
@@ -46,8 +53,8 @@ test_first_install() {
   t_begin "first install builds locally and creates private files"
   sandbox_new
   install_machine
-  assert_contains "$OUT" "Open:     http://127.0.0.1:8791"
-  assert_contains "$OUT" "Use 127.0.0.1 in the browser"
+  assert_contains "$OUT" "Open      http://127.0.0.1:8791"
+  assert_flat_contains "$OUT" "Use 127.0.0.1, not localhost"
   assert_mode "$AMAN_HOME" 700
   assert_mode "$AMAN_HOME/instances/main" 700
   assert_mode "$AMAN_HOME/instances/main/.env" 600
@@ -179,7 +186,7 @@ test_concurrent_run_blocked_and_stale_lock_taken_over() {
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "another installer run"
+  assert_flat_contains "$ERR" "another installer run"
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
   with_input "$SENTINEL_PASSWORD
@@ -206,9 +213,7 @@ second-password-2
 test_declining_changes_nothing() {
   t_begin "answering no at the confirmation changes nothing"
   sandbox_new
-  with_input "
-
-n
+  with_input "n
 "
   run_install --name main --email owner@example.invalid
   assert_rc 0
@@ -225,7 +230,7 @@ test_low_disk_blocks() {
   STUB_DF_KB=1000000
   run_install --dry-run
   assert_rc 1
-  assert_contains "$OUT$ERR" "Less than 10 GB free"
+  assert_flat_contains "$OUT$ERR" "Less than 10 GB free"
   sandbox_drop
 }
 

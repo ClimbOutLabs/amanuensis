@@ -5,10 +5,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
 ANSWERS="Instance name=>
-Owner email=>owner@example.invalid
-Address you will use from other devices=>
-Token Factory key=>
-Model server address=>
+Your email=>owner@example.invalid
 Go ahead?=>y
 Password for the owner account=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"
@@ -29,8 +26,8 @@ test_password_is_not_echoed() {
 test_the_echo_test_can_fail() {
   t_begin "the same run echoes the password if the prompt stops using read -s"
   sandbox_new
-  sed -i 's/IFS= read -rs /IFS= read -r /' "$SB_INSTALLER/lib/common.sh"
-  assert_not_contains "$(cat "$SB_INSTALLER/lib/common.sh")" "read -rs"
+  sed -i 's/IFS= read -rs /IFS= read -r /' "$SB_INSTALLER/lib/ui.sh"
+  assert_not_contains "$(cat "$SB_INSTALLER/lib/ui.sh")" "read -rs"
   run_install_tty "$ANSWERS"
   assert_contains "$OUT" "$SENTINEL_PASSWORD" "echo is visible without -s"
   sandbox_drop

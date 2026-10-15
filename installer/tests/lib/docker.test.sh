@@ -10,7 +10,7 @@ test_rootless_is_unsupported() {
   STUB_ROOTLESS=1
   run_install --dry-run
   assert_rc 1
-  assert_contains "$OUT$ERR" "Rootless Docker is not supported"
+  assert_flat_contains "$OUT$ERR" "Rootless Docker is not supported"
   assert_no_path "$AMAN_HOME"
   sandbox_drop
 }
@@ -21,7 +21,7 @@ test_podman_is_unsupported() {
   STUB_PODMAN=1
   run_install --dry-run
   assert_rc 1
-  assert_contains "$OUT$ERR" "Podman is not supported"
+  assert_flat_contains "$OUT$ERR" "Podman is not supported"
   sandbox_drop
 }
 
@@ -31,12 +31,12 @@ test_old_engine_and_compose_v1() {
   STUB_ENGINE_VERSION=20.10.24
   run_install --dry-run
   assert_rc 1
-  assert_contains "$OUT$ERR" "too old"
+  assert_flat_contains "$OUT$ERR" "too old"
   unset STUB_ENGINE_VERSION
   STUB_COMPOSE_VERSION=1.29.2
   run_install --dry-run
   assert_rc 1
-  assert_contains "$OUT$ERR" "Compose 1.29.2 is too old; v2 or newer is required"
+  assert_flat_contains "$OUT$ERR" "Compose 1.29.2 is too old; v2 or newer is required"
   sandbox_drop
 }
 
@@ -46,7 +46,7 @@ test_compose_v2_or_newer_passes() {
   for version in v5.2.0 5.2.0 2.29.1 v2.40.0 5.2.0-desktop.1; do
     sandbox_new
     STUB_COMPOSE_VERSION=$version
-    run_install --dry-run
+    run_install --dry-run --verbose
     assert_not_contains "$OUT$ERR" "Docker Compose" "$version"
     assert_contains "$OUT" "Compose ${version#v}" "$version"
     sandbox_drop
@@ -61,7 +61,7 @@ test_unreadable_compose_version_is_named() {
     STUB_COMPOSE_VERSION=$version
     run_install --dry-run
     assert_rc 1
-    assert_contains "$OUT$ERR" "Could not read the Docker Compose version (got '$version')"
+    assert_flat_contains "$OUT$ERR" "Could not read the Docker Compose version (got '$version')"
     sandbox_drop
   done
 }
@@ -71,11 +71,11 @@ test_blocker_stops_before_any_prompt() {
   sandbox_new
   STUB_COMPOSE_VERSION=1.29.2
   run_install_tty "Instance name=>
-Owner email=>owner@example.invalid
+Your email=>owner@example.invalid
 "
   assert_eq "$RC" 1
-  assert_contains "$OUT" "This machine cannot be set up yet"
-  assert_contains "$OUT" "Compose 1.29.2 is too old"
+  assert_contains "$OUT" "Stopped before changing anything"
+  assert_flat_contains "$OUT" "Compose 1.29.2 is too old"
   assert_not_contains "$OUT" "Instance name"
   assert_not_contains "$OUT" "Password"
   assert_no_path "$AMAN_HOME"
@@ -91,7 +91,7 @@ test_daemon_down() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_contains "$OUT$ERR" "not running"
+  assert_flat_contains "$OUT$ERR" "not running"
   assert_no_path "$AMAN_HOME/state/instances"
   sandbox_drop
 }
@@ -131,7 +131,7 @@ test_doctor_follows_sudo_access() {
   rm -f "$SB_BIN/sg"
   INSTALL_EXTRA=(--add-docker-group)
   install_machine
-  assert_contains "$ERR" "using sudo for Docker during this run only"
+  assert_flat_contains "$ERR" "using sudo for Docker during this run only"
   assert_log_has "sudo env AMANUENSIS_HOME=$AMAN_HOME HOME=$SB/user timeout 180 $AMAN_HOME/bin/aman doctor"
   sandbox_drop
 }
@@ -162,7 +162,7 @@ n
 "
   run_install --name main --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "nothing was installed"
+  assert_flat_contains "$ERR" "nothing was installed"
   assert_log_lacks "sudo "
   assert_no_path "$SB_BIN/docker"
   assert_no_path "$AMAN_HOME/state/instances"
@@ -246,8 +246,8 @@ n
 "
   run_install --name main --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "sudo usermod -aG docker testuser"
-  assert_contains "$ERR" "nothing was changed"
+  assert_flat_contains "$ERR" "sudo usermod -aG docker testuser"
+  assert_flat_contains "$ERR" "nothing was changed"
   assert_log_lacks "usermod -aG"
   assert_log_lacks "sudo docker"
   assert_no_path "$AMAN_HOME/state/instances"
@@ -265,7 +265,7 @@ test_yes_does_not_consent_to_root_changes() {
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "--add-docker-group"
+  assert_flat_contains "$ERR" "--add-docker-group"
   assert_log_lacks "usermod"
   assert_log_lacks "sudo "
   clear_input
@@ -277,7 +277,7 @@ test_yes_does_not_consent_to_root_changes() {
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "--install-docker"
+  assert_flat_contains "$ERR" "--install-docker"
   assert_log_lacks "sudo "
   assert_no_path "$SB_BIN/docker"
   clear_input

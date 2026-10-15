@@ -36,13 +36,14 @@ test_dry_run_plans_the_front_end() {
   dns_ready
   run_install --dry-run --email owner@example.invalid "${TLS_ARGS[@]}"
   assert_rc 0
-  assert_contains "$OUT" "[done]     DNS: aman.example.com and login.example.com resolve to this computer's public address $PUBLIC_IP"
-  assert_contains "$OUT" "[root]     Install Caddy from the Ubuntu package archive"
-  assert_contains "$OUT" "[root]     Apply the Caddyfile for aman.example.com and login.example.com under"
-  assert_contains "$OUT" "exactly those two names"
-  assert_contains "$OUT" "Open only TCP 443"
-  assert_contains "$OUT" "port 80 can stay closed"
+  assert_flat_contains "$OUT" "done DNS: aman.example.com and login.example.com resolve to this computer's public address $PUBLIC_IP"
+  assert_flat_contains "$OUT" "needs admin Install Caddy from the Ubuntu package archive"
+  assert_flat_contains "$OUT" "needs admin Apply the Caddyfile for aman.example.com and login.example.com"
+  assert_flat_contains "$OUT" "exactly those two names"
+  assert_flat_contains "$OUT" "Open only TCP 443"
+  assert_flat_contains "$OUT" "port 80 can stay closed"
   assert_contains "$OUT" "--tls-root"
+  run_install --dry-run --verbose --email owner@example.invalid "${TLS_ARGS[@]}"
   assert_contains "$OUT" "archive.ubuntu.com"
   assert_eq "$(sudo_calls)" 0
   assert_no_path "$AMAN_HOME"
@@ -56,9 +57,9 @@ test_plan_skips_the_install_line_when_caddy_is_there() {
   fixture_caddy
   run_install --dry-run --email owner@example.invalid "${TLS_ARGS[@]}"
   assert_rc 0
-  assert_contains "$OUT" "[done]     Caddy is installed"
+  assert_flat_contains "$OUT" "done Caddy is installed"
   assert_not_contains "$OUT" "Install Caddy from the Ubuntu package archive"
-  assert_contains "$OUT" "[root]     Apply the Caddyfile"
+  assert_flat_contains "$OUT" "needs admin Apply the Caddyfile"
   sandbox_drop
 }
 
@@ -72,9 +73,9 @@ test_dns_not_resolving_stops_before_anything() {
   run_install --yes --password-stdin --email owner@example.invalid "${TLS_ARGS[@]}"
   clear_input
   assert_rc 1
-  assert_contains "$ERR" "login.example.com does not resolve yet"
-  assert_contains "$ERR" "A record for it pointing at $PUBLIC_IP"
-  assert_contains "$ERR" "Nothing was requested from Let's Encrypt"
+  assert_flat_contains "$OUT$ERR" "login.example.com does not resolve yet"
+  assert_flat_contains "$OUT$ERR" "A record for it pointing at $PUBLIC_IP"
+  assert_flat_contains "$OUT$ERR" "Nothing was requested from Let's Encrypt"
   assert_log_lacks "docker build"
   assert_eq "$(sudo_calls)" 0
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
@@ -88,8 +89,8 @@ test_dns_pointing_elsewhere_stops() {
   fixture_dns aman.example.com 203.0.113.9
   run_install --dry-run --email owner@example.invalid "${TLS_ARGS[@]}"
   assert_rc 1
-  assert_contains "$ERR" "aman.example.com resolves to 203.0.113.9, but this computer's public address is $PUBLIC_IP"
-  assert_contains "$ERR" "Nothing was requested from Let's Encrypt"
+  assert_flat_contains "$OUT$ERR" "aman.example.com resolves to 203.0.113.9, but this computer's public address is $PUBLIC_IP"
+  assert_flat_contains "$OUT$ERR" "Nothing was requested from Let's Encrypt"
   sandbox_drop
 }
 
@@ -100,12 +101,12 @@ test_public_address_lookup_failure_and_override() {
   fixture_dns login.example.com "$PUBLIC_IP"
   run_install --dry-run --email owner@example.invalid "${TLS_ARGS[@]}"
   assert_rc 1
-  assert_contains "$ERR" "Could not find this computer's public address"
-  assert_contains "$ERR" "--public-ip ADDRESS"
+  assert_flat_contains "$OUT$ERR" "Could not find this computer's public address"
+  assert_flat_contains "$OUT$ERR" "--public-ip ADDRESS"
   : >"$STUB_LOG"
   run_install --dry-run --email owner@example.invalid "${TLS_ARGS[@]}" --public-ip "$PUBLIC_IP"
   assert_rc 0
-  assert_contains "$OUT" "resolve to this computer's public address $PUBLIC_IP"
+  assert_flat_contains "$OUT" "resolve to this computer's public address $PUBLIC_IP"
   assert_log_lacks "api.ipify.org"
   sandbox_drop
 }
@@ -127,8 +128,8 @@ test_install_with_the_flag_runs_the_root_steps() {
   assert_contains "$script" "systemctl reload-or-restart caddy"
   assert_contains "$OUT" "Root steps for HTTPS with Caddy" "the steps were printed before they ran"
   assert_contains "$OUT" "HTTPS answers at $APP_URL"
-  assert_contains "$OUT" "HTTPS:    Caddy on this computer serves $APP_URL and $LOGIN_URL"
-  assert_contains "$OUT" "Open only TCP 443"
+  assert_flat_contains "$OUT" "HTTPS Caddy on this computer serves $APP_URL and $LOGIN_URL"
+  assert_flat_contains "$OUT" "Open only TCP 443"
   assert_contains "$(grep '^curl' "$STUB_LOG")" "$APP_URL/healthz"
   assert_eq "$(sed -n 's/^tls=//p' "$AMAN_HOME/state/instances/main.conf")" caddy
   sandbox_drop
@@ -181,8 +182,8 @@ test_yes_alone_never_uses_sudo() {
   assert_rc 1
   assert_eq "$(sudo_calls)" 0
   assert_contains "$OUT" "apt-get install -y caddy"
-  assert_contains "$ERR" "HTTPS for instance main is not set up"
-  assert_contains "$ERR" "--tls-root"
+  assert_flat_contains "$ERR" "HTTPS for instance main is not set up"
+  assert_flat_contains "$ERR" "--tls-root"
   assert_file "$AMAN_HOME/state/instances/main.conf"
   assert_log_has "compose --project-name aman-main"
   sandbox_drop
@@ -193,9 +194,7 @@ test_answering_yes_on_a_terminal() {
   sandbox_new
   dns_ready
   run_install_tty "Instance name=>
-Owner email=>owner@example.invalid
-Token Factory key=>
-Model server address=>
+Your email=>owner@example.invalid
 Go ahead?=>y
 Password for the owner account=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD
@@ -211,9 +210,7 @@ test_declining_on_a_terminal() {
   sandbox_new
   dns_ready
   run_install_tty "Instance name=>
-Owner email=>owner@example.invalid
-Token Factory key=>
-Model server address=>
+Your email=>owner@example.invalid
 Go ahead?=>y
 Password for the owner account=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD
@@ -232,7 +229,7 @@ test_a_late_dns_change_stops_before_the_root_steps() {
   printf '203.0.113.9\n' >"$SB_STATE/dns/aman.example.com.later"
   install_tls --tls-root
   assert_rc 1
-  assert_contains "$ERR" "aman.example.com resolves to 203.0.113.9"
+  assert_flat_contains "$OUT$ERR" "aman.example.com resolves to 203.0.113.9"
   assert_eq "$(sudo_calls)" 0
   sandbox_drop
 }
@@ -244,7 +241,7 @@ test_a_failing_root_script_is_reported() {
   STUB_SUDO_SH_FAIL=1
   install_tls --tls-root
   assert_rc 1
-  assert_contains "$ERR" "the Caddy steps failed"
+  assert_flat_contains "$ERR" "the Caddy steps failed"
   assert_file "$AMAN_HOME/state/instances/main.conf"
   unset STUB_SUDO_SH_FAIL
   sandbox_drop
@@ -258,8 +255,8 @@ test_certificates_slow_to_arrive_only_warn() {
   fixture_dns login.example.com "$PUBLIC_IP"
   install_tls --tls-root
   assert_rc 0
-  assert_contains "$ERR" "did not answer over https yet"
-  assert_contains "$ERR" "journalctl -u caddy"
+  assert_flat_contains "$ERR" "did not answer over https yet"
+  assert_flat_contains "$ERR" "journalctl -u caddy"
   sandbox_drop
 }
 
@@ -279,7 +276,7 @@ test_rerun_with_everything_in_place() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 0
-  assert_contains "$OUT" "[done]     HTTPS for instance main: Caddy serves aman.example.com and login.example.com"
+  assert_flat_contains "$OUT" "done HTTPS for instance main: Caddy serves aman.example.com and login.example.com"
   assert_contains "$OUT" "Nothing to do"
   assert_eq "$(sudo_calls)" 0
   sandbox_drop
@@ -398,8 +395,8 @@ test_a_rejected_file_never_replaces_the_good_one() {
   run_install --yes --password-stdin --email owner@example.invalid --tls-root
   clear_input
   assert_rc 1
-  assert_contains "$ERR" "unrecognized directive" "Caddy's own reason is shown"
-  assert_contains "$ERR" "Caddy rejected the generated configuration"
+  assert_flat_contains "$ERR" "unrecognized directive" "Caddy's own reason is shown"
+  assert_flat_contains "$ERR" "Caddy rejected the generated configuration"
   assert_eq "$(cat "$site")" "# previous good file"
   assert_eq "$(cmp -s "$main" "$SB/main.before" && echo same)" same
   assert_eq "$(dir_names "$SB/etc-caddy/aman.d")" "main.caddyfile " "no temporary file is left next to it"
@@ -455,8 +452,8 @@ test_remove_with_yes_alone_never_uses_sudo() {
   run_install instance remove main --yes
   assert_rc 0
   assert_contains "$OUT" "rm -f $SB/etc-caddy/aman.d/main.caddyfile"
-  assert_contains "$ERR" "Caddy still serves the addresses of instance main"
-  assert_contains "$ERR" "--tls-root"
+  assert_flat_contains "$ERR" "Caddy still serves the addresses of instance main"
+  assert_flat_contains "$ERR" "--tls-root"
   assert_eq "$(sudo_calls)" 0
   assert_file "$SB/etc-caddy/aman.d/main.caddyfile"
   assert_no_path "$AMAN_HOME/instances/main"
@@ -495,19 +492,19 @@ test_usage_errors() {
   sandbox_new
   run_install --dry-run --email owner@example.invalid --tls caddy
   assert_rc 2
-  assert_contains "$ERR" "--tls caddy needs --public-url and --login-url"
+  assert_flat_contains "$ERR" "--tls caddy needs --public-url and --login-url"
   run_install --dry-run --email owner@example.invalid --public-url "$APP_URL" --login-url "$LOGIN_URL" --tls nginx
   assert_rc 2
-  assert_contains "$ERR" "--tls takes caddy"
+  assert_flat_contains "$ERR" "--tls takes caddy"
   run_install --dry-run --email owner@example.invalid --public-url https://aman.example.com:8443 --login-url "$LOGIN_URL" --tls caddy
   assert_rc 2
-  assert_contains "$ERR" "cannot carry a port"
+  assert_flat_contains "$ERR" "cannot carry a port"
   run_install --dry-run --email owner@example.invalid --public-url "$APP_URL" --login-url https://203.0.113.5 --tls caddy
   assert_rc 2
-  assert_contains "$ERR" "login address cannot carry a port or be an IP address"
+  assert_flat_contains "$ERR" "login address cannot carry a port or be an IP address"
   run_install --dry-run --email owner@example.invalid --public-url "$APP_URL" --login-url "$LOGIN_URL" --tls caddy --public-ip 999.1.1.1
   assert_rc 2
-  assert_contains "$ERR" "--public-ip must be an IPv4 address"
+  assert_flat_contains "$ERR" "--public-ip must be an IPv4 address"
   sandbox_drop
 }
 

@@ -52,9 +52,14 @@ machine_render() {
 
 # up -d is a no-op when nothing changed. The speech model loads in the background, so this does not wait on it.
 machine_up() {
-  local name
+  local name rc=0
   machine_render "$1"
-  dcm up -d || die "could not start the shared speech-to-text service"
+  step_begin start-machine "Starting the shared speech-to-text service"
+  dcm up -d >"$STEP_LOG" 2>&1 || rc=$?
+  if [ "$rc" != 0 ]; then
+    step_fail "The shared speech-to-text service could not start" "Run install.sh again once the cause in the log is fixed."
+  fi
+  step_ok "Shared speech-to-text service is running"
   # A recreated speech container loses the extra networks it was connected to, so reconnect them all.
   for name in $(reg_names); do
     if D network inspect "aman_${name}_stt" >/dev/null 2>&1; then
@@ -131,27 +136,63 @@ instance_state() {
 }
 
 instance_up() {
-  local name=$1
-  say "Starting instance $name and waiting for it to become healthy"
-  if ! dc "$name" up -d --wait --wait-timeout 240; then
-    warn "instance $name did not become healthy. Look at: docker compose -p aman-$name logs --tail 50"
+  local name=$1 rc=0
+  step_begin "start-$name" "Starting instance $name and waiting for it to be healthy"
+  dc "$name" up -d --wait --wait-timeout 240 >"$STEP_LOG" 2>&1 || rc=$?
+  if [ "$rc" != 0 ]; then
+    instance_unhealthy "$name"
     return 1
   fi
   if machine_running; then
     stt_attach "$name" || true
   fi
+  step_ok "Instance $name is running and healthy"
+}
+
+# Saves the last 200 lines of every container of an instance and prints the cause in one plain sentence. The person
+# is never sent to read container logs; a cause the installer does not know is called a bug and the saved log named.
+instance_unhealthy() {
+  local name=$1 log id cause fix=
+  log="$STATE_DIR/logs/instance-$name.log"
+  {
+    cat "$STEP_LOG"
+    for id in $(D ps -a -q --filter "label=com.docker.compose.project=aman-$name" 2>/dev/null || true); do
+      printf '\n== container %s (%s)\n' "$(D inspect --format '{{.Name}}' "$id" 2>/dev/null || true)" "$(D inspect --format '{{.State.Status}} exit {{.State.ExitCode}} oom {{.State.OOMKilled}}' "$id" 2>/dev/null || true)"
+      D logs --tail 200 "$id" 2>&1 || true
+    done
+  } >"$log" 2>&1
+  cause=$(container_failure_cause "$log")
+  if [ -n "$cause" ]; then
+    UI_FD=2 ui_step_end fail "Instance $name did not start. $cause" "Fix that, then run install.sh again."
+  else
+    UI_FD=2 ui_step_end fail "Instance $name did not become healthy, and the cause is not one the installer knows. This looks like a bug in Aman." "Run install.sh again; if it fails the same way, share the log below."
+  fi
+  UI_FD=2 ui_hint "Last 200 log lines: $(ui_path "$log")"
+  return 0
 }
 
 doctor_shim() { printf '%s/bin/aman' "$AMAN_HOME"; }
 
+# The doctor reads the checkout the compose files, the image build context and this installer come from.
+record_source_checkout() {
+  ensure_private_dir "$STATE_DIR"
+  printf '%s\n' "$REPO_ROOT" | write_if_changed "$STATE_DIR/source" 600 || true
+}
+
+# The shim finds its display and diagnosis helpers at ../lib next to its folder, here and in a checkout alike.
 install_doctor_shim() {
-  local src="$INSTALLER_DIR/doctor/aman"
+  local src="$INSTALLER_DIR/doctor/aman" lib
   if [ ! -f "$src" ]; then
-    warn "doctor shim not found at installer/doctor/aman; doctor will be unavailable"
+    warn "The doctor command was not found in the installer, so it will be unavailable."
     return 0
   fi
   ensure_private_dir "$AMAN_HOME/bin"
+  ensure_private_dir "$AMAN_HOME/lib"
   write_if_changed "$AMAN_HOME/bin/aman" 755 <"$src" || true
+  for lib in ui diagnose; do
+    write_if_changed "$AMAN_HOME/lib/$lib.sh" 644 <"$INSTALLER_DIR/lib/$lib.sh" || true
+  done
+  record_source_checkout
 }
 
 # Runs the doctor shim with a time bound; prints nothing when it is not installed.
@@ -186,49 +227,35 @@ doctor_status() {
 
 # ---- inputs -----------------------------------------------------------------------------------
 
-# Fills I_* from flags and prompts. Plan-time calls (dry run) never prompt.
+# Fills I_* from flags and prompts. Plan-time calls (dry run) never prompt. Which address the app answers at is
+# decided by flags only; there is no question about it.
 instance_collect() {
   local name_default=${1:-main}
   I_NAME=${OPT_NAME:-}
   I_EMAIL=${OPT_EMAIL:-}
   I_PUBLIC_URL=${OPT_PUBLIC_URL:-}
   I_LOGIN_URL=${OPT_LOGIN_URL:-}
-  I_MODEL=${OPT_MODEL_ENDPOINT:-}
   I_TLS=${OPT_TLS:-}
   I_SANDBOX=slots
   if [ "$OPT_NO_SANDBOX" = 1 ]; then I_SANDBOX=off; fi
-  ask I_NAME "Instance name" "$name_default"
-  valid_name "$I_NAME" || usage_die "instance name must be 1-24 lowercase letters, digits or hyphens, start with a letter, and not be 'machine'"
+  ask_valid I_NAME "Instance name (a-z, 0-9, hyphen; starts with a letter)" "$name_default" "Each person or team gets one instance. Example: main" name_problem
   if [ "$DRY_RUN" = 1 ] && [ -z "$I_EMAIL" ]; then
     I_EMAIL="owner@example.invalid"
   fi
-  ask I_EMAIL "Owner email" ""
-  valid_email "$I_EMAIL" || usage_die "a valid owner email is required"
-  ask I_PUBLIC_URL "Address you will use from other devices (press Enter to use this computer only)" ""
+  ask_valid I_EMAIL "Your email, used to sign in" "" "Example: you@example.com" email_problem
   if [ -n "$I_PUBLIC_URL" ]; then
-    valid_origin "$I_PUBLIC_URL" || usage_die "the public URL must be an origin such as https://aman.example.com with no path"
-    case "$I_PUBLIC_URL" in https://*) ;; *) usage_die "a public URL must be https" ;; esac
-    ask I_LOGIN_URL "Address for the sign-in service (its own https address, never a path of the first one)" ""
-    valid_origin "$I_LOGIN_URL" || usage_die "the login URL must be an origin such as https://login.example.com with no path"
-    case "$I_LOGIN_URL" in https://*) ;; *) usage_die "the login URL must be https" ;; esac
-    [ "$I_LOGIN_URL" != "$I_PUBLIC_URL" ] || usage_die "the app and the login service need two different origins"
+    valid_origin "$I_PUBLIC_URL" || usage_die "The public URL must be an origin such as https://aman.example.com, with no path."
+    case "$I_PUBLIC_URL" in https://*) ;; *) usage_die "A public URL must be https." ;; esac
+    [ -n "$I_LOGIN_URL" ] || usage_die "--public-url needs --login-url, the sign-in service's own https address (never a path of the first one)."
+    valid_origin "$I_LOGIN_URL" || usage_die "The login URL must be an origin such as https://login.example.com, with no path."
+    case "$I_LOGIN_URL" in https://*) ;; *) usage_die "The login URL must be https." ;; esac
+    [ "$I_LOGIN_URL" != "$I_PUBLIC_URL" ] || usage_die "The app and the login service need two different origins."
   elif [ -n "$I_LOGIN_URL" ]; then
-    usage_die "--login-url needs --public-url"
+    usage_die "--login-url needs --public-url."
   fi
   instance_collect_tls
   instance_collect_token_factory
-  # A hosted model replaces the model server prompt; --model-endpoint still adds one.
-  if [ "$I_TF" = 1 ] && [ -z "$I_MODEL" ]; then
-    :
-  else
-    ask I_MODEL "Model server address (optional; for one on this computer, for example http://host.docker.internal:11434/v1)" ""
-  fi
-  if [ -n "$I_MODEL" ]; then
-    valid_model_endpoint "$I_MODEL" || usage_die "the model server address must be an http(s) URL"
-    if matches_whole "$I_MODEL" '^https?://(localhost|127\.0\.0\.1|\[::1\])([:/].*)?$'; then
-      warn "inside the app, localhost is the app itself, so it cannot reach a model server there. Use host.docker.internal instead of localhost."
-    fi
-  fi
+  ui_ok "Instance $I_NAME for $I_EMAIL"
 }
 
 # --tls caddy serves the two public origins on 443 under DNS names Let's Encrypt can issue for.
@@ -313,7 +340,7 @@ instance_create() {
   created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   reg_write "$I_NAME" "name=$I_NAME" "app_port=$I_PORT" "login_port=$I_LOGIN_PORT" "public_url=$I_PUBLIC_URL" \
     "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
-    "model_endpoint=$I_MODEL" "sandbox=$I_SANDBOX" "tls=$I_TLS" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
+    "sandbox=$I_SANDBOX" "tls=$I_TLS" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
     "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then
@@ -346,33 +373,49 @@ read_password_first() {
   fi
 }
 
+# Rows and next steps of one instance, under the closing block's verdict.
 print_instance_summary() {
-  local name=$1
-  say ""
-  say "Instance $name"
-  say "  Open:     $(reg_get "$name" public_url)"
-  say "  Sign in:  $(reg_get "$name" owner_email) with the password you chose"
-  say "  Sign-in service (used by the app automatically, not a page to open): $(reg_get "$name" login_url)/dex"
-  say "  Data:     Docker volumes aman_${name}_data and aman_${name}_dex"
+  local name=$1 url count open_line
+  url=$(reg_get "$name" public_url)
+  count=$(reg_names | wc -l | tr -d ' ')
+  if [ "$count" -gt 1 ]; then ui_heading "Instance $name"; fi
+  ui_row "Open" "$url"
+  ui_row "Sign in" "$(reg_get "$name" owner_email), with the password you chose"
+  ui_row "Service" "Sign-in service (used by the app automatically, not a page to open): $(reg_get "$name" login_url)/dex"
+  ui_row "Data" "Docker volumes aman_${name}_data and aman_${name}_dex"
   if edge_wanted "$name"; then
-    say "  HTTPS:    Caddy on this computer serves $(reg_get "$name" public_url) and $(reg_get "$name" login_url) (certificates from Let's Encrypt, renewed by Caddy)"
-    edge_print_firewall_hint
-  elif is_loopback_origin "$(reg_get "$name" public_url)"; then
-    say "  Use 127.0.0.1 in the browser, not localhost; sign-in depends on the exact name."
-    say "  To reach it from other devices later, see: install.sh --print-proxy-requirements"
-  else
-    print_proxy_requirements "$(reg_get "$name" public_url)" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_url)" "$(reg_get "$name" login_port)"
+    ui_row "HTTPS" "Caddy on this computer serves $url and $(reg_get "$name" login_url), with certificates from Let's Encrypt renewed by Caddy"
   fi
-  print_model_hint "$name"
+  print_model_row "$name"
   if demo_env_on "$name"; then
-    say "  Demo:     on (DEMO_MODE=true). Reseed: $(demo_seed_command "$name") [--reset]"
+    ui_row "Demo" "on (DEMO_MODE=true). Reseed: $(demo_seed_command "$name") [--reset]"
   fi
   if instance_sandbox_wanted "$name"; then
-    say "  Run code: on, in the gVisor sandbox (Settings > Sandbox shows its status). Repair: $(sandbox_repair_command)"
-    say "  Attachment extraction is off in this version."
+    ui_row "Run code" "on, in the gVisor sandbox (Settings $S_PROMPT Sandbox shows its status). Repair: $(sandbox_repair_command). Attachment extraction is off in this version."
   else
-    say "  Run code and attachment extraction are off (installed with --no-sandbox)."
+    ui_row "Run code" "off, and so is attachment extraction (installed with --no-sandbox)"
   fi
+  ui_heading "Next"
+  open_line="Open $url in your browser."
+  if is_loopback_origin "$url"; then open_line="$open_line Use 127.0.0.1, not localhost."; fi
+  if [ "$(reg_get "$name" token_factory)" != 1 ]; then open_line="$open_line Then add a model in Settings $S_PROMPT Models."; fi
+  ui_line "$open_line"
+  print_model_next "$name"
+  if edge_wanted "$name"; then
+    edge_print_firewall_hint
+  elif is_loopback_origin "$url"; then
+    ui_line "To reach it from other devices later, see: install.sh --print-proxy-requirements"
+  else
+    print_proxy_requirements "$url" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_url)" "$(reg_get "$name" login_port)"
+  fi
+  ui_line "Back up: install.sh backup (kept in $(ui_path "$BACKUPS_DIR")). Upgrade after pulling new source: install.sh upgrade"
+}
+
+# The framed closing block of `instance add`.
+print_instance_block() {
+  ui_summary ok "Instance $1 is ready."
+  print_instance_summary "$1"
+  ui_summary_end
 }
 
 # Everything an installed machine already has: the recorded release and the shared network owner.
@@ -391,7 +434,7 @@ load_installed_release() {
 
 cmd_instance_add() {
   [ -n "${OPT_NAME:-}" ] || usage_die "usage: install.sh instance add <name> [--email ...]"
-  valid_name "$OPT_NAME" || usage_die "instance name must be 1-24 lowercase letters, digits or hyphens, start with a letter, and not be 'machine'"
+  valid_name "$OPT_NAME" || usage_die "$(name_problem "$OPT_NAME")"
   require_installed
   docker_prepare
   lock_acquire
@@ -403,8 +446,8 @@ cmd_instance_add() {
     tf_rotation_apply
     edge_ensure "$I_NAME"
     if [ "$OPT_DEMO" = 1 ]; then demo_install_apply "$I_NAME"; fi
-    print_instance_summary "$I_NAME"
     if instance_sandbox_wanted "$I_NAME"; then sandbox_verify "$I_NAME"; fi
+    print_instance_block "$I_NAME"
     sandbox_finish
     edge_finish
     [ "$DEMO_FAILED" = 0 ] || exit 1
@@ -424,8 +467,8 @@ cmd_instance_add() {
   AMAN_PASSWORD=
   edge_ensure "$I_NAME"
   if [ "$OPT_DEMO" = 1 ]; then demo_install_apply "$I_NAME"; fi
-  print_instance_summary "$I_NAME"
   if [ "$I_SANDBOX" = slots ]; then sandbox_verify "$I_NAME"; fi
+  print_instance_block "$I_NAME"
   print_signout_note
   sandbox_finish
   edge_finish

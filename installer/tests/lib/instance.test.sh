@@ -67,7 +67,7 @@ test_explicit_busy_port_is_refused() {
   install_machine
   add_instance other --port 8791
   assert_rc 1
-  assert_contains "$ERR" "already used by another instance"
+  assert_flat_contains "$ERR" "already used by another instance"
   assert_no_path "$AMAN_HOME/state/instances/other.conf"
   sandbox_drop
 }
@@ -165,7 +165,7 @@ test_purge_failure_is_not_reported_as_success() {
   STUB_VOLUME_RM_FAIL=aman_second_data
   run_install instance remove second --purge-data --confirm-name second
   assert_rc 1
-  assert_contains "$ERR" "could not delete the volumes: aman_second_data"
+  assert_flat_contains "$ERR" "could not delete the volumes: aman_second_data"
   assert_not_contains "$OUT" "deleted its data volumes"
   assert_contains "$(cat "$SB_STATE/volumes")" "aman_second_data"
   unset STUB_VOLUME_RM_FAIL
@@ -262,15 +262,14 @@ test_url_validation() {
   sandbox_drop
 }
 
-test_model_endpoint_is_recorded_not_a_secret() {
-  t_begin "the model endpoint is remembered for the summary and never goes to .env"
+test_a_new_instance_points_to_settings_for_a_model() {
+  t_begin "an instance added without a hosted model says to add one in Settings and keeps no model address"
   sandbox_new
   install_machine
-  add_instance m --model-endpoint http://host.docker.internal:11434/v1
+  add_instance m
   assert_rc 0
-  assert_contains "$OUT" "Settings > Models"
-  assert_not_contains "$(cat "$AMAN_HOME/instances/m/.env")" "11434"
-  assert_contains "$(cat "$AMAN_HOME/state/instances/m.conf")" "model_endpoint=http://host.docker.internal:11434/v1"
+  assert_flat_contains "$OUT" "add a model in Settings > Models"
+  assert_not_contains "$(cat "$AMAN_HOME/state/instances/m.conf")" "model_endpoint"
   sandbox_drop
 }
 
@@ -279,7 +278,7 @@ test_add_before_install_is_refused() {
   sandbox_new
   add_instance x
   assert_rc 1
-  assert_contains "$ERR" "run install.sh first"
+  assert_flat_contains "$ERR" "run install.sh first"
   sandbox_drop
 }
 
@@ -377,7 +376,7 @@ test_yes_does_not_bypass_purge_confirmation
 test_name_validation
 test_public_url_rules
 test_url_validation
-test_model_endpoint_is_recorded_not_a_secret
+test_a_new_instance_points_to_settings_for_a_model
 test_add_before_install_is_refused
 test_dry_run_instance_add
 tests_finish

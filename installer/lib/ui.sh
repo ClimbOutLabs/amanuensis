@@ -17,7 +17,7 @@ UI_STEP_PID=
 UI_STEP_T0=0
 UI_STATUS_WIDTH=11
 UI_MAX_TRIES=5
-UI_FRAMES=('|' '/' '-' '\')
+UI_FRAMES=("|" "/" "-" "\\")
 S_OK=+ S_WARN=! S_FAIL=x S_PROMPT=">" S_SKIP=- S_RULE=-
 
 # Decides symbols, color and width once. Color needs a terminal and no NO_COLOR; CLICOLOR_FORCE=1 is for tests.
@@ -62,7 +62,7 @@ ui_init() {
     UI_FRAMES=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧)
   else
     S_OK=+ S_WARN=! S_FAIL=x S_PROMPT=">" S_SKIP=- S_RULE=-
-    UI_FRAMES=('|' '/' '-' '\')
+    UI_FRAMES=("|" "/" "-" "\\")
   fi
 }
 
@@ -271,7 +271,7 @@ ui_prompt_head() { # label [default]
 
 # ui_prompt VAR label default [hint]: one line from stdin; Enter keeps the default. Returns 1 at the end of the input.
 ui_prompt() {
-  local __var=$1 __answer= __rc=0 UI_FD=2
+  local __var=$1 __answer='' __rc=0 UI_FD=2
   if [ -n "${4:-}" ]; then ui_hint "$4"; fi
   ui_prompt_head "$2" "${3:-}"
   IFS= read -r __answer || __rc=1
@@ -284,7 +284,7 @@ ui_prompt() {
 # Yes or no with the default capitalised. Returns 0 on yes. A root or delete question passes n; --yes takes the
 # default and says so. The end of the input counts as no.
 ui_confirm() { # question y|n
-  local def=${2:-n} hint answer= tries=0 UI_FD=2
+  local def=${2:-n} hint answer='' tries=0 UI_FD=2
   if [ "$def" = y ]; then hint="Y/n"; else hint="y/N"; fi
   if [ "$UI_ASSUME_YES" = 1 ]; then
     ui_prompt_head "$1 [$hint]"
@@ -315,7 +315,7 @@ ui_confirm() { # question y|n
 
 # Reads a secret without echo into VAR. Returns 1 at the end of the input.
 ui_password() { # VAR label
-  local __value= __rc=0 UI_FD=2
+  local __value='' __rc=0 UI_FD=2
   ui_prompt_head "$2 (not shown)"
   IFS= read -rs __value || __rc=1
   printf '\n' >&2
@@ -342,7 +342,7 @@ ui_step_start() { # text [log file]
         printf '\r%*s\r%s' "$shown" '' "$line" >&2
         shown=${#line}
         i=$((i + 1))
-        sleep 0.2 </dev/null >/dev/null 2>&1 || sleep 1 </dev/null >/dev/null 2>&1
+        sleep 0.2 >/dev/null 2>&1 || sleep 1 >/dev/null 2>&1
       done
     ) &
     UI_STEP_PID=$!
@@ -355,7 +355,7 @@ ui_step_start() { # text [log file]
       while :; do
         s=0
         while [ "$s" -lt 60 ]; do
-          sleep 1 </dev/null >/dev/null 2>&1
+          sleep 1 >/dev/null 2>&1
           s=$((s + 1))
         done
         ticks=$((ticks + 1))
