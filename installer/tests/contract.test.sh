@@ -145,6 +145,18 @@ test_sign_in_settings_match_the_server() {
   sandbox_drop
 }
 
+test_image_keeps_app_data_on_the_data_volume() {
+  t_begin "the image has no home for its runtime user, so the app data dir is set and sits on the volume the instance mounts at /data"
+  local repo=$INSTALLER_DIR/.. dockerfile
+  dockerfile=$(cat "$repo/Dockerfile.dev")
+  assert_contains "$dockerfile" "USER 10001:10001" "the app runs as the non-root user"
+  assert_not_contains "$dockerfile" "useradd --create-home" "the runtime user gets no home"
+  assert_contains "$dockerfile" "APP_DATA_DIR=/data/app" "the app data dir is under /data"
+  assert_contains "$dockerfile" "mkdir -p /data/memory /data/persona-knowledge /data/app" "the dir exists and is owned by the runtime user"
+  assert_contains "$(cat "$repo/packages/trueforge/src/config.ts")" "'APP_DATA_DIR'" "the server reads APP_DATA_DIR"
+  assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "      - data:/data" "the instance mounts its data volume at /data"
+}
+
 test_in_image_check_ids_match() {
   t_begin "every check the shim relays from the app container is one the app's doctor knows"
   local repo=$INSTALLER_DIR/.. ids id known
@@ -157,6 +169,7 @@ test_in_image_check_ids_match() {
 
 test_token_factory_settings_match_the_server
 test_sign_in_settings_match_the_server
+test_image_keeps_app_data_on_the_data_volume
 test_in_image_check_ids_match
 test_doctor_reads_what_the_installer_wrote
 test_installer_calls_the_shim_as_documented

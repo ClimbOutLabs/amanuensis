@@ -548,7 +548,7 @@ function resolveOptionalPathEnv(envKey: string): string | undefined {
 
 /**
  * Absolute SQLite file path for standalone mode.
- * Env: `SQLITE_PATH` (optional). Default: `{env-paths data}/db/db.sqlite`.
+ * Env: `SQLITE_PATH` (optional). Default: `{app data dir}/db/db.sqlite`.
  */
 function resolveSqlitePath(appDataDir: string): string {
   const override = getEnv('SQLITE_PATH');
@@ -558,7 +558,7 @@ function resolveSqlitePath(appDataDir: string): string {
   return path.join(appDataDir, 'db', 'db.sqlite');
 }
 
-/** Parent for local sandbox roots. Same env-paths data dir as SQLite (`{suffix:''}`). */
+/** Parent for local sandbox roots. Same app data dir as SQLite. */
 function resolveLocalSandboxRootParent(appDataDir: string): string {
   return path.join(appDataDir, 'sandboxes');
 }
@@ -911,19 +911,19 @@ export interface SharedServerConfiguration {
   /**
    * Parent directory for per-run run_code isolation dirs
    * (`<dir>/sandbox-runs/<runId>/{ingress,scratch,egress}`).
-   * Derived: `{env-paths data}/sandbox-runs` (both topologies — the Docker
+   * Derived: `{app data dir}/sandbox-runs` (both topologies — the Docker
    * driver is host-local even in distributed mode).
    */
   SANDBOX_RUNS_DIR: string;
   /**
    * Directory where the Docker driver remembers its last successful image
    * signature verification, so readiness works offline.
-   * Derived: `{env-paths data}/sandbox-state`.
+   * Derived: `{app data dir}/sandbox-state`.
    */
   SANDBOX_STATE_DIR: string;
   /**
    * Scratch directory for the server's own git work on behalf of sandbox slots (clone, fetch, push). Every
-   * operation uses a fresh subdirectory and removes it. Derived: `{env-paths data}/git-bridge`.
+   * operation uses a fresh subdirectory and removes it. Derived: `{app data dir}/git-bridge`.
    */
   SANDBOX_GIT_BRIDGE_DIR: string;
   /**
@@ -1428,7 +1428,7 @@ export type StandaloneServerConfiguration = SharedServerConfiguration & {
   SQLITE_PATH: string;
   /**
    * Parent directory for local sandbox roots (ULID children).
-   * Derived: `{env-paths data}/sandboxes`.
+   * Derived: `{app data dir}/sandboxes`.
    */
   LOCAL_SANDBOX_ROOT_PARENT: string;
   /**
@@ -1538,8 +1538,20 @@ const standalone = parseBoolean({
   defaultValue: true,
 });
 
-const appDataDirSuffix = getEnv('APP_DATA_DIR_SUFFIX', { defaultValue: '' }) ?? '';
-const appDataDir = envPaths(ENV_PATHS_APP_NAME, { suffix: appDataDirSuffix }).data;
+/**
+ * Root for SQLite, sandbox roots, sandbox state and the git bridge.
+ * Env: `APP_DATA_DIR` (optional absolute path). Default: the env-paths data dir, which sits under the
+ * home directory. Images that run as a user with no home set this to a path on the data volume.
+ */
+function resolveAppDataDir(): string {
+  const override = resolveOptionalPathEnv('APP_DATA_DIR');
+  if (override !== undefined) {
+    return override;
+  }
+  return envPaths(ENV_PATHS_APP_NAME, { suffix: getEnv('APP_DATA_DIR_SUFFIX', { defaultValue: '' }) ?? '' }).data;
+}
+
+const appDataDir = resolveAppDataDir();
 
 const port = parsePort(getEnv('PORT'));
 const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;
