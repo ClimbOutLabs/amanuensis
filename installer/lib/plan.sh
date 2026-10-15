@@ -162,7 +162,10 @@ print_plan() {
   say ""
   say "Images are built on this machine from the checkout. Nothing is pushed to any registry."
   if [ "$PLAN_ROOT" -gt 0 ]; then
-    say "Steps marked [root] use sudo and only run if you answer yes when asked (or pass --install-docker / --add-docker-group / --sandbox-root; --yes alone does not allow them). The docker group is root-equivalent."
+    say "Steps marked [root] use sudo and only run if you answer yes when asked (or pass --install-docker / --add-docker-group / --sandbox-root / --tls-root; --yes alone does not allow them). The docker group is root-equivalent."
+  fi
+  if [ "$EDGE_IN_PLAN" = 1 ]; then
+    edge_print_firewall_hint
   fi
   if [ -n "$DL_LINES" ]; then
     total_gb=$(awk -v mb="$DL_TOTAL_MB" 'BEGIN {printf "%.1f", mb / 1024}')
@@ -273,8 +276,12 @@ plan_build() {
   fi
   if need_new_instance; then
     plan_add todo "Create instance $I_NAME for $I_EMAIL: app at $I_PUBLIC_URL (port $I_PORT on this computer), sign-in service on port $I_LOGIN_PORT"
+    if [ "$I_TF" = 1 ]; then
+      plan_add todo "$(tf_plan_text)"
+    fi
     dl_add embed
   fi
+  plan_edge
 }
 
 docker_available_for_probes() {
@@ -365,6 +372,9 @@ install_execute() {
     instance_create
     AMAN_PASSWORD=
   fi
+  for name in $(reg_names); do
+    edge_ensure "$name"
+  done
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REL_APP_TAG" >"$STATE_DIR/installed"
   log_event "install complete $REL_APP_TAG"
   for name in $(reg_names); do
@@ -382,4 +392,5 @@ install_execute() {
   say "Backups: install.sh backup  (kept in $BACKUPS_DIR). Upgrade after pulling new source: install.sh upgrade"
   print_signout_note
   sandbox_finish
+  edge_finish
 }

@@ -7,8 +7,8 @@
 set -euo pipefail
 # Everything written is private unless a file is deliberately made world-readable.
 umask 077
-# A password in the caller's environment is never used and must not reach a child process.
-unset AMAN_PASSWORD
+# A password or key in the caller's environment is never used and must not reach a child process.
+unset AMAN_PASSWORD AMAN_TF_KEY NEBIUS_API_KEY
 
 INSTALLER_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=${AMAN_REPO_ROOT:-$(cd -P -- "$INSTALLER_DIR/.." && pwd)}
@@ -32,6 +32,10 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/templates.sh"
 # shellcheck source=lib/sandbox.sh
 . "$INSTALLER_DIR/lib/sandbox.sh"
+# shellcheck source=lib/tokenfactory.sh
+. "$INSTALLER_DIR/lib/tokenfactory.sh"
+# shellcheck source=lib/edge.sh
+. "$INSTALLER_DIR/lib/edge.sh"
 # shellcheck source=lib/instance.sh
 . "$INSTALLER_DIR/lib/instance.sh"
 # shellcheck source=lib/backup.sh
@@ -50,6 +54,8 @@ OPT_ADD_DOCKER_GROUP=0
 OPT_NO_SANDBOX=0
 OPT_HOST_NODE=0
 OPT_SANDBOX_ROOT=0
+OPT_TLS_ROOT=0
+OPT_TF_KEY_STDIN=0
 PRINT_ROOT_STEPS=0
 PRINT_NETWORK=0
 PRINT_PROXY=0
@@ -63,11 +69,16 @@ OPT_LOGIN_URL=
 OPT_PORT=
 OPT_LOGIN_PORT=
 OPT_MODEL_ENDPOINT=
+OPT_TLS=
+OPT_PUBLIC_IP=
+OPT_TF_MODEL=
+OPT_TF_CAP=
 OPT_CONFIRM_NAME=
 COMMAND=install
 SUBCOMMAND=
 LOCK_HELD=0
 AMAN_PASSWORD=
+AMAN_TF_KEY=
 
 usage() {
   cat <<'USAGE'
@@ -87,16 +98,22 @@ Options
   --install-docker      let the installer run the printed root steps to install Docker Engine (Debian, Ubuntu)
   --add-docker-group    let the installer add your user to the docker group (needs sudo)
   --sandbox-root        let the installer run the printed root steps for the sandbox (AppArmor profile, slot disks) without asking
+  --tls-root            let the installer run the printed root steps for --tls caddy (install Caddy, apply its configuration) without asking
   --no-sandbox          install without the gVisor sandbox (run code stays off)
   --use-host-node       run the sandbox setup on this computer's Node.js 22.14 or newer instead of downloading a pinned copy
   --dry-run             stop after printing the plan
   --name NAME           first instance name (default main)
   --email ADDRESS       owner email
   --password-stdin      read the owner password from the first line of stdin, before any prompt
+  --token-factory-key-stdin  read the Token Factory key from stdin (the line after the password with --password-stdin); the key is never a command-line value
+  --token-factory-model ID   Token Factory model the app uses (default nvidia/nemotron-3-super-120b-a12b)
+  --token-factory-daily-cap N  stop answering after N Token Factory tokens per day (default: no cap)
   --public-url URL      https address you will use from other devices (behind your own reverse proxy)
   --login-url URL       https address for the sign-in service behind the same proxy
   --port N              port on this computer for the app
   --login-port N        port on this computer for the sign-in service
+  --tls caddy           serve --public-url and --login-url over https with Caddy on this computer (Ubuntu package, Let's Encrypt)
+  --public-ip ADDRESS   this computer's public IPv4 address for the --tls DNS check (default: ask a lookup service)
   --model-endpoint URL  model server endpoint to remind you of at the end
   --confirm-name NAME   with --purge-data, the instance name typed in advance
   --print-root-steps    print the root steps for installing Docker and stop
@@ -135,15 +152,18 @@ parse_args() {
       --print-root-steps) PRINT_ROOT_STEPS=1 ;;
       --print-network) PRINT_NETWORK=1 ;;
       --print-proxy-requirements) PRINT_PROXY=1 ;;
+      --tls-root) OPT_TLS_ROOT=1 ;;
+      --token-factory-key-stdin) OPT_TF_KEY_STDIN=1 ;;
+      --token-factory-key | --token-factory-key=*) usage_die "the Token Factory key is never taken from the command line; enter it at the hidden prompt or use --token-factory-key-stdin" ;;
       --check) OPT_CHECK=1 ;;
       --force) OPT_FORCE=1 ;;
       --purge-data) OPT_PURGE=1 ;;
-      --home | --name | --email | --public-url | --login-url | --port | --login-port | --model-endpoint | --confirm-name)
+      --home | --name | --email | --public-url | --login-url | --port | --login-port | --model-endpoint | --confirm-name | --tls | --public-ip | --token-factory-model | --token-factory-daily-cap)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --model-endpoint=* | --confirm-name=*)
+      --home=* | --name=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --model-endpoint=* | --confirm-name=* | --tls=* | --public-ip=* | --token-factory-model=* | --token-factory-daily-cap=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -178,6 +198,10 @@ set_option() {
     --login-port) OPT_LOGIN_PORT=$2 ;;
     --model-endpoint) OPT_MODEL_ENDPOINT=$2 ;;
     --confirm-name) OPT_CONFIRM_NAME=$2 ;;
+    --tls) OPT_TLS=$2 ;;
+    --public-ip) OPT_PUBLIC_IP=$2 ;;
+    --token-factory-model) OPT_TF_MODEL=$2 ;;
+    --token-factory-daily-cap) OPT_TF_CAP=$2 ;;
   esac
   safe_value "$2" || usage_die "$1 contains a character that is not allowed"
 }
@@ -194,6 +218,7 @@ on_exit() {
   local rc=$?
   trap - EXIT
   AMAN_PASSWORD=
+  AMAN_TF_KEY=
   upgrade_on_exit
   lock_release
   exit "$rc"
@@ -207,6 +232,10 @@ main() {
   trap 'exit 143' TERM
   if [ "$PRINT_ROOT_STEPS" = 1 ]; then
     print_root_steps
+    if [ "$OPT_TLS" = caddy ]; then
+      say ""
+      edge_print_root_steps "${OPT_NAME:-main}"
+    fi
     exit 0
   fi
   if [ "$PRINT_NETWORK" = 1 ]; then

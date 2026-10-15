@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Test double for curl: serves the fixture Node.js tarballs under $STUB_STATE/dist for nodejs.org URLs and nothing else.
+# Test double for curl. nodejs.org URLs serve the fixture Node.js tarballs under $STUB_STATE/dist; the public-address
+# lookup answers with $STUB_STATE/public_ip; every other https URL is looked up in $STUB_STATE/curl_routes, one line
+# per route: <url><TAB><status><TAB><body>. A route keyed "resolve:<url>" answers only a request that pins the name
+# with --resolve. Nothing else is reachable.
 printf 'curl %s\n' "$*" >>"$STUB_LOG"
 if [ -n "${STUB_CURL_FAIL:-}" ]; then
   echo "curl: (6) Could not resolve host: nodejs.org" >&2
@@ -7,21 +10,50 @@ if [ -n "${STUB_CURL_FAIL:-}" ]; then
 fi
 out=
 url=
+write_out=
+pinned=
+fail_on_error=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) out=$2; shift ;;
+    -w) write_out=$2; shift ;;
+    --resolve) pinned=1; shift ;;
+    --max-time | --proto) shift ;;
+    -*f*) case "$1" in --*) ;; *) fail_on_error=1 ;; esac ;;
     https://*) url=$1 ;;
   esac
   shift
 done
 case "$url" in
-  https://nodejs.org/dist/v*/node-v*.tar.gz) ;;
-  *) echo "stub curl: unexpected address $url" >&2; exit 22 ;;
+  https://nodejs.org/dist/v*/node-v*.tar.gz)
+    src=$STUB_STATE/dist/${url##*/}
+    [ -f "$src" ] || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
+    if [ -n "${STUB_CURL_CORRUPT:-}" ]; then
+      printf 'not the tarball\n' >"$out"
+    else
+      cp "$src" "$out"
+    fi
+    exit 0
+    ;;
+  https://api.ipify.org)
+    [ -f "$STUB_STATE/public_ip" ] || { echo "curl: (6) Could not resolve host: api.ipify.org" >&2; exit 6; }
+    cat "$STUB_STATE/public_ip"
+    exit 0
+    ;;
 esac
-src=$STUB_STATE/dist/${url##*/}
-[ -f "$src" ] || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
-if [ -n "${STUB_CURL_CORRUPT:-}" ]; then
-  printf 'not the tarball\n' >"$out"
-else
-  cp "$src" "$out"
+key=$url
+if [ -n "$pinned" ]; then key="resolve:$url"; fi
+line=$(awk -F'\t' -v k="$key" '$1 == k { print; exit }' "$STUB_STATE/curl_routes" 2>/dev/null || true)
+if [ -z "$line" ]; then
+  echo "curl: (6) Could not resolve host: ${url#https://}" >&2
+  exit 6
 fi
+status=$(printf '%s' "$line" | cut -f2)
+body=$(printf '%s' "$line" | cut -f3-)
+if [ "$fail_on_error" = 1 ] && [ "$status" -ge 400 ]; then
+  echo "curl: (22) The requested URL returned error: $status" >&2
+  exit 22
+fi
+if [ -n "$out" ]; then printf '%s\n' "$body" >"$out"; else printf '%s' "$body"; fi
+case "$write_out" in *http_code*) printf '\n%s' "$status" ;; esac
+exit 0

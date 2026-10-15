@@ -70,6 +70,33 @@ echo "sudo $*" >> "$FAKE_DOCKER_DIR/calls.log"
 exit 0
 `;
 
+/**
+ * A curl that answers from files under $FAKE_DOCKER_DIR: `curl_<n>.out` for the n-th request (0 = exit code only).
+ * A request that pins the name with --resolve reads `curl_pinned.*` instead. Each file holds the exit code in
+ * `.rc`, the body in `.body` and the status in `.status`.
+ */
+const FAKE_CURL = `#!/usr/bin/env bash
+dir="$FAKE_DOCKER_DIR"
+echo "curl $*" >> "$dir/calls.log"
+mode=plain
+url=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --resolve) mode=pinned; shift ;;
+    --max-time | -w) shift ;;
+    https://*) url=$1 ;;
+  esac
+  shift
+done
+key=$(printf '%s' "$url" | tr -c 'A-Za-z0-9' '_')
+[ "$mode" = pinned ] && key="pinned_$key"
+[ -e "$dir/curl_$key.rc" ] || { echo "curl: (6) Could not resolve host" >&2; exit 6; }
+rc=$(cat "$dir/curl_$key.rc")
+if [ "$rc" != 0 ]; then echo "curl: ($rc) $(cat "$dir/curl_$key.err")" >&2; exit "$rc"; fi
+cat "$dir/curl_$key.body" 2>/dev/null
+printf '\n%s' "$(cat "$dir/curl_$key.status")"
+`;
+
 export function sanitize(value) {
   return value.replace(/[^A-Za-z0-9\n]/g, '_');
 }
@@ -186,10 +213,23 @@ export function createWorld({ instances = ['main'] } = {}) {
       }
       return repo;
     },
-    writeEnv(name, mode = 0o600) {
+    writeEnv(name, mode = 0o600, extra = '') {
       const file = path.join(world.instanceDir(name), '.env');
-      writeFileSync(file, 'ENV_SECRET=SENTINEL-secret-value\n');
+      writeFileSync(file, `ENV_SECRET=SENTINEL-secret-value\n${extra}`);
       chmodSync(file, mode);
+    },
+    /** An instance with public https addresses; \`curl\` answers only the routes a test sets. */
+    publicInstance(name, { app = 'https://aman.example.com', login = 'https://login.example.com' } = {}) {
+      world.writeEnv(name, 0o600, `PUBLIC_BASE_URL=${app}\nOIDC_ISSUER_URL=${login}/dex\n`);
+      world.install('curl', FAKE_CURL);
+    },
+    /** What curl does for one address: an exit code (and message) or a status with a body. */
+    curlRoute(url, { pinned = false, rc = 0, error = '', status = 200, body = '' } = {}) {
+      const key = `${pinned ? 'pinned_' : ''}${url.replace(/[^A-Za-z0-9]/g, '_')}`;
+      writeFileSync(path.join(fake, `curl_${key}.rc`), String(rc));
+      writeFileSync(path.join(fake, `curl_${key}.err`), error);
+      writeFileSync(path.join(fake, `curl_${key}.status`), String(status));
+      writeFileSync(path.join(fake, `curl_${key}.body`), body);
     },
     psLine({ id, name, state = 'running', status = 'Up 2 minutes', service }) {
       return `${id}|${name}|${state}|${status}|${service}`;
@@ -279,6 +319,7 @@ export const HEALTHY_INSTANCE_CHECKS =
     'clock\tok\tThe clock is within 60 seconds of the login provider.\t',
     'run_code\toff\trun_code is not available: no sandbox isolation driver is configured for this deployment.\t',
     'attachments\toff\tReading email attachments is not available.\t',
+    'model\toff\tNo Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.\t',
   ].join('\n') + '\n';
 
 export const RUN_CODE_READY = 'run_code\tok\trun_code is ready: the sandbox slots answer through the app.\t\n';

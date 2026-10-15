@@ -327,6 +327,7 @@ test_root_steps_answered_yes_on_a_terminal() {
   run_install_tty "Instance name=>
 Owner email=>owner@example.invalid
 Address you will use=>
+Token Factory key=>
 Model server address=>
 Go ahead?=>y
 Password for the owner account=>$SENTINEL_PASSWORD
@@ -347,6 +348,7 @@ test_root_steps_declined_on_a_terminal() {
   run_install_tty "Instance name=>
 Owner email=>owner@example.invalid
 Address you will use=>
+Token Factory key=>
 Model server address=>
 Go ahead?=>y
 Password for the owner account=>$SENTINEL_PASSWORD

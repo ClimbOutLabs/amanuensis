@@ -7,6 +7,7 @@ set -euo pipefail
 ANSWERS="Instance name=>
 Owner email=>owner@example.invalid
 Address you will use from other devices=>
+Token Factory key=>
 Model server address=>
 Go ahead?=>y
 Password for the owner account=>$SENTINEL_PASSWORD

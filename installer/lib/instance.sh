@@ -87,7 +87,7 @@ machine_running() {
 
 # Rewrites compose.yaml and dex.yaml from the registry and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on
+  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on edge_on login_host
   dir=$(instance_dir "$name")
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
@@ -96,10 +96,18 @@ instance_render() {
   email=$(reg_get "$name" owner_email)
   client_id=$(reg_get "$name" client_id)
   if instance_sandbox_wanted "$name"; then sandbox_on=1; else sandbox_on=0; fi
+  edge_on=0
+  login_host=
+  if edge_wanted "$name"; then
+    edge_on=1
+    login_host=$(edge_host "$login_url")
+  fi
   ensure_private_dir "$dir"
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
     "NAME=$name" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
+    "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" | write_if_changed "$dir/compose.yaml" 644 || true
+  if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
     "ISSUER=$login_url/dex" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
     "OWNER_EMAIL=$email" "CLIENT_ID=$client_id" "PUBLIC_URL=$public_url" | write_if_changed "$dir/dex.yaml" 644 || true
@@ -183,6 +191,7 @@ instance_collect() {
   I_PUBLIC_URL=${OPT_PUBLIC_URL:-}
   I_LOGIN_URL=${OPT_LOGIN_URL:-}
   I_MODEL=${OPT_MODEL_ENDPOINT:-}
+  I_TLS=${OPT_TLS:-}
   I_SANDBOX=slots
   if [ "$OPT_NO_SANDBOX" = 1 ]; then I_SANDBOX=off; fi
   ask I_NAME "Instance name" "$name_default"
@@ -203,13 +212,33 @@ instance_collect() {
   elif [ -n "$I_LOGIN_URL" ]; then
     usage_die "--login-url needs --public-url"
   fi
-  ask I_MODEL "Model server address (optional; for one on this computer, for example http://host.docker.internal:11434/v1)" ""
+  instance_collect_tls
+  instance_collect_token_factory
+  # A hosted model replaces the model server prompt; --model-endpoint still adds one.
+  if [ "$I_TF" = 1 ] && [ -z "$I_MODEL" ]; then
+    :
+  else
+    ask I_MODEL "Model server address (optional; for one on this computer, for example http://host.docker.internal:11434/v1)" ""
+  fi
   if [ -n "$I_MODEL" ]; then
     valid_model_endpoint "$I_MODEL" || usage_die "the model server address must be an http(s) URL"
     if matches_whole "$I_MODEL" '^https?://(localhost|127\.0\.0\.1|\[::1\])([:/].*)?$'; then
       warn "inside the app, localhost is the app itself, so it cannot reach a model server there. Use host.docker.internal instead of localhost."
     fi
   fi
+}
+
+# --tls caddy serves the two public origins on 443 under DNS names Let's Encrypt can issue for.
+instance_collect_tls() {
+  case "$I_TLS" in
+    '') return 0 ;;
+    caddy) ;;
+    *) usage_die "--tls takes caddy" ;;
+  esac
+  [ -n "$I_PUBLIC_URL" ] || usage_die "--tls caddy needs --public-url and --login-url (the two https addresses Caddy will serve)"
+  [ -z "$OPT_PUBLIC_IP" ] || valid_ipv4 "$OPT_PUBLIC_IP" || usage_die "--public-ip must be an IPv4 address"
+  valid_edge_host "$(edge_host "$I_PUBLIC_URL")" || usage_die "--tls caddy serves port 443 under a DNS name: the public address cannot carry a port or be an IP address"
+  valid_edge_host "$(edge_host "$I_LOGIN_URL")" || usage_die "--tls caddy serves port 443 under a DNS name: the login address cannot carry a port or be an IP address"
 }
 
 # Picks ports and derives URLs. Read-only: nothing is written, so the plan can show the result.
@@ -248,7 +277,7 @@ issuer_check() {
 # ---- create / list / remove -------------------------------------------------------------------
 
 instance_create() {
-  local dir cookie client_id client_secret api_key hash created
+  local dir cookie client_id client_secret api_key hash created tf_cap_on=0
   dir=$(instance_dir "$I_NAME")
   if reg_exists "$I_NAME"; then
     say "Instance $I_NAME already exists; making sure it is running"
@@ -269,15 +298,19 @@ instance_create() {
   client_secret=$(rand_hex 32)
   api_key=$(rand_hex 32)
   hash=$(hash_password "$REL_APP_TAG")
+  if [ -n "$I_TF_CAP" ]; then tf_cap_on=1; fi
   render_template "$TEMPLATES_DIR/instance/env.tpl" \
     "PUBLIC_URL=$I_PUBLIC_URL" "COOKIE_SUFFIX=$cookie" "ISSUER=$I_ISSUER" "CLIENT_ID=$client_id" \
-    "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "API_KEY=$api_key" |
+    "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "API_KEY=$api_key" \
+    "IF_TOKEN_FACTORY=$I_TF" "TF_KEY=$AMAN_TF_KEY" "TF_MODEL=$I_TF_MODEL" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$I_TF_CAP" |
     write_if_changed "$dir/.env" 600 || true
+  AMAN_TF_KEY=
   render_template "$TEMPLATES_DIR/instance/dex.env.tpl" "PASSWORD_HASH=$hash" | write_if_changed "$dir/dex.env" 600 || true
   created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   reg_write "$I_NAME" "name=$I_NAME" "app_port=$I_PORT" "login_port=$I_LOGIN_PORT" "public_url=$I_PUBLIC_URL" \
     "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
-    "model_endpoint=$I_MODEL" "sandbox=$I_SANDBOX" "created=$created"
+    "model_endpoint=$I_MODEL" "sandbox=$I_SANDBOX" "tls=$I_TLS" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
+    "tf_cap=$I_TF_CAP" "created=$created"
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then
     warn "reusing the existing data volume aman_${I_NAME}_data from an earlier instance with this name"
@@ -298,23 +331,15 @@ print_proxy_requirements() {
   say "    the app contacts the login origin from inside its container."
 }
 
-# With --password-stdin the password is the first line of stdin, read before any prompt can take it.
+# With --password-stdin the password is the first line of stdin, read before any prompt can take it; with
+# --token-factory-key-stdin the key is the next line.
 read_password_first() {
   if [ "$PASSWORD_FROM_STDIN" = 1 ] && [ "$DRY_RUN" != 1 ]; then
     ask_password AMAN_PASSWORD
   fi
-}
-
-# Next step for the model server. Generic on purpose: no product is named.
-print_model_hint() {
-  if [ -n "$1" ]; then
-    say "  Model:    open Settings > Models and enter $1"
-  else
-    say "  Model:    not set yet. Next step: open Settings > Models and add your model server address or a provider key."
+  if [ "$OPT_TF_KEY_STDIN" = 1 ] && [ "$DRY_RUN" != 1 ]; then
+    read_token_factory_key_stdin
   fi
-  say "            A model server running on this computer must listen on more than 127.0.0.1 to be reachable"
-  say "            from the app, which sees this computer as host.docker.internal. Make it listen on all addresses"
-  say "            (or on the Docker bridge address), then use http://host.docker.internal:<its port>/v1."
 }
 
 print_instance_summary() {
@@ -325,13 +350,16 @@ print_instance_summary() {
   say "  Sign in:  $(reg_get "$name" owner_email) with the password you chose"
   say "  Sign-in service (used by the app automatically, not a page to open): $(reg_get "$name" login_url)/dex"
   say "  Data:     Docker volumes aman_${name}_data and aman_${name}_dex"
-  if is_loopback_origin "$(reg_get "$name" public_url)"; then
+  if edge_wanted "$name"; then
+    say "  HTTPS:    Caddy on this computer serves $(reg_get "$name" public_url) and $(reg_get "$name" login_url) (certificates from Let's Encrypt, renewed by Caddy)"
+    edge_print_firewall_hint
+  elif is_loopback_origin "$(reg_get "$name" public_url)"; then
     say "  Use 127.0.0.1 in the browser, not localhost; sign-in depends on the exact name."
     say "  To reach it from other devices later, see: install.sh --print-proxy-requirements"
   else
     print_proxy_requirements "$(reg_get "$name" public_url)" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_url)" "$(reg_get "$name" login_port)"
   fi
-  print_model_hint "$(reg_get "$name" model_endpoint)"
+  print_model_hint "$name"
   if instance_sandbox_wanted "$name"; then
     say "  Run code: on, in the gVisor sandbox (Settings > Sandbox shows its status). Repair: $(sandbox_repair_command)"
     say "  Attachment extraction is off in this version."
@@ -364,9 +392,11 @@ cmd_instance_add() {
   I_NAME=$OPT_NAME
   if reg_exists "$I_NAME"; then
     instance_create
+    edge_ensure "$I_NAME"
     print_instance_summary "$I_NAME"
     if instance_sandbox_wanted "$I_NAME"; then sandbox_verify "$I_NAME"; fi
     sandbox_finish
+    edge_finish
     return 0
   fi
   AMAN_PASSWORD=
@@ -381,10 +411,12 @@ cmd_instance_add() {
   machine_running || machine_up "$REL_STT_TAG"
   instance_create
   AMAN_PASSWORD=
+  edge_ensure "$I_NAME"
   print_instance_summary "$I_NAME"
   if [ "$I_SANDBOX" = slots ]; then sandbox_verify "$I_NAME"; fi
   print_signout_note
   sandbox_finish
+  edge_finish
 }
 
 # Pads tab-separated columns to the widest cell of each, so long names and addresses stay aligned.

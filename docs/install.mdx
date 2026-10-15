@@ -44,7 +44,8 @@ For the first instance it prompts, with defaults in brackets:
 - Owner email
 - Address you will use from other devices (press Enter to use this computer only)
 - If you give a public address: address for the sign-in service (its own https address, never a path of the first one)
-- Model server address (optional)
+- Token Factory key (optional; typed hidden, never echoed). Giving one makes Nebius Token Factory the default model and skips the next question
+- Model server address (optional; skipped when you gave a Token Factory key)
 - Password (typed twice, never echoed; at least 8 characters, at most 72 bytes)
 
 Everything else is generated: ports, secrets, and the login setup.
@@ -57,6 +58,12 @@ The printed plan lists every first-run download with its approximate size, inclu
 
 - `--confirm-name NAME`: with `--purge-data`, the instance name typed in advance so it does not prompt.
 - `--password-stdin`: read the owner password from the first line of stdin, before any prompt.
+- `--token-factory-key-stdin`: read the Token Factory key from stdin (the line after the password when `--password-stdin` is also given). The key is never accepted as a command-line value, and it is written only to the instance `.env` (mode 600).
+- `--token-factory-model ID`: the Token Factory model to use (default `nvidia/nemotron-3-super-120b-a12b`).
+- `--token-factory-daily-cap N`: stop answering after N Token Factory tokens per day (default: no cap).
+- `--tls caddy`: serve `--public-url` and `--login-url` over https with Caddy on this computer. See [Https with Caddy](#https-with-caddy).
+- `--tls-root`: let the installer run the printed root steps for `--tls caddy` without asking. `--yes` alone never uses sudo.
+- `--public-ip ADDRESS`: this computer's public IPv4 address for the DNS check of `--tls caddy`, instead of asking a lookup service.
 - `--install-docker`: let the installer run the printed root steps to install Docker Engine (Debian, Ubuntu).
 - `--add-docker-group`: let the installer add your user to the docker group (needs sudo).
 - `--sandbox-root`: let the installer run the printed root steps for the sandbox (AppArmor profile, slot disks) without asking. `--yes` alone never uses sudo.
@@ -107,6 +114,24 @@ The first run is local only. To reach an instance from another device on your ne
 
 When you set a public URL, that instance's URL and its login issuer switch to HTTPS behind your proxy. An HTTP login issuer is only allowed for loopback addresses.
 
+### Https with Caddy
+
+On an Ubuntu or Debian machine with a public address you can let the installer be that proxy:
+
+```bash
+installer/install.sh --public-url https://<app-name> --login-url https://<login-name> --tls caddy
+```
+
+Create two DNS A records first, one for each name, both pointing at this machine's public address. The installer then:
+
+1. Checks that both names resolve to this machine's public address. If not, it says which one does not and stops before anything is requested from Let's Encrypt.
+2. Prints the root steps and runs them only after you answer yes (or pass `--tls-root`): install Caddy from the Ubuntu package archive, copy the generated Caddyfile for exactly your two names into `/etc/caddy/aman.d`, check it, and reload Caddy. No container image is pulled for Caddy.
+3. Lets the app reach the login name through this machine (an `extra_hosts` entry), so sign-in does not depend on the machine reaching its own public address.
+
+The installer changes no firewall. Open only TCP 443 to the internet, plus SSH from your own address; port 80 can stay closed. The names are only ever given on the command line or at the prompts; nothing in the installer or its files contains a domain.
+
+`aman doctor` then also tries the public health address and the login discovery document over https, and (with a Token Factory key) the model.
+
 ## Doctor
 
 The doctor binary is not on your PATH. It lives at `~/.amanuensis/bin/aman`. Either run it with the full path, or add the folder to your PATH:
@@ -148,6 +173,9 @@ Common checks and what they mean:
 | disk          | Under 2 GB free is a fail                       | Free space or prune unused images                               |
 | clock         | Machine clock disagrees with the containers     | Enable automatic time sync                                      |
 | run_code      | The app cannot reach the sandbox slots, or a slot fails a safety check | Run `aman doctor sandbox --fix`                   |
+| model         | Token Factory refuses the key, does not list the model, or the model answers a tool call without `tool_calls` | The check says which; fix `NEBIUS_API_KEY` or `TOKEN_FACTORY_MODEL` in the instance `.env` and restart |
+| public_url    | The public https address does not answer the health check (https instances only) | Check DNS, Caddy (`sudo systemctl status caddy`) and port 443 |
+| public_login  | The login discovery document is not served over https with the configured issuer | Same as above; the issuer in the instance `.env` must be the address Caddy serves for sign-in |
 
 A fresh install never warns about backups until the first backup exists.
 

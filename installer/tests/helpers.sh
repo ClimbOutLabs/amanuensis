@@ -26,7 +26,7 @@ sandbox_new() {
   done
   for t in "$TESTS_DIR"/stubs/*; do
     case "$(basename "$t")" in
-      aman-doctor) ;;
+      aman-doctor | caddy) ;;
       *) cp "$t" "$SB_BIN/" ;;
     esac
   done
@@ -96,6 +96,28 @@ UNAME
   chmod 755 "$SB_BIN/uname"
 }
 
+# Caddy is on the machine; a second call is the same.
+fixture_caddy() {
+  cp "$TESTS_DIR/stubs/caddy" "$SB_BIN/caddy"
+}
+
+# What the DNS check sees: the machine's public address and what a name resolves to (example.com names only).
+fixture_public_ip() { printf '%s\n' "$1" >"$SB_STATE/public_ip"; }
+fixture_dns() {
+  local host=$1
+  shift
+  mkdir -p "$SB_STATE/dns"
+  printf '%s\n' "$@" >"$SB_STATE/dns/$host"
+}
+
+# fixture_route URL STATUS BODY [pinned]: what the stub curl answers for a URL; "pinned" is for a request that
+# maps the name to this machine with --resolve.
+fixture_route() {
+  local key=$1
+  [ "${4:-}" != pinned ] || key="resolve:$1"
+  printf '%s\t%s\t%s\n' "$key" "$2" "$3" >>"$SB_STATE/curl_routes"
+}
+
 # Puts a host Node.js (the stub) on the PATH of the installer.
 fixture_host_node() {
   cp "$TESTS_DIR/stubs/node" "$SB_BIN/node"
@@ -144,6 +166,7 @@ build_run_env() {
     STUB_APPARMOR="${STUB_APPARMOR:-}" STUB_CGROUP="${STUB_CGROUP:-}" STUB_DOCKER_OS="${STUB_DOCKER_OS:-}" STUB_NO_BUNDLE="${STUB_NO_BUNDLE:-}"
     STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}"
     STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" STUB_DOCKER_ROOT="${STUB_DOCKER_ROOT:-}" STUB_DOCKER_ROOT_KB="${STUB_DOCKER_ROOT_KB:-}"
+    AMAN_CADDY_ETC="$SB/etc-caddy" AMAN_EDGE_WAIT_TRIES=1
     ${AMAN_PASSWORD+AMAN_PASSWORD="$AMAN_PASSWORD"})
 }
 

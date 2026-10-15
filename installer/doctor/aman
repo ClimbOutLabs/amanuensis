@@ -11,6 +11,9 @@
 # the Node.js the installer downloaded into <home>/runtime/node, or on the host's Node.js 22.14 or newer. With --fix it rebuilds the image, reloads the AppArmor profile,
 # recreates missing slot disks and recreates the slots; it asks before any sudo.
 #
+# `public_url` and `public_login` run from this machine against an instance's public https addresses (its health
+# endpoint and the login discovery document), only for an instance installed with https addresses.
+#
 # Exit codes: 0 no failures, 1 at least one failure, 2 usage error.
 # Test hooks: AMAN_DOCTOR_NOW (epoch seconds) replaces the clock.
 
@@ -24,8 +27,8 @@ ONLY=""
 ONLY_INSTANCE=""
 
 MACHINE_IDS="docker runtime credentials images disk docker_memory clock backup"
-INSTANCE_IDS="config containers ports service login database disk clock run_code attachments"
-IN_IMAGE_IDS="service login database disk clock run_code attachments"
+INSTANCE_IDS="config containers ports service login database disk clock run_code attachments model public_url public_login"
+IN_IMAGE_IDS="service login database disk clock run_code attachments model"
 
 BACKUP_WARN_DAYS=7
 GIB=$((1024 * 1024 * 1024))
@@ -510,9 +513,10 @@ in_list() { # word list
 }
 
 run_in_image_checks() { # name
-  local name=$1 out rc line id state detail fix exec_timeout=20 args=(doctor --text)
+  # The model check waits on a hosted model, so the whole run gets more room than the local checks need.
+  local name=$1 out rc line id state detail fix exec_timeout=45 args=(doctor --text)
   if [ "$DEEP" = 1 ]; then
-    exec_timeout=60
+    exec_timeout=90
     args+=(--deep)
   fi
   if [ -n "$ONLY" ] && in_list "$ONLY" "$IN_IMAGE_IDS"; then
@@ -533,7 +537,95 @@ run_in_image_checks() { # name
   done <<<"$out"
 }
 
+PROBE_RC=0
+PROBE_CODE=""
+PROBE_BODY=""
+PROBE_ERR=""
+
+# One https request from this machine; a second form pins the name to this machine to tell a broken public path
+# (DNS, firewall, a cloud that does not loop back) from a broken proxy.
+http_probe() { # url [host:port:address]
+  local url=$1 pin=${2:-} out args=(-sS --max-time 10 -w $'\n%{http_code}')
+  if [ -n "$pin" ]; then args+=(--resolve "$pin"); fi
+  out=$(bounded 15 curl "${args[@]}" "$url" 2>&1)
+  PROBE_RC=$?
+  PROBE_CODE=""
+  PROBE_BODY=""
+  PROBE_ERR=""
+  if [ "$PROBE_RC" -ne 0 ]; then
+    clean "${out##*$'\n'}"
+    PROBE_ERR=$CLEANED
+    return
+  fi
+  PROBE_CODE=${out##*$'\n'}
+  PROBE_BODY=${out%$'\n'*}
+}
+
+public_check() { # name id url what [expected issuer]
+  local name=$1 id=$2 url=$3 what=$4 want=${5:-} rest host port=443 first_error="" pinned=0 got
+  local fix_path="Check that the DNS records point at this machine, that Caddy is running (sudo systemctl status caddy; sudo journalctl -u caddy -n 50) and that port 443 is open in the cloud firewall."
+  rest=${url#https://}
+  host=${rest%%/*}
+  case "$host" in *:*)
+    port=${host##*:}
+    host=${host%%:*}
+    ;;
+  esac
+  http_probe "$url"
+  if [ "$PROBE_RC" -ne 0 ]; then
+    first_error=$PROBE_ERR
+    http_probe "$url" "${host}:${port}:127.0.0.1"
+    if [ "$PROBE_RC" -ne 0 ]; then
+      record "$name" "$id" fail "${what} did not answer over https (${first_error:-no answer})." "$fix_path"
+      return
+    fi
+    pinned=1
+  fi
+  if [ "$PROBE_CODE" != 200 ]; then
+    record "$name" "$id" fail "${what} answered status ${PROBE_CODE}, not 200." \
+      "Status 502 or 503 means Caddy runs but the instance does not answer: run \"aman doctor --instance ${name}\" and fix what it reports. Otherwise check the Caddy log: sudo journalctl -u caddy -n 50."
+    return
+  fi
+  if [ -n "$want" ]; then
+    got=$(printf '%s' "$PROBE_BODY" | tr -d '\n' | sed -n 's/.*"issuer"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    if [ "$got" != "$want" ]; then
+      record "$name" "$id" fail "${what} answered, but its issuer is \"${got:-missing}\", not the configured \"${want}\"." \
+        "Check that the login address in the instance .env (OIDC_ISSUER_URL) is the one Caddy serves for the sign-in service, then restart the instance."
+      return
+    fi
+  fi
+  if [ "$pinned" = 1 ]; then
+    record "$name" "$id" warn "${what} answers on this machine with a valid certificate, but not through its public address from here (${first_error:-no answer})." \
+      "Some clouds do not loop a machine back to its own public address. Check from another network: curl -sSI ${url}"
+    return
+  fi
+  record "$name" "$id" ok "${what} answers over https." ""
+}
+
+# The addresses people use, checked the way a browser reaches them. Skipped for an instance with local addresses only.
+check_instance_public() { # name
+  local name=$1 file public issuer
+  file="${AMAN_HOME}/instances/${name}/.env"
+  [ -r "$file" ] || return 0
+  public=$(sed -n 's/^PUBLIC_BASE_URL=//p' "$file" | head -n 1)
+  issuer=$(sed -n 's/^OIDC_ISSUER_URL=//p' "$file" | head -n 1)
+  case "$public" in https://*) ;; *) return 0 ;; esac
+  if ! command -v curl >/dev/null 2>&1; then
+    record "$name" public_url off "Skipped: curl is not installed, so the public https address cannot be tried." ""
+    return 0
+  fi
+  public_check "$name" public_url "${public}/healthz" "The app at ${public}"
+  case "$issuer" in
+    https://*) public_check "$name" public_login "${issuer}/.well-known/openid-configuration" "The login provider at ${issuer}" "$issuer" ;;
+  esac
+}
+
 check_instance() {
+  check_instance_core "$1"
+  check_instance_public "$1"
+}
+
+check_instance_core() {
   local name=$1
   check_instance_config "$name"
   if [ "$DOCKER_OK" != 1 ]; then

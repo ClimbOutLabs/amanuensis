@@ -10,4 +10,8 @@ stt-weights|464|Whisper small speech model weights, downloaded once at first sta
 dex|36|Login service image (pinned by digest)|ghcr.io
 embed|120|Search embedding model, downloaded once per instance at first start|huggingface.co
 slot-image|900|Sandbox slot image: base images, Ubuntu packages, Python and npm packages, the gVisor runtime (built once)|registry-1.docker.io archive.ubuntu.com ports.ubuntu.com pypi.org files.pythonhosted.org registry.npmjs.org storage.googleapis.com
+caddy|5|Caddy web server package, only with --tls caddy|archive.ubuntu.com
+acme|0|Certificates Caddy requests for your two https addresses, only with --tls caddy|acme-v02.api.letsencrypt.org
+public-ip|0|This computer's public address, asked once for the --tls caddy DNS check (--public-ip skips it)|api.ipify.org
+token-factory|0|Token Factory model API, used by the app and the doctor only when you give a key|api.tokenfactory.nebius.com
 node-runtime|35|Node.js runtime that runs the sandbox setup, pinned and checked by SHA-256 (not needed with --use-host-node)|nodejs.org

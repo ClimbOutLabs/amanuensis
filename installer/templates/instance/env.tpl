@@ -16,4 +16,7 @@ SQLITE_PATH=/data/db/db.sqlite
 MEMORY_MARKDOWN_DIR=/data/memory
 PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge
 STT_URL=http://aman-stt:8001
+@@IF_TOKEN_FACTORY@@NEBIUS_API_KEY=@@TF_KEY@@
+@@IF_TOKEN_FACTORY@@TOKEN_FACTORY_MODEL=@@TF_MODEL@@
+@@IF_TF_CAP@@TOKEN_FACTORY_DAILY_TOKEN_CAP=@@TF_CAP@@
 # <<< end of managed block; add your own settings below this line

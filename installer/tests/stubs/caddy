@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Stand-in for the Caddy binary; the installer only checks that it exists.
+printf 'caddy %s\n' "$*" >>"$STUB_LOG"
+exit 0

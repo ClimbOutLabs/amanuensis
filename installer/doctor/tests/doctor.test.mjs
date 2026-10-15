@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { chmodSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, it } from 'node:test';
 
 import {
@@ -57,7 +58,19 @@ describe('document and exit codes', () => {
     );
     assert.deepEqual(
       result.doc.instances.main.map(c => c.id),
-      ['config', 'containers', 'ports', 'service', 'login', 'database', 'disk', 'clock', 'run_code', 'attachments'],
+      [
+        'config',
+        'containers',
+        'ports',
+        'service',
+        'login',
+        'database',
+        'disk',
+        'clock',
+        'run_code',
+        'attachments',
+        'model',
+      ],
     );
   });
 
@@ -867,5 +880,150 @@ describe('doctor sandbox', () => {
     const result = world.json();
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(sandboxCalls(), []);
+  });
+});
+
+describe('model check', () => {
+  const MODEL_OK = 'model\tok\tToken Factory lists vendor/m and it answered a tool call.\t\n';
+
+  it('shows the in-image model result and passes --only model to the app container', () => {
+    make();
+    world.set('exec_c1', { out: MODEL_OK, rc: 0 });
+    const result = world.json(['--only', 'model']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(find(result.doc.instances.main, 'model'), {
+      id: 'model',
+      state: 'ok',
+      detail: 'Token Factory lists vendor/m and it answered a tool call.',
+      fix: '',
+    });
+    assert.ok(world.calls().includes(`exec -e AMAN_HOST_EPOCH=${world.now} c1 aman doctor --text --only model`));
+  });
+
+  it('exits 1 with the fix when the model check fails', () => {
+    make();
+    world.set('exec_c1', {
+      out: HEALTHY_INSTANCE_CHECKS.replace(/model\t.*\n/, 'model\tfail\tToken Factory GET /models: HTTP 401\tCreate a new key.\n'),
+      rc: 1,
+    });
+    const result = world.json();
+    assert.equal(result.code, 1);
+    assert.equal(find(result.doc.instances.main, 'model').fix, 'Create a new key.');
+  });
+
+  it('lets the whole in-image run take as long as a hosted model may', () => {
+    make();
+    world.run();
+    world.run(['--deep']);
+    const shim = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'aman'), 'utf8');
+    assert.match(shim, /exec_timeout=45/);
+    assert.match(shim, /exec_timeout=90/);
+  });
+});
+
+describe('public https checks', () => {
+  const APP = 'https://aman.example.com';
+  const LOGIN = 'https://login.example.com';
+  const HEALTH = `${APP}/healthz`;
+  const DISCOVERY = `${LOGIN}/dex/.well-known/openid-configuration`;
+  const DISCOVERY_BODY = JSON.stringify({ issuer: `${LOGIN}/dex`, jwks_uri: `${LOGIN}/dex/keys` }, null, 2);
+  const publicChecks = () => world.json().doc.instances.main.filter(check => check.id.startsWith('public_'));
+
+  it('adds nothing for an instance with local addresses only', () => {
+    make();
+    assert.deepEqual(publicChecks(), []);
+  });
+
+  it('is ok when the health endpoint and the discovery document answer over https', () => {
+    make();
+    world.publicInstance('main');
+    world.curlRoute(HEALTH, { body: 'ok' });
+    world.curlRoute(DISCOVERY, { body: DISCOVERY_BODY });
+    const checks = publicChecks();
+    assert.deepEqual(
+      checks.map(c => [c.id, c.state]),
+      [
+        ['public_url', 'ok'],
+        ['public_login', 'ok'],
+      ],
+    );
+    assert.ok(world.calls().some(call => call.endsWith(HEALTH)));
+    assert.ok(world.calls().some(call => call.endsWith(DISCOVERY)));
+    assert.ok(!world.calls().some(call => call.includes('--resolve')), 'no pinned request when the public path works');
+  });
+
+  it('warns, not fails, when only the request pinned to this machine works', () => {
+    make();
+    world.publicInstance('main');
+    world.curlRoute(HEALTH, { rc: 28, error: 'Connection timed out' });
+    world.curlRoute(HEALTH, { pinned: true, body: 'ok' });
+    world.curlRoute(DISCOVERY, { body: DISCOVERY_BODY });
+    const [url, login] = publicChecks();
+    assert.equal(url.state, 'warn');
+    assert.match(url.detail, /not through its public address/);
+    assert.match(url.fix, /another network/);
+    assert.equal(login.state, 'ok');
+    assert.equal(world.json().code, 0);
+  });
+
+  it('fails with the curl reason and the DNS, Caddy and firewall fix when nothing answers', () => {
+    make();
+    world.publicInstance('main');
+    world.curlRoute(HEALTH, { rc: 60, error: 'SSL certificate problem' });
+    world.curlRoute(HEALTH, { pinned: true, rc: 60, error: 'SSL certificate problem' });
+    world.curlRoute(DISCOVERY, { rc: 6, error: 'Could not resolve host' });
+    world.curlRoute(DISCOVERY, { pinned: true, rc: 6, error: 'Could not resolve host' });
+    const result = world.json();
+    const [url, login] = result.doc.instances.main.filter(c => c.id.startsWith('public_'));
+    assert.equal(result.code, 1);
+    assert.equal(url.state, 'fail');
+    assert.match(url.detail, /SSL certificate problem/);
+    assert.match(url.fix, /Caddy is running/);
+    assert.match(url.fix, /port 443/);
+    assert.equal(login.state, 'fail');
+  });
+
+  it('fails on a bad gateway and points at the instance doctor', () => {
+    make();
+    world.publicInstance('main');
+    world.curlRoute(HEALTH, { status: 502 });
+    world.curlRoute(DISCOVERY, { body: DISCOVERY_BODY });
+    const url = publicChecks()[0];
+    assert.equal(url.state, 'fail');
+    assert.match(url.detail, /status 502/);
+    assert.match(url.fix, /aman doctor --instance main/);
+  });
+
+  it('fails when the discovery document names another issuer', () => {
+    make();
+    world.publicInstance('main');
+    world.curlRoute(HEALTH, { body: 'ok' });
+    world.curlRoute(DISCOVERY, { body: JSON.stringify({ issuer: 'https://elsewhere.example.net/dex' }) });
+    const login = publicChecks()[1];
+    assert.equal(login.state, 'fail');
+    assert.match(login.detail, /issuer is "https:\/\/elsewhere\.example\.net\/dex"/);
+    assert.match(login.fix, /OIDC_ISSUER_URL/);
+  });
+
+  it('skips with a reason when curl is not installed', () => {
+    make();
+    world.publicInstance('main');
+    world.uninstall('curl');
+    const [url] = publicChecks();
+    assert.equal(url.state, 'off');
+    assert.match(url.detail, /curl is not installed/);
+  });
+
+  it('is selectable with --only and keeps secrets out of the report', () => {
+    make();
+    world.publicInstance('main');
+    world.curlRoute(HEALTH, { body: 'ok' });
+    world.curlRoute(DISCOVERY, { body: DISCOVERY_BODY });
+    const result = world.json(['--only', 'public_login']);
+    assert.deepEqual(
+      result.doc.instances.main.map(c => c.id),
+      ['public_login'],
+    );
+    assert.ok(!result.stdout.includes('SENTINEL'));
   });
 });

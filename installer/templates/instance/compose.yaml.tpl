@@ -17,6 +17,8 @@ services:
     # Lets a model server on the host answer at host.docker.internal.
     extra_hosts:
       - 'host.docker.internal:host-gateway'
+@@IF_EDGE@@      # Caddy on this computer answers for the login name, so the app reaches its issuer without a trip through the public address.
+@@IF_EDGE@@      - '@@LOGIN_HOST@@:host-gateway'
     # Own network for the shared speech service, so instances cannot reach each other through it.
     networks:
       - default

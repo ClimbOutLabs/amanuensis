@@ -115,6 +115,30 @@ test_public_base_url_is_the_host_facing_origin() {
   sandbox_drop
 }
 
+test_token_factory_settings_match_the_server() {
+  t_begin "the installer writes the default model and the setting names the server reads"
+  local repo=$INSTALLER_DIR/.. defaults config key
+  defaults=$(sed -n "s/^export const DEFAULT_TOKEN_FACTORY_MODEL = '\(.*\)';/\1/p" "$repo/packages/trueforge/src/runtime/tokenFactoryDefaults.ts")
+  assert_eq "$(sed -n 's/^TF_DEFAULT_MODEL=//p' "$INSTALLER_DIR/lib/tokenfactory.sh")" "$defaults" "default model"
+  config=$(cat "$repo/packages/trueforge/src/config.ts")
+  for key in NEBIUS_API_KEY TOKEN_FACTORY_MODEL TOKEN_FACTORY_DAILY_TOKEN_CAP; do
+    assert_contains "$config" "getEnv('$key'" "the server reads $key"
+    assert_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "$key=" "the installer writes $key"
+  done
+}
+
+test_in_image_check_ids_match() {
+  t_begin "every check the shim relays from the app container is one the app's doctor knows"
+  local repo=$INSTALLER_DIR/.. ids id known
+  ids=$(sed -n 's/^IN_IMAGE_IDS="\(.*\)"/\1/p' "$INSTALLER_DIR/doctor/aman")
+  known=$(awk '/^export const INSTANCE_CHECK_IDS = \[/ {on = 1} on {print} /\] as const;/ {on = 0}' "$repo/packages/trueforge/src/cli/doctor/run.ts" | tr -d "' ,")
+  for id in $ids; do
+    assert_contains "$known" "$id" "$id is an app check"
+  done
+}
+
+test_token_factory_settings_match_the_server
+test_in_image_check_ids_match
 test_doctor_reads_what_the_installer_wrote
 test_installer_calls_the_shim_as_documented
 test_doctor_sandbox_reads_what_the_installer_wrote

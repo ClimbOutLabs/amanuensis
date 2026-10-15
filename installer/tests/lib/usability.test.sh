@@ -125,6 +125,7 @@ test_end_of_input_at_the_password_prompt_aborts() {
   run_install_tty "Instance name=>
 Owner email=>owner@example.invalid
 Address you will use=>
+Token Factory key=>
 Model server address=>
 Go ahead?=>y
 Password for the owner account=><EOF>"
@@ -142,6 +143,7 @@ test_prompts_and_summary_use_plain_words() {
   run_install_tty "Instance name=>
 Owner email=>owner@example.invalid
 Address you will use=>
+Token Factory key=>
 Model server address=>
 Go ahead?=>y
 Password for the owner account=>$SENTINEL_PASSWORD
