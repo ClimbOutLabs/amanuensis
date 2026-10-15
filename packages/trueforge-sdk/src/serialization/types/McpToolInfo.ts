@@ -15,6 +15,7 @@ export const McpToolInfo: core.serialization.ObjectSchema<serializers.McpToolInf
         "readOnlyHint": core.serialization.property("read_only_hint", core.serialization.boolean().optional()),
         "serverId": core.serialization.property("server_id", core.serialization.string()),
         "serverName": core.serialization.property("server_name", core.serialization.string()),
+        "silentSearchQuery": core.serialization.property("silent_search_query", core.serialization.string().optional()),
         "type": core.serialization.stringLiteral("mcp")
     });
 
@@ -29,6 +30,7 @@ export declare namespace McpToolInfo {
         read_only_hint?: boolean | null;
         server_id: string;
         server_name: string;
+        silent_search_query?: string | null;
         type: "mcp";
     }
 }

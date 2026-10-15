@@ -213,6 +213,7 @@ export class PersonasClient {
      * @param {PersonasClient.RequestOptions} requestOptions - Request-specific configuration.
      *
      * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.NotFoundError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
      *
@@ -244,6 +245,7 @@ export class PersonasClient {
         if (_response.error.reason === "status-code") {
             switch (_response.error.statusCode) {
                 case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 404: throw new TrueForge.NotFoundError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 default: throw new errors.TrueForgeError({
                     statusCode: _response.error.statusCode,
                     body: _response.error.body,
@@ -304,5 +306,226 @@ export class PersonasClient {
         }
 
         return handleNonStatusCodeError(_response.error, _response.rawResponse, "GET", "/api/v1/personas/{persona_id}/context");
+    }
+
+    /**
+     * Returns the documents in the persona’s knowledge library with their indexing status.
+     *
+     * @param {string} persona_id - Stable persona identifier.
+     * @param {PersonasClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.InternalServerError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.personas.listKnowledge("persona_id")
+     */
+    public listKnowledge(persona_id: string, requestOptions?: PersonasClient.RequestOptions): core.HttpResponsePromise<TrueForge.ListKnowledgeDocumentsResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__listKnowledge(persona_id, requestOptions));
+    }
+
+    private async __listKnowledge(persona_id: string, requestOptions?: PersonasClient.RequestOptions): Promise<core.WithRawResponse<TrueForge.ListKnowledgeDocumentsResponse>> {
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        let _headers: core.Fetcher.Args["headers"] = mergeHeaders(_authRequest.headers, this._options?.headers, requestOptions?.headers);
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(await core.Supplier.get(this._options.baseUrl) ?? await core.Supplier.get(this._options.environment), `api/v1/personas/${core.url.encodePathParam(persona_id)}/knowledge`),
+            method: "GET",
+            headers: _headers,
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging
+        });
+        if (_response.ok) {
+            return { data: serializers.ListKnowledgeDocumentsResponse.parseOrThrow(_response.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), rawResponse: _response.rawResponse };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 404: throw new TrueForge.NotFoundError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 500: throw new TrueForge.InternalServerError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                default: throw new errors.TrueForgeError({
+                    statusCode: _response.error.statusCode,
+                    body: _response.error.body,
+                    rawResponse: _response.rawResponse
+                });
+            }
+        }
+
+        return handleNonStatusCodeError(_response.error, _response.rawResponse, "GET", "/api/v1/personas/{persona_id}/knowledge");
+    }
+
+    /**
+     * Adds a file, saved link, or pasted text to the persona’s knowledge library. Indexing runs in the background; the document reports its status until it is searchable.
+     *
+     * @param {string} persona_id - Stable persona identifier.
+     * @param {TrueForge.CreateKnowledgeDocumentRequest} request
+     * @param {PersonasClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.BadRequestError}
+     * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.InternalServerError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.personas.createKnowledge("persona_id", {
+     *         kind: "text",
+     *         text: "text",
+     *         title: "title"
+     *     })
+     */
+    public createKnowledge(persona_id: string, request: TrueForge.CreateKnowledgeDocumentRequest, requestOptions?: PersonasClient.RequestOptions): core.HttpResponsePromise<TrueForge.GetKnowledgeDocumentResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__createKnowledge(persona_id, request, requestOptions));
+    }
+
+    private async __createKnowledge(persona_id: string, request: TrueForge.CreateKnowledgeDocumentRequest, requestOptions?: PersonasClient.RequestOptions): Promise<core.WithRawResponse<TrueForge.GetKnowledgeDocumentResponse>> {
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        let _headers: core.Fetcher.Args["headers"] = mergeHeaders(_authRequest.headers, this._options?.headers, requestOptions?.headers);
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(await core.Supplier.get(this._options.baseUrl) ?? await core.Supplier.get(this._options.environment), `api/v1/personas/${core.url.encodePathParam(persona_id)}/knowledge`),
+            method: "POST",
+            headers: _headers,
+            contentType: "application/json",
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            requestType: "json",
+            body: mergeAdditionalBodyParameters(serializers.CreateKnowledgeDocumentRequest.jsonOrThrow(request, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, omitUndefined: true }), requestOptions?.additionalBodyParameters),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging
+        });
+        if (_response.ok) {
+            return { data: serializers.GetKnowledgeDocumentResponse.parseOrThrow(_response.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), rawResponse: _response.rawResponse };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 400: throw new TrueForge.BadRequestError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 404: throw new TrueForge.NotFoundError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 500: throw new TrueForge.InternalServerError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                default: throw new errors.TrueForgeError({
+                    statusCode: _response.error.statusCode,
+                    body: _response.error.body,
+                    rawResponse: _response.rawResponse
+                });
+            }
+        }
+
+        return handleNonStatusCodeError(_response.error, _response.rawResponse, "POST", "/api/v1/personas/{persona_id}/knowledge");
+    }
+
+    /**
+     * Reports the one-time search model download in plain English.
+     *
+     * @param {string} persona_id - Stable persona identifier.
+     * @param {PersonasClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.personas.getKnowledgeEmbeddingModel("persona_id")
+     */
+    public getKnowledgeEmbeddingModel(persona_id: string, requestOptions?: PersonasClient.RequestOptions): core.HttpResponsePromise<TrueForge.GetKnowledgeEmbeddingModelResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__getKnowledgeEmbeddingModel(persona_id, requestOptions));
+    }
+
+    private async __getKnowledgeEmbeddingModel(persona_id: string, requestOptions?: PersonasClient.RequestOptions): Promise<core.WithRawResponse<TrueForge.GetKnowledgeEmbeddingModelResponse>> {
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        let _headers: core.Fetcher.Args["headers"] = mergeHeaders(_authRequest.headers, this._options?.headers, requestOptions?.headers);
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(await core.Supplier.get(this._options.baseUrl) ?? await core.Supplier.get(this._options.environment), `api/v1/personas/${core.url.encodePathParam(persona_id)}/knowledge/embedding-model`),
+            method: "GET",
+            headers: _headers,
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging
+        });
+        if (_response.ok) {
+            return { data: serializers.GetKnowledgeEmbeddingModelResponse.parseOrThrow(_response.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), rawResponse: _response.rawResponse };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 404: throw new TrueForge.NotFoundError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                default: throw new errors.TrueForgeError({
+                    statusCode: _response.error.statusCode,
+                    body: _response.error.body,
+                    rawResponse: _response.rawResponse
+                });
+            }
+        }
+
+        return handleNonStatusCodeError(_response.error, _response.rawResponse, "GET", "/api/v1/personas/{persona_id}/knowledge/embedding-model");
+    }
+
+    /**
+     * Removes the document and all of its indexed chunks from the persona’s library.
+     *
+     * @param {string} persona_id - Stable persona identifier.
+     * @param {string} document_id - Stable knowledge document identifier.
+     * @param {PersonasClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.InternalServerError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.personas.deleteKnowledge("persona_id", "document_id")
+     */
+    public deleteKnowledge(persona_id: string, document_id: string, requestOptions?: PersonasClient.RequestOptions): core.HttpResponsePromise<TrueForge.DeleteKnowledgeDocumentResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__deleteKnowledge(persona_id, document_id, requestOptions));
+    }
+
+    private async __deleteKnowledge(persona_id: string, document_id: string, requestOptions?: PersonasClient.RequestOptions): Promise<core.WithRawResponse<TrueForge.DeleteKnowledgeDocumentResponse>> {
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        let _headers: core.Fetcher.Args["headers"] = mergeHeaders(_authRequest.headers, this._options?.headers, requestOptions?.headers);
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(await core.Supplier.get(this._options.baseUrl) ?? await core.Supplier.get(this._options.environment), `api/v1/personas/${core.url.encodePathParam(persona_id)}/knowledge/${core.url.encodePathParam(document_id)}`),
+            method: "DELETE",
+            headers: _headers,
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging
+        });
+        if (_response.ok) {
+            return { data: serializers.DeleteKnowledgeDocumentResponse.parseOrThrow(_response.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), rawResponse: _response.rawResponse };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 404: throw new TrueForge.NotFoundError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 500: throw new TrueForge.InternalServerError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                default: throw new errors.TrueForgeError({
+                    statusCode: _response.error.statusCode,
+                    body: _response.error.body,
+                    rawResponse: _response.rawResponse
+                });
+            }
+        }
+
+        return handleNonStatusCodeError(_response.error, _response.rawResponse, "DELETE", "/api/v1/personas/{persona_id}/knowledge/{document_id}");
     }
 }

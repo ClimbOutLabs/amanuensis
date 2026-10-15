@@ -21,6 +21,7 @@ import { defaultSentinelServices, type SentinelServices } from '../../../src/cor
 import { verifyPreDispatch, type VerifiableCall } from '../../../src/core/permissions/dispatch';
 import type { ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 import type { Tier, TrackedExecutionBinding } from '../../../src/core/permissions/tier';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';
 
 function servicesWithTempAllowlist(): { services: SentinelServices; cleanup: () => void } {
@@ -79,6 +80,7 @@ function makeCtx(overrides?: {
     repository_id: 'r1',
     workspace_cwd: overrides?.workspace_cwd ?? null,
     agent_intent: null,
+    web_search: createWebSearchTurnState(),
   };
 }
 

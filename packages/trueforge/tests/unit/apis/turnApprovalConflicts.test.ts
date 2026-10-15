@@ -40,44 +40,65 @@ const SESSION_ID = 's1';
 const TIP_TURN_ID = 'turn-tip';
 const TOOL_CALL_ID = 'tc-1';
 
-/** The decided tool call the tip turn already recorded, in the shape the store persists. */
-function decidedApprovalAppend(approval: { status: 'allow' } | { status: 'deny'; reason: string }) {
+type RecordedApproval = { status: 'allow' } | { status: 'deny'; reason: string };
+
+const FIRST_TURN_ID = 'turn-first';
+
+const TOOL_CALL_MESSAGE = {
+  role: 'assistant' as const,
+  content: '',
+  tool_calls: [
+    {
+      id: TOOL_CALL_ID,
+      type: 'function' as const,
+      function: { name: 'write_file', arguments: '{}' },
+      tool_info: {
+        type: 'mcp' as const,
+        mcp_server_id: 'files',
+        mcp_server_name: 'files',
+        original_tool_name: 'write_file',
+        is_approval_required: true,
+      },
+    },
+  ],
+};
+
+type ContextAppend = CreateTurnInput['new_context_appends'][number];
+
+function contextAppend(context: ContextAppend['context']): ContextAppend {
   return {
     thread_id: MAIN_THREAD_ID,
     current_context_usage: { prompt_tokens: 0, completion_tokens: 0 },
-    context: [
-      {
-        role: 'assistant' as const,
-        content: '',
-        tool_calls: [
-          {
-            id: TOOL_CALL_ID,
-            type: 'function' as const,
-            function: { name: 'write_file', arguments: '{}' },
-            tool_info: {
-              type: 'mcp' as const,
-              mcp_server_id: 'files',
-              mcp_server_name: 'files',
-              original_tool_name: 'write_file',
-              is_approval_required: true,
-            },
-          },
-        ],
-      },
-      { type: EventType.USER_TOOL_APPROVAL, tool_call_id: TOOL_CALL_ID, approval },
-    ],
+    context,
   };
 }
 
-function tipTurnInput(approval: { status: 'allow' } | { status: 'deny'; reason: string }): CreateTurnInput {
+function decisionMessage(approval: RecordedApproval) {
+  return { type: EventType.USER_TOOL_APPROVAL, tool_call_id: TOOL_CALL_ID, approval };
+}
+
+/** The decided tool call the tip turn already recorded, in the shape the store persists. */
+function decidedApprovalAppend(approval: RecordedApproval) {
+  return contextAppend([TOOL_CALL_MESSAGE, decisionMessage(approval)]);
+}
+
+function turnInput({
+  turnId,
+  previousTurnId,
+  appends,
+}: {
+  turnId: string;
+  previousTurnId: string | null;
+  appends: ContextAppend[];
+}): CreateTurnInput {
   const now = new Date();
   return {
     turn: {
-      turn_id: TIP_TURN_ID,
+      turn_id: turnId,
       session_id: SESSION_ID,
-      first_turn_id: TIP_TURN_ID,
-      ancestor_ids: [],
-      previous_turn_id: null,
+      first_turn_id: previousTurnId === null ? turnId : FIRST_TURN_ID,
+      ancestor_ids: previousTurnId === null ? [] : [previousTurnId],
+      previous_turn_id: previousTurnId,
       state: { status: 'done', output: null, required_actions: [], completed_at: now.toISOString() },
       input: [],
       created_at: now,
@@ -86,17 +107,20 @@ function tipTurnInput(approval: { status: 'allow' } | { status: 'deny'; reason: 
     },
     approval_grants: [],
     require_previous_turn_is_tip: false,
-    retained_previous_thread_ids: [],
-    new_threads: [
-      {
-        thread_id: MAIN_THREAD_ID,
-        parent: null,
-        agent_info: null,
-        tool_call_memo: undefined,
-        task_state: undefined,
-      },
-    ],
-    new_context_appends: [decidedApprovalAppend(approval)],
+    retained_previous_thread_ids: previousTurnId === null ? [] : [MAIN_THREAD_ID],
+    new_threads:
+      previousTurnId === null
+        ? [
+            {
+              thread_id: MAIN_THREAD_ID,
+              parent: null,
+              agent_info: null,
+              tool_call_memo: undefined,
+              task_state: undefined,
+            },
+          ]
+        : [],
+    new_context_appends: appends,
     capability_states: [{ thread_id: MAIN_THREAD_ID, capability_state: null }],
     tool_call_memos: [],
     task_states: [],
@@ -105,7 +129,11 @@ function tipTurnInput(approval: { status: 'allow' } | { status: 'deny'; reason: 
   };
 }
 
-async function buildApp(recordedApproval: { status: 'allow' } | { status: 'deny'; reason: string }) {
+/**
+ * `pausedFirstTurn` seeds the real sequence: turn one asks for the approval, and turn two, created by
+ * the user's answer, records the decision. Otherwise the single tip turn carries both.
+ */
+async function buildApp(recordedApproval: RecordedApproval, options: { pausedFirstTurn?: boolean } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const sessionStore = new SqliteSessionStore(db);
@@ -127,7 +155,22 @@ async function buildApp(recordedApproval: { status: 'allow' } | { status: 'deny'
       }),
     },
   });
-  await sessionStore.createTurn(tipTurnInput(recordedApproval));
+  if (options.pausedFirstTurn === true) {
+    await sessionStore.createTurn(
+      turnInput({ turnId: FIRST_TURN_ID, previousTurnId: null, appends: [contextAppend([TOOL_CALL_MESSAGE])] }),
+    );
+    await sessionStore.createTurn(
+      turnInput({
+        turnId: TIP_TURN_ID,
+        previousTurnId: FIRST_TURN_ID,
+        appends: [contextAppend([decisionMessage(recordedApproval)])],
+      }),
+    );
+  } else {
+    await sessionStore.createTurn(
+      turnInput({ turnId: TIP_TURN_ID, previousTurnId: null, appends: [decidedApprovalAppend(recordedApproval)] }),
+    );
+  }
 
   const tokenStore = new SqliteOAuthTokenStore(db);
   const app = new OpenAPIHono();
@@ -161,11 +204,15 @@ async function buildApp(recordedApproval: { status: 'allow' } | { status: 'deny'
   return app;
 }
 
-async function postTurn(app: OpenAPIHono, input: TurnInputItem[]): Promise<Response> {
+async function postTurn(app: OpenAPIHono, input: TurnInputItem[], previousTurnId?: string): Promise<Response> {
   return app.request(`/${SESSION_ID}/turns`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ input, stream: false }),
+    body: JSON.stringify({
+      input,
+      stream: false,
+      ...(previousTurnId === undefined ? {} : { previous_turn_id: previousTurnId }),
+    }),
   });
 }
 
@@ -191,7 +238,6 @@ describe('POST /{session_id}/turns approval conflicts', () => {
   });
 
   it.each([
-    [new StaleApprovalContinuationError('turn-old', TIP_TURN_ID), 'stale_approval_continuation'],
     [new PreviousTurnRunningError(TIP_TURN_ID), 'previous_turn_running'],
     [new TurnAlreadyExistsError(TIP_TURN_ID), 'turn_already_exists'],
   ])('maps a store conflict to 409 with code %#', async (error, code) => {
@@ -203,6 +249,72 @@ describe('POST /{session_id}/turns approval conflicts', () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
       error: { message: error.message, type: 'conflict', code },
+    });
+  });
+
+  describe('when the session tip moved after the request read it', () => {
+    const stale = () => new StaleApprovalContinuationError('turn-old', TIP_TURN_ID);
+
+    it('replays a decision the tip already recorded, as a double submit would send it', async () => {
+      const app = await buildApp({ status: 'allow' });
+      rejectCreateTurnWith(stale());
+
+      const response = await postTurn(app, approvalInput({ status: 'allow' }));
+
+      expect(response.status).toBe(200);
+      const body: unknown = await response.json();
+      expect(body).toMatchObject({ data: { id: TIP_TURN_ID, session_id: SESSION_ID } });
+    });
+
+    it('replays the answer for a resend anchored on the turn that asked, after the answer created the next turn', async () => {
+      const app = await buildApp({ status: 'allow' }, { pausedFirstTurn: true });
+      rejectCreateTurnWith(stale());
+
+      const response = await postTurn(app, approvalInput({ status: 'allow' }), FIRST_TURN_ID);
+
+      expect(response.status).toBe(200);
+      const body: unknown = await response.json();
+      expect(body).toMatchObject({ data: { id: TIP_TURN_ID, session_id: SESSION_ID } });
+    });
+
+    it('refuses a different answer anchored on the turn that asked once the first answer is recorded', async () => {
+      const app = await buildApp({ status: 'allow' }, { pausedFirstTurn: true });
+      rejectCreateTurnWith(stale());
+
+      const response = await postTurn(app, approvalInput({ status: 'deny', reason: 'too late' }), FIRST_TURN_ID);
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ error: { code: 'approval_conflict' } });
+    });
+
+    it('refuses a decision that contradicts the recorded one instead of replaying it', async () => {
+      const app = await buildApp({ status: 'allow' });
+      rejectCreateTurnWith(stale());
+
+      const response = await postTurn(app, approvalInput({ status: 'deny', reason: 'changed my mind' }));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ error: { code: 'approval_conflict' } });
+    });
+
+    it('keeps the stale 409 for a decision the session never recorded', async () => {
+      const app = await buildApp({ status: 'allow' });
+      const error = stale();
+      rejectCreateTurnWith(error);
+
+      const response = await postTurn(app, [
+        {
+          type: EventType.USER_TOOL_APPROVAL,
+          thread_id: MAIN_THREAD_ID,
+          tool_call_id: 'tc-from-an-older-turn',
+          approval: { status: 'allow' },
+        },
+      ]);
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: { message: error.message, type: 'conflict', code: 'stale_approval_continuation' },
+      });
     });
   });
 

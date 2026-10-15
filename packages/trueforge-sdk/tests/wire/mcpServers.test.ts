@@ -240,7 +240,7 @@ describe("McpServersClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : { "auth_status" : { "authorization_url" : "authorization_url" , "status" : "authenticated" } , "manifest" : { "auth" : { "type" : "dcr" } , "description" : "description" , "memory_provider" : true , "name" : "name" , "type" : "remote" , "url" : "url" } , "name" : "name" } };
+        const rawResponseBody = { "data" : { "auth_status" : { "authorization_url" : "authorization_url" , "status" : "authenticated" } , "manifest" : { "auth" : { "type" : "dcr" } , "description" : "description" , "memory_provider" : true , "name" : "name" , "search_provider" : true , "search_tools" : [ "search_tools" ] , "type" : "remote" , "url" : "url" } , "name" : "name" } };
         
         server
             .mockEndpoint()
@@ -264,6 +264,8 @@ describe("McpServersClient", () => {
             description: "description",
             memoryProvider: true,
             name: "name",
+            searchProvider: true,
+            searchTools: ["search_tools"],
             type: "remote",
             url: "url"
         },

@@ -1954,9 +1954,9 @@ describe('TurnResourceResolver caches', () => {
   });
 
   it.each([
-    { source: { type: 'schedule' as const, id: 'sched-1', run_id: 'run-1' }, relaxed: [] },
-    { source: null, relaxed: ['file_write'] },
-  ])('applies Tier 2 relaxations only to attended sessions (source: $source)', async ({ source, relaxed }) => {
+    { source: { type: 'schedule' as const, id: 'sched-1', run_id: 'run-1' }, relaxed: [], unattended: true },
+    { source: null, relaxed: ['file_write'], unattended: false },
+  ])('applies relaxations only when attended (source: $source)', async ({ source, relaxed, unattended }) => {
     const sandbox = makeStubPublicSandbox();
     jest.spyOn(sandbox, 'close').mockResolvedValue(undefined);
     const sentinelServices = {
@@ -2005,5 +2005,7 @@ describe('TurnResourceResolver caches', () => {
     }
     const granted = await received[0]?.services.tier2AutoAllow({ tenant_id: 't', created_by: 'user-1' });
     expect([...(granted ?? [])]).toEqual(relaxed);
+    // A held-back web search is denied instead of asked only while nobody watches.
+    expect(received[0]?.services.unattended).toBe(unattended);
   });
 });

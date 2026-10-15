@@ -24,6 +24,7 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
       .selectFrom('sentinel_user_settings')
       .select(eb => [
         'offline_mode' as const,
+        'search_without_asking' as const,
         jsonText<SentinelUserSettings['tier2_auto_allow']>(eb.ref('tier2_auto_allow')).as('tier2_auto_allow'),
       ])
       .where('tenant_id', '=', input.tenant_id)
@@ -31,7 +32,11 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
       .executeTakeFirst();
     return row === undefined
       ? DEFAULT_SENTINEL_USER_SETTINGS
-      : { offline_mode: row.offline_mode === 1, tier2_auto_allow: normalizeTier2AutoAllow(row.tier2_auto_allow) };
+      : {
+          offline_mode: row.offline_mode === 1,
+          tier2_auto_allow: normalizeTier2AutoAllow(row.tier2_auto_allow),
+          search_without_asking: row.search_without_asking === 1,
+        };
   }
 
   async patch(input: PatchSentinelSettingsInput, transaction?: Transaction<Database>): Promise<SentinelUserSettings> {
@@ -46,6 +51,8 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
         created_by: input.created_by,
         offline_mode: input.offline_mode === true ? 1 : 0,
         tier2_auto_allow: jsonbBind(tier2 ?? []),
+        search_without_asking:
+          (input.search_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.search_without_asking) ? 1 : 0,
         created_at: timestamp,
         updated_at: timestamp,
       })
@@ -54,6 +61,9 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
           updated_at: timestamp,
           ...(input.offline_mode === undefined ? {} : { offline_mode: input.offline_mode ? 1 : 0 }),
           ...(tier2 === undefined ? {} : { tier2_auto_allow: jsonbBind(tier2) }),
+          ...(input.search_without_asking === undefined
+            ? {}
+            : { search_without_asking: input.search_without_asking ? 1 : 0 }),
         }),
       )
       .execute();

@@ -1,15 +1,17 @@
 'use client';
 
 import { useAuiState } from '@assistant-ui/react';
-import { useTrueFoundryApprovals, useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
+import { useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
+import { useAnswerableApprovals } from '../hooks/useAnswerableApprovals.js';
 import {
   subscribeToBlockedSend,
   type HarnessChatServerExtensions,
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import { useOptionalServer } from '../server/ServerContext.js';
+import { isStaleApprovalError } from '../utils/staleApproval.js';
 import { useToasterOptional } from './ToasterContainer.js';
 
 /** Structural check: the trueforge adapter's pending-approval escape hatch. */
@@ -28,7 +30,7 @@ const DISMISS_REASON = 'Dismissed from the action-needed banner.';
  * pending so the chat can continue.
  */
 export function PendingApprovalsBanner(): React.JSX.Element | null {
-  const { pending } = useTrueFoundryApprovals();
+  const { pending } = useAnswerableApprovals();
   const reload = useTrueFoundryReload();
   const toaster = useToasterOptional();
   const server = useOptionalServer();
@@ -56,6 +58,7 @@ export function PendingApprovalsBanner(): React.JSX.Element | null {
         });
       }
     } catch (error) {
+      if (isStaleApprovalError(error)) reload();
       toaster?.showError(error instanceof Error ? error : new Error('Could not dismiss the pending approvals.'));
     } finally {
       setDismissing(false);

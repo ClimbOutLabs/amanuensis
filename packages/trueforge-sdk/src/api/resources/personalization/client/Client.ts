@@ -233,7 +233,7 @@ export class PersonalizationClient {
     }
 
     /**
-     * Returns the authenticated user’s offline mode and the Tier 2 action kinds that run without asking.
+     * Returns the authenticated user’s offline mode, the Tier 2 action kinds that run without asking, and whether web searches run without asking.
      *
      * @param {PersonalizationClient.RequestOptions} requestOptions - Request-specific configuration.
      *
