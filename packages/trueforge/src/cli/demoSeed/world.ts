@@ -74,8 +74,6 @@ export interface DemoWorldInput {
   timeZone: string;
   /** Fully qualified `provider/model` for the persona and the briefing agent. */
   modelName: string;
-  /** False when no sandbox image is pinned: the agent then answers a PDF request with plain text. */
-  runCodeAvailable: boolean;
 }
 
 function minutesLabel(totalMinutes: number): string {
@@ -96,11 +94,9 @@ function weekPlan(today: CalendarDay): { library: number; sync: number; bill: nu
   return { library, sync, bill, pot, call: pot + 1 };
 }
 
-function pdfGuidance(runCodeAvailable: boolean): string {
-  return runCodeAvailable
-    ? 'When she asks for a PDF or a file, build it with run_code and say where to download it.'
-    : 'When she asks for a PDF, say plainly that file creation is not available on this server and give the checklist as plain text she can print.';
-}
+/** The seed does not guess which sandbox backend exists; the app reports an unavailable sandbox itself. */
+const PDF_GUIDANCE =
+  'When she asks for a PDF or a file, build it with run_code and say where to download it. If run_code is not available, say so plainly and give the checklist as plain text she can print.';
 
 /** Everything the seed writes, derived from "today" in the user's zone so the dates stay relative. */
 export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
@@ -168,11 +164,12 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
 
   const agentSpec = AgentSpecSchema.parse({
     model: { name: input.modelName },
+    config: { sandbox: { enabled: true } },
     instructions: [
       'You are Aman, a calm personal assistant for Mara Hollis, a fictional demo user.',
       'Use what you remember about her. Keep answers short and friendly.',
       'For an appointment brief: recall the appointment, use render_route from where she starts to the appointment place, then give a short brief with when to leave and what to bring.',
-      pdfGuidance(input.runCodeAvailable),
+      PDF_GUIDANCE,
     ].join(' '),
   });
 
@@ -193,7 +190,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       instructions: [
         'Sol is a calm planner who helps Mara Hollis, a fictional demo user, with appointments, errands and weekly planning.',
         'Be brief and friendly. Use what you remember about her before asking.',
-        pdfGuidance(input.runCodeAvailable),
+        PDF_GUIDANCE,
       ].join(' '),
       model_name: input.modelName,
     },

@@ -8,7 +8,6 @@ import { buildDemoWorld } from './world';
 export interface DemoSeedSession {
   /** Fully qualified `provider/model` names configured on the instance. */
   models: readonly string[];
-  runCodeAvailable: boolean;
   seed(input: { userId: string; now: Date; timeZone: string; modelName: string }): Promise<SeedReport>;
   reset(input: { userId: string }): Promise<ResetReport>;
   close(): Promise<void>;
@@ -18,24 +17,21 @@ export function buildDemoSession({
   db,
   tenantId,
   memoryDir,
-  runCodeAvailable,
   models,
 }: {
   db: Kysely<Database>;
   tenantId: string;
   memoryDir: string;
-  runCodeAvailable: boolean;
   models: readonly string[];
 }): DemoSeedSession {
   const stores = createSqliteDemoSeedStores({ db, memoryDir, tenantId });
   return {
     models,
-    runCodeAvailable,
     seed: ({ userId, now, timeZone, modelName }) =>
       seedDemoWorld({
         stores,
         scope: { tenantId, userId },
-        world: buildDemoWorld({ now, timeZone, modelName, runCodeAvailable }),
+        world: buildDemoWorld({ now, timeZone, modelName }),
         now,
       }),
     reset: ({ userId }) => resetDemoWorld({ stores, scope: { tenantId, userId } }),

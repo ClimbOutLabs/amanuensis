@@ -41,7 +41,6 @@ function fakeDeps({ enabled, models = ['demo-provider/demo-model'] }: { enabled:
   };
   const session: DemoSeedSession = {
     models,
-    runCodeAvailable: false,
     seed: input => {
       calls.seed.push(input);
       return Promise.resolve(SEED_REPORT);

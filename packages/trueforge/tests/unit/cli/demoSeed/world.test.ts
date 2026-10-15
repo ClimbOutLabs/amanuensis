@@ -2,7 +2,7 @@ import { buildDemoWorld, DEMO_MARKER } from '../../../../src/cli/demoSeed/world'
 import { PersonaContentSchema } from '../../../../src/schemas/persona';
 import { PersonalizationProfileContentSchema } from '../../../../src/schemas/personalization';
 
-const base = { timeZone: 'Europe/Madrid', modelName: 'demo-provider/demo-model', runCodeAvailable: true };
+const base = { timeZone: 'Europe/Madrid', modelName: 'demo-provider/demo-model' };
 
 describe('buildDemoWorld', () => {
   it('anchors every date to today in the user zone', () => {
@@ -66,11 +66,12 @@ describe('buildDemoWorld', () => {
     expect(world.profile.user_profile).toContain(DEMO_MARKER);
   });
 
-  it('tells the agent what to do about a PDF with and without a sandbox', () => {
-    const now = new Date('2026-10-15T09:00:00Z');
-    expect(buildDemoWorld({ ...base, now }).persona.instructions).toContain('run_code');
-    const without = buildDemoWorld({ ...base, now, runCodeAvailable: false });
-    expect(without.persona.instructions).not.toContain('run_code');
-    expect(without.persona.instructions).toContain('not available on this server');
+  it('turns the sandbox on for the agent and tells it to degrade to plain text', () => {
+    const world = buildDemoWorld({ ...base, now: new Date('2026-10-15T09:00:00Z') });
+    expect(world.agentSpec.config?.sandbox?.enabled).toBe(true);
+    for (const text of [world.agentSpec.instructions, world.persona.instructions]) {
+      expect(text).toContain('run_code');
+      expect(text).toContain('If run_code is not available');
+    }
   });
 });

@@ -36,7 +36,6 @@ export async function openDemoSeedSession(): Promise<DemoSeedSession> {
       db,
       tenantId: TENANT_ID,
       memoryDir: configuration.MEMORY_MARKDOWN_DIR,
-      runCodeAvailable: configuration.SANDBOX_IMAGE.trim() !== '',
       models: flattenProviderModels(providers).map(model => model.name),
     });
   } catch (error) {

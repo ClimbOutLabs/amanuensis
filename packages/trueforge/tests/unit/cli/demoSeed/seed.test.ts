@@ -14,7 +14,7 @@ const DAY_ONE = new Date('2026-10-15T08:00:00Z');
 const DAY_TWO = new Date('2026-10-20T08:00:00Z');
 
 function worldFor(now: Date) {
-  return buildDemoWorld({ now, timeZone: 'Europe/Madrid', modelName: MODEL_NAME, runCodeAvailable: true });
+  return buildDemoWorld({ now, timeZone: 'Europe/Madrid', modelName: MODEL_NAME });
 }
 
 async function seed(stores: TestStores, now: Date) {
@@ -77,6 +77,9 @@ describe('demo seed against the real stores', () => {
       id: DEMO_PERSONA_ID,
     });
     expect(persona?.display_name).toBe('Sol');
+
+    const agent = await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: DEMO_AGENT_NAME });
+    expect(agent?.manifest.config?.sandbox?.enabled).toBe(true);
 
     const entries = await vault(stores);
     expect(entries).toHaveLength(8);
