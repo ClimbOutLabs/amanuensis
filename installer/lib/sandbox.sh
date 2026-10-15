@@ -13,8 +13,10 @@ SLOT_MIN_FREE_KB=$((20 * 1024 * 1024))
 SANDBOX_NODE_MAJOR=22
 SANDBOX_NODE_MINOR=14
 SANDBOX_BUNDLE_IN_IMAGE=/app/packages/trueforge/dist/sandbox-slots.js
-SANDBOX_REPAIR_COMMAND="aman doctor sandbox --fix"
 SANDBOX_VERIFY_FAILED=0
+
+# The doctor is not on PATH, so every repair line names it by its path.
+sandbox_repair_command() { printf '%s doctor sandbox --fix' "$(doctor_shim)"; }
 
 sandbox_bundle() { printf '%s/bin/aman-sandbox.mjs' "$AMAN_HOME"; }
 sandbox_log() { printf '%s/sandbox.log' "$STATE_DIR"; }
@@ -138,7 +140,7 @@ sandbox_install_bundle() {
 # Runs the slot setup with the Docker access of this run. Build output goes to a log file, progress lines to the terminal.
 sandbox_run() {
   as_docker_user env DOCKER_BUILDKIT=1 node "$(sandbox_bundle)" "$@" \
-    --repo-root "$REPO_ROOT" --log-file "$(sandbox_log)" --command-name "aman doctor sandbox"
+    --repo-root "$REPO_ROOT" --log-file "$(sandbox_log)" --command-name "$(doctor_shim) doctor sandbox"
 }
 
 # Execute phase of the images step: the bundle, then the slot image (cached when nothing changed).
@@ -173,15 +175,18 @@ sandbox_print_root_steps() {
 }
 
 # Brings up the slots of one instance, with a root step only after a yes. Runs before the instance starts, because
-# the app mounts the slots' control volumes.
+# the app mounts the slots' control volumes. "refresh" starts them even when healthy, so a rebuilt image replaces
+# the running slots (an upgrade).
 sandbox_ensure() {
-  local name=$1 out step='' fix_args=()
+  local name=$1 refresh=${2:-} out step='' fix_args=()
   sandbox_node_ok || die "$(sandbox_node_text)"
   [ -f "$(sandbox_bundle)" ] || sandbox_install_bundle
   out=$(sandbox_run --check --json --instance "$name" 2>/dev/null || true)
   if printf '%s' "$out" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
-    say "Sandbox slots of instance $name are already healthy"
-    return 0
+    if [ "$refresh" != refresh ]; then
+      say "Sandbox slots of instance $name are already healthy"
+      return 0
+    fi
   fi
   step=$(printf '%s' "$out" | sed -n 's/.*"step"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' | head -n 1)
   case "$step" in
@@ -195,7 +200,7 @@ sandbox_ensure() {
   esac
   say "Starting the $SLOT_COUNT sandbox slots of instance $name"
   sandbox_run --instance "$name" ${fix_args[@]+"${fix_args[@]}"} ||
-    die "the sandbox slots of instance $name did not come up. The fix: $SANDBOX_REPAIR_COMMAND   (build log: $(sandbox_log))"
+    die "the sandbox slots of instance $name did not come up. The fix: $(sandbox_repair_command)   (build log: $(sandbox_log))"
 }
 
 # After the instance is up: every slot's attestation, then a real call through the app's own slot driver.
@@ -205,7 +210,7 @@ sandbox_verify() {
   say "Sandbox check for instance $name:"
   if ! DOCTOR_TIMEOUT=300 run_doctor sandbox --instance "$name"; then
     SANDBOX_VERIFY_FAILED=1
-    warn "the sandbox of instance $name is not ready. The fix: $SANDBOX_REPAIR_COMMAND"
+    warn "the sandbox of instance $name is not ready. The fix: $(sandbox_repair_command)"
   fi
 }
 

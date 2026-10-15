@@ -741,7 +741,7 @@ doctor_sandbox() {
   fi
   for name in "${targets[@]}"; do
     printf 'Instance %s\n' "$name"
-    args=(--instance "$name" --repo-root "$repo" --log-file "${AMAN_HOME}/state/sandbox.log" --command-name "aman doctor sandbox" "${passthru[@]+"${passthru[@]}"}")
+    args=(--instance "$name" --repo-root "$repo" --log-file "${AMAN_HOME}/state/sandbox.log" --command-name "${AMAN_HOME}/bin/aman doctor sandbox" "${passthru[@]+"${passthru[@]}"}")
     if [ "$fix" = 1 ]; then
       args+=(--fix --restart)
       if [ "$yes" = 1 ]; then args+=(--yes); fi

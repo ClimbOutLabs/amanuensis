@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { smokeEnvProblem } from '../scripts/require-smoke-env.mjs';
 
@@ -22,7 +22,10 @@ describe('smoke stack env file', () => {
       assert.equal(result.status, 1);
       assert.equal(result.stdout, '');
       assert.equal(result.stderr.trim().split('\n').length, 1);
-      assert.match(result.stderr, /packages\/trueforge\/\.env does not exist\. To install Aman, run installer\/install\.sh/);
+      assert.match(
+        result.stderr,
+        /packages\/trueforge\/\.env does not exist\. To install Aman, run installer\/install\.sh/,
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

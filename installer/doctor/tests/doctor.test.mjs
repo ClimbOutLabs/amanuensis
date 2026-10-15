@@ -3,7 +3,16 @@ import { chmodSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
-import { DAEMON_TIME, GIB, GIB_KB, HEALTHY_INSTANCE_CHECKS, RUN_CODE_READY, createWorld, find, sanitize } from './world.mjs';
+import {
+  DAEMON_TIME,
+  GIB,
+  GIB_KB,
+  HEALTHY_INSTANCE_CHECKS,
+  RUN_CODE_READY,
+  createWorld,
+  find,
+  sanitize,
+} from './world.mjs';
 
 let world;
 const make = options => (world = createWorld(options));
@@ -672,7 +681,8 @@ describe('instance service health', () => {
 });
 
 describe('doctor sandbox', () => {
-  const sandboxCalls = () => world.calls().filter(line => line.startsWith('node ') && !line.startsWith('node --version'));
+  const sandboxCalls = () =>
+    world.calls().filter(line => line.startsWith('node ') && !line.startsWith('node --version'));
 
   function ready() {
     const repo = world.sandbox();
@@ -686,7 +696,7 @@ describe('doctor sandbox', () => {
     const result = world.shim(['doctor', 'sandbox']);
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(sandboxCalls(), [
-      `node ${world.home}/bin/aman-sandbox.mjs --instance main --repo-root ${repo} --log-file ${world.home}/state/sandbox.log --command-name aman doctor sandbox --check`,
+      `node ${world.home}/bin/aman-sandbox.mjs --instance main --repo-root ${repo} --log-file ${world.home}/state/sandbox.log --command-name ${world.home}/bin/aman doctor sandbox --check`,
     ]);
     assert.ok(world.calls().some(line => /^exec .*c1 aman doctor --text --only run_code$/.test(line)));
     assert.match(result.stdout, /Instance main/);
@@ -730,7 +740,7 @@ describe('doctor sandbox', () => {
     const result = world.shim(['doctor', 'sandbox', '--fix']);
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(sandboxCalls(), [
-      `node ${world.home}/bin/aman-sandbox.mjs --instance main --repo-root ${repo} --log-file ${world.home}/state/sandbox.log --command-name aman doctor sandbox --fix --restart`,
+      `node ${world.home}/bin/aman-sandbox.mjs --instance main --repo-root ${repo} --log-file ${world.home}/state/sandbox.log --command-name ${world.home}/bin/aman doctor sandbox --fix --restart`,
     ]);
   });
 

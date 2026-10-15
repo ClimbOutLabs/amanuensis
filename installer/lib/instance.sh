@@ -333,7 +333,7 @@ print_instance_summary() {
   fi
   print_model_hint "$(reg_get "$name" model_endpoint)"
   if instance_sandbox_wanted "$name"; then
-    say "  Run code: on, in the gVisor sandbox (Settings > Sandbox shows its status). Repair: $SANDBOX_REPAIR_COMMAND"
+    say "  Run code: on, in the gVisor sandbox (Settings > Sandbox shows its status). Repair: $(sandbox_repair_command)"
     say "  Attachment extraction is off in this version."
   else
     say "  Run code and attachment extraction are off (installed with --no-sandbox)."

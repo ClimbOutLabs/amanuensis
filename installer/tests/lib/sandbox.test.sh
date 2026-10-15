@@ -98,7 +98,7 @@ test_install_builds_then_starts_slots_then_the_instance() {
   assert_eq "$(cat "$AMAN_HOME/state/source")" "$REPO" "the doctor learns where the compose files are"
   assert_log_has "docker run --rm --entrypoint cat aman-app:"
   assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --build-only --instance main --repo-root $REPO"
-  assert_log_has "--log-file $AMAN_HOME/state/sandbox.log --command-name aman doctor sandbox"
+  assert_log_has "--log-file $AMAN_HOME/state/sandbox.log --command-name $AMAN_HOME/bin/aman doctor sandbox"
   assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --check --json --instance main"
   assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --instance main --repo-root $REPO"
   local build up slots
@@ -182,7 +182,7 @@ test_root_steps_with_the_flag() {
   INSTALL_EXTRA=(--sandbox-root)
   install_machine
   assert_eq "$RC" 0
-  assert_log_has "--instance main --repo-root $REPO --log-file $AMAN_HOME/state/sandbox.log --command-name aman doctor sandbox"
+  assert_log_has "--instance main --repo-root $REPO --log-file $AMAN_HOME/state/sandbox.log --command-name $AMAN_HOME/bin/aman doctor sandbox"
   assert_log_has "--fix --yes"
   assert_eq "$(cat "$SB_STATE/slots_state")" ready
   sandbox_drop
@@ -277,7 +277,7 @@ test_failed_verification_fails_the_install_with_the_repair() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_contains "$ERR" "the sandbox of instance main is not ready. The fix: aman doctor sandbox --fix"
+  assert_contains "$ERR" "the sandbox of instance main is not ready. The fix: $AMAN_HOME/bin/aman doctor sandbox --fix"
   assert_contains "$OUT" "Instance main" "the summary was still printed"
   sandbox_drop
 }
@@ -357,6 +357,7 @@ test_upgrade_refreshes_the_setup_and_image() {
   assert_rc 0
   assert_log_has "--entrypoint cat aman-app:"
   assert_log_has "aman-sandbox.mjs --build-only"
+  assert_log_has "aman-sandbox.mjs --instance main --repo-root" "the slots are started again so a rebuilt image replaces them"
   sandbox_drop
 }
 

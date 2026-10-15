@@ -103,6 +103,7 @@ cmd_upgrade() {
   release_write
   machine_up "$REL_STT_TAG"
   for name in $(reg_names); do
+    if instance_sandbox_wanted "$name"; then sandbox_ensure "$name" refresh; fi
     instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
     instance_up "$name" || exit 1
   done
