@@ -18,7 +18,11 @@ export const SentinelSettings: FC = () => {
   const [searchError, setSearchError] = useState<string | null>(null);
 
   if (sentinel === null) {
-    return <p className="text-sm text-text-secondary">Permissions are not available in this setup.</p>;
+    return (
+      <p className="text-sm text-text-secondary">
+        Permissions settings are unavailable: the host did not provide a Sentinel API.
+      </p>
+    );
   }
 
   const offline = sentinel.settings?.offline_mode ?? false;
@@ -52,15 +56,15 @@ export const SentinelSettings: FC = () => {
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-base font-semibold text-text-primary">Permissions</h2>
-        <p className="mt-1 text-sm text-text-secondary">How Aman asks before acting for you.</p>
+        <p className="mt-1 text-sm text-text-secondary">How the assistant asks before acting on your behalf.</p>
       </div>
 
       <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-4">
         <div>
           <p className="text-sm font-medium text-text-primary">Offline mode</p>
           <p className="mt-1 text-sm text-text-secondary">
-            While on, actions outside this device that need your approval are denied automatically. Reading and your
-            allowed workspace actions still work.
+            While on, actions outside this device that would need your approval are denied automatically instead of
+            showing an approval card. Reads and workspace actions you allowed are unaffected.
           </p>
           {error !== null && (
             <p className="mt-2 text-xs text-failure-bg" role="alert">

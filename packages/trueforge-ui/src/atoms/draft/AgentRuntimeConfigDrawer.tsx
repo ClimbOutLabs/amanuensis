@@ -26,7 +26,7 @@ export function AgentRuntimeConfigDrawer({
       open={open}
       onOpenChange={nextOpen => !nextOpen && onClose()}
       title="Run settings"
-      description="Control how the agent runs and uses context."
+      description="Control execution, sandbox, and context behavior."
       anchor="right"
       size="xl"
       className="md:w-3xl"

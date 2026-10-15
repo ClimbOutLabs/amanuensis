@@ -80,8 +80,9 @@ const ModelRoleSettings = () => {
               <div className="min-w-0 flex-1">
                 <h5 className="text-sm font-medium text-text-primary">Summarization model</h5>
                 <p className="mt-0.5 text-sm text-text-secondary">
-                  Condenses each message before it is written to memory, when memory summarization is on. A cheaper
-                  model works well here; a poor summary means less useful memories later.
+                  Condenses each message before it is saved to memory, when memory summarization is on. Only the
+                  summary is kept, and each one costs an extra model call. A poor summary means less useful memories
+                  later.
                 </p>
               </div>
               <div className="w-full shrink-0 sm:w-80">

@@ -107,8 +107,8 @@ export function TestScheduleScreen({ schedule, agentName, mcpMounts, onEditConfi
 
       <section className="overflow-hidden rounded-lg border border-border bg-card-bg">
         <div className="border-b border-border px-3 py-2">
-          <h3 className="text-text-secondary text-[10px] font-semibold tracking-wide uppercase">
-            Tools this test can use
+          <h3 className="text-text-secondary text-[0.625rem] font-semibold tracking-wide uppercase">
+            Connector sign-in
           </h3>
         </div>
         {mcpMounts.length === 0 ? (
@@ -149,7 +149,7 @@ export function TestScheduleScreen({ schedule, agentName, mcpMounts, onEditConfi
 
       <section className="overflow-hidden rounded-lg border border-border bg-card-bg">
         <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-          <h3 className="text-text-secondary text-[10px] font-semibold tracking-wide uppercase">Test run</h3>
+          <h3 className="text-text-secondary text-[0.625rem] font-semibold tracking-wide uppercase">Test run</h3>
           <Button.Primary type="button" disabled={running} size="small" onClick={() => void handleRunTest()}>
             <Icon name={running ? 'loader' : 'play'} className={cn('size-3.5', running && 'animate-spin')} />
             Run test
