@@ -69,13 +69,17 @@ test_old_node_blocks() {
   sandbox_drop
 }
 
-test_cgroup_v1_and_low_disk_block() {
-  t_begin "cgroup v1 and too little disk for the slot disks are blockers that name --no-sandbox"
+test_cgroup_and_low_disk() {
+  t_begin "cgroup v1 only warns, an unknown cgroup setup blocks, and too little disk for the slot disks blocks"
   sandbox_new
   STUB_CGROUP=1
   run_install --dry-run --email owner@example.invalid
+  assert_rc 0
+  assert_contains "$ERR" "cgroup v1"
+  STUB_CGROUP=3
+  run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_contains "$ERR" "cgroup v2"
+  assert_contains "$ERR" "unknown cgroup setup"
   assert_contains "$ERR" "--no-sandbox"
   STUB_CGROUP=2
   STUB_DF_KB=$((15 * 1024 * 1024))
@@ -376,7 +380,7 @@ test_dry_run_plans_the_sandbox
 test_plan_has_no_root_line_in_docker_desktop
 test_missing_node_blocks_before_any_prompt
 test_old_node_blocks
-test_cgroup_v1_and_low_disk_block
+test_cgroup_and_low_disk
 test_install_builds_then_starts_slots_then_the_instance
 test_rendered_compose_wires_the_app_to_the_slots
 test_install_without_sandbox

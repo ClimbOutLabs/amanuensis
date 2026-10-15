@@ -66,10 +66,13 @@ preflight_sandbox() {
     plan_add blocked "$(sandbox_node_text)"
   fi
   if docker_available_for_probes; then
+    # The slot agent reads the limits of either cgroup version, so v1 is no blocker; it only reports a different line.
     cgroup=$(D info --format '{{.CgroupVersion}}' 2>/dev/null || true)
-    if [ "$cgroup" = 1 ]; then
-      plan_add blocked "The sandbox needs cgroup v2 and Docker here uses cgroup v1. Use a distribution with cgroup v2 (Ubuntu 22.04 or newer), then run this again, or pass --no-sandbox to install without run code."
-    fi
+    case "$cgroup" in
+      1) warn "Docker here uses cgroup v1. The sandbox runs on it; memory limits are read from the v1 files." ;;
+      2 | '') ;;
+      *) plan_add blocked "Docker reports an unknown cgroup setup ($cgroup), which the sandbox cannot check. Pass --no-sandbox to install without run code." ;;
+    esac
   fi
   if sandbox_native_linux; then
     free=$(free_kb "$SLOT_DISK_ROOT")
