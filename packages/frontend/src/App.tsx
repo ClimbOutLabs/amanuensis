@@ -47,7 +47,7 @@ import { createPersonaApi } from './personaApi';
 import { createPersonalizationApi } from './personalizationApi';
 import { API_BASE_URL, apiPath, uiRouterBasename } from './publicPath';
 import { createRunCodeStatusApi } from './runCodeStatusApi';
-import { createSentinelApi } from './sentinelApi';
+import { createSentinelApi, readAllSessionEvents } from './sentinelApi';
 import { isSetupComplete, mergeSetupRead, SETUP_REFRESH_MS, type SetupSnapshot } from './setupStatus';
 import { createSpaceStore } from './spaceStore';
 import { createVoiceInputApi } from './voiceInputApi';
@@ -369,21 +369,11 @@ export function App() {
     () =>
       createSentinelApi({
         fetcher: authAwareFetch,
-        listSessionEvents: async (sessionId: string): Promise<unknown[]> => {
-          const events: unknown[] = [];
-          let pageToken: string | undefined;
-          do {
-            const page = await bootClient.sessions.listEvents(sessionId, {
-              limit: 200,
-              ...(pageToken === undefined ? {} : { pageToken }),
-            });
-            for (const item of page.data) {
-              events.push(item.event);
-            }
-            pageToken = page.response.pagination.nextPageToken;
-          } while (pageToken !== undefined);
-          return events;
-        },
+        listSessionEvents: sessionId =>
+          readAllSessionEvents(async input => {
+            const page = await bootClient.sessions.listEvents(sessionId, input);
+            return { data: page.data, nextPageToken: page.response.pagination.nextPageToken };
+          }),
       }),
     [],
   );

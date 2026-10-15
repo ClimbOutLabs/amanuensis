@@ -33,6 +33,9 @@ function card(plain_what: string): SentinelApprovalCard {
     recipient: null,
     amount: null,
     parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
   };
 }
 

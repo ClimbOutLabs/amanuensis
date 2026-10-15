@@ -3,6 +3,7 @@ import type { Logger } from 'winston';
 import { McpConnectionError } from '../errors';
 import type { MCPServerInitInfo } from '../events/schema';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import { hostFromUrl } from '../permissions/extractorRegistry';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../tracing/NoopAgentTracing';
 import {
@@ -59,6 +60,7 @@ export class RemoteMCP implements ToolSource {
   readonly description?: string | undefined;
 
   private readonly url: string;
+  readonly serverHost: string | undefined;
   private readonly headers: RemoteMcpHeaders;
   private readonly signal: AbortSignal;
   private readonly logger: Logger;
@@ -101,6 +103,7 @@ export class RemoteMCP implements ToolSource {
     this.id = params.id;
     this.description = params.description;
     this.url = params.url;
+    this.serverHost = hostFromUrl(params.url) ?? undefined;
     this.headers = params.headers;
     this.signal = params.signal;
     this.sessionId = params.sessionId;

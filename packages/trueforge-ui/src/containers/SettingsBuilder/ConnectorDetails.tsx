@@ -4,13 +4,16 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { cn } from '../../atoms/lib/cn.js';
 import { Button } from '../../atoms/primitives/Button.js';
+import { Switch } from '../../atoms/primitives/Switch.js';
 import { useMCPAuth } from '../../hooks/useMcpAuth.js';
 import { Icon } from '../../icons/Icon.js';
 import { hasConnectorToolGrants } from '../../server/connectorToolGrants.js';
+import { isSearchProvider } from '../../server/searchProviderTypes.js';
 import { useCatalogServer } from '../../server/ServerContext.js';
 import type { ConnectorBase, ToolBase } from '../../server/types.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
 import { AUTH_TYPE_LABELS } from './authTypeLabels.js';
+import { searchProviderUpdateRequest } from './searchProvider.js';
 
 type ConnectorDetailsProps = {
   connector: ConnectorBase;
@@ -113,6 +116,8 @@ const ConnectorDetails = ({
   const [grantedTools, setGrantedTools] = useState<string[]>([]);
   const [grantsError, setGrantsError] = useState<string | null>(null);
   const [revokingTool, setRevokingTool] = useState<string | null>(null);
+  const [searchProviderBusy, setSearchProviderBusy] = useState(false);
+  const [searchProviderError, setSearchProviderError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -170,6 +175,18 @@ const ConnectorDetails = ({
       setGrantsError(getErrorMessage(err, 'Failed to revoke the always-allowed tool'));
     } finally {
       setRevokingTool(null);
+    }
+  };
+
+  const setSearchProvider = async (next: boolean) => {
+    setSearchProviderBusy(true);
+    setSearchProviderError(null);
+    try {
+      onConnectorRefreshed(await connectorCatalog.updateConnector(searchProviderUpdateRequest(connector, next)));
+    } catch (err: unknown) {
+      setSearchProviderError(getErrorMessage(err, 'Failed to change the web search provider'));
+    } finally {
+      setSearchProviderBusy(false);
     }
   };
 
@@ -260,6 +277,34 @@ const ConnectorDetails = ({
             ) : null}
           </div>
         </header>
+
+        <section className="mt-6" aria-labelledby="connector-search-heading">
+          <div className="flex items-start justify-between gap-4 rounded-xl border border-border bg-card-bg p-3">
+            <div>
+              <h5 id="connector-search-heading" className="text-[0.8125rem] font-semibold text-text-primary">
+                Web search provider
+              </h5>
+              <p className="mt-0.5 text-xs text-text-secondary">
+                Use this connector for web searches. They run without asking, and show what was searched in the chat,
+                unless a safety check holds one back. Only one connector can be the search provider.
+              </p>
+              {searchProviderError ? (
+                <p className="mt-2 text-xs text-failure-bg" role="alert">
+                  {searchProviderError}
+                </p>
+              ) : null}
+            </div>
+            <Switch
+              size="md"
+              checked={isSearchProvider(connector)}
+              disabled={busy || searchProviderBusy}
+              onCheckedChange={next => {
+                void setSearchProvider(next);
+              }}
+              aria-label={`Use ${connector.name} as the web search provider`}
+            />
+          </div>
+        </section>
 
         {grantedTools.length > 0 ? (
           <section className="mt-6" aria-labelledby="connector-grants-heading">

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useAui, type AppendMessage } from '@assistant-ui/react';
+import { useAui, type AppendMessage, type ThreadMessageLike } from '@assistant-ui/react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -74,9 +74,9 @@ function SecretSelectProbe({ onSubmit }: CustomActionRendererProps) {
   );
 }
 
-function renderComposer(onNew?: (message: AppendMessage) => Promise<void>) {
+function renderComposer(onNew?: (message: AppendMessage) => Promise<void>, messages: ThreadMessageLike[] = []) {
   return render(
-    <RuntimeHarness messages={[]} onNew={onNew}>
+    <RuntimeHarness messages={messages} onNew={onNew}>
       <ComposerBusyProvider>
         <ComposerContainer />
       </ComposerBusyProvider>
@@ -899,7 +899,19 @@ describe('ComposerContainer', () => {
       },
     ];
 
-    renderComposer();
+    // Pending approvals are answerable only when they sit on the newest message.
+    renderComposer(undefined, [
+      {
+        role: 'assistant',
+        content: approvalsState.pending.map(item => ({
+          type: 'tool-call' as const,
+          toolCallId: item.approvalId,
+          toolName: item.toolName,
+          args: {},
+          approval: { id: item.approvalId, approved: undefined },
+        })),
+      },
+    ]);
 
     expect(screen.getByText('2 tools need your input')).toBeInTheDocument();
     expect(screen.getByText('(1/2)')).toBeInTheDocument();
