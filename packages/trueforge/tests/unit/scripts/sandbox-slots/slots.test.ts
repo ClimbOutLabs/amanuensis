@@ -127,7 +127,7 @@ describe('runSandboxSlots', () => {
       seen.push({ args: input.args, env: input.env });
       return Promise.resolve({
         ...OK,
-        ...defaultAnswers({ command: input.command, args: input.args, env: input.env }),
+        ...defaultAnswers({ command: input.command, args: input.args, env: input.env, interactive: input.interactive }),
       });
     };
     const result = await runSandboxSlots({ ...BASE_OPTIONS, run: runner, fix: false, instance: 'lab' });
