@@ -420,6 +420,7 @@ export function toToolCallInfo(toolInfo: InternalToolCallInfo): ToolInfo {
       server_id: toolInfo.mcp_server_id,
       server_name: toolInfo.mcp_server_name,
       ...(hostObservedTargetSummary === undefined ? {} : { host_observed_target_summary: hostObservedTargetSummary }),
+      ...(toolInfo.silent_search_query === undefined ? {} : { silent_search_query: toolInfo.silent_search_query }),
       ...hints,
     };
   }

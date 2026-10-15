@@ -23,11 +23,12 @@ function stubApi(entries: SentinelAuditEntry[]): { api: SentinelApi; updateUserS
   const updateUserSettings = vi.fn(async (patch: Partial<SentinelUserSettings>) => ({
     offline_mode: false,
     tier2_auto_allow: [],
+    search_without_asking: true,
     ...patch,
   }));
   const api: SentinelApi = {
     listAuditEntries: vi.fn(async () => entries),
-    getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [] })),
+    getUserSettings: vi.fn(async () => ({ offline_mode: false, tier2_auto_allow: [], search_without_asking: true })),
     updateUserSettings,
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
   };
@@ -113,6 +114,7 @@ describe('SentinelAuditFeed', () => {
     api.getUserSettings = vi.fn(async () => ({
       offline_mode: false,
       tier2_auto_allow: ['file_write'] as Array<'file_write'>,
+      search_without_asking: true,
     }));
     render(
       <SentinelApiProvider api={api}>
@@ -134,6 +136,7 @@ describe('SentinelAuditFeed', () => {
     api.getUserSettings = vi.fn(async () => ({
       offline_mode: false,
       tier2_auto_allow: ['file_write'] as Array<'file_write'>,
+      search_without_asking: true,
     }));
     render(
       <SentinelApiProvider api={api}>

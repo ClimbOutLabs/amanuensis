@@ -11,6 +11,7 @@ import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
 import SearchInput from '@/atoms/primitives/SearchInput.js';
 import { Icon } from '@/icons/Icon.js';
 import { hasConnectorConnectionTest, type ConnectorConnectionFailureKind } from '@/server/connectorChecks.js';
+import { isSearchProvider, type SearchProviderFields } from '@/server/searchProviderTypes.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
 import { shellIsMutable, useShellMode } from '@/server/ShellModeContext.js';
 import type { AgentSpec, ConnectorAuth, ConnectorBase, ConnectorCatalogEntry } from '@/server/types.js';
@@ -20,6 +21,7 @@ import AddMcpServerForm, { type AddMcpServerDraft } from './AddMcpServerForm.js'
 import { AUTH_TYPE_LABELS } from './authTypeLabels.js';
 import ConnectorDetails from './ConnectorDetails.js';
 import { isMemoryProvider, memoryProviderUpdateRequest, withRemediation } from './memoryProvider.js';
+import { searchProviderForNewConnector } from './searchProvider.js';
 
 type ConnectorListItem =
   { connector: ConnectorBase; isConfigured: true } | { connector: ConnectorCatalogEntry; isConfigured: false };
@@ -240,12 +242,15 @@ const ConnectorSettings = () => {
         : entry.auth.type === 'dcr'
           ? { type: 'dcr' }
           : { type: 'none' });
-    await connectorCatalog.createConnector({
+    const configured = connectors.ordered.flatMap(item => (item.isConfigured ? [item.connector] : []));
+    const request: Parameters<typeof connectorCatalog.createConnector>[0] & SearchProviderFields = {
       name: entry.name,
       description: entry.description ?? entry.url,
       url: entry.url,
       auth,
-    });
+      ...searchProviderForNewConnector({ entry, configured }),
+    };
+    await connectorCatalog.createConnector(request);
   };
 
   const handleConnect = (entry: ConnectorCatalogEntry) => {
@@ -311,7 +316,14 @@ const ConnectorSettings = () => {
     if (!connector) return;
     setFormError(null);
     await runMutation(async () => {
-      const updated = await connectorCatalog.updateConnector({ id: connector.id, ...draft });
+      // updateConnector sends the full manifest, so the search-provider role is resupplied or this
+      // edit would silently clear it.
+      const request: Parameters<typeof connectorCatalog.updateConnector>[0] & SearchProviderFields = {
+        id: connector.id,
+        ...draft,
+        ...(isSearchProvider(connector) ? { searchProvider: true } : {}),
+      };
+      const updated = await connectorCatalog.updateConnector(request);
       setSelectedConnector(current => (current?.id === updated.id ? updated : current));
     }, setFormError);
     setTimeout(() => {
@@ -465,7 +477,14 @@ const ConnectorSettings = () => {
         </span>
 
         <div className="min-w-0 flex-1">
-          <h5 className="truncate text-sm font-medium text-text-primary">{connector.name}</h5>
+          <h5 className="flex min-w-0 items-center gap-2 text-sm font-medium text-text-primary">
+            <span className="truncate">{connector.name}</span>
+            {isSearchProvider(connector) ? (
+              <span className="shrink-0 rounded-full border border-border bg-secondary-bg/40 px-2 py-0.5 text-xs font-medium text-text-secondary">
+                Search provider
+              </span>
+            ) : null}
+          </h5>
           <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary sm:truncate">{connector.description}</p>
         </div>
       </>
