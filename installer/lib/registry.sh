@@ -46,6 +46,19 @@ reg_set() {
   } | write_if_changed "$(reg_file "$name")" 600 || true
 }
 
+# reg_unset NAME key: drops the line of a key; absent is fine.
+reg_unset() {
+  local name=$1 key=$2 line
+  {
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        "$key="*) ;;
+        *) printf '%s\n' "$line" ;;
+      esac
+    done <"$(reg_file "$name")"
+  } | write_if_changed "$(reg_file "$name")" 600 || true
+}
+
 reg_remove() { rm -f "$(reg_file "$1")"; }
 
 # Space-separated values of one key across all instances, optionally skipping one instance.

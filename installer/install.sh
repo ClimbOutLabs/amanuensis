@@ -2,6 +2,7 @@
 # Amanuensis installer: plan, local image builds, shared speech-to-text, per-person instances and their sandbox.
 # Usage: install.sh [--dry-run] [--yes] [options]
 #        install.sh instance add|list|remove <name>
+#        install.sh instance add-user|remove-user|list-users
 #        install.sh backup [<name>]
 #        install.sh upgrade [--check] [--force]
 set -euo pipefail
@@ -38,6 +39,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/edge.sh"
 # shellcheck source=lib/instance.sh
 . "$INSTALLER_DIR/lib/instance.sh"
+# shellcheck source=lib/users.sh
+. "$INSTALLER_DIR/lib/users.sh"
 # shellcheck source=lib/backup.sh
 . "$INSTALLER_DIR/lib/backup.sh"
 # shellcheck source=lib/upgrade.sh
@@ -63,6 +66,8 @@ OPT_CHECK=0
 OPT_FORCE=0
 OPT_PURGE=0
 OPT_NAME=
+OPT_INSTANCE=
+OPT_ROLE=
 OPT_EMAIL=
 OPT_PUBLIC_URL=
 OPT_LOGIN_URL=
@@ -89,6 +94,9 @@ Amanuensis installer
   install.sh instance add <name>  add another person's instance
   install.sh instance list
   install.sh instance remove <name> [--purge-data]
+  install.sh instance add-user <name> --email ADDRESS [--role member] [--instance NAME] [--password-stdin]
+  install.sh instance remove-user <name> [--instance NAME]
+  install.sh instance list-users [--instance NAME]
   install.sh backup [<name>]
   install.sh upgrade [--check] [--force]
 
@@ -103,8 +111,10 @@ Options
   --use-host-node       run the sandbox setup on this computer's Node.js 22.14 or newer instead of downloading a pinned copy
   --dry-run             stop after printing the plan
   --name NAME           first instance name (default main)
-  --email ADDRESS       owner email
-  --password-stdin      read the owner password from the first line of stdin, before any prompt
+  --email ADDRESS       owner email (with add-user: the new user's email)
+  --instance NAME       the instance a user command applies to (default: the only one)
+  --role member         role of an added user; members chat but cannot change server settings (the only role)
+  --password-stdin      read the owner password (with add-user: the new user's password; otherwise one is generated and shown once) from the first line of stdin, before any prompt
   --token-factory-key-stdin  read the Token Factory key from stdin (the line after the password with --password-stdin); the key is never a command-line value
   --token-factory-model ID   Token Factory model the app uses (default nvidia/nemotron-3-super-120b-a12b)
   --token-factory-daily-cap N  stop answering after N Token Factory tokens per day (default: no cap)
@@ -158,12 +168,12 @@ parse_args() {
       --check) OPT_CHECK=1 ;;
       --force) OPT_FORCE=1 ;;
       --purge-data) OPT_PURGE=1 ;;
-      --home | --name | --email | --public-url | --login-url | --port | --login-port | --model-endpoint | --confirm-name | --tls | --public-ip | --token-factory-model | --token-factory-daily-cap)
+      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --model-endpoint | --confirm-name | --tls | --public-ip | --token-factory-model | --token-factory-daily-cap)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --model-endpoint=* | --confirm-name=* | --tls=* | --public-ip=* | --token-factory-model=* | --token-factory-daily-cap=*)
+      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --model-endpoint=* | --confirm-name=* | --tls=* | --public-ip=* | --token-factory-model=* | --token-factory-daily-cap=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -191,6 +201,8 @@ set_option() {
   case "$1" in
     --home) AMAN_HOME=$2 ;;
     --name) OPT_NAME=$2 ;;
+    --instance) OPT_INSTANCE=$2 ;;
+    --role) OPT_ROLE=$2 ;;
     --email) OPT_EMAIL=$2 ;;
     --public-url) OPT_PUBLIC_URL=$2 ;;
     --login-url) OPT_LOGIN_URL=$2 ;;
@@ -261,7 +273,10 @@ main() {
         add) cmd_instance_add ;;
         list) cmd_instance_list ;;
         remove) cmd_instance_remove ;;
-        *) usage_die "usage: install.sh instance add|list|remove <name>" ;;
+        add-user) cmd_instance_add_user ;;
+        remove-user) cmd_instance_remove_user ;;
+        list-users) cmd_instance_list_users ;;
+        *) usage_die "usage: install.sh instance add|list|remove|add-user|remove-user|list-users" ;;
       esac
       ;;
   esac

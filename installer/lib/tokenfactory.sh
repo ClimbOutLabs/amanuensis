@@ -91,34 +91,13 @@ tf_rotation_collect() {
   TF_ROTATE_NAME=$name
 }
 
-# Rewrites NEBIUS_API_KEY inside the managed block of the instance .env (0600, atomic); the key only passes through
-# shell builtins. A block without the line gets it.
+# Rewrites NEBIUS_API_KEY inside the managed block of the instance .env; the key only passes through shell builtins.
 tf_rotation_write_env() {
-  local name=$1 env line inblock=0 written=0
+  local name=$1 env
   env="$(instance_dir "$name")/.env"
   [ -f "$env" ] || die "instance $name has no .env, so its Token Factory key was not changed"
   grep -q '^# >>> managed by the installer' "$env" || die "the managed block of $env is missing, so its Token Factory key was not changed"
-  {
-    while IFS= read -r line || [ -n "$line" ]; do
-      case "$line" in
-        '# >>> managed by the installer'*) inblock=1 ;;
-        '# <<< end of managed block'*)
-          if [ "$inblock" = 1 ] && [ "$written" = 0 ]; then
-            printf 'NEBIUS_API_KEY=%s\n' "$AMAN_TF_KEY"
-            written=1
-          fi
-          inblock=0
-          ;;
-        NEBIUS_API_KEY=*)
-          if [ "$inblock" = 1 ]; then
-            line="NEBIUS_API_KEY=$AMAN_TF_KEY"
-            written=1
-          fi
-          ;;
-      esac
-      printf '%s\n' "$line"
-    done <"$env"
-  } | write_if_changed "$env" 600 || true
+  env_managed_set "$env" NEBIUS_API_KEY "$AMAN_TF_KEY"
 }
 
 tf_rotation_apply() {

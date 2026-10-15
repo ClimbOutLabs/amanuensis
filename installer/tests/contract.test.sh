@@ -127,6 +127,24 @@ test_token_factory_settings_match_the_server() {
   done
 }
 
+test_sign_in_settings_match_the_server() {
+  t_begin "the installer writes the sign-in settings the server reads, and the doctor counts what add-user wrote"
+  local repo=$INSTALLER_DIR/.. config key out
+  config=$(cat "$repo/packages/trueforge/src/config.ts")
+  for key in OIDC_ALLOWED_EMAILS OIDC_ADMIN_ROLE_VALUE OIDC_USER_ROLE_CLAIM OIDC_USER_REFERENCE_CLAIM; do
+    assert_contains "$config" "getEnv('$key'" "the server reads $key"
+    assert_contains "$(cat "$INSTALLER_DIR/templates/instance/env.tpl")" "$key=" "the installer writes $key"
+  done
+  sandbox_new
+  install_machine
+  run_install instance add-user judge1 --email judge1@demo.invalid
+  assert_rc 0
+  out=$(real_doctor --json --instance main) || true
+  assert_contains "$out" '"id":"config","state":"ok","detail":"The settings files exist and are private to you. 2 sign-in user(s): the owner and 1 member(s)."'
+  assert_not_contains "$out" '$2a$'
+  sandbox_drop
+}
+
 test_in_image_check_ids_match() {
   t_begin "every check the shim relays from the app container is one the app's doctor knows"
   local repo=$INSTALLER_DIR/.. ids id known
@@ -138,6 +156,7 @@ test_in_image_check_ids_match() {
 }
 
 test_token_factory_settings_match_the_server
+test_sign_in_settings_match_the_server
 test_in_image_check_ids_match
 test_doctor_reads_what_the_installer_wrote
 test_installer_calls_the_shim_as_documented

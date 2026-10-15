@@ -566,6 +566,48 @@ describe('instance settings file', () => {
     assert.doesNotMatch(world.json().stdout, /SENTINEL-hash/);
   });
 
+  it('reports the sign-in user count without printing a hash', () => {
+    make();
+    const file = path.join(world.instanceDir('main'), 'dex.env');
+    writeFileSync(
+      file,
+      [
+        "DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'",
+        "DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'",
+        "DEX_USER_PASSWORD_HASH_JUDGE_TWO='SENTINEL-judge2-hash'",
+        '',
+      ].join('\n'),
+    );
+    chmodSync(file, 0o600);
+    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=o@x.invalid,a@x.invalid,b@x.invalid\n');
+    const check = find(world.json().doc.instances.main, 'config');
+    assert.equal(check.state, 'ok');
+    assert.match(check.detail, /3 sign-in user\(s\): the owner and 2 member\(s\)/);
+    assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+  });
+
+  it('warns when fewer emails are allowed than there are users', () => {
+    make();
+    const file = path.join(world.instanceDir('main'), 'dex.env');
+    writeFileSync(file, "DEX_USER_PASSWORD_HASH='h1'\nDEX_USER_PASSWORD_HASH_JUDGE1='h2'\n");
+    chmodSync(file, 0o600);
+    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=o@x.invalid\n');
+    const check = find(world.json().doc.instances.main, 'config');
+    assert.equal(check.state, 'warn');
+    assert.match(check.detail, /2 sign-in user\(s\)/);
+    assert.match(check.detail, /Fewer emails are allowed/);
+    assert.match(check.fix, /add-user/);
+  });
+
+  it('does not warn about a wildcard allowlist', () => {
+    make();
+    const file = path.join(world.instanceDir('main'), 'dex.env');
+    writeFileSync(file, "DEX_USER_PASSWORD_HASH='h1'\nDEX_USER_PASSWORD_HASH_JUDGE1='h2'\n");
+    chmodSync(file, 0o600);
+    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=*@x.invalid\n');
+    assert.equal(find(world.json().doc.instances.main, 'config').state, 'ok');
+  });
+
   it('fails when the file is missing', () => {
     make();
     rmSync(path.join(world.instanceDir('main'), '.env'));

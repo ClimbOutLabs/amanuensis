@@ -454,7 +454,32 @@ check_instance_config() {
       return
     fi
   done
-  record "$name" config ok "The settings files exist and are private to you." ""
+  summarize_users "$dir"
+  if [ "$USERS_SHORT" = 1 ]; then
+    record "$name" config warn "The settings files are private to you.${USERS_SUMMARY} Fewer emails are allowed to sign in than there are users." \
+      "Run install.sh instance list-users, then instance add-user again for each member; it repairs the allowed emails."
+    return
+  fi
+  record "$name" config ok "The settings files exist and are private to you.${USERS_SUMMARY}" ""
+}
+
+# Sets USERS_SUMMARY (" N sign-in user(s): the owner and M member(s).") from the hash variables in dex.env, and
+# USERS_SHORT=1 when fewer emails are allowed than there are users. Hashes are counted, never printed.
+summarize_users() { # instance dir
+  local users members allowed
+  USERS_SUMMARY=""
+  USERS_SHORT=0
+  [ -f "${1}/dex.env" ] || return 0
+  users=$(awk '/^DEX_USER_PASSWORD_HASH(_[A-Z0-9_]+)?=/ { n++ } END { print n + 0 }' "${1}/dex.env" 2>/dev/null)
+  users=${users:-0}
+  members=0
+  if [ "$users" -gt 0 ]; then members=$((users - 1)); fi
+  USERS_SUMMARY=" ${users} sign-in user(s): the owner and ${members} member(s)."
+  allowed=$(sed -n 's/^OIDC_ALLOWED_EMAILS=//p' "${1}/.env" 2>/dev/null | awk 'END { print }')
+  case "$allowed" in
+    '' | *'*'*) return 0 ;;
+  esac
+  if [ "$(printf '%s' "$allowed" | tr ',' '\n' | awk 'NF { n++ } END { print n + 0 }')" -lt "$users" ]; then USERS_SHORT=1; fi
 }
 
 check_instance_containers() { # name; sets APP_CONTAINER

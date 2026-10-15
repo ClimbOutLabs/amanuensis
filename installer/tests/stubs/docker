@@ -206,7 +206,8 @@ case "$cmd" in
       *"aman hash-password"*)
         cat >"$S/hash_stdin"
         env >"$S/hash_env"
-        hash="\$2a\$10\$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY01"
+        # Derived from the password, so two different passwords never share a hash.
+        hash="\$2a\$10\$$(sha256sum <"$S/hash_stdin" | cut -c1-53)"
         printf '{"hash":"%s"}\n' "$hash"
         exit 0
         ;;

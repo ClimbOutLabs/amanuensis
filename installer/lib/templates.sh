@@ -40,3 +40,33 @@ safe_value() {
   esac
   return 0
 }
+
+# Sets KEY=VALUE inside the managed block of an instance .env (0600, atomic) and leaves every other line, including
+# the owner's own settings below the block, as they were. A block without the key gets it. The value passes only
+# through shell builtins, so a secret never reaches argv.
+env_managed_set() {
+  local env=$1 key=$2 value=$3 line inblock=0 written=0
+  [ -f "$env" ] || die "$env is missing"
+  grep -q '^# >>> managed by the installer' "$env" || die "the managed block of $env is missing"
+  {
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        '# >>> managed by the installer'*) inblock=1 ;;
+        '# <<< end of managed block'*)
+          if [ "$inblock" = 1 ] && [ "$written" = 0 ]; then
+            printf '%s=%s\n' "$key" "$value"
+            written=1
+          fi
+          inblock=0
+          ;;
+        "$key="*)
+          if [ "$inblock" = 1 ]; then
+            line="$key=$value"
+            written=1
+          fi
+          ;;
+      esac
+      printf '%s\n' "$line"
+    done <"$env"
+  } | write_if_changed "$env" 600 || true
+}
