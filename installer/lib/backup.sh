@@ -41,13 +41,21 @@ backup_scratch_prune() {
 # /backup, then streams that volume into DESTDIR as tar. The scratch volume is always removed again.
 # The CLI opens the live database through SQLite's online backup API, safe beside the running app.
 backup_data() {
-  local name=$1 dest=$2 image=$3 scratch env_file rc=0
+  local name=$1 dest=$2 image=$3 scratch env_file sqlite rc=0 probe=0
   scratch="aman_${name}_backup_scratch"
   env_file="$(instance_dir "$name")/.env"
+  sqlite=$(env_get "$env_file" SQLITE_PATH)
+  # An instance that never got as far as creating its database has no data yet; that is not a failed backup.
+  D run --rm --network none -v "aman_${name}_data:/data:ro" "$image" test -f "$sqlite" >/dev/null 2>&1 || probe=$?
+  if [ "$probe" = 1 ]; then
+    say "Instance $name has no database yet, so there is nothing to back up for it; its settings are saved."
+    return 0
+  fi
+  [ "$probe" = 0 ] || return 1
   D volume create --label "$BACKUP_SCRATCH_LABEL" "$scratch" >/dev/null || return 1
   D run --rm --network none -v "aman_${name}_data:/data" -v "$scratch:/backup" "$image" aman backup \
     --target /backup \
-    --sqlite "$(env_get "$env_file" SQLITE_PATH)" \
+    --sqlite "$sqlite" \
     --memory-dir "$(env_get "$env_file" MEMORY_MARKDOWN_DIR)" \
     --persona-dir "$(env_get "$env_file" PERSONA_KNOWLEDGE_DIR)" >/dev/null || rc=1
   if [ "$rc" = 0 ]; then

@@ -128,7 +128,7 @@ test_install_with_the_flag_runs_the_root_steps() {
   assert_contains "$script" "systemctl reload-or-restart caddy"
   assert_contains "$OUT" "Root steps for HTTPS with Caddy" "the steps were printed before they ran"
   assert_contains "$OUT" "HTTPS answers at $APP_URL"
-  assert_flat_contains "$OUT" "HTTPS Caddy on this computer serves $APP_URL and $LOGIN_URL"
+  assert_flat_contains "$OUT" "HTTPS Caddy on this computer, certificates from Let"
   assert_flat_contains "$OUT" "Open only TCP 443"
   assert_contains "$(grep '^curl' "$STUB_LOG")" "$APP_URL/healthz"
   assert_eq "$(sed -n 's/^tls=//p' "$AMAN_HOME/state/instances/main.conf")" caddy

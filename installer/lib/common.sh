@@ -210,14 +210,6 @@ valid_email() {
   [ "${#1}" -le 254 ] && matches_whole "$1" '^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'
 }
 
-valid_ipv4() {
-  local ip=$1 part
-  matches_whole "$ip" '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || return 1
-  for part in ${ip//./ }; do
-    [ "$((10#$part))" -le 255 ] || return 1
-  done
-}
-
 # The reason a value is refused, as one sentence, or nothing when it is fine. The prompts show it and ask again.
 name_problem() {
   local v=$1 rest

@@ -432,6 +432,41 @@ export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath
 }
 
 /**
+ * The addresses the app may be opened at, as origins. Sign-in returns to the one the request came to, so the list is
+ * what keeps a request from steering it elsewhere. Plain http is only for this computer and private networks.
+ */
+export function parseAllowedOrigins(raw: string | undefined): string[] {
+  const origins: string[] = [];
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim();
+    if (text === '') {
+      continue;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(text);
+    } catch (error) {
+      throw new Error(`ALLOWED_ORIGINS has an entry that is not a valid origin: ${text}`, { cause: error });
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`ALLOWED_ORIGINS entries must be http or https origins: ${text}`);
+    }
+    if (parsed.pathname !== '/' || parsed.search !== '' || parsed.hash !== '' || parsed.username !== '') {
+      throw new Error(`ALLOWED_ORIGINS entries must be bare origins with no path, query or login: ${text}`);
+    }
+    if (parsed.protocol === 'http:' && !isPrivateNetworkHost(parsed.hostname)) {
+      throw new Error(
+        `ALLOWED_ORIGINS has a public address over plain http (${text}). Sign-in over the internet needs https: set up HTTPS with Caddy (--tls caddy).`,
+      );
+    }
+    if (!origins.includes(parsed.origin)) {
+      origins.push(parsed.origin);
+    }
+  }
+  return origins;
+}
+
+/**
  * Parse a maps upstream URL: must be http(s), no query or hash. Fails fast at
  * boot like PUBLIC_BASE_URL. Trailing slashes are trimmed; callers join paths.
  */
@@ -654,7 +689,7 @@ function buildPostgresConnectionString(parts: {
   return connectionString;
 }
 
-/** An http issuer is accepted only on this computer or a private network; anything else must be https. */
+/** An http issuer is accepted only on a loopback host; anything else must be https. */
 export function assertOidcIssuerTransportAllowed(issuerUrl: string): void {
   let parsed: URL;
   try {
@@ -665,12 +700,10 @@ export function assertOidcIssuerTransportAllowed(issuerUrl: string): void {
   if (parsed.protocol === 'https:') {
     return;
   }
-  if (parsed.protocol === 'http:' && isPrivateNetworkHost(parsed.hostname)) {
+  if (parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname)) {
     return;
   }
-  throw new Error(
-    'OIDC_ISSUER_URL must use https, except http on this computer or a private network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16, .local, .ts.net or a single-label name)',
-  );
+  throw new Error('OIDC_ISSUER_URL must use https, except http on a loopback host (localhost, 127.0.0.1, ::1)');
 }
 
 /** Cookie-name-safe suffix appended to every auth cookie name so instances on one hostname stay apart. */
@@ -1065,6 +1098,12 @@ export interface SharedServerConfiguration {
    * fail if empty. Env: `PUBLIC_BASE_URL`.
    */
   PUBLIC_BASE_URL: string;
+  /**
+   * Addresses the app may be opened at, as comma-separated origins. Set for an instance opened on the local network:
+   * sign-in then returns to the origin of the request (if listed) and the app serves the sign-in service under
+   * `/dex` itself. Empty keeps the single `PUBLIC_BASE_URL` origin. Env: `ALLOWED_ORIGINS`.
+   */
+  ALLOWED_ORIGINS: string[];
   /**
    * Max tokens requested from the memory provider's recall endpoint.
    * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 2048.
@@ -1966,6 +2005,7 @@ const shared: SharedServerConfiguration = {
   }),
   DOCUMENT_OCR_LANGUAGES: getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: 'eng hin mar' }) ?? 'eng hin mar',
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),
+  ALLOWED_ORIGINS: parseAllowedOrigins(getEnv('ALLOWED_ORIGINS', { defaultValue: '' })),
   SERVER_URL:
     getEnv('SERVER_URL', { defaultValue: `http://localhost:${String(port)}` }) ?? `http://localhost:${String(port)}`,
   TRUEFORGE_API_KEY: resolveTrueForgeApiKey({ standalone }),
@@ -2272,7 +2312,7 @@ function isPrivateIpv4(addr: string): boolean {
 
 /**
  * Whether `host` is this computer or sits on a private network: loopback, a private IPv4 address, a `.local` or
- * `.ts.net` name, or a single-label name. Plain http sign-in is only allowed for these; a public address needs https.
+ * `.ts.net` name, or a single-label name. An allowed origin may use plain http only for these; a public one needs https.
  */
 export function isPrivateNetworkHost(host: string): boolean {
   if (isLoopbackHost(host)) {
@@ -2453,6 +2493,11 @@ export function getPublicBaseUrl(config: PublicUrlConfig = configuration): strin
     throw new Error('PUBLIC_BASE_URL is required for OIDC callbacks but was empty');
   }
   return publicBaseUrl;
+}
+
+/** The origins the app may be opened at; empty unless `ALLOWED_ORIGINS` is set. */
+export function getAllowedOrigins(config: Pick<ServerConfiguration, 'ALLOWED_ORIGINS'> = configuration): string[] {
+  return config.ALLOWED_ORIGINS;
 }
 
 /** Suffix appended to every auth cookie name; empty unless `AUTH_COOKIE_SUFFIX` is set. */

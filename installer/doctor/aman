@@ -32,6 +32,7 @@ APP_SERVICE="${AMAN_DOCTOR_APP_SERVICE:-app}"
 AS_JSON=0
 UI_VERBOSE=0
 SUMMARY=0
+PROBLEMS_ONLY=0
 DEEP=0
 LOCAL=0
 ONLY=""
@@ -560,6 +561,8 @@ check_instance_containers() { # name; sets APP_CONTAINER
           *"(health: starting)"*) starting="${starting} ${cname}" ;;
         esac
         ports=$(bounded "$PROBE_SECONDS" docker port "$id" 2>/dev/null)
+        # An instance opened on the network publishes the app port (8790 inside) on every interface on purpose.
+        if [ -n "$(registry_value "$name" origins)" ]; then ports=$(printf '%s\n' "$ports" | grep -v '^8790/tcp' || true); fi
         case "$ports" in
           *"0.0.0.0:"* | *"[::]:"* | *":::"*) exposed="${exposed} ${cname}" ;;
         esac
@@ -593,10 +596,10 @@ check_instance_containers() { # name; sets APP_CONTAINER
   else
     record "$name" containers ok "All ${count} containers are running." ""
   fi
-  if [ "$(registry_value "$name" network)" = 1 ]; then
-    record "$name" ports ok "Published ports are open to your network on purpose, so other devices can open Aman." ""
-  elif [ -n "$exposed" ]; then
+  if [ -n "$exposed" ]; then
     record "$name" ports fail "Ports are open to the whole network, not just this machine:${exposed}." "$INSTANCE_FIX"
+  elif [ -n "$(registry_value "$name" origins)" ]; then
+    record "$name" ports ok "The app port is open to your network on purpose, so other devices can open Aman; sign-in stays on this computer." ""
   else
     record "$name" ports ok "Published ports listen on this machine only." ""
   fi
@@ -724,51 +727,32 @@ check_instance() {
   check_instance_network "$1"
 }
 
-# IPv4 addresses on this computer's interfaces, one per line.
-local_ipv4_addresses() {
-  if command -v ip >/dev/null 2>&1; then
-    ip -4 -o addr show 2>/dev/null | awk '{ sub(/\/.*/, "", $4); print $4 }'
-  elif command -v ifconfig >/dev/null 2>&1; then
-    ifconfig 2>/dev/null | awk '/inet / { print ($2 == "addr:" ? $3 : $2) }' | sed 's/^addr://'
-  elif command -v hostname >/dev/null 2>&1; then
-    hostname -I 2>/dev/null | tr ' ' '\n'
-  fi
-}
-
-# The address this computer reaches the network with: the source address of the default route.
-primary_ipv4_address() {
-  local out iface
-  if command -v ip >/dev/null 2>&1; then
-    out=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n 1)
-  elif command -v route >/dev/null 2>&1 && command -v ipconfig >/dev/null 2>&1; then
-    iface=$(route -n get default 2>/dev/null | awk '/interface:/ { print $2 }')
-    out=$(ipconfig getifaddr "$iface" 2>/dev/null)
-  fi
-  printf '%s' "$out"
-}
-
-# An instance published on the network names one address of this computer; DHCP can hand that address to another
-# machine, which breaks sign-in. Nothing is recorded for an instance that is open on this computer only.
+# An instance opened on the network lists the addresses it answers at; a new address of this computer (another
+# network, a changed DHCP lease, Tailscale coming up) is not on the list until the instance is refreshed, and sign-in
+# is refused there. Nothing is recorded for an instance that is open on this computer only.
 check_instance_network() {
-  local name=$1 url host addresses now
-  [ "$(registry_value "$name" network)" = 1 ] || return 0
-  url=$(registry_value "$name" public_url)
-  host=${url#*://}
-  host=${host%%:*}
-  addresses=$(local_ipv4_addresses)
-  if [ -z "$addresses" ]; then
-    record "$name" network off "Skipped: this computer's network addresses could not be read." ""
+  local name=$1 origins port host missing='' count
+  origins=$(registry_value "$name" origins)
+  [ -n "$origins" ] || return 0
+  if ! load_lib network; then
+    record "$name" network off "Skipped: the network helper file (lib/network.sh next to the doctor's folder) is missing." ""
     return
   fi
-  case $'\n'"$addresses"$'\n' in
-    *$'\n'"$host"$'\n'*)
-      record "$name" network ok "Aman opens at ${url}, an address of this computer." ""
-      return
-      ;;
-  esac
-  now=$(primary_ipv4_address)
-  record "$name" network warn "Aman is set up at ${url}, but ${host} is no longer an address of this computer${now:+ (it is ${now} now)}; sign-in will not work from any address until it is updated." \
-    "Run \`aman doctor network --fix\`; it moves Aman to the current address and restarts it."
+  port=$(registry_value "$name" app_port)
+  # shellcheck disable=SC2046,SC2086 # the extra hosts are checked names without spaces
+  for host in $(network_default_hosts) $(registry_value "$name" extra_hosts); do
+    case ",${origins}," in
+      *",http://${host}:${port},"*) ;;
+      *) missing="${missing} ${host}" ;;
+    esac
+  done
+  if [ -n "$missing" ]; then
+    record "$name" network warn "Aman is not set up for these addresses of this computer:${missing}. Sign-in from there is refused." \
+      "Run \`aman doctor network --fix\`; it adds them and restarts Aman."
+    return
+  fi
+  count=$(printf '%s\n' "$origins" | tr ',' '\n' | wc -l | tr -d ' ')
+  record "$name" network ok "Aman opens at ${count} addresses of this computer, and sign-in works from each." ""
 }
 
 check_instance_core() {
@@ -844,6 +828,9 @@ text_checks() { # scope
   local scope id state detail fix label
   while IFS=$'\t' read -r scope id state detail fix; do
     [ -n "$scope" ] || continue
+    if [ "$PROBLEMS_ONLY" = 1 ]; then
+      case "$state" in warn | fail) ;; *) continue ;; esac
+    fi
     case "$state" in
       ok | warn | fail) ;;
       *)
@@ -939,22 +926,28 @@ print_text() {
   print_verdict
 }
 
-# One line per scope when everything passed, the full rows otherwise; the installer shows this after a run.
+# What the installer shows after a run: one line when everything passed, otherwise only the problems.
 print_summary() {
-  local scope label extra
+  local scope label passed=0 problems=0
   for scope in machine "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
-    if [ "$scope" = machine ]; then label="This computer"; else label="Instance $scope"; fi
     count_checks "$scope"
-    if [ "$N_WARN" -eq 0 ] && [ "$N_FAIL" -eq 0 ]; then
-      extra=""
-      if [ "$N_OFF" -gt 0 ]; then extra=", $N_OFF not run"; fi
-      ui_ok "$label: $N_OK checks passed$extra"
-    else
-      ui_line "$label"
-      text_checks "$scope"
-    fi
+    passed=$((passed + N_OK))
+    problems=$((problems + N_WARN + N_FAIL))
   done
-  ui_hint "Full report any time: aman doctor"
+  if [ "$problems" -eq 0 ]; then
+    ui_ok "All $passed checks passed"
+    return
+  fi
+  PROBLEMS_ONLY=1
+  for scope in machine "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+    count_checks "$scope"
+    if [ $((N_WARN + N_FAIL)) -eq 0 ]; then continue; fi
+    if [ "$scope" = machine ]; then label="This computer"; else label="Instance $scope"; fi
+    ui_line "$label"
+    text_checks "$scope"
+  done
+  PROBLEMS_ONLY=0
+  ui_hint "$passed other checks passed. Full report: aman doctor"
 }
 
 select_instances() {
@@ -1170,7 +1163,7 @@ doctor_repair() { # kind
     if [ "$kind" = network ]; then
       check_instance_network "$name"
       if [ -z "$RECORDS" ]; then
-        ui_skip "Open on this computer only; there is no network address to keep up to date"
+        ui_skip "Open on this computer only; there are no network addresses to keep up to date"
         continue
       fi
     else
@@ -1189,8 +1182,7 @@ doctor_repair() { # kind
     fi
     args=(--home "$AMAN_HOME" --yes instance refresh "$name")
     if [ "$kind" = network ]; then
-      args+=(--new-address)
-      question="Move instance $name to this computer's current address and restart it?"
+      question="Add this computer's current addresses to instance $name and restart it?"
     else
       question="Restart instance $name now?"
     fi

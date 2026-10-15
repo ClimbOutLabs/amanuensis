@@ -307,6 +307,26 @@ export class Ui {
     this.block({ lead: `  ${label.padEnd(8)}  `, leadWidth: 12, text: value });
   }
 
+  /** A row of the closing table: a marker for its state (`skip` for something left off), the label and the value. */
+  checkRow({ state, label, value }: { state: 'ok' | 'todo' | 'warn' | 'skip'; label: string; value: string }): void {
+    const marker = {
+      ok: { color: COLOR.green, symbol: this.symbols.ok },
+      todo: { color: COLOR.cyan, symbol: this.symbols.prompt },
+      warn: { color: COLOR.yellow, symbol: this.symbols.warn },
+      skip: { color: COLOR.dim, symbol: this.symbols.skip },
+    }[state];
+    this.block({
+      lead: `  ${this.style({ code: marker.color, text: marker.symbol })} ${label.padEnd(8)}  `,
+      leadWidth: 14,
+      text: value,
+    });
+  }
+
+  /** Another value under the label of the row above. */
+  checkMore(value: string): void {
+    this.block({ lead: ' '.repeat(14), leadWidth: 14, text: value });
+  }
+
   rule(): void {
     this.emit(this.style({ code: COLOR.dim, text: this.symbols.rule.repeat(this.width) }));
   }

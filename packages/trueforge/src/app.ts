@@ -39,6 +39,7 @@ import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
 import { resolveRequestContext } from './auth/identity';
+import { createLoginProxy } from './auth/loginProxy';
 import {
   createAdminAuthMiddleware,
   createApiKeyAuthMiddleware,
@@ -53,6 +54,7 @@ import type { ModelCatalog } from './catalog/ModelCatalog';
 import type { SandboxCatalog } from './catalog/SandboxCatalog';
 import type { SkillCatalog } from './catalog/SkillCatalog';
 import configuration, {
+  getAllowedOrigins,
   getPublicBaseUrl,
   getPublicUiBasePath,
   getTrueForgeAuthMode,
@@ -315,9 +317,22 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   }
   // Standalone sessions are cookies, so reject foreign Hosts and cross-origin writes before any router.
   if (configuration.STANDALONE && authEnabled) {
-    app.use('*', createRequestGuardMiddleware({ port: configuration.PORT, publicBaseUrl: getPublicBaseUrl() }));
+    app.use(
+      '*',
+      createRequestGuardMiddleware({
+        port: configuration.PORT,
+        publicBaseUrl: getPublicBaseUrl(),
+        allowedOrigins: getAllowedOrigins(),
+      }),
+    );
   }
   app.use('*', createRequestBodyLimitMiddleware(configuration.MAX_REQUEST_BODY_BYTES));
+
+  // An instance opened on several addresses serves its sign-in service under the app's own origin.
+  if (configuration.STANDALONE && configuration.OIDC !== undefined && getAllowedOrigins().length > 0) {
+    const issuerPath = new URL(configuration.OIDC.OIDC_ISSUER_URL).pathname.replace(/\/$/, '');
+    app.all(`${issuerPath}/*`, createLoginProxy({ issuerUrl: configuration.OIDC.OIDC_ISSUER_URL }));
+  }
 
   app.get('/healthz', c => c.json({ status: 'ok', version: PACKAGE_VERSION }));
 

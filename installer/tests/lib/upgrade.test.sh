@@ -268,7 +268,57 @@ test_a_record_from_before_the_flag_counts_as_having_data() {
   sandbox_drop
 }
 
+# The data volume exists (Docker made it when the app first started) but holds no database.
+no_database_yet() {
+  mkdir -p "$SB_STATE/no_db"
+  : >"$SB_STATE/no_db/aman_$1_data"
+  printf 'aman_%s_data\n' "$1" >>"$SB_STATE/volumes"
+}
+
+test_backup_and_upgrade_force_cope_with_an_instance_without_a_database() {
+  t_begin "an instance that never created its database is not a failed backup, by backup or by upgrade --force"
+  sandbox_new
+  install_that_never_starts
+  no_database_yet main
+  run_install backup
+  assert_rc 0
+  assert_flat_contains "$OUT" "Instance main has no database yet, so there is nothing to back up for it"
+  assert_not_contains "$OUT$ERR" "Cannot open database"
+  assert_not_contains "$OUT$ERR" "failed"
+  assert_no_path "$SB_STATE/backup_runs"
+  repo_commit_change "the fix"
+  run_install upgrade --force
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "backup of main failed"
+  sandbox_drop
+}
+
+test_owner_path_remove_upgrade_install() {
+  t_begin "the owner's path works end to end: a first start that failed, instance remove, upgrade, then install"
+  sandbox_new
+  install_that_never_starts
+  no_database_yet main
+  run_install --yes instance remove main
+  assert_rc 0
+  repo_commit_change "the fix"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$ERR" "--force"
+  rm -f "$SB_STATE/no_db/aman_main_data"
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 0
+  assert_flat_contains "$OUT" "Instance main is running."
+  assert_eq "$(sed -n 's/^healthy=//p' "$AMAN_HOME/state/instances/main.conf")" 1
+  assert_eq "$(compose_image main)" "$(app_tag "$AMAN_HOME/release/release.json")"
+  sandbox_drop
+}
+
 test_noop_when_current
+test_backup_and_upgrade_force_cope_with_an_instance_without_a_database
+test_owner_path_remove_upgrade_install
 test_install_rerun_updates_instead_of_reusing_old_images
 test_failed_update_through_install_rolls_back
 test_install_rerun_of_an_instance_that_never_started_is_a_fresh_build

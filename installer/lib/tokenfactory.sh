@@ -107,13 +107,10 @@ tf_plan_detail() {
 # The model row of the summary: a hosted model is the only one chosen at install time; otherwise models are added in the app.
 print_model_row() {
   local name=$1 cap
-  [ "$(reg_get "$name" token_factory)" = 1 ] || return 0
-  cap=$(reg_get "$name" tf_cap)
-  ui_row "Model" "Token Factory, $(reg_get "$name" tf_model), is the default model. Its key is in $(ui_path "$(instance_dir "$name")")/.env (mode 600).${cap:+ Daily limit: $cap tokens per day.}"
-}
-
-print_model_next() {
-  local name=$1
-  [ "$(reg_get "$name" token_factory)" = 1 ] || return 0
-  ui_line "Check the hosted model any time: $(doctor_shim) doctor --instance $name --only model"
+  if [ "$(reg_get "$name" token_factory)" = 1 ]; then
+    cap=$(reg_get "$name" tf_cap)
+    ui_check_row ok "Model" "Token Factory, $(reg_get "$name" tf_model)${cap:+, limit $cap tokens a day}"
+  else
+    ui_check_row todo "Model" "not set: add one in Settings $S_PROMPT Models"
+  fi
 }

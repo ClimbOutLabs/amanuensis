@@ -10,9 +10,14 @@ if [ "${2:-}" = sandbox ]; then
   exit "${STUB_SANDBOX_DOCTOR_EXIT:-0}"
 fi
 if [ "${2:-}" = --summary ]; then
-  ui_ok "This computer: 8 checks passed"
-  ui_ok "Instance main: 8 checks passed, 2 not run"
-  ui_hint "Full report any time: aman doctor"
+  # Like the real summary: one line when all is well, otherwise only the problems.
+  if [ "${STUB_DOCTOR_EXIT:-0}" = 0 ]; then
+    ui_ok "All 16 checks passed"
+  else
+    ui_line "Instance main"
+    ui_fail "Port 5556 is already in use by another program." "Run aman doctor instance --fix"
+    ui_hint "15 other checks passed. Full report: aman doctor"
+  fi
   exit "${STUB_DOCTOR_EXIT:-0}"
 fi
 echo '{"machine":[{"id":"docker","state":"ok","detail":"","fix":""}],"instances":{}}'

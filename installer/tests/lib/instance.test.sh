@@ -268,7 +268,7 @@ test_a_new_instance_points_to_settings_for_a_model() {
   install_machine
   add_instance m
   assert_rc 0
-  assert_flat_contains "$OUT" "add a model in Settings > Models"
+  assert_flat_contains "$OUT" "not set: add one in Settings > Models"
   assert_not_contains "$(cat "$AMAN_HOME/state/instances/m.conf")" "model_endpoint"
   sandbox_drop
 }

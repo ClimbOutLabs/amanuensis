@@ -2,9 +2,10 @@
 name: aman-@@NAME@@
 
 services:
-  # Idle holder of the network namespace that app and login share and that publishes their ports: on 127.0.0.1
-  # only, or on every interface for an instance opened on the local network. Either one can restart without stranding the other, and the login issuer name is the same
-  # URL for the browser and for the app.
+  # Idle holder of the network namespace that app and login share and that publishes their ports. The app port is on
+  # 127.0.0.1 only, or on every interface for an instance opened on the local network; the login port is always on
+  # 127.0.0.1 (other devices reach sign-in through the app). Either container can restart without stranding the
+  # other, and the login issuer name is the same URL for the browser and for the app.
   loopback:
     image: @@APP_IMAGE@@
     # Built on this machine and never pulled.
@@ -13,7 +14,7 @@ services:
     entrypoint: ['sleep', 'infinity']
     ports:
       - '@@BIND@@@@APP_PORT@@:8790'
-      - '@@BIND@@@@LOGIN_PORT@@:@@LOGIN_PORT@@'
+      - '127.0.0.1:@@LOGIN_PORT@@:@@LOGIN_PORT@@'
     # Lets a model server on the host answer at host.docker.internal.
     extra_hosts:
       - 'host.docker.internal:host-gateway'

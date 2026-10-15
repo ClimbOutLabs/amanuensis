@@ -100,8 +100,7 @@ STEPS
 }
 
 edge_print_firewall_hint() {
-  say "  Firewall: the installer changes none. Open only TCP 443 to the internet, plus SSH (22) from your own address;"
-  say "            port 80 can stay closed. In a cloud this is the security group of the machine."
+  ui_line "Firewall: the installer changes none. Open only TCP 443 to the internet, plus SSH (22) from your own address; port 80 can stay closed. In a cloud this is the security group of the machine."
 }
 
 edge_print_root_steps() {

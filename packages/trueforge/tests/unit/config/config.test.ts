@@ -4,6 +4,8 @@ import {
   getPublicBaseUrl,
   getPublicUiBasePath,
   isLoopbackHost,
+  isPrivateNetworkHost,
+  parseAllowedOrigins,
   parsePublicBaseUrl,
   parseTokenFactoryMode,
   TrueForgeAuthMode,
@@ -171,38 +173,17 @@ describe('assertOidcIssuerTransportAllowed', () => {
     'http://localhost:5556/dex',
     'http://127.0.0.1:5556/dex',
     'http://[::1]:5556/dex',
-    'http://192.168.1.10:5556/dex',
-    'http://10.0.0.5:5556/dex',
-    'http://172.16.0.9:5556/dex',
-    'http://172.31.255.1:5556/dex',
-    'http://100.64.0.1:5556/dex',
-    'http://100.127.255.254:5556/dex',
-    'http://169.254.10.2:5556/dex',
-    'http://spark.local:5556/dex',
-    'http://spark.example.ts.net:5556/dex',
-    'http://spark:5556/dex',
   ])('accepts %s', issuer => {
     expect(() => assertOidcIssuerTransportAllowed(issuer)).not.toThrow();
   });
 
   it.each([
     'http://login.example/dex',
-    'http://203.0.113.9:5556/dex',
-    'http://8.8.8.8:5556/dex',
-    'http://172.15.0.1:5556/dex',
-    'http://172.32.0.1:5556/dex',
-    'http://100.63.255.255:5556/dex',
-    'http://100.128.0.1:5556/dex',
-    'http://192.169.1.1:5556/dex',
+    'http://192.168.1.10:5556/dex',
     'http://0.0.0.0:5556/dex',
-    'http://aman.example.com:5556/dex',
-    'http://spark.local.evil.example:5556/dex',
-    'http://[fd00::1]:5556/dex',
     'ftp://localhost/dex',
   ])('rejects %s', issuer => {
-    expect(() => assertOidcIssuerTransportAllowed(issuer)).toThrow(
-      /https, except http on this computer or a private network/,
-    );
+    expect(() => assertOidcIssuerTransportAllowed(issuer)).toThrow(/https, except http on a loopback host/);
   });
 });
 
@@ -374,5 +355,90 @@ describe('parseTokenFactoryMode', () => {
 
   it('throws on anything else', () => {
     expect(() => parse('sometimes')).toThrow('TOKEN_FACTORY_MODE must be one of off, fallback, force');
+  });
+});
+
+describe('isPrivateNetworkHost', () => {
+  it.each([
+    'localhost',
+    '127.0.0.1',
+    '[::1]',
+    '10.1.2.3',
+    '172.16.0.1',
+    '172.31.255.254',
+    '192.168.0.9',
+    '100.64.0.1',
+    '100.127.255.254',
+    '169.254.1.1',
+    'spark',
+    'spark.local',
+    'spark.example.ts.net',
+  ])('accepts %s', host => {
+    expect(isPrivateNetworkHost(host)).toBe(true);
+  });
+
+  it.each([
+    '8.8.8.8',
+    '203.0.113.9',
+    '172.15.0.1',
+    '172.32.0.1',
+    '100.63.255.255',
+    '100.128.0.1',
+    '192.169.1.1',
+    '0.0.0.0',
+    '[fd00::1]',
+    'aman.example.com',
+    'spark.local.example.com',
+    'a..b',
+    '',
+  ])('rejects %s', host => {
+    expect(isPrivateNetworkHost(host)).toBe(false);
+  });
+});
+
+describe('parseAllowedOrigins', () => {
+  it('is empty when unset or blank', () => {
+    expect(parseAllowedOrigins(undefined)).toEqual([]);
+    expect(parseAllowedOrigins(' , ')).toEqual([]);
+  });
+
+  it('keeps plain http for this computer and private networks, and https for anything', () => {
+    expect(
+      parseAllowedOrigins(
+        'http://127.0.0.1:8791, http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791,http://spark.local:8791,https://aman.example.com',
+      ),
+    ).toEqual([
+      'http://127.0.0.1:8791',
+      'http://localhost:8791',
+      'http://192.168.1.20:8791',
+      'http://100.101.102.103:8791',
+      'http://spark.local:8791',
+      'https://aman.example.com',
+    ]);
+  });
+
+  it('normalises and removes duplicates', () => {
+    expect(parseAllowedOrigins('HTTP://Spark.Local:8791,http://spark.local:8791,https://a.example.com:443')).toEqual([
+      'http://spark.local:8791',
+      'https://a.example.com',
+    ]);
+  });
+
+  it.each(['http://203.0.113.9:8791', 'http://aman.example.com', 'http://8.8.8.8'])(
+    'refuses a public address over plain http (%s) and points to HTTPS',
+    entry => {
+      expect(() => parseAllowedOrigins(entry)).toThrow(/public address over plain http.*--tls caddy/);
+    },
+  );
+
+  it.each([
+    'ftp://spark:8791',
+    'http://spark:8791/app',
+    'http://user@spark:8791',
+    'http://spark:8791?x=1',
+    'spark',
+    'http://',
+  ])('refuses %s', entry => {
+    expect(() => parseAllowedOrigins(entry)).toThrow(/ALLOWED_ORIGINS/);
   });
 });

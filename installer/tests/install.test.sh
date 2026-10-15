@@ -53,8 +53,10 @@ test_first_install() {
   t_begin "first install builds locally and creates private files"
   sandbox_new
   install_machine
-  assert_contains "$OUT" "Open      http://127.0.0.1:8791"
-  assert_flat_contains "$OUT" "Use 127.0.0.1, not localhost"
+  assert_flat_contains "$OUT" "Open http://127.0.0.1:8791 http://localhost:8791"
+  assert_not_contains "$OUT" "not localhost"
+  assert_not_contains "$OUT" "print-proxy-requirements"
+  assert_not_contains "$OUT" "not a page to open"
   assert_mode "$AMAN_HOME" 700
   assert_mode "$AMAN_HOME/instances/main" 700
   assert_mode "$AMAN_HOME/instances/main/.env" 600
@@ -92,7 +94,8 @@ test_first_install() {
   assert_contains "$compose" "name: aman_main_dex"
   assert_contains "$compose" "ghcr.io/dexidp/dex@sha256:"
   assert_not_contains "$compose" "@@" "no unfilled placeholder"
-  assert_contains "$compose" "127.0.0.1:8791:8790"
+  assert_contains "$compose" "- '8791:8790'"
+  assert_contains "$compose" "- '127.0.0.1:5556:5556'"
   sandbox_drop
 }
 

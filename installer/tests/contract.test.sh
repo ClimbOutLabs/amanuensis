@@ -110,7 +110,7 @@ test_public_base_url_is_the_host_facing_origin() {
   assert_contains "$env" "PORT=8790"
   assert_contains "$env" "PUBLIC_BASE_URL=http://127.0.0.1:18790"
   assert_contains "$env" "OIDC_ISSUER_URL=http://127.0.0.1:15556/dex"
-  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "127.0.0.1:18790:8790"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '18790:8790'"
   assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "http://127.0.0.1:18790/api/v1/auth/callback"
   sandbox_drop
 }

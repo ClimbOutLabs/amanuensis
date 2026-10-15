@@ -238,10 +238,10 @@ test_install_builds_then_starts_slots_then_the_instance() {
   slots=$(first_line_of "node $AMAN_HOME/bin/aman-sandbox.mjs --instance main")
   up=$(first_line_of "docker compose --project-name aman-main")
   if [ "$build" -lt "$slots" ] && [ "$slots" -lt "$up" ]; then t_pass; else t_fail "order: image build $build, slots $slots, instance $up"; fi
-  assert_contains "$OUT" "Sandbox check for instance main:"
+  assert_not_contains "$OUT" "Sandbox check for instance main:" "the check is quiet when the sandbox answers"
   assert_log_has "doctor sandbox --instance main"
   assert_flat_contains "$OUT" "Run code on, in the gVisor sandbox"
-  assert_flat_contains "$OUT" "aman doctor sandbox --fix"
+  assert_eq "$(printf '%s\n' "$OUT" | grep -c 'run_code')" 0 "the sandbox row is not printed twice"
   assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" slots
   sandbox_drop
 }
@@ -408,7 +408,8 @@ test_failed_verification_fails_the_install_with_the_repair() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_flat_contains "$ERR" "the sandbox of instance main is not ready. The fix: $AMAN_HOME/bin/aman doctor sandbox --fix"
+  assert_flat_contains "$OUT" "Run code not ready: $AMAN_HOME/bin/aman doctor sandbox --fix"
+  assert_flat_contains "$OUT" "Running, but the checks found a problem"
   assert_contains "$OUT" "Instance main" "the summary was still printed"
   sandbox_drop
 }

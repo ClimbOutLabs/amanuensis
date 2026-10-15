@@ -359,7 +359,7 @@ test_the_closing_block_and_warnings() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_flat_contains "$OUT" "Ready. Instance main is running."
-  assert_flat_contains "$OUT" "Then add a model in Settings > Models."
+  assert_flat_contains "$OUT" "Model not set: add one in Settings > Models"
   assert_contains "$OUT" "------------------------------------------------------------------------"
   assert_eq "$(printf '%s\n' "$OUT" | grep -c '^-\{72\}$')" 2 "a rule above and below"
   sandbox_drop

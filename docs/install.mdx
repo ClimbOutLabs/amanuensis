@@ -93,7 +93,9 @@ If the installer just installed Docker for you, it finishes the same run without
 
 ## First login
 
-When the installer finishes, it prints an address like `http://127.0.0.1:<port>` (`localhost` works too). Open it in your browser and sign in with the owner email and the password you set. The first run is local only: the app and its login server are reached over plain HTTP on loopback.
+When the installer finishes, it prints a short table with the addresses to open. By default Aman answers at every address this computer has on a private network (`127.0.0.1`, `localhost`, its LAN address, its Tailscale address, its host name, `<name>.local` and its MagicDNS name), and signing in works from each of them: open any one in a browser, from this computer or another device, and sign in with the owner email and the password you set. The sign-in service itself stays on this computer; the app passes its pages through under its own address.
+
+On a home network the connection is plain HTTP, so the password is not encrypted on the way; Tailscale encrypts it. A public address is never used over plain HTTP: for access from the internet use `--public-url`, `--login-url` and `--tls caddy`. `--address <name or private address>` (repeatable) adds a name this computer cannot work out itself, and `--local-only` keeps the app on `127.0.0.1` alone. If this computer gets a new address later, `aman doctor network` says so and `aman doctor network --fix` adds it.
 
 Your password is never stored anywhere. The installer hashes it once and keeps only the hash.
 
@@ -179,6 +181,8 @@ aman doctor --deep          # raises the probe timeout to 30 seconds
 aman doctor --json          # machine-readable output
 aman doctor sandbox         # sandbox: every slot's safety checks, then a real call through the app
 aman doctor sandbox --fix   # repair the sandbox: rebuild the image, reload AppArmor, recreate disks, restart the slots
+aman doctor network         # are all this computer's addresses listed for sign-in?
+aman doctor network --fix   # add the new ones and restart the instance
 ```
 
 Each check reports one of four states:

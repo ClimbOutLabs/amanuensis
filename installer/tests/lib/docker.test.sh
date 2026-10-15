@@ -118,7 +118,7 @@ test_group_member_without_relogin_uses_sg() {
   repo_commit_change "upgrade under sg"
   run_install upgrade
   assert_rc 0
-  assert_eq "$(grep -c 'sg docker -c env AMANUENSIS_HOME=.* doctor --json --local$' "$STUB_LOG")" 1 "the upgrade preflight runs the doctor with the run's access"
+  assert_eq "$(grep -c 'sg docker -c env AMANUENSIS_HOME=.* doctor --json --local --instance main$' "$STUB_LOG")" 1 "the upgrade preflight runs the doctor with the run's access, once per instance that had data"
   assert_eq "$(grep -c '^doctor ' "$STUB_LOG")" "$(grep -c 'sg docker -c env AMANUENSIS_HOME' "$STUB_LOG")" "every doctor call went through sg"
   sandbox_drop
 }

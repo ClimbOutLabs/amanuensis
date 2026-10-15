@@ -36,7 +36,4 @@ staticClients:
     name: Amanuensis
     secretEnv: OIDC_CLIENT_SECRET
     redirectURIs:
-      - @@PUBLIC_URL@@/api/v1/auth/callback
-@@IF_NETWORK@@      # Opened on this computer's own loopback name, the app signs in at that address.
-@@IF_NETWORK@@      - http://127.0.0.1:@@APP_PORT@@/api/v1/auth/callback
-@@IF_NETWORK@@      - http://localhost:@@APP_PORT@@/api/v1/auth/callback
+@@REDIRECT_URIS@@

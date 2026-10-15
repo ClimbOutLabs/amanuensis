@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Test double for `tailscale`: the address in $STUB_TS_IP and the MagicDNS name in $STUB_TS_NAME.
+case "$*" in
+  "ip -4") echo "${STUB_TS_IP:-}" ;;
+  "status --json") printf '{\n  "Self": {\n    "DNSName": "%s.",\n    "TailscaleIPs": ["%s"]\n  }\n}\n' "${STUB_TS_NAME:-}" "${STUB_TS_IP:-}" ;;
+  *) exit 1 ;;
+esac

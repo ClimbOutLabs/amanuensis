@@ -17,6 +17,7 @@ SANDBOX_NODE_MAJOR=22
 SANDBOX_NODE_MINOR=14
 SANDBOX_BUNDLE_IN_IMAGE=/app/packages/trueforge/dist/sandbox-slots.js
 SANDBOX_VERIFY_FAILED=0
+SANDBOX_FAILED_NAMES=''
 
 # The doctor is not on PATH, so every repair line names it by its path.
 sandbox_repair_command() { printf '%s doctor sandbox --fix' "$(ui_path "$(doctor_shim)")"; }
@@ -341,13 +342,15 @@ sandbox_docker_boot_ensure() {
 }
 
 # After the instance is up: every slot's attestation, then a real call through the app's own slot driver.
+# Quiet when the sandbox answers: the doctor summary already shows its row. A failure is told once, in the closing
+# table, with the one command that repairs it (and shows the check's output).
 sandbox_verify() {
   local name=$1
-  ui_line "Sandbox check for instance $name:"
-  if ! DOCTOR_TIMEOUT=300 run_doctor sandbox --instance "$name"; then
-    SANDBOX_VERIFY_FAILED=1
-    warn "the sandbox of instance $name is not ready. The fix: $(sandbox_repair_command)"
+  if DOCTOR_TIMEOUT=300 run_doctor sandbox --instance "$name" >/dev/null 2>&1; then
+    return 0
   fi
+  SANDBOX_VERIFY_FAILED=1
+  SANDBOX_FAILED_NAMES="$SANDBOX_FAILED_NAMES $name"
 }
 
 sandbox_finish() {

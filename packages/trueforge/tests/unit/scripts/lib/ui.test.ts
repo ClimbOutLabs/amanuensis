@@ -21,6 +21,7 @@ const PARAMS: Record<string, readonly string[]> = {
   ui_warn: ['text', 'next', 'details'],
   ui_fail: ['text', 'next', 'details'],
   ui_row: ['label', 'value'],
+  ui_check_row: ['state', 'label', 'value'],
   ui_summary: ['status', 'verdict'],
   ui_prompt_head: ['label', 'fallback'],
   ui_confirm: ['question', 'fallback'],

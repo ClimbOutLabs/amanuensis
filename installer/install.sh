@@ -4,7 +4,7 @@
 #        install.sh instance add|list|remove <name>
 #        install.sh instance add-user|remove-user|list-users
 #        install.sh instance demo-seed [--reset]
-#        install.sh instance refresh <name> [--new-address]
+#        install.sh instance refresh <name>
 #        install.sh backup [<name>]
 #        install.sh upgrade [--check] [--force]
 set -euo pipefail
@@ -77,7 +77,7 @@ OPT_FORCE=0
 OPT_PURGE=0
 OPT_DEMO=0
 OPT_LOCAL_ONLY=0
-OPT_NEW_ADDRESS=0
+OPT_ADDRESSES=
 OPT_RESET=0
 OPT_NAME=
 OPT_INSTANCE=
@@ -113,7 +113,7 @@ Amanuensis installer
   install.sh instance remove-user <name> [--instance NAME]
   install.sh instance list-users [--instance NAME]
   install.sh instance demo-seed [--reset] [--instance NAME] [--demo-user ADDRESS]
-  install.sh instance refresh <name> [--new-address]
+  install.sh instance refresh <name>
   install.sh backup [<name>]
   install.sh upgrade [--check] [--force]
 
@@ -139,7 +139,8 @@ Options
   --demo                mark the instance as a demo (DEMO_MODE=true) and seed its synthetic demo world once it is healthy
   --demo-user ADDRESS   the user the demo world is seeded for (default: the owner)
   --reset               with instance demo-seed, remove the synthetic demo records instead of seeding
-  --local-only          open Aman only at 127.0.0.1 on this computer (by default it also answers at this computer's address on the local network)
+  --local-only          open Aman only at 127.0.0.1 on this computer (by default it answers at every address this computer has on a private network, and at its names)
+  --address HOST        also answer at this name or private address; repeat for more (for example --address spark.local)
   --public-url URL      https address of Aman behind your own reverse proxy; the ports then stay on 127.0.0.1
   --login-url URL       https address for the sign-in service behind the same proxy
   --port N              port on this computer for the app
@@ -196,13 +197,12 @@ parse_args() {
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
-      --new-address) OPT_NEW_ADDRESS=1 ;;
-      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --token-factory-model | --token-factory-daily-cap | --demo-user)
+      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --token-factory-model | --token-factory-daily-cap | --demo-user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --token-factory-model=* | --token-factory-daily-cap=* | --demo-user=*)
+      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --token-factory-model=* | --token-factory-daily-cap=* | --demo-user=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -227,6 +227,7 @@ parse_args() {
 }
 
 set_option() {
+  local problem
   case "$1" in
     --home) AMAN_HOME=$2 ;;
     --name) OPT_NAME=$2 ;;
@@ -240,6 +241,11 @@ set_option() {
     --confirm-name) OPT_CONFIRM_NAME=$2 ;;
     --tls) OPT_TLS=$2 ;;
     --public-ip) OPT_PUBLIC_IP=$2 ;;
+    --address)
+      problem=$(address_problem "$2")
+      [ -z "$problem" ] || usage_die "$problem"
+      OPT_ADDRESSES="${OPT_ADDRESSES:+$OPT_ADDRESSES }$2"
+      ;;
     --token-factory-model) OPT_TF_MODEL=$2 ;;
     --token-factory-daily-cap) OPT_TF_CAP=$2 ;;
     --demo-user) OPT_DEMO_USER=$2 ;;
@@ -263,9 +269,6 @@ check_demo_options() {
   fi
   if [ "$OPT_RESET" = 1 ] && [ "$seeding" != 1 ]; then
     usage_die "--reset applies to instance demo-seed"
-  fi
-  if [ "$OPT_NEW_ADDRESS" = 1 ] && [ "$SUBCOMMAND" != refresh ]; then
-    usage_die "--new-address applies to instance refresh"
   fi
   if [ "$OPT_LOCAL_ONLY" = 1 ] && [ -n "$OPT_PUBLIC_URL" ]; then
     usage_die "--local-only and --public-url are opposites; pick one."

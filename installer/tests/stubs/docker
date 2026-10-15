@@ -242,6 +242,11 @@ case "$cmd" in
         printf '{"target":"/backup","manifest":"manifest.json","files":1,"bytes":1}\n'
         exit 0
         ;;
+      *" test -f "*)
+        # The probe for a database file; a data volume listed in $S/no_db has none.
+        [ -f "$S/no_db/$vol" ] && exit 1
+        exit 0
+        ;;
       *" tar "*)
         if [ -d "$S/scratchfs/$vol" ]; then
           tar -C "$S/scratchfs/$vol" -cf - .

@@ -19,6 +19,7 @@ PLAN_UPGRADE_NOTE=
 PLAN_FS=$'\037'
 PLAN_RS=$'\036'
 INSTALL_T0=0
+DOCTOR_PROBLEMS=0
 
 # Results of the checks on this computer print as they are made; a blocker also stops the run before any question.
 check_ok() { ui_ok "$1"; }
@@ -241,9 +242,9 @@ print_plan() {
     fi
   fi
   if sandbox_needed; then
-    ui_hint "Run code (Python, shell, files) runs in the gVisor sandbox; attachment extraction stays off in this version."
+    ui_hint "Run code (Python, shell, files) runs in the gVisor sandbox."
   else
-    ui_hint "Run code and attachment extraction stay off in this version."
+    ui_hint "Run code stays off (installed with --no-sandbox)."
   fi
 }
 
@@ -368,8 +369,8 @@ plan_build() {
     done
   fi
   if need_new_instance; then
-    if [ "$I_NETWORK" = 1 ]; then
-      plan_add todo "Create instance $I_NAME for $I_EMAIL" "The app opens at $I_PUBLIC_URL, and at http://127.0.0.1:$I_PORT on this computer; the sign-in service uses port $I_LOGIN_PORT. Both ports are open to your network."
+    if [ -n "$I_ORIGINS" ]; then
+      plan_instance_with_addresses
     else
       plan_add todo "Create instance $I_NAME for $I_EMAIL" "The app opens at $I_PUBLIC_URL (port $I_PORT on this computer); the sign-in service uses port $I_LOGIN_PORT."
     fi
@@ -512,7 +513,7 @@ install_execute() {
   ui_phase "Checking the result" 6 6
   if [ -x "$(doctor_shim)" ]; then
     # Includes the model and the public https checks, which wait on the network.
-    DOCTOR_TIMEOUT=180 run_doctor --summary || warn "The doctor reported problems; each one says how to fix it. Run: $(doctor_shim) doctor"
+    DOCTOR_TIMEOUT=180 run_doctor --summary || DOCTOR_PROBLEMS=1
     for name in $(reg_names); do
       if instance_sandbox_wanted "$name"; then sandbox_verify "$name"; fi
     done
@@ -523,12 +524,28 @@ install_execute() {
   [ "$DEMO_FAILED" = 0 ] || exit 1
 }
 
+# The plan row of an instance that answers at every address of this computer.
+plan_instance_with_addresses() {
+  local hosts
+  hosts=$(printf '%s' "$I_ORIGINS" | sed "s|http://||g; s|:$I_PORT||g; s|,|, |g")
+  if [ -n "${I_PUBLIC_ADDRESSES// /}" ]; then
+    plan_add todo "Create instance $I_NAME for $I_EMAIL" \
+      "It opens on port $I_PORT at: $hosts. Sign-in works from each, and the port is open to your network. The sign-in service stays on this computer (port $I_LOGIN_PORT)." \
+      "This computer's public address (${I_PUBLIC_ADDRESSES% }) is not used: signing in over plain http across the internet is not safe. For the internet use --tls caddy."
+  else
+    plan_add todo "Create instance $I_NAME for $I_EMAIL" \
+      "It opens on port $I_PORT at: $hosts. Sign-in works from each, and the port is open to your network. The sign-in service stays on this computer (port $I_LOGIN_PORT)."
+  fi
+}
+
 # The closing block of a finished install: one verdict, then each instance and what to do next.
 print_install_summary() {
   local names count
   names=$(reg_names)
   count=$(printf '%s\n' "$names" | wc -l | tr -d ' ')
-  if [ "$count" = 1 ]; then
+  if [ "$DOCTOR_PROBLEMS" = 1 ] || [ "$SANDBOX_VERIFY_FAILED" = 1 ]; then
+    ui_summary warn "Running, but the checks found a problem (listed above)."
+  elif [ "$count" = 1 ]; then
     ui_summary ok "Ready. Instance $names is running."
   else
     ui_summary ok "Ready. Your instances are running."
@@ -537,5 +554,6 @@ print_install_summary() {
   for name in $names; do
     print_instance_summary "$name"
   done
+  print_upgrade_line
   ui_summary_end "$(_ui_elapsed_since "$INSTALL_T0")"
 }

@@ -92,7 +92,7 @@ machine_running() {
 
 # Rewrites compose.yaml and dex.yaml from the registry (owner and added users) and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on edge_on login_host members members_on=0 network_on=0 bind=127.0.0.1:
+  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on edge_on login_host members members_on=0 bind=127.0.0.1: origins redirects
   dir=$(instance_dir "$name")
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
@@ -101,10 +101,13 @@ instance_render() {
   email=$(reg_get "$name" owner_email)
   client_id=$(reg_get "$name" client_id)
   if instance_sandbox_wanted "$name"; then sandbox_on=1; else sandbox_on=0; fi
-  # An instance opened on the network publishes its ports on every interface; any other stays on 127.0.0.1.
-  if [ "$(reg_get "$name" network)" = 1 ]; then
-    network_on=1
+  # An instance opened on the network publishes the app on every interface; sign-in stays on 127.0.0.1 and reaches
+  # other devices through the app. Any other instance stays on 127.0.0.1 entirely.
+  origins=$(reg_get "$name" origins)
+  redirects="      - $public_url/api/v1/auth/callback"
+  if [ -n "$origins" ]; then
     bind=
+    redirects=$(printf '%s\n' "$origins" | tr ',' '\n' | sed 's|^|      - |; s|$|/api/v1/auth/callback|')
   fi
   edge_on=0
   login_host=
@@ -122,7 +125,7 @@ instance_render() {
   if [ -n "$members" ]; then members_on=1; fi
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
     "ISSUER=$login_url/dex" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
-    "OWNER_EMAIL=$email" "CLIENT_ID=$client_id" "PUBLIC_URL=$public_url" "APP_PORT=$app_port" "IF_NETWORK=$network_on" \
+    "OWNER_EMAIL=$email" "CLIENT_ID=$client_id" "REDIRECT_URIS=$redirects" \
     "IF_MEMBERS=$members_on" "MEMBER_USERS=$members" | write_if_changed "$dir/dex.yaml" 644 || true
 }
 
@@ -203,7 +206,7 @@ install_doctor_shim() {
   ensure_private_dir "$AMAN_HOME/bin"
   ensure_private_dir "$AMAN_HOME/lib"
   write_if_changed "$AMAN_HOME/bin/aman" 755 <"$src" || true
-  for lib in ui diagnose; do
+  for lib in ui diagnose network; do
     write_if_changed "$AMAN_HOME/lib/$lib.sh" 644 <"$INSTALLER_DIR/lib/$lib.sh" || true
   done
   record_source_checkout
@@ -267,9 +270,17 @@ instance_collect() {
   elif [ -n "$I_LOGIN_URL" ]; then
     usage_die "--login-url needs --public-url."
   fi
+  instance_collect_addresses
   instance_collect_tls
   instance_collect_token_factory
   ui_ok "Instance $I_NAME for $I_EMAIL"
+}
+
+# --address adds a name or address Aman should also answer at; each is checked as it is read, like every other flag.
+instance_collect_addresses() {
+  if [ -z "$OPT_ADDRESSES" ]; then return 0; fi
+  [ -z "$I_PUBLIC_URL" ] || usage_die "--address applies to an instance opened on your network; with --public-url the public address is the only one."
+  [ "$OPT_LOCAL_ONLY" != 1 ] || usage_die "--address and --local-only are opposites; pick one."
 }
 
 # --tls caddy serves the two public origins on 443 under DNS names Let's Encrypt can issue for.
@@ -287,7 +298,7 @@ instance_collect_tls() {
 
 # Picks ports and derives URLs. Read-only: nothing is written, so the plan can show the result.
 instance_derive() {
-  local reserved_app reserved_login all_reserved net_ip
+  local reserved_app reserved_login all_reserved
   reserved_app=$(reg_all app_port)
   reserved_login=$(reg_all login_port)
   all_reserved="$reserved_app $reserved_login"
@@ -303,41 +314,33 @@ instance_derive() {
   else
     I_LOGIN_PORT=$(pick_port 5556 "$all_reserved $I_PORT") || die "no free port found on this computer for sign-in near 5556"
   fi
-  I_NETWORK=0
+  I_ORIGINS=
+  I_PUBLIC_ADDRESSES=
   if [ -z "$I_PUBLIC_URL" ]; then
-    net_ip=
-    if [ "$OPT_LOCAL_ONLY" != 1 ]; then net_ip=$(network_primary_ip); fi
-    if [ -n "$net_ip" ] && private_ipv4 "$net_ip"; then
-      # Open on this computer's own address too, so other devices on the network can use it.
-      I_NETWORK=1
-      I_PUBLIC_URL="http://$net_ip:$I_PORT"
-      I_LOGIN_URL="http://$net_ip:$I_LOGIN_PORT"
-    else
-      if [ -n "$net_ip" ]; then
-        warn "This computer's address ($net_ip) is a public one, so Aman opens only on this computer. To reach it from elsewhere, set up HTTPS with --public-url."
-      fi
-      I_PUBLIC_URL="http://127.0.0.1:$I_PORT"
-      I_LOGIN_URL="http://127.0.0.1:$I_LOGIN_PORT"
+    # The sign-in service is only ever reached on this computer: other devices go through the app.
+    I_PUBLIC_URL="http://127.0.0.1:$I_PORT"
+    I_LOGIN_URL="http://127.0.0.1:$I_LOGIN_PORT"
+    if [ "$OPT_LOCAL_ONLY" != 1 ]; then
+      # shellcheck disable=SC2086 # OPT_ADDRESSES is a list of checked hosts
+      I_ORIGINS=$(network_origin_list "$I_PORT" $OPT_ADDRESSES)
+      I_PUBLIC_ADDRESSES=$(network_public_addresses | tr '\n' ' ')
     fi
   fi
   I_ISSUER="$I_LOGIN_URL/dex"
 }
 
-# An http issuer is only allowed on this computer or a private network; anything else must be https.
+# An http issuer is only allowed on this computer; anything else must be https.
 issuer_check() {
   case "$1" in
     https://*) ;;
-    *)
-      is_loopback_origin "${1%/dex}" || private_host "$(origin_host "${1%/dex}")" ||
-        die "A sign-in address without https is only allowed on this computer or a private network; use an https address."
-      ;;
+    *) is_loopback_origin "${1%/dex}" || die "A sign-in address without https is only allowed on this computer; use an https address." ;;
   esac
 }
 
 # ---- create / list / remove -------------------------------------------------------------------
 
 instance_create() {
-  local dir cookie client_id client_secret api_key hash created tf_cap_on=0 demo_on=0
+  local dir cookie client_id client_secret api_key hash created tf_cap_on=0 demo_on=0 network_on=0
   dir=$(instance_dir "$I_NAME")
   if reg_exists "$I_NAME"; then
     say "Instance $I_NAME already exists; making sure it is running"
@@ -347,6 +350,7 @@ instance_create() {
     return
   fi
   issuer_check "$I_ISSUER"
+  if [ -n "$I_ORIGINS" ]; then network_on=1; fi
   if [ "$I_SANDBOX" = slots ]; then sandbox_ensure "$I_NAME"; fi
   remove_instance_dir "$I_NAME"
   ensure_private_dir "$dir"
@@ -361,7 +365,7 @@ instance_create() {
   if [ -n "$I_TF_CAP" ]; then tf_cap_on=1; fi
   if [ "$OPT_DEMO" = 1 ]; then demo_on=1; fi
   render_template "$TEMPLATES_DIR/instance/env.tpl" \
-    "PUBLIC_URL=$I_PUBLIC_URL" "COOKIE_SUFFIX=$cookie" "ISSUER=$I_ISSUER" "CLIENT_ID=$client_id" \
+    "PUBLIC_URL=$I_PUBLIC_URL" "IF_NETWORK=$network_on" "ORIGINS=$I_ORIGINS" "COOKIE_SUFFIX=$cookie" "ISSUER=$I_ISSUER" "CLIENT_ID=$client_id" \
     "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "API_KEY=$api_key" \
     "IF_TOKEN_FACTORY=$I_TF" "TF_KEY=$AMAN_TF_KEY" "TF_MODEL=$I_TF_MODEL" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$I_TF_CAP" "IF_DEMO=$demo_on" |
     write_if_changed "$dir/.env" 600 || true
@@ -370,7 +374,7 @@ instance_create() {
   created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   reg_write "$I_NAME" "name=$I_NAME" "app_port=$I_PORT" "login_port=$I_LOGIN_PORT" "public_url=$I_PUBLIC_URL" \
     "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
-    "healthy=0" "network=$I_NETWORK" "sandbox=$I_SANDBOX" "tls=$I_TLS" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
+    "healthy=0" "origins=$I_ORIGINS" "extra_hosts=$OPT_ADDRESSES" "sandbox=$I_SANDBOX" "tls=$I_TLS" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
     "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then
@@ -403,55 +407,67 @@ read_password_first() {
   fi
 }
 
-# Rows and next steps of one instance, under the closing block's verdict.
+# The closing table of one instance: what to open, who signs in, and where the model, sandbox, data and backups stand.
 print_instance_summary() {
-  local name=$1 url count open_line
+  local name=$1 url count origin first=1 origins
   url=$(reg_get "$name" public_url)
+  origins=$(reg_get "$name" origins)
   count=$(reg_names | wc -l | tr -d ' ')
   if [ "$count" -gt 1 ]; then ui_heading "Instance $name"; fi
-  if [ "$(reg_get "$name" network)" = 1 ]; then
-    ui_row "Open" "$url, from this computer and from other devices on your network or Tailscale"
-    ui_row "Or" "http://127.0.0.1:$(reg_get "$name" app_port), on this computer only"
-  else
-    ui_row "Open" "$url"
-  fi
-  ui_row "Sign in" "$(reg_get "$name" owner_email), with the password you chose"
-  ui_row "Service" "Sign-in service (used by the app automatically, not a page to open): $(reg_get "$name" login_url)/dex"
-  ui_row "Data" "Docker volumes aman_${name}_data and aman_${name}_dex"
-  if edge_wanted "$name"; then
-    ui_row "HTTPS" "Caddy on this computer serves $url and $(reg_get "$name" login_url), with certificates from Let's Encrypt renewed by Caddy"
-  fi
+  for origin in $(printf '%s\n' "${origins:-$url}" | tr ',' ' '); do
+    if [ "$first" = 1 ]; then ui_check_row ok "Open" "$origin"; else ui_check_more "$origin"; fi
+    first=0
+  done
+  ui_check_row ok "Sign in" "$(reg_get "$name" owner_email)"
   print_model_row "$name"
-  if demo_env_on "$name"; then
-    ui_row "Demo" "on (DEMO_MODE=true). Reseed: $(demo_seed_command "$name") [--reset]"
-  fi
   if instance_sandbox_wanted "$name"; then
-    ui_row "Run code" "on, in the gVisor sandbox (Settings $S_PROMPT Sandbox shows its status). Repair: $(sandbox_repair_command). Attachment extraction is off in this version."
+    case "$SANDBOX_FAILED_NAMES " in
+      *" $name "*) ui_check_row warn "Run code" "not ready: $(sandbox_repair_command)" ;;
+      *) ui_check_row ok "Run code" "on, in the gVisor sandbox" ;;
+    esac
   else
-    ui_row "Run code" "off, and so is attachment extraction (installed with --no-sandbox)"
+    ui_check_row skip "Run code" "off (installed with --no-sandbox)"
   fi
-  ui_heading "Next"
-  open_line="Open $url in your browser."
-  if [ "$(reg_get "$name" network)" != 1 ] && is_loopback_origin "$url"; then open_line="$open_line Use 127.0.0.1, not localhost."; fi
-  if [ "$(reg_get "$name" token_factory)" != 1 ]; then open_line="$open_line Then add a model in Settings $S_PROMPT Models."; fi
-  ui_line "$open_line"
-  print_model_next "$name"
+  ui_check_row ok "Data" "Docker volumes aman_${name}_data and aman_${name}_dex"
+  print_backups_row
+  if edge_wanted "$name"; then
+    ui_check_row ok "HTTPS" "Caddy on this computer, certificates from Let's Encrypt"
+  fi
+  if demo_env_on "$name"; then
+    ui_check_row ok "Demo" "on. Reseed: $(demo_seed_command "$name") [--reset]"
+  fi
   if edge_wanted "$name"; then
     edge_print_firewall_hint
-  elif [ "$(reg_get "$name" network)" = 1 ]; then
-    ui_line "Sign-in from other devices is not encrypted on a home network; Tailscale encrypts it."
-  elif is_loopback_origin "$url"; then
-    ui_line "To reach it from other devices later, see: install.sh --print-proxy-requirements"
-  else
+  elif [ -n "$origins" ]; then
+    ui_line "On your home network sign-in is not encrypted; Tailscale encrypts it."
+  elif ! is_loopback_origin "$url"; then
     print_proxy_requirements "$url" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_url)" "$(reg_get "$name" login_port)"
   fi
-  ui_line "Back up: install.sh backup (kept in $(ui_path "$BACKUPS_DIR")). Upgrade after pulling new source: install.sh upgrade"
+}
+
+# How many backups there are, or how to make the first one.
+print_backups_row() {
+  local count=0
+  if [ -d "$BACKUPS_DIR" ]; then count=$(find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' '); fi
+  if [ "$count" -gt 0 ]; then
+    ui_check_row ok "Backups" "$count kept in $(ui_path "$BACKUPS_DIR")"
+  else
+    ui_check_row todo "Backups" "none yet. Make one: $(ui_path "$INSTALLER_DIR")/install.sh backup"
+  fi
+}
+
+# The last line of a finished run, only when the installer it names is there.
+print_upgrade_line() {
+  if [ -f "$INSTALLER_DIR/install.sh" ]; then
+    ui_line "Upgrade later: $(ui_path "$INSTALLER_DIR")/install.sh upgrade"
+  fi
 }
 
 # The framed closing block of `instance add`.
 print_instance_block() {
   ui_summary ok "Instance $1 is ready."
   print_instance_summary "$1"
+  print_upgrade_line
   ui_summary_end
 }
 
@@ -469,29 +485,28 @@ load_installed_release() {
   docker_image_exists "$REL_APP_TAG" || die "image $REL_APP_TAG is missing; run install.sh to rebuild it"
 }
 
-# Renders an instance again from its record and restarts it, so a change in the record (or in this computer's network
-# address, with --new-address) takes effect. The data and the secrets stay as they are.
+# Renders an instance again from its record and restarts it. For an instance opened on the network the addresses are read
+# again first, so a new address of this computer works for sign-in. Data and secrets stay as they are.
 cmd_instance_refresh() {
-  local name=${OPT_NAME:-} ip app_port login_port env
-  [ -n "$name" ] || usage_die "usage: install.sh instance refresh <name> [--new-address]"
+  local name=${OPT_NAME:-} origins port env extras
+  [ -n "$name" ] || usage_die "usage: install.sh instance refresh <name>"
   valid_name "$name" || usage_die "$(name_problem "$name")"
   reg_exists "$name" || die "Instance $name does not exist."
   require_installed
   docker_prepare
   lock_acquire
   load_installed_release
-  if [ "$OPT_NEW_ADDRESS" = 1 ]; then
-    [ "$(reg_get "$name" network)" = 1 ] || die "Instance $name is open on this computer only, so it has no network address to update."
-    ip=$(network_primary_ip)
-    private_ipv4 "$ip" || die "This computer has no private network address right now. Connect it to your network and run this again."
-    app_port=$(reg_get "$name" app_port)
-    login_port=$(reg_get "$name" login_port)
+  origins=$(reg_get "$name" origins)
+  if [ -n "$origins" ]; then
+    port=$(reg_get "$name" app_port)
     env="$(instance_dir "$name")/.env"
-    reg_set "$name" public_url "http://$ip:$app_port"
-    reg_set "$name" login_url "http://$ip:$login_port"
-    env_managed_set "$env" PUBLIC_BASE_URL "http://$ip:$app_port"
-    env_managed_set "$env" OIDC_ISSUER_URL "http://$ip:$login_port/dex"
-    log_event "instance $name moved to $ip"
+    # The extra names given at install stay: they are the part of the list this computer cannot work out again.
+    extras=$(reg_get "$name" extra_hosts)
+    # shellcheck disable=SC2086 # the extras are checked hosts without spaces
+    origins=$(network_origin_list "$port" $extras)
+    reg_set "$name" origins "$origins"
+    env_managed_set "$env" ALLOWED_ORIGINS "$origins"
+    log_event "instance $name addresses refreshed"
   fi
   instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   instance_up "$name" recreate
@@ -524,7 +539,7 @@ cmd_instance_add() {
   instance_collect "$OPT_NAME"
   instance_derive
   if [ "$DRY_RUN" = 1 ]; then
-    say "Would create instance $I_NAME for $I_EMAIL: app at $I_PUBLIC_URL (port $I_PORT on this computer), sign-in service port $I_LOGIN_PORT. Nothing was changed."
+    say "Would create instance $I_NAME for $I_EMAIL: app at ${I_ORIGINS:-$I_PUBLIC_URL} (port $I_PORT on this computer), sign-in service port $I_LOGIN_PORT. Nothing was changed."
     return 0
   fi
   [ -n "$AMAN_PASSWORD" ] || ask_password AMAN_PASSWORD

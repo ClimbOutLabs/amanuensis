@@ -208,6 +208,31 @@ ui_row() { # label value
   _ui_block "  $(printf '%-8s' "$1")  " 12 "$2"
 }
 
+# A row of the closing table: a marker (ok, todo, warn or skip for something left off), the label and the value.
+ui_check_row() { # ok|todo|warn|skip label value
+  local color=32 marker=$S_OK
+  case "$1" in
+    skip)
+      color=2
+      marker=$S_SKIP
+      ;;
+    todo)
+      color=36
+      marker=$S_PROMPT
+      ;;
+    warn)
+      color=33
+      marker=$S_WARN
+      ;;
+  esac
+  _ui_block "  $(_ui_s "$color" "$marker") $(printf '%-8s' "$2")  " 14 "$3"
+}
+
+# Another value under the label of the row above.
+ui_check_more() { # value
+  _ui_block "$(printf '%14s' '')" 14 "$1"
+}
+
 ui_rule() {
   local line
   line=$(printf '%*s' "$UI_WIDTH" '')

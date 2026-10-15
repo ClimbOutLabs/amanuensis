@@ -37,9 +37,8 @@ test_key_from_stdin_reaches_only_the_env() {
   assert_mode "$AMAN_HOME/instances/main/.env" 600
   assert_key_only_in_env
   assert_tree_lacks "$AMAN_HOME" "$SENTINEL_PASSWORD"
-  assert_flat_contains "$OUT" "Token Factory, $DEFAULT_MODEL, is the default model"
-  assert_contains "$OUT" "doctor --instance main --only model"
-  assert_not_contains "$OUT" "Then add a model in Settings" "the generic model hint is replaced"
+  assert_flat_contains "$OUT" "Model Token Factory, $DEFAULT_MODEL"
+  assert_not_contains "$OUT" "not set: add one in Settings" "a model is set"
   sandbox_drop
 }
 
@@ -55,7 +54,7 @@ test_model_and_cap_flags() {
   managed=${env%%# <<< end of managed block*}
   assert_contains "$managed" "NEBIUS_API_KEY=$TF_KEY" "inside the managed block"
   assert_contains "$managed" "TOKEN_FACTORY_DAILY_TOKEN_CAP=250000"
-  assert_flat_contains "$OUT" "Daily limit: 250000 tokens per day"
+  assert_flat_contains "$OUT" "limit 250000 tokens a day"
   assert_key_only_in_env
   sandbox_drop
 }
@@ -106,7 +105,7 @@ test_key_in_the_callers_environment_is_ignored() {
   assert_rc 0
   assert_eq "$(env_value main NEBIUS_API_KEY)" "" "no key was written"
   assert_tree_lacks "$AMAN_HOME" "$TF_KEY"
-  assert_flat_contains "$(cat "$SB/out")" "add a model in Settings"
+  assert_flat_contains "$(cat "$SB/out")" "not set: add one in Settings"
   sandbox_drop
 }
 
@@ -123,7 +122,7 @@ Repeat the password=>$SENTINEL_PASSWORD"
   assert_not_contains "$OUT" "Model server address"
   assert_eq "$(env_value main NEBIUS_API_KEY)" ""
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/.env")" "TOKEN_FACTORY"
-  assert_flat_contains "$OUT" "Then add a model in Settings > Models."
+  assert_flat_contains "$OUT" "Model not set: add one in Settings > Models"
   sandbox_drop
 }
 

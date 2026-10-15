@@ -33,7 +33,7 @@ test_demo_install_turns_demo_mode_on_and_seeds_the_owner() {
   assert_contains "$(seed_runs)" "-T app aman demo-seed --user $OWNER"
   assert_contains "$(cat "$STUB_LOG")" "--project-name aman-main" "run through the instance project"
   assert_not_contains "$(seed_runs)" "--reset"
-  assert_flat_contains "$OUT" "Demo on (DEMO_MODE=true)"
+  assert_flat_contains "$OUT" "Demo on. Reseed:"
   assert_flat_contains "$OUT" "instance demo-seed --instance main"
   local up_line seed_line
   up_line=$(grep -n 'up -d --wait' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
@@ -233,7 +233,7 @@ test_demo_install_summary_survives_a_rerun() {
   rm -f "$SB_STATE/up/aman-main"
   run_install --yes
   assert_rc 0
-  assert_flat_contains "$OUT" "Demo on (DEMO_MODE=true)"
+  assert_flat_contains "$OUT" "Demo on. Reseed:"
   assert_eq "$(seed_count)" 1 "a plain re-run does not seed"
   sandbox_drop
 }

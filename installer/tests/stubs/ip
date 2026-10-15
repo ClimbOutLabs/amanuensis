@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
-# Test double for `ip`: answers only the route lookup the installer uses to find this computer's network address.
+# Test double for `ip`: lists the IPv4 addresses in $STUB_ADDRS (space separated, each ADDRESS or INTERFACE:ADDRESS)
+# the way `ip -4 -o addr show` does.
 case "$*" in
-  *"route get"*)
-    [ -n "${STUB_PRIMARY_IP:-}" ] || exit 1
-    echo "1.1.1.1 via 192.168.1.1 dev eth0 src $STUB_PRIMARY_IP uid 0"
+  *"addr show"*)
+    n=0
+    for addr in ${STUB_ADDRS:-}; do
+      n=$((n + 1))
+      iface=eth0
+      case "$addr" in *:*)
+        iface=${addr%%:*}
+        addr=${addr#*:}
+        ;;
+      esac
+      echo "$((n + 1)): $iface    inet $addr/24 brd 255.255.255.255 scope global $iface"
+    done
     ;;
   *) exit 1 ;;
 esac

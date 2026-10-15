@@ -139,6 +139,27 @@ describe('document and exit codes', () => {
     assert.match(verbose.stdout, /Docker 27\.1\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
   });
 
+  it('--summary is one line when everything passed, with the number of checks and nothing else', () => {
+    make();
+    const result = world.run(['--summary']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout.trim(), /^\S{1,3} All \d+ checks passed$/);
+    assert.doesNotMatch(result.stdout, /Instance main|This computer|Full report/);
+  });
+
+  it('--summary lists only the problems, once, and counts the checks that passed', () => {
+    make();
+    world.df(1 * GIB_KB);
+    const result = world.run(['--summary']);
+    assert.equal(result.code, 1);
+    const flat = result.stdout.replace(/\s+/g, ' ');
+    assert.match(flat, /This computer x Only 1\.0 GB is free for Docker data/);
+    assert.match(flat, /\d+ other checks passed\. Full report: aman doctor/);
+    assert.doesNotMatch(flat, /All \d+ checks passed/);
+    assert.doesNotMatch(flat, /Docker 27\.1\.1 is running/);
+    assert.doesNotMatch(flat, /Instance main/);
+  });
+
   it('keeps color out of a report that is not on a terminal, and uses it when forced', () => {
     make();
     world.df(5 * GIB_KB);
@@ -1191,38 +1212,60 @@ describe('network address check', () => {
     assert.equal(find(result.doc.instances.main, 'network'), undefined);
   });
 
-  it('is ok while the address still belongs to this computer, and calls the open ports intended', () => {
+  it('is ok while every address of this computer is listed, and calls the open app port intended', () => {
     make();
     world.network('main');
-    world.set('port_c1', { out: '8790/tcp -> 0.0.0.0:8791\n' });
+    world.set('port_c1', { out: '8790/tcp -> 0.0.0.0:8791\n5556/tcp -> 127.0.0.1:5556\n' });
     const result = world.json();
     assert.equal(find(result.doc.instances.main, 'network').state, 'ok');
-    assert.match(find(result.doc.instances.main, 'network').detail, /http:\/\/192\.168\.1\.20:8791/);
+    assert.match(find(result.doc.instances.main, 'network').detail, /3 addresses/);
     assert.equal(find(result.doc.instances.main, 'ports').state, 'ok');
     assert.match(find(result.doc.instances.main, 'ports').detail, /on purpose/);
   });
 
-  it('warns, naming the fix, when the address went to another machine', () => {
+  it('fails when the sign-in port is open to the network, even for an instance opened on the network', () => {
     make();
-    world.network('main', { addresses: ['127.0.0.1', '192.168.1.77'], primary: '192.168.1.77' });
+    world.network('main');
+    world.set('port_c1', { out: '8790/tcp -> 0.0.0.0:8791\n5556/tcp -> 0.0.0.0:5556\n' });
+    assert.equal(find(world.json().doc.instances.main, 'ports').state, 'fail');
+  });
+
+  it('counts a name given at install as listed', () => {
+    make();
+    world.network('main', {
+      origins: 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://nas.local:8791',
+      extraHosts: 'nas.local',
+    });
+    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
+  });
+
+  it('warns, naming the fix, when this computer has an address the instance was not set up for', () => {
+    make();
+    world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', '100.101.102.103'] });
     const check = find(world.json().doc.instances.main, 'network');
     assert.equal(check.state, 'warn');
-    assert.match(check.detail, /192\.168\.1\.20 is no longer an address of this computer \(it is 192\.168\.1\.77 now\)/);
+    assert.match(check.detail, /not set up for these addresses of this computer: 100\.101\.102\.103/);
     assert.match(check.fix, /aman doctor network --fix/);
     assert.doesNotMatch(check.fix, /\.env|compose\.yaml|docker /);
   });
 
-  it('--fix moves the instance to the current address through the installer, after a yes', () => {
+  it('does not offer a public address of this computer', () => {
+    make();
+    world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', '203.0.113.9'] });
+    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
+  });
+
+  it('--fix refreshes the instance through the installer, after a yes', () => {
     make();
     const repo = world.sandbox();
     world.installerStub(repo);
-    world.network('main', { addresses: ['127.0.0.1', '192.168.1.77'], primary: '192.168.1.77' });
+    world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', '100.101.102.103'] });
     const result = world.shim(['doctor', 'network', '--fix', '--yes']);
     assert.equal(result.code, 0, result.stdout + result.stderr);
-    assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main --new-address`));
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main`));
   });
 
-  it('--fix does nothing when the address is right', () => {
+  it('--fix does nothing when every address is listed', () => {
     make();
     const repo = world.sandbox();
     world.installerStub(repo);
@@ -1230,7 +1273,7 @@ describe('network address check', () => {
     const result = world.shim(['doctor', 'network', '--fix', '--yes']);
     assert.equal(result.code, 0);
     assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
-    assert.match(result.stdout, /an address of this computer/);
+    assert.match(result.stdout, /3 addresses/);
   });
 
   it('says plainly that an instance on this computer only has no network address', () => {

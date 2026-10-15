@@ -136,7 +136,7 @@ Password for the owner account=><EOF>"
 }
 
 test_prompts_and_summary_use_plain_words() {
-  t_begin "prompts and the summary avoid jargon and do not present the sign-in service as a page to open"
+  t_begin "prompts and the summary avoid jargon and say nothing about the sign-in service as a page"
   sandbox_new
   run_install_tty "Instance name=>
 Your email=>owner@example.invalid
@@ -149,17 +149,17 @@ Repeat the password=>$SENTINEL_PASSWORD"
   assert_contains "$OUT" "Password for the owner account (8 to 72 characters)"
   assert_not_contains "$OUT" "Address you will use" "no question about the address is asked"
   assert_not_contains "$(printf '%s' "$OUT" | tr '[:upper:]' '[:lower:]')" "loopback"
-  assert_flat_contains "$OUT" "Sign-in service (used by the app automatically, not a page to open)"
+  assert_not_contains "$OUT" "not a page to open" "the sign-in service is not presented at all"
   assert_not_contains "$OUT" "  Login:"
-  assert_flat_contains "$OUT" "port 8791 on this computer"
+  assert_flat_contains "$OUT" "on port 8791 at: 127.0.0.1, localhost"
   sandbox_drop
 }
 
 test_model_hint() {
-  t_begin "a fresh install ends with one line saying to add a model in Settings, and names no model product"
+  t_begin "a fresh install shows the model as not set, says where to add one, and names no model product"
   sandbox_new
   install_machine
-  assert_flat_contains "$OUT" "Then add a model in Settings > Models."
+  assert_flat_contains "$OUT" "Model not set: add one in Settings > Models"
   assert_not_contains "$OUT" "must listen on more than 127.0.0.1" "models are set up in the app, not here"
   local product
   for product in ollama llama lmstudio vllm openai; do
