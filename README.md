@@ -94,7 +94,7 @@ pnpm dev:login   # second terminal; prints the OIDC_* lines for .env
 pnpm standalone:dev
 ```
 
-Open `http://localhost:3000` and sign in with the account `pnpm dev:login` prints. The app ships with no model configured — connect one under **Settings → Models** before starting a chat.
+Open `http://localhost:3000` and sign in with the account `pnpm dev:login` prints. The app ships with no model configured — connect one under **Settings, Models** before starting a chat.
 
 The server runs without a file watcher (on some Windows machines the watcher stalls before the server starts), so restart `pnpm standalone:dev` to pick up backend changes — the UI itself still hot-reloads.
 
@@ -129,7 +129,7 @@ Open `http://localhost:8791` and click **Let's Get Started**. The identity provi
   <img src="./packages/frontend/public/compose-login.png" alt="The Dex sign-in form the button leads to: an Email Address field, a Password field, and a Login button" width="420">
 </p>
 
-You land in **Settings → Models** as that user, with your name at the bottom of the navigation rail. Connect a model there before starting a chat; nothing is configured on a fresh stack.
+You land in **Settings, Models** as that user, with your name at the bottom of the navigation rail. Connect a model there before starting a chat; nothing is configured on a fresh stack.
 
 <p align="center">
   <img src="./packages/frontend/public/compose-signed-in.png" alt="Signed in: Settings open on the Models page, listing model providers each with a Configure button, the signed-in user shown at the bottom of the left rail, and the assistant panel on the right" width="850">
@@ -197,19 +197,19 @@ See [Deployment Security](docs/deployment-security.mdx#prompt-guard-screens) for
 
 ## How Nemotron and Token Factory are used
 
-With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and `TOKEN_FACTORY_CHEAPER_MODEL` (default `openai/gpt-oss-120b`), and makes Nemotron 3 Super the chat default. The provider is managed by the environment, so to run a smaller model beside Super, set `TOKEN_FACTORY_CHEAPER_MODEL` to its id, for example NVIDIA Nemotron 3 Nano (`nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`), and restart. It then appears in **Settings → Models** and can be assigned to roles.
+With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provider (Nebius Token Factory) at startup. It lists `TOKEN_FACTORY_MODEL` (default `nvidia/nemotron-3-super-120b-a12b`, NVIDIA Nemotron 3 Super) and `TOKEN_FACTORY_CHEAPER_MODEL` (default `openai/gpt-oss-120b`), and makes Nemotron 3 Super the chat default. The provider is managed by the environment, so to run a smaller model beside Super, set `TOKEN_FACTORY_CHEAPER_MODEL` to its id, for example NVIDIA Nemotron 3 Nano (`nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`), and restart. It then appears in **Settings, Models** and can be assigned to roles.
 
-**Which role uses which model.** Every job the server does with a model is a role, and each role can have its own model under **Settings → Model roles**. A role left unset uses the main chat model.
+**Which role uses which model.** Every job the server does with a model is a role, and each role can have its own model under **Settings, Roles and Personas**. A role left unset uses the main chat model.
 
-| Role                | What it does                                            | Where the model comes from                             |
-| ------------------- | ------------------------------------------------------- | ------------------------------------------------------ |
-| Main chat           | Answers you, including requests for a briefing          | Main chat model                                        |
-| Coding / sub-agent  | Work the assistant hands to sub-agents                  | Coding / subagent model, else the main chat model      |
-| Compaction          | Summarizes old context in long conversations            | Compaction model, else the main chat model             |
-| Summarization       | Condenses each turn before it is written to memory      | Summarization model, else the main chat model          |
-| Profile learning    | Rewrites the learned profile after a turn, when enabled | `PROFILE_LEARNING_MODEL`, else the model that answered |
-| Knowledge relevance | Checks which library passages help answer a question    | The active persona's model                             |
-| Persona             | Answers as that persona                                 | The model bound to the persona under **Model roles**   |
+| Role                | What it does                                            | Where the model comes from                                  |
+| ------------------- | ------------------------------------------------------- | ----------------------------------------------------------- |
+| Main chat           | Answers you, including requests for a briefing          | Main chat model                                             |
+| Coding / sub-agent  | Work the assistant hands to sub-agents                  | Coding / subagent model, else the main chat model           |
+| Compaction          | Summarizes old context in long conversations            | Compaction model, else the main chat model                  |
+| Summarization       | Condenses each turn before it is written to memory      | Summarization model, else the main chat model               |
+| Profile learning    | Rewrites the learned profile after a turn, when enabled | `PROFILE_LEARNING_MODEL`, else the model that answered      |
+| Knowledge relevance | Checks which library passages help answer a question    | The active persona's model                                  |
+| Persona             | Answers as that persona                                 | The model bound to the persona under **Roles and Personas** |
 
 **Why tier them.** Helper jobs are short and structured: a few hundred tokens in, a short summary or a yes/no list out. They run on every turn, so their price and latency add up, and a small model such as Nemotron 3 Nano does them at a fraction of the cost of Nemotron 3 Super (see the price table below). Chat answers and briefings are open-ended reasoning over memory and tools, so they stay on Nemotron 3 Super. A weak compaction summary degrades every later turn of a conversation, so keep that role on a model you trust.
 
@@ -230,8 +230,8 @@ These defaults are a snapshot and are meant to be edited. Set `TOKEN_FACTORY_PRI
 
 - Under each answer, a quiet line names the model, its provider, and the tokens and cost of the whole turn, for example `Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 · + 2 helper calls on Nemotron 3 Nano`. Helper calls are included in the total.
 - With **Show agent details** on for the chat, each role that ran appears in the turn's details with its model, calls, tokens and cost.
-- **Settings → Models** shows today's tokens and cost per Token Factory model and the daily cap remaining.
-- **Settings → Themes → Answers** switches the line and the helper rows off for you. This changes only what is shown; usage is still counted.
+- **Settings, Models** shows today's tokens and cost per Token Factory model and the daily cap remaining.
+- **Settings, Themes, Answers** switches the line and the helper rows off for you. This changes only what is shown; usage is still counted.
 
 The numbers are the usage the provider reported for each call. Nothing is estimated: if a provider reports no usage for a call, the line says `usage not reported`. Usage is recorded for completed turns; a turn that errors or is cancelled shows no line, though its tokens still count toward the daily total.
 
