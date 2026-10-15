@@ -6,6 +6,7 @@ jest.mock('../../../src/sandbox/slotBackend', () => ({
 
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { createLogger } from 'winston';
+import { z } from 'zod';
 import { createCapabilitiesRouter } from '../../../src/apis/capabilities';
 import { resolveRequestContext } from '../../../src/auth/identity';
 import { createAuthMiddleware } from '../../../src/auth/middleware';
@@ -20,7 +21,9 @@ import { slotSandboxBuildStatus } from '../../../src/sandbox/slotBackend';
 
 const mockSlotStatus = slotSandboxBuildStatus as jest.Mock;
 
-async function capabilities(): Promise<{ sandbox: { enabled: boolean } }> {
+const CapabilitiesBody = z.object({ data: z.object({ sandbox: z.object({ enabled: z.boolean() }) }) });
+
+async function capabilities(): Promise<z.infer<typeof CapabilitiesBody>['data']> {
   disableOidcAuth();
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -37,8 +40,7 @@ async function capabilities(): Promise<{ sandbox: { enabled: boolean } }> {
       resolveRequestContext,
     }),
   );
-  const body: { data: { sandbox: { enabled: boolean } } } = await (await shell.request('/')).json();
-  return body.data;
+  return CapabilitiesBody.parse(await (await shell.request('/')).json()).data;
 }
 
 // New chats and agents start with the sandbox on exactly when this flag is on (the UI seeds its default spec from it).
