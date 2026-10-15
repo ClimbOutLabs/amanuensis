@@ -217,7 +217,7 @@ describe('TruefoundrySettingsBuilder', () => {
     unmount();
 
     // Even with a persona API wired up, Settings still has no standalone Personas
-    // tab or content here — PersonaSettings is only ever reached via Roles and Personas.
+    // tab or content here: PersonaSettings is only ever reached via Roles and Personas.
     render(<TestShell server={createServer()} personas />);
     await openSettings();
 
