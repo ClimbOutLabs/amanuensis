@@ -19,7 +19,7 @@ SANDBOX_BUNDLE_IN_IMAGE=/app/packages/trueforge/dist/sandbox-slots.js
 SANDBOX_VERIFY_FAILED=0
 
 # The doctor is not on PATH, so every repair line names it by its path.
-sandbox_repair_command() { printf '%s doctor sandbox --fix' "$(doctor_shim)"; }
+sandbox_repair_command() { printf '%s doctor sandbox --fix' "$(ui_path "$(doctor_shim)")"; }
 
 sandbox_bundle() { printf '%s/bin/aman-sandbox.mjs' "$AMAN_HOME"; }
 sandbox_log() { printf '%s/sandbox.log' "$STATE_DIR"; }

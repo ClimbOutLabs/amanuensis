@@ -261,7 +261,7 @@ test_lines_stay_readable_in_72_columns() {
   local line
   while IFS= read -r line; do
     if [ "${#line}" -le 72 ]; then t_pass; else
-      case "$line" in */* | *://*) t_pass ;; *) t_fail "wide line (${#line}): $line" ;; esac
+      case "$line" in */*) t_pass ;; *) t_fail "wide line (${#line}): $line" ;; esac
     fi
   done < <(printf '%s\n%s\n' "$OUT" "$ERR")
   sandbox_drop

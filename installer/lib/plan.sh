@@ -245,7 +245,7 @@ print_plan() {
 
 # Machine checks that need no answers from the user, so a blocker can stop the run before any prompt.
 plan_preflight() {
-  local before ver
+  local ver
   PLAN_LINES=
   PLAN_TODO=0
   PLAN_ROOT=0
@@ -290,9 +290,8 @@ plan_preflight() {
     preflight_docker_space
     preflight_docker_memory
   fi
-  before=$PLAN_BLOCKERS
   preflight_sandbox
-  if sandbox_needed && [ "$PLAN_BLOCKERS" = "$before" ]; then
+  if sandbox_needed && [ -z "$PLAN_BLOCKERS" ]; then
     check_ok "This computer can run the sandbox"
   fi
 }
