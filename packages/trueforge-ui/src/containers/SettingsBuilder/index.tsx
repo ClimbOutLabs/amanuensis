@@ -16,7 +16,7 @@ import { useShellMode, type SettingsSection } from '@/server/ShellModeContext.js
 
 // Section modules (and their list/catalog APIs) load only when that tab mounts.
 const ModelSettings = lazy(() => import('./ModelSettings.js'));
-// Personas live under Model roles (their model bindings sit alongside every other
+// Personas live under Roles and Personas (their model bindings sit alongside every other
 // model role — see docs/model-roles.mdx), not as a section of their own here.
 const ModelRoleSettings = lazy(() => import('./ModelRoleSettings.js'));
 const ConnectorSettings = lazy(() => import('./ConnectorSettings.js'));
@@ -108,7 +108,7 @@ const TruefoundrySettingsBuilder = () => {
       icon: 'cpu' | 'brain' | 'plug' | 'box-archive' | 'lightbulb' | 'cube' | 'robot' | 'palette' | 'save' | 'lock';
     }> = [
       { id: 'models', label: 'Models', icon: 'cpu' },
-      { id: 'model-roles', label: 'Model roles', icon: 'brain' },
+      { id: 'model-roles', label: 'Roles and Personas', icon: 'brain' },
       { id: 'connectors', label: 'Connectors', icon: 'plug' },
       // Not gated on a capability: memory is configured by pointing at a bank, so the section has
       // to be reachable while none is configured. It reads as off until one is.

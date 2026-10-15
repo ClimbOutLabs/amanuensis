@@ -283,7 +283,7 @@ const ModelSettings = () => {
     <>
       <h3 className="text-xl font-semibold tracking-tight text-text-primary">Models</h3>
       <p className="mt-1 text-sm text-text-secondary">
-        Connect providers and choose which models are available. Assign models to roles under Model roles.
+        Connect providers and choose which models are available. Assign models to roles under Roles and Personas.
       </p>
 
       <TokenFactoryUsagePanel providerConfigured={configuredTypes.has('tokenfactory')} />

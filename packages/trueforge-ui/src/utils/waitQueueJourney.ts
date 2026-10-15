@@ -11,13 +11,6 @@ import { formatDuration, parseMcpToolArgs } from './toolCallParsing.js';
 /** Stations on the queue, in journey order. */
 export type WaitStationId = 'listening' | 'remembering' | 'doing' | 'writing';
 
-/**
- * Sprite states for the turn-status panda. Wider than the station ids:
- * found-memories shows when recall lands before any part, and still-writing
- * shows when writing passes the long-wait threshold.
- */
-export type TurnSpriteId = 'listening' | 'remembering' | 'found-memories' | 'doing' | 'writing' | 'still-writing';
-
 export type WaitStationState = 'pending' | 'active' | 'done' | 'skipped';
 
 export const WAIT_STATION_LABELS: Record<WaitStationId, string> = {
@@ -66,12 +59,6 @@ export type WaitStation = {
 export type WaitQueueSnapshot = {
   stations: WaitStation[];
   activeStation: WaitStationId | null;
-  /**
-   * True when this turn's recall landed with items and no tool or text part
-   * exists yet: the found-memories sprite's moment. Goes false once the first
-   * part appears, so a late recall never claims the sprite mid-turn.
-   */
-  recallJustLanded: boolean;
   /** The line under the queue — always tied to a real event, never invented. */
   microcopy: string;
   /** Quiet completion ticks, oldest first, capped for pacing. */
@@ -268,38 +255,7 @@ export function deriveWaitQueue(input: WaitQueueInput): WaitQueueSnapshot {
   for (const tool of settledTools) tickCandidates.push(toolTick(tool));
   const ticks = tickCandidates.slice(-MAX_TICKS);
 
-  // The found-memories moment: recall landed with items (same test as the
-  // "Found N memories" tick) and no tool or text part exists yet. Once the
-  // first part appears, the sprite belongs to doing/writing instead.
-  const recallJustLanded =
-    memory.landed &&
-    (memory.outcome === 'ok' || memory.outcome === undefined) &&
-    (memory.items ?? 0) > 0 &&
-    toolParts.length === 0 &&
-    textParts.length === 0;
-
-  return { stations, activeStation, recallJustLanded, microcopy, ticks };
-}
-
-export type SpriteStateForInput = {
-  activeStation: WaitStationId | null;
-  recallJustLanded: boolean;
-  longWait: boolean;
-};
-
-/**
- * Canonical owner of the turn-status sprite mapping. Pure: same input always
- * yields the same sprite. Doing and writing win over found-memories, so a
- * recall that lands after the first part never steals the sprite mid-turn.
- * Remembering is the fallback: it is never "active" because no signal says
- * recall is running.
- */
-export function spriteStateFor({ activeStation, recallJustLanded, longWait }: SpriteStateForInput): TurnSpriteId {
-  if (activeStation === 'doing') return 'doing';
-  if (activeStation === 'writing') return longWait ? 'still-writing' : 'writing';
-  if (activeStation === 'listening') return 'listening';
-  if (recallJustLanded) return 'found-memories';
-  return 'remembering';
+  return { stations, activeStation, microcopy, ticks };
 }
 
 export type LongWaitNoteInput = {

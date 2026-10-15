@@ -540,16 +540,46 @@ describe('card copy', () => {
   });
 
   test('no card sentence uses an em dash or the old cold wording', async () => {
-    const decisions = await Promise.all(
-      ['delete_note', 'frobnicate', 'web_search', 'send_email'].map(name =>
+    const mapsCall = (tool_name: string, params: Record<string, unknown>): SentinelAction => ({
+      tool_name,
+      canonical_params: params,
+      tool_type: 'truefoundry-system',
+      mcp_server_name: 'maps',
+      mcp_first_party: true,
+      mcp_hints: {},
+      maps_hosts: {
+        geocoder: 'https://nominatim.openstreetmap.org',
+        router: 'https://router.project-osrm.org',
+        tile: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      },
+    });
+    const askingCtx = makeCtx();
+    askingCtx.services = { ...askingCtx.services, searchWithoutAsking: () => Promise.resolve(false) };
+    const designatedSearch: SentinelAction = {
+      ...connectorCall({ tool_name: 'lookup', params: { query: 'q' }, hints: { read_only_hint: true } }),
+      mcp_search_provider: true,
+    };
+
+    const decisions = await Promise.all([
+      ...['delete_note', 'frobnicate', 'web_search', 'send_email'].map(name =>
         classifyTier(connectorCall({ tool_name: name, params: { to: 'a@x.example', query: 'q' } }), makeCtx()),
       ),
+      classifyTier(mapsCall('render_map', { place_name: 'Paris' }), makeCtx()),
+      classifyTier(mapsCall('render_route', { from_place: 'Madrid', to_place: 'Barcelona' }), makeCtx()),
+      classifyTier(designatedSearch, askingCtx),
+    ]);
+    expect(decisions.map(decision => decision.reason)).toEqual(
+      expect.arrayContaining(['maps_tool', 'mcp_search_setting_ask']),
     );
     for (const decision of decisions) {
       const card = cardOf(decision);
       expect(`${card.plain_what} ${card.cannot_be_undone ?? ''}`).not.toMatch(
         /\u2014|cannot be taken back|irreversible/,
       );
+    }
+    // Maps and search cards carry no reversibility note at all.
+    for (const decision of decisions.slice(4)) {
+      expect(cardOf(decision).cannot_be_undone).toBeNull();
     }
   });
 });
