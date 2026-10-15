@@ -9,6 +9,9 @@ export const SentinelUserSettingsSchema = z
   .object({
     offline_mode: z.boolean().describe('While on, actions that reach outside this machine are denied automatically.'),
     tier2_auto_allow: Tier2AutoAllowSchema,
+    search_without_asking: z
+      .boolean()
+      .describe('While on, your designated search provider runs web searches without asking. Off asks for each one.'),
   })
   .openapi('SentinelUserSettings');
 
@@ -18,6 +21,7 @@ export const UpdateSentinelUserSettingsRequestSchema = z
     tier2_auto_allow: Tier2AutoAllowSchema.optional().describe(
       'Replaces the relaxed Tier 2 kinds; omitted keeps the current set.',
     ),
+    search_without_asking: z.boolean().optional().describe('New search setting; omitted keeps the current value.'),
   })
   .openapi('UpdateSentinelUserSettingsRequest');
 

@@ -7,6 +7,8 @@
 export interface UpdateSentinelUserSettingsRequest {
     /** New offline mode value; omitted keeps the current value. */
     offlineMode?: boolean;
+    /** New search setting; omitted keeps the current value. */
+    searchWithoutAsking?: boolean;
     /** Replaces the relaxed Tier 2 kinds; omitted keeps the current set. */
     tier2AutoAllow?: "file_write"[];
 }

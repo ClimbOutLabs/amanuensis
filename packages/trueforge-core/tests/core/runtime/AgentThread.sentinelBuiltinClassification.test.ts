@@ -17,6 +17,7 @@ import type { InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import { toolResultResponse } from '../../../src/core/mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../../src/core/mcp/LocalToolMCP';
 import { createSentinelHostContext, type SentinelHostContext } from '../../../src/core/permissions/context';
+import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { classifyUnstampedToolCall } from '../../../src/core/runtime/AgentThread';
 import { TaskStateToolSet } from '../../../src/core/runtime/TaskStateToolSet';
 import { TASK_STATE_TOOL_NAME } from '../../../src/core/runtime/taskState';
@@ -184,4 +185,77 @@ test('record_finding (agent scratchpad) classifies Tier 1 silent', async () => {
   expect(stamped.tier).toBe(1);
   expect(stamped.is_approval_required).toBe(false);
   expect(stamped.tier3_card).toBeNull();
+});
+
+test('maps calls keep the host-stamped hosts on the card instead of the unnamed fallback', async () => {
+  const base = await infoFor('synthetic_write');
+  const info: InternalToolCallInfo = {
+    ...base,
+    original_tool_name: 'render_map',
+    maps_hosts: {
+      geocoder: 'https://geocode.example.internal',
+      router: 'https://routes.example.internal',
+      tile: 'https://tiles.example.internal/{z}/{x}/{y}.png',
+    },
+  };
+  const stamped = await classifyUnstampedToolCall({
+    sentinel: makeSentinel(),
+    canonical_params: { place_name: 'Paris' },
+    info,
+  });
+  expect(stamped.tier).toBe(3);
+  expect(stamped.tier3_card?.plain_what).toContain('geocode.example.internal');
+  expect(stamped.tier3_card?.destination_host).toContain('tiles.example.internal');
+});
+
+describe('classifyUnstampedToolCall on a connector call', () => {
+  const info: InternalToolCallInfo = {
+    type: 'mcp',
+    original_tool_name: 'frobnicate',
+    mcp_server_id: 'misc',
+    mcp_server_name: 'misc',
+    is_approval_required: true,
+  };
+  const connector = { server_id: 'misc', destination_host: 'misc.example.com' };
+
+  async function dispatchAgainst(moved: boolean): Promise<string | undefined> {
+    const sentinel = makeSentinel();
+    const stamped = await classifyUnstampedToolCall({
+      sentinel,
+      canonical_params: { id: '1' },
+      info,
+      connector,
+    });
+    expect(stamped.tier3_card?.destination_host).toBe('misc.example.com');
+    return await verifyPreDispatch({
+      call: {
+        tool_name: 'frobnicate',
+        tool_type: 'mcp',
+        canonical_params: { id: '1' },
+        tier: 3,
+        approval_token_id: stamped.approval_token_id ?? null,
+        approval_binding: null,
+        shell_binding: null,
+        connector: moved ? { ...connector, destination_host: 'evil.example' } : connector,
+      },
+      ctx: {
+        tenant_id: 't1',
+        created_by: 'u1',
+        conversation_id: 'conv-1',
+        repository_id: null,
+        workspace_cwd: null,
+        agent_intent: null,
+        services: sentinel.services,
+        offline: false,
+      },
+    });
+  }
+
+  test('the approval verifies against the same connector', async () => {
+    expect(await dispatchAgainst(false)).toBeUndefined();
+  });
+
+  test('the approval is denied once the connector host differs', async () => {
+    expect(await dispatchAgainst(true)).toContain('Approval invalid');
+  });
 });

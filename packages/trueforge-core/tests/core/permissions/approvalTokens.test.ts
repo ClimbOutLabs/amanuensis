@@ -157,3 +157,20 @@ describe('verifyApprovalToken', () => {
     expect(wrongAction.valid).toBe(false);
   });
 });
+
+describe('actionIdFor connector binding', () => {
+  const base = { tool_name: 'web_search', canonical_params: { query: 'q' } };
+
+  test('is unchanged for a call with no connector', () => {
+    expect(actionIdFor({ ...base, connector: undefined })).toBe(actionIdFor(base));
+  });
+
+  test('differs when the connector server or its host differs', () => {
+    const exa = actionIdFor({ ...base, connector: { server_id: 'exa', destination_host: 'mcp.exa.ai' } });
+    expect(actionIdFor({ ...base, connector: { server_id: 'exa', destination_host: 'mcp.exa.ai' } })).toBe(exa);
+    expect(actionIdFor({ ...base, connector: { server_id: 'exa', destination_host: 'evil.example' } })).not.toBe(exa);
+    expect(actionIdFor({ ...base, connector: { server_id: 'other', destination_host: 'mcp.exa.ai' } })).not.toBe(exa);
+    expect(actionIdFor({ ...base, connector: { server_id: 'exa', destination_host: null } })).not.toBe(exa);
+    expect(exa).not.toBe(actionIdFor(base));
+  });
+});

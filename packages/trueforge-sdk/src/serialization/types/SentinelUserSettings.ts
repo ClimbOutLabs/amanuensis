@@ -6,12 +6,14 @@ import * as serializers from "../index.js";
 
 export const SentinelUserSettings: core.serialization.ObjectSchema<serializers.SentinelUserSettings.Raw, TrueForge.SentinelUserSettings> = core.serialization.object({
         "offlineMode": core.serialization.property("offline_mode", core.serialization.boolean()),
+        "searchWithoutAsking": core.serialization.property("search_without_asking", core.serialization.boolean()),
         "tier2AutoAllow": core.serialization.property("tier2_auto_allow", core.serialization.list(core.serialization.stringLiteral("file_write")))
     });
 
 export declare namespace SentinelUserSettings {
     export interface Raw {
         offline_mode: boolean;
+        search_without_asking: boolean;
         tier2_auto_allow: "file_write"[];
     }
 }

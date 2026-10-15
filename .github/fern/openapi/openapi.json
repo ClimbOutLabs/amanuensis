@@ -1159,6 +1159,20 @@
           "name": {
             "$ref": "#/components/schemas/ResourceName"
           },
+          "search_provider": {
+            "description": "When true, adding this preset offers to make it the web search provider.",
+            "type": "boolean"
+          },
+          "search_tools": {
+            "description": "Search tools of this server that run without asking when it is the web search provider.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
           "type": {
             "$ref": "#/components/schemas/CatalogMCPServerType"
           },
@@ -1479,7 +1493,7 @@
         "default": {
           "enabled": true
         },
-        "description": "Uses 80% of the model context length when the explicit trigger is omitted, or 50000 tokens if unknown.",
+        "description": "Without an explicit trigger, compaction starts at 80% of the model context length, lowered so input plus the configured max output tokens fit (never below 4000), or at 50000 tokens when the context length is unknown.",
         "properties": {
           "enabled": {
             "default": true,
@@ -1635,7 +1649,7 @@
             "type": "string"
           },
           "outcome": {
-            "description": "applied: context was overwritten with the summary. skipped_invalid: the model produced a malformed summary and the attempt was discarded. skipped_blocked: the turn was cancelled before the attempt could complete. truncated_fallback: the summary was invalid so old turns were truncated instead.",
+            "description": "applied: context was overwritten with the summary. skipped_invalid: the model produced a malformed summary and the attempt was discarded. skipped_blocked: the turn was cancelled before the attempt could complete. truncated_fallback: no usable summary was produced, so old turns were truncated instead.",
             "enum": [
               "applied",
               "skipped_invalid",
@@ -1645,13 +1659,15 @@
             "type": "string"
           },
           "reason": {
-            "description": "Rejection reason when outcome is skipped_invalid. missing_block: no complete <summary> block. missing_section: a required section is absent. duplicate_section: a section appears more than once. self_referential: the goal/user_goal describes the summarization request instead of the user objective. over_length: summary exceeds bounded length.",
+            "description": "Why no summary was applied. missing_block, missing_section, duplicate_section, self_referential, over_length: the summary was invalid. summarizer_failed: the summarization call failed. request_too_large: the summarization request could not fit the model context.",
             "enum": [
               "missing_block",
               "missing_section",
               "duplicate_section",
               "self_referential",
-              "over_length"
+              "over_length",
+              "summarizer_failed",
+              "request_too_large"
             ],
             "type": "string"
           },
@@ -1756,6 +1772,27 @@
           "data"
         ],
         "type": "object"
+      },
+      "CreateKnowledgeDocumentRequest": {
+        "discriminator": {
+          "mapping": {
+            "text": "#/components/schemas/KnowledgeDocumentTextRequest",
+            "upload": "#/components/schemas/KnowledgeDocumentUploadRequest",
+            "url": "#/components/schemas/KnowledgeDocumentUrlRequest"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/KnowledgeDocumentUploadRequest"
+          },
+          {
+            "$ref": "#/components/schemas/KnowledgeDocumentUrlRequest"
+          },
+          {
+            "$ref": "#/components/schemas/KnowledgeDocumentTextRequest"
+          }
+        ]
       },
       "CreateMCPServerRequest": {
         "additionalProperties": false,
@@ -2102,6 +2139,10 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteKnowledgeDocumentResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteMCPServerResponse": {
         "properties": {},
         "type": "object"
@@ -2416,6 +2457,28 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CapabilitiesData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetKnowledgeDocumentResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PersonaKnowledgeDocument"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetKnowledgeEmbeddingModelResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/KnowledgeEmbeddingModel"
           }
         },
         "required": [
@@ -2966,18 +3029,15 @@
         "additionalProperties": false,
         "properties": {
           "approach": {
-            "maxLength": 4000,
             "minLength": 1,
             "type": "string"
           },
           "branch": {
-            "maxLength": 512,
             "minLength": 1,
             "type": "string"
           },
           "file_globs": {
             "items": {
-              "maxLength": 512,
               "minLength": 1,
               "type": "string"
             },
@@ -2991,7 +3051,6 @@
             "type": "string"
           },
           "repository_id": {
-            "maxLength": 256,
             "minLength": 1,
             "type": "string"
           },
@@ -3001,7 +3060,6 @@
           },
           "verify_command_ids": {
             "items": {
-              "maxLength": 256,
               "minLength": 1,
               "type": "string"
             },
@@ -3537,6 +3595,143 @@
         ],
         "type": "object"
       },
+      "KnowledgeDocumentStatus": {
+        "description": "Where the document is in the background indexing pipeline.",
+        "enum": [
+          "pending",
+          "parsing",
+          "indexing",
+          "ready",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "KnowledgeDocumentTextRequest": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "text"
+            ],
+            "type": "string"
+          },
+          "text": {
+            "description": "Text pasted directly into the library.",
+            "maxLength": 1000000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "description": "Title for the pasted text.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "text"
+        ],
+        "type": "object"
+      },
+      "KnowledgeDocumentUploadRequest": {
+        "properties": {
+          "content_base64": {
+            "description": "File bytes as base64 (max 15 MB decoded).",
+            "maxLength": 20971520,
+            "minLength": 1,
+            "type": "string"
+          },
+          "filename": {
+            "description": "Original file name, used to detect PDF, Word, text, or Markdown.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "upload"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "Shown instead of the file name.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "filename",
+          "content_base64"
+        ],
+        "type": "object"
+      },
+      "KnowledgeDocumentUrlRequest": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "url"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "Shown instead of the page title.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "description": "Public web page or PDF link; the page text is snapshotted at save time.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url"
+        ],
+        "type": "object"
+      },
+      "KnowledgeEmbeddingModel": {
+        "properties": {
+          "message": {
+            "description": "Plain-English explanation of the current state.",
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/KnowledgeEmbeddingPhase"
+          }
+        },
+        "required": [
+          "phase",
+          "message"
+        ],
+        "type": "object"
+      },
+      "KnowledgeEmbeddingPhase": {
+        "description": "State of the one-time search model download.",
+        "enum": [
+          "idle",
+          "loading",
+          "downloading",
+          "ready",
+          "unavailable"
+        ],
+        "type": "string"
+      },
+      "KnowledgeSourceKind": {
+        "description": "How the document entered the library: file upload, saved link, or pasted text.",
+        "enum": [
+          "upload",
+          "url",
+          "text"
+        ],
+        "type": "string"
+      },
       "LargeToolResponseConfig": {
         "default": {
           "enabled": true
@@ -3615,6 +3810,20 @@
           "data": {
             "items": {
               "$ref": "#/components/schemas/ImplementationPlanGrant"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ListKnowledgeDocumentsResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PersonaKnowledgeDocument"
             },
             "type": "array"
           }
@@ -4494,6 +4703,10 @@
           },
           "server_name": {
             "description": "Configured MCP server name.",
+            "type": "string"
+          },
+          "silent_search_query": {
+            "description": "Text of a web search the host ran without asking, for the Searched chip.",
             "type": "string"
           },
           "type": {
@@ -6034,6 +6247,83 @@
         ],
         "type": "object"
       },
+      "PersonaKnowledgeDocument": {
+        "properties": {
+          "chunk_count": {
+            "description": "Searchable chunks once the document is ready.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": {
+            "description": "When the document was added (ISO 8601).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Stable knowledge document identifier.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/KnowledgeSourceKind"
+          },
+          "source_label": {
+            "description": "Human-readable origin: file name, link text, or \"Pasted text\".",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_url": {
+            "description": "Final link address, for saved links.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/KnowledgeDocumentStatus"
+          },
+          "status_message": {
+            "description": "Plain-English explanation when the document is paused or failed.",
+            "maxLength": 1024,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "description": "Title shown in the library and cited in answers.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title_explicit": {
+            "description": "True when the user supplied the title; false when it was defaulted from the source.",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "description": "Last status change (ISO 8601).",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "title_explicit",
+          "source_kind",
+          "source_label",
+          "source_url",
+          "status",
+          "status_message",
+          "chunk_count",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "PersonalizationContext": {
         "additionalProperties": false,
         "properties": {
@@ -6462,6 +6752,20 @@
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
+          },
+          "search_provider": {
+            "description": "When true, this connector is the web search provider: its read-only tools run without asking, behind an outbound secret check, unless the user switched searches to Ask. At most one connector holds it.",
+            "type": "boolean"
+          },
+          "search_tools": {
+            "description": "Tools that run without asking as the web search provider even when the server does not declare them read-only. Set by the server for a known provider; a value sent is replaced.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
           },
           "type": {
             "enum": [
@@ -7189,6 +7493,10 @@
             "description": "While on, actions that reach outside this machine are denied automatically.",
             "type": "boolean"
           },
+          "search_without_asking": {
+            "description": "While on, your designated search provider runs web searches without asking. Off asks for each one.",
+            "type": "boolean"
+          },
           "tier2_auto_allow": {
             "description": "Tier 2 action kinds that run without asking. Kinds not listed ask for approval.",
             "items": {
@@ -7202,7 +7510,8 @@
         },
         "required": [
           "offline_mode",
-          "tier2_auto_allow"
+          "tier2_auto_allow",
+          "search_without_asking"
         ],
         "type": "object"
       },
@@ -8446,7 +8755,7 @@
             ]
           },
           "cannot_be_undone": {
-            "description": "What cannot be undone, or null when fully reversible.",
+            "description": "A short note on what can't be reversed, or null.",
             "type": [
               "string",
               "null"
@@ -8458,6 +8767,24 @@
               "string",
               "null"
             ]
+          },
+          "destination_host": {
+            "description": "Host of the connector server that receives the call, or null when it is not a remote server.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outbound_text": {
+            "description": "Exact arguments sent to a connector, one \"name: value\" line each. Long values are cut with a marker.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outbound_truncated": {
+            "description": "True when part of outbound_text is cut and not shown in full.",
+            "type": "boolean"
           },
           "parsed_command": {
             "description": "Server-parsed command structure for shell actions, or null.",
@@ -8500,7 +8827,10 @@
           "destination",
           "recipient",
           "amount",
-          "parsed_command"
+          "parsed_command",
+          "outbound_text",
+          "destination_host",
+          "outbound_truncated"
         ],
         "type": "object"
       },
@@ -10495,6 +10825,10 @@
         "properties": {
           "offline_mode": {
             "description": "New offline mode value; omitted keeps the current value.",
+            "type": "boolean"
+          },
+          "search_without_asking": {
+            "description": "New search setting; omitted keeps the current value.",
             "type": "boolean"
           },
           "tier2_auto_allow": {
@@ -13869,6 +14203,16 @@
               }
             },
             "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such persona for this user."
           }
         },
         "summary": "Delete a persona",
@@ -14035,6 +14379,302 @@
           "personas"
         ],
         "x-fern-sdk-method-name": "get_context"
+      }
+    },
+    "/api/v1/personas/{persona_id}/knowledge": {
+      "get": {
+        "description": "Returns the documents in the persona’s knowledge library with their indexing status.",
+        "parameters": [
+          {
+            "description": "Stable persona identifier.",
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "description": "Stable persona identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListKnowledgeDocumentsResponse"
+                }
+              }
+            },
+            "description": "Knowledge documents."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such persona for this user."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The knowledge library storage is unavailable; the message is safe to show."
+          }
+        },
+        "summary": "List persona knowledge documents",
+        "tags": [
+          "Personas"
+        ],
+        "x-fern-sdk-group-name": [
+          "personas"
+        ],
+        "x-fern-sdk-method-name": "list_knowledge"
+      },
+      "post": {
+        "description": "Adds a file, saved link, or pasted text to the persona’s knowledge library. Indexing runs in the background; the document reports its status until it is searchable.",
+        "parameters": [
+          {
+            "description": "Stable persona identifier.",
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "description": "Stable persona identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateKnowledgeDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetKnowledgeDocumentResponse"
+                }
+              }
+            },
+            "description": "Created knowledge document."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid document: unsupported file type, bad link, or oversized payload."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such persona for this user."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The knowledge library storage is unavailable; the message is safe to show."
+          }
+        },
+        "summary": "Add a knowledge document",
+        "tags": [
+          "Personas"
+        ],
+        "x-fern-sdk-group-name": [
+          "personas"
+        ],
+        "x-fern-sdk-method-name": "create_knowledge"
+      }
+    },
+    "/api/v1/personas/{persona_id}/knowledge/embedding-model": {
+      "get": {
+        "description": "Reports the one-time search model download in plain English.",
+        "parameters": [
+          {
+            "description": "Stable persona identifier.",
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "description": "Stable persona identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetKnowledgeEmbeddingModelResponse"
+                }
+              }
+            },
+            "description": "Search model status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such persona for this user."
+          }
+        },
+        "summary": "Get the knowledge search model status",
+        "tags": [
+          "Personas"
+        ],
+        "x-fern-sdk-group-name": [
+          "personas"
+        ],
+        "x-fern-sdk-method-name": "get_knowledge_embedding_model"
+      }
+    },
+    "/api/v1/personas/{persona_id}/knowledge/{document_id}": {
+      "delete": {
+        "description": "Removes the document and all of its indexed chunks from the persona’s library.",
+        "parameters": [
+          {
+            "description": "Stable persona identifier.",
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "description": "Stable persona identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable knowledge document identifier.",
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "description": "Stable knowledge document identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteKnowledgeDocumentResponse"
+                }
+              }
+            },
+            "description": "Deleted."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such persona for this user."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The knowledge library storage is unavailable; the message is safe to show."
+          }
+        },
+        "summary": "Delete a knowledge document",
+        "tags": [
+          "Personas"
+        ],
+        "x-fern-sdk-group-name": [
+          "personas"
+        ],
+        "x-fern-sdk-method-name": "delete_knowledge"
       }
     },
     "/api/v1/repositories": {
@@ -16850,7 +17490,7 @@
     },
     "/api/v1/sessions/{session_id}/turns": {
       "get": {
-        "description": "List turns for a session (newest first by default), token-paginated. Only the session creator may list turns.",
+        "description": "List turns for a session, oldest first, token-paginated. Only the session creator may list turns.",
         "parameters": [
           {
             "description": "Session identifier.",
@@ -17671,7 +18311,7 @@
                 }
               }
             },
-            "description": "An MCP server with this name already exists, or `manifest.memory_provider: true` is set while another server already holds it."
+            "description": "An MCP server with this name already exists, or `manifest.memory_provider` or `manifest.search_provider` is set to true while another server already holds it."
           },
           "422": {
             "content": {
@@ -17745,7 +18385,7 @@
                 }
               }
             },
-            "description": "`manifest.memory_provider: true` is set while another server already holds it, or the connector changed while its memory-provider connection check was running, so the save must be retried."
+            "description": "`manifest.memory_provider` or `manifest.search_provider` is set to true while another server already holds it, or the connector changed while its memory-provider connection check was running, so the save must be retried."
           },
           "422": {
             "content": {
@@ -19395,7 +20035,7 @@
     },
     "/api/v1/user/settings/sentinel": {
       "get": {
-        "description": "Returns the authenticated user’s offline mode and the Tier 2 action kinds that run without asking.",
+        "description": "Returns the authenticated user’s offline mode, the Tier 2 action kinds that run without asking, and whether web searches run without asking.",
         "responses": {
           "200": {
             "content": {

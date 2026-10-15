@@ -13,13 +13,14 @@ import { FIRST_PARTY_TOOL_REASON, isStandingTrustDecision } from '../../../src/c
 import {
   createSentinelHostContext,
   defaultSentinelServices,
-  withoutTier2Relaxations,
+  forUnattendedRun,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { seedShellAllowlist, type ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 import type { Tier2ActionKind } from '../../../src/core/permissions/tier';
 import { TOOL_GRANT_REASON, type ToolGrantKey, type ToolGrantStore } from '../../../src/core/permissions/toolGrants';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';
 
 /**
@@ -56,6 +57,7 @@ function makeCtx(overrides?: {
     repository_id: 'r1',
     workspace_cwd: overrides?.workspace_cwd ?? null,
     agent_intent: null,
+    web_search: createWebSearchTurnState(),
   };
 }
 
@@ -161,7 +163,7 @@ describe('classifyTier Tier 2 asks by default', () => {
   test('a scheduled session ignores relaxations', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
     try {
-      const unattended = withoutTier2Relaxations(
+      const unattended = forUnattendedRun(
         relaxing(defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), ['file_write']),
       );
       const decision = await classifyTier(
@@ -255,7 +257,7 @@ describe('classifyTier read-only shell commands are Tier 1', () => {
     try {
       const decision = await classifyTier(
         action('exec', { command: 'git status', cwd: workspace }),
-        makeCtx({ services: withoutTier2Relaxations(services), workspace_cwd: workspace }),
+        makeCtx({ services: forUnattendedRun(services), workspace_cwd: workspace }),
       );
       expect(decision.tier).toBe(1);
     } finally {

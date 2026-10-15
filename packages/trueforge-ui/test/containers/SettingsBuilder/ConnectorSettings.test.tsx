@@ -569,3 +569,73 @@ describe('ConnectorSettings edit flow', () => {
     });
   });
 });
+
+describe('ConnectorSettings web search provider role', () => {
+  const finder: ConnectorBase = {
+    id: 'finder',
+    name: 'finder',
+    description: 'Searches the web',
+    url: 'https://finder.example/mcp',
+    authenticated: true,
+    requiresAuth: false,
+    auth: { type: 'none' },
+  };
+  const finderAsProvider: ConnectorBase & { searchProvider: true } = { ...finder, searchProvider: true };
+  const parallelPreset = {
+    id: 'parallel-web',
+    name: 'parallel-web',
+    description: 'Search the web',
+    url: 'https://search.parallel.ai/mcp',
+    auth: { type: 'none' as const },
+    searchProvider: true,
+  };
+
+  beforeEach(() => {
+    mutableChat = true;
+    agentSpec = { model: { name: 'local/qwen36-fp8' }, mcpServers: [] };
+    updateAgentSpec.mockReset();
+  });
+
+  it('marks the connector that holds the role', async () => {
+    renderSettings([finderAsProvider, github]);
+    expect(await screen.findByText('Search provider')).toBeInTheDocument();
+    expect(screen.getAllByText('Search provider')).toHaveLength(1);
+  });
+
+  it('makes a flagged preset the search provider when nobody holds the role yet', async () => {
+    const createConnector = vi.fn(async () => finder);
+    renderSettings([github], { getConnectorCatalog: async () => [parallelPreset], createConnector });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect' }));
+
+    await waitFor(() => {
+      expect(createConnector).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'parallel-web', searchProvider: true }),
+      );
+    });
+  });
+
+  it('adds a flagged preset as an ordinary connector when another connector already holds the role', async () => {
+    const createConnector = vi.fn(async () => finder);
+    renderSettings([finderAsProvider], { getConnectorCatalog: async () => [parallelPreset], createConnector });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect' }));
+
+    await waitFor(() => {
+      expect(createConnector).toHaveBeenCalledTimes(1);
+    });
+    expect(createConnector).toHaveBeenCalledWith(expect.not.objectContaining({ searchProvider: true }));
+  });
+
+  it('keeps the role when the holder is edited, since the update replaces the whole manifest', async () => {
+    const updateConnector = vi.fn(async () => finderAsProvider);
+    renderSettings([finderAsProvider], { updateConnector });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(updateConnector).toHaveBeenCalledWith(expect.objectContaining({ id: 'finder', searchProvider: true }));
+    });
+  });
+});

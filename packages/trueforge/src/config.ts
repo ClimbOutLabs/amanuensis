@@ -26,6 +26,7 @@ import {
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
 import { normalizedOrigin } from './mcp/firstParty';
+import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
 
@@ -368,6 +369,54 @@ function parsePublicBaseUrl(raw: string | undefined): string {
   }
   const path = segments.length === 0 ? '' : `/${segments.join('/')}`;
   return `${parsed.origin}${path}`;
+}
+
+/**
+ * Parse a maps upstream URL: must be http(s), no query or hash. Fails fast at
+ * boot like PUBLIC_BASE_URL. Trailing slashes are trimmed; callers join paths.
+ */
+function parseMapsUrl({
+  envKey,
+  raw,
+  defaultValue,
+  requiredPlaceholders = [],
+}: {
+  envKey: string;
+  raw: string | undefined;
+  defaultValue: string;
+  requiredPlaceholders?: readonly string[];
+}): string {
+  const value = raw === undefined || raw.trim() === '' ? defaultValue : raw.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch (error) {
+    throw new Error(`${envKey} must be a valid URL`, { cause: error });
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`${envKey} must be an http(s) URL`);
+  }
+  if (parsed.search !== '' || parsed.hash !== '') {
+    throw new Error(`${envKey} must not include a query or hash`);
+  }
+  for (const placeholder of requiredPlaceholders) {
+    if (!value.includes(placeholder)) {
+      throw new Error(`${envKey} must include the ${placeholder} placeholder`);
+    }
+  }
+  return value.endsWith('/') && value.length > 1 ? value.slice(0, -1) : value;
+}
+
+/** Parses `MAPS_ROUTER_PROVIDER`. Unset/blank → `osrm`. Unknown values throw. */
+function parseMapsRouterProvider(raw: string | undefined): string {
+  if (raw === undefined || raw.trim() === '') {
+    return 'osrm';
+  }
+  const value = raw.trim().toLowerCase();
+  if (value === 'osrm') {
+    return value;
+  }
+  throw new Error(`Environment variable MAPS_ROUTER_PROVIDER must be "osrm", got ${JSON.stringify(raw)}`);
 }
 
 function parseTrueFoundrySandboxProvider(raw: string | undefined): 'daytona' | 'truefoundry' | undefined {
@@ -951,6 +1000,32 @@ export interface SharedServerConfiguration {
    * Env: `STT_URL`. Default `http://aman-stt:8001`.
    */
   STT_URL: string;
+  /**
+   * Base URL of the Nominatim-compatible geocoder used by the embedded maps tools.
+   * Env: `MAPS_GEOCODER_URL`. Default `https://nominatim.openstreetmap.org`.
+   */
+  MAPS_GEOCODER_URL: string;
+  /**
+   * Routing provider id for the embedded maps tools. Only `osrm` is implemented in v1;
+   * the interface leaves room for a traffic-aware provider later.
+   * Env: `MAPS_ROUTER_PROVIDER`. Default `osrm`.
+   */
+  MAPS_ROUTER_PROVIDER: string;
+  /**
+   * Base URL of the routing provider used by the embedded maps tools.
+   * Env: `MAPS_ROUTER_URL`. Default `https://router.project-osrm.org`.
+   */
+  MAPS_ROUTER_URL: string;
+  /**
+   * Tile URL template used by the same-origin tile proxy, with `{z}`, `{x}`, `{y}` placeholders.
+   * Env: `MAPS_TILE_URL`. Default `https://tile.openstreetmap.org/{z}/{x}/{y}.png`.
+   */
+  MAPS_TILE_URL: string;
+  /**
+   * User-Agent sent to the geocoder, router, and tile upstreams.
+   * Env: `MAPS_USER_AGENT`. Default `Amanuensis/<version> (+https://github.com/ClimbOutLabs/amanuensis)`.
+   */
+  MAPS_USER_AGENT: string;
   /**
    * Bearer token for the memory recall screen classifier. Distinct from any memory-provider
    * credential. Env: `MEMORY_SCREEN_AUTH_TOKEN`. Default empty.
@@ -1539,6 +1614,26 @@ const shared: SharedServerConfiguration = {
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
   STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
+  MAPS_GEOCODER_URL: parseMapsUrl({
+    envKey: 'MAPS_GEOCODER_URL',
+    raw: getEnv('MAPS_GEOCODER_URL'),
+    defaultValue: 'https://nominatim.openstreetmap.org',
+  }),
+  MAPS_ROUTER_PROVIDER: parseMapsRouterProvider(getEnv('MAPS_ROUTER_PROVIDER', { required: false })),
+  MAPS_ROUTER_URL: parseMapsUrl({
+    envKey: 'MAPS_ROUTER_URL',
+    raw: getEnv('MAPS_ROUTER_URL'),
+    defaultValue: 'https://router.project-osrm.org',
+  }),
+  MAPS_TILE_URL: parseMapsUrl({
+    envKey: 'MAPS_TILE_URL',
+    raw: getEnv('MAPS_TILE_URL'),
+    defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    requiredPlaceholders: ['{z}', '{x}', '{y}'],
+  }),
+  MAPS_USER_AGENT:
+    getEnv('MAPS_USER_AGENT', { required: false }) ??
+    `Amanuensis/${PACKAGE_VERSION} (+https://github.com/ClimbOutLabs/amanuensis)`,
   MEMORY_SCREEN_AUTH_TOKEN: getEnv('MEMORY_SCREEN_AUTH_TOKEN', { defaultValue: '' }) ?? '',
   MEMORY_SCREEN_THRESHOLD: parseUnitInterval({
     envKey: 'MEMORY_SCREEN_THRESHOLD',
@@ -1739,6 +1834,54 @@ const configuration: ServerConfiguration = standalone
       TRUEFOUNDRY_SANDBOX_SERVER_URL: getEnv('TRUEFOUNDRY_SANDBOX_SERVER_URL', { required: false }),
       TRUEFOUNDRY_SANDBOX_SETTINGS: getEnv('TRUEFOUNDRY_SANDBOX_SETTINGS', { required: false }),
     };
+
+/** The password a connection URL carries, decoded, or undefined when it has none or is not a URL. */
+function urlPassword(raw: string): string | undefined {
+  try {
+    const password = decodeURIComponent(new URL(raw).password);
+    return password === '' ? undefined : password;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The settings that carry secrets: what {@link getConfiguredSecretValues} reads, so a test can supply just these. */
+export type ConfiguredSecretSettings = Pick<
+  SharedServerConfiguration,
+  'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN'
+> &
+  (
+    | { STANDALONE: true }
+    | ({ STANDALONE: false } & Pick<
+        DistributedServerConfiguration,
+        'OIDC' | 'TRUEFOUNDRY_API_KEY' | 'TRUEFOUNDRY_SANDBOX_API_KEY' | 'DATABASE_URL' | 'REDIS_URL'
+      >)
+  );
+
+/**
+ * Secret values this process holds from its own configuration, for the outbound secret guard:
+ * service credentials, the OIDC client secret, and the passwords inside connection URLs. The one
+ * place to extend when a new secret setting is added.
+ */
+export function getConfiguredSecretValues(config: ConfiguredSecretSettings = configuration): string[] {
+  const candidates: (string | undefined)[] = [
+    config.TRUEFORGE_API_KEY,
+    config.NEBIUS_API_KEY,
+    config.MEMORY_SCREEN_AUTH_TOKEN,
+  ];
+  if (!config.STANDALONE) {
+    candidates.push(
+      config.OIDC?.OIDC_CLIENT_SECRET,
+      config.TRUEFOUNDRY_API_KEY,
+      config.TRUEFOUNDRY_SANDBOX_API_KEY,
+      config.DATABASE_URL,
+      urlPassword(config.DATABASE_URL),
+      config.REDIS_URL,
+      urlPassword(config.REDIS_URL),
+    );
+  }
+  return candidates.filter((value): value is string => value !== undefined && value !== '');
+}
 
 export function isOidcConfigured(
   value: ServerConfiguration,
