@@ -73,11 +73,15 @@ beforeAll(async () => {
   };
 
   // The first boot pays the lazy shell and server adapter module loads. Boot once here so
-  // that cost lands outside every test's wait window.
+  // that cost lands outside every test's wait window; the long timeout is only for this
+  // one-time setup wait, never for an assertion.
   const warmUp = renderApp();
-  await waitFor(() => {
-    expect(screen.getByTestId('pending')).toBeInTheDocument();
-  });
+  await waitFor(
+    () => {
+      expect(screen.getByTestId('pending')).toBeInTheDocument();
+    },
+    { timeout: 30_000 },
+  );
   warmUp.unmount();
 });
 
