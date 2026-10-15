@@ -51,6 +51,7 @@ DOCKER_MEM_WARN_BYTES=$((8 * GIB))
 DOCKER_MIN_COMPOSE_MAJOR=2
 
 RECORDS=""
+CAUSE_IDS=""
 CLEANED=""
 JSON_ESCAPED=""
 DOCKER_OK=0
@@ -152,10 +153,11 @@ registry_value() { # instance key
 }
 
 # The cause of a container failure in one sentence (starting with a space), or nothing when the log does not say.
-container_cause_sentence() { # instance
+# CAUSE_IDS holds the containers that are not running or not healthy.
+container_cause_sentence() {
   local id log="" cause
   if ! load_lib diagnose; then return 0; fi
-  for id in $(bounded "$PROBE_SECONDS" docker ps -a -q --filter "label=com.docker.compose.project=aman-${1}" 2>/dev/null); do
+  for id in $CAUSE_IDS; do
     log="${log}$(bounded "$PROBE_SECONDS" docker logs --tail 50 "$id" 2>&1)"$'\n'
   done
   [ -n "$log" ] || return 0
@@ -539,6 +541,7 @@ summarize_users() { # instance dir
 check_instance_containers() { # name; sets APP_CONTAINER
   local name=$1 line id cname state status service bad="" unhealthy="" starting="" found=0 ports exposed="" count=0
   APP_CONTAINER=""
+  CAUSE_IDS=""
   local lines
   lines=$(bounded "$PROBE_SECONDS" docker ps -a --filter "label=com.docker.compose.project=aman-${name}" \
     --format '{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)
@@ -550,7 +553,10 @@ check_instance_containers() { # name; sets APP_CONTAINER
       running)
         if [ "$service" = "$APP_SERVICE" ]; then APP_CONTAINER=$id; fi
         case "$status" in
-          *"(unhealthy)"*) unhealthy="${unhealthy} ${cname}" ;;
+          *"(unhealthy)"*)
+            unhealthy="${unhealthy} ${cname}"
+            CAUSE_IDS="${CAUSE_IDS} ${id}"
+            ;;
           *"(health: starting)"*) starting="${starting} ${cname}" ;;
         esac
         ports=$(bounded "$PROBE_SECONDS" docker port "$id" 2>/dev/null)
@@ -561,10 +567,16 @@ check_instance_containers() { # name; sets APP_CONTAINER
       exited)
         case "$status" in
           "Exited (0)"*) ;;
-          *) bad="${bad} ${cname}" ;;
+          *)
+            bad="${bad} ${cname}"
+            CAUSE_IDS="${CAUSE_IDS} ${id}"
+            ;;
         esac
         ;;
-      *) bad="${bad} ${cname}" ;;
+      *)
+        bad="${bad} ${cname}"
+        CAUSE_IDS="${CAUSE_IDS} ${id}"
+        ;;
     esac
   done <<<"$lines"
   if [ "$found" = 0 ]; then
@@ -573,9 +585,9 @@ check_instance_containers() { # name; sets APP_CONTAINER
     return
   fi
   if [ -n "$bad" ]; then
-    record "$name" containers fail "Not running:${bad}.$(container_cause_sentence "$name")" "$INSTANCE_FIX"
+    record "$name" containers fail "Not running:${bad}.$(container_cause_sentence)" "$INSTANCE_FIX"
   elif [ -n "$unhealthy" ]; then
-    record "$name" containers fail "Reported unhealthy by Docker:${unhealthy}.$(container_cause_sentence "$name")" "$INSTANCE_FIX"
+    record "$name" containers fail "Reported unhealthy by Docker:${unhealthy}.$(container_cause_sentence)" "$INSTANCE_FIX"
   elif [ -n "$starting" ]; then
     record "$name" containers warn "Still starting:${starting}." "Wait a minute and run doctor again."
   else
@@ -748,10 +760,12 @@ check_instance_network() {
     record "$name" network off "Skipped: this computer's network addresses could not be read." ""
     return
   fi
-  if printf '%s\n' "$addresses" | grep -Fxq "$host"; then
-    record "$name" network ok "Aman opens at ${url}, an address of this computer." ""
-    return
-  fi
+  case $'\n'"$addresses"$'\n' in
+    *$'\n'"$host"$'\n'*)
+      record "$name" network ok "Aman opens at ${url}, an address of this computer." ""
+      return
+      ;;
+  esac
   now=$(primary_ipv4_address)
   record "$name" network warn "Aman is set up at ${url}, but ${host} is no longer an address of this computer${now:+ (it is ${now} now)}; sign-in will not work from any address until it is updated." \
     "Run \`aman doctor network --fix\`; it moves Aman to the current address and restarts it."
@@ -1071,7 +1085,8 @@ doctor_sandbox() {
   fi
   if [ "$(docker_boot_state)" = disabled ]; then
     ui_warn "Docker does not start at boot here, so the sandbox stays down after a restart." "Run \`aman doctor sandbox --fix\`; it turns Docker on at boot after you say yes."
-    if [ "$fix" = 1 ] && ui_confirm "Turn Docker on at boot now? This needs sudo." n; then
+    # --yes is the explicit approval for this root step; without it the question defaults to no.
+    if [ "$fix" = 1 ] && { [ "$yes" = 1 ] || ui_confirm "Turn Docker on at boot now? This needs sudo." n; }; then
       sudo systemctl enable docker || failed=1
     fi
   fi

@@ -15,6 +15,10 @@ import {
   sanitize,
 } from './world.mjs';
 
+// The document a healthy world prints, as it was before the text report was restyled.
+const HEALTHY_JSON = `{"machine":[{"id":"docker","state":"ok","detail":"Docker 27.1.1 is running and Compose 2.29.1 is available.","fix":""},{"id":"runtime","state":"ok","detail":"A supported Docker runtime is in use.","fix":""},{"id":"credentials","state":"ok","detail":"No Docker settings file, so no credential store is in use.","fix":""},{"id":"images","state":"ok","detail":"All 3 images are present for amd64.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free for Docker data.","fix":""},{"id":"docker_memory","state":"ok","detail":"Docker has 16.0 GB of memory.","fix":""},{"id":"clock","state":"ok","detail":"This machine and Docker agree on the time.","fix":""},{"id":"backup","state":"ok","detail":"No backup yet; one is made automatically before your first upgrade.","fix":""}],"instances":{"main":[{"id":"config","state":"ok","detail":"The settings files exist and are private to you.","fix":""},{"id":"containers","state":"ok","detail":"All 2 containers are running.","fix":""},{"id":"ports","state":"ok","detail":"Published ports listen on this machine only.","fix":""},{"id":"service","state":"ok","detail":"The app answers its health check.","fix":""},{"id":"login","state":"ok","detail":"The login provider answers.","fix":""},{"id":"database","state":"ok","detail":"The database can be written to.","fix":""},{"id":"disk","state":"ok","detail":"50.0 GB is free where the data lives.","fix":""},{"id":"clock","state":"ok","detail":"The clock is within 60 seconds of the login provider.","fix":""},{"id":"run_code","state":"off","detail":"run_code is not available: no sandbox isolation driver is configured for this deployment.","fix":""},{"id":"attachments","state":"off","detail":"Reading email attachments is not available.","fix":""},{"id":"demo","state":"off","detail":"Demo mode is off.","fix":""},{"id":"model","state":"off","detail":"No Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.","fix":""}]}}
+`;
+
 let world;
 const make = options => (world = createWorld(options));
 afterEach(() => world?.dispose());
@@ -107,10 +111,50 @@ describe('document and exit codes', () => {
     world.df(1 * GIB_KB);
     const result = world.run();
     assert.equal(result.code, 1);
-    assert.match(result.stdout, /^Machine\n/);
-    assert.match(result.stdout, /\[FAIL\] disk/);
-    assert.match(result.stdout, /Fix: Free space/);
-    assert.match(result.stdout, /\nInstance main\n/);
+    assert.match(result.stdout, /\nChecking this computer\n/);
+    assert.match(result.stdout, / x Only 1\.0 GB is free for Docker data/);
+    assert.match(result.stdout, /Next: Free space/);
+    assert.match(result.stdout, /\nChecking instance main\n/);
+    assert.match(result.stdout, /1 problem\./);
+    assert.match(result.stdout, /Run the Next command for each, then run aman doctor again\./);
+  });
+
+  it('prints one line for skipped checks with the same reason, instead of a row each', () => {
+    make();
+    world.set('info', { out: '', rc: 1, err: 'Cannot connect to the Docker daemon' });
+    const result = world.run();
+    assert.equal(result.code, 1);
+    const flat = result.stdout.replace(/\s+/g, ' ');
+    assert.match(flat, /Skipped: Docker is not reachable\. \(images, disk, docker_memory, clock\)/);
+    assert.equal(flat.split('Skipped: Docker is not reachable.').length - 1, 2, 'two lines for five skipped checks');
+  });
+
+  it('says all checks passed, and shows the ids of the checks with --verbose', () => {
+    make();
+    const plain = world.run();
+    assert.equal(plain.code, 0, plain.stderr);
+    assert.match(plain.stdout, /All checks passed\./);
+    assert.doesNotMatch(plain.stdout, /\(docker\)/);
+    const verbose = world.run(['--verbose']);
+    assert.match(verbose.stdout, /Docker 27\.1\.1 is running and Compose 2\.29\.1 is available\. \(docker\)/);
+  });
+
+  it('keeps color out of a report that is not on a terminal, and uses it when forced', () => {
+    make();
+    world.df(5 * GIB_KB);
+    assert.doesNotMatch(world.run().stdout, /\u001b/);
+    const forced = world.run([], { env: { CLICOLOR_FORCE: '1', LANG: 'C.UTF-8', TERM: 'xterm' } });
+    assert.match(forced.stdout, /\u001b\[33m!\u001b\[0m/);
+    assert.match(forced.stdout, /\u2713/);
+    const none = world.run([], { env: { CLICOLOR_FORCE: '1', NO_COLOR: '1', LANG: 'C.UTF-8', TERM: 'xterm' } });
+    assert.doesNotMatch(none.stdout, /\u001b/);
+    assert.match(none.stdout, /\u2713/);
+  });
+
+  it('prints the same json document as before the text report was restyled', () => {
+    make();
+    const result = world.run(['--json']);
+    assert.equal(result.stdout, HEALTHY_JSON);
   });
 
   it('is read-only: only inspection commands reach Docker', () => {
@@ -648,7 +692,8 @@ describe('instance service health', () => {
     const result = world.json();
     const containersCheck = find(result.doc.instances.main, 'containers');
     assert.equal(containersCheck.state, 'fail');
-    assert.match(containersCheck.fix, /docker compose --project-directory .*instances\/main up -d/);
+    assert.match(containersCheck.fix, /aman doctor instance --fix/);
+    assert.doesNotMatch(containersCheck.fix, /docker (compose|logs)/);
     assert.equal(find(result.doc.instances.main, 'service').state, 'fail');
     assert.equal(result.code, 1);
   });
@@ -701,7 +746,8 @@ describe('instance service health', () => {
     const exposed = check('ports');
     assert.equal(exposed.state, 'fail');
     assert.match(exposed.detail, /aman-main-dex-1/);
-    assert.match(exposed.fix, /127\.0\.0\.1/);
+    assert.match(exposed.fix, /aman doctor instance --fix/);
+    assert.doesNotMatch(exposed.fix, /compose\.yaml/);
   });
 
   it('fails the service when the in-image doctor cannot run', () => {
@@ -755,8 +801,7 @@ describe('doctor sandbox', () => {
       `node ${world.home}/bin/aman-sandbox.mjs --instance main --repo-root ${repo} --log-file ${world.home}/state/sandbox.log --command-name ${world.home}/bin/aman doctor sandbox --check`,
     ]);
     assert.ok(world.calls().some(line => /^exec .*c1 aman doctor --text --only run_code$/.test(line)));
-    assert.match(result.stdout, /Instance main/);
-    assert.match(result.stdout, /\[ok {2}\] run_code/);
+    assert.match(result.stdout, /\+ run_code is ready/);
   });
 
   it('fails without trying the app when the slots fail their check', () => {
@@ -777,8 +822,8 @@ describe('doctor sandbox', () => {
     });
     const result = world.shim(['doctor', 'sandbox']);
     assert.equal(result.code, 1);
-    assert.match(result.stdout, /FAIL\] run_code/);
-    assert.match(result.stdout, /Fix: Run `aman doctor sandbox --fix`/);
+    assert.match(result.stdout, /x The sandbox slots are not running/);
+    assert.match(result.stdout, /Next: Run `aman doctor sandbox --fix`/);
   });
 
   it('fails when the app container is not running', () => {
@@ -850,7 +895,7 @@ describe('doctor sandbox', () => {
     rmSync(path.join(repo, 'docker-compose.slots.yml'));
     const moved = world.shim(['doctor', 'sandbox']);
     assert.equal(moved.code, 1);
-    assert.match(moved.stderr, /not at .* any more/);
+    assert.match(moved.stderr.replace(/\s+/g, ' '), /not at .* any more/);
   });
 
   it('points to the installer when there is no pinned runtime and the host Node.js is missing or too old', () => {
@@ -891,8 +936,8 @@ describe('doctor sandbox', () => {
     world.systemd({ enabled: false });
     const check = world.shim(['doctor', 'sandbox']);
     assert.equal(check.code, 0, check.stderr);
-    assert.match(check.stdout, /Docker does not start at boot/);
-    assert.match(check.stdout, /Fix: sudo systemctl enable docker/);
+    assert.match(check.stdout.replace(/\s+/g, ' '), /Docker does not start at boot/);
+    assert.match(check.stdout.replace(/\s+/g, ' '), /Next: Run `aman doctor sandbox --fix`/);
     assert.ok(!world.calls().includes('sudo systemctl enable docker'));
     world.shim(['doctor', 'sandbox', '--fix', '--yes']);
     assert.ok(world.calls().includes('sudo systemctl enable docker'));
@@ -1085,5 +1130,113 @@ describe('public https checks', () => {
       ['public_login'],
     );
     assert.ok(!result.stdout.includes('SENTINEL'));
+  });
+});
+
+describe('why an instance does not run', () => {
+  const containers = lines => world.containers('main', lines);
+  const app = (extra = {}) => world.psLine({ id: 'c1', name: 'aman-main-app-1', service: 'app', ...extra });
+  const dex = (extra = {}) => world.psLine({ id: 'c2', name: 'aman-main-dex-1', service: 'dex', ...extra });
+
+  it('names the cause from the container log in one sentence and never asks anyone to read logs', () => {
+    make();
+    containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
+    world.set('logs_c1', { out: "Error: EACCES: permission denied, mkdir '/home/trueforge'\n" });
+    world.set('logs_c2', { out: '' });
+    const check = find(world.json().doc.instances.main, 'containers');
+    assert.equal(check.state, 'fail');
+    assert.match(check.detail, /The app could not start: it was not allowed to create a folder \(\/home\/trueforge\)\./);
+    assert.match(check.fix, /aman doctor instance --fix/);
+    assert.doesNotMatch(`${check.detail} ${check.fix}`, /docker (compose|logs)|compose\.yaml|\.env/);
+  });
+
+  it('shows the state and, with --fix, asks the installer to render the instance again and restart it', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
+    const shown = world.shim(['doctor', 'instance']);
+    assert.equal(shown.code, 1);
+    assert.match(shown.stdout, /x Not running: aman-main-app-1/);
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+    const fixed = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(fixed.code, 0, fixed.stderr + fixed.stdout);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main`));
+    assert.match(fixed.stdout, /Instance main is fixed/);
+  });
+
+  it('fix asks first and changes nothing when the answer is not yes', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
+    const result = world.shim(['doctor', 'instance', '--fix']);
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+    assert.match(result.stdout + result.stderr, /Restart instance main now\? \[Y\/n\]/);
+  });
+
+  it('points to the installer when the checkout it was set up from is not recorded', () => {
+    make();
+    containers([app({ state: 'exited', status: 'Exited (1) 3 minutes ago' }), dex()]);
+    const result = world.shim(['doctor', 'instance', '--fix', '--yes']);
+    assert.equal(result.code, 1);
+    assert.match(result.stdout.replace(/\s+/g, ' '), /Run install\.sh from the checkout; it records the place\./);
+  });
+});
+
+describe('network address check', () => {
+  it('records nothing for an instance that is open on this computer only', () => {
+    make();
+    const result = world.json();
+    assert.equal(find(result.doc.instances.main, 'network'), undefined);
+  });
+
+  it('is ok while the address still belongs to this computer, and calls the open ports intended', () => {
+    make();
+    world.network('main');
+    world.set('port_c1', { out: '8790/tcp -> 0.0.0.0:8791\n' });
+    const result = world.json();
+    assert.equal(find(result.doc.instances.main, 'network').state, 'ok');
+    assert.match(find(result.doc.instances.main, 'network').detail, /http:\/\/192\.168\.1\.20:8791/);
+    assert.equal(find(result.doc.instances.main, 'ports').state, 'ok');
+    assert.match(find(result.doc.instances.main, 'ports').detail, /on purpose/);
+  });
+
+  it('warns, naming the fix, when the address went to another machine', () => {
+    make();
+    world.network('main', { addresses: ['127.0.0.1', '192.168.1.77'], primary: '192.168.1.77' });
+    const check = find(world.json().doc.instances.main, 'network');
+    assert.equal(check.state, 'warn');
+    assert.match(check.detail, /192\.168\.1\.20 is no longer an address of this computer \(it is 192\.168\.1\.77 now\)/);
+    assert.match(check.fix, /aman doctor network --fix/);
+    assert.doesNotMatch(check.fix, /\.env|compose\.yaml|docker /);
+  });
+
+  it('--fix moves the instance to the current address through the installer, after a yes', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.network('main', { addresses: ['127.0.0.1', '192.168.1.77'], primary: '192.168.1.77' });
+    const result = world.shim(['doctor', 'network', '--fix', '--yes']);
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} --yes instance refresh main --new-address`));
+  });
+
+  it('--fix does nothing when the address is right', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.network('main');
+    const result = world.shim(['doctor', 'network', '--fix', '--yes']);
+    assert.equal(result.code, 0);
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+    assert.match(result.stdout, /an address of this computer/);
+  });
+
+  it('says plainly that an instance on this computer only has no network address', () => {
+    make();
+    const result = world.shim(['doctor', 'network']);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout.replace(/\s+/g, ' '), /Open on this computer only/);
   });
 });
