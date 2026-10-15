@@ -300,6 +300,138 @@ test_rerun_does_not_rewrite_the_env() {
   sandbox_drop
 }
 
+NEW_KEY="v1.sentinel-rotated-key_5b2e08d4"
+
+# The files under the home and the run's output must not hold a key; the .env holds exactly the other one.
+assert_rotated() {
+  assert_eq "$(env_value "${1:-main}" NEBIUS_API_KEY)" "$NEW_KEY" "the new key is in the .env"
+  assert_tree_lacks "$AMAN_HOME" "$TF_KEY"
+  assert_tree_lacks "$SB/stub.log" "$NEW_KEY"
+  assert_not_contains "$OUT$ERR" "$NEW_KEY"
+  assert_not_contains "$OUT$ERR" "$TF_KEY"
+}
+
+test_a_key_on_a_rerun_replaces_the_old_one() {
+  t_begin "a new key on stdin for an existing instance is written in place (0600), the app restarts, nothing else moves"
+  sandbox_new
+  install_with_key_stdin --token-factory-model vendor/m --token-factory-daily-cap 5000
+  assert_rc 0
+  printf 'MY_OWN_SETTING=kept\n' >>"$AMAN_HOME/instances/main/.env"
+  local before_lines
+  before_lines=$(grep -vc '^NEBIUS_API_KEY=' "$AMAN_HOME/instances/main/.env")
+  : >"$STUB_LOG"
+  with_input "$NEW_KEY
+"
+  run_install --yes --token-factory-key-stdin
+  clear_input
+  assert_rc 0
+  assert_contains "$OUT" "Token Factory key updated; restarting the app"
+  assert_rotated main
+  assert_mode "$AMAN_HOME/instances/main/.env" 600
+  assert_eq "$(grep -vc '^NEBIUS_API_KEY=' "$AMAN_HOME/instances/main/.env")" "$before_lines" "every other line is unchanged"
+  assert_eq "$(env_value main TOKEN_FACTORY_MODEL)" vendor/m
+  assert_eq "$(env_value main TOKEN_FACTORY_DAILY_TOKEN_CAP)" 5000
+  assert_eq "$(env_value main MY_OWN_SETTING)" kept "a line below the managed block"
+  assert_eq "$(grep -c '^NEBIUS_API_KEY=' "$AMAN_HOME/instances/main/.env")" 1
+  assert_not_contains "$(dir_names "$AMAN_HOME/instances/main")" ".env." "no temporary file is left"
+  assert_log_has "up -d --force-recreate --no-deps --wait --wait-timeout 240 app"
+  assert_contains "$(grep 'force-recreate' "$STUB_LOG")" "aman-main"
+  sandbox_drop
+}
+
+test_a_key_on_a_rerun_with_the_password_line() {
+  t_begin "with --password-stdin too the first line is the password, which an existing instance drops, and the second the key"
+  sandbox_new
+  install_with_key_stdin
+  with_input "$SENTINEL_PASSWORD
+$NEW_KEY
+"
+  run_install --yes --password-stdin --token-factory-key-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 0
+  assert_rotated main
+  assert_tree_lacks "$AMAN_HOME" "$SENTINEL_PASSWORD"
+  sandbox_drop
+}
+
+test_a_key_for_a_named_instance() {
+  t_begin "instance add on an existing name replaces that instance's key and leaves the others alone"
+  sandbox_new
+  install_with_key_stdin
+  with_input "$SENTINEL_PASSWORD
+$TF_KEY
+"
+  run_install instance add second --yes --password-stdin --token-factory-key-stdin --email second@example.invalid
+  clear_input
+  assert_rc 0
+  with_input "$NEW_KEY
+"
+  run_install instance add second --yes --token-factory-key-stdin
+  clear_input
+  assert_rc 0
+  assert_contains "$OUT" "Token Factory key updated; restarting the app"
+  assert_eq "$(env_value second NEBIUS_API_KEY)" "$NEW_KEY"
+  assert_eq "$(env_value main NEBIUS_API_KEY)" "$TF_KEY" "the other instance is untouched"
+  assert_not_contains "$OUT$ERR" "$NEW_KEY"
+  sandbox_drop
+}
+
+test_a_key_for_an_instance_that_had_none() {
+  t_begin "a key for an instance installed without one is added to its managed block and recorded"
+  sandbox_new
+  install_machine
+  with_input "$NEW_KEY
+"
+  run_install --yes --token-factory-key-stdin
+  clear_input
+  assert_rc 0
+  assert_eq "$(env_value main NEBIUS_API_KEY)" "$NEW_KEY"
+  assert_eq "$(sed -n '/^# >>> managed/,/^# <<< end/p' "$AMAN_HOME/instances/main/.env" | grep -c '^NEBIUS_API_KEY=')" 1 "inside the managed block"
+  assert_eq "$(sed -n 's/^token_factory=//p' "$AMAN_HOME/state/instances/main.conf")" 1
+  assert_eq "$(sed -n 's/^tf_model=//p' "$AMAN_HOME/state/instances/main.conf")" "$DEFAULT_MODEL"
+  assert_not_contains "$OUT$ERR" "$NEW_KEY"
+  assert_tree_lacks "$SB/stub.log" "$NEW_KEY"
+  sandbox_drop
+}
+
+test_a_rerun_key_is_checked_and_planned() {
+  t_begin "a bad key on a rerun is refused unquoted, a dry run plans the change without reading it, several instances need a name"
+  sandbox_new
+  install_with_key_stdin
+  local before name
+  before=$(cat "$AMAN_HOME/instances/main/.env")
+  with_input "short key
+"
+  run_install --yes --token-factory-key-stdin
+  clear_input
+  assert_rc 2
+  assert_contains "$ERR" "length or characters a key never has"
+  assert_not_contains "$ERR" "short key"
+  assert_eq "$(cat "$AMAN_HOME/instances/main/.env")" "$before"
+  with_input "$NEW_KEY
+"
+  run_install --dry-run --token-factory-key-stdin
+  clear_input
+  assert_rc 0
+  assert_contains "$OUT" "Replace the Token Factory key of instance main"
+  assert_eq "$(cat "$AMAN_HOME/instances/main/.env")" "$before" "a dry run changes nothing"
+  assert_not_contains "$OUT$ERR" "$NEW_KEY"
+  for name in second third; do
+    with_input "$SENTINEL_PASSWORD
+"
+    run_install instance add "$name" --yes --password-stdin --email "$name@example.invalid"
+    clear_input
+  done
+  run_install instance remove main --yes
+  with_input "$NEW_KEY
+"
+  run_install --yes --token-factory-key-stdin
+  clear_input
+  assert_rc 2
+  assert_contains "$ERR" "needs --name of the instance whose key changes" "two instances, none called main"
+  sandbox_drop
+}
+
 test_key_from_stdin_reaches_only_the_env
 test_model_and_cap_flags
 test_password_first_then_key_on_stdin
@@ -318,4 +450,9 @@ test_a_dry_run_without_tf_flags_has_no_tf_line
 test_network_list_names_token_factory
 test_instance_add_takes_a_key
 test_rerun_does_not_rewrite_the_env
+test_a_key_on_a_rerun_replaces_the_old_one
+test_a_key_on_a_rerun_with_the_password_line
+test_a_key_for_a_named_instance
+test_a_key_for_an_instance_that_had_none
+test_a_rerun_key_is_checked_and_planned
 tests_finish

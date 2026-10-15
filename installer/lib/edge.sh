@@ -18,6 +18,8 @@ edge_host() {
 }
 edge_file() { printf '%s/Caddyfile' "$(instance_dir "$1")"; }
 edge_installed_file() { printf '%s/aman.d/%s.caddyfile' "$CADDY_ETC" "$1"; }
+# The main Caddyfile is the installer's minimal one, not the package's default site.
+edge_main_managed() { grep -q 'Managed by the Amanuensis installer' "$CADDY_ETC/Caddyfile" 2>/dev/null; }
 
 valid_ipv4() {
   local ip=$1 part
@@ -41,6 +43,9 @@ edge_render() {
 }
 
 # Caddy runs as its own user and cannot read the private install directory, so the file is copied, not linked.
+# The Ubuntu package's own main Caddyfile (a :80 welcome site) is replaced by one that only imports aman.d, after
+# being kept once as Caddyfile.aman-orig. The new site file is checked as part of the combined configuration under
+# a temporary name first; a rejected file never replaces the previous good one.
 edge_root_script() {
   local name=$1 src dest main dir
   src=$(printf '%q' "$(edge_file "$name")")
@@ -55,17 +60,49 @@ if ! command -v caddy >/dev/null 2>&1; then
   apt-get install -y caddy
 fi
 install -d -m 0755 $dir
-install -m 0644 $src $dest
-if ! grep -qxF 'import $CADDY_ETC/aman.d/*.caddyfile' $main 2>/dev/null; then
-  printf '\nimport $CADDY_ETC/aman.d/*.caddyfile\n' >> $main
-fi
-if ! out=\$(caddy validate --config $main --adapter caddyfile 2>&1); then
+site_new=$dest.new
+main_new=$main.aman-new
+check=\$(mktemp)
+trap 'rm -f "\$site_new" "\$main_new" "\$check"' EXIT
+global_block() { printf '{\n\tadmin localhost:2019\n}\n'; }
+install -m 0644 $src "\$site_new"
+{
+  printf '# Managed by the Amanuensis installer. The package original is kept as Caddyfile.aman-orig.\n'
+  global_block
+  printf 'import %s\n' '$CADDY_ETC/aman.d/*.caddyfile'
+} >"\$main_new"
+chmod 0644 "\$main_new"
+{
+  global_block
+  for other in $dir/*.caddyfile; do
+    if [ -e "\$other" ] && [ "\$other" != $dest ]; then printf 'import %s\n' "\$other"; fi
+  done
+  printf 'import %s\n' "\$site_new"
+} >"\$check"
+if ! out=\$(caddy validate --config "\$check" --adapter caddyfile 2>&1); then
   echo "\$out" >&2
-  rm -f $dest
-  echo "Caddy rejected the generated configuration, so it was removed; Caddy keeps running as before" >&2
+  echo "Caddy rejected the generated configuration, so nothing was replaced; Caddy keeps running as before" >&2
   exit 1
 fi
+mv -f "\$site_new" $dest
+if ! cmp -s "\$main_new" $main; then
+  if [ -e $main ] && [ ! -e $main.aman-orig ] && ! grep -q 'Managed by the Amanuensis installer' $main; then
+    cp -p $main $main.aman-orig
+  fi
+  mv -f "\$main_new" $main
+fi
 systemctl enable caddy
+systemctl reload-or-restart caddy
+STEPS
+}
+
+# Stops serving an instance whose site file was installed by edge_root_script.
+edge_remove_script() {
+  local dest
+  dest=$(printf '%q' "$(edge_installed_file "$1")")
+  cat <<STEPS
+set -eu
+rm -f $dest
 systemctl reload-or-restart caddy
 STEPS
 }
@@ -123,6 +160,7 @@ edge_dns_check() {
 edge_in_place() {
   local name=$1
   command -v caddy >/dev/null 2>&1 || return 1
+  edge_main_managed || return 1
   [ -f "$(edge_installed_file "$name")" ] && cmp -s "$(edge_file "$name")" "$(edge_installed_file "$name")" || return 1
   if command -v systemctl >/dev/null 2>&1 && systemctl cat caddy.service >/dev/null 2>&1; then
     systemctl is-active --quiet caddy
@@ -204,6 +242,26 @@ edge_ensure() {
     die "the Caddy steps failed, so HTTPS for instance $name is not set up (the instance itself runs). Fix what is reported above, then run this installer again."
   log_event "caddy configured for instance $name"
   edge_wait_ready "$(reg_get "$name" public_url)"
+}
+
+# instance remove: the site file is only removed with the same consent as the install steps. Declining leaves the
+# instance removed and says how to finish; Caddy then keeps answering for the names with a bad gateway.
+edge_remove() {
+  local name=$1
+  edge_wanted "$name" || return 0
+  [ -f "$(edge_installed_file "$name")" ] || return 0
+  say ""
+  say "Root steps to stop serving instance $name with Caddy:"
+  edge_remove_script "$name" | sed 's/^/    /'
+  if ! consent_root "Remove the Caddy site for instance $name now?" "$OPT_TLS_ROOT"; then
+    warn "Caddy still serves the addresses of instance $name. Run the root steps above, or run this command again with --tls-root (--yes alone never uses sudo)."
+    return 0
+  fi
+  if run_root sh -c "$(edge_remove_script "$name")"; then
+    log_event "caddy site removed for instance $name"
+  else
+    warn "the Caddy steps failed, so Caddy may still serve the addresses of instance $name. Run the root steps above by hand."
+  fi
 }
 
 edge_finish() {

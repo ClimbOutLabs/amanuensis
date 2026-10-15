@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
-# Stand-in for the Caddy binary; the installer only checks that it exists.
+# Stand-in for the Caddy binary. validate keeps the config it was given for the test to read and fails when the
+# test asks for a rejection; everything else only checks that the binary exists.
 printf 'caddy %s\n' "$*" >>"$STUB_LOG"
+if [ "${1:-}" = validate ]; then
+  cfg=
+  while [ "$#" -gt 0 ]; do
+    [ "$1" != --config ] || cfg=${2:-}
+    shift
+  done
+  [ -z "$cfg" ] || cp "$cfg" "$STUB_STATE/caddy_check" 2>/dev/null || true
+  if [ -e "$STUB_STATE/caddy_reject" ]; then
+    echo "Error: adapting config using caddyfile: unrecognized directive" >&2
+    exit 1
+  fi
+fi
 exit 0

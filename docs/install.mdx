@@ -58,11 +58,11 @@ The printed plan lists every first-run download with its approximate size, inclu
 
 - `--confirm-name NAME`: with `--purge-data`, the instance name typed in advance so it does not prompt.
 - `--password-stdin`: read the owner password from the first line of stdin, before any prompt.
-- `--token-factory-key-stdin`: read the Token Factory key from stdin (the line after the password when `--password-stdin` is also given). The key is never accepted as a command-line value, and it is written only to the instance `.env` (mode 600).
+- `--token-factory-key-stdin`: read the Token Factory key from stdin (the line after the password when `--password-stdin` is also given). The key is never accepted as a command-line value, and it is written only to the instance `.env` (mode 600). See [Feeding the Token Factory key safely](#feeding-the-token-factory-key-safely). On an instance that already exists it replaces the key and restarts the app.
 - `--token-factory-model ID`: the Token Factory model to use (default `nvidia/nemotron-3-super-120b-a12b`).
 - `--token-factory-daily-cap N`: stop answering after N Token Factory tokens per day (default: no cap).
 - `--tls caddy`: serve `--public-url` and `--login-url` over https with Caddy on this computer. See [Https with Caddy](#https-with-caddy).
-- `--tls-root`: let the installer run the printed root steps for `--tls caddy` without asking. `--yes` alone never uses sudo.
+- `--tls-root`: let the installer run the printed root steps for `--tls caddy` (and for the Caddy removal of `instance remove`) without asking. `--yes` alone never uses sudo.
 - `--public-ip ADDRESS`: this computer's public IPv4 address for the DNS check of `--tls caddy`, instead of asking a lookup service.
 - `--install-docker`: let the installer run the printed root steps to install Docker Engine (Debian, Ubuntu).
 - `--add-docker-group`: let the installer add your user to the docker group (needs sudo).
@@ -72,6 +72,20 @@ The printed plan lists every first-run download with its approximate size, inclu
 - `--print-root-steps`: print the root steps for installing Docker and stop.
 - `--print-network`: print every host the installer may contact and stop.
 - `--print-proxy-requirements`: print what a reverse proxy in front of an instance must do and stop.
+
+### Feeding the Token Factory key safely
+
+Type the key at the hidden prompt, or read it hidden into a shell variable and hand it over on stdin. A command-line value or `echo KEY |` would put the key in your shell history and in the process list, so the installer refuses the first and these docs never use the second.
+
+```bash
+read -rs KEY                                   # type or paste the key; nothing is shown
+printf '%s\n' "$KEY" | installer/install.sh --yes --token-factory-key-stdin
+unset KEY
+```
+
+`printf` is a shell builtin, so the key never appears as an argument of any process. With `--password-stdin` as well, the password is the first line and the key the second.
+
+To rotate the key, run the same command again on the machine. For an instance that already exists, the installer replaces `NEBIUS_API_KEY` in the managed block of its `.env` (mode 600, written atomically), prints `Token Factory key updated; restarting the app`, and recreates the app container. Add `--name <instance>` when there is more than one instance and none is called `main`.
 
 ### Fresh Docker installs on Linux
 
@@ -103,6 +117,8 @@ installer/install.sh instance remove <name> --purge-data
 
 This asks you to type the instance name to confirm (or pass it in advance with `--confirm-name`). The installer never deletes a volume otherwise.
 
+An instance served with `--tls caddy` also has a site file in `/etc/caddy/aman.d`. `instance remove` prints the root steps that delete it and reload Caddy (`sudo rm -f /etc/caddy/aman.d/<name>.caddyfile`, then `systemctl reload-or-restart caddy`) and runs them after you answer yes or pass `--tls-root`. Without consent the instance is still removed, a warning says that Caddy keeps serving its names, and the steps stay yours to run.
+
 ## Using it from other devices
 
 The first run is local only. To reach an instance from another device on your network, you put your own reverse proxy in front of it. The installer configures nothing outside the machine; it only prints what your proxy must satisfy:
@@ -125,10 +141,10 @@ installer/install.sh --public-url https://<app-name> --login-url https://<login-
 Create two DNS A records first, one for each name, both pointing at this machine's public address. The installer then:
 
 1. Checks that both names resolve to this machine's public address. If not, it says which one does not and stops before anything is requested from Let's Encrypt.
-2. Prints the root steps and runs them only after you answer yes (or pass `--tls-root`): install Caddy from the Ubuntu package archive, copy the generated Caddyfile for exactly your two names into `/etc/caddy/aman.d`, check it, and reload Caddy. No container image is pulled for Caddy.
+2. Prints the root steps and runs them only after you answer yes (or pass `--tls-root`): install Caddy from the Ubuntu package archive, replace the package's default `:80` site with a main Caddyfile that only imports `/etc/caddy/aman.d` (the original is kept once as `/etc/caddy/Caddyfile.aman-orig`, and the admin API stays on localhost), check the new site file together with the other instances' files before it replaces the previous one, and reload Caddy. A file Caddy rejects never replaces a working one. No container image is pulled for Caddy.
 3. Lets the app reach the login name through this machine (an `extra_hosts` entry), so sign-in does not depend on the machine reaching its own public address.
 
-The installer changes no firewall. Open only TCP 443 to the internet, plus SSH from your own address; port 80 can stay closed. The names are only ever given on the command line or at the prompts; nothing in the installer or its files contains a domain.
+Both names are served with `Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy` and `X-Frame-Options: DENY`, each added only when the app or the login service did not send it. The installer changes no firewall. Open only TCP 443 to the internet, plus SSH from your own address; port 80 can stay closed. The names are only ever given on the command line or at the prompts; nothing in the installer or its files contains a domain.
 
 `aman doctor` then also tries the public health address and the login discovery document over https, and (with a Token Factory key) the model.
 

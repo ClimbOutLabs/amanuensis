@@ -20,6 +20,10 @@ case "$1" in
       cp "$STUB_DOCKER_SRC" "$STUB_BIN/docker"
       printf '%s\n' "$STUB_USER" >"$STUB_STATE/group_members"
     fi
+    if [ -e "$STUB_STATE/run_root_sh" ]; then
+      sh -c "$3"
+      exit $?
+    fi
     ;;
   usermod)
     printf '%s\n' "$STUB_USER" >"$STUB_STATE/group_members"

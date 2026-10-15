@@ -281,6 +281,9 @@ plan_build() {
     fi
     dl_add embed
   fi
+  if ! need_new_instance && [ "$OPT_TF_KEY_STDIN" = 1 ]; then
+    plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) (it goes only into the instance .env) and restart its app"
+  fi
   plan_edge
 }
 
@@ -319,6 +322,8 @@ cmd_install() {
     read_password_first
     instance_collect main
     instance_derive
+  else
+    tf_rotation_collect
   fi
   plan_build
   print_plan
@@ -372,6 +377,7 @@ install_execute() {
     instance_create
     AMAN_PASSWORD=
   fi
+  tf_rotation_apply
   for name in $(reg_names); do
     edge_ensure "$name"
   done

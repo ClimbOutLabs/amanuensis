@@ -391,7 +391,9 @@ cmd_instance_add() {
   load_installed_release
   I_NAME=$OPT_NAME
   if reg_exists "$I_NAME"; then
+    tf_rotation_collect
     instance_create
+    tf_rotation_apply
     edge_ensure "$I_NAME"
     print_instance_summary "$I_NAME"
     if instance_sandbox_wanted "$I_NAME"; then sandbox_verify "$I_NAME"; fi
@@ -532,6 +534,7 @@ cmd_instance_remove() {
       dc "$name" down || warn "could not stop the stack cleanly; continuing with the removal"
     fi
     if instance_sandbox_wanted "$name"; then sandbox_down "$name" "${OPT_PURGE:-0}"; fi
+    edge_remove "$name"
     remove_instance_dir "$name"
     reg_remove "$name"
     log_event "instance $name removed"

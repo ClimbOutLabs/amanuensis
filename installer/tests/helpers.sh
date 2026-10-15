@@ -12,7 +12,7 @@ CURRENT_TEST=
 
 # System tools the installer needs. docker, sudo, sg, id and friends are never taken from the host.
 TOOLS="bash sh env awk sed grep egrep cut tr od head tail sort uniq wc cat cp mv rm mkdir rmdir chmod mktemp date cmp find
-basename dirname uname kill sleep ln git sha256sum shasum tee readlink ls touch xargs timeout getconf true false python3 diff tar gzip stat"
+basename dirname uname kill sleep ln install git sha256sum shasum tee readlink ls touch xargs timeout getconf true false python3 diff tar gzip stat"
 
 sandbox_new() {
   SB=$(mktemp -d)
@@ -26,7 +26,7 @@ sandbox_new() {
   done
   for t in "$TESTS_DIR"/stubs/*; do
     case "$(basename "$t")" in
-      aman-doctor | caddy) ;;
+      aman-doctor | caddy | systemctl) ;;
       *) cp "$t" "$SB_BIN/" ;;
     esac
   done
@@ -100,6 +100,15 @@ UNAME
 fixture_caddy() {
   cp "$TESTS_DIR/stubs/caddy" "$SB_BIN/caddy"
 }
+
+# systemctl only logs; "cat" fails so the installer treats the Caddy unit as absent unless a test needs it.
+fixture_systemctl() {
+  cp "$TESTS_DIR/stubs/systemctl" "$SB_BIN/systemctl"
+}
+
+# The next root script that reaches the sudo stub is run for real inside the sandbox (its paths all sit under
+# AMAN_CADDY_ETC), so a test can look at the files it leaves behind.
+fixture_run_root_scripts() { : >"$SB_STATE/run_root_sh"; }
 
 # What the DNS check sees: the machine's public address and what a name resolves to (example.com names only).
 fixture_public_ip() { printf '%s\n' "$1" >"$SB_STATE/public_ip"; }
@@ -263,6 +272,15 @@ file_mode() {
 
 assert_mode() {
   assert_eq "$(file_mode "$1")" "$2" "mode of $1"
+}
+
+# The names directly under a directory, hidden ones included, sorted and space separated with a trailing space.
+dir_names() {
+  local f
+  for f in "$1"/* "$1"/.[!.]*; do
+    [ -e "$f" ] || continue
+    basename "$f"
+  done | sort | tr '\n' ' '
 }
 
 log_has() { grep -Fq -- "$1" "$STUB_LOG"; }
