@@ -3,7 +3,7 @@ import { sql, type Kysely } from 'kysely';
 /**
  * One Google login per user (their own OAuth client, the refresh token Google issued, and the scopes
  * Google actually granted), plus the single consent a user can have in flight. Mirrors
- * db/postgres/migrations/20261015_000001_google_connection.ts.
+ * db/postgres/migrations/20261016_000003_google_connection.ts.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   // Kysely's SqliteAdapter reports supportsTransactionalDdl: false, so the Migrator runs this
