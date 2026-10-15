@@ -3139,19 +3139,14 @@
                 "$ref": "#/components/schemas/GoogleClientType"
               },
               {
-                "description": "The type read from the downloaded client file, or null when the id and secret were typed in.",
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "description": "The type read from the downloaded client file; omitted when the id and secret were typed in."
               }
             ]
           }
         },
         "required": [
           "client_id",
-          "client_secret",
-          "client_type"
+          "client_secret"
         ],
         "type": "object"
       },

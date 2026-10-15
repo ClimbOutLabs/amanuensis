@@ -58,9 +58,13 @@ function statusBody(input: { record: GoogleConnectionRecord | null; setup: Googl
 function toClientInput(body: {
   client_id: string;
   client_secret: string;
-  client_type: GoogleClientInput['client_type'];
-}) {
-  return { client_id: body.client_id.trim(), client_secret: body.client_secret.trim(), client_type: body.client_type };
+  client_type?: GoogleClientInput['client_type'] | undefined;
+}): GoogleClientInput {
+  return {
+    client_id: body.client_id.trim(),
+    client_secret: body.client_secret.trim(),
+    client_type: body.client_type ?? null,
+  };
 }
 
 export function createGoogleRouter(deps: GoogleRouterDeps) {
