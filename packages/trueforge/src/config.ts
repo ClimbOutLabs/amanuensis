@@ -383,6 +383,15 @@ export function parseTokenFactoryMode(options: {
 /** Default Token Factory model used when `TOKEN_FACTORY_MODEL` is unset. */
 export const DEFAULT_TOKEN_FACTORY_MODEL = 'nvidia/nemotron-3-super-120b-a12b';
 
+/** Cheaper second model registered next to the default when `TOKEN_FACTORY_CHEAPER_MODEL` is unset. */
+export const DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL = 'openai/gpt-oss-120b';
+
+/** Treats an unset or blank env value as absent; used where blank is the way to switch a default off. */
+function blankToUndefined(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim();
+  return trimmed === undefined || trimmed === '' ? undefined : trimmed;
+}
+
 function parseBoolean(options: { envKey: string; raw: string | undefined; defaultValue: boolean }): boolean {
   const { envKey, raw, defaultValue } = options;
   if (raw === undefined || raw.trim() === '') {
@@ -1283,7 +1292,9 @@ export interface SharedServerConfiguration {
   MEMORY_SUMMARIZE: boolean;
   /**
    * Nebius Token Factory API key. Populated from the Secure Vault into the deployment
-   * environment; never committed or logged. Env: `NEBIUS_API_KEY`. Unset by default.
+   * environment; never committed or logged. With a key set, startup also writes a read-only
+   * `tokenfactory` provider and makes its default model the chat default.
+   * Env: `NEBIUS_API_KEY`. Unset by default.
    */
   NEBIUS_API_KEY: string | undefined;
   /**
@@ -1291,6 +1302,12 @@ export interface SharedServerConfiguration {
    * Env: `TOKEN_FACTORY_MODEL`. Default `nvidia/nemotron-3-super-120b-a12b`.
    */
   TOKEN_FACTORY_MODEL: string;
+  /**
+   * Optional cheaper Token Factory model registered next to the default on the env-managed
+   * provider. Set it to an empty string to register only the default model.
+   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `openai/gpt-oss-120b`.
+   */
+  TOKEN_FACTORY_CHEAPER_MODEL: string | undefined;
   /**
    * Token Factory base URL.
    * Env: `TOKEN_FACTORY_BASE_URL`. Default `https://api.tokenfactory.nebius.com/v1`.
@@ -1300,10 +1317,18 @@ export interface SharedServerConfiguration {
    * How turns may route to Nebius Token Factory. `off` (the default) disables Token
    * Factory routing entirely. `fallback` uses the configured local provider first and
    * fails over to Token Factory when it is unavailable. `force` uses Token Factory
-   * first with the local provider as fallback, for testing and demo paths.
+   * first with the local provider as fallback, for testing and demo paths; it sends
+   * prompts to the cloud first, so it is not local-first. Routing is a no-op when the
+   * chat model already is on Token Factory.
    * Env: `TOKEN_FACTORY_MODE`. Default `off`.
    */
   TOKEN_FACTORY_MODE: TokenFactoryMode;
+  /**
+   * Daily Token Factory token budget per instance, counted per UTC day from provider-reported
+   * usage. Once reached, new turns on Token Factory are refused until the next UTC day.
+   * Env: `TOKEN_FACTORY_DAILY_TOKEN_CAP`. Unset means no cap.
+   */
+  TOKEN_FACTORY_DAILY_TOKEN_CAP: number | undefined;
   /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
@@ -1876,6 +1901,9 @@ const shared: SharedServerConfiguration = {
   NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
   TOKEN_FACTORY_MODEL:
     getEnv('TOKEN_FACTORY_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_MODEL }) ?? DEFAULT_TOKEN_FACTORY_MODEL,
+  TOKEN_FACTORY_CHEAPER_MODEL: blankToUndefined(
+    getEnv('TOKEN_FACTORY_CHEAPER_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL }),
+  ),
   TOKEN_FACTORY_BASE_URL:
     getEnv('TOKEN_FACTORY_BASE_URL', { defaultValue: TOKEN_FACTORY_DEFAULT_BASE_URL }) ??
     TOKEN_FACTORY_DEFAULT_BASE_URL,
@@ -1883,6 +1911,10 @@ const shared: SharedServerConfiguration = {
     envKey: 'TOKEN_FACTORY_MODE',
     raw: getEnv('TOKEN_FACTORY_MODE'),
     defaultValue: 'off',
+  }),
+  TOKEN_FACTORY_DAILY_TOKEN_CAP: parseOptionalPositiveInt({
+    envKey: 'TOKEN_FACTORY_DAILY_TOKEN_CAP',
+    raw: getEnv('TOKEN_FACTORY_DAILY_TOKEN_CAP'),
   }),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',

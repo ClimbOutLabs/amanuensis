@@ -58,6 +58,7 @@
     "smoke:local-sandbox": "pnpm run build:gen && cross-env NODE_OPTIONS=--conditions=trueforge-dev jest --config jest.local-sandbox.smoke.config.cjs --runInBand --forceExit tests/sandbox/local/smoke.test.ts",
     "smoke:local-sandbox:lima": "bash scripts/local-sandbox/smoke-lima.sh",
     "sandbox:slots": "tsx scripts/sandbox-slots/main.ts",
+    "smoke:tokenfactory": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --env-file=.env.test scripts/smoke-tokenfactory.ts",
     "probe:loopback": "pnpm exec tsx scripts/local-sandbox/probe-loopback.ts",
     "pretypecheck": "pnpm -w run sdk:types",
     "typecheck": "pnpm run typecheck:only",

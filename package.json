@@ -68,6 +68,7 @@
     "test:installer-doctor": "node --test installer/doctor/tests/doctor.test.mjs",
     "smoke:local-sandbox": "pnpm --filter @truefoundry/trueforge smoke:local-sandbox",
     "smoke:local-sandbox:lima": "pnpm --filter @truefoundry/trueforge smoke:local-sandbox:lima",
+    "smoke:tokenfactory": "pnpm --filter @truefoundry/trueforge smoke:tokenfactory",
     "test:store:local": "bash scripts/test-store-local.sh",
     "test:store:postgres": "pnpm --filter @truefoundry/trueforge test:store:postgres",
     "test:store:sqlite": "pnpm --filter @truefoundry/trueforge test:store:sqlite",

@@ -37,6 +37,7 @@ import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 /** Standalone caller identity, spelled out as a plain string where a store expects one. */
 const TEST_CREATED_BY = STANDALONE_REQUEST_CONTEXT.subject.id;
@@ -132,6 +133,7 @@ describe('turns', () => {
         '/',
         createTurnsRouter({
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -217,6 +219,7 @@ describe('turns', () => {
         '/',
         createTurnsRouter({
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions: new Sessions({ sessionStore }),
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -433,6 +436,7 @@ describe('turns', () => {
         '/',
         createTurnsRouter({
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -566,6 +570,7 @@ describe('turns', () => {
         '/',
         createTurnsRouter({
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -676,6 +681,7 @@ describe('turns', () => {
         '/',
         createTurnsRouter({
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -766,6 +772,7 @@ describe('turns', () => {
         '/',
         createTurnsRouter({
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),

@@ -35,6 +35,8 @@ export interface SettingsRouterDeps<TTransaction> {
   resolveSkillStore: ResolveSkillStore<TTransaction>;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Model providers the environment owns (see `envManagedModelProviderNames`). */
+  envManagedModelProviderNames: ReadonlySet<string>;
   withTransaction: WithTransaction<TTransaction>;
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
@@ -48,6 +50,7 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
       resolveModelProviderStore: deps.resolveModelProviderStore,
       withTransaction: deps.withTransaction,
       resolveRequestContext: deps.resolveRequestContext,
+      envManagedNames: deps.envManagedModelProviderNames,
     }),
   );
   router.route(

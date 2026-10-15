@@ -95,6 +95,7 @@ import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { Database as SqliteDatabase } from './db/sqlite/types';
+import type { ITokenFactoryUsageStore } from './db/tokenFactoryUsageStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import { mountFrontend } from './frontend';
@@ -108,6 +109,8 @@ import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { createSentinelServices } from './runtime/sentinelServices';
+import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
+import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
@@ -160,6 +163,8 @@ interface ServerPersistence<TTransaction> {
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Not tenant-scoped: one counter row per UTC day for this instance. */
+  tokenFactoryUsageStore: ITokenFactoryUsageStore<TTransaction>;
   mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
@@ -327,6 +332,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/repository-store/SqliteRepositoryStore'),
       import('./db/sqlite/turn-artifact-store/SqliteTurnArtifactStore'),
       import('./db/sqlite/global-settings-store/SqliteGlobalSettingsStore'),
+      import('./db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore'),
       import('./db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore'),
       import('./db/sqlite/approval-token-store/SqliteApprovalTokenStore'),
       import('./db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore'),
@@ -348,6 +354,7 @@ async function createStandalonePersistence(options: {
     { SqliteRepositoryStore },
     { SqliteTurnArtifactStore },
     { SqliteGlobalSettingsStore },
+    { SqliteTokenFactoryUsageStore },
     { SqliteSentinelSettingsStore },
     { SqliteApprovalTokenStore },
     { SqliteMcpToolGrantStore },
@@ -384,6 +391,7 @@ async function createStandalonePersistence(options: {
     scheduleStore: new SqliteScheduleStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
+    tokenFactoryUsageStore: new SqliteTokenFactoryUsageStore(db),
     mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
@@ -436,6 +444,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/repository-store/PostgresRepositoryStore'),
       import('./db/postgres/turn-artifact-store/PostgresTurnArtifactStore'),
       import('./db/postgres/global-settings-store/PostgresGlobalSettingsStore'),
+      import('./db/postgres/token-factory-usage-store/PostgresTokenFactoryUsageStore'),
       import('./db/postgres/sentinel-settings-store/PostgresSentinelSettingsStore'),
       import('./db/postgres/approval-token-store/PostgresApprovalTokenStore'),
       import('./db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore'),
@@ -457,6 +466,7 @@ async function createDistributedPersistence(options: {
     { PostgresRepositoryStore },
     { PostgresTurnArtifactStore },
     { PostgresGlobalSettingsStore },
+    { PostgresTokenFactoryUsageStore },
     { PostgresSentinelSettingsStore },
     { PostgresApprovalTokenStore },
     { PostgresMcpToolGrantStore },
@@ -544,6 +554,7 @@ async function createDistributedPersistence(options: {
     scheduleStore: new PostgresScheduleStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
+    tokenFactoryUsageStore: new PostgresTokenFactoryUsageStore(db),
     mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
@@ -581,6 +592,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     repositoryStore,
     turnArtifactStore,
     globalSettingsStore,
+    tokenFactoryUsageStore,
     mcpToolGrantStore,
     sentinelAuditStore,
     sentinelSettingsStore,
@@ -589,6 +601,33 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     redis,
     serviceFoundryClient,
   } = persistence;
+
+  // The env-managed Token Factory provider and default model are written before the first request,
+  // so no Settings step is needed. TrueFoundry mode lists providers from TrueFoundry instead.
+  if (!isTrueFoundryModeEnabled(configuration)) {
+    const outcome = await ensureEnvManagedTokenFactoryProvider({
+      store: modelProviderStore,
+      tenant_id: TENANT_ID,
+      settings: {
+        apiKey: configuration.NEBIUS_API_KEY,
+        baseUrl: configuration.TOKEN_FACTORY_BASE_URL,
+        model: configuration.TOKEN_FACTORY_MODEL,
+        cheaperModel: configuration.TOKEN_FACTORY_CHEAPER_MODEL,
+      },
+      logger,
+    });
+    if (outcome !== 'skipped') {
+      await seedEnvManagedDefaultChatModel({
+        globalSettingsStore,
+        model: configuration.TOKEN_FACTORY_MODEL,
+        logger,
+      });
+    }
+  }
+  const tokenFactoryBudget = createTokenFactoryBudget({
+    store: tokenFactoryUsageStore,
+    cap: configuration.TOKEN_FACTORY_DAILY_TOKEN_CAP,
+  });
 
   if (redis === undefined) {
     const recoveredCommandExecutions = await sessionStore.recoverRunningCommandExecutions({
@@ -702,6 +741,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     repositoryStore,
     turnArtifactStore,
     globalSettingsStore,
+    tokenFactoryBudget,
     sessionStore,
     sessionMetricsStore,
     sentinelAuditStore,

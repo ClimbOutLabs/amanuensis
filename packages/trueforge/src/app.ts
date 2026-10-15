@@ -56,6 +56,7 @@ import configuration, {
   getPublicBaseUrl,
   getPublicUiBasePath,
   getTrueForgeAuthMode,
+  isTrueFoundryModeEnabled,
   TrueForgeAuthMode,
 } from './config';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
@@ -84,6 +85,8 @@ import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import type { resolveSandboxProvider } from './runtime/sessionResources';
+import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
+import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
 import { InvalidCronError } from './schemas/schedule';
 import { zodErrorResponse, zodValidationHook } from './zodErrorResponse';
@@ -137,6 +140,9 @@ export function createAppErrorHandler(params: { logger: Logger }): ErrorHandler 
     }
     if (error instanceof InvalidCronError) {
       return c.json({ error: { message: error.message } }, 400);
+    }
+    if (error instanceof TokenFactoryDailyCapError) {
+      return c.json({ error: { message: error.message, type: 'rate_limit', code: error.code } }, 429);
     }
     if (error instanceof HTTPException) {
       if (error.status >= 500) {
@@ -246,6 +252,8 @@ export interface ServerDeps<TTransaction> {
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Per-instance daily Token Factory token cap, enforced when a turn starts on Token Factory. */
+  tokenFactoryBudget: TokenFactoryBudget;
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   sessions: Sessions<SessionCustom, TurnCustom>;
@@ -273,6 +281,10 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const adminAuthMiddleware = createAdminAuthMiddleware(deps.authenticator);
   const scheduleExecutionAuthMiddleware = createApiKeyAuthMiddleware(configuration.TRUEFORGE_API_KEY);
   const authEnabled = getTrueForgeAuthMode() !== TrueForgeAuthMode.Standalone;
+  const envManagedProviders = envManagedModelProviderNames({
+    apiKey: configuration.NEBIUS_API_KEY,
+    managedByTrueFoundry: isTrueFoundryModeEnabled(),
+  });
   const scheduleTurnDeps = {
     scheduleStore: deps.scheduleStore,
     sessions: deps.sessions,
@@ -292,6 +304,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     turnArtifactStore: deps.turnArtifactStore,
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
+    tokenFactoryBudget: deps.tokenFactoryBudget,
   };
 
   if (configuration.ACCESS_LOGS) {
@@ -337,6 +350,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveModelProviderStore: deps.resolveModelProviderStore,
         withTransaction: deps.withTransaction,
         resolveRequestContext,
+        globalSettingsStore: deps.globalSettingsStore,
+        logger: deps.logger,
       }),
       authMiddleware,
     ),
@@ -443,6 +458,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveSkillStore: deps.resolveSkillStore,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
+        envManagedModelProviderNames: envManagedProviders,
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,
@@ -699,6 +715,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         repositoryStore: deps.repositoryStore,
         turnArtifactStore: deps.turnArtifactStore,
         globalSettingsStore: deps.globalSettingsStore,
+        tokenFactoryBudget: deps.tokenFactoryBudget,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         sandboxProviderResolver: deps.sandboxProviderResolver,

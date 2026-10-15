@@ -4,6 +4,7 @@ import { afterEach, describe, it, vi } from 'vitest';
 
 import {
   createModelProviderCatalog,
+  isEnvManagedProvider,
   toHarnessModelEntry,
   toHarnessModelProvider,
   toUiCatalogModelProviderEntry,
@@ -122,6 +123,61 @@ describe('modelProviderCatalog mappers', () => {
         ],
       },
     );
+  });
+
+  it('maps the Token Factory preset with its endpoint and both model ids', () => {
+    assert.deepEqual(
+      toUiCatalogModelProviderEntry({
+        type: 'tokenfactory',
+        baseUrl: 'https://api.tokenfactory.nebius.com/v1',
+        models: [
+          { modelId: 'nvidia/nemotron-3-super-120b-a12b', name: 'nemotron-3-super-120b-a12b', properties: {} },
+          { modelId: 'openai/gpt-oss-120b', name: 'gpt-oss-120b', properties: {} },
+        ],
+      }),
+      {
+        type: 'tokenfactory',
+        name: 'tokenfactory',
+        baseUrl: 'https://api.tokenfactory.nebius.com/v1',
+        models: [
+          { id: 'nvidia/nemotron-3-super-120b-a12b', name: 'nemotron-3-super-120b-a12b', properties: {} },
+          { id: 'openai/gpt-oss-120b', name: 'gpt-oss-120b', properties: {} },
+        ],
+      },
+    );
+  });
+
+  it('turns a Token Factory preset into an upsert body on its own endpoint', () => {
+    assert.deepEqual(
+      toHarnessModelProvider({
+        type: 'tokenfactory',
+        name: 'tokenfactory',
+        apiKey: 'sk-nebius',
+        baseUrl: 'https://api.tokenfactory.nebius.com/v1',
+        models: [{ id: 'openai/gpt-oss-120b', name: 'gpt-oss-120b', properties: {} }],
+      }),
+      {
+        type: 'tokenfactory',
+        auth: { apiKey: 'sk-nebius' },
+        baseUrl: 'https://api.tokenfactory.nebius.com/v1',
+        models: [{ modelId: 'openai/gpt-oss-120b', name: 'gpt-oss-120b', properties: {} }],
+      },
+    );
+  });
+
+  it('carries the environment-managed flag of a configured provider', () => {
+    const manifest = {
+      type: 'tokenfactory' as const,
+      baseUrl: 'https://api.tokenfactory.nebius.com/v1',
+      auth: { apiKey: '***REDACTED***' },
+      models: [{ modelId: 'openai/gpt-oss-120b', name: 'gpt-oss-120b', properties: {} }],
+    };
+
+    const managed = toUiModelProvider({ name: 'tokenfactory', envManaged: true, manifest });
+    const manual = toUiModelProvider({ name: 'tokenfactory', manifest });
+
+    assert.equal(isEnvManagedProvider(managed), true);
+    assert.equal(isEnvManagedProvider(manual), false);
   });
 
   it('builds discriminated harness upsert bodies from UI create/update requests', () => {

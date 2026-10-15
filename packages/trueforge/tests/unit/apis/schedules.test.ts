@@ -25,6 +25,7 @@ import {
   ListSchedulesResponseSchema,
 } from '../../../src/schemas/schedule';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../src/controller/scheduleDispatch', () => {
   const actual = jest.requireActual<typeof import('../../../src/controller/scheduleDispatch')>(
@@ -87,6 +88,7 @@ function stubTurnExecutionDeps(
     spaceStore: {} as never,
     turnArtifactStore: new FakeTurnArtifactStore(),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
+    tokenFactoryBudget: uncappedTokenFactoryBudget,
   };
 }
 
