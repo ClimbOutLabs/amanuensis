@@ -7,7 +7,7 @@
  *  - paste: the browser is elsewhere. A Desktop client returns to an address that cannot load, and the user
  *    pastes that address back so the code and state can be read from it.
  */
-import type { ClientType } from './clientJson';
+import type { ClientType } from './clientJson.js';
 
 export const GOOGLE_CALLBACK_PATH = '/api/v1/user/settings/google/oauth/callback';
 

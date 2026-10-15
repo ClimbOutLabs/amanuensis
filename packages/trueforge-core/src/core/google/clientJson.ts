@@ -4,7 +4,7 @@
  * Pure, so the Settings panel runs the same checks in the browser. Problems are plain language.
  */
 import { z } from 'zod';
-import type { GoogleSetupInfo } from './setupMode';
+import type { GoogleSetupInfo } from './setupMode.js';
 
 export const CLIENT_TYPES = ['desktop', 'web'] as const;
 export type ClientType = (typeof CLIENT_TYPES)[number];
