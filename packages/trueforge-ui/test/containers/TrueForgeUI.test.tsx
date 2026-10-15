@@ -428,6 +428,10 @@ describe('StackChatPanel', () => {
       </SlotsProvider>,
     );
 
+    // SchedulesPage is lazy-loaded, so the first open pays the module load inside the
+    // findByRole wait below and times out under load. Load it before clicking instead.
+    await import('@/atoms/schedules/SchedulesPage.js');
+
     fireEvent.click(screen.getByRole('button', { name: 'Open schedules' }));
     expect(await screen.findByRole('heading', { name: 'Scheduled Agents' })).toBeInTheDocument();
 
