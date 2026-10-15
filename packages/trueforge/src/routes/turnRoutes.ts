@@ -273,6 +273,12 @@ Use \`previous_turn_id\` to chain to the session's last turn (defaults to \`auto
         'unavailable (e.g. file uploads), or the turn input conflicts with current state ' +
         '(e.g. unresolved tool calls or approvals, tool name collision).',
     },
+    429: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description:
+        "Today's Token Factory token budget is used up (`error.code` is `token_factory_daily_cap_reached`). " +
+        'It resets at midnight UTC.',
+    },
   },
 });
 

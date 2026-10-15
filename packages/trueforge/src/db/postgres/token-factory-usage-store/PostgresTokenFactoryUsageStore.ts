@@ -33,7 +33,10 @@ export class PostgresTokenFactoryUsageStore implements ITokenFactoryUsageStore<T
     return row === undefined ? undefined : toRecord(row);
   }
 
-  async addUsage(input: AddTokenFactoryUsageInput, transaction?: Transaction<Database>): Promise<TokenFactoryUsageRecord> {
+  async addUsage(
+    input: AddTokenFactoryUsageInput,
+    transaction?: Transaction<Database>,
+  ): Promise<TokenFactoryUsageRecord> {
     const write = async (trx: Transaction<Database>) => {
       const row = await trx
         .insertInto('token_factory_usage')

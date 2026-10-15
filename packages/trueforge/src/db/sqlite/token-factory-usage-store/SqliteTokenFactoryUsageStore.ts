@@ -33,7 +33,10 @@ export class SqliteTokenFactoryUsageStore implements ITokenFactoryUsageStore<Tra
     return row === undefined ? undefined : toRecord(row);
   }
 
-  async addUsage(input: AddTokenFactoryUsageInput, transaction?: Transaction<Database>): Promise<TokenFactoryUsageRecord> {
+  async addUsage(
+    input: AddTokenFactoryUsageInput,
+    transaction?: Transaction<Database>,
+  ): Promise<TokenFactoryUsageRecord> {
     const write = async (trx: Transaction<Database>) => {
       const timestamp = nowIso();
       const row = await trx
@@ -49,6 +52,8 @@ export class SqliteTokenFactoryUsageStore implements ITokenFactoryUsageStore<Tra
         .executeTakeFirstOrThrow();
       return toRecord(row);
     };
-    return transaction ? await write(transaction) : await this.#db.transaction().setAccessMode('read write').execute(write);
+    return transaction
+      ? await write(transaction)
+      : await this.#db.transaction().setAccessMode('read write').execute(write);
   }
 }
