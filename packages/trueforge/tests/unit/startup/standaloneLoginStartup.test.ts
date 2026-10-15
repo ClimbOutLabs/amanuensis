@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -124,6 +124,31 @@ describe('standalone login startup', () => {
       /Refusing to start without login.*OIDC_ISSUER_URL.*OIDC_CLIENT_ID.*OIDC_CLIENT_SECRET/,
     );
   });
+
+  it('starts when the home directory cannot be created, keeping its data under APP_DATA_DIR', async () => {
+    const port = await freePort();
+    // A path below a regular file can never be created, as for a runtime user whose home directory is missing.
+    const blocker = path.join(dataDir, 'not-a-directory');
+    await writeFile(blocker, '');
+    const appDataDir = path.join(dataDir, 'app');
+    const booted = boot(
+      {
+        PORT: String(port),
+        HOME: path.join(blocker, 'home'),
+        APP_DATA_DIR: appDataDir,
+        OIDC_ISSUER_URL: `http://127.0.0.1:${String(await freePort())}/dex`,
+        OIDC_CLIENT_ID: 'client-a',
+        OIDC_CLIENT_SECRET: 'secret-a',
+      },
+      dataDir,
+    );
+    running.push(booted);
+
+    await waitFor(async () => (await fetch(`http://localhost:${String(port)}/healthz`)).status === 200);
+
+    expect(booted.output()).not.toMatch(/Failed to start server/);
+    expect(await readdir(appDataDir)).toContain('sandboxes');
+  }, 90_000);
 
   it('boots with an unreachable issuer, serves 401 and the retry page, guards Host and Origin, then logs in once the issuer appears', async () => {
     const port = await freePort();

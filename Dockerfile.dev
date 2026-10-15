@@ -149,14 +149,17 @@ RUN groupadd --gid 10001 trueforge \
 # must still mount persistent volumes. Without these dirs, the cwd-relative
 # storage defaults resolve under the root-owned workdir and die with EACCES at
 # first write.
-RUN mkdir -p /data/memory /data/persona-knowledge \
+RUN mkdir -p /data/memory /data/persona-knowledge /data/app \
   && chown -R 10001:10001 /data
 
 # Image-level defaults so either image works without deploy-specific env: the
 # data roots above are writable by the runtime user. Deploys that pin their own
 # values (compose, runbook templates) override these.
+# APP_DATA_DIR keeps SQLite defaults, sandbox state and the git bridge on the data volume: the runtime user
+# has no home directory, so the default under HOME would fail with EACCES at startup.
 ENV MEMORY_MARKDOWN_DIR=/data/memory \
-  PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge
+  PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge \
+  APP_DATA_DIR=/data/app
 
 # `docker run --rm -i <image> aman <command>` (hash-password, backup, doctor).
 # /backup is the mount point for `aman backup --target /backup`; owning it here lets a fresh
