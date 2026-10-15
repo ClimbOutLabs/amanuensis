@@ -87,7 +87,7 @@ describe('20261011_000001_sentinel_search_without_asking migration', () => {
       VALUES ('t1', 'kept', 0, jsonb('[]'), 0, '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z')
     `.execute(db);
 
-    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect((await migrator.migrateTo(PREVIOUS_MIGRATION)).error).toBeUndefined();
     expect(await columnNames(db)).not.toContain('search_without_asking');
     const kept = await sql<{ created_by: string }>`SELECT created_by FROM sentinel_user_settings`.execute(db);
     expect(kept.rows).toEqual([{ created_by: 'kept' }]);
