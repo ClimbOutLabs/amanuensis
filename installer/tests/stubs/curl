@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Test double for curl: serves the fixture Node.js tarballs under $STUB_STATE/dist for nodejs.org URLs and nothing else.
+printf 'curl %s\n' "$*" >>"$STUB_LOG"
+if [ -n "${STUB_CURL_FAIL:-}" ]; then
+  echo "curl: (6) Could not resolve host: nodejs.org" >&2
+  exit 6
+fi
+out=
+url=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift ;;
+    https://*) url=$1 ;;
+  esac
+  shift
+done
+case "$url" in
+  https://nodejs.org/dist/v*/node-v*.tar.gz) ;;
+  *) echo "stub curl: unexpected address $url" >&2; exit 22 ;;
+esac
+src=$STUB_STATE/dist/${url##*/}
+[ -f "$src" ] || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
+if [ -n "${STUB_CURL_CORRUPT:-}" ]; then
+  printf 'not the tarball\n' >"$out"
+else
+  cp "$src" "$out"
+fi

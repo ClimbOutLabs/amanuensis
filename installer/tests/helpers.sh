@@ -12,7 +12,7 @@ CURRENT_TEST=
 
 # System tools the installer needs. docker, sudo, sg, id and friends are never taken from the host.
 TOOLS="bash sh env awk sed grep egrep cut tr od head tail sort uniq wc cat cp mv rm mkdir rmdir chmod mktemp date cmp find
-basename dirname uname kill sleep ln git sha256sum shasum tee readlink ls touch xargs timeout getconf true false python3 diff tar stat"
+basename dirname uname kill sleep ln git sha256sum shasum tee readlink ls touch xargs timeout getconf true false python3 diff tar gzip stat"
 
 sandbox_new() {
   SB=$(mktemp -d)
@@ -30,6 +30,8 @@ sandbox_new() {
       *) cp "$t" "$SB_BIN/" ;;
     esac
   done
+  # Host Node.js is not part of the machine unless a test adds it: the installer brings its own.
+  rm -f "$SB_BIN/node"
   stage_installer
   STUB_REAL_DF=$(command -v df)
   export STUB_LOG=$SB/stub.log STUB_STATE=$SB_STATE STUB_BIN=$SB_BIN STUB_USER=testuser
@@ -38,9 +40,10 @@ sandbox_new() {
   AMAN_HOME=$SB/home
   REPO=$SB/repo
   fixture_repo "$REPO"
+  fixture_node_runtime
   unset STUB_DOCKER_DENIED STUB_DOCKER_DOWN STUB_ROOTLESS STUB_PODMAN STUB_BUILD_FAIL STUB_BUILD_OOM STUB_DOCKER_MEM_BYTES STUB_UP_FAIL_UNLESS_TAG \
     STUB_DOCKER_ROOT STUB_DOCKER_ROOT_KB AMAN_PASSWORD STUB_BUSY_PORTS STUB_BACKUP_FAIL STUB_VOLUME_RM_FAIL STUB_ENGINE_VERSION STUB_COMPOSE_VERSION STUB_DOCTOR_EXIT STUB_VIA_SG STUB_VIA_SUDO \
-    STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_NODE_VERSION STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC || true
+    STUB_CURL_FAIL STUB_CURL_CORRUPT STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_NODE_VERSION STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC || true
   STUB_DF_KB=50000000
   INSTALL_EXTRA=()
 }
@@ -52,6 +55,50 @@ stage_installer() {
   mkdir -p "$SB_INSTALLER/doctor"
   cp -R "$INSTALLER_DIR/install.sh" "$INSTALLER_DIR/lib" "$INSTALLER_DIR/templates" "$INSTALLER_DIR/release.json" "$INSTALLER_DIR/downloads.txt" "$SB_INSTALLER/"
   cp "$TESTS_DIR/stubs/aman-doctor" "$SB_INSTALLER/doctor/aman"
+}
+
+# The pinned Node.js release as tarballs a stub curl can serve, for every platform the installer knows, with the staged
+# release.json pointing at their real SHA-256. The "binary" in each is a wrapper around the stub node, so a run that
+# uses the downloaded runtime leaves the same log lines as one that uses a host Node.js.
+fixture_node_runtime() {
+  local version platform dir hash pins=$SB_INSTALLER/release.json key
+  version=$(sed -n 's/.*"node_version"[^"]*"\([^"]*\)".*/\1/p' "$INSTALLER_DIR/release.json")
+  NODE_PIN_VERSION=$version
+  mkdir -p "$SB_STATE/dist"
+  for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+    dir=$SB/nodebuild/node-v$version-$platform/bin
+    mkdir -p "$dir"
+    cat >"$dir/node" <<NODE
+#!/usr/bin/env bash
+STUB_NODE_VERSION=\${STUB_NODE_VERSION:-v$version}
+export STUB_NODE_VERSION
+exec bash $TESTS_DIR/stubs/node "\$@"
+NODE
+    chmod 755 "$dir/node"
+    tar -czf "$SB_STATE/dist/node-v$version-$platform.tar.gz" -C "$SB/nodebuild" "node-v$version-$platform"
+    hash=$(sha256sum "$SB_STATE/dist/node-v$version-$platform.tar.gz" | cut -d' ' -f1)
+    key=node_sha256_${platform//-/_}
+    sed "s|\"$key\": \"[a-f0-9]*\"|\"$key\": \"$hash\"|" "$pins" >"$pins.new" && mv "$pins.new" "$pins"
+  done
+}
+
+# Replaces the system uname with one that reports the given kernel name and machine, for platform selection.
+fixture_uname() {
+  rm -f "$SB_BIN/uname"
+  cat >"$SB_BIN/uname" <<UNAME
+#!/usr/bin/env bash
+case "\${1:-}" in
+  -m) echo $2 ;;
+  -r) echo 6.8.0-generic ;;
+  *) echo $1 ;;
+esac
+UNAME
+  chmod 755 "$SB_BIN/uname"
+}
+
+# Puts a host Node.js (the stub) on the PATH of the installer.
+fixture_host_node() {
+  cp "$TESTS_DIR/stubs/node" "$SB_BIN/node"
 }
 
 sandbox_drop() {
@@ -93,6 +140,7 @@ build_run_env() {
     STUB_UP_FAIL_UNLESS_TAG="${STUB_UP_FAIL_UNLESS_TAG:-}" STUB_DF_KB="${STUB_DF_KB:-}"
     STUB_BUSY_PORTS="${STUB_BUSY_PORTS:-}" STUB_BACKUP_FAIL="${STUB_BACKUP_FAIL:-}" STUB_VOLUME_RM_FAIL="${STUB_VOLUME_RM_FAIL:-}"
     STUB_ENGINE_VERSION="${STUB_ENGINE_VERSION:-}" ${STUB_COMPOSE_VERSION+STUB_COMPOSE_VERSION="$STUB_COMPOSE_VERSION"}
+    STUB_CURL_FAIL="${STUB_CURL_FAIL:-}" STUB_CURL_CORRUPT="${STUB_CURL_CORRUPT:-}"
     STUB_APPARMOR="${STUB_APPARMOR:-}" STUB_CGROUP="${STUB_CGROUP:-}" STUB_DOCKER_OS="${STUB_DOCKER_OS:-}" STUB_NO_BUNDLE="${STUB_NO_BUNDLE:-}"
     STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}"
     STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" STUB_DOCKER_ROOT="${STUB_DOCKER_ROOT:-}" STUB_DOCKER_ROOT_KB="${STUB_DOCKER_ROOT_KB:-}"

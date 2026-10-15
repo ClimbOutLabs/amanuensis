@@ -15,7 +15,7 @@ test_dry_run_plans_the_sandbox() {
   assert_contains "$OUT" "Build the sandbox slot image amanuensis-sandbox-slot:local"
   assert_contains "$OUT" "Start the 4 sandbox slots of instance main"
   assert_contains "$OUT" "[root]"
-  assert_contains "$OUT" "load the AppArmor profile aman-sandbox-slot"
+  assert_contains "$OUT" "install the AppArmor profile as /etc/apparmor.d/aman-sandbox-slot and load it (it loads again at every boot)"
   assert_contains "$OUT" "4 slot disk files of 16 GB under /var/lib/aman-slots"
   assert_contains "$OUT" "--sandbox-root"
   assert_contains "$OUT" "Run code (Python, shell, files) runs in the gVisor sandbox"
@@ -37,34 +37,159 @@ test_plan_has_no_root_line_in_docker_desktop() {
   sandbox_drop
 }
 
-test_missing_node_blocks_before_any_prompt() {
-  t_begin "without Node.js the sandbox is a blocker named in plain words, before any prompt, with the way out"
+test_no_host_node_is_needed() {
+  t_begin "a machine with no Node.js installs: the pinned runtime is downloaded, checked and used"
   sandbox_new
-  rm -f "$SB_BIN/node"
-  run_install_tty "Instance name=>
-Owner email=>owner@example.invalid
-"
-  assert_eq "$RC" 1
-  assert_contains "$OUT" "This machine cannot be set up yet"
-  assert_contains "$OUT" "Node.js 22.14 or newer"
-  assert_contains "$OUT" "--no-sandbox"
-  assert_not_contains "$OUT" "Instance name"
-  assert_log_lacks "docker build"
+  install_machine
+  assert_eq "$RC" 0
+  assert_file "$AMAN_HOME/runtime/node/bin/node"
+  assert_mode "$AMAN_HOME/runtime/node/bin/node" 755
+  assert_mode "$AMAN_HOME/runtime/node" 700
+  assert_eq "$("$AMAN_HOME/runtime/node/bin/node" --version)" "v$NODE_PIN_VERSION"
+  assert_log_has "curl -fsSL --proto =https --tlsv1.2 -o"
+  assert_log_has "https://nodejs.org/dist/v$NODE_PIN_VERSION/node-v$NODE_PIN_VERSION-"
+  assert_contains "$OUT" "Downloading Node.js v$NODE_PIN_VERSION"
+  assert_eq "$(log_count 'https://nodejs.org')" 1 "one download"
+  assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --build-only"
+  assert_no_path "$SB/user/.node"
+  assert_eq "$(find "$AMAN_HOME/runtime" -type f | wc -l | tr -d ' ')" 1 "only the node binary is kept"
   sandbox_drop
 }
 
-test_old_node_blocks() {
-  t_begin "Node.js older than 22.14 is a blocker"
+test_plan_lists_the_runtime_download() {
+  t_begin "the plan and --print-network list the Node.js download from nodejs.org, and a present runtime is not downloaded again"
   sandbox_new
-  STUB_NODE_VERSION=v22.13.1
-  run_install --dry-run --email owner@example.invalid
-  assert_rc 1
-  assert_contains "$ERR" "Node.js 22.14 or newer"
-  STUB_NODE_VERSION=v22.14.0
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  STUB_NODE_VERSION=v24.1.0
+  assert_contains "$OUT" "Download Node.js v$NODE_PIN_VERSION ("
+  assert_contains "$OUT" "from nodejs.org, checked against a pinned SHA-256"
+  assert_contains "$OUT" "the host needs no Node.js"
+  assert_contains "$OUT" "Node.js runtime that runs the sandbox setup"
+  assert_contains "$OUT" "nodejs.org"
+  assert_log_lacks "curl "
+  run_install --print-network
+  assert_contains "$OUT" "nodejs.org"
+  install_machine
+  : >"$STUB_LOG"
+  run_install --dry-run
+  assert_rc 0
+  assert_contains "$OUT" "Pinned Node.js v$NODE_PIN_VERSION for the sandbox setup"
+  assert_not_contains "$OUT" "Download Node.js"
+  run_install instance add second --yes --password-stdin --email second@example.invalid </dev/null
+  assert_log_lacks "https://nodejs.org" "an installed runtime is reused"
+  sandbox_drop
+}
+
+test_platform_selection() {
+  t_begin "the tarball and the pinned hash follow the kernel and CPU: linux and darwin, x64 and arm64"
+  local pair os arch plat
+  for pair in "Linux x86_64 linux-x64" "Linux aarch64 linux-arm64" "Linux arm64 linux-arm64" "Darwin x86_64 darwin-x64" "Darwin arm64 darwin-arm64"; do
+    read -r os arch plat <<<"$pair"
+    sandbox_new
+    fixture_uname "$os" "$arch"
+    run_install --dry-run --email owner@example.invalid
+    assert_rc 0
+    assert_contains "$OUT" "Download Node.js v$NODE_PIN_VERSION ($plat) from nodejs.org" "$os $arch"
+    sandbox_drop
+  done
+  sandbox_new
+  fixture_uname Linux aarch64
+  install_machine
+  assert_log_has "node-v$NODE_PIN_VERSION-linux-arm64.tar.gz"
+  assert_not_contains "$(cat "$STUB_LOG")" "linux-x64"
+  sandbox_drop
+}
+
+test_unsupported_machine_is_a_blocker() {
+  t_begin "a CPU nodejs.org has no build for blocks with the host-Node and no-sandbox ways out"
+  sandbox_new
+  fixture_uname Linux riscv64
   run_install --dry-run --email owner@example.invalid
+  assert_rc 1
+  assert_contains "$ERR" "no official Node.js build for this computer (Linux riscv64)"
+  assert_contains "$ERR" "--use-host-node"
+  assert_contains "$ERR" "--no-sandbox"
+  assert_log_lacks "curl "
+  sandbox_drop
+}
+
+test_download_needs_curl_or_wget() {
+  t_begin "without curl or wget the download is a blocker before any prompt"
+  sandbox_new
+  rm -f "$SB_BIN/curl"
+  run_install --dry-run --email owner@example.invalid
+  assert_rc 1
+  assert_contains "$ERR" "needs curl or wget"
+  sandbox_drop
+}
+
+test_checksum_mismatch_is_refused() {
+  t_begin "a tarball that does not match the pinned SHA-256 is refused and nothing is kept"
+  sandbox_new
+  STUB_CURL_CORRUPT=1
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 1
+  assert_contains "$ERR" "does not match the pinned SHA-256"
+  assert_contains "$ERR" "so it was not used"
+  assert_no_path "$AMAN_HOME/runtime/node/bin/node"
+  assert_log_lacks "aman-sandbox.mjs"
+  assert_no_path "$AMAN_HOME/state/instances/main.conf"
+  assert_eq "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'aman-node.*' -newer "$STUB_LOG" 2>/dev/null | wc -l | tr -d ' ')" 0 "the scratch download is removed"
+  sandbox_drop
+}
+
+test_download_failure_is_explained() {
+  t_begin "a failed download names the address and nothing else is changed"
+  sandbox_new
+  STUB_CURL_FAIL=1
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 1
+  assert_contains "$ERR" "could not download https://nodejs.org/dist/v$NODE_PIN_VERSION/node-v$NODE_PIN_VERSION-"
+  assert_no_path "$AMAN_HOME/runtime/node/bin/node"
+  sandbox_drop
+}
+
+test_host_node_only_by_opt_in() {
+  t_begin "a suitable host Node.js is used only with --use-host-node; without the flag the pinned runtime is used"
+  sandbox_new
+  fixture_host_node
+  install_machine
+  assert_file "$AMAN_HOME/runtime/node/bin/node" "the host Node.js is ignored by default"
+  sandbox_drop
+  sandbox_new
+  fixture_host_node
+  INSTALL_EXTRA=(--use-host-node)
+  install_machine
+  assert_eq "$RC" 0
+  assert_no_path "$AMAN_HOME/runtime"
+  assert_log_lacks "https://nodejs.org"
+  assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --build-only"
+  assert_not_contains "$OUT" "Download Node.js"
+  sandbox_drop
+}
+
+test_host_node_opt_in_needs_a_new_enough_node() {
+  t_begin "--use-host-node with no Node.js, or one older than 22.14, is a blocker (no silent fallback)"
+  sandbox_new
+  run_install --dry-run --use-host-node --email owner@example.invalid
+  assert_rc 1
+  assert_contains "$ERR" "--use-host-node needs Node.js 22.14 or newer"
+  fixture_host_node
+  STUB_NODE_VERSION=v22.13.1
+  run_install --dry-run --use-host-node --email owner@example.invalid
+  assert_rc 1
+  STUB_NODE_VERSION=v22.14.0
+  run_install --dry-run --use-host-node --email owner@example.invalid
+  assert_rc 0
+  assert_contains "$OUT" "Node.js on this computer runs the sandbox setup (--use-host-node)"
+  STUB_NODE_VERSION=v24.1.0
+  run_install --dry-run --use-host-node --email owner@example.invalid
   assert_rc 0
   sandbox_drop
 }
@@ -140,12 +265,13 @@ test_rendered_compose_wires_the_app_to_the_slots() {
 test_install_without_sandbox() {
   t_begin "--no-sandbox installs without node, the wiring or any slot step, and says run code is off"
   sandbox_new
-  rm -f "$SB_BIN/node"
   INSTALL_EXTRA=(--no-sandbox)
   install_machine
   assert_eq "$RC" 0
   assert_log_lacks "node "
   assert_log_lacks "--entrypoint cat"
+  assert_log_lacks "https://nodejs.org" "no runtime is downloaded for an install without the sandbox"
+  assert_no_path "$AMAN_HOME/runtime"
   assert_no_path "$AMAN_HOME/bin/aman-sandbox.mjs"
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "SANDBOX_BACKEND"
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "slot_ctl"
@@ -170,7 +296,9 @@ test_root_steps_need_consent_yes_is_not_enough() {
   assert_rc 1
   assert_contains "$ERR" "root steps that were not approved"
   assert_contains "$ERR" "--sandbox-root"
-  assert_contains "$OUT" "sudo apparmor_parser -r -W $REPO/ops/sandbox-slot/apparmor/aman-sandbox-slot"
+  assert_contains "$OUT" "sudo install -m 0644 $REPO/ops/sandbox-slot/apparmor/aman-sandbox-slot /etc/apparmor.d/aman-sandbox-slot"
+  assert_contains "$OUT" "sudo apparmor_parser -r -W /etc/apparmor.d/aman-sandbox-slot"
+  assert_contains "$OUT" "loaded again by the system at every boot"
   assert_contains "$OUT" "setup-disks.sh setup /var/lib/aman-slots/<instance> 16 4"
   assert_log_lacks "--fix"
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
@@ -371,15 +499,84 @@ test_node_calls_use_the_docker_access_of_the_run() {
   STUB_DOCKER_DENIED=1
   printf 'testuser\n' >"$SB_STATE/group_members"
   install_machine
-  assert_log_has "sg docker -c env DOCKER_BUILDKIT=1 node $AMAN_HOME/bin/aman-sandbox.mjs --build-only"
-  assert_log_has "sg docker -c env DOCKER_BUILDKIT=1 node $AMAN_HOME/bin/aman-sandbox.mjs --check --json"
+  assert_log_has "sg docker -c env DOCKER_BUILDKIT=1 $AMAN_HOME/runtime/node/bin/node $AMAN_HOME/bin/aman-sandbox.mjs --build-only"
+  assert_log_has "sg docker -c env DOCKER_BUILDKIT=1 $AMAN_HOME/runtime/node/bin/node $AMAN_HOME/bin/aman-sandbox.mjs --check --json"
+  sandbox_drop
+}
+
+# A systemd host whose docker.service is or is not enabled at boot.
+fixture_systemd() {
+  local rc=0
+  [ "$1" = enabled ] || rc=1
+  cat >"$SB_BIN/systemctl" <<SC
+#!/usr/bin/env bash
+printf 'systemctl %s\n' "\$*" >>"\$STUB_LOG"
+case "\${1:-}" in
+  cat) exit 0 ;;
+  is-enabled) exit $rc ;;
+esac
+exit 0
+SC
+  chmod 755 "$SB_BIN/systemctl"
+}
+
+test_docker_is_enabled_at_boot_with_consent() {
+  t_begin "when Docker does not start at boot the root step is shown and run with --sandbox-root"
+  sandbox_new
+  fixture_systemd disabled
+  INSTALL_EXTRA=(--sandbox-root)
+  install_machine
+  assert_eq "$RC" 0
+  assert_contains "$OUT" "Docker does not start at boot here"
+  assert_contains "$OUT" "sudo systemctl enable docker"
+  assert_log_has "sudo systemctl enable docker"
+  sandbox_drop
+}
+
+test_docker_boot_needs_consent_but_does_not_stop_the_install() {
+  t_begin "--yes alone does not enable Docker at boot; the install finishes and says what a restart would do"
+  sandbox_new
+  fixture_systemd disabled
+  install_machine
+  assert_eq "$RC" 0
+  assert_log_lacks "sudo systemctl enable docker"
+  assert_contains "$ERR$OUT" "after a restart the sandbox stays down until you run: sudo systemctl enable docker"
+  sandbox_drop
+}
+
+test_nothing_to_enable_when_docker_starts_at_boot() {
+  t_begin "no boot step when Docker is already enabled"
+  sandbox_new
+  fixture_systemd enabled
+  install_machine
+  assert_not_contains "$OUT" "does not start at boot"
+  assert_log_lacks "sudo systemctl enable docker"
+  sandbox_drop
+}
+
+test_slots_come_back_after_a_restart() {
+  t_begin "the slots and the instance restart with Docker: every service restarts unless stopped"
+  sandbox_new
+  install_machine
+  local compose slots
+  compose=$(cat "$AMAN_HOME/instances/main/compose.yaml")
+  assert_eq "$(printf '%s\n' "$compose" | grep -c 'restart: unless-stopped')" 3 "loopback, app and dex"
+  slots=$(cat "$INSTALLER_DIR/../docker-compose.slots.yml")
+  assert_contains "$slots" "restart: unless-stopped"
   sandbox_drop
 }
 
 test_dry_run_plans_the_sandbox
 test_plan_has_no_root_line_in_docker_desktop
-test_missing_node_blocks_before_any_prompt
-test_old_node_blocks
+test_no_host_node_is_needed
+test_plan_lists_the_runtime_download
+test_platform_selection
+test_unsupported_machine_is_a_blocker
+test_download_needs_curl_or_wget
+test_checksum_mismatch_is_refused
+test_download_failure_is_explained
+test_host_node_only_by_opt_in
+test_host_node_opt_in_needs_a_new_enough_node
 test_cgroup_and_low_disk
 test_install_builds_then_starts_slots_then_the_instance
 test_rendered_compose_wires_the_app_to_the_slots
@@ -398,4 +595,8 @@ test_remove_stops_the_slots
 test_existing_instance_without_wiring_gets_it
 test_upgrade_refreshes_the_setup_and_image
 test_node_calls_use_the_docker_access_of_the_run
+test_docker_is_enabled_at_boot_with_consent
+test_docker_boot_needs_consent_but_does_not_stop_the_install
+test_nothing_to_enable_when_docker_starts_at_boot
+test_slots_come_back_after_a_restart
 tests_finish
