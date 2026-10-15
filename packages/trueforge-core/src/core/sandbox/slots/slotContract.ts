@@ -1,7 +1,13 @@
+import { join } from 'node:path';
 import { z } from 'zod';
 
 /** Socket file name inside a slot's control directory. */
 export const SLOT_AGENT_SOCKET_NAME = 'agent.sock';
+
+/** Control socket of each slot agent, `<dir>/<n>/agent.sock` for n = 1..count: the layout the slots compose project mounts. */
+export function slotSocketPathsIn({ dir, count }: { dir: string; count: number }): string[] {
+  return Array.from({ length: count }, (_, index) => join(dir, String(index + 1), SLOT_AGENT_SOCKET_NAME));
+}
 
 /** The agent build and gVisor release this server was written against; a slot reporting others is refused. */
 export const SLOT_AGENT_VERSION = '0.3.0';

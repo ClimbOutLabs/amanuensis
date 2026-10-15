@@ -11,6 +11,7 @@ export function fakeDeps(overrides: Partial<DoctorDeps> = {}): DoctorDeps {
     get: () => Promise.reject(new Error('unexpected request')),
     freeBytes: () => Promise.resolve(50 * 1024 ** 3),
     probeDatabaseWritable: () => undefined,
+    slotsReadiness: () => Promise.reject(new Error('unexpected sandbox probe')),
     ...overrides,
   };
 }

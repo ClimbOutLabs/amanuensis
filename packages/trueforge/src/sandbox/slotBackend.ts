@@ -3,11 +3,10 @@ import {
   extractErrorLogFields,
   GitBridge,
   rawSandboxId,
-  SLOT_AGENT_SOCKET_NAME,
   SlotSandboxProvider,
+  slotSocketPathsIn,
   type SandboxBuild,
 } from '@truefoundry/trueforge-core/core';
-import { join } from 'node:path';
 import type { Logger } from 'winston';
 import configuration from '../config';
 
@@ -38,9 +37,7 @@ export function slotsBackendEnabled(): boolean {
 
 /** Control socket of each slot agent, `<dir>/<n>/agent.sock` for n = 1..SANDBOX_SLOTS. */
 export function slotSocketPaths(): string[] {
-  return Array.from({ length: configuration.SANDBOX_SLOTS }, (_, index) =>
-    join(configuration.SANDBOX_SLOTS_DIR, String(index + 1), SLOT_AGENT_SOCKET_NAME),
-  );
+  return slotSocketPathsIn({ dir: configuration.SANDBOX_SLOTS_DIR, count: configuration.SANDBOX_SLOTS });
 }
 
 export function createSlotSandboxProvider({ logger }: { logger: Logger }): SlotSandboxProvider {

@@ -30,7 +30,7 @@ export async function runInstanceChecks({
     checkDatabase({ deps, timeoutMs }),
     await checkDisk({ deps }),
     checkClock({ deps }),
-    checkRunCode(),
+    await checkRunCode({ deps, timeoutMs }),
     checkAttachments(),
   ];
   return only === undefined ? checks : checks.filter(check => check.id === only);

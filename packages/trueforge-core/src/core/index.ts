@@ -355,7 +355,7 @@ export { existingSandboxIdForProvider, formatSandboxId, parseSandboxId, rawSandb
 export type { SandboxRefParts } from './sandbox/sandboxRef';
 export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
-export { SLOT_AGENT_SOCKET_NAME } from './sandbox/slots/slotContract';
+export { slotSocketPathsIn } from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SlotDriver } from './sandbox/slots/SlotDriver';
 export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';

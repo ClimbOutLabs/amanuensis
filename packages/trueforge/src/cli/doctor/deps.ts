@@ -1,6 +1,8 @@
 import { statfs } from 'node:fs/promises';
 
+import { SlotDriver, type DriverReadiness } from '@truefoundry/trueforge-core/core';
 import Database from 'better-sqlite3';
+import winston from 'winston';
 
 import { processEnv, type CliEnv } from '../env';
 
@@ -18,6 +20,8 @@ export interface DoctorDeps {
   freeBytes(dir: string): Promise<number>;
   /** Throws unless a write transaction can be opened on an existing database. */
   probeDatabaseWritable(options: { path: string; timeoutMs: number }): void;
+  /** Asks the sandbox slots the way the app does: every slot's attestation, through their control sockets. */
+  slotsReadiness(options: { socketPaths: string[]; timeoutMs: number }): Promise<DriverReadiness>;
 }
 
 async function get({ url, timeoutMs }: { url: string; timeoutMs: number }): Promise<HttpResponse> {
@@ -46,6 +50,26 @@ function probeDatabaseWritable({ path, timeoutMs }: { path: string; timeoutMs: n
   }
 }
 
+async function slotsReadiness({
+  socketPaths,
+  timeoutMs,
+}: {
+  socketPaths: string[];
+  timeoutMs: number;
+}): Promise<DriverReadiness> {
+  const driver = new SlotDriver({
+    socketPaths,
+    logger: winston.createLogger({ silent: true }),
+    now: undefined,
+    sleepMs: undefined,
+  });
+  try {
+    return await driver.ensureReady(AbortSignal.timeout(timeoutMs));
+  } finally {
+    await driver.dispose();
+  }
+}
+
 export function processDeps(): DoctorDeps {
-  return { env: processEnv(), nowMs: () => Date.now(), get, freeBytes, probeDatabaseWritable };
+  return { env: processEnv(), nowMs: () => Date.now(), get, freeBytes, probeDatabaseWritable, slotsReadiness };
 }
