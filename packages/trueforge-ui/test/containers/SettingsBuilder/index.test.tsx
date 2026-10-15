@@ -195,11 +195,11 @@ describe('TruefoundrySettingsBuilder', () => {
     await openSettings();
 
     // Roles are assigned here, not on the page that manages provider connections.
-    fireEvent.click(screen.getByRole('button', { name: 'Model roles' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Roles and Personas' }));
     await waitFor(() => {
       expect(screen.getByText('Model role settings content')).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Model roles' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: 'Roles and Personas' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByText('Model settings content')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Models' }));
@@ -209,7 +209,7 @@ describe('TruefoundrySettingsBuilder', () => {
     expect(screen.queryByText('Model role settings content')).not.toBeInTheDocument();
   });
 
-  it('has no Personas section of its own: personas live under Model roles, not in the nav', async () => {
+  it('has no Personas section of its own: personas live under Roles and Personas, not in the nav', async () => {
     const { unmount } = render(<TestShell server={createServer()} />);
     await openSettings();
 
@@ -217,7 +217,7 @@ describe('TruefoundrySettingsBuilder', () => {
     unmount();
 
     // Even with a persona API wired up, Settings still has no standalone Personas
-    // tab or content here — PersonaSettings is only ever reached via Model roles.
+    // tab or content here — PersonaSettings is only ever reached via Roles and Personas.
     render(<TestShell server={createServer()} personas />);
     await openSettings();
 
