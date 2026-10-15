@@ -141,7 +141,7 @@ test_sign_in_settings_match_the_server() {
   assert_rc 0
   out=$(real_doctor --json --instance main) || true
   assert_contains "$out" '"id":"config","state":"ok","detail":"The settings files exist and are private to you. 2 sign-in user(s): the owner and 1 member(s)."'
-  assert_not_contains "$out" '$2a$'
+  assert_not_contains "$out" "\$2a"
   sandbox_drop
 }
 
