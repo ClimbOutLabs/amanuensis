@@ -204,7 +204,7 @@ plan_sandbox() {
   elif sandbox_runtime_present; then
     plan_add have "Pinned Node.js v$(json_get "$PINS_FILE" node_version) for the sandbox setup at $(sandbox_runtime_node)"
   else
-    plan_add todo "Download Node.js v$(json_get "$PINS_FILE" node_version) from nodejs.org, checked against a pinned SHA-256, into $AMAN_HOME/runtime/node (it only runs the sandbox setup; the host needs no Node.js)"
+    plan_add todo "Download Node.js v$(json_get "$PINS_FILE" node_version) ($(sandbox_node_platform)) from nodejs.org, checked against a pinned SHA-256, into $AMAN_HOME/runtime/node (it only runs the sandbox setup; the host needs no Node.js)"
     dl_add node-runtime
   fi
   plan_image "$SLOT_IMAGE" "Build the sandbox slot image $SLOT_IMAGE from ops/sandbox-slot (gVisor guest, Ubuntu packages)" slot-image

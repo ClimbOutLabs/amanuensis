@@ -797,16 +797,58 @@ describe('doctor sandbox', () => {
     assert.match(moved.stderr, /not at .* any more/);
   });
 
-  it('asks for Node.js when it is missing or too old', () => {
+  it('points to the installer when there is no pinned runtime and the host Node.js is missing or too old', () => {
     make();
     ready();
     const old = world.shim(['doctor', 'sandbox'], { env: { FAKE_NODE_VERSION: 'v22.13.0' } });
     assert.equal(old.code, 1);
-    assert.match(old.stderr, /Node\.js 22\.14 or newer/);
+    assert.match(old.stderr, /No Node\.js runtime for the sandbox setup/);
+    assert.match(old.stderr, /Run install\.sh from the checkout; it downloads one/);
     world.uninstall('node');
     const missing = world.shim(['doctor', 'sandbox']);
     assert.equal(missing.code, 1);
-    assert.match(missing.stderr, /Node\.js 22\.14 or newer/);
+    assert.match(missing.stderr, /No Node\.js runtime for the sandbox setup/);
+  });
+
+  it('runs the setup on the pinned runtime when the installer downloaded one, even with no Node.js on the host', () => {
+    make();
+    ready();
+    world.uninstall('node');
+    world.runtimeNode();
+    const result = world.shim(['doctor', 'sandbox']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(world.calls().some(line => line.startsWith('runtime-node ') && line.includes('--check')));
+  });
+
+  it('prefers the pinned runtime over a host Node.js', () => {
+    make();
+    ready();
+    world.runtimeNode();
+    world.shim(['doctor', 'sandbox']);
+    assert.ok(world.calls().some(line => line.startsWith('runtime-node ')));
+    assert.deepEqual(sandboxCalls(), []);
+  });
+
+  it('warns, without failing, when Docker does not start at boot, and enables it with --fix --yes', () => {
+    make();
+    ready();
+    world.systemd({ enabled: false });
+    const check = world.shim(['doctor', 'sandbox']);
+    assert.equal(check.code, 0, check.stderr);
+    assert.match(check.stdout, /Docker does not start at boot/);
+    assert.match(check.stdout, /Fix: sudo systemctl enable docker/);
+    assert.ok(!world.calls().includes('sudo systemctl enable docker'));
+    world.shim(['doctor', 'sandbox', '--fix', '--yes']);
+    assert.ok(world.calls().includes('sudo systemctl enable docker'));
+  });
+
+  it('says nothing about boot when Docker is enabled or the host has no systemd', () => {
+    make();
+    ready();
+    world.systemd({ enabled: true });
+    assert.doesNotMatch(world.shim(['doctor', 'sandbox']).stdout, /start at boot/);
+    world.uninstall('systemctl');
+    assert.doesNotMatch(world.shim(['doctor', 'sandbox']).stdout, /start at boot/);
   });
 
   it('stops with the Docker problem when Docker cannot be reached', () => {

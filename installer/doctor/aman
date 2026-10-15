@@ -6,9 +6,9 @@
 #   aman doctor [--json] [--only ID] [--instance NAME] [--deep]
 #   aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
 #
-# `doctor sandbox` checks every sandbox slot's attestation and then makes a real call through the app, which is
-# the only part that needs Node.js: the slot setup itself is the copy of packages/trueforge/scripts/sandbox-slots
-# the installer took out of the app image. With --fix it rebuilds the image, reloads the AppArmor profile,
+# `doctor sandbox` checks every sandbox slot's attestation and then makes a real call through the app. The slot
+# setup is the copy of packages/trueforge/scripts/sandbox-slots the installer took out of the app image; it runs on
+# the Node.js the installer downloaded into <home>/runtime/node, or on the host's Node.js 22.14 or newer. With --fix it rebuilds the image, reloads the AppArmor profile,
 # recreates missing slot disks and recreates the slots; it asks before any sudo.
 #
 # Exit codes: 0 no failures, 1 at least one failure, 2 usage error.
@@ -675,6 +675,22 @@ record_state() { # scope id
   done <<<"$RECORDS"
 }
 
+# The pinned runtime the installer downloaded, else the host's Node.js when it is new enough; empty when neither is.
+sandbox_node_path() {
+  if [ -x "${AMAN_HOME}/runtime/node/bin/node" ]; then
+    printf '%s' "${AMAN_HOME}/runtime/node/bin/node"
+  elif sandbox_node_ok; then
+    command -v node
+  fi
+}
+
+# The slots come back after a restart only if Docker itself starts at boot.
+docker_boot_state() { # prints enabled, or the reason it is not
+  command -v systemctl >/dev/null 2>&1 || return 0
+  systemctl cat docker.service >/dev/null 2>&1 || return 0
+  systemctl is-enabled --quiet docker 2>/dev/null || printf 'disabled'
+}
+
 sandbox_instances() { # prints the instances whose app is wired to the slots
   local name compose
   for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
@@ -686,7 +702,7 @@ sandbox_instances() { # prints the instances whose app is wired to the slots
 }
 
 doctor_sandbox() {
-  local fix=0 yes=0 passthru=() bundle source repo name args state failed=0 targets=()
+  local fix=0 yes=0 passthru=() bundle source repo name args state failed=0 targets=() node_bin answer
   while [ $# -gt 0 ]; do
     case "$1" in
       --fix) fix=1 ;;
@@ -723,8 +739,9 @@ doctor_sandbox() {
     printf 'The checkout the sandbox was installed from is not at %s any more. Run install.sh from the checkout; it records the new place.\n' "$repo" >&2
     exit 1
   fi
-  if ! sandbox_node_ok; then
-    printf 'Node.js %s.%s or newer is needed to check or repair the sandbox. Install it (https://nodejs.org or your package manager), then run this again.\n' "$SANDBOX_NODE_MAJOR" "$SANDBOX_NODE_MINOR" >&2
+  node_bin=$(sandbox_node_path)
+  if [ -z "$node_bin" ]; then
+    printf 'No Node.js runtime for the sandbox setup was found (%s/runtime/node, or Node.js %s.%s or newer on this computer). Run install.sh from the checkout; it downloads one.\n' "$AMAN_HOME" "$SANDBOX_NODE_MAJOR" "$SANDBOX_NODE_MINOR" >&2
     exit 1
   fi
   check_docker
@@ -739,6 +756,16 @@ doctor_sandbox() {
     printf 'No instance has the sandbox (it was installed with --no-sandbox, or no instance exists yet).\n'
     exit 0
   fi
+  if [ "$(docker_boot_state)" = disabled ]; then
+    printf 'Docker does not start at boot here, so the sandbox stays down after a restart.\n  Fix: sudo systemctl enable docker\n'
+    if [ "$fix" = 1 ]; then
+      answer=n
+      if [ "$yes" = 1 ]; then answer=y; else read -r -p 'Run it now? [y/N] ' answer || true; fi
+      case "$answer" in
+        y | Y | yes) sudo systemctl enable docker || failed=1 ;;
+      esac
+    fi
+  fi
   for name in "${targets[@]}"; do
     printf 'Instance %s\n' "$name"
     args=(--instance "$name" --repo-root "$repo" --log-file "${AMAN_HOME}/state/sandbox.log" --command-name "${AMAN_HOME}/bin/aman doctor sandbox" "${passthru[@]+"${passthru[@]}"}")
@@ -748,7 +775,7 @@ doctor_sandbox() {
     else
       args+=(--check)
     fi
-    if ! node "$bundle" "${args[@]}"; then
+    if ! "$node_bin" "$bundle" "${args[@]}"; then
       failed=1
       continue
     fi

@@ -56,6 +56,20 @@ if [ -e "$dir/node.rc" ]; then exit "$(cat "$dir/node.rc")"; fi
 exit 0
 `;
 
+const FAKE_SYSTEMCTL = `#!/usr/bin/env bash
+echo "systemctl $*" >> "$FAKE_DOCKER_DIR/calls.log"
+case "$1" in
+  cat) exit 0 ;;
+  is-enabled) [ -e "$FAKE_DOCKER_DIR/docker_boot_disabled" ] && exit 1; exit 0 ;;
+esac
+exit 0
+`;
+
+const FAKE_SUDO = `#!/usr/bin/env bash
+echo "sudo $*" >> "$FAKE_DOCKER_DIR/calls.log"
+exit 0
+`;
+
 export function sanitize(value) {
   return value.replace(/[^A-Za-z0-9\n]/g, '_');
 }
@@ -137,6 +151,23 @@ export function createWorld({ instances = ['main'] } = {}) {
       world.install(`docker-credential-${store}`, `#!/usr/bin/env bash\nexit ${rc}\n`);
     },
     instanceDir: name => path.join(home, 'instances', name),
+    /** The pinned Node.js the installer downloaded; it marks the call log so a test can tell it from the host's. */
+    runtimeNode() {
+      const dir = path.join(home, 'runtime', 'node', 'bin');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, 'node'), FAKE_NODE.replace('echo "node $*"', 'echo "runtime-node $*"'));
+      chmodSync(path.join(dir, 'node'), 0o755);
+    },
+    /** A systemd host; Docker is enabled at boot unless `enabled` is false. */
+    systemd({ enabled = true } = {}) {
+      world.install('systemctl', FAKE_SYSTEMCTL);
+      world.install('sudo', FAKE_SUDO);
+      if (enabled) {
+        rmSync(path.join(fake, 'docker_boot_disabled'), { force: true });
+      } else {
+        writeFileSync(path.join(fake, 'docker_boot_disabled'), '');
+      }
+    },
     /** The state the installer leaves for the sandbox: the setup copy, the checkout record and the wired compose file. */
     sandbox({ wired = instances } = {}) {
       const repo = path.join(root, 'checkout');
