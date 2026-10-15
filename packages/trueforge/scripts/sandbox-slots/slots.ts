@@ -37,7 +37,7 @@ export const MAX_DISK_GB = 512;
 /** The installer's instance names (lowercase letters, digits and inner hyphens), so one name serves both. */
 export const INSTANCE_PATTERN = /^[a-z]([a-z0-9-]{0,22}[a-z0-9])?$/;
 /** The variable the compose files read their project and volume names from. */
-export const INSTANCE_ENV = 'AMAN_SLOTS_INSTANCE';
+const INSTANCE_ENV = 'AMAN_SLOTS_INSTANCE';
 export function slotsProject(instance: string): string {
   return `${instance}-slots`;
 }
