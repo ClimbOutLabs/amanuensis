@@ -62,4 +62,4 @@ export {
 } from './trackedExecutables';
 export type { TrackApprovalGrantInput, TrackedExecutableScope, TrackedExecutableStore } from './trackedExecutables';
 export { createWebSearchTurnState } from './webSearch';
-export type { WebSearchTurnState } from './webSearch';
+export type { SearchProviderGrant, WebSearchTurnState } from './webSearch';

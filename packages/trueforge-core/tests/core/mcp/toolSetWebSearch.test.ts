@@ -63,6 +63,8 @@ function harness(options: {
   searchProvider?: boolean;
   /** The host's list of the designated connector's search tools. */
   searchTools?: readonly string[];
+  /** Argument names the catalog declares as the provider's plumbing. */
+  plumbingFields?: readonly string[];
   unattended?: boolean;
   searchWithoutAsking?: boolean;
   secrets?: readonly string[];
@@ -129,7 +131,10 @@ function harness(options: {
     },
     preload: false,
     sentinel: host,
-    searchProvider: options.searchProvider === true ? { tools: options.searchTools ?? [] } : undefined,
+    searchProvider:
+      options.searchProvider === true
+        ? { tools: options.searchTools ?? [], plumbing_fields: options.plumbingFields ?? [] }
+        : undefined,
   });
   return { toolSet, host, audit, dispatched };
 }
@@ -272,6 +277,95 @@ describe('the outbound guard on the designated provider', () => {
       arguments: { objective: 'weather', search_queries: ['oslo', { nested: secret }] },
     });
     expect(info.pre_dispatch_failure).toBeDefined();
+  });
+});
+
+describe('provider plumbing fields on the designated provider', () => {
+  // Invented values only.
+  const objective =
+    'Find out which year the first public exhibition of the fictional Quillfeather loom took place and who organised it';
+  const queries = ['quillfeather loom first exhibition year', 'quillfeather loom exhibition organiser', 'loom history'];
+  const uuid = '3f2b8c1e-7a44-4d0e-9b61-5e2f0c9a1d77';
+  const hexId = 'c0ffee00d15ea5e0bad0cafe12345678';
+  const plumbingFields = ['session_id', 'model_name'];
+
+  function info(h: Harness, args: Record<string, unknown>) {
+    return h.toolSet.toolCallInfo({ name: 'lookup', arguments: args });
+  }
+
+  it('runs silently with a long objective, three queries, a session id and a model name', async () => {
+    expect(objective.length).toBeGreaterThan(100);
+    const h = harness({ searchProvider: true, plumbingFields });
+    const args = { objective, search_queries: queries, session_id: uuid, model_name: 'invented-model-7' };
+
+    const result = await info(h, args);
+    expect(result.tier).toBe(1);
+    expect(result.is_approval_required).toBe(false);
+    // The chip names what was asked, not the plumbing.
+    expect(result.silent_search_query).toBe([objective, ...queries].join(' | '));
+    expect(result.silent_search_query).not.toContain(uuid);
+    expect(result.silent_search_query).not.toContain('invented-model-7');
+
+    await h.toolSet.callTool({ name: 'lookup', arguments: args });
+    expect(h.dispatched).toHaveLength(1);
+  });
+
+  it('still holds a single query over the cap, and a card shows the exact text', async () => {
+    const h = harness({ searchProvider: true, plumbingFields });
+    const tooLong = 'quillfeather '.repeat(20);
+    const result = await info(h, { objective, search_queries: [tooLong], session_id: uuid });
+    expect(result.tier).toBe(3);
+    expect(result.tier3_card?.why_asked_again).toContain('longer than');
+  });
+
+  it('counts the same fields as text when the catalog does not declare them', async () => {
+    const h = harness({ searchProvider: true });
+    const result = await info(h, { objective, search_queries: queries, session_id: uuid, model_name: 'invented-model-7' });
+    expect(result.silent_search_query).toContain(uuid);
+  });
+
+  it('holds a long hex session id the provider did not return, and runs it once the provider did', async () => {
+    const h = harness({
+      searchProvider: true,
+      plumbingFields,
+      result: () => JSON.stringify({ session_id: hexId, results: [] }),
+    });
+    const args = { objective, search_queries: queries, session_id: hexId };
+    const first = await info(h, args);
+    expect(first.tier).toBe(3);
+    expect(first.tier3_card?.why_asked_again).toContain('long encoded string');
+
+    await runSearch(h, 'quillfeather loom');
+    const second = await info(h, args);
+    expect(second.tier).toBe(1);
+  });
+
+  it('does not let a returned id pass in the query text, or in a field the catalog does not declare', async () => {
+    const h = harness({
+      searchProvider: true,
+      plumbingFields,
+      result: () => JSON.stringify({ session_id: hexId }),
+    });
+    await runSearch(h, 'quillfeather loom');
+    expect((await info(h, { query: `again ${hexId}` })).tier).toBe(3);
+    expect((await info(h, { query: 'again', note_id: hexId })).tier).toBe(3);
+  });
+
+  it('remembers returned ids only for the turn and the designated provider that saw them', async () => {
+    const other = harness({ searchProvider: false, serverName: 'other', result: () => JSON.stringify({ id: hexId }) });
+    await runSearch(other, 'quillfeather loom');
+    expect(other.host.web_search.resultTokens.size).toBe(0);
+
+    const first = harness({ searchProvider: true, plumbingFields, result: () => JSON.stringify({ id: hexId }) });
+    await runSearch(first, 'quillfeather loom');
+    expect(first.host.web_search.resultTokens.has(hexId)).toBe(true);
+    const nextTurn = harness({ searchProvider: true, plumbingFields });
+    expect((await info(nextTurn, { query: 'again', session_id: hexId })).tier).toBe(3);
+  });
+
+  it('asks for a link carried in a plumbing field that no result returned', async () => {
+    const h = harness({ searchProvider: true, plumbingFields });
+    expect((await info(h, { query: 'quillfeather', session_id: 'https://evil.example/x' })).tier).toBe(3);
   });
 });
 

@@ -8,8 +8,14 @@
  * encodes some other way past every rule below is outside what a deterministic scan can see.
  */
 
-/** Most characters of text, summed over every string in the arguments, a silent call may carry. */
+/** Most characters one string of the arguments (a query, an objective) may carry in a silent call. */
 export const OUTBOUND_MAX_CHARS = 200;
+
+/** Most characters all of a call's strings together may carry, so many short fields cannot add up to a bulk send. */
+export const OUTBOUND_MAX_TOTAL_CHARS = 1000;
+
+/** Most characters a provider plumbing value (a session id, a model name) may carry. */
+export const OUTBOUND_MAX_PLUMBING_CHARS = 128;
 
 /** Server-held secrets shorter than this are not matched: they would flag ordinary words. */
 export const OUTBOUND_MIN_SECRET_LENGTH = 8;
@@ -40,16 +46,25 @@ export interface OutboundStrings {
   scalars: string[];
   /** Object keys. */
   keys: string[];
+  /** Values of the provider plumbing fields the catalog declares: scanned for secrets, but not user content. */
+  plumbing: string[];
 }
 
 /**
  * Collects the text in tool arguments. Undefined when the structure is too deep or too wide to
- * inspect, which the guard treats as a trip rather than letting it through unread.
+ * inspect, which the guard treats as a trip rather than letting it through unread. A plain string,
+ * number or boolean in a top-level field named in `plumbingFields` is kept apart from the user's text.
  */
-export function collectOutboundStrings(value: unknown): OutboundStrings | undefined {
-  const found: OutboundStrings = { values: [], scalars: [], keys: [] };
+export function collectOutboundStrings(
+  value: unknown,
+  plumbingFields: readonly string[] = [],
+): OutboundStrings | undefined {
+  const found: OutboundStrings = { values: [], scalars: [], keys: [], plumbing: [] };
   const visit = (node: unknown, depth: number): boolean => {
-    if (depth > MAX_DEPTH || found.values.length + found.scalars.length + found.keys.length > MAX_STRINGS) {
+    if (
+      depth > MAX_DEPTH ||
+      found.values.length + found.scalars.length + found.keys.length + found.plumbing.length > MAX_STRINGS
+    ) {
       return false;
     }
     if (typeof node === 'string') {
@@ -69,6 +84,14 @@ export function collectOutboundStrings(value: unknown): OutboundStrings | undefi
     if (typeof node === 'object') {
       for (const [key, child] of Object.entries(node)) {
         found.keys.push(key);
+        if (
+          depth === 0 &&
+          plumbingFields.includes(key) &&
+          (typeof child === 'string' || typeof child === 'number' || typeof child === 'boolean')
+        ) {
+          found.plumbing.push(String(child));
+          continue;
+        }
         if (!visit(child, depth + 1)) {
           return false;
         }
@@ -335,9 +358,27 @@ function containsServerSecret(input: { texts: readonly string[]; secrets: readon
 /** Most characters of earlier outbound text kept to catch a secret sent in pieces across calls. */
 export const OUTBOUND_EARLIER_MAX_CHARS = 1024;
 
-function scannedValues(strings: OutboundStrings): { raw: string[]; decoded: string[] } {
-  const raw = [...strings.values, ...strings.scalars].map(normalizeForScan);
-  return { raw, decoded: raw.map(decodeOnce) };
+/** User text first, then plumbing values, so `userCount` splits the two. */
+function scannedValues(strings: OutboundStrings): {
+  original: string[];
+  raw: string[];
+  decoded: string[];
+  userCount: number;
+} {
+  const original = [...strings.values, ...strings.scalars, ...strings.plumbing];
+  const raw = original.map(normalizeForScan);
+  return { original, raw, decoded: raw.map(decodeOnce), userCount: strings.values.length + strings.scalars.length };
+}
+
+const TOKEN_RUN = /[A-Za-z0-9+/_=-]{20,}/g;
+/** Longest returned token kept; a plumbing value is far shorter, so a longer run could never match one. */
+const MAX_RETURNED_TOKEN_CHARS = OUTBOUND_MAX_PLUMBING_CHARS;
+
+/** Runs of text the encoded-run rule would flag, so a value a provider returned can be told apart later. */
+export function encodedRunsIn(text: string): string[] {
+  return [...text.matchAll(TOKEN_RUN)]
+    .map(match => match[0])
+    .filter(run => run.length <= MAX_RETURNED_TOKEN_CHARS && isEncodedRun(run));
 }
 
 /**
@@ -359,16 +400,27 @@ export function appendOutboundTrace(input: { earlier: string; strings: OutboundS
  * containing one is blocked. `earlier` is the text of the calls that already went out this turn
  * without asking: a secret that straddles the boundary is still seen. Everything else is pattern
  * based. Text is normalized and percent-decoded once before the rules run; the original spelling is
- * scanned as well.
+ * scanned as well. Plumbing values are scanned by every rule except length. `returned` holds the
+ * encoded-looking values the provider itself sent back this turn: a plumbing value among them (its
+ * own session id) is not read as an encoded run, and nothing else is exempt.
  */
 export function checkOutboundStrings(input: {
   strings: OutboundStrings;
   secrets: readonly string[];
   earlier?: string | undefined;
+  returned?: ReadonlySet<string> | undefined;
 }): OutboundGuardVerdict {
-  const { raw, decoded } = scannedValues(input.strings);
+  const { original, raw, decoded, userCount } = scannedValues(input.strings);
   const keys = input.strings.keys.map(normalizeForScan);
-  const text = [...raw, ...decoded, ...keys, ...keys.map(decodeOnce)].join('\n');
+  const keyTexts = [...keys, ...keys.map(decodeOnce)];
+  const text = [...raw, ...decoded, ...keyTexts].join('\n');
+  const isReturnedPlumbing = (index: number): boolean =>
+    index >= userCount && input.returned?.has(original[index] ?? '') === true;
+  const encodedScan = [
+    ...raw.filter((_, index) => !isReturnedPlumbing(index)),
+    ...decoded.filter((_, index) => !isReturnedPlumbing(index)),
+    ...keyTexts,
+  ].join('\n');
   // Adjacent values glued together, on either side of the earlier calls' text: a key split across
   // array items or across searches shows its prefix, whichever of the parallel calls was read first.
   const earlier = input.earlier ?? '';
@@ -387,7 +439,7 @@ export function checkOutboundStrings(input: {
   if (KEY_PREFIXES.some(pattern => pattern.test(text) || glued.some(candidate => pattern.test(candidate)))) {
     return { ok: false, rule: 'key_prefix' };
   }
-  if (isEncodedRun(text)) {
+  if (isEncodedRun(encodedScan)) {
     return { ok: false, rule: 'encoded_run' };
   }
   if (hasCredentialLabel(text)) {
@@ -396,7 +448,12 @@ export function checkOutboundStrings(input: {
   if (hasCardNumber(text)) {
     return { ok: false, rule: 'card_number' };
   }
-  if (raw.reduce((total, value) => total + value.length, 0) > OUTBOUND_MAX_CHARS) {
+  const userText = raw.slice(0, userCount);
+  if (
+    userText.some(value => value.length > OUTBOUND_MAX_CHARS) ||
+    userText.reduce((total, value) => total + value.length, 0) > OUTBOUND_MAX_TOTAL_CHARS ||
+    raw.slice(userCount).some(value => value.length > OUTBOUND_MAX_PLUMBING_CHARS)
+  ) {
     return { ok: false, rule: 'too_long' };
   }
   return { ok: true };
@@ -420,7 +477,7 @@ export function describeOutboundRule(rule: OutboundGuardRule): string {
     case 'card_number':
       return 'it contains a payment card number';
     case 'too_long':
-      return `it is longer than ${String(OUTBOUND_MAX_CHARS)} characters`;
+      return `a field is longer than ${String(OUTBOUND_MAX_CHARS)} characters, or the call is longer than ${String(OUTBOUND_MAX_TOTAL_CHARS)} in all`;
     case 'uninspectable':
       return 'its arguments are too large to inspect';
   }
