@@ -1,12 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Amanuensis installer release manifest",
-  "description": "installer/release.json carries the pinned third-party images. The copy under release/ in the state directory also records the local builds. Values are flat strings so the installer can read them without a JSON tool.",
+  "description": "installer/release.json carries the pinned third-party images and the pinned Node.js runtime. The copy under release/ in the state directory also records the local builds. Values are flat strings so the installer can read them without a JSON tool.",
   "type": "object",
   "required": ["schema", "dex_image"],
   "additionalProperties": false,
   "properties": {
-    "schema": { "const": "1" },
+    "schema": {
+      "const": "1"
+    },
     "dex_image": {
       "description": "Login service image, pinned by multi-arch index digest.",
       "type": "string",
@@ -37,6 +39,31 @@
     "sandbox_key_fingerprint": {
       "description": "Reserved for the sandbox signing key, absent until the broker ships.",
       "type": "string"
+    },
+    "node_version": {
+      "description": "Node.js release the installer downloads from nodejs.org to run the sandbox setup when the host has no suitable Node.js (22.14 or newer).",
+      "type": "string",
+      "pattern": "^22\\.[0-9]+\\.[0-9]+$"
+    },
+    "node_sha256_linux_x64": {
+      "description": "SHA-256 of node-v<node_version>-linux-x64.tar.gz, copied from the SHASUMS256.txt that nodejs.org publishes for that release.",
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "node_sha256_linux_arm64": {
+      "description": "SHA-256 of node-v<node_version>-linux-arm64.tar.gz, copied from the SHASUMS256.txt that nodejs.org publishes for that release.",
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "node_sha256_darwin_x64": {
+      "description": "SHA-256 of node-v<node_version>-darwin-x64.tar.gz, copied from the SHASUMS256.txt that nodejs.org publishes for that release.",
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "node_sha256_darwin_arm64": {
+      "description": "SHA-256 of node-v<node_version>-darwin-arm64.tar.gz, copied from the SHASUMS256.txt that nodejs.org publishes for that release.",
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
     }
   }
 }

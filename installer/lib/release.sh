@@ -17,6 +17,16 @@ pins_validate() {
   [ "$(json_get "$PINS_FILE" schema)" = 1 ] || die "unsupported release manifest schema in $PINS_FILE"
   dex=$(json_get "$PINS_FILE" dex_image)
   valid_digest_ref "$dex" || die "dex_image in $PINS_FILE must be pinned by sha256 digest"
+  node_pins_validate
+}
+
+# The Node.js runtime for the sandbox setup is pinned by version and by the published SHA-256 of each tarball.
+node_pins_validate() {
+  local key
+  matches_whole "$(json_get "$PINS_FILE" node_version)" '^22\.[0-9]+\.[0-9]+$' || die "node_version in $PINS_FILE must be a 22.x.y release"
+  for key in node_sha256_linux_x64 node_sha256_linux_arm64 node_sha256_darwin_x64 node_sha256_darwin_arm64; do
+    matches_whole "$(json_get "$PINS_FILE" "$key")" '^[a-f0-9]{64}$' || die "$key in $PINS_FILE must be a sha256 digest"
+  done
 }
 
 # Content id of a path in the checkout: tree hash, plus a hash of local changes when dirty, so the
