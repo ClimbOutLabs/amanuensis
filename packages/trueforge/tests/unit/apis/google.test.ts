@@ -141,7 +141,7 @@ describe('Google connection API', () => {
     const begin = await call({
       method: 'POST',
       path: '/oauth/begin',
-      body: { client: null, features: ['gmail_compose'] },
+      body: { features: ['gmail_compose'] },
     });
     expect(begin.status).toBe(201);
     const url = new URL(JSON.parse(begin.text).data.authorization_url);

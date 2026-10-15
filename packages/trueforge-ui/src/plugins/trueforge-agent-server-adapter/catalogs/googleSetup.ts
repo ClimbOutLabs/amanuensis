@@ -66,7 +66,7 @@ export function createGoogleSetupApi(options: CreateTrueForgeClientOptions): Goo
       request({
         method: 'POST',
         path: '/oauth/begin',
-        body: { client: req.client === null ? null : clientBody(req.client), features: req.features },
+        body: { ...(req.client === null ? {} : { client: clientBody(req.client) }), features: req.features },
         schema: GoogleConsentStartSchema,
       }),
     completeGoogleConsent: req =>

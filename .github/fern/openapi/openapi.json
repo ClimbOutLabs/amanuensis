@@ -614,11 +614,7 @@
                 "$ref": "#/components/schemas/GoogleClientCredentials"
               },
               {
-                "description": "The user’s client. Null reuses the saved client, to add a feature or reconnect.",
-                "type": [
-                  "object",
-                  "null"
-                ]
+                "description": "The user’s client. Omit it to reuse the saved client, to add a feature or reconnect."
               }
             ]
           },
@@ -632,7 +628,6 @@
           }
         },
         "required": [
-          "client",
           "features"
         ],
         "type": "object"

@@ -99,7 +99,7 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
       const { authorization_url } = await service.begin({
         owner: ownerOf(c),
         setup,
-        client: body.client === null ? null : toClientInput(body.client),
+        client: body.client === undefined ? null : toClientInput(body.client),
         features: body.features,
       });
       return c.json({ data: { authorization_url, setup } }, 201);

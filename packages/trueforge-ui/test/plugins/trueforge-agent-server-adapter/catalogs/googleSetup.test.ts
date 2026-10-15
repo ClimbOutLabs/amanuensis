@@ -24,7 +24,7 @@ describe('createGoogleSetupApi', () => {
     );
   });
 
-  it('sends snake_case on the wire and null to reuse the saved client', async () => {
+  it('sends snake_case on the wire and omits the client to reuse the saved client', async () => {
     const sent: unknown[] = [];
     const fetchSpy = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       sent.push(JSON.parse(String(init?.body)));
@@ -40,7 +40,7 @@ describe('createGoogleSetupApi', () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     const bodies = sent;
-    expect(bodies[0]).toEqual({ client: null, features: ['gmail_compose'] });
+    expect(bodies[0]).toEqual({ features: ['gmail_compose'] });
     expect(bodies[1]).toEqual({
       client: { client_id: 'id', client_secret: 'secret', client_type: 'desktop' },
       features: ['gmail_read'],

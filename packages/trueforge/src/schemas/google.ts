@@ -86,8 +86,8 @@ export const CheckGoogleClientResponseSchema = z
 
 export const BeginGoogleConsentRequestSchema = z
   .object({
-    client: GoogleClientCredentialsSchema.nullable().describe(
-      'The user’s client. Null reuses the saved client, to add a feature or reconnect.',
+    client: GoogleClientCredentialsSchema.optional().describe(
+      'The user’s client. Omit it to reuse the saved client, to add a feature or reconnect.',
     ),
     features: z.array(GoogleFeatureSchema).min(1).describe('Features to ask for. Features already granted are kept.'),
   })
