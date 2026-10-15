@@ -26,7 +26,7 @@ import {
   INERT_WRITE_TOOL,
   startInertMcpServer,
 } from '../../fixtures/inertMcpServer';
-import { RUN_DIRECTIVE_PREFIX } from '../../fixtures/scriptedModelServer';
+import { RUN_DIRECTIVE_PREFIX, THREE_AT_ONCE_DIRECTIVE } from '../../fixtures/scriptedModelServer';
 
 const TURN_TIMEOUT_MS = 60_000;
 
@@ -734,6 +734,29 @@ describe('approval gate over an inert connector', () => {
     );
 
     it(
+      'still shows a card when a selector gates a call the standing grant let through',
+      async () => {
+        await alwaysAllow(INERT_READ_TOOL);
+
+        // AGENT_SPEC force-gates inert_read by name, so the grant makes it Tier 1 but the selector still asks.
+        const sessionId = await createSession(server);
+        const gated = await runTurn({ server, sessionId, input: userMessage(INERT_READ_TOOL) });
+        if (gated.state.status !== 'done') {
+          throw new Error(`turn is not done: ${JSON.stringify(gated.state)}`);
+        }
+        const ref = gated.state.required_actions.flatMap(action =>
+          action.type === 'tool.approval_required' ? action.tool_calls : [],
+        )[0];
+
+        expect(ref?.tier).toBe(3);
+        expect(ref?.tier3_card?.plain_what).toContain(INERT_READ_TOOL);
+        expect(ref?.tier3_card?.outbound_text).toContain('text: inert');
+        expect(server.mcp.readInvocations()).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
       'covers only the approved tool on that connector',
       async () => {
         await alwaysAllow(INERT_READ_TOOL);
@@ -1077,6 +1100,320 @@ describe('memory provider on an origin the operator did not list', () => {
       const askedAgain = await runTurn({ server, sessionId: afterRemoval, input: userMessage(INERT_ASK_MEMORY_TOOL) });
       expect(pendingApproval(askedAgain)).toBeDefined();
       expect(server.mcp.askMemoryInvocations()).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('web search provider over an inert connector', () => {
+  let server: ApprovalTestServer;
+
+  /** Assembled at run time so no literal here looks like a credential to a scanner. */
+  const syntheticAwsKeyId = ['AKI', 'A', 'ABCDEFGH', 'IJKLMNOP'].join('');
+
+  /** The user's own switch, set through the same route the settings page uses. */
+  async function setSearchWithoutAsking(value: boolean) {
+    const response = await server.request('/api/v1/user/settings/sentinel', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ search_without_asking: value }),
+    });
+    expect(response.status).toBe(200);
+  }
+
+  /** Designates the inert connector (or clears the role) the way the settings page does. */
+  async function designateSearchProvider(designated: boolean) {
+    const response = await server.request('/api/v1/settings/mcp-servers', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        manifest: {
+          type: 'remote',
+          name: INERT_SERVER_NAME,
+          url: server.mcp.url,
+          description: 'Inert connector used by approval-flow tests.',
+          ...(designated ? { search_provider: true } : {}),
+        },
+      }),
+    });
+    expect(response.status).toBe(200);
+  }
+
+  function searchMessage(text: string): TurnInputItem[] {
+    return [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}${INERT_ECHO_TOOL} text:${text}` }];
+  }
+
+  /** The `silent_search_query` the server stamped on any tool call of the session, as the chat would draw its chip. */
+  async function stampedQueries(sessionId: string): Promise<string[]> {
+    const ToolCallsSchema = z.object({
+      type: z.literal('model.message'),
+      tool_calls: z
+        .array(z.object({ tool_info: z.object({ silent_search_query: z.string().optional() }).loose() }).loose())
+        .optional(),
+    });
+    const queries: string[] = [];
+    for (const item of await listSessionEvents(server, sessionId)) {
+      const parsed = ToolCallsSchema.safeParse(item.event);
+      for (const call of parsed.success ? (parsed.data.tool_calls ?? []) : []) {
+        if (call.tool_info.silent_search_query !== undefined) {
+          queries.push(call.tool_info.silent_search_query);
+        }
+      }
+    }
+    return queries;
+  }
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer();
+  }, TURN_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  beforeEach(async () => {
+    server.mcp.resetInvocations();
+    await setSearchWithoutAsking(true);
+    await designateSearchProvider(true);
+  });
+
+  it(
+    'runs the designated provider’s tool without asking, stamps the chip text on the call, and audits the run',
+    async () => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: searchMessage('tallest-building-in-Lisbon') });
+
+      expect(requiredActions(turn)).toEqual([]);
+      expect(server.mcp.echoInvocations()).toBe(1);
+      expect(await stampedQueries(sessionId)).toEqual(['tallest-building-in-Lisbon']);
+      expect(await auditEntries({ server, sessionId })).toEqual([
+        expect.objectContaining({
+          tier: 1,
+          tool_name: INERT_ECHO_TOOL,
+          outcome: 'logged',
+          description: 'Searched: tallest-building-in-Lisbon',
+        }),
+      ]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'still asks for the same tool once the connector is no longer the designated provider',
+    async () => {
+      await designateSearchProvider(false);
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: searchMessage('tallest-building-in-Lisbon') });
+
+      expect(pendingApproval(turn)).toBeDefined();
+      expect(server.mcp.echoInvocations()).toBe(0);
+      expect(await stampedQueries(sessionId)).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it.each([
+    ['an unannotated tool', INERT_UNANNOTATED_TOOL, 'unannotatedInvocations'],
+    ['a write tool', INERT_WRITE_TOOL, 'writeInvocations'],
+  ] as const)(
+    'still asks for %s on the designated connector, because the role does not make a connector’s other tools silent',
+    async (_label, tool, counter) => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: userMessage(tool) });
+
+      expect(pendingApproval(turn)).toBeDefined();
+      expect(server.mcp[counter]()).toBe(0);
+      expect(await stampedQueries(sessionId)).toEqual([]);
+      expect(await auditEntries({ server, sessionId })).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'asks when the user switched searches to Ask, and runs again once they switch back',
+    async () => {
+      await setSearchWithoutAsking(false);
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const asked = await runTurn({ server, sessionId, input: searchMessage('tallest-building-in-Lisbon') });
+      expect(pendingApproval(asked)).toBeDefined();
+      expect(server.mcp.echoInvocations()).toBe(0);
+
+      await setSearchWithoutAsking(true);
+      const otherSessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const ran = await runTurn({
+        server,
+        sessionId: otherSessionId,
+        input: searchMessage('tallest-building-in-Lisbon'),
+      });
+      expect(requiredActions(ran)).toEqual([]);
+      expect(server.mcp.echoInvocations()).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'holds a query that carries a key for approval instead of running it, with the exact query on the card',
+    async () => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: searchMessage(syntheticAwsKeyId) });
+
+      expect(pendingApproval(turn)).toBeDefined();
+      expect(server.mcp.echoInvocations()).toBe(0);
+      expect(await stampedQueries(sessionId)).toEqual([]);
+      const events = await listSessionEvents(server, sessionId);
+      expect(JSON.stringify(events)).toContain(syntheticAwsKeyId);
+      expect(await auditEntries({ server, sessionId })).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'runs the held query only after the user approves it, once',
+    async () => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const held = await runTurn({ server, sessionId, input: searchMessage(syntheticAwsKeyId) });
+      const pending = pendingApproval(held);
+      if (pending === undefined) {
+        throw new Error('expected the query to wait for approval');
+      }
+
+      const approved = await runTurn({
+        server,
+        sessionId,
+        previousTurnId: held.id,
+        input: approvalInput({ ...pending, approval: { status: 'allow' } }),
+      });
+      expect(requiredActions(approved)).toEqual([]);
+      expect(server.mcp.echoInvocations()).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('three connector calls pending in one turn', () => {
+  let server: ApprovalTestServer;
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer({ memoryProvider: true });
+  }, TURN_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  beforeEach(() => {
+    server.mcp.resetInvocations();
+  });
+
+  /** Every pending approval of a paused turn, in the order the model asked for them. */
+  function pendingApprovals(turn: Turn): PendingApproval[] {
+    if (turn.state.status !== 'done') {
+      throw new Error(`turn is not done: ${JSON.stringify(turn.state)}`);
+    }
+    return turn.state.required_actions.flatMap(action =>
+      action.type === 'tool.approval_required'
+        ? action.tool_calls.map(call => ({ thread_id: action.thread_id, tool_call_id: call.id }))
+        : [],
+    );
+  }
+
+  async function pauseOnThree(): Promise<{ sessionId: string; turn: Turn; pending: PendingApproval[] }> {
+    const sessionId = await createSession(server);
+    const turn = await runTurn({ server, sessionId, input: userMessage(THREE_AT_ONCE_DIRECTIVE) });
+    return { sessionId, turn, pending: pendingApprovals(turn) };
+  }
+
+  it(
+    'asks once per call, each with its own card, and runs nothing until answered',
+    async () => {
+      const { turn, pending } = await pauseOnThree();
+
+      expect(pending).toHaveLength(3);
+      expect(new Set(pending.map(call => call.tool_call_id)).size).toBe(3);
+      expect(server.mcp.unannotatedInvocations()).toBe(0);
+      if (turn.state.status !== 'done') {
+        throw new Error(`turn is not done: ${JSON.stringify(turn.state)}`);
+      }
+      const refs = turn.state.required_actions.flatMap(action =>
+        action.type === 'tool.approval_required' ? action.tool_calls : [],
+      );
+      expect(refs.map(ref => ref.tier)).toEqual([3, 3, 3]);
+      for (const ref of refs) {
+        expect(ref.tier3_card?.outbound_text).toContain('text: ');
+      }
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'approves two and denies one in one answer: the turn continues, and each call runs or is refused as decided',
+    async () => {
+      const { sessionId, turn, pending } = await pauseOnThree();
+      const [first, second, third] = pending;
+      if (first === undefined || second === undefined || third === undefined) {
+        throw new Error('expected three pending approvals');
+      }
+
+      const resumed = await runTurn({
+        server,
+        sessionId,
+        previousTurnId: turn.id,
+        input: [
+          ...approvalInput({ ...first, approval: { status: 'allow', scope: 'once' } }),
+          ...approvalInput({ ...second, approval: { status: 'deny', reason: 'not this one' } }),
+          ...approvalInput({ ...third, approval: { status: 'allow', scope: 'once' } }),
+        ],
+      });
+
+      expect(resumed.state.status).toBe('done');
+      expect(requiredActions(resumed)).toEqual([]);
+      expect(server.mcp.unannotatedInvocations()).toBe(2);
+      const responses = await toolResponses(server, sessionId);
+      const byCall = new Map(responses.map(response => [response.tool_call_id, response.content]));
+      expect(byCall.get(second.tool_call_id)).toMatch(/denied/i);
+      expect(byCall.get(first.tool_call_id)).not.toMatch(/denied/i);
+      expect(byCall.get(third.tool_call_id)).not.toMatch(/denied/i);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'refuses a partial answer by name, runs nothing, and still accepts the full answer afterwards',
+    async () => {
+      const { sessionId, turn, pending } = await pauseOnThree();
+      const [first, second, third] = pending;
+      if (first === undefined || second === undefined || third === undefined) {
+        throw new Error('expected three pending approvals');
+      }
+
+      // The client collects every decision before sending, so a lone answer is a client bug:
+      // the server says exactly which calls are missing instead of resuming half a batch.
+      const partial = await server.request(
+        `/api/v1/sessions/${sessionId}/turns`,
+        jsonInit({
+          input: approvalInput({ ...first, approval: { status: 'allow', scope: 'once' } }),
+          stream: true,
+          previous_turn_id: turn.id,
+        }),
+      );
+      expect(partial.status).toBe(422);
+      const partialBody = z.object({ error: z.object({ message: z.string() }) }).parse(await partial.json());
+      expect(partialBody.error.message).toContain(second.tool_call_id);
+      expect(partialBody.error.message).toContain(third.tool_call_id);
+      expect(server.mcp.unannotatedInvocations()).toBe(0);
+
+      const done = await runTurn({
+        server,
+        sessionId,
+        previousTurnId: turn.id,
+        input: [
+          ...approvalInput({ ...first, approval: { status: 'allow', scope: 'once' } }),
+          ...approvalInput({ ...second, approval: { status: 'deny' } }),
+          ...approvalInput({ ...third, approval: { status: 'allow', scope: 'once' } }),
+        ],
+      });
+      expect(requiredActions(done)).toEqual([]);
+      expect(server.mcp.unannotatedInvocations()).toBe(2);
     },
     TURN_TIMEOUT_MS,
   );

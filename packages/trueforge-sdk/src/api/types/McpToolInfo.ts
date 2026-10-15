@@ -21,5 +21,7 @@ export interface McpToolInfo {
     serverId: string;
     /** Configured MCP server name. */
     serverName: string;
+    /** Text of a web search the host ran without asking, for the Searched chip. */
+    silentSearchQuery?: string;
     type: "mcp";
 }

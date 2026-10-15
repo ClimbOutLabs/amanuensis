@@ -27,8 +27,7 @@ export const listTurnsRoute = createRoute({
   path: '/{session_id}/turns',
   tags: [OpenApiTag.AGENT_SESSIONS],
   summary: 'List turns in a session',
-  description:
-    'List turns for a session (newest first by default), token-paginated. Only the session creator may list turns.',
+  description: 'List turns for a session, oldest first, token-paginated. Only the session creator may list turns.',
   'x-fern-sdk-group-name': ['sessions'],
   'x-fern-sdk-method-name': 'list_turns',
   'x-fern-pagination': TOKEN_PAGINATION,

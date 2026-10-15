@@ -25,6 +25,7 @@ import {
   publishBlockedSend,
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import type { AgentUIServer } from '../server/types.js';
+import { isStaleApprovalError, publishStaleApproval } from '../utils/staleApproval.js';
 import { ToasterProvider, useToaster } from './ToasterContainer.js';
 
 type RuntimeAdapters = NonNullable<UseTrueFoundryAgentRuntimeOptions['adapters']>;
@@ -142,6 +143,10 @@ function ChatRuntimeScope({
         // offers the dismiss action) and probe the tip so the runtime learns
         // the approvals even when the approval card never rendered.
         publishBlockedSend();
+      }
+      if (isStaleApprovalError(error)) {
+        // Reload so the expired card is replaced by the chat's current state.
+        publishStaleApproval();
       }
       reportError(error);
     },

@@ -15,7 +15,8 @@ const TOOL_TAG_ALL = '@all';
 export const TOOL_TAG_READ_ONLY = '@read-only';
 const TOOL_TAG_WRITE = '@write';
 const TOOL_TAG_DESTRUCTIVE = '@destructive';
-const TOOL_TAG_UNCLASSIFIED = '@unclassified';
+/** Exported so a host that already vouches for a tool's read-only nature can name the tag it waives. */
+export const TOOL_TAG_UNCLASSIFIED = '@unclassified';
 
 const TOOL_TAGS = [
   TOOL_TAG_ALL,

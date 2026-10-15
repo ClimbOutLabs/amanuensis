@@ -64,7 +64,7 @@ index 6c2f1b9a90a9b2b690c8f6f938e875678cb87f3d..b0fbcd3184c250330266b2c440e1d540
 +
 +export { AgentChatServer, AgentSpec, type AgentSpecUpdate, type ConvertTurnsResult, type DraftAgentConfig, type DraftSession, type DraftSessionBridge, type McpAuthMessageCustomMetadata, McpAuthRequiredEvent, type NamedAgentConfig, type PendingApproval, type PendingToolResponse, ROOT_THREAD_ID, type SandboxMessageCustomMetadata, Session, type SubAgentArtifact, type SubAgentCustomMetadata, type SubAgentMessageCustomMetadata, TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY, ThreadCreatedEvent, type ToolApprovalMessageCustomMetadata, type ToolResponseMessageCustomMetadata, type TrueFoundryAgentConfig, type TrueFoundryDraftRuntimeExtras, type TrueFoundryMessageCustomMetadata, type TrueFoundryRuntimeExtras, Turn, TurnEvent, TurnInputItem, type UseTrueFoundryAgentRuntimeOptions, type UserMessageContent, UserToolApprovalEvent, UserToolResponseEvent, buildEditedUserMessageContent, buildTurnAssistantContent, buildUserMessageContent, collectApprovalInputs, collectRequiredActionInputs, collectResponseInputs, convertTurnsToThreadMessages, createDraftSessionBridge, createTrueFoundryDraftThreadListAdapter, createTrueFoundryOwnedSessionsThreadListAdapter, createTrueFoundryThreadListAdapter, draftSessionTitle, findPausedAssistantMessage, getSession, getTrueFoundryExtras, getTurnMessageContent, mergeAgentSpec, messageHasPendingApprovals, messageHasPendingRequiredActions, messageHasPendingResponses, parseTurnIdFromMessageId, repositoryItemsFromMessages, toTrueFoundryApprovalInputs, toolInvocationRawId, trueFoundryAttachmentAdapter, trueFoundryExtras, tryGetTrueFoundryExtras, useTrueFoundryAdoptAgentSpec, useTrueFoundryAgentRuntime, useTrueFoundryAgentSpec, useTrueFoundryApprovals, useTrueFoundryCancel, useTrueFoundryDownloadSandboxFile, useTrueFoundryFlushAgentSpec, useTrueFoundryHistoryPagination, useTrueFoundryMcpAuth, useTrueFoundryReload, useTrueFoundryResetFromTurn, useTrueFoundryRespondToToolApproval, useTrueFoundryRespondToToolResponse, useTrueFoundryResumeMcpAuth, useTrueFoundryResumeUnavailable, useTrueFoundrySandboxId, useTrueFoundryTerminalError, useTrueFoundryToolResponses, useTrueFoundryTurnId, useTrueFoundryUpdateAgentSpec };
 diff --git a/dist/index.js b/dist/index.js
-index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c2531044cd729ab 100644
+index 7931deb018203ae9c0a616fa30e25aeb8c667d85..b052e82a4bf3d5786776f49034dc2740e4543ace 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -158,6 +158,7 @@ function applyApprovalDecisionsToContent(content, decisions) {
@@ -134,19 +134,21 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
  function parseToolArgs(argsText) {
    if (!argsText) {
      return {};
-@@ -427,12 +447,28 @@ function parseToolArgs(argsText) {
+@@ -427,12 +447,30 @@ function parseToolArgs(argsText) {
      return {};
    }
  }
 +function toolCallArtifact(toolInfo) {
 +  const hostObservedTargetSummary = toolInfo?.hostObservedTargetSummary;
 +  const builtInToolName = toolInfo?.type === "truefoundry-system" && typeof toolInfo.name === "string" ? toolInfo.name : void 0;
-+  if (hostObservedTargetSummary === void 0 && builtInToolName === void 0) {
++  const silentSearchQuery = toolInfo?.type === "mcp" && typeof toolInfo.silentSearchQuery === "string" ? toolInfo.silentSearchQuery : void 0;
++  if (hostObservedTargetSummary === void 0 && builtInToolName === void 0 && silentSearchQuery === void 0) {
 +    return void 0;
 +  }
 +  return {
 +    ...hostObservedTargetSummary === void 0 ? {} : { hostObservedTargetSummary },
-+    ...builtInToolName === void 0 ? {} : { builtInToolName }
++    ...builtInToolName === void 0 ? {} : { builtInToolName },
++    ...silentSearchQuery === void 0 ? {} : { silentSearchQuery }
 +  };
 +}
  function toolCallToPart(toolCall, context) {
@@ -167,7 +169,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
    let interrupt;
    if (pendingResponse != null && toolResult === void 0) {
      interrupt = {
-@@ -448,10 +484,20 @@ function toolCallToPart(toolCall, context) {
+@@ -448,10 +486,20 @@ function toolCallToPart(toolCall, context) {
      approval = {
        id: approvalDecision.id,
        approved: approvalDecision.approved,
@@ -189,7 +191,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
    }
    let result;
    let isError = false;
-@@ -461,12 +507,14 @@ function toolCallToPart(toolCall, context) {
+@@ -461,12 +509,14 @@ function toolCallToPart(toolCall, context) {
      result = { error: approvalDecision.reason || "Tool approval denied" };
      isError = true;
    }
@@ -204,7 +206,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      ...result !== void 0 ? { result } : {},
      ...isError ? { isError: true } : {},
      ...approval != null ? { approval } : {},
-@@ -508,6 +556,15 @@ function buildAssistantContent(message, context) {
+@@ -508,6 +558,15 @@ function buildAssistantContent(message, context) {
  }
  
  // src/foldPeerThreads.ts
@@ -220,7 +222,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
  var isDev = typeof process !== "undefined" && typeof process.env !== "undefined" && process.env.NODE_ENV !== "production";
  function warnUnexpectedRootThread(threadId, eventType) {
    if (!isDev) {
-@@ -541,6 +598,7 @@ var PeerThreadFoldState = class {
+@@ -541,6 +600,7 @@ var PeerThreadFoldState = class {
          pendingApprovals: /* @__PURE__ */ new Map(),
          approvalDecisions: /* @__PURE__ */ new Map(),
          pendingResponses: /* @__PURE__ */ new Map(),
@@ -228,7 +230,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
          done: false
        };
        this.threads.set(threadId, bucket);
-@@ -559,6 +617,9 @@ function ingestEventIntoBucket(bucket, message) {
+@@ -559,6 +619,9 @@ function ingestEventIntoBucket(bucket, message) {
      const base = bucket.events.get(message.id);
      if (base != null) {
        mergeStreamEventDelta(base, message);
@@ -238,7 +240,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      }
      return;
    }
-@@ -567,28 +628,44 @@ function ingestEventIntoBucket(bucket, message) {
+@@ -567,28 +630,44 @@ function ingestEventIntoBucket(bucket, message) {
      if (!bucket.modelMessageIds.includes(message.id)) {
        bucket.modelMessageIds.push(message.id);
      }
@@ -293,7 +295,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      }
      return;
    }
-@@ -600,7 +677,7 @@ function ingestEventIntoBucket(bucket, message) {
+@@ -600,7 +679,7 @@ function ingestEventIntoBucket(bucket, message) {
    }
  }
  function isContentAffectingEvent(message) {
@@ -302,7 +304,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
  }
  function ingestStreamEvent(state, message) {
    if (message.type === "mcp.auth_required" || isTurnScopedEvent(message)) {
-@@ -689,7 +766,7 @@ function childSubThreadIds(state, parentThreadId, toolCallId) {
+@@ -689,7 +768,7 @@ function childSubThreadIds(state, parentThreadId, toolCallId) {
    return ids;
  }
  function bucketHasUnresolvedPendingResponses(bucket) {
@@ -311,7 +313,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      if (!bucket.toolResults.has(id)) {
        return true;
      }
-@@ -724,11 +801,12 @@ function attachSubAgentMessages(state, parentThreadId, parts) {
+@@ -724,11 +803,12 @@ function attachSubAgentMessages(state, parentThreadId, parts) {
      if (part.type !== "tool-call" || parentBucket == null) {
        return part;
      }
@@ -326,7 +328,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      if (childIds.length === 0) {
        return part;
      }
-@@ -775,17 +853,19 @@ function buildThreadAssistantParts(state, threadId, modelMessageIds) {
+@@ -775,17 +855,19 @@ function buildThreadAssistantParts(state, threadId, modelMessageIds) {
        toolResults: bucket.toolResults,
        pendingApprovals: bucket.pendingApprovals,
        approvalDecisions: bucket.approvalDecisions,
@@ -352,7 +354,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      }
    }
    return attachSubAgentMessages(state, threadId, parts);
-@@ -847,40 +927,83 @@ function recordToolApprovalInFold(fold, decision) {
+@@ -847,40 +929,83 @@ function recordToolApprovalInFold(fold, decision) {
    const record = {
      id: decision.toolCallId,
      approved: decision.approved,
@@ -452,7 +454,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
  
  // src/toolResponse.ts
  var TOOL_RESPONSE_THREAD_ID_CUSTOM_KEY = "toolResponseThreadId";
-@@ -966,7 +1089,7 @@ function collectResponseInputs(message, threadId) {
+@@ -966,7 +1091,7 @@ function collectResponseInputs(message, threadId) {
        events.push({
          type: "user.tool_response",
          threadId: scopedThreadId,
@@ -461,7 +463,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
          content: String(part.result)
        });
      }
-@@ -983,7 +1106,7 @@ function applyStagedResponsesToContentMap(content, staged) {
+@@ -983,7 +1108,7 @@ function applyStagedResponsesToContentMap(content, staged) {
      if (part.type !== "tool-call") {
        return part;
      }
@@ -470,7 +472,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      let nextPart = part;
      if (contentValue != null && hasPendingToolResponse(part)) {
        nextPart = applyToolResponseToToolCall(part, contentValue);
-@@ -1019,12 +1142,15 @@ function applyUserToolResponsesToFold(fold, inputs) {
+@@ -1019,12 +1144,15 @@ function applyUserToolResponsesToFold(fold, inputs) {
      if (item.type === "user.tool_response") {
        recordToolResponseInFold(fold, {
          toolCallId: item.toolCallId,
@@ -487,7 +489,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
          ...item.approval.status === "deny" && item.approval.reason != null ? { reason: item.approval.reason } : {}
        });
      }
-@@ -1282,6 +1408,13 @@ function appendMcpAuthToTurnContent(content, turn) {
+@@ -1282,6 +1410,13 @@ function appendMcpAuthToTurnContent(content, turn) {
  }
  
  // src/sessionSnapshot.ts
@@ -501,7 +503,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
  function emptyRequiredActionsOverlay() {
    return {
      approvals: /* @__PURE__ */ new Map(),
-@@ -1351,7 +1484,7 @@ function oldestCompleteTurnGroupState(itemsAsc) {
+@@ -1351,7 +1486,7 @@ function oldestCompleteTurnGroupState(itemsAsc) {
    if (!hasDone) {
      return "incomplete";
    }
@@ -510,7 +512,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
  }
  async function fetchSessionEventsPage(server, sessionId, options) {
    const page = await server.listEvents({
-@@ -1422,6 +1555,12 @@ function cloneThreadBucket(bucket) {
+@@ -1422,6 +1557,12 @@ function cloneThreadBucket(bucket) {
      pendingApprovals: new Map(bucket.pendingApprovals),
      approvalDecisions: new Map(bucket.approvalDecisions),
      pendingResponses: new Map(bucket.pendingResponses),
@@ -523,7 +525,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      done: bucket.done,
      ...bucket.title != null ? { title: bucket.title } : {},
      ...bucket.agentInfo != null ? { agentInfo: bucket.agentInfo } : {}
-@@ -1466,6 +1605,17 @@ function prependFoldState(older, newer) {
+@@ -1466,6 +1607,17 @@ function prependFoldState(older, newer) {
          ...olderBucket.pendingResponses,
          ...newerBucket.pendingResponses
        ]),
@@ -541,7 +543,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
        done: newerBucket.done || olderBucket.done,
        ...newerBucket.title != null || olderBucket.title != null ? { title: newerBucket.title ?? olderBucket.title } : {},
        ...newerBucket.agentInfo != null || olderBucket.agentInfo != null ? { agentInfo: newerBucket.agentInfo ?? olderBucket.agentInfo } : {}
-@@ -1491,6 +1641,7 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
+@@ -1491,6 +1643,7 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
        currentCreatedEvent = event;
        currentContentEvents = [];
        beforeCount = snapshot.fold.threads.get(ROOT_THREAD_ID)?.modelMessageIds.length ?? 0;
@@ -549,7 +551,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      } else if (event.type === "turn.done") {
        if (currentTurnId == null || currentCreatedEvent == null) {
          continue;
-@@ -1502,10 +1653,6 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
+@@ -1502,10 +1655,6 @@ function ingestSessionEventsIntoSnapshot(snapshot, items, onTurnComplete) {
        const sandboxEvent = currentContentEvents.find(
          (ev) => ev.type === "sandbox.created"
        );
@@ -560,7 +562,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
        snapshot.turns.push(
          sessionEventsToSessionRecord(
            currentTurnId,
-@@ -2066,6 +2213,12 @@ function projectSessionMessages(snapshot, options) {
+@@ -2066,6 +2215,12 @@ function projectSessionMessages(snapshot, options) {
      const resolvedUpdate = streamComplete === true ? projectActiveStreamUpdate(snapshot) : update;
      const last = messages.at(-1);
      const existingAssistant = isContinuation && last?.role === "assistant" ? last : void 0;
@@ -573,7 +575,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      let assistantMessage = turnStreamUpdateToAssistantMessage(
        turnId,
        resolvedUpdate,
-@@ -2096,8 +2249,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
+@@ -2096,8 +2251,8 @@ function ingestTurnsIntoSnapshot(snapshot, turns, eventArrays) {
      const turn = turns[i];
      const rootBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
      const beforeCount = rootBucket?.modelMessageIds.length ?? 0;
@@ -583,7 +585,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      const afterBucket = snapshot.fold.threads.get(ROOT_THREAD_ID);
      const rootModelMessageIds = (afterBucket?.modelMessageIds ?? []).slice(
        beforeCount
-@@ -2166,6 +2319,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
+@@ -2166,6 +2321,7 @@ async function convertTurnsToThreadMessages(server, sessionId) {
    return {
      messages,
      foldState: snapshot.fold,
@@ -591,7 +593,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      ...snapshot.runningTurn != null ? {
        runningTurn: snapshot.runningTurn,
        unstable_resume: true
-@@ -2336,7 +2490,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
+@@ -2336,7 +2492,11 @@ async function* streamTurnEvents(stream, foldState, groupRootBaseline, onTurnIdA
      }
      if (event.type === "turn.done") {
        if (event.state.status === "error") {
@@ -604,7 +606,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
        }
        break;
      }
-@@ -3039,19 +3197,7 @@ function buildTurnInput(options) {
+@@ -3039,19 +3199,7 @@ function buildTurnInput(options) {
    }
    return [{ type: "user.message", content: options.userMessage ?? "" }];
  }
@@ -624,7 +626,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
    if (abortSignal.aborted) {
      return;
    }
-@@ -3083,22 +3229,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
+@@ -3083,22 +3231,15 @@ async function* streamTurnContent(server, sessionId, foldState, options, abortSi
        return;
      }
      throw error;
@@ -647,7 +649,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
    try {
      yield* streamTurnEvents(
        server.subscribeToTurn({
-@@ -3115,8 +3254,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
+@@ -3115,8 +3256,6 @@ async function* resumeTurnStream(server, sessionId, turnId, foldState, abortSign
        return;
      }
      throw error;
@@ -656,7 +658,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
    }
  }
  
-@@ -3176,20 +3313,49 @@ function appendTurnInputs(base, continuationInputs) {
+@@ -3176,20 +3315,49 @@ function appendTurnInputs(base, continuationInputs) {
    }
    return [...base, ...continuationInputs];
  }
@@ -709,7 +711,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
    );
    const lastTurn = snapshot.turns.at(-1);
    if (lastTurn?.id === active.turnId) {
-@@ -3273,6 +3439,10 @@ function useTrueFoundryAgentMessages({
+@@ -3273,6 +3441,10 @@ function useTrueFoundryAgentMessages({
    const createdAtByMessageIdRef = useRef2(/* @__PURE__ */ new Map());
    const abortControllerRef = useRef2(null);
    const activeRunRef = useRef2(null);
@@ -720,7 +722,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
    const resumeUnavailableRef = useRef2(false);
    const runningTurnRef = useRef2(void 0);
    const loadGenerationRef = useRef2(0);
-@@ -3302,6 +3472,7 @@ function useTrueFoundryAgentMessages({
+@@ -3302,6 +3474,7 @@ function useTrueFoundryAgentMessages({
      () => projectSessionMessages(snapshot, projectOptions),
      [snapshot, projectOptions]
    );
@@ -728,7 +730,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
    const runStream = useCallback3(
      (createStream, turnIdRef, isContinuation) => {
        const streamGeneration = ++streamGenerationRef.current;
-@@ -3310,9 +3481,11 @@ function useTrueFoundryAgentMessages({
+@@ -3310,9 +3483,11 @@ function useTrueFoundryAgentMessages({
        abortControllerRef.current = abortController;
        setIsRunning(true);
        markResumeUnavailable(false);
@@ -740,7 +742,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
          const flushPendingStreamUpdate = () => {
            streamUpdateRaf = null;
            const pending = pendingStreamUpdate;
-@@ -3347,6 +3520,7 @@ function useTrueFoundryAgentMessages({
+@@ -3347,6 +3522,7 @@ function useTrueFoundryAgentMessages({
              }
              applyStreamUpdate(update);
            }
@@ -748,7 +750,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
          } catch (error) {
            if (error instanceof Error && error.name === "AbortError") {
              return;
-@@ -3366,22 +3540,37 @@ function useTrueFoundryAgentMessages({
+@@ -3366,22 +3542,37 @@ function useTrueFoundryAgentMessages({
              abortControllerRef.current = null;
            }
            setIsRunning(false);
@@ -800,7 +802,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
          }
        })();
        activeRunRef.current = run;
-@@ -3447,6 +3636,7 @@ function useTrueFoundryAgentMessages({
+@@ -3447,6 +3638,7 @@ function useTrueFoundryAgentMessages({
          return;
        }
        createdAtByMessageIdRef.current = /* @__PURE__ */ new Map();
@@ -808,7 +810,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
        setSnapshot(loadedSnapshot);
        runningTurnRef.current = loadedSnapshot.runningTurn;
        setIsLoading(false);
-@@ -3662,12 +3852,13 @@ function useTrueFoundryAgentMessages({
+@@ -3662,12 +3854,13 @@ function useTrueFoundryAgentMessages({
      [server, runStream, sessionId]
    );
    const cancel = useCallback3(async () => {
@@ -824,7 +826,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
        resolveConversationSessionIdRef.current
      );
      await server.cancelSession({ sessionId: conversationSessionId }).catch(() => void 0);
-@@ -3677,11 +3868,26 @@ function useTrueFoundryAgentMessages({
+@@ -3677,11 +3870,26 @@ function useTrueFoundryAgentMessages({
        setIsRunning(false);
      }
    }, [server, sessionId, markResumeUnavailable]);
@@ -854,7 +856,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
          return;
        }
        const projected = projectSessionMessages(nextSnapshot, projectOptions);
-@@ -3690,18 +3896,29 @@ function useTrueFoundryAgentMessages({
+@@ -3690,18 +3898,29 @@ function useTrueFoundryAgentMessages({
          return;
        }
        const inputs = collectRequiredActionInputs(paused);
@@ -886,7 +888,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
          ...response.reason != null ? { reason: response.reason } : {}
        });
        const nextSnapshot = replaceSessionSnapshot(prev, {
-@@ -3710,6 +3927,7 @@ function useTrueFoundryAgentMessages({
+@@ -3710,6 +3929,7 @@ function useTrueFoundryAgentMessages({
            approvals
          }
        });
@@ -894,7 +896,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3726,6 +3944,7 @@ function useTrueFoundryAgentMessages({
+@@ -3726,6 +3946,7 @@ function useTrueFoundryAgentMessages({
            toolResponses
          }
        });
@@ -902,7 +904,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
        setSnapshot(nextSnapshot);
        trySendCollectedRequiredActions(nextSnapshot);
      },
-@@ -3880,6 +4099,7 @@ function useTrueFoundryAgentMessages({
+@@ -3880,6 +4101,7 @@ function useTrueFoundryAgentMessages({
    }, [server, isMain, sessionId]);
    return {
      messages,
@@ -910,7 +912,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -3958,6 +4178,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -3958,6 +4180,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
    const [toolStatuses, setToolStatuses] = useState3({});
    const {
      messages,
@@ -918,7 +920,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
      isRunning,
      resumeUnavailable,
      isLoading,
-@@ -4047,6 +4268,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
+@@ -4047,6 +4270,7 @@ function useTrueFoundryAgentRuntimeImpl(options, pendingAgentSpecRef) {
        pendingToolResponses,
        pendingMcpAuth,
        resumeUnavailable,
@@ -926,7 +928,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
        sandboxId,
        respondToToolApproval,
        respondToToolResponse,
-@@ -4249,8 +4471,13 @@ var useTrueFoundryMcpAuth = () => {
+@@ -4249,8 +4473,13 @@ var useTrueFoundryMcpAuth = () => {
    );
  };
  var useTrueFoundryRespondToToolApproval = () => {
@@ -942,7 +944,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
  };
  var useTrueFoundryRespondToToolResponse = () => {
    const aui = useAui3();
-@@ -4298,6 +4525,7 @@ var useTrueFoundryHistoryPagination = () => {
+@@ -4298,6 +4527,7 @@ var useTrueFoundryHistoryPagination = () => {
    );
  };
  var useTrueFoundryResumeUnavailable = () => useTrueFoundryRuntimeExtras()?.resumeUnavailable ?? false;
@@ -950,7 +952,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
  var useTrueFoundryResetFromTurn = () => {
    const aui = useAui3();
    return (turnId) => getTrueFoundryExtras(aui).resetFromTurn(turnId);
-@@ -4408,6 +4636,7 @@ export {
+@@ -4408,6 +4638,7 @@ export {
    parseTurnIdFromMessageId,
    repositoryItemsFromMessages,
    toTrueFoundryApprovalInputs,
@@ -958,7 +960,7 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
    trueFoundryAttachmentAdapter,
    trueFoundryExtras,
    tryGetTrueFoundryExtras,
-@@ -4427,6 +4656,7 @@ export {
+@@ -4427,6 +4658,7 @@ export {
    useTrueFoundryResumeMcpAuth,
    useTrueFoundryResumeUnavailable,
    useTrueFoundrySandboxId,
@@ -967,10 +969,10 @@ index 7931deb018203ae9c0a616fa30e25aeb8c667d85..485a2e3b6368ae1ebff78da94c253104
    useTrueFoundryTurnId,
    useTrueFoundryUpdateAgentSpec
 diff --git a/dist/types-hS8TQqBP.d.ts b/dist/types-hS8TQqBP.d.ts
-index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955ec97c5c8 100644
+index bddf93d1f4ad64c3df464ec48e884fc6f586e816..ef08cbf93907717f4d02aced7429b71a2ff25525 100644
 --- a/dist/types-hS8TQqBP.d.ts
 +++ b/dist/types-hS8TQqBP.d.ts
-@@ -9,7 +9,11 @@ interface ToolCallFunction {
+@@ -9,7 +9,12 @@ interface ToolCallFunction {
      name: string;
      arguments: string;
  }
@@ -978,12 +980,13 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
 +type ToolInfoMetadata = {
 +    effect?: string;
 +    hostObservedTargetSummary?: string;
++    silentSearchQuery?: string;
 +};
 +type ToolInfo = ({
      type: "truefoundry-system";
      name: string;
  } | {
-@@ -21,7 +25,7 @@ type ToolInfo = {
+@@ -21,7 +26,7 @@ type ToolInfo = {
      type: string;
      name?: string;
      [key: string]: unknown;
@@ -992,7 +995,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
  interface ToolCall {
      id: string;
      type: "function";
-@@ -115,6 +119,24 @@ interface ToolResponseEvent {
+@@ -115,6 +120,24 @@ interface ToolResponseEvent {
      content: string;
      createdAt: string;
  }
@@ -1017,7 +1020,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
  interface ToolApprovalRequiredEvent {
      type: "tool.approval_required";
      id: string;
-@@ -204,7 +226,7 @@ interface TurnDoneEvent {
+@@ -204,7 +227,7 @@ interface TurnDoneEvent {
      threadId?: string | null;
  }
  /** Events stored in fold buckets (non-delta, non-turn-lifecycle). */
@@ -1026,7 +1029,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
  /** Full streaming event union (includes deltas + turn lifecycle). */
  type TurnStreamingEvent = TurnEvent | ModelMessageDeltaEvent | TurnCreatedEvent | TurnDoneEvent;
  type ActionRequiredEvent = ToolApprovalRequiredEvent | ToolResponseRequiredEvent | McpAuthRequiredEvent;
-@@ -327,6 +349,9 @@ interface AgentContextManagementConfig {
+@@ -327,6 +350,9 @@ interface AgentContextManagementConfig {
      compaction?: AgentCompactionConfig;
      largeToolResponse?: AgentCapabilityConfig;
  }
@@ -1036,7 +1039,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
  interface AgentRuntimeConfig {
      iterationLimit?: number;
      sandbox?: AgentSandboxConfig;
-@@ -334,6 +359,7 @@ interface AgentRuntimeConfig {
+@@ -334,6 +360,7 @@ interface AgentRuntimeConfig {
      generativeUi?: AgentCapabilityConfig;
      dynamicSubAgents?: AgentCapabilityConfig;
      askUserQuestions?: AgentCapabilityConfig;
@@ -1044,7 +1047,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
  }
  /**
   * SDK-owned agent definition — fields the FE reads/writes.
-@@ -345,6 +371,11 @@ interface AgentSpec<TModel extends Model = Model, TSkill extends SkillMount = Sk
+@@ -345,6 +372,11 @@ interface AgentSpec<TModel extends Model = Model, TSkill extends SkillMount = Sk
      skills?: TSkill[];
      mcpServers?: TMcp[];
      config?: TConfig;
@@ -1056,7 +1059,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
      instructions?: string;
      variables?: Record<string, string>;
  }
-@@ -406,6 +437,7 @@ interface UserMessage {
+@@ -406,6 +438,7 @@ interface UserMessage {
  }
  type ApprovalDecision = {
      status: "allow";
@@ -1064,7 +1067,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
  } | {
      status: "deny";
      reason?: string;
-@@ -671,7 +703,7 @@ interface ToolBase {
+@@ -671,7 +704,7 @@ interface ToolBase {
      description: string;
  }
  /** Strict auth type id. Hosts widen branches via intersection + re-union. */
@@ -1073,7 +1076,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
  type ConnectorAuthOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -684,7 +716,13 @@ type ConnectorAuthApiKey = {
+@@ -684,7 +717,13 @@ type ConnectorAuthApiKey = {
  type ConnectorAuthNone = {
      type: "none";
  };
@@ -1088,7 +1091,7 @@ index bddf93d1f4ad64c3df464ec48e884fc6f586e816..fe1ee2c9ab06e26f6233ec9245f2b955
  type ConnectorAuthPublicOAuth = {
      type: "dcr";
      authUrl?: string;
-@@ -696,7 +734,12 @@ type ConnectorAuthPublicApiKey = {
+@@ -696,7 +735,12 @@ type ConnectorAuthPublicApiKey = {
  type ConnectorAuthPublicNone = {
      type: "none";
  };
@@ -1795,10 +1798,10 @@ index b5873bc07df150d1d74d240acd50a4a1681523d9..bc9bb32562213be287c70e9d069bcb7d
      messageHasPendingResponses,
 diff --git a/src/modelMessageContent.test.ts b/src/modelMessageContent.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..0c732d1ab2a05603aeba408686ec8c6db35c4aa0
+index 0000000000000000000000000000000000000000..2d552fc7cdbd97c5c6538d8f94359edb55d04936
 --- /dev/null
 +++ b/src/modelMessageContent.test.ts
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,170 @@
 +import { describe, expect, it } from "vitest";
 +
 +import { buildAssistantContent } from "./modelMessageContent.js";
@@ -1935,8 +1938,42 @@ index 0000000000000000000000000000000000000000..0c732d1ab2a05603aeba408686ec8c6d
 +        });
 +    });
 +});
++
++describe("modelMessageContent silent search marker", () => {
++    function searchMessage(toolInfo: NonNullable<ModelMessageEvent["toolCalls"]>[number]["toolInfo"]) {
++        return buildAssistantContent(approvalMessage(toolInfo));
++    }
++
++    it("carries the query the host ran without asking", () => {
++        const [part] = searchMessage({
++            type: "mcp",
++            serverId: "finder",
++            serverName: "finder",
++            name: "lookup",
++            silentSearchQuery: "tallest building in Lisbon",
++        });
++
++        expect(part).toMatchObject({ artifact: { silentSearchQuery: "tallest building in Lisbon" } });
++    });
++
++    it("ignores the marker on anything that is not an MCP tool", () => {
++        const [part] = searchMessage({
++            type: "truefoundry-system",
++            name: "run_code",
++            silentSearchQuery: "forged",
++        });
++
++        expect(part).not.toHaveProperty("artifact.silentSearchQuery");
++    });
++
++    it("shows no chip for a call without the marker", () => {
++        const [part] = searchMessage({ type: "mcp", serverId: "finder", serverName: "finder", name: "lookup" });
++
++        expect(part).not.toHaveProperty("artifact");
++    });
++});
 diff --git a/src/modelMessageContent.ts b/src/modelMessageContent.ts
-index 300935acab3bc155897c9705e3c441e773f2c1c2..453f8705389cac0c9956e5b6372d22d99b6e519a 100644
+index 300935acab3bc155897c9705e3c441e773f2c1c2..9c32aa02f0782f9194059d59eb230b01e614d0d2 100644
 --- a/src/modelMessageContent.ts
 +++ b/src/modelMessageContent.ts
 @@ -10,11 +10,27 @@ export type ToolCallContext = {
@@ -1968,25 +2005,38 @@ index 300935acab3bc155897c9705e3c441e773f2c1c2..453f8705389cac0c9956e5b6372d22d9
  export type SdkToolCall = NonNullable<ModelMessageEvent["toolCalls"]>[number];
  
  function parseToolArgs(argsText: string): Record<string, string | number | boolean | null> {
-@@ -34,15 +50,51 @@ function parseToolArgs(argsText: string): Record<string, string | number | boole
+@@ -34,15 +50,65 @@ function parseToolArgs(argsText: string): Record<string, string | number | boole
  
  type ToolCallPart = Extract<AssistantContentPart, { type: "tool-call" }>;
  
 +/**
 + * Facts the host set on a call's tool info, which the model cannot forge: the
-+ * structured-edit target summary, and the name of a built-in tool (an MCP tool
-+ * with the same name is not one). Undefined when there are none.
++ * structured-edit target summary, the name of a built-in tool (an MCP tool
++ * with the same name is not one), and the text of a web search the host ran
++ * without asking. Undefined when there are none.
 + */
-+function toolCallArtifact(
-+    toolInfo: SdkToolCall["toolInfo"],
-+): { hostObservedTargetSummary?: string; builtInToolName?: string } | undefined {
++function toolCallArtifact(toolInfo: SdkToolCall["toolInfo"]):
++    | {
++          hostObservedTargetSummary?: string;
++          builtInToolName?: string;
++          silentSearchQuery?: string;
++      }
++    | undefined {
 +    const hostObservedTargetSummary = toolInfo?.hostObservedTargetSummary;
 +    const builtInToolName =
 +        toolInfo?.type === "truefoundry-system" &&
 +        typeof toolInfo.name === "string"
 +            ? toolInfo.name
 +            : undefined;
-+    if (hostObservedTargetSummary === undefined && builtInToolName === undefined) {
++    const silentSearchQuery =
++        toolInfo?.type === "mcp" && typeof toolInfo.silentSearchQuery === "string"
++            ? toolInfo.silentSearchQuery
++            : undefined;
++    if (
++        hostObservedTargetSummary === undefined &&
++        builtInToolName === undefined &&
++        silentSearchQuery === undefined
++    ) {
 +        return undefined;
 +    }
 +    return {
@@ -1994,6 +2044,7 @@ index 300935acab3bc155897c9705e3c441e773f2c1c2..453f8705389cac0c9956e5b6372d22d9
 +            ? {}
 +            : { hostObservedTargetSummary }),
 +        ...(builtInToolName === undefined ? {} : { builtInToolName }),
++        ...(silentSearchQuery === undefined ? {} : { silentSearchQuery }),
 +    };
 +}
 +
@@ -2024,7 +2075,7 @@ index 300935acab3bc155897c9705e3c441e773f2c1c2..453f8705389cac0c9956e5b6372d22d9
  
      let interrupt: ToolCallPart["interrupt"];
      if (pendingResponse != null && toolResult === undefined) {
-@@ -64,12 +116,31 @@ function toolCallToPart(
+@@ -64,12 +130,31 @@ function toolCallToPart(
          approval = {
              id: approvalDecision.id,
              approved: approvalDecision.approved,
@@ -2057,7 +2108,7 @@ index 300935acab3bc155897c9705e3c441e773f2c1c2..453f8705389cac0c9956e5b6372d22d9
      }
  
      let result: ToolCallPart["result"];
-@@ -81,12 +152,14 @@ function toolCallToPart(
+@@ -81,12 +166,14 @@ function toolCallToPart(
          isError = true;
      }
  
@@ -2073,10 +2124,10 @@ index 300935acab3bc155897c9705e3c441e773f2c1c2..453f8705389cac0c9956e5b6372d22d9
          ...(isError ? { isError: true } : {}),
          ...(approval != null ? { approval } : {}),
 diff --git a/src/server/events.ts b/src/server/events.ts
-index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..59127f8c232a94e973f18b865cc59dae524a7f5a 100644
+index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..376c1f6420a3d400ce7b8f1597a8e7a65e191ed6 100644
 --- a/src/server/events.ts
 +++ b/src/server/events.ts
-@@ -16,10 +16,16 @@ export interface ToolCallFunction {
+@@ -16,10 +16,17 @@ export interface ToolCallFunction {
      arguments: string;
  }
  
@@ -2084,6 +2135,7 @@ index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..59127f8c232a94e973f18b865cc59dae
 +type ToolInfoMetadata = {
 +    effect?: string;
 +    hostObservedTargetSummary?: string;
++    silentSearchQuery?: string;
 +};
 +
 +export type ToolInfo = (
@@ -2095,7 +2147,7 @@ index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..59127f8c232a94e973f18b865cc59dae
  
  export interface ToolCall {
      id: string;
-@@ -102,6 +108,38 @@ export interface ToolResponseEvent {
+@@ -102,6 +109,38 @@ export interface ToolResponseEvent {
      createdAt: string;
  }
  
@@ -2134,7 +2186,7 @@ index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..59127f8c232a94e973f18b865cc59dae
  export interface ToolApprovalRequiredEvent {
      type: "tool.approval_required";
      id: string;
-@@ -210,6 +248,7 @@ export interface TurnDoneEvent {
+@@ -210,6 +249,7 @@ export interface TurnDoneEvent {
  export type TurnEvent =
      | ModelMessageEvent
      | ToolResponseEvent
@@ -2143,7 +2195,7 @@ index 677d5b7bacd18aceb962c7f948bf1a92de5695e0..59127f8c232a94e973f18b865cc59dae
      | ThreadDoneEvent
      | McpAuthRequiredEvent
 diff --git a/src/server/types.ts b/src/server/types.ts
-index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..849419c5726fc1495e4a1d94f0ea0eea7030ff8b 100644
+index 68b20cbb0f3506b46ed72f7431c3b483ece82c0c..99874d6f2101f5d4d72be429a000b90f6a674885 100644
 --- a/src/server/types.ts
 +++ b/src/server/types.ts
 @@ -168,6 +168,11 @@ export interface AgentSpec<

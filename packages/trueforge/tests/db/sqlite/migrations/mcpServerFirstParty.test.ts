@@ -94,7 +94,7 @@ describe('20261010_000007_mcp_server_first_party migration', () => {
       VALUES ('s-kept', 'default', 'kept', jsonb('{}'), 1, ${timestamp}, ${timestamp})
     `.execute(db);
 
-    const rolledBack = await migrator.migrateDown();
+    const rolledBack = await migrator.migrateTo(PREVIOUS_MIGRATION);
     expect(rolledBack.error).toBeUndefined();
     expect(await columnNames(db)).not.toContain('first_party');
     const kept = await sql<{ name: string }>`SELECT name FROM mcp_server WHERE id = 's-kept'`.execute(db);

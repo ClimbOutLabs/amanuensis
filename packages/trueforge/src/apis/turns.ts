@@ -397,6 +397,7 @@ function createTurnResolver(deps: {
             metadataHeaders,
           }),
           first_party: connection.first_party,
+          search_provider: connection.search_provider,
         };
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
@@ -1167,6 +1168,45 @@ function isSessionOwner({
 const FORBIDDEN_SESSION_ACCESS = 'Only the session creator can access this session';
 const FORBIDDEN_CREATE_TURN = 'Only the session creator can create turns';
 
+type RecordedApprovalResponse =
+  | { status: 200; body: { data: Turn } }
+  | { status: 409; body: { error: { message: string; type: 'conflict'; code: TurnConflictCode } } };
+
+/**
+ * Answers a resubmitted approval from stored state: the already-recorded turn when the same
+ * decision is on record, a conflict when a different one is, or undefined when none is recorded.
+ */
+async function recordedApprovalResponse({
+  session,
+  previous_turn_id,
+  input,
+}: {
+  session: SessionHandle<SessionCustom, TurnCustom>;
+  previous_turn_id: string | undefined;
+  input: TurnInputItem[] | undefined;
+}): Promise<RecordedApprovalResponse | undefined> {
+  const resubmission = await session.classifyApprovalResubmission({
+    previous_turn_id,
+    decisions: (input ?? []).filter(item => item.type === EventType.USER_TOOL_APPROVAL),
+  });
+  if (resubmission.outcome === 'replay') {
+    return { status: 200, body: { data: toWireTurn(resubmission.turn) } };
+  }
+  if (resubmission.outcome === 'conflict') {
+    return {
+      status: 409,
+      body: {
+        error: {
+          message: `Tool call ${resubmission.tool_call_id} already has a different decision on record`,
+          type: 'conflict',
+          code: TurnConflictCode.APPROVAL_CONFLICT,
+        },
+      },
+    };
+  }
+  return undefined;
+}
+
 /** DB-backed turns (mounted at /api/v1/sessions). */
 export function createTurnsRouter(deps: TurnsRouterDeps) {
   const listTurnsHandler: RouteHandler<typeof listTurnsRoute> = async c => {
@@ -1783,6 +1823,25 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         return c.json({ error: { message: error.message } }, 404);
       }
       if (error instanceof SessionStoreConflictError) {
+        if (error instanceof StaleApprovalContinuationError) {
+          // The tip moved after this request read the session. A double submit or a second tab
+          // may already have recorded this exact decision; the handle read above is stale, so
+          // classify against a fresh one. A replay never runs the tool again.
+          const freshSession = await deps.sessions.get({
+            tenant_id: requestContext.tenant_id,
+            session_id: sessionId,
+          });
+          if (freshSession !== undefined) {
+            const response = await recordedApprovalResponse({
+              session: freshSession,
+              previous_turn_id: body.previous_turn_id,
+              input: body.input,
+            });
+            if (response !== undefined) {
+              return c.json(response.body, response.status);
+            }
+          }
+        }
         return c.json({ error: { message: error.message, type: 'conflict', code: turnConflictCodeFor(error) } }, 409);
       }
       if (error instanceof AgentHarnessError && !(error instanceof McpConnectionError)) {
@@ -1793,24 +1852,13 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             // A decision the session already recorded is a resubmission, not a bad request:
             // the tool has run (or been denied) once and must not run again. Answer from
             // stored state; only a genuinely unrecorded decision keeps the 422.
-            const resubmission = await session.classifyApprovalResubmission({
+            const response = await recordedApprovalResponse({
+              session,
               previous_turn_id: body.previous_turn_id,
-              decisions: (body.input ?? []).filter(item => item.type === EventType.USER_TOOL_APPROVAL),
+              input: body.input,
             });
-            if (resubmission.outcome === 'replay') {
-              return c.json({ data: toWireTurn(resubmission.turn) }, 200);
-            }
-            if (resubmission.outcome === 'conflict') {
-              return c.json(
-                {
-                  error: {
-                    message: `Tool call ${resubmission.tool_call_id} already has a different decision on record`,
-                    type: 'conflict',
-                    code: TurnConflictCode.APPROVAL_CONFLICT,
-                  },
-                },
-                409,
-              );
+            if (response !== undefined) {
+              return c.json(response.body, response.status);
             }
             return c.json({ error: { message: error.message } }, 422);
           }

@@ -737,7 +737,7 @@ export class SessionsClient {
     }
 
     /**
-     * List turns for a session (newest first by default), token-paginated. Only the session creator may list turns.
+     * List turns for a session, oldest first, token-paginated. Only the session creator may list turns.
      *
      * @param {string} session_id - Session identifier.
      * @param {TrueForge.ListTurnsSessionsRequest} request
