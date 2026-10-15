@@ -17,6 +17,7 @@ import {
   type RequestContext,
   type ResolveRequestContext,
 } from '../auth/identity';
+import type { McpCatalog } from '../catalog/McpCatalog';
 import {
   loadScheduleDispatchItem,
   ScheduleAgentNotFoundError,
@@ -73,6 +74,7 @@ import { getTurnExecutionError, startTurnInProcess } from './turns';
 
 /** Runtime + Context store resolvers needed to start a schedule turn. */
 export interface ScheduleTurnExecutionDeps<TTransaction> {
+  mcpCatalog: McpCatalog;
   scheduleStore: IScheduleStore<TTransaction>;
   sessions: Sessions<SessionCustom, TurnCustom>;
   activeTurns: ActiveTurnRegistry;
@@ -136,6 +138,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     previous_turn_id: prepared.previous_turn_id,
     userRef: prepared.userRef,
     deps: {
+      mcpCatalog: deps.mcpCatalog,
       activeTurns: deps.activeTurns,
       turnDrains: deps.turnDrains,
       eventSubscriptions: deps.eventSubscriptions,

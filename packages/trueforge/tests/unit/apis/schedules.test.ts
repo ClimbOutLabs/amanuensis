@@ -9,6 +9,7 @@ import winston from 'winston';
 import { createScheduleExecutionRouter, createSchedulesRouter } from '../../../src/apis/schedules';
 import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authorizer';
 import type { RequestContext } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { ScheduleAgentNotFoundError, startScheduleRun } from '../../../src/controller/scheduleDispatch';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
@@ -70,6 +71,7 @@ function stubTurnExecutionDeps(
 ) {
   const sessionStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
   return {
+    mcpCatalog: McpCatalog.load(),
     scheduleStore,
     sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
     agentStore,

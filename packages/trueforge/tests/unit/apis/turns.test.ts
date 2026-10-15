@@ -15,6 +15,7 @@ import { TENANT_ID } from '../../../src/apis/sessions';
 import { createTurnsRouter, extractUserMessageText, turnStreamId } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
@@ -131,6 +132,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           sessions,
           sessionStore,
@@ -216,6 +218,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           sessions: new Sessions({ sessionStore }),
           sessionStore,
@@ -432,6 +435,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           sessions,
           sessionStore,
@@ -565,6 +569,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           sessions,
           sessionStore,
@@ -675,6 +680,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           sessions,
           sessionStore,
@@ -765,6 +771,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           sessions,
           sessionStore,

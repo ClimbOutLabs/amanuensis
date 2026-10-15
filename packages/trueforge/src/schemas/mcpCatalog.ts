@@ -17,6 +17,9 @@ import {
  */
 export const CatalogMcpServerTypeSchema = McpServerTypeSchema.exclude(['truefoundry']).openapi('CatalogMCPServerType');
 
+/** Argument names of a search provider's tools that carry its own bookkeeping, not the user's text. */
+const McpSearchPlumbingFieldsSchema = z.array(z.string().min(1).max(128)).max(16);
+
 /** Catalog entry — discovery preset the settings UI copies into a PUT body. */
 export const CatalogMcpServerSchema = z
   .object({
@@ -32,6 +35,9 @@ export const CatalogMcpServerSchema = z
       .describe('When true, adding this preset offers to make it the web search provider.'),
     search_tools: McpSearchToolsSchema.optional().describe(
       'Search tools of this server that run without asking when it is the web search provider.',
+    ),
+    search_plumbing_fields: McpSearchPlumbingFieldsSchema.optional().describe(
+      'Top-level search tool arguments, such as a session id or model name, that are not the user text and do not count toward the length check.',
     ),
   })
   .strict()

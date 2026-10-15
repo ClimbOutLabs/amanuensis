@@ -12,7 +12,7 @@ The card is not the real protection anyway. The risk in a search is the query te
 
 Let the user designate one connector as their search provider. Its search tool then runs without asking, in interactive chats and scheduled runs, behind a deterministic host-side outbound secret guard. When the guard trips, the call does not run silently: an interactive chat shows the normal approval card with the exact query, and a scheduled run denies the call, records it in the audit log, and continues.
 
-Parallel's free keyless hosted MCP (`search.parallel.ai/mcp`) is the default search provider and ships as a catalog preset. Any other connector can hold the role instead.
+Parallel's free keyless hosted MCP (`search.parallel.ai/mcp`) is the default search provider and ships as a catalog preset. Any other connector can hold the role instead. A one-time data migration designates a connector saved before the setting existed when it matches a search preset by endpoint and none of the tenant's connectors carries any explicit `search_provider` value; an explicit `false` is the record of "turned off". A designated connector with no stored `search_tools` uses its preset's list at run time.
 
 Everything is enforced by the server (classifier, tool executor, host state). Nothing depends on the model behaving.
 
@@ -29,7 +29,9 @@ Everything is enforced by the server (classifier, tool executor, host state). No
 - a base64 or hex run of 20 characters or more;
 - a password or credential label (`password:`, `pwd=`, `passw0rd`, `token=`, `api key:`, and similar) followed by a value;
 - a payment card number that passes Luhn;
-- more than 200 characters in total.
+- more than 200 characters in any one string, or more than 1,000 in all.
+
+Arguments the catalog declares as a provider's plumbing (`search_plumbing_fields`, such as `session_id` and `model_name`) are not user text: they stay out of the search chip and the length rule, every other rule still reads them, and a hex or base64 value there passes the encoded-run rule only when the provider itself returned it earlier in the turn.
 
 The guard is tuned so ordinary queries with numbers, dates, and names pass.
 

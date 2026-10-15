@@ -45,7 +45,7 @@ export interface McpConnection {
   headers: RemoteMcpHeaders;
   /** The stored connector's trust marker, and only while the operator still lists its origin. */
   first_party: boolean;
-  /** Set when the user designated this connector as their search provider: the tools it may run silently. */
+  /** Set when the user designated this connector as their search provider: the tools stored on its record, which the shipped catalog completes per turn. */
   search_provider: { tools: readonly string[] } | undefined;
 }
 
