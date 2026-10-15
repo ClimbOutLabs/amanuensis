@@ -1324,6 +1324,7 @@ export interface SharedServerConfiguration {
    * Env: `TOKEN_FACTORY_DAILY_TOKEN_CAP`. Unset means no cap.
    */
   TOKEN_FACTORY_DAILY_TOKEN_CAP: number | undefined;
+  /**
    * Marks this instance as a demo. Only `aman demo-seed` reads it: the seed refuses to run
    * unless it is true, so it can never touch a real instance.
    * Env: `DEMO_MODE`. Default false.

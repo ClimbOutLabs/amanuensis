@@ -247,10 +247,12 @@ case "$cmd" in
     fi
     proj=
     file=
+    envfile=
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --project-name) proj=$2; shift 2 ;;
-        --project-directory | --env-file) shift 2 ;;
+        --env-file) envfile=$2; shift 2 ;;
+        --project-directory) shift 2 ;;
         -f) file=$2; shift 2 ;;
         *) break ;;
       esac
@@ -278,6 +280,21 @@ case "$cmd" in
             *) grep -Fxq "$v" "$S/volumes" || echo "$v" >>"$S/volumes" ;;
           esac
         done
+        exit 0
+        ;;
+      exec)
+        # `exec -T app aman demo-seed ...`: refuses unless the instance .env turns demo mode on, as the real command does.
+        case "$*" in
+          *"aman demo-seed"*)
+            echo "$*" >>"$S/demo_runs"
+            [ -n "${STUB_DEMO_FAIL:-}" ] && { echo "No model is configured yet." >&2; exit 1; }
+            if ! grep -q '^DEMO_MODE=true$' "$envfile"; then
+              echo "Refusing to seed: DEMO_MODE is not true. This command only runs on a demo instance." >&2
+              exit 1
+            fi
+            printf '{"action":"seed"}\n'
+            ;;
+        esac
         exit 0
         ;;
       down)

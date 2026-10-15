@@ -281,6 +281,16 @@ plan_build() {
     fi
     dl_add embed
   fi
+  if [ "$OPT_DEMO" = 1 ]; then
+    name=$(demo_target)
+    if need_new_instance; then
+      plan_add todo "$(demo_plan_text "$name" "${OPT_DEMO_USER:-$I_EMAIL}")"
+    elif demo_env_on "$name"; then
+      plan_add have "Demo mode is on for instance $name"
+    else
+      plan_add todo "$(demo_plan_text "$name" "$(demo_user "$name")")"
+    fi
+  fi
   if ! need_new_instance && [ "$OPT_TF_KEY_STDIN" = 1 ]; then
     plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) (it goes only into the instance .env) and restart its app"
   fi
@@ -352,7 +362,7 @@ cmd_install() {
 }
 
 install_execute() {
-  local name
+  local name demo_name=
   ensure_private_dir "$AMAN_HOME"
   lock_acquire
   docker_prepare
@@ -373,6 +383,7 @@ install_execute() {
       instance_up "$name" || exit 1
     fi
   done
+  if [ "$OPT_DEMO" = 1 ]; then demo_name=$(demo_target); fi
   if need_new_instance; then
     instance_create
     AMAN_PASSWORD=
@@ -381,6 +392,7 @@ install_execute() {
   for name in $(reg_names); do
     edge_ensure "$name"
   done
+  if [ "$OPT_DEMO" = 1 ]; then demo_install_apply "$demo_name"; fi
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REL_APP_TAG" >"$STATE_DIR/installed"
   log_event "install complete $REL_APP_TAG"
   for name in $(reg_names); do
@@ -400,4 +412,5 @@ install_execute() {
   print_signout_note
   sandbox_finish
   edge_finish
+  [ "$DEMO_FAILED" = 0 ] || exit 1
 }

@@ -31,8 +31,8 @@ ONLY=""
 ONLY_INSTANCE=""
 
 MACHINE_IDS="docker runtime credentials images disk docker_memory clock backup"
-INSTANCE_IDS="config containers ports service login database disk clock run_code attachments model public_url public_login"
-IN_IMAGE_IDS="service login database disk clock run_code attachments model"
+INSTANCE_IDS="config containers ports service login database disk clock run_code attachments demo model public_url public_login"
+IN_IMAGE_IDS="service login database disk clock run_code attachments demo model"
 
 BACKUP_WARN_DAYS=7
 GIB=$((1024 * 1024 * 1024))

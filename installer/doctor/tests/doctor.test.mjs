@@ -69,6 +69,7 @@ describe('document and exit codes', () => {
         'clock',
         'run_code',
         'attachments',
+        'demo',
         'model',
       ],
     );

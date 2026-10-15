@@ -319,6 +319,7 @@ export const HEALTHY_INSTANCE_CHECKS =
     'clock\tok\tThe clock is within 60 seconds of the login provider.\t',
     'run_code\toff\trun_code is not available: no sandbox isolation driver is configured for this deployment.\t',
     'attachments\toff\tReading email attachments is not available.\t',
+    'demo\toff\tDemo mode is off.\t',
     'model\toff\tNo Token Factory key is set (NEBIUS_API_KEY), so the hosted model is not checked.\t',
   ].join('\n') + '\n';
 

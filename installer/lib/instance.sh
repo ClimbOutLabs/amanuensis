@@ -280,7 +280,7 @@ issuer_check() {
 # ---- create / list / remove -------------------------------------------------------------------
 
 instance_create() {
-  local dir cookie client_id client_secret api_key hash created tf_cap_on=0
+  local dir cookie client_id client_secret api_key hash created tf_cap_on=0 demo_on=0
   dir=$(instance_dir "$I_NAME")
   if reg_exists "$I_NAME"; then
     say "Instance $I_NAME already exists; making sure it is running"
@@ -302,10 +302,11 @@ instance_create() {
   api_key=$(rand_hex 32)
   hash=$(hash_password "$REL_APP_TAG")
   if [ -n "$I_TF_CAP" ]; then tf_cap_on=1; fi
+  if [ "$OPT_DEMO" = 1 ]; then demo_on=1; fi
   render_template "$TEMPLATES_DIR/instance/env.tpl" \
     "PUBLIC_URL=$I_PUBLIC_URL" "COOKIE_SUFFIX=$cookie" "ISSUER=$I_ISSUER" "CLIENT_ID=$client_id" \
     "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "API_KEY=$api_key" \
-    "IF_TOKEN_FACTORY=$I_TF" "TF_KEY=$AMAN_TF_KEY" "TF_MODEL=$I_TF_MODEL" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$I_TF_CAP" |
+    "IF_TOKEN_FACTORY=$I_TF" "TF_KEY=$AMAN_TF_KEY" "TF_MODEL=$I_TF_MODEL" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$I_TF_CAP" "IF_DEMO=$demo_on" |
     write_if_changed "$dir/.env" 600 || true
   AMAN_TF_KEY=
   render_template "$TEMPLATES_DIR/instance/dex.env.tpl" "PASSWORD_HASH=$hash" | write_if_changed "$dir/dex.env" 600 || true
@@ -313,7 +314,7 @@ instance_create() {
   reg_write "$I_NAME" "name=$I_NAME" "app_port=$I_PORT" "login_port=$I_LOGIN_PORT" "public_url=$I_PUBLIC_URL" \
     "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
     "model_endpoint=$I_MODEL" "sandbox=$I_SANDBOX" "tls=$I_TLS" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
-    "tf_cap=$I_TF_CAP" "created=$created"
+    "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then
     warn "reusing the existing data volume aman_${I_NAME}_data from an earlier instance with this name"
@@ -363,6 +364,9 @@ print_instance_summary() {
     print_proxy_requirements "$(reg_get "$name" public_url)" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_url)" "$(reg_get "$name" login_port)"
   fi
   print_model_hint "$name"
+  if demo_env_on "$name"; then
+    say "  Demo:     on (DEMO_MODE=true). Reseed: $(demo_seed_command "$name") [--reset]"
+  fi
   if instance_sandbox_wanted "$name"; then
     say "  Run code: on, in the gVisor sandbox (Settings > Sandbox shows its status). Repair: $(sandbox_repair_command)"
     say "  Attachment extraction is off in this version."
@@ -398,10 +402,12 @@ cmd_instance_add() {
     instance_create
     tf_rotation_apply
     edge_ensure "$I_NAME"
+    if [ "$OPT_DEMO" = 1 ]; then demo_install_apply "$I_NAME"; fi
     print_instance_summary "$I_NAME"
     if instance_sandbox_wanted "$I_NAME"; then sandbox_verify "$I_NAME"; fi
     sandbox_finish
     edge_finish
+    [ "$DEMO_FAILED" = 0 ] || exit 1
     return 0
   fi
   AMAN_PASSWORD=
@@ -417,11 +423,13 @@ cmd_instance_add() {
   instance_create
   AMAN_PASSWORD=
   edge_ensure "$I_NAME"
+  if [ "$OPT_DEMO" = 1 ]; then demo_install_apply "$I_NAME"; fi
   print_instance_summary "$I_NAME"
   if [ "$I_SANDBOX" = slots ]; then sandbox_verify "$I_NAME"; fi
   print_signout_note
   sandbox_finish
   edge_finish
+  [ "$DEMO_FAILED" = 0 ] || exit 1
 }
 
 # Pads tab-separated columns to the widest cell of each, so long names and addresses stay aligned.

@@ -1,5 +1,6 @@
 import { checkClock } from './checks/clock';
 import { checkDatabase } from './checks/database';
+import { checkDemo } from './checks/demo';
 import { checkDisk } from './checks/disk';
 import { checkLogin, probeLogin } from './checks/login';
 import { checkModel } from './checks/model';
@@ -16,6 +17,7 @@ export const INSTANCE_CHECK_IDS = [
   'clock',
   'run_code',
   'attachments',
+  'demo',
   'model',
 ] as const;
 
@@ -47,6 +49,7 @@ export async function runInstanceChecks({
     checkClock({ deps }),
     await checkRunCode({ deps, timeoutMs }),
     checkAttachments(),
+    checkDemo({ deps }),
   ];
   // The model check spends a few tokens, so it only runs when asked for or when nothing is filtered.
   if (local) {

@@ -19,4 +19,5 @@ STT_URL=http://aman-stt:8001
 @@IF_TOKEN_FACTORY@@NEBIUS_API_KEY=@@TF_KEY@@
 @@IF_TOKEN_FACTORY@@TOKEN_FACTORY_MODEL=@@TF_MODEL@@
 @@IF_TF_CAP@@TOKEN_FACTORY_DAILY_TOKEN_CAP=@@TF_CAP@@
+@@IF_DEMO@@DEMO_MODE=true
 # <<< end of managed block; add your own settings below this line

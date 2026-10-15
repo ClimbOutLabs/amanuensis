@@ -3,6 +3,7 @@
 # Usage: install.sh [--dry-run] [--yes] [options]
 #        install.sh instance add|list|remove <name>
 #        install.sh instance add-user|remove-user|list-users
+#        install.sh instance demo-seed [--reset]
 #        install.sh backup [<name>]
 #        install.sh upgrade [--check] [--force]
 set -euo pipefail
@@ -41,6 +42,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/instance.sh"
 # shellcheck source=lib/users.sh
 . "$INSTALLER_DIR/lib/users.sh"
+# shellcheck source=lib/demo.sh
+. "$INSTALLER_DIR/lib/demo.sh"
 # shellcheck source=lib/backup.sh
 . "$INSTALLER_DIR/lib/backup.sh"
 # shellcheck source=lib/upgrade.sh
@@ -65,6 +68,8 @@ PRINT_PROXY=0
 OPT_CHECK=0
 OPT_FORCE=0
 OPT_PURGE=0
+OPT_DEMO=0
+OPT_RESET=0
 OPT_NAME=
 OPT_INSTANCE=
 OPT_ROLE=
@@ -79,6 +84,7 @@ OPT_PUBLIC_IP=
 OPT_TF_MODEL=
 OPT_TF_CAP=
 OPT_CONFIRM_NAME=
+OPT_DEMO_USER=
 COMMAND=install
 SUBCOMMAND=
 LOCK_HELD=0
@@ -97,6 +103,7 @@ Amanuensis installer
   install.sh instance add-user <name> --email ADDRESS [--role member] [--instance NAME] [--password-stdin]
   install.sh instance remove-user <name> [--instance NAME]
   install.sh instance list-users [--instance NAME]
+  install.sh instance demo-seed [--reset] [--instance NAME] [--demo-user ADDRESS]
   install.sh backup [<name>]
   install.sh upgrade [--check] [--force]
 
@@ -118,6 +125,9 @@ Options
   --token-factory-key-stdin  read the Token Factory key from stdin (the line after the password with --password-stdin); the key is never a command-line value
   --token-factory-model ID   Token Factory model the app uses (default nvidia/nemotron-3-super-120b-a12b)
   --token-factory-daily-cap N  stop answering after N Token Factory tokens per day (default: no cap)
+  --demo                mark the instance as a demo (DEMO_MODE=true) and seed its synthetic demo world once it is healthy
+  --demo-user ADDRESS   the user the demo world is seeded for (default: the owner)
+  --reset               with instance demo-seed, remove the synthetic demo records instead of seeding
   --public-url URL      https address you will use from other devices (behind your own reverse proxy)
   --login-url URL       https address for the sign-in service behind the same proxy
   --port N              port on this computer for the app
@@ -168,12 +178,14 @@ parse_args() {
       --check) OPT_CHECK=1 ;;
       --force) OPT_FORCE=1 ;;
       --purge-data) OPT_PURGE=1 ;;
-      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --model-endpoint | --confirm-name | --tls | --public-ip | --token-factory-model | --token-factory-daily-cap)
+      --demo) OPT_DEMO=1 ;;
+      --reset) OPT_RESET=1 ;;
+      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --model-endpoint | --confirm-name | --tls | --public-ip | --token-factory-model | --token-factory-daily-cap | --demo-user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --model-endpoint=* | --confirm-name=* | --tls=* | --public-ip=* | --token-factory-model=* | --token-factory-daily-cap=*)
+      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --model-endpoint=* | --confirm-name=* | --tls=* | --public-ip=* | --token-factory-model=* | --token-factory-daily-cap=* | --demo-user=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -214,6 +226,7 @@ set_option() {
     --public-ip) OPT_PUBLIC_IP=$2 ;;
     --token-factory-model) OPT_TF_MODEL=$2 ;;
     --token-factory-daily-cap) OPT_TF_CAP=$2 ;;
+    --demo-user) OPT_DEMO_USER=$2 ;;
   esac
   safe_value "$2" || usage_die "$1 contains a character that is not allowed"
 }
@@ -223,6 +236,22 @@ print_signout_note() {
     say ""
     say "Docker access: this run used your new docker group membership without a re-login."
     say "Sign out and back in (or run: newgrp docker) once so docker works in your other terminals."
+  fi
+}
+
+# --demo and --demo-user belong to install, instance add and instance demo-seed; --reset only to demo-seed.
+check_demo_options() {
+  local seeding=0
+  if [ "$COMMAND:$SUBCOMMAND" = instance:demo-seed ]; then seeding=1; fi
+  if [ "$OPT_DEMO" = 1 ] && { [ "$seeding" = 1 ] || { [ "$COMMAND" != install ] && [ "$SUBCOMMAND" != add ]; }; }; then
+    usage_die "--demo applies to install and instance add (instance demo-seed reseeds a demo instance)"
+  fi
+  if [ "$OPT_RESET" = 1 ] && [ "$seeding" != 1 ]; then
+    usage_die "--reset applies to instance demo-seed"
+  fi
+  if [ -n "$OPT_DEMO_USER" ]; then
+    [ "$OPT_DEMO" = 1 ] || [ "$seeding" = 1 ] || usage_die "--demo-user applies with --demo or instance demo-seed"
+    valid_email "$OPT_DEMO_USER" || usage_die "--demo-user must be an email address"
   fi
 }
 
@@ -240,6 +269,7 @@ main() {
   parse_args "$@"
   set_paths
   trap on_exit EXIT
+  check_demo_options
   trap 'exit 130' INT
   trap 'exit 143' TERM
   if [ "$PRINT_ROOT_STEPS" = 1 ]; then
@@ -276,7 +306,8 @@ main() {
         add-user) cmd_instance_add_user ;;
         remove-user) cmd_instance_remove_user ;;
         list-users) cmd_instance_list_users ;;
-        *) usage_die "usage: install.sh instance add|list|remove|add-user|remove-user|list-users" ;;
+        demo-seed) cmd_instance_demo_seed ;;
+        *) usage_die "usage: install.sh instance add|list|remove|add-user|remove-user|list-users|demo-seed" ;;
       esac
       ;;
   esac

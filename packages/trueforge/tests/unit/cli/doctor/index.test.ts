@@ -33,6 +33,7 @@ describe('aman doctor', () => {
       ['clock', 'ok'],
       ['run_code', 'off'],
       ['attachments', 'off'],
+      ['demo', 'off'],
       ['model', 'off'],
     ]);
   });
@@ -104,7 +105,7 @@ describe('aman doctor', () => {
     const deps = fakeDeps({ env: healthyEnv, get: () => Promise.reject(networkError('ECONNREFUSED')) });
     const { io } = await run(['--text'], deps);
     const lines = io.out.join('').trimEnd().split('\n');
-    expect(lines).toHaveLength(8);
+    expect(lines).toHaveLength(9);
     const [id, state, detail, fix] = lines[0]?.split('\t') ?? [];
     expect([id, state]).toEqual(['service', 'fail']);
     expect(detail).not.toBe('');
