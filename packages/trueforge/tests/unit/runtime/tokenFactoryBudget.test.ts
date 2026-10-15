@@ -1,36 +1,30 @@
-import { EventType, type ModelMessageEvent } from '@truefoundry/trueforge-core/core';
+import type {
+  ExtendedChatCompletionChunk,
+  ILLM,
+  LLMCreateParams,
+  LLMCreateParamsStreaming,
+  RawAssistantMessageWithUsage,
+} from '@truefoundry/trueforge-core/core';
+import { createLogger } from 'winston';
+
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteTokenFactoryUsageStore } from '../../../src/db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore';
 import {
   createTokenFactoryBudget,
+  meterHelperLlm,
   TOKEN_FACTORY_DAILY_CAP_CODE,
   TokenFactoryDailyCapError,
-  TokenFactoryTurnMeter,
+  TokenFactoryMeteredLLM,
+  tokenFactoryRole,
   utcUsageDate,
+  type TokenFactoryBudget,
 } from '../../../src/runtime/tokenFactoryBudget';
 
 async function createStore(): Promise<SqliteTokenFactoryUsageStore> {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   return new SqliteTokenFactoryUsageStore(db);
-}
-
-function modelMessage(usage: { input_tokens: number; output_tokens: number } | undefined): ModelMessageEvent {
-  return {
-    type: EventType.MODEL_MESSAGE,
-    id: 'msg-1',
-    thread_id: 'main',
-    created_at: '2026-10-15T10:00:00.000Z',
-    ...(usage === undefined
-      ? {}
-      : {
-          usage: {
-            ...usage,
-            input_tokens_breakdown: { harness: 0, skills: 0, instructions: 0, tool_definitions: 0, messages: 0 },
-          },
-        }),
-  };
 }
 
 describe('utcUsageDate', () => {
@@ -123,49 +117,276 @@ describe('createTokenFactoryBudget', () => {
   });
 });
 
-describe('TokenFactoryTurnMeter', () => {
-  const now = () => new Date('2026-10-15T09:00:00.000Z');
+const TODAY = () => new Date('2026-10-15T09:00:00.000Z');
+const USAGE_DATE = '2026-10-15';
+const BODY: LLMCreateParamsStreaming = { messages: [{ role: 'user', content: 'hi' }], stream: true };
+const silentLogger = createLogger({ silent: true });
 
-  it('counts provider-reported input and output tokens of an admitted turn', async () => {
+function chunk(usage?: { input_tokens: number; output_tokens: number }): ExtendedChatCompletionChunk {
+  return {
+    id: 'c1',
+    object: 'chat.completion.chunk',
+    created: 1,
+    model: 'm',
+    choices: [{ index: 0, delta: {}, finish_reason: null, logprobs: null }],
+    ...(usage === undefined ? {} : { usage: { ...usage, total_tokens: usage.input_tokens + usage.output_tokens } }),
+  };
+}
+
+const FINAL: RawAssistantMessageWithUsage = {
+  output: { role: 'assistant', content: 'ok' },
+  usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+  finish_reason: 'stop',
+};
+
+/** An inner client that yields the given chunks, then either finishes or throws `failure`. */
+function scriptedClient(options: { chunks: ExtendedChatCompletionChunk[]; failure?: Error }): ILLM & {
+  closed: () => boolean;
+} {
+  let closed = false;
+  async function* create(): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
+    try {
+      for (const next of options.chunks) {
+        yield next;
+      }
+      if (options.failure !== undefined) {
+        throw options.failure;
+      }
+      return FINAL;
+    } finally {
+      closed = true;
+    }
+  }
+  return {
+    create,
+    createNonStream: (_body: LLMCreateParams) => Promise.resolve(FINAL),
+    closed: () => closed,
+  };
+}
+
+async function usedToday(store: SqliteTokenFactoryUsageStore): Promise<number | undefined> {
+  return (await store.getUsage({ usage_date: USAGE_DATE }))?.used_tokens;
+}
+
+async function drain(llm: ILLM): Promise<void> {
+  const stream = llm.create(BODY);
+  let step = await stream.next();
+  while (!step.done) {
+    step = await stream.next();
+  }
+}
+
+describe('TokenFactoryBudget.isExhausted', () => {
+  it('is never true without a cap and true from the cap onward', async () => {
     const store = await createStore();
-    const meter = new TokenFactoryTurnMeter(createTokenFactoryBudget({ store, cap: 10_000, now }));
+    const uncapped = createTokenFactoryBudget({ store, cap: undefined, now: TODAY });
+    await uncapped.record(1_000_000);
+    expect(await uncapped.isExhausted()).toBe(false);
 
-    await meter.admit();
-    await meter.observe(modelMessage({ input_tokens: 1200, output_tokens: 80 }));
-    await meter.observe(modelMessage({ input_tokens: 1400, output_tokens: 20 }));
+    const capped = createTokenFactoryBudget({ store, cap: 500, now: TODAY });
+    expect(await capped.isExhausted()).toBe(false);
+    await capped.record(500);
+    expect(await capped.isExhausted()).toBe(true);
+  });
+});
 
-    expect((await store.getUsage({ usage_date: '2026-10-15' }))?.used_tokens).toBe(2700);
+describe('TokenFactoryMeteredLLM with Token Factory as the primary', () => {
+  async function setup(cap: number) {
+    const store = await createStore();
+    const budget = createTokenFactoryBudget({ store, cap, now: TODAY });
+    return { store, budget };
+  }
+
+  it('re-checks the cap before every model call, so a turn stops mid-way once the cap is reached', async () => {
+    const { store, budget } = await setup(1000);
+    const build = jest.fn(() => scriptedClient({ chunks: [chunk({ input_tokens: 900, output_tokens: 100 })] }));
+    const llm = new TokenFactoryMeteredLLM({ role: 'primary', budget, logger: silentLogger, build });
+
+    await drain(llm);
+    expect(await usedToday(store)).toBe(1000);
+
+    const refusal = await drain(llm).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(refusal).toBeInstanceOf(TokenFactoryDailyCapError);
+    if (!(refusal instanceof TokenFactoryDailyCapError)) {
+      throw new Error('expected a TokenFactoryDailyCapError');
+    }
+    expect(refusal.code).toBe(TOKEN_FACTORY_DAILY_CAP_CODE);
+    expect(refusal.message).toContain('midnight UTC');
+    expect(build).toHaveBeenCalledTimes(1);
+    expect(await usedToday(store)).toBe(1000);
   });
 
-  it('does not count a turn that was never admitted onto Token Factory', async () => {
-    const store = await createStore();
-    const meter = new TokenFactoryTurnMeter(createTokenFactoryBudget({ store, cap: 10_000, now }));
+  it('applies the same check to the non-streaming calls compaction and helpers make', async () => {
+    const { budget } = await setup(10);
+    await budget.record(10);
+    const llm = new TokenFactoryMeteredLLM({
+      role: 'primary',
+      budget,
+      logger: silentLogger,
+      build: () => scriptedClient({ chunks: [] }),
+    });
 
-    await meter.observe(modelMessage({ input_tokens: 1200, output_tokens: 80 }));
-
-    expect(await store.getUsage({ usage_date: '2026-10-15' })).toBeUndefined();
+    await expect(llm.createNonStream({ messages: [{ role: 'user', content: 'hi' }] })).rejects.toBeInstanceOf(
+      TokenFactoryDailyCapError,
+    );
   });
 
-  it('skips events that carry no usage', async () => {
+  it('counts the usage a stream reported even when it then fails', async () => {
+    const { store, budget } = await setup(10_000);
+    const llm = new TokenFactoryMeteredLLM({
+      role: 'primary',
+      budget,
+      logger: silentLogger,
+      build: () =>
+        scriptedClient({ chunks: [chunk({ input_tokens: 300, output_tokens: 40 })], failure: new Error('stream cut') }),
+    });
+
+    await expect(drain(llm)).rejects.toThrow('stream cut');
+
+    expect(await usedToday(store)).toBe(340);
+  });
+
+  it('counts the usage a stream reported when the consumer abandons it, and closes the provider stream', async () => {
+    const { store, budget } = await setup(10_000);
+    const inner = scriptedClient({ chunks: [chunk(), chunk({ input_tokens: 70, output_tokens: 5 }), chunk()] });
+    const llm = new TokenFactoryMeteredLLM({ role: 'primary', budget, logger: silentLogger, build: () => inner });
+
+    const stream = llm.create(BODY);
+    await stream.next();
+    await stream.next();
+    await stream.return(FINAL);
+
+    expect(await usedToday(store)).toBe(75);
+    expect(inner.closed()).toBe(true);
+  });
+
+  it('does not count a call that failed over away from Token Factory', async () => {
+    const { store, budget } = await setup(10_000);
+    const llm = new TokenFactoryMeteredLLM({
+      role: 'primary',
+      budget,
+      logger: silentLogger,
+      build: ({ onFailover }) => {
+        onFailover();
+        return scriptedClient({ chunks: [chunk({ input_tokens: 50, output_tokens: 50 })] });
+      },
+    });
+
+    await drain(llm);
+
+    expect(await usedToday(store)).toBeUndefined();
+  });
+
+  it('never fails a call because the count could not be stored', async () => {
+    const { budget } = await setup(10_000);
+    const failing: TokenFactoryBudget = {
+      ...budget,
+      record: () => Promise.reject(new Error('disk full')),
+    };
+    const warn = jest.spyOn(silentLogger, 'warn');
+    const llm = new TokenFactoryMeteredLLM({
+      role: 'primary',
+      budget: failing,
+      logger: silentLogger,
+      build: () => scriptedClient({ chunks: [chunk({ input_tokens: 5, output_tokens: 5 })] }),
+    });
+
+    await expect(drain(llm)).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith('Token Factory usage could not be counted', expect.anything());
+  });
+
+  it('is unlimited and writes nothing without a cap', async () => {
     const store = await createStore();
     const addUsage = jest.spyOn(store, 'addUsage');
-    const meter = new TokenFactoryTurnMeter(createTokenFactoryBudget({ store, cap: 10_000, now }));
+    const llm = new TokenFactoryMeteredLLM({
+      role: 'primary',
+      budget: createTokenFactoryBudget({ store, cap: undefined, now: TODAY }),
+      logger: silentLogger,
+      build: () => scriptedClient({ chunks: [chunk({ input_tokens: 9_000_000, output_tokens: 1 })] }),
+    });
 
-    await meter.admit();
-    await meter.observe(modelMessage(undefined));
+    await drain(llm);
 
     expect(addUsage).not.toHaveBeenCalled();
   });
+});
 
-  it('refuses admission when the cap is already reached', async () => {
+describe('TokenFactoryMeteredLLM with Token Factory as the fallback (TOKEN_FACTORY_MODE=fallback)', () => {
+  it('counts only the calls Token Factory answered after the configured provider failed', async () => {
     const store = await createStore();
-    const budget = createTokenFactoryBudget({ store, cap: 100, now });
+    const budget = createTokenFactoryBudget({ store, cap: 10_000, now: TODAY });
+    let failOver = false;
+    const llm = new TokenFactoryMeteredLLM({
+      role: 'fallback',
+      budget,
+      logger: silentLogger,
+      build: ({ onFailover }) => {
+        if (failOver) {
+          onFailover();
+        }
+        return scriptedClient({ chunks: [chunk({ input_tokens: 200, output_tokens: 30 })] });
+      },
+    });
+
+    await drain(llm);
+    expect(await usedToday(store)).toBeUndefined();
+
+    failOver = true;
+    await drain(llm);
+    await drain(llm);
+    expect(await usedToday(store)).toBe(460);
+  });
+
+  it('leaves the Token Factory failover out of a call once the cap is reached', async () => {
+    const store = await createStore();
+    const budget = createTokenFactoryBudget({ store, cap: 100, now: TODAY });
+    const build = jest.fn((_options: { withFailover: boolean; onFailover: () => void }) =>
+      scriptedClient({ chunks: [chunk({ input_tokens: 80, output_tokens: 20 })] }),
+    );
+    const llm = new TokenFactoryMeteredLLM({ role: 'fallback', budget, logger: silentLogger, build });
+
+    await drain(llm);
+    expect(build).toHaveBeenLastCalledWith(expect.objectContaining({ withFailover: true }));
+
     await budget.record(100);
-    const meter = new TokenFactoryTurnMeter(budget);
+    await drain(llm);
+    expect(build).toHaveBeenLastCalledWith(expect.objectContaining({ withFailover: false }));
+  });
+});
 
-    await expect(meter.admit()).rejects.toBeInstanceOf(TokenFactoryDailyCapError);
-    await meter.observe(modelMessage({ input_tokens: 10, output_tokens: 10 }));
+describe('meterHelperLlm', () => {
+  it('limits and counts a helper call on the tokenfactory provider', async () => {
+    const store = await createStore();
+    const budget = createTokenFactoryBudget({ store, cap: 100, now: TODAY });
+    const inner = scriptedClient({ chunks: [chunk({ input_tokens: 60, output_tokens: 40 })] });
+    const llm = meterHelperLlm({ llm: inner, providerType: 'tokenfactory', budget, logger: silentLogger });
 
-    expect((await store.getUsage({ usage_date: '2026-10-15' }))?.used_tokens).toBe(100);
+    await llm.createNonStream({ messages: [{ role: 'user', content: 'hi' }] });
+    expect(await usedToday(store)).toBe(100);
+
+    await expect(llm.createNonStream({ messages: [{ role: 'user', content: 'again' }] })).rejects.toBeInstanceOf(
+      TokenFactoryDailyCapError,
+    );
+  });
+
+  it('hands any other provider back untouched', async () => {
+    const store = await createStore();
+    const budget = createTokenFactoryBudget({ store, cap: 1, now: TODAY });
+    await budget.record(1);
+    const inner = scriptedClient({ chunks: [chunk({ input_tokens: 60, output_tokens: 40 })] });
+
+    expect(meterHelperLlm({ llm: inner, providerType: 'custom', budget, logger: silentLogger })).toBe(inner);
+  });
+});
+
+describe('tokenFactoryRole', () => {
+  it('names the Token Factory side of the routing', () => {
+    expect(tokenFactoryRole({ primaryType: 'tokenfactory', fallbackType: undefined })).toBe('primary');
+    expect(tokenFactoryRole({ primaryType: 'tokenfactory', fallbackType: 'custom' })).toBe('primary');
+    expect(tokenFactoryRole({ primaryType: 'custom', fallbackType: 'tokenfactory' })).toBe('fallback');
+    expect(tokenFactoryRole({ primaryType: 'custom', fallbackType: undefined })).toBeUndefined();
   });
 });

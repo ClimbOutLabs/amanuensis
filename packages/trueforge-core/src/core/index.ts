@@ -219,7 +219,7 @@ export type {
   ToolResultRemediation,
 } from './events/schema';
 export { CompletionUsageSchema } from './llm/LLMTypes';
-export type { CompletionUsage } from './llm/LLMTypes';
+export type { CompletionUsage, ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from './llm/LLMTypes';
 export type { ChatCompletionContentPartRefusal, ChatCompletionContentPartText } from './llm/openaiSchemas';
 export type { ToolCallMemoSnapshot } from './mcp/executeToolCalls';
 export { InternalEventType } from './runtime/AgentThread.types';

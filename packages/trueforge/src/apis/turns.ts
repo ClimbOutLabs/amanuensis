@@ -103,7 +103,7 @@ import {
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
 import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
-import { TokenFactoryTurnMeter, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
+import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
@@ -298,8 +298,8 @@ function createTurnResolver(deps: {
    * caller, never per tool call.
    */
   toolOutputScreenEnabled: boolean;
-  /** Refuses a Token Factory turn past the daily cap and counts its usage. */
-  tokenFactoryMeter: TokenFactoryTurnMeter;
+  /** Limits and counts the turn's Token Factory calls against the daily cap. */
+  tokenFactoryBudget: TokenFactoryBudget;
 }): SpaceTurnResourceResolver {
   const {
     mcpServerStore,
@@ -332,7 +332,7 @@ function createTurnResolver(deps: {
     turnArtifactStore,
     clientTimezone,
     toolOutputScreenEnabled,
-    tokenFactoryMeter,
+    tokenFactoryBudget,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -354,10 +354,6 @@ function createTurnResolver(deps: {
           model: configuration.TOKEN_FACTORY_MODEL,
           baseUrl: configuration.TOKEN_FACTORY_BASE_URL,
         });
-        // A turn whose primary model is on Token Factory is refused once today's budget is gone.
-        if (routed.providerConfig.provider.type === 'tokenfactory') {
-          await tokenFactoryMeter.admit();
-        }
         // Gateway metadata is only meaningful to the TrueFoundry gateway, so it is
         // never sent to Token Factory (a different external party).
         const withMetadataHeaders = (providerConfig: typeof routed.providerConfig) => ({
@@ -367,16 +363,30 @@ function createTurnResolver(deps: {
             ...(providerConfig.provider.type === 'tokenfactory' ? {} : metadataHeaders),
           },
         });
-        return {
-          modelClient: new VercelAILLM({
+        const buildClient = ({ withFailover, onFailover }: { withFailover: boolean; onFailover: () => void }) =>
+          new VercelAILLM({
             providerConfig: withMetadataHeaders(routed.providerConfig),
-            ...(routed.fallbackProviderConfig !== undefined
-              ? { fallbackProviderConfig: withMetadataHeaders(routed.fallbackProviderConfig) }
+            ...(withFailover && routed.fallbackProviderConfig !== undefined
+              ? { fallbackProviderConfig: withMetadataHeaders(routed.fallbackProviderConfig), onFallback: onFailover }
               : {}),
             logger,
             signal,
             streamTimeout: resolved.streamTimeout,
-          }),
+          });
+        const role = tokenFactoryRole({
+          primaryType: routed.providerConfig.provider.type,
+          fallbackType: routed.fallbackProviderConfig?.provider.type,
+        });
+        // A new turn on a Token Factory model is refused up front once today's budget is gone; the
+        // metered client re-checks before every model call after that.
+        if (role === 'primary') {
+          await tokenFactoryBudget.assertWithinCap();
+        }
+        return {
+          modelClient:
+            role === undefined
+              ? buildClient({ withFailover: true, onFailover: () => undefined })
+              : new TokenFactoryMeteredLLM({ role, budget: tokenFactoryBudget, logger, build: buildClient }),
           defaultModelParams: resolved.defaultModelParams,
           // The upstream identifier actually sent to the provider, not
           // `name` (the configured catalog alias), so the model-identity
@@ -782,8 +792,6 @@ export interface DrainTurnEventsInput {
   logger: Logger;
   turnDrains: TurnDrainRegistry;
   onEvent?: (event: TurnStreamingEvent, sequenceNumber: number) => Promise<void>;
-  /** Counts the turn's provider-reported tokens against the daily Token Factory cap. */
-  tokenFactoryMeter?: TokenFactoryTurnMeter;
   /** Present only when a memory provider resolved for this turn; the drain awaits the retain. */
   memory?:
     | {
@@ -816,23 +824,6 @@ export interface DrainTurnEventsInput {
     | undefined;
 }
 
-/** Usage counting never fails the turn: a store error costs one count, not the reply. */
-async function observeTokenFactoryUsage({
-  meter,
-  event,
-  logger,
-}: {
-  meter: TokenFactoryTurnMeter | undefined;
-  event: TurnStreamingEvent;
-  logger: Logger;
-}): Promise<void> {
-  try {
-    await meter?.observe(event);
-  } catch (error) {
-    logger.warn('Token Factory usage could not be counted', extractErrorLogFields(error));
-  }
-}
-
 export async function drainTurnEvents(input: DrainTurnEventsInput): Promise<void> {
   const drain = runTurnEventDrain(input);
   input.turnDrains.track({ sessionId: input.sessionId, turnId: input.turnId, drain });
@@ -848,7 +839,6 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
     executionDeadline,
     logger,
     onEvent,
-    tokenFactoryMeter,
     memory,
     artifacts,
     profileLearning,
@@ -870,7 +860,6 @@ async function runTurnEventDrain(input: DrainTurnEventsInput): Promise<void> {
         streamTTLSeconds: streamTTLSecondsFor(event),
       });
       await onEvent?.(event, sequenceNumber);
-      await observeTokenFactoryUsage({ meter: tokenFactoryMeter, event, logger });
       if (event.type === EventType.TURN_DONE && event.state.status === 'done') {
         if (memory !== undefined) {
           // Awaited (not void): the drain's tracked promise covers this, so shutdown waits for
@@ -941,7 +930,6 @@ export interface TurnEventDrainInput {
   executionDeadline: TurnExecutionDeadline;
   logger: Logger;
   turnDrains: TurnDrainRegistry;
-  tokenFactoryMeter: TokenFactoryTurnMeter;
   memory?:
     | {
         client: MemoryClient;
@@ -979,7 +967,6 @@ export async function beginTurnExecution(params: {
     finalization_buffer_ms: 30_000,
   });
   const tenant_id = session.tenant_id;
-  const tokenFactoryMeter = new TokenFactoryTurnMeter(deps.tokenFactoryBudget);
   // One read per turn: the persisted override (or env default) applies to the whole turn.
   const toolOutputScreenEnabled = await resolveToolOutputScreenEnabled({
     globalSettingsStore: deps.globalSettingsStore,
@@ -994,6 +981,7 @@ export async function beginTurnExecution(params: {
     sessionId,
     tenantId: tenant_id,
     modelProviderStore: deps.modelProviderStore,
+    tokenFactoryBudget: deps.tokenFactoryBudget,
     agentStore: deps.agentStore,
     personaModelName: deps.personaContext?.model_name,
     sessionAgent: session.record.agent,
@@ -1020,6 +1008,7 @@ export async function beginTurnExecution(params: {
     knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
     modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
     modelProviderStore: deps.modelProviderStore,
+    tokenFactoryBudget: deps.tokenFactoryBudget,
     logger: deps.logger,
   });
   const resolver = createTurnResolver({
@@ -1052,7 +1041,7 @@ export async function beginTurnExecution(params: {
     clientTimezone: deps.clientTimezone,
     toolOutputScreenEnabled,
     turnArtifactStore: deps.turnArtifactStore,
-    tokenFactoryMeter,
+    tokenFactoryBudget: deps.tokenFactoryBudget,
   });
 
   // First turn only: derive the title from the first user message. The store
@@ -1095,7 +1084,6 @@ export async function beginTurnExecution(params: {
       executionDeadline,
       logger: deps.logger,
       turnDrains: deps.turnDrains,
-      tokenFactoryMeter,
       memory:
         deps.memoryClient === undefined
           ? undefined
@@ -1644,6 +1632,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
       modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
       modelProviderStore,
+      tokenFactoryBudget: deps.tokenFactoryBudget,
       logger: deps.logger,
     });
     const turnCustom: TurnCustom = {
@@ -1747,6 +1736,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           personalizationStore: deps.personalizationStore,
           eventStore: deps.sessionStore,
           modelProviderStore,
+          tokenFactoryBudget: deps.tokenFactoryBudget,
           memoryClient,
           tenantId: requestContext.tenant_id,
           createdBy: userRef,
@@ -1776,6 +1766,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       sessionId,
       tenantId: requestContext.tenant_id,
       modelProviderStore,
+      tokenFactoryBudget: deps.tokenFactoryBudget,
       agentStore,
       personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
       sessionAgent: session.record.agent,
@@ -1789,7 +1780,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       finalization_buffer_ms: 30_000,
     });
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
-    const tokenFactoryMeter = new TokenFactoryTurnMeter(deps.tokenFactoryBudget);
     // One read per turn: the persisted override (or env default) applies to the whole turn.
     const toolOutputScreenEnabled = await resolveToolOutputScreenEnabled({
       globalSettingsStore: deps.globalSettingsStore,
@@ -1835,7 +1825,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       clientTimezone: body.client_timezone,
       toolOutputScreenEnabled,
       turnArtifactStore: deps.turnArtifactStore,
-      tokenFactoryMeter,
+      tokenFactoryBudget: deps.tokenFactoryBudget,
     });
 
     // First turn only: derive the title from the first user message. The store
@@ -2093,7 +2083,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       executionDeadline,
       logger: deps.logger,
       turnDrains: deps.turnDrains,
-      tokenFactoryMeter,
       memory:
         memoryClient === undefined
           ? undefined

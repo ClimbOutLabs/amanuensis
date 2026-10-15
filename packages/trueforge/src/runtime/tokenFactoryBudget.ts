@@ -1,13 +1,22 @@
-import type { TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import { EventType } from '@truefoundry/trueforge-core/core';
+import type {
+  CompletionUsage,
+  ExtendedChatCompletionChunk,
+  ILLM,
+  LLMCreateParams,
+  LLMCreateParamsStreaming,
+  RawAssistantMessageWithUsage,
+  VercelAIProviderName,
+} from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import { HTTPException } from 'hono/http-exception';
+import type { Logger } from 'winston';
 
 import type { ITokenFactoryUsageStore } from '../db/tokenFactoryUsageStore';
 
 /** Machine-readable `error.code` on the 429 returned once the daily budget is used up. */
 export const TOKEN_FACTORY_DAILY_CAP_CODE = 'token_factory_daily_cap_reached';
 
-/** A new turn on Token Factory was refused because today's token budget is used up. */
+/** A call to Token Factory was refused because today's token budget is used up. */
 export class TokenFactoryDailyCapError extends HTTPException {
   readonly code = TOKEN_FACTORY_DAILY_CAP_CODE;
 
@@ -23,6 +32,8 @@ export function utcUsageDate(instant: Date): string {
 }
 
 export interface TokenFactoryBudget {
+  /** True once today's counted tokens reach the cap; never true without a cap. */
+  isExhausted(): Promise<boolean>;
   /** Throws {@link TokenFactoryDailyCapError} once today's counted tokens reach the cap. */
   assertWithinCap(): Promise<void>;
   /** Adds provider-reported tokens to today's UTC counter. */
@@ -30,7 +41,7 @@ export interface TokenFactoryBudget {
 }
 
 /**
- * Counts Token Factory tokens per UTC day against `cap`. With no cap both calls are no-ops, so an
+ * Counts Token Factory tokens per UTC day against `cap`. With no cap every call is a no-op, so an
  * instance without `TOKEN_FACTORY_DAILY_TOKEN_CAP` never touches the store.
  */
 export function createTokenFactoryBudget({
@@ -42,13 +53,17 @@ export function createTokenFactoryBudget({
   cap: number | undefined;
   now?: () => Date;
 }): TokenFactoryBudget {
+  async function isExhausted(): Promise<boolean> {
+    if (cap === undefined) {
+      return false;
+    }
+    const usage = await store.getUsage({ usage_date: utcUsageDate(now()) });
+    return (usage?.used_tokens ?? 0) >= cap;
+  }
   return {
+    isExhausted,
     async assertWithinCap() {
-      if (cap === undefined) {
-        return;
-      }
-      const usage = await store.getUsage({ usage_date: utcUsageDate(now()) });
-      if ((usage?.used_tokens ?? 0) >= cap) {
+      if (await isExhausted()) {
         throw new TokenFactoryDailyCapError();
       }
     },
@@ -62,29 +77,142 @@ export function createTokenFactoryBudget({
 }
 
 /**
- * One turn's view of the budget. A turn is admitted when its primary model is on Token Factory;
- * only admitted turns have their usage counted. A turn already running when the cap is crossed
- * finishes, so the cap can be overshot by at most the turns in flight.
+ * Which side of a model's routing is Token Factory: `primary` for a Token Factory model (or
+ * `TOKEN_FACTORY_MODE=force`), `fallback` for `TOKEN_FACTORY_MODE=fallback`, where it only answers
+ * once the configured provider failed.
  */
-export class TokenFactoryTurnMeter {
+export type TokenFactoryRole = 'primary' | 'fallback';
+
+/** The Token Factory side of a model's routing, if it has one. */
+export function tokenFactoryRole({
+  primaryType,
+  fallbackType,
+}: {
+  primaryType: VercelAIProviderName;
+  fallbackType: VercelAIProviderName | undefined;
+}): TokenFactoryRole | undefined {
+  if (primaryType === 'tokenfactory') {
+    return 'primary';
+  }
+  return fallbackType === 'tokenfactory' ? 'fallback' : undefined;
+}
+
+async function closeStream(stream: AsyncIterator<unknown>): Promise<void> {
+  await stream.return?.();
+}
+
+/**
+ * The one place Token Factory calls are limited and counted. The budget is re-checked before every
+ * call: a Token Factory primary is refused with the daily-cap error, a Token Factory fallback is left
+ * out of the call. Usage is counted from each chunk that reports it, so a stream that is aborted or
+ * fails afterwards still counts what the provider already reported. A call that failed over is
+ * counted only when Token Factory was the side that answered.
+ */
+export class TokenFactoryMeteredLLM implements ILLM {
+  readonly #role: TokenFactoryRole;
   readonly #budget: TokenFactoryBudget;
-  #admitted = false;
+  readonly #logger: Logger;
+  readonly #build: (options: { withFailover: boolean; onFailover: () => void }) => ILLM;
 
-  constructor(budget: TokenFactoryBudget) {
+  constructor({
+    role,
+    budget,
+    logger,
+    build,
+  }: {
+    role: TokenFactoryRole;
+    budget: TokenFactoryBudget;
+    logger: Logger;
+    /** Builds the client for one call; `withFailover: false` must leave out any fallback provider. */
+    build: (options: { withFailover: boolean; onFailover: () => void }) => ILLM;
+  }) {
+    this.#role = role;
     this.#budget = budget;
+    this.#logger = logger;
+    this.#build = build;
   }
 
-  /** Refuses the turn when the cap is reached, otherwise starts counting its usage. */
-  async admit(): Promise<void> {
-    await this.#budget.assertWithinCap();
-    this.#admitted = true;
+  async *create(
+    body: LLMCreateParamsStreaming,
+  ): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
+    let withFailover = true;
+    if (this.#role === 'primary') {
+      await this.#budget.assertWithinCap();
+    } else {
+      withFailover = !(await this.#budget.isExhausted());
+    }
+    let failedOver = false;
+    const stream = this.#build({
+      withFailover,
+      onFailover: () => {
+        failedOver = true;
+      },
+    }).create(body);
+    let finished = false;
+    try {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done) {
+          finished = true;
+          return step.value;
+        }
+        // Failover happens before the first chunk, so the flag is settled by the time usage arrives.
+        if (this.#servedByTokenFactory(failedOver)) {
+          await this.#count(step.value.usage);
+        }
+        yield step.value;
+      }
+    } finally {
+      // A consumer that stops early (turn cancelled) must close the provider stream too.
+      if (!finished) {
+        await closeStream(stream);
+      }
+    }
   }
 
-  /** Counts the provider-reported usage on a completed model message. */
-  async observe(event: TurnStreamingEvent): Promise<void> {
-    if (!this.#admitted || event.type !== EventType.MODEL_MESSAGE || event.usage === undefined) {
+  async createNonStream(body: LLMCreateParams): Promise<RawAssistantMessageWithUsage> {
+    const stream = this.create({ ...body, stream: true });
+    let step = await stream.next();
+    while (!step.done) {
+      step = await stream.next();
+    }
+    return step.value;
+  }
+
+  #servedByTokenFactory(failedOver: boolean): boolean {
+    return (this.#role === 'primary') !== failedOver;
+  }
+
+  /** Counting never fails the call: a store error costs one count, not the reply. */
+  async #count(usage: CompletionUsage | null | undefined): Promise<void> {
+    if (usage === undefined || usage === null) {
       return;
     }
-    await this.#budget.record(event.usage.input_tokens + event.usage.output_tokens);
+    try {
+      await this.#budget.record(usage.input_tokens + usage.output_tokens);
+    } catch (error) {
+      this.#logger.warn('Token Factory usage could not be counted', extractErrorLogFields(error));
+    }
   }
+}
+
+/**
+ * Meters a helper call (relevance judge, summarization, profile learning) that has no failover
+ * routing: only a model configured on the `tokenfactory` provider is Token Factory traffic.
+ */
+export function meterHelperLlm({
+  llm,
+  providerType,
+  budget,
+  logger,
+}: {
+  llm: ILLM;
+  providerType: VercelAIProviderName;
+  budget: TokenFactoryBudget;
+  logger: Logger;
+}): ILLM {
+  if (providerType !== 'tokenfactory') {
+    return llm;
+  }
+  return new TokenFactoryMeteredLLM({ role: 'primary', budget, logger, build: () => llm });
 }

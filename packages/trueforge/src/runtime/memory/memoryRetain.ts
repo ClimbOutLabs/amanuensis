@@ -9,6 +9,7 @@
 import type { Logger } from 'winston';
 import configuration from '../../config';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
+import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import type { RetainItem } from './hindsightClient';
 import { isOperationCompletedStatus, isOperationFailedStatus } from './hindsightClient';
 import type { MemoryClient } from './memoryClient';
@@ -106,6 +107,7 @@ export interface SummarizeTurnContext {
   modelProviderStore: IModelProviderStore;
   /** Model to summarize with; an undefined/blank value skips summarization. */
   summarizationModelFqn: string | undefined;
+  tokenFactoryBudget: TokenFactoryBudget;
 }
 
 export interface SubmitRetainParams {
@@ -169,6 +171,7 @@ async function maybeSummarizeTurn(params: SubmitRetainParams): Promise<string | 
       tenantId: summarize.tenantId,
       modelProviderStore: summarize.modelProviderStore,
       summarizationModelFqn: summarize.summarizationModelFqn,
+      tokenFactoryBudget: summarize.tokenFactoryBudget,
       logger: params.logger,
     });
     if (result.status === 'summarized') {

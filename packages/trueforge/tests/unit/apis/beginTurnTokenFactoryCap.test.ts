@@ -4,7 +4,8 @@ import {
   TurnHandle,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
-import { EventType, type ModelMessageEvent } from '@truefoundry/trueforge-core/core';
+import { EventType, type ILLM, type ModelMessageEvent } from '@truefoundry/trueforge-core/core';
+import type { Server } from 'node:http';
 import { createLogger } from 'winston';
 
 import { TENANT_ID } from '../../../src/apis/sessions';
@@ -32,6 +33,7 @@ import { createTokenFactoryBudget, TokenFactoryDailyCapError } from '../../../sr
 import { ensureEnvManagedTokenFactoryProvider } from '../../../src/runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
+import { startModelEndpointStub } from '../../fixtures/modelEndpointStub';
 
 /** Constructor args of the replaced resolver: the first one carries the `llm` factory the cap guards. */
 const mockResolverCtorArgs: unknown[][] = [];
@@ -63,11 +65,14 @@ function modelMessageWithUsage(usage: { input_tokens: number; output_tokens: num
   };
 }
 
-function isLlmFactory(value: unknown): value is (name: string) => Promise<{ modelId: string }> {
+function isLlmFactory(value: unknown): value is (name: string) => Promise<{ modelId: string; modelClient: ILLM }> {
   return typeof value === 'function';
 }
 
-async function startTurn(options: { cap: number | undefined }) {
+const DEAD_URL = 'http://127.0.0.1:1/v1';
+const ask = { messages: [{ role: 'user' as const, content: 'hi' }] };
+
+async function startTurn(options: { cap: number | undefined; tokenFactoryUrl?: string; localUrl?: string }) {
   const logger = createLogger({ silent: true });
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -78,7 +83,7 @@ async function startTurn(options: { cap: number | undefined }) {
     tenant_id: TENANT_ID,
     settings: {
       apiKey: 'sk-nebius',
-      baseUrl: 'https://api.tokenfactory.nebius.com/v1',
+      baseUrl: options.tokenFactoryUrl ?? 'https://api.tokenfactory.nebius.com/v1',
       model: 'nvidia/nemotron-3-super-120b-a12b',
       cheaperModel: undefined,
     },
@@ -90,7 +95,7 @@ async function startTurn(options: { cap: number | undefined }) {
     manifest: {
       type: 'custom',
       name: 'local-vllm',
-      base_url: 'http://127.0.0.1:8000/v1',
+      base_url: options.localUrl ?? 'http://127.0.0.1:8000/v1',
       models: [{ model_id: 'local-model', name: 'local-model', properties: {} }],
     },
   });
@@ -177,6 +182,8 @@ async function startTurn(options: { cap: number | undefined }) {
 describe('Token Factory daily cap in the turn path', () => {
   const originalMode = configuration.TOKEN_FACTORY_MODE;
   const originalKey = configuration.NEBIUS_API_KEY;
+  const originalBaseUrl = configuration.TOKEN_FACTORY_BASE_URL;
+  const servers: Server[] = [];
 
   beforeEach(() => {
     mockResolverCtorArgs.length = 0;
@@ -186,25 +193,36 @@ describe('Token Factory daily cap in the turn path', () => {
   afterEach(() => {
     configuration.TOKEN_FACTORY_MODE = originalMode;
     configuration.NEBIUS_API_KEY = originalKey;
+    configuration.TOKEN_FACTORY_BASE_URL = originalBaseUrl;
+    for (const server of servers.splice(0)) {
+      server.close();
+    }
   });
+
+  async function modelServer(usage: { prompt_tokens: number; completion_tokens: number }) {
+    const started = await startModelEndpointStub({ usage });
+    servers.push(started.server);
+    return started.baseUrl;
+  }
 
   async function useUpToday(usageStore: SqliteTokenFactoryUsageStore, tokens: number) {
     await usageStore.addUsage({ usage_date: NOW.toISOString().slice(0, 10), tokens });
   }
 
-  it('admits a Token Factory turn under the cap and counts the usage it reports', async () => {
-    const { llm, drainInput, usageStore } = await startTurn({ cap: CAP });
+  async function usedToday(usageStore: SqliteTokenFactoryUsageStore) {
+    return (await usageStore.getUsage({ usage_date: NOW.toISOString().slice(0, 10) }))?.used_tokens;
+  }
 
-    await expect(llm('tokenfactory/nemotron-3-super-120b-a12b')).resolves.toMatchObject({
-      modelId: 'nvidia/nemotron-3-super-120b-a12b',
-    });
-    async function* events(): AsyncGenerator<TurnStreamingEvent> {
-      yield modelMessageWithUsage({ input_tokens: 300, output_tokens: 50 });
-      yield modelMessageWithUsage({ input_tokens: 360, output_tokens: 20 });
-    }
-    await drainTurnEvents({ ...drainInput, trackedStream: events() });
+  it('admits a Token Factory turn under the cap and counts the usage each model call reports', async () => {
+    const tokenFactoryUrl = await modelServer({ prompt_tokens: 300, completion_tokens: 50 });
+    const { llm, usageStore } = await startTurn({ cap: CAP, tokenFactoryUrl });
 
-    expect((await usageStore.getUsage({ usage_date: NOW.toISOString().slice(0, 10) }))?.used_tokens).toBe(730);
+    const { modelClient, modelId } = await llm('tokenfactory/nemotron-3-super-120b-a12b');
+    expect(modelId).toBe('nvidia/nemotron-3-super-120b-a12b');
+    await modelClient.createNonStream(ask);
+    await modelClient.createNonStream(ask);
+
+    expect(await usedToday(usageStore)).toBe(700);
   });
 
   it('refuses a new Token Factory turn with the typed error once the cap is reached', async () => {
@@ -214,30 +232,28 @@ describe('Token Factory daily cap in the turn path', () => {
     await expect(llm('tokenfactory/nemotron-3-super-120b-a12b')).rejects.toBeInstanceOf(TokenFactoryDailyCapError);
   });
 
-  it('does not count a turn that was refused', async () => {
-    const { llm, drainInput, usageStore } = await startTurn({ cap: CAP });
-    await useUpToday(usageStore, CAP);
-    await llm('tokenfactory/nemotron-3-super-120b-a12b').catch(() => undefined);
+  it('stops a running turn before its next model call when the cap is reached mid-turn', async () => {
+    const tokenFactoryUrl = await modelServer({ prompt_tokens: 900, completion_tokens: 200 });
+    const { llm, usageStore } = await startTurn({ cap: CAP, tokenFactoryUrl });
+    const { modelClient } = await llm('tokenfactory/nemotron-3-super-120b-a12b');
 
-    async function* events(): AsyncGenerator<TurnStreamingEvent> {
-      yield modelMessageWithUsage({ input_tokens: 300, output_tokens: 50 });
-    }
-    await drainTurnEvents({ ...drainInput, trackedStream: events() });
+    await modelClient.createNonStream(ask);
+    expect(await usedToday(usageStore)).toBe(1100);
 
-    expect((await usageStore.getUsage({ usage_date: NOW.toISOString().slice(0, 10) }))?.used_tokens).toBe(CAP);
+    await expect(modelClient.createNonStream(ask)).rejects.toBeInstanceOf(TokenFactoryDailyCapError);
+    expect(await usedToday(usageStore)).toBe(1100);
   });
 
   it('never refuses and never counts a turn on another provider', async () => {
-    const { llm, drainInput, usageStore } = await startTurn({ cap: CAP });
+    const localUrl = await modelServer({ prompt_tokens: 300, completion_tokens: 50 });
+    const { llm, usageStore } = await startTurn({ cap: CAP, localUrl });
     await useUpToday(usageStore, CAP);
 
-    await expect(llm('local-vllm/local-model')).resolves.toMatchObject({ modelId: 'local-model' });
-    async function* events(): AsyncGenerator<TurnStreamingEvent> {
-      yield modelMessageWithUsage({ input_tokens: 300, output_tokens: 50 });
-    }
-    await drainTurnEvents({ ...drainInput, trackedStream: events() });
+    const { modelClient, modelId } = await llm('local-vllm/local-model');
+    expect(modelId).toBe('local-model');
+    await modelClient.createNonStream(ask);
 
-    expect((await usageStore.getUsage({ usage_date: NOW.toISOString().slice(0, 10) }))?.used_tokens).toBe(CAP);
+    expect(await usedToday(usageStore)).toBe(CAP);
   });
 
   it('applies the cap to a local turn that TOKEN_FACTORY_MODE=force routes to Token Factory', async () => {
@@ -248,15 +264,59 @@ describe('Token Factory daily cap in the turn path', () => {
     await expect(llm('local-vllm/local-model')).rejects.toBeInstanceOf(TokenFactoryDailyCapError);
   });
 
-  it('has no cap when the variable is unset', async () => {
-    const { llm, drainInput, usageStore } = await startTurn({ cap: undefined });
+  it('counts Token Factory traffic that TOKEN_FACTORY_MODE=fallback sends after the local model failed', async () => {
+    configuration.TOKEN_FACTORY_MODE = 'fallback';
+    configuration.TOKEN_FACTORY_BASE_URL = await modelServer({ prompt_tokens: 120, completion_tokens: 30 });
+    const { llm, usageStore } = await startTurn({ cap: CAP, localUrl: DEAD_URL });
+    const { modelClient } = await llm('local-vllm/local-model');
 
-    await expect(llm('tokenfactory/nemotron-3-super-120b-a12b')).resolves.toBeDefined();
+    await modelClient.createNonStream(ask);
+
+    expect(await usedToday(usageStore)).toBe(150);
+  });
+
+  it('does not count a fallback-mode call the local model answered itself', async () => {
+    configuration.TOKEN_FACTORY_MODE = 'fallback';
+    configuration.TOKEN_FACTORY_BASE_URL = await modelServer({ prompt_tokens: 120, completion_tokens: 30 });
+    const localUrl = await modelServer({ prompt_tokens: 7, completion_tokens: 3 });
+    const { llm, usageStore } = await startTurn({ cap: CAP, localUrl });
+    const { modelClient } = await llm('local-vllm/local-model');
+
+    await modelClient.createNonStream(ask);
+
+    expect(await usedToday(usageStore)).toBeUndefined();
+  });
+
+  it('stops using the Token Factory fallback once the cap is reached', async () => {
+    configuration.TOKEN_FACTORY_MODE = 'fallback';
+    configuration.TOKEN_FACTORY_BASE_URL = await modelServer({ prompt_tokens: 120, completion_tokens: 30 });
+    const { llm, usageStore } = await startTurn({ cap: CAP, localUrl: DEAD_URL });
+    const { modelClient } = await llm('local-vllm/local-model');
+    await useUpToday(usageStore, CAP);
+
+    await expect(modelClient.createNonStream(ask)).rejects.toThrow();
+
+    expect(await usedToday(usageStore)).toBe(CAP);
+  });
+
+  it('counts through the model calls only, so the turn event drain adds nothing', async () => {
+    const { drainInput, usageStore } = await startTurn({ cap: CAP });
+
     async function* events(): AsyncGenerator<TurnStreamingEvent> {
-      yield modelMessageWithUsage({ input_tokens: 9_000_000, output_tokens: 1 });
+      yield modelMessageWithUsage({ input_tokens: 300, output_tokens: 50 });
     }
     await drainTurnEvents({ ...drainInput, trackedStream: events() });
 
-    expect(await usageStore.getUsage({ usage_date: NOW.toISOString().slice(0, 10) })).toBeUndefined();
+    expect(await usedToday(usageStore)).toBeUndefined();
+  });
+
+  it('has no cap when the variable is unset', async () => {
+    const tokenFactoryUrl = await modelServer({ prompt_tokens: 9_000_000, completion_tokens: 1 });
+    const { llm, usageStore } = await startTurn({ cap: undefined, tokenFactoryUrl });
+
+    const { modelClient } = await llm('tokenfactory/nemotron-3-super-120b-a12b');
+    await modelClient.createNonStream(ask);
+
+    expect(await usedToday(usageStore)).toBeUndefined();
   });
 });
