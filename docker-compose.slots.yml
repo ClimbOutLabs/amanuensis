@@ -1,9 +1,9 @@
 # Sandbox slots: four hardened services, each with a PID 1 agent that starts every call in a fresh gVisor
-# guest with no network. They form their own Compose project (aman-slots, or <instance>-slots when a second install
-# on the same Docker host sets AMAN_SLOTS_INSTANCE), so this file is run from this
-# checkout with `pnpm sandbox:slots`, which also builds the image (the services never pull). An app deploy
-# joins them with docker-compose.slots-app.yml. There is no Docker socket anywhere; the hardening below is
-# verified at run time by the agent's attestation and in tests by composeSlots.test.ts.
+# guest with no network. They form their own Compose project (<instance>-slots; aman-slots when
+# AMAN_SLOTS_INSTANCE is unset). The installer starts them for each instance and connects the instance's app
+# to their control volumes; from a checkout without the installer, `pnpm sandbox:slots` does the same
+# work. Both build the image first, because the services never pull. There is no Docker socket anywhere;
+# the hardening below is verified at run time by the agent's attestation and in tests by composeSlots.test.ts.
 name: ${AMAN_SLOTS_INSTANCE:-aman}-slots
 
 x-sandbox-slot: &sandbox-slot

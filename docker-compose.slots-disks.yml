@@ -1,6 +1,6 @@
-# Backs each slot's workspace volume with the fixed-size disk that `pnpm sandbox:slots --fix` creates on a Linux
-# host, so a program that fills its workspace fills only its own slot's disk. It is added to
-# docker-compose.slots.yml by `pnpm sandbox:slots`, which supplies the two variables. On Docker Desktop and
+# Backs each slot's workspace volume with the fixed-size disk that the slot setup (the installer, `aman doctor
+# sandbox --fix` or `pnpm sandbox:slots --fix`) creates on a Linux host, so a program that fills its workspace
+# fills only its own slot's disk. The slot setup adds it to docker-compose.slots.yml and supplies the two variables. On Docker Desktop and
 # WSL2 the VM's own disk bounds the workspaces and this file is not used. The agent refuses to run anything
 # unless the workspace it sees really is an ext4 disk of the size given here.
 x-disk-size: &disk-size
