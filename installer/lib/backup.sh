@@ -84,9 +84,21 @@ backup_prune() {
   done
 }
 
-# backup_run [NAME]: one timestamped directory; removed again if any part fails.
+# The instances a backup covers: the one named, or all; with BACKUP_ONLY_HEALTHY=1 not those that never became healthy.
+backup_targets() {
+  local only=$1 name
+  for name in $(reg_names); do
+    if [ -n "$only" ] && [ "$only" != "$name" ]; then continue; fi
+    if [ "${BACKUP_ONLY_HEALTHY:-0}" = 1 ] && ! instance_ever_healthy "$name"; then continue; fi
+    printf '%s\n' "$name"
+  done
+}
+
+# backup_run [NAME]: one timestamped directory; removed again if any part fails. Nothing to cover means no backup.
 backup_run() {
   local only=${1:-} stamp dir name image n=0
+  LAST_BACKUP_DIR=
+  [ -n "$(backup_targets "$only")" ] || return 0
   release_load "$RELEASE_DIR/release.json" || die "the recorded release is unreadable; run install.sh again"
   image=$CUR_APP_TAG
   docker_image_exists "$image" || die "image $image is missing; run install.sh to rebuild it"
@@ -99,8 +111,7 @@ backup_run() {
     dir=$BACKUPS_DIR/$stamp-$n
   done
   ensure_private_dir "$dir"
-  for name in $(reg_names); do
-    if [ -n "$only" ] && [ "$only" != "$name" ]; then continue; fi
+  for name in $(backup_targets "$only"); do
     say "Backing up instance $name"
     if ! backup_instance "$name" "$dir" "$image"; then
       rm -rf "$dir"

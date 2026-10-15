@@ -152,8 +152,14 @@ instance_up() {
   if machine_running; then
     stt_attach "$name" || true
   fi
+  # From now on the instance may hold data worth backing up; an instance that never got here holds none.
+  if reg_exists "$name"; then reg_set "$name" healthy 1; fi
   step_ok "Instance $name is running and healthy"
 }
+
+# False only for an instance that was created and never became healthy; a record from before this was kept counts as
+# one that did, since its data must not be skipped.
+instance_ever_healthy() { [ "$(reg_get "$1" healthy)" != 0 ]; }
 
 # Saves the last 200 lines of every container of an instance and prints the cause in one plain sentence. The person
 # is never sent to read container logs; a cause the installer does not know is called a bug and the saved log named.
@@ -168,7 +174,9 @@ instance_unhealthy() {
     done
   } >"$log" 2>&1
   cause=$(container_failure_cause "$log")
-  if [ -n "$cause" ]; then
+  if [ -n "$cause" ] && [ "$(container_failure_kind "$log")" = bug ]; then
+    UI_FD=2 ui_step_end fail "Instance $name did not start. $cause" "Update Aman and run install.sh again. If it fails the same way, share the saved log below."
+  elif [ -n "$cause" ]; then
     UI_FD=2 ui_step_end fail "Instance $name did not start. $cause" "Fix that, then run install.sh again."
   else
     UI_FD=2 ui_step_end fail "Instance $name did not become healthy, and the cause is not one the installer knows. This looks like a bug in Aman." "Run install.sh again; if it fails the same way, share the log below."
@@ -362,7 +370,7 @@ instance_create() {
   created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   reg_write "$I_NAME" "name=$I_NAME" "app_port=$I_PORT" "login_port=$I_LOGIN_PORT" "public_url=$I_PUBLIC_URL" \
     "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
-    "network=$I_NETWORK" "sandbox=$I_SANDBOX" "tls=$I_TLS" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
+    "healthy=0" "network=$I_NETWORK" "sandbox=$I_SANDBOX" "tls=$I_TLS" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
     "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then

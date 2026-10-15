@@ -1145,7 +1145,7 @@ describe('why an instance does not run', () => {
     world.set('logs_c2', { out: '' });
     const check = find(world.json().doc.instances.main, 'containers');
     assert.equal(check.state, 'fail');
-    assert.match(check.detail, /The app could not start: it was not allowed to create a folder \(\/home\/trueforge\)\./);
+    assert.match(check.detail, /The app could not start: it was not allowed to create a folder \(\/home\/trueforge\)\. This is a bug in Aman, not a problem on your computer\./);
     assert.match(check.fix, /aman doctor instance --fix/);
     assert.doesNotMatch(`${check.detail} ${check.fix}`, /docker (compose|logs)|compose\.yaml|\.env/);
   });

@@ -310,12 +310,30 @@ test_an_unhealthy_instance_gets_a_plain_cause_and_a_saved_log() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_flat_contains "$ERR" "Instance main did not start. The app could not start: it was not allowed to create a folder (/home/trueforge)."
+  assert_flat_contains "$ERR" "Instance main did not start. The app could not start: it was not allowed to create a folder (/home/trueforge). This is a bug in Aman, not a problem on your computer."
+  assert_flat_contains "$ERR" "Next: Update Aman and run install.sh again. If it fails the same way, share the saved log below."
+  assert_not_contains "$OUT$ERR" "Fix that"
   assert_flat_contains "$ERR" "Last 200 log lines: $AMAN_HOME/state/logs/instance-main.log"
   assert_not_contains "$OUT$ERR" "docker compose"
   assert_not_contains "$OUT$ERR" "logs --tail"
   assert_contains "$(cat "$AMAN_HOME/state/logs/instance-main.log")" "EACCES"
   assert_mode "$AMAN_HOME/state/logs/instance-main.log" 600
+  sandbox_drop
+}
+
+test_any_permission_error_is_a_bug_not_a_user_fix() {
+  t_begin "a permission error at startup, whatever the path, is called a bug in Aman with the saved log, never a fix to make"
+  sandbox_new
+  STUB_UP_FAIL_LOG="Error: EACCES: permission denied, open '/app/state/x.db'"
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 1
+  assert_flat_contains "$ERR" "a permission error stopped it. This is a bug in Aman, not a problem on your computer."
+  assert_flat_contains "$ERR" "Last 200 log lines: $AMAN_HOME/state/logs/instance-main.log"
+  assert_not_contains "$OUT$ERR" "chmod"
+  assert_not_contains "$ERR" "sudo"
   sandbox_drop
 }
 
@@ -365,6 +383,7 @@ test_lines_stay_readable_in_72_columns
 test_docker_output_stays_in_a_log
 test_a_failed_build_shows_the_log_tail_and_its_path
 test_an_unhealthy_instance_gets_a_plain_cause_and_a_saved_log
+test_any_permission_error_is_a_bug_not_a_user_fix
 test_an_unknown_failure_is_called_a_bug_with_the_log
 test_the_closing_block_and_warnings
 tests_finish

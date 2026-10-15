@@ -20,6 +20,8 @@ upgrade_rollback() {
   fi
   (machine_up "$CUR_STT_TAG") || failed=1
   for name in $(reg_names); do
+    # An instance that never became healthy has no data to restore and nothing worth bringing back.
+    instance_ever_healthy "$name" || continue
     say "Restoring instance $name"
     dc "$name" down >/dev/null 2>&1
     if [ -n "$UPGRADE_BACKUP" ]; then
@@ -44,6 +46,44 @@ upgrade_on_exit() {
   if [ "$UPGRADE_STAGE" = applying ]; then
     upgrade_rollback
   fi
+}
+
+# Only an instance that was healthy once has anything the upgrade could harm, so only its failure stops the upgrade;
+# an instance that never started is what the upgrade is for. --force skips the check.
+upgrade_health_gate() {
+  local name
+  [ -x "$(doctor_shim)" ] && [ "$OPT_FORCE" != 1 ] || return 0
+  for name in $(reg_names); do
+    instance_ever_healthy "$name" || continue
+    run_doctor --json --local --instance "$name" >/dev/null 2>&1 ||
+      die "The doctor reports a failure for instance $name, which was healthy before. Fix it first (run: $(ui_path "$(doctor_shim)") doctor), or run upgrade --force."
+  done
+}
+
+# Backs up every instance that has data, then builds what is missing. Touches nothing that is running, so a failed
+# build needs no rollback.
+upgrade_prepare() {
+  UPGRADE_BACKUP=
+  if [ -n "$(reg_names)" ]; then
+    BACKUP_ONLY_HEALTHY=1 backup_run "" || die "the pre-upgrade backup failed; nothing was changed"
+    UPGRADE_BACKUP=$LAST_BACKUP_DIR
+  fi
+  images_ensure
+}
+
+# Records the new release and restarts everything on it; from here a failure restores the backup and the old images.
+upgrade_switch() {
+  local name
+  UPGRADE_STAGE=applying
+  release_write
+  machine_up "$REL_STT_TAG"
+  for name in $(reg_names); do
+    if instance_sandbox_wanted "$name"; then sandbox_ensure "$name" refresh; fi
+    instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+    instance_up "$name" || exit 1
+  done
+  UPGRADE_STAGE=finished
+  log_event "upgrade to $REL_APP_TAG"
 }
 
 cmd_upgrade() {
@@ -88,28 +128,10 @@ cmd_upgrade() {
   lock_acquire
   say "Order: check health, back up every instance, build the new images, restart the instances, check health again."
   say "If a restart fails, the old images come back and each database is restored from the new backup."
-  if [ -x "$(doctor_shim)" ] && [ "$OPT_FORCE" != 1 ]; then
-    run_doctor --json --local >/dev/null 2>&1 || die "doctor reports a failure; fix it first or run upgrade --force"
-  fi
-  # The backup comes first so every later step has something to return to.
-  UPGRADE_BACKUP=
-  if [ -n "$(reg_names)" ]; then
-    backup_run "" || die "the pre-upgrade backup failed; nothing was changed"
-    UPGRADE_BACKUP=$LAST_BACKUP_DIR
-  fi
-  # Building touches nothing that is running, so a failed build needs no rollback.
-  images_ensure
-  UPGRADE_STAGE=applying
-  release_write
-  machine_up "$REL_STT_TAG"
-  for name in $(reg_names); do
-    if instance_sandbox_wanted "$name"; then sandbox_ensure "$name" refresh; fi
-    instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
-    instance_up "$name" || exit 1
-  done
-  UPGRADE_STAGE=finished
-  log_event "upgrade to $REL_APP_TAG"
-  say "Upgraded to $REL_APP_TAG. The pre-upgrade backup is ${UPGRADE_BACKUP:-not needed (no instances)}."
+  upgrade_health_gate
+  upgrade_prepare
+  upgrade_switch
+  say "Upgraded to $REL_APP_TAG. The pre-upgrade backup is ${UPGRADE_BACKUP:-not needed (no instance had data)}."
   if [ -x "$(doctor_shim)" ]; then
     DOCTOR_TIMEOUT=180 run_doctor || warn "doctor reported problems after the upgrade; see its output above"
   fi

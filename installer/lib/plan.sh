@@ -13,6 +13,9 @@ PLAN_BLOCKERS=
 DL_TOTAL_MB=0
 DL_LINES=
 DL_HOSTS=
+# 1 when this checkout differs from the recorded release: the run then updates the installed version first.
+INSTALL_UPGRADE=0
+PLAN_UPGRADE_NOTE=
 PLAN_FS=$'\037'
 PLAN_RS=$'\036'
 INSTALL_T0=0
@@ -215,6 +218,7 @@ print_plan() {
       ui_hint "Docker Engine $DOCKER_ENGINE_VERSION, Compose ${DOCKER_COMPOSE_VERSION:-?} (access: ${DOCKER_ACCESS:-direct})."
     fi
   fi
+  if [ -n "$PLAN_UPGRADE_NOTE" ]; then ui_line "$PLAN_UPGRADE_NOTE"; fi
   print_plan_rows
   ui_hint "Images are built here and never pushed anywhere."
   if [ "$PLAN_ROOT" -gt 0 ]; then
@@ -316,15 +320,17 @@ plan_build() {
   else
     plan_add todo "Create the state directory $(ui_path "$AMAN_HOME")"
   fi
+  INSTALL_UPGRADE=0
+  PLAN_UPGRADE_NOTE=
   if [ "$have_release" = 1 ] && release_load "$RELEASE_DIR/release.json"; then
-    expected_app=$CUR_APP_TAG
-    expected_stt=$CUR_STT_TAG
-    REL_DEX_IMAGE=$CUR_DEX_IMAGE
-    if [ "$expected_app" != "$REL_APP_TAG" ]; then
-      plan_add have "Installed release $expected_app" "The checkout is at $REL_APP_TAG; install.sh upgrade applies it."
+    if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ]; then
+      # A re-run never quietly reuses older images: this checkout is what gets installed.
+      INSTALL_UPGRADE=1
+      PLAN_UPGRADE_NOTE="This checkout is newer than the installed version, so it will be updated."
+      plan_add todo "Update the installed version to this checkout" \
+        "App $CUR_APP_TAG to $REL_APP_TAG." \
+        "Instances that have data are backed up first. If the restart fails, the old version comes back and each database is restored."
     fi
-    REL_APP_TAG=$expected_app
-    REL_STT_TAG=$expected_stt
   fi
 
   plan_image "$REL_APP_TAG" "Build the app image $REL_APP_TAG" app-base app-deps dockerfile-frontend
@@ -352,7 +358,9 @@ plan_build() {
 
   if [ -n "$(reg_names)" ]; then
     for name in $(reg_names); do
-      if docker_available_for_probes && [ "$(instance_state "$name")" = running ]; then
+      if [ "$INSTALL_UPGRADE" = 1 ]; then
+        plan_add todo "Restart instance $name on the new version"
+      elif docker_available_for_probes && [ "$(instance_state "$name")" = running ]; then
         plan_add have "Instance $name is running"
       else
         plan_add todo "Start instance $name"
@@ -470,17 +478,25 @@ install_execute() {
     ask_password AMAN_PASSWORD
   fi
   ui_phase "Building images" 4 6
-  images_ensure
-  release_write
+  if [ "$INSTALL_UPGRADE" = 1 ]; then
+    upgrade_prepare
+  else
+    images_ensure
+    release_write
+  fi
   ui_phase "Starting services" 5 6
-  machine_up "$REL_STT_TAG"
-  for name in $(reg_names); do
-    if [ "$(instance_state "$name")" != running ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; }; then
-      if instance_sandbox_wanted "$name"; then sandbox_ensure "$name"; fi
-      instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
-      instance_up "$name" || exit 1
-    fi
-  done
+  if [ "$INSTALL_UPGRADE" = 1 ]; then
+    upgrade_switch
+  else
+    machine_up "$REL_STT_TAG"
+    for name in $(reg_names); do
+      if [ "$(instance_state "$name")" != running ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; }; then
+        if instance_sandbox_wanted "$name"; then sandbox_ensure "$name"; fi
+        instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+        instance_up "$name" || exit 1
+      fi
+    done
+  fi
   if [ "$OPT_DEMO" = 1 ]; then demo_name=$(demo_target); fi
   if need_new_instance; then
     instance_create
