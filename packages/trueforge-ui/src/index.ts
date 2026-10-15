@@ -159,10 +159,6 @@ export { AgentInternalsDisclosure } from './atoms/agent-chat/AgentInternalsDiscl
 export type { AgentInternalsDisclosureProps } from './atoms/agent-chat/AgentInternalsDisclosure.js';
 export { MemoryContextCard } from './atoms/agent-chat/MemoryContextCard.js';
 export type { MemoryContextCardProps } from './atoms/agent-chat/MemoryContextCard.js';
-export { MemorySharing } from './atoms/memory/MemorySharing.js';
-export type { MemorySharingPersona } from './atoms/memory/MemorySharing.js';
-export { MemoryVaultEntryRow } from './atoms/memory/MemoryVaultEntry.js';
-export { MemoryVaultPage } from './atoms/memory/MemoryVaultPage.js';
 export { AttachmentCard, USER_MESSAGE_ATTACHMENT_PREVIEW_REM } from './atoms/AttachmentCard.js';
 export type { AttachmentCardProps, AttachmentCardSize } from './atoms/AttachmentCard.js';
 export { AttachmentPickerButton } from './atoms/AttachmentPickerButton.js';
@@ -178,6 +174,10 @@ export type {
 } from './atoms/ComposerSections.js';
 export { ComposerShell } from './atoms/ComposerShell.js';
 export type { ComposerShellProps } from './atoms/ComposerShell.js';
+export { MemorySharing } from './atoms/memory/MemorySharing.js';
+export type { MemorySharingPersona } from './atoms/memory/MemorySharing.js';
+export { MemoryVaultEntryRow } from './atoms/memory/MemoryVaultEntry.js';
+export { MemoryVaultPage } from './atoms/memory/MemoryVaultPage.js';
 export { ResumeUnavailable } from './atoms/ResumeUnavailable.js';
 export type { ResumeUnavailableProps } from './atoms/ResumeUnavailable.js';
 export { SandboxToolCallCard } from './atoms/SandboxToolCallCard.js';
@@ -208,11 +208,10 @@ export { ToolCallContentBlock } from './atoms/ToolCallContentBlock.js';
 export type { ToolCallContentBlockProps } from './atoms/ToolCallContentBlock.js';
 export { ToolGroupCard } from './atoms/ToolGroupCard.js';
 export type { ToolGroupCardProps } from './atoms/ToolGroupCard.js';
-export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
-export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanAvatarMotion } from './components/AmanAvatarMotion.js';
 export type { AmanAvatarMotionSources } from './components/AmanAvatarMotion.js';
-export type { AmanAvatarActivity } from './hooks/useAvatarActivity.js';
+export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
+export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanSetupProvider, useOptionalAmanSetup } from './components/AmanSetupContext.js';
 export type { AmanSetupState, MemoryBankStatus } from './components/AmanSetupContext.js';
 export { AmanWelcome, amanSetupItems, amanWelcomeHeading } from './components/AmanWelcome.js';
@@ -269,6 +268,10 @@ export {
 export type { PersonalizationApi, PersonalizationProfile } from './components/PersonalizationContext.js';
 export { PersonalizationPanel } from './components/PersonalizationPanel.js';
 export type { PersonalizationPanelProps } from './components/PersonalizationPanel.js';
+export { RunCodeStatusProvider, useOptionalRunCodeStatus } from './components/RunCodeStatusContext.js';
+export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatusContext.js';
+export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
+export type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from './components/VoiceInputContext.js';
 export { AgentStepsContainer } from './containers/AgentStepsContainer.js';
 export type { AgentStepsContainerProps } from './containers/AgentStepsContainer.js';
 export { ApprovalNavContainer } from './containers/ApprovalNavContainer.js';
@@ -323,6 +326,7 @@ export { UserEditComposerContainer } from './containers/UserEditComposerContaine
 export { UserMessageContainer } from './containers/UserMessageContainer.js';
 export { useApprovalNav } from './hooks/useApprovalNav.js';
 export type { ApprovalNavState } from './hooks/useApprovalNav.js';
+export type { AmanAvatarActivity } from './hooks/useAvatarActivity.js';
 export { ComposerBusyProvider, useComposerBusyState } from './hooks/useComposerBusyState.js';
 export type { ComposerBusyState } from './hooks/useComposerBusyState.js';
 export {
@@ -344,6 +348,37 @@ export { useResourcePermissions } from './hooks/useResourcePermissions.js';
 export type { UseResourcePermissionsOptions, UseResourcePermissionsResult } from './hooks/useResourcePermissions.js';
 export { useRuntimeConnectivity } from './hooks/useRuntimeConnectivity.js';
 export type { RuntimeConnectivity, UseRuntimeConnectivityOptions } from './hooks/useRuntimeConnectivity.js';
+export { OfflineIndicator } from './sentinel/OfflineIndicator.js';
+export { PermissionApprovalCard } from './sentinel/PermissionApprovalCard.js';
+export type { PermissionApprovalCardProps } from './sentinel/PermissionApprovalCard.js';
+export {
+  SentinelApiProvider,
+  useOptionalSentinelApi,
+  useOptionalSentinelApiState,
+} from './sentinel/SentinelApiContext.js';
+export type { SentinelApiState } from './sentinel/SentinelApiContext.js';
+export { SentinelAuditFeed } from './sentinel/SentinelAuditFeed.js';
+export type { SentinelAuditFeedProps } from './sentinel/SentinelAuditFeed.js';
+export { SentinelSettings } from './sentinel/SentinelSettings.js';
+export { Tier2RelaxationToggle } from './sentinel/Tier2RelaxationToggle.js';
+export type { Tier2RelaxationToggleProps } from './sentinel/Tier2RelaxationToggle.js';
+export {
+  extractSentinelFromEvent,
+  extractSentinelSessionContext,
+  parseAuditEntries,
+  parseToolTier,
+  parseUserSettings,
+} from './sentinel/types.js';
+export type {
+  SentinelApi,
+  SentinelApprovalCard,
+  SentinelApprovalInfo,
+  SentinelAuditEntry,
+  SentinelAuditOutcome,
+  SentinelSessionContext,
+  SentinelUserSettings,
+  ToolTier,
+} from './sentinel/types.js';
 export {
   IMAGE_MAX_EDGE,
   IMAGE_PASSTHROUGH_BYTES,
@@ -585,7 +620,7 @@ export type { SessionTurnView } from './utils/sessionTurnViews.js';
 
 // Utils
 export { computeAgentStepsSplit } from './utils/computeAgentStepsSplit.js';
-export type { AgentStepPart, AgentStepsSplitResult } from './utils/computeAgentStepsSplit.js';
+export type { AgentStepPart, AgentStepsRun, AgentStepsSplitResult } from './utils/computeAgentStepsSplit.js';
 export { findSubAgentAncestorsForApproval } from './utils/findApprovalAncestors.js';
 export { getErrorMessage } from './utils/getErrorMessage.js';
 

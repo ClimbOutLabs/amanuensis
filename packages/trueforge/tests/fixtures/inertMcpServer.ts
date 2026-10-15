@@ -24,6 +24,11 @@
  * connector offline and bring it back on the same port (a refused connection,
  * simulating the server process being down), distinct from `sever`/`restore`
  * (which keeps listening but answers every request with a 503).
+ *
+ * The same server doubles as a Hindsight-shaped memory provider: `memoryProviderUrl`
+ * has the `{apiBase}/mcp/{bank}` shape the memory-provider setup requires, and the fixture answers the
+ * REST recall route behind it, so the setup's connection check passes and a connector registered
+ * through the real setup flow is first-party.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -40,6 +45,12 @@ export const INERT_WRITE_TOOL = 'inert_write';
 export const INERT_UNANNOTATED_TOOL = 'inert_unannotated';
 export const INERT_ASK_MEMORY_TOOL = 'ask_memory';
 export const INERT_SEARCH_MEMORY_TOOL = 'search_memory';
+/** Opt-in (`startInertMcpServer({ webSearch: true })`), so the default tool list stays unchanged. */
+export const INERT_WEB_SEARCH_TOOL = 'web_search';
+
+/** Bank in `memoryProviderUrl`; the fixture answers a recall for any bank, so a URL can move between them. */
+const INERT_MEMORY_BANK = 'aman';
+const MEMORY_RECALL_PATH = /^\/v1\/default\/banks\/[^/]+\/memories\/recall$/;
 
 /**
  * LKOS's `AskMemoryResponse` shape: empty means empty context plus empty claim groups.
@@ -76,9 +87,20 @@ export interface WriteHold {
   release: () => void;
 }
 
+/** A redirect for `InertMcpServer.redirectAllTo`. */
+export interface InertRedirect {
+  /** Origin the redirect points at. The request's own path is appended, so that origin serves the same route. */
+  to: string;
+  status: 301 | 302 | 303 | 307 | 308;
+}
+
 export interface InertMcpServer {
   /** Streamable HTTP endpoint to register as the connector `url`. Stable across `stop`/`start`. */
   url: string;
+  /** The same endpoint as a single-bank memory provider URL; the setup's recall check is answered. */
+  memoryProviderUrl: string;
+  /** Origin of {@link InertMcpServer.url}: what an operator lists in `FIRST_PARTY_MCP_ORIGINS` to vouch for this server. */
+  origin: string;
   /** Times the gated write tool actually started executing. */
   writeInvocations: () => number;
   echoInvocations: () => number;
@@ -86,8 +108,19 @@ export interface InertMcpServer {
   unannotatedInvocations: () => number;
   askMemoryInvocations: () => number;
   searchMemoryInvocations: () => number;
-  /** Resets every invocation counter and returns both memory tools to `'result'` mode. */
+  webSearchInvocations: () => number;
+  /**
+   * Resets every invocation counter, the request count and the last `Authorization` value, drops
+   * any redirect, and returns both memory tools to `'result'` mode.
+   */
   resetInvocations: () => void;
+  /**
+   * While set, every request is answered with this redirect instead of its normal reply: an
+   * origin that points somewhere else. Pass `undefined` to serve normally again.
+   */
+  redirectAllTo: (redirect: InertRedirect | undefined) => void;
+  /** HTTP requests received since the last reset, whatever they were answered with. */
+  requestsSeen: () => number;
   /** Parks the next write invocation so a turn can be cancelled mid-execution. */
   holdNextWrite: () => WriteHold;
   /** Refuses every request until {@link InertMcpServer.restore}, severing an in-flight submission. */
@@ -97,7 +130,11 @@ export interface InertMcpServer {
   setAskMemoryMode: (mode: MemoryToolMode) => void;
   /** Sets the result shape the next (and every subsequent) `search_memory` call answers with. */
   setSearchMemoryMode: (mode: MemoryToolMode) => void;
-  /** The `Authorization` header value the most recent HTTP request carried, if any. */
+  /**
+   * The `Authorization` value of the most recent HTTP request that carried one since the last
+   * reset. A request without it never clears it: an earlier session's client can still retry its
+   * event stream against a restarted connector, and that stray request carries no credential.
+   */
   lastAuthorizationHeader: () => string | undefined;
   /**
    * Closes the listening socket and every open MCP session, simulating the
@@ -118,6 +155,7 @@ interface Counters {
   unannotated: number;
   askMemory: number;
   searchMemory: number;
+  webSearch: number;
 }
 
 interface MemoryModes {
@@ -171,10 +209,12 @@ function buildMcpServer({
   counters,
   gates,
   memoryModes,
+  webSearch,
 }: {
   counters: Counters;
   gates: WriteGate[];
   memoryModes: MemoryModes;
+  webSearch: boolean;
 }): McpServer {
   const server = new McpServer({ name: 'inert-connector', version: '0.0.0' });
 
@@ -268,6 +308,21 @@ function buildMcpServer({
     },
   );
 
+  if (webSearch) {
+    server.registerTool(
+      INERT_WEB_SEARCH_TOOL,
+      {
+        description: 'Pretends to search the open web. Never reaches the network.',
+        inputSchema: { query: z.string() },
+        annotations: { readOnlyHint: true, openWorldHint: true },
+      },
+      ({ query }) => {
+        counters.webSearch += 1;
+        return textResult(`no results for ${query}`);
+      },
+    );
+  }
+
   return server;
 }
 
@@ -317,12 +372,23 @@ function asTransport(transport: StreamableHTTPServerTransport): Transport {
   };
 }
 
-export async function startInertMcpServer(): Promise<InertMcpServer> {
-  const counters: Counters = { echo: 0, read: 0, write: 0, unannotated: 0, askMemory: 0, searchMemory: 0 };
+export async function startInertMcpServer(options?: { webSearch?: boolean }): Promise<InertMcpServer> {
+  const webSearch = options?.webSearch === true;
+  const counters: Counters = {
+    echo: 0,
+    read: 0,
+    write: 0,
+    unannotated: 0,
+    askMemory: 0,
+    searchMemory: 0,
+    webSearch: 0,
+  };
   const memoryModes: MemoryModes = { ask: 'result', search: 'result' };
   const gates: WriteGate[] = [];
   const transports = new Map<string, StreamableHTTPServerTransport>();
   let severed = false;
+  let redirect: InertRedirect | undefined;
+  let requestCount = 0;
   let lastAuthorizationHeader: string | undefined;
   let running = false;
   let boundPort: number | undefined;
@@ -330,11 +396,28 @@ export async function startInertMcpServer(): Promise<InertMcpServer> {
 
   async function dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const authHeader = req.headers.authorization;
-    lastAuthorizationHeader = typeof authHeader === 'string' ? authHeader : undefined;
+    if (typeof authHeader === 'string') {
+      lastAuthorizationHeader = authHeader;
+    }
 
+    requestCount += 1;
+    if (redirect !== undefined) {
+      req.resume();
+      res.writeHead(redirect.status, { location: `${redirect.to}${req.url ?? '/'}` });
+      res.end();
+      return;
+    }
     if (severed) {
       res.writeHead(503, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'inert MCP fixture is severed' }));
+      return;
+    }
+    if (req.method === 'POST' && req.url !== undefined && MEMORY_RECALL_PATH.test(req.url)) {
+      // The memory-provider setup check: an authenticated, empty recall.
+      req.resume();
+      const body = JSON.stringify({ results: [], entities: {} });
+      res.writeHead(200, { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body)) });
+      res.end(body);
       return;
     }
     const sessionHeader = req.headers['mcp-session-id'];
@@ -365,7 +448,7 @@ export async function startInertMcpServer(): Promise<InertMcpServer> {
         transports.delete(id);
       }
     };
-    await buildMcpServer({ counters, gates, memoryModes }).connect(asTransport(transport));
+    await buildMcpServer({ counters, gates, memoryModes, webSearch }).connect(asTransport(transport));
     await transport.handleRequest(req, res, body);
   }
 
@@ -422,16 +505,20 @@ export async function startInertMcpServer(): Promise<InertMcpServer> {
   httpServer = makeHttpServer();
   boundPort = await listen(httpServer, 0);
   running = true;
-  const url = `http://127.0.0.1:${String(boundPort)}/mcp`;
+  const origin = `http://127.0.0.1:${String(boundPort)}`;
+  const url = `${origin}/mcp`;
 
   return {
     url,
+    origin,
+    memoryProviderUrl: `${url}/${INERT_MEMORY_BANK}`,
     writeInvocations: () => counters.write,
     echoInvocations: () => counters.echo,
     readInvocations: () => counters.read,
     unannotatedInvocations: () => counters.unannotated,
     askMemoryInvocations: () => counters.askMemory,
     searchMemoryInvocations: () => counters.searchMemory,
+    webSearchInvocations: () => counters.webSearch,
     resetInvocations: () => {
       counters.echo = 0;
       counters.read = 0;
@@ -439,9 +526,17 @@ export async function startInertMcpServer(): Promise<InertMcpServer> {
       counters.unannotated = 0;
       counters.askMemory = 0;
       counters.searchMemory = 0;
+      counters.webSearch = 0;
       memoryModes.ask = 'result';
       memoryModes.search = 'result';
+      lastAuthorizationHeader = undefined;
+      requestCount = 0;
+      redirect = undefined;
     },
+    redirectAllTo: next => {
+      redirect = next;
+    },
+    requestsSeen: () => requestCount,
     holdNextWrite: () => {
       const entered: PromiseWithResolvers<void> = Promise.withResolvers();
       const released: PromiseWithResolvers<void> = Promise.withResolvers();

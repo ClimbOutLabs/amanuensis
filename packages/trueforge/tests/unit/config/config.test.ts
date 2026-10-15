@@ -2,6 +2,7 @@ import {
   assertNetworkAuthRequirement,
   getPublicUiBasePath,
   isLoopbackHost,
+  parseTokenFactoryMode,
   TrueForgeAuthMode,
   type ServerConfiguration,
 } from '../../../src/config';
@@ -229,5 +230,27 @@ describe('assertNetworkAuthRequirement', () => {
         requireAuth: false,
       }),
     ).not.toThrow();
+  });
+});
+
+describe('parseTokenFactoryMode', () => {
+  const parse = (raw: string | undefined) =>
+    parseTokenFactoryMode({ envKey: 'TOKEN_FACTORY_MODE', raw, defaultValue: 'off' });
+
+  it('defaults to off when unset or blank', () => {
+    expect(parse(undefined)).toBe('off');
+    expect(parse('')).toBe('off');
+    expect(parse('   ')).toBe('off');
+  });
+
+  it('parses off, fallback, and force case-insensitively', () => {
+    expect(parse('off')).toBe('off');
+    expect(parse('fallback')).toBe('fallback');
+    expect(parse('force')).toBe('force');
+    expect(parse('FALLBACK')).toBe('fallback');
+  });
+
+  it('throws on anything else', () => {
+    expect(() => parse('sometimes')).toThrow('TOKEN_FACTORY_MODE must be one of off, fallback, force');
   });
 });

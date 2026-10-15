@@ -54,8 +54,7 @@ function renderSection(overrides?: {
         throw new Error('not used');
       }),
     deletePersonaKnowledge: overrides?.deletePersonaKnowledge ?? (async () => {}),
-    getPersonaKnowledgeEmbeddingModel:
-      overrides?.getPersonaKnowledgeEmbeddingModel ?? (async () => READY_MODEL),
+    getPersonaKnowledgeEmbeddingModel: overrides?.getPersonaKnowledgeEmbeddingModel ?? (async () => READY_MODEL),
   };
   return render(
     <PersonaProvider api={api}>
@@ -68,9 +67,7 @@ describe('PersonaKnowledgeSection', () => {
   it('explains the empty library and its cross-persona isolation', async () => {
     renderSection();
     expect(await screen.findByText(/Nothing here yet/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/other personas and the default assistant can’t see them/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/other personas and the default assistant can’t see them/)).toBeInTheDocument();
   });
 
   it('lists documents with status, passage count, and a working delete', async () => {
@@ -153,7 +150,13 @@ describe('PersonaKnowledgeSection', () => {
   it('renders a saved link as a link, but never a non-http(s) URL', async () => {
     renderSection({
       listPersonaKnowledge: async () => [
-        { ...DOC, id: 'doc-http', source_kind: 'url', source_label: 'example.com', source_url: 'https://example.com/story' },
+        {
+          ...DOC,
+          id: 'doc-http',
+          source_kind: 'url',
+          source_label: 'example.com',
+          source_url: 'https://example.com/story',
+        },
         // A legacy or hostile row must not become a clickable javascript: href.
         { ...DOC, id: 'doc-evil', source_kind: 'url', source_label: 'evil', source_url: 'javascript:alert(1)' },
       ],

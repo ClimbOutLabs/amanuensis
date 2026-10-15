@@ -27,7 +27,7 @@ export const UpdateToolOutputScreenRequestSchema = z
       .nullable()
       .describe('Persisted override: `true`/`false`. `null` clears the override back to the env default.'),
   })
-  .openapi('UpdateToolOutputScreenRequest');
+  .openapi('UpdateToolOutputScreenRequest', { example: { enabled: true } });
 
 export const GetToolOutputScreenResponseSchema = z
   .object({

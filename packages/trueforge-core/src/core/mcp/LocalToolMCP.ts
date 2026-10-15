@@ -1,4 +1,4 @@
-import type { CallToolRequest, ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolRequest, ListToolsResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
@@ -11,7 +11,7 @@ import {
   type ToolInvocationContext,
   toolResultResponse,
 } from './IMCPServer';
-import { deniedToolCallText } from './ToolSet';
+import { deniedToolCallText, toolEffectHints } from './ToolSet';
 
 function withValidatedInput<T extends z.ZodType>(
   schema: T,
@@ -51,6 +51,12 @@ export function defineTool<T extends z.ZodType>(config: {
   name: string;
   description: string;
   schema: T;
+  /**
+   * MCP tool annotations (readOnlyHint, destructiveHint, openWorldHint).
+   * Surfaced on toolCallInfo so the permission layer classifies built-in
+   * tools from the same server-declared metadata remote tools carry.
+   */
+  annotations?: ToolAnnotations | undefined;
   // Handlers may opt into the approvalDecision (forwarded by the agent loop after the
   // user approves an approval-gated tool). Handlers that don't declare it ignore it.
   handler: (
@@ -66,6 +72,7 @@ export function defineTool<T extends z.ZodType>(config: {
     name: config.name,
     description: config.description,
     inputSchema: jsonSchema,
+    ...(config.annotations !== undefined && { annotations: config.annotations }),
     execute: withValidatedInput(config.schema, config.handler),
   };
 }
@@ -147,6 +154,10 @@ export abstract class LocalToolMCP implements IToolSet {
   toolCallInfo(params: CallToolRequest['params'], _resolveUnderlyingTool?: boolean): Promise<InternalToolCallInfo> {
     void _resolveUnderlyingTool;
     return Promise.resolve({
+      // Built-ins declare their effects through MCP annotations on the tool
+      // definition, the same metadata remote tools carry, so the permission
+      // layer classifies them from server-owned claims.
+      ...toolEffectHints(this.getTools().find(t => t.name === params.name)),
       type: 'truefoundry-system',
       mcp_server_id: this.mcpServerId,
       mcp_server_name: this.name,

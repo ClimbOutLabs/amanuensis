@@ -5,7 +5,7 @@ import {
   type SessionAgent,
   type SessionHandle,
 } from '@truefoundry/trueforge-core/agent-session';
-import { McpConnectionError } from '@truefoundry/trueforge-core/core';
+import { McpConnectionError, type VercelAIProviderConfig } from '@truefoundry/trueforge-core/core';
 import { HTTPException } from 'hono/http-exception';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,6 +22,7 @@ import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provi
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import {
+  applyTokenFactoryRouting,
   buildGatewayMetadata,
   getMcpConnection,
   getModelDetails,
@@ -29,7 +30,7 @@ import {
   localSandboxSessionSegment,
   RepositoryBindingResolutionError,
   resolveBoundRepository,
-  resolveGithubGitCredentials,
+  resolveGithubGitToken,
   TFG_METADATA_PREFIX,
   validateAgentSpec,
   withGatewayMetadataHeaders,
@@ -192,7 +193,7 @@ describe('localSandboxSessionSegment', () => {
   });
 });
 
-describe('resolveGithubGitCredentials', () => {
+describe('resolveGithubGitToken', () => {
   it('bridges an explicitly enabled trusted GitHub connector without admitting lookalike hosts', async () => {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
@@ -211,11 +212,10 @@ describe('resolveGithubGitCredentials', () => {
         description: 'GitHub',
         auth: { type: 'header', headers: { authorization: 'github_pat_test_value' } },
       },
+      first_party: false,
     });
 
-    await expect(resolveGithubGitCredentials({ tenant_id: TENANT_ID, spec, store })).resolves.toBe(
-      'https://x-access-token:github_pat_test_value@github.com\n',
-    );
+    await expect(resolveGithubGitToken({ tenant_id: TENANT_ID, spec, store })).resolves.toBe('github_pat_test_value');
 
     await store.upsertServer({
       tenant_id: TENANT_ID,
@@ -227,8 +227,9 @@ describe('resolveGithubGitCredentials', () => {
         description: 'Lookalike GitHub server',
         auth: { type: 'header', headers: { Authorization: 'Bearer must-not-escape' } },
       },
+      first_party: false,
     });
-    await expect(resolveGithubGitCredentials({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
+    await expect(resolveGithubGitToken({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
   });
 
   it('does not bridge a stored token unless the GitHub connector is enabled for the agent', async () => {
@@ -245,10 +246,11 @@ describe('resolveGithubGitCredentials', () => {
         description: 'GitHub',
         auth: { type: 'header', headers: { Authorization: 'Bearer github_pat_test' } },
       },
+      first_party: false,
     });
     const spec = AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' } });
 
-    await expect(resolveGithubGitCredentials({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
+    await expect(resolveGithubGitToken({ tenant_id: TENANT_ID, spec, store })).resolves.toBeNull();
   });
 });
 
@@ -685,6 +687,7 @@ describe('getMcpConnection — secret references in header auth', () => {
         description: 'Literal-only MCP server.',
         auth: { type: 'header', headers: { Authorization: 'Bearer plain-token' } },
       },
+      first_party: false,
     });
 
     const connection = await getMcpConnection({
@@ -715,6 +718,7 @@ describe('getMcpConnection — secret references in header auth', () => {
         description: 'Reference-auth MCP server.',
         auth: { type: 'header', headers: { Authorization: `\${env:${ENV_VAR}}`, 'X-Static': 'unchanged' } },
       },
+      first_party: false,
     });
 
     const connection = await getMcpConnection({
@@ -751,6 +755,7 @@ describe('getMcpConnection — secret references in header auth', () => {
           description: 'File-reference MCP server.',
           auth: { type: 'header', headers: { Authorization: `\${file:${tokenPath}}` } },
         },
+        first_party: false,
       });
 
       const connection = await getMcpConnection({
@@ -791,6 +796,7 @@ describe('getMcpConnection — secret references in header auth', () => {
         description: 'Missing-secret MCP server.',
         auth: { type: 'header', headers: { Authorization: `\${env:${ENV_VAR}}` } },
       },
+      first_party: false,
     });
 
     // This is the exact function the admin tools-listing handler (GET /mcp-servers/{name}/tools)
@@ -814,5 +820,61 @@ describe('getMcpConnection — secret references in header auth', () => {
     await expect(connection.headers()).rejects.toMatchObject({
       message: expect.stringContaining(`\${env:${ENV_VAR}}`),
     });
+  });
+});
+
+describe('applyTokenFactoryRouting', () => {
+  const localConfig: VercelAIProviderConfig = {
+    provider: { type: 'custom', name: 'local' },
+    model: { id: 'nemotron-3', name: 'nemotron' },
+    name: 'local/nemotron',
+    baseUrl: 'http://localhost:11434/v1',
+    apiKey: 'none',
+    headers: {},
+  };
+  const routing = {
+    apiKey: 'tf-key',
+    model: 'nvidia/nemotron-3-super-120b-a12b',
+    baseUrl: 'https://api.tokenfactory.nebius.com/v1',
+  };
+
+  it('leaves the primary untouched when the mode is off', () => {
+    const routed = applyTokenFactoryRouting({ primary: localConfig, mode: 'off', ...routing });
+    expect(routed.providerConfig).toBe(localConfig);
+    expect(routed.fallbackProviderConfig).toBeUndefined();
+  });
+
+  it('leaves the primary untouched when no API key is configured', () => {
+    const routed = applyTokenFactoryRouting({ primary: localConfig, mode: 'fallback', ...routing, apiKey: undefined });
+    expect(routed.providerConfig).toBe(localConfig);
+    expect(routed.fallbackProviderConfig).toBeUndefined();
+  });
+
+  it('keeps local first with Token Factory as fallback in fallback mode', () => {
+    const routed = applyTokenFactoryRouting({ primary: localConfig, mode: 'fallback', ...routing });
+    expect(routed.providerConfig).toBe(localConfig);
+    expect(routed.fallbackProviderConfig).toMatchObject({
+      provider: { type: 'tokenfactory', name: 'tokenfactory' },
+      model: { id: 'nvidia/nemotron-3-super-120b-a12b' },
+      baseUrl: 'https://api.tokenfactory.nebius.com/v1',
+      apiKey: 'tf-key',
+    });
+  });
+
+  it('routes to Token Factory first with local as fallback in force mode', () => {
+    const routed = applyTokenFactoryRouting({ primary: localConfig, mode: 'force', ...routing });
+    expect(routed.providerConfig.provider.type).toBe('tokenfactory');
+    expect(routed.providerConfig.model.id).toBe('nvidia/nemotron-3-super-120b-a12b');
+    expect(routed.fallbackProviderConfig).toBe(localConfig);
+  });
+
+  it('does not wrap a primary that already is Token Factory', () => {
+    const tokenFactoryPrimary: VercelAIProviderConfig = {
+      ...localConfig,
+      provider: { type: 'tokenfactory', name: 'tokenfactory' },
+    };
+    const routed = applyTokenFactoryRouting({ primary: tokenFactoryPrimary, mode: 'force', ...routing });
+    expect(routed.providerConfig).toBe(tokenFactoryPrimary);
+    expect(routed.fallbackProviderConfig).toBeUndefined();
   });
 });

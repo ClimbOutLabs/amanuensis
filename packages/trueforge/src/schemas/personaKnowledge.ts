@@ -27,9 +27,7 @@ export function isFetchableHttpUrl(value: string): boolean {
     return false;
   }
   return (
-    (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
-    parsed.username === '' &&
-    parsed.password === ''
+    (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.username === '' && parsed.password === ''
   );
 }
 
@@ -41,11 +39,7 @@ export const PersonaKnowledgeDocumentSchema = z
       .boolean()
       .describe('True when the user supplied the title; false when it was defaulted from the source.'),
     source_kind: KnowledgeSourceKindSchema,
-    source_label: z
-      .string()
-      .min(1)
-      .max(512)
-      .describe('Human-readable origin: file name, link text, or "Pasted text".'),
+    source_label: z.string().min(1).max(512).describe('Human-readable origin: file name, link text, or "Pasted text".'),
     source_url: z.url().max(2048).nullable().describe('Final link address, for saved links.'),
     status: KnowledgeDocumentStatusSchema,
     status_message: z
@@ -74,7 +68,12 @@ const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
 const KnowledgeDocumentUploadRequestSchema = z
   .object({
     kind: z.literal('upload'),
-    filename: z.string().trim().min(1).max(256).describe('Original file name, used to detect PDF, Word, text, or Markdown.'),
+    filename: z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .describe('Original file name, used to detect PDF, Word, text, or Markdown.'),
     content_base64: z
       .string()
       .min(1)

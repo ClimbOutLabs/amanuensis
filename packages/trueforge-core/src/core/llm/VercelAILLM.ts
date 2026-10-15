@@ -7,7 +7,7 @@ import type { OpenAIResponsesProviderOptions } from '@ai-sdk/openai';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { OpenAICompatibleProviderOptions } from '@ai-sdk/openai-compatible';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import type { JSONObject } from '@ai-sdk/provider';
+import type { JSONObject, LanguageModelV4 } from '@ai-sdk/provider';
 import type { ProviderOptions, ReasoningPart } from '@ai-sdk/provider-utils';
 import type {
   AssistantContent,
@@ -35,6 +35,7 @@ import type {
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
+import { withFailover } from './failoverLanguageModel';
 import type { ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './ILLM';
 import {
   type CompletionUsage,
@@ -44,6 +45,7 @@ import {
   type RawAssistantMessageWithUsage,
   type ThinkingBlock,
 } from './LLMTypes';
+import { resolveMaxOutputTokens } from './maxOutputTokens';
 
 // ---------------------------------------------------------------------------
 // Public config
@@ -64,6 +66,7 @@ export const VERCEL_AI_PROVIDER_NAMES = [
   'together',
   'custom',
   'truefoundry',
+  'tokenfactory',
 ] as const;
 
 export type VercelAIProviderName = (typeof VERCEL_AI_PROVIDER_NAMES)[number];
@@ -108,6 +111,11 @@ export interface VercelAILLMConfig {
   signal?: AbortSignal;
   /** Host-owned deadlines, fully resolved (no field left to default); never supplied by model-generated request parameters. */
   streamTimeout?: Required<StreamTimeout> | undefined;
+  /**
+   * Optional secondary provider config. When set, a request that fails on the primary
+   * before producing output is retried once on this provider (see `withFailover`).
+   */
+  fallbackProviderConfig?: VercelAIProviderConfig | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +147,13 @@ function isFunctionToolCall<T extends { type: string }>(toolCall: T): toolCall i
  * own packages: those drop `json_schema`, and Fireworks also clamps efforts its models do accept.
  * TODO: move Z AI to @ai-sdk/zai once https://github.com/vercel/ai/pull/17340 ships.
  */
-function compatibleModel(config: VercelAIProviderConfig): LanguageModel {
+/**
+ * Default Nebius Token Factory endpoint, used when a `tokenfactory` provider record does
+ * not set its own base URL. Token Factory is OpenAI-compatible.
+ */
+export const TOKEN_FACTORY_DEFAULT_BASE_URL = 'https://api.tokenfactory.nebius.com/v1';
+
+function compatibleModel(config: VercelAIProviderConfig): LanguageModelV4 {
   const { provider, model, apiKey, headers, baseUrl } = config;
   if (baseUrl === undefined) {
     throw new Error(`Provider "${provider.type}" requires a baseUrl`);
@@ -157,7 +171,7 @@ function compatibleModel(config: VercelAIProviderConfig): LanguageModel {
   return client(model.id);
 }
 
-export function buildLanguageModel(config: VercelAIProviderConfig): LanguageModel {
+export function buildLanguageModel(config: VercelAIProviderConfig): LanguageModelV4 {
   const { provider, model, baseUrl, apiKey, headers } = config;
   const extraHeaders = Object.keys(headers).length > 0 ? headers : undefined;
 
@@ -212,6 +226,12 @@ export function buildLanguageModel(config: VercelAIProviderConfig): LanguageMode
     case 'custom':
     case 'truefoundry': {
       return compatibleModel(config);
+    }
+    case 'tokenfactory': {
+      // Token Factory is OpenAI-compatible. A provider record may override the base
+      // URL (for example the regional endpoint); otherwise the default applies.
+      const baseUrl = config.baseUrl ?? TOKEN_FACTORY_DEFAULT_BASE_URL;
+      return compatibleModel({ ...config, baseUrl });
     }
     default: {
       const _exhaustive: never = provider.type;
@@ -586,14 +606,6 @@ export function buildProviderOptions({
 // ---------------------------------------------------------------------------
 // Request conversion (OpenAI → SDK)
 // ---------------------------------------------------------------------------
-
-/** Prefers `max_completion_tokens`, falling back to the deprecated `max_tokens`. */
-export function resolveMaxOutputTokens(
-  body: Pick<ChatCompletionCreateParamsStreaming, 'max_completion_tokens'>,
-): number | undefined {
-  const limit: unknown = body.max_completion_tokens ?? Reflect.get(body, 'max_tokens');
-  return typeof limit === 'number' ? limit : undefined;
-}
 
 /** Parses the MIME type from a data URI (`data:<mime>;base64,...`). */
 export function parseMimeFromDataUri(uri: string): string | undefined {
@@ -1051,6 +1063,25 @@ export function describeStreamError(raw: unknown): string {
     return raw.message;
   }
   return describeUnknownError(raw);
+}
+
+/**
+ * Definite provider status carried by a stream error part, when the provider answered with a
+ * real HTTP status rather than the stream itself breaking. Covers APICallError (statusCode)
+ * and the AI SDK's provider error shape (data.code), so a provider-side 500 from a request
+ * the provider rejects is not mistaken for a broken stream that compaction could fix.
+ */
+export function providerStatusCode(raw: unknown): number | undefined {
+  if (APICallError.isInstance(raw) && typeof raw.statusCode === 'number') {
+    return raw.statusCode;
+  }
+  if (typeof raw === 'object' && raw !== null && 'data' in raw) {
+    const data: unknown = raw.data;
+    if (typeof data === 'object' && data !== null && 'code' in data && typeof data.code === 'number') {
+      return data.code;
+    }
+  }
+  return undefined;
 }
 
 export function toStreamError(raw: unknown): Error {
@@ -1608,13 +1639,14 @@ export async function* mapStreamToChunks({
         const message = describeStreamError(raw);
         // Preserve the original stream error as cause; toast/turn use .message only.
         const cause = raw instanceof Error ? raw : new Error(message);
-        // A definite provider response (an APICallError carrying a status code: auth, rate
-        // limit, bad request) is a real answer from the provider, not a broken stream:
-        // compacting context and retrying would not change it, so it stays a plain Error. Any
-        // other error part (no status code: a transport failure or a malformed-response parse
-        // failure, the shape a cut/malformed stream like vLLM's mid-response HarmonyError takes)
-        // is the stream itself breaking, so it is a ModelStreamFault.
-        if (APICallError.isInstance(raw) && raw.statusCode != null) {
+        // A definite provider response (a status code on the error: auth, rate limit, bad
+        // request, or a provider-side 500) is a real answer from the provider, not a broken
+        // stream: compacting context and retrying would not change it, so it stays a plain
+        // Error. Any other error part (no status code: a transport failure or a
+        // malformed-response parse failure, the shape a cut/malformed stream like vLLM's
+        // mid-response HarmonyError takes) is the stream itself breaking, so it is a
+        // ModelStreamFault.
+        if (providerStatusCode(raw) != null) {
           throw new Error(message, { cause });
         }
         throw new ModelStreamFault(message, { cause });
@@ -1720,8 +1752,16 @@ export class VercelAILLM implements ILLM {
   async *create(
     body: LLMCreateParamsStreaming,
   ): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
-    const { providerConfig } = this.config;
-    const languageModel = buildLanguageModel(providerConfig);
+    const { providerConfig, fallbackProviderConfig } = this.config;
+    const primaryModel = buildLanguageModel(providerConfig);
+    const languageModel =
+      fallbackProviderConfig !== undefined
+        ? withFailover({
+            primary: primaryModel,
+            secondary: buildLanguageModel(fallbackProviderConfig),
+            logger: this.logger,
+          })
+        : primaryModel;
     const { provider, model } = providerConfig;
 
     const { instructions, messages } = convertMessages({
@@ -1731,6 +1771,22 @@ export class VercelAILLM implements ILLM {
       logger: this.logger,
     });
     const tools = convertTools(body.tools ?? undefined);
+    if (
+      this.logger.isDebugEnabled() &&
+      body.tools !== undefined &&
+      body.messages.some(
+        m => Array.isArray(m.content) && m.content.some(p => p.type === 'image_url' || p.type === 'file'),
+      )
+    ) {
+      this.logger.debug('Multimodal chat completion request payload', {
+        model: model.id,
+        tools: body.tools,
+        messages: body.messages.map(m => ({
+          role: m.role,
+          partTypes: Array.isArray(m.content) ? m.content.map(p => p.type) : typeof m.content,
+        })),
+      });
+    }
     const structuredOutputSpec = toStructuredOutputSpec(body.response_format);
     const output = buildOutput(structuredOutputSpec);
 

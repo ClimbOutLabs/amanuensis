@@ -32,15 +32,18 @@ import type {
 import type {
   CompletionUsage,
   InternalEnrichedAssistantMessage,
+  LLMSystemMessage,
   LLMToolMessage,
   LLMUserMessage,
 } from '../llm/LLMTypes';
 import type { ToolCallMemoSnapshot } from '../mcp/executeToolCalls';
+import type { SentinelHostContext } from '../permissions';
 import type { Sandbox } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import type { AbnormalHandoffCause } from './AbnormalHandoff';
 import type { AgentDefinition } from './AgentDefinition';
 import type { CurrentContextUsage } from './contextUsage';
+import type { HostToolCallPolicy } from './HostToolCallPolicy';
 import type { TaskStateSnapshot } from './taskState';
 
 export type { AgentInfo, AgentParent };
@@ -107,7 +110,7 @@ export type InternalThreadDoneEvent = BaseThreadDoneEvent & {
   handoff_cause?: AbnormalHandoffCause | undefined;
 } & ({ status: 'done'; output: ModelMessageEvent } | { status: 'error'; error: string; output?: ModelMessageEvent });
 
-export type LLMContextMessage = LLMUserMessage | InternalEnrichedAssistantMessage | LLMToolMessage;
+export type LLMContextMessage = LLMUserMessage | LLMSystemMessage | InternalEnrichedAssistantMessage | LLMToolMessage;
 
 export type ContextMessage =
   LLMContextMessage | AgentApprovalDecisionMessage | ToolExecutionStartedEvent | ToolExecutionTrackingContext;
@@ -263,6 +266,13 @@ export interface AgentThreadConstructorInput {
    */
   toolDispatchMaxConcurrency?: number | undefined;
   /**
+   * Synchronous host policy consulted for every tool call during
+   * assistant-message enrichment, before provider dispatch. A block resolves
+   * the call as `policy_blocked` with the host message as the tool error.
+   * Undefined disables the hook.
+   */
+  toolCallPolicy?: HostToolCallPolicy | undefined;
+  /**
    * Per-tool-call dispatch deadline in milliseconds, forwarded to
    * executeToolCalls. Undefined falls back to the core default.
    */
@@ -278,6 +288,24 @@ export interface AgentThreadConstructorInput {
    * core default (see DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS).
    */
   modelFirstResponseTimeoutMs?: number | undefined;
+  /**
+   * Bound in milliseconds on the pre-LLM context processor phase producing
+   * progress before the turn fails visibly instead of hanging. Undefined falls
+   * back to the core default (DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS).
+   */
+  preLLMProcessorsTimeoutMs?: number | undefined;
+  /**
+   * Bound in milliseconds on the sandbox repository refresh before a model call.
+   * On timeout the turn continues with the pre-refresh state. Undefined falls
+   * back to the core default (DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS).
+   */
+  sandboxRefreshTimeoutMs?: number | undefined;
+  /**
+   * Sentinel permission context for this session. Stored as an instance field
+   * and passed to executeToolCalls for Tier 3 dispatch verification.
+   * Undefined means Sentinel is not active for this thread.
+   */
+  sentinel?: SentinelHostContext | undefined;
   tracing: AgentTracing;
   logger: Logger;
 }

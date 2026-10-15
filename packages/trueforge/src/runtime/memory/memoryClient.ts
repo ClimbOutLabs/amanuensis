@@ -91,12 +91,8 @@ export interface MemoryVaultFailure {
   reason: string;
 }
 
-export type ListMemoryVaultEntriesOutcome =
-  | { ok: true; entries: MemoryVaultEntry[] }
-  | MemoryVaultFailure;
+export type ListMemoryVaultEntriesOutcome = { ok: true; entries: MemoryVaultEntry[] } | MemoryVaultFailure;
 
-export type UpdateMemoryVaultEntryOutcome =
-  | { ok: true; entry: MemoryVaultEntry }
-  | MemoryVaultFailure;
+export type UpdateMemoryVaultEntryOutcome = { ok: true; entry: MemoryVaultEntry } | MemoryVaultFailure;
 
 export type DeleteMemoryVaultEntryOutcome = { ok: true } | MemoryVaultFailure;

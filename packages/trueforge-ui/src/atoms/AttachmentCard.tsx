@@ -77,7 +77,7 @@ export function AttachmentCard({
             variant: 'ghost',
             size: 'icon',
             className:
-              'aui-attachment-tile-remove absolute inset-e-1 top-1 z-10 size-5 rounded-full bg-black/50 text-white hover:bg-black/70 hover:text-white',
+              'aui-attachment-tile-remove absolute inset-e-1 top-1 z-10 size-5 rounded-full bg-[var(--overlay)] text-[var(--color-white)]',
           })}
           onClick={e => {
             e.stopPropagation();

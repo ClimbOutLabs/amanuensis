@@ -20,6 +20,7 @@ export const TABLES_TO_MOVE = [
   'session_folder',
   'space_aggregate',
   'space',
+  'space_revision',
   'implementation_plan_grant',
   'implementation_plan_dispatch',
   'turn',
@@ -38,6 +39,7 @@ export const TABLES_TO_MOVE = [
   'persona_name_key',
   'session_persona',
   'mcp_server',
+  'mcp_tool_grant',
   'oauth_token',
   'oauth_pending_authorization',
   'repository',
@@ -48,6 +50,9 @@ export const TABLES_TO_MOVE = [
   'artifact_blob',
   'turn_artifact',
   'global_settings',
+  'sentinel_audit',
+  'sentinel_user_settings',
+  'approval_token',
 ] as const;
 
 /**

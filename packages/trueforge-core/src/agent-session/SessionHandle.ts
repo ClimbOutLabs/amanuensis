@@ -11,6 +11,14 @@ import {
   type ImplementationPlanGrant,
 } from '../core/mcp/implementationPlanGrant';
 import {
+  createSentinelHostContext,
+  DEFAULT_PINNED_PATH,
+  defaultSentinelServices,
+  forUnattendedRun,
+  type SentinelHostContext,
+  type SentinelServices,
+} from '../core/permissions';
+import {
   mechanicalAbnormalHandoff,
   type AbnormalHandoff,
   type AbnormalHandoffCause,
@@ -201,14 +209,43 @@ export class SessionHandle<
 > {
   private readonly store: ISessionStore<TSessionCustom, TTurnCustom>;
   private session: SessionRecord<TSessionCustom>;
+  /**
+   * Session-scoped Sentinel services. Created once per SessionHandle so
+   * tracked-executable grants and approval tokens are shared across the
+   * main thread, sub-agent threads, and ToolSet batches within the session.
+   */
+  private readonly sentinelServices: SentinelServices;
 
-  constructor(options: { store: ISessionStore<TSessionCustom, TTurnCustom>; session: SessionRecord<TSessionCustom> }) {
+  constructor(options: {
+    store: ISessionStore<TSessionCustom, TTurnCustom>;
+    session: SessionRecord<TSessionCustom>;
+    sentinelServices?: SentinelServices | undefined;
+  }) {
     this.store = options.store;
     this.session = options.session;
+    const services = options.sentinelServices ?? defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH });
+    // Nobody watches a scheduled run, so relaxations never apply: Tier 2 parks for approval.
+    this.sentinelServices = options.session.source?.type === 'schedule' ? forUnattendedRun(services) : services;
   }
 
   get session_id(): string {
     return this.session.session_id;
+  }
+
+  /**
+   * Creates the SentinelHostContext for this session. Session-scoped:
+   * tenant_id, created_by, and conversation_id (mapped from session_id)
+   * come from the authoritative session record. Services are the session's
+   * shared instance so grants and tokens are visible across threads.
+   */
+  private createSentinelContext(): SentinelHostContext {
+    return createSentinelHostContext({
+      services: this.sentinelServices,
+      tenant_id: this.session.tenant_id,
+      created_by: this.session.created_by_subject.subject_id,
+      conversation_id: this.session.session_id,
+      workspace_cwd: this.session.workspace_cwd ?? null,
+    });
   }
 
   get tenant_id(): string {
@@ -296,6 +333,7 @@ export class SessionHandle<
         turn_id: input.turn_id,
         signal: input.signal,
         tracing,
+        sentinel: this.createSentinelContext(),
       });
 
       const definitionsByThreadId = await this.resolveAgentDefinitions({
@@ -686,6 +724,11 @@ export class SessionHandle<
           previousTurn: input.previous,
           signal: input.signal,
           tracing: input.tracing,
+          tenant_id: this.session.tenant_id,
+          created_by: this.session.created_by_subject.subject_id,
+          session_id: this.session.session_id,
+          sentinel_services: this.sentinelServices,
+          workspace_cwd: this.session.workspace_cwd ?? null,
         });
         definitionsByThreadId.set(threadId, resolved);
       }),
@@ -785,6 +828,9 @@ export class SessionHandle<
       toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
       toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
       runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
+      modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
+      toolCallPolicy: input.resolver.toolCallPolicy,
+      sentinel: this.createSentinelContext(),
     });
   }
 
@@ -812,6 +858,11 @@ export class SessionHandle<
         previousTurn: input.previous,
         signal: params.signal,
         tracing: input.tracing,
+        tenant_id: this.session.tenant_id,
+        created_by: this.session.created_by_subject.subject_id,
+        session_id: this.session.session_id,
+        sentinel_services: this.sentinelServices,
+        workspace_cwd: this.session.workspace_cwd ?? null,
       });
       throwIfSignalAborted(params.signal);
       const { definition, extraCapabilities, compactionModel } = resolvedDefinition;
@@ -869,6 +920,9 @@ export class SessionHandle<
         toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
         toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
+        modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
+        toolCallPolicy: input.resolver.toolCallPolicy,
+        sentinel: this.createSentinelContext(),
       });
     };
   }

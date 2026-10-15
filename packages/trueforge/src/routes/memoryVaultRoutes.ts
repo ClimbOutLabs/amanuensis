@@ -18,11 +18,7 @@ import {
 import { OpenApiTag } from './openapiTags';
 
 export const MemoryVaultEntryIdParamsSchema = z.object({
-  entry_id: z
-    .string()
-    .min(1)
-    .max(256)
-    .describe('URL-encoded vault entry id (`md:{namespace}:{file}#{index}`).'),
+  entry_id: z.string().min(1).max(256).describe('URL-encoded vault entry id (`md:{namespace}:{file}#{index}`).'),
 });
 
 export const ListMemoryVaultEntriesQuerySchema = z
@@ -38,12 +34,7 @@ export const ListMemoryVaultEntriesQuerySchema = z
 
 export const ExportMemoryVaultQuerySchema = z
   .object({
-    namespace: z
-      .string()
-      .trim()
-      .max(128)
-      .optional()
-      .describe('Vault namespace to export: omit for the shared vault.'),
+    namespace: z.string().trim().max(128).optional().describe('Vault namespace to export: omit for the shared vault.'),
   })
   .openapi('ExportMemoryVaultQuery');
 

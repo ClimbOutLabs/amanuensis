@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // Bug: "Personas" used to appear twice in Settings — once as its own nav section
-// (SettingsBuilder/index.tsx), and again embedded under Model roles
-// (ModelRoleSettings.tsx), matching docs/model-roles.mdx ("Settings -> Model
-// roles -> Personas"). This exercises the REAL ModelRoleSettings and
+// (SettingsBuilder/index.tsx), and again embedded under Roles and Personas
+// (ModelRoleSettings.tsx), matching docs/model-roles.mdx ("Settings ->
+// Roles and Personas"). This exercises the REAL ModelRoleSettings and
 // PersonaSettings (unlike SettingsBuilder/index.test.tsx, which mocks section
 // content) so it actually proves personas render in exactly one place.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -10,10 +10,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { PersonaProvider, type Persona, type PersonaApi } from '@/components/PersonaContext.js';
-import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
 import TruefoundrySettingsBuilder from '@/containers/SettingsBuilder/index.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
+import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
 vi.mock('@truefoundry/assistant-ui-runtime', () => ({
@@ -59,7 +59,7 @@ function OpenSettingsButton() {
 }
 
 describe('Personas render in exactly one place in Settings', () => {
-  it('has no standalone Personas nav item, and shows personas exactly once, under Model roles', async () => {
+  it('has no standalone Personas nav item, and shows personas exactly once, under Roles and Personas', async () => {
     render(<TestShell />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
@@ -68,11 +68,11 @@ describe('Personas render in exactly one place in Settings', () => {
     // No separate "Personas" tab in the section nav.
     expect(screen.queryByRole('button', { name: 'Personas' })).not.toBeInTheDocument();
 
-    // Personas live on the Model roles page. The section is lazy-loaded, and a
+    // Personas live on the Roles and Personas page. The section is lazy-loaded, and a
     // cold vitest transform of its model-selector import graph can take >5s,
     // so give the chunk load a generous budget instead of the default 5s.
-    fireEvent.click(screen.getByRole('button', { name: 'Model roles' }));
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Model roles' })).toBeInTheDocument(), {
+    fireEvent.click(screen.getByRole('button', { name: 'Roles and Personas' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Roles and Personas' })).toBeInTheDocument(), {
       timeout: 20000,
     });
 

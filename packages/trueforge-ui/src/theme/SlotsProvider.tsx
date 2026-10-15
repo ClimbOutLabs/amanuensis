@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react';
 
 import { defaultSlots } from './defaultSlots.js';
 import type { PublicAtomSlots, SlotOverrides } from './publicSlots.js';
-import { ThemeProvider, useOptionalThemeMode } from './ThemeProvider.js';
+import { ThemeContext, ThemeProvider, useOptionalThemeMode } from './ThemeProvider.js';
 import type { ThemeConfig } from './types.js';
 
 export type { ThemeConfig, ThemeMode } from './types.js';
@@ -31,6 +31,7 @@ export function SlotsProvider({
 }) {
   const parentSlots = useContext(SlotsContext);
   const inheritedTheme = useContext(ThemeModeContext);
+  const parentTheme = useContext(ThemeContext);
   const resolved = useMemo(() => ({ ...parentSlots, ...overrides }), [parentSlots, overrides]);
 
   const slotsTree = (
@@ -40,9 +41,11 @@ export function SlotsProvider({
   );
 
   // Nest ThemeProvider only when this SlotsProvider owns a theme config, or when
-  // there is no parent theme yet (outermost provider).
-  const hasParentTheme = inheritedTheme !== undefined;
-  if (theme !== undefined || !hasParentTheme) {
+  // there is no parent theme yet (outermost provider). A parent ThemeProvider
+  // mounted directly by the host (not via SlotsProvider) is detected through
+  // ThemeContext, so the whole tree shares one preset instead of drifting apart.
+  const hasParentTheme = parentTheme !== null || inheritedTheme !== undefined;
+  if (parentTheme === null && (theme !== undefined || !hasParentTheme)) {
     return <ThemeProvider theme={theme}>{slotsTree}</ThemeProvider>;
   }
 

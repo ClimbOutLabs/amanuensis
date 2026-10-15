@@ -88,8 +88,12 @@ export function applyHostToolCallPolicy(input: {
     logger?.warn('Host tool-call policy returned a malformed block; failing open and allowing the call');
     return toolInfo;
   }
+  // A blocked call never dispatches, so there is nothing left to approve: an
+  // approval prompt stamped earlier (e.g. by permission classification) must
+  // not pause the turn on it.
   return {
     ...toolInfo,
+    is_approval_required: false,
     pre_dispatch_failure: { kind: 'policy_blocked', message: block.message },
   };
 }

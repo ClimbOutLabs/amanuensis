@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
 import { render } from '@testing-library/react';
-import { describe, expect, it, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { useAuiState } from '@/assistant-ui.js';
 import { resetWaitQueueTurnClocks, useWaitQueue, type WaitQueueView } from '@/hooks/useWaitQueue.js';

@@ -23,6 +23,21 @@ const SettingsCapabilitySchema = z
   .openapi('SettingsCapability');
 
 /**
+ * Local voice input availability. `enabled` reflects the latest non-blocking
+ * STT sidecar `/healthz` probe: true only once the sidecar answered with a
+ * loaded model. The backend probes at startup (flag reads false until that
+ * first probe resolves) and re-checks every 30s, so a recovered sidecar flips
+ * the flag without a backend restart.
+ */
+export const VoiceCapabilitySchema = z
+  .object({
+    enabled: z.boolean().describe('Whether local voice input is available (STT sidecar healthy).'),
+  })
+  .openapi('VoiceCapability');
+
+export type VoiceCapability = z.infer<typeof VoiceCapabilitySchema>;
+
+/**
  * Read-only status of the memory recall screen. The screen is a separate subsystem from the
  * memory provider: it classifies recalled memory as it would be injected into the model's
  * context. The classifier sidecar's URL and token are operator-configured via `MEMORY_SCREEN_*`
@@ -148,7 +163,9 @@ export const SandboxIsolationCapabilitySchema = z
       .describe('Process-isolation backend behind the run_code tool (`SANDBOX_ISOLATION_DRIVER`).'),
     image: z
       .string()
-      .describe('Expected sandbox image as <tag>@sha256:<digest> (`SANDBOX_IMAGE`). Never a bare tag.'),
+      .describe(
+        'Expected sandbox image as <tag>@sha256:<digest> (`SANDBOX_IMAGE`); empty when run_code is not configured.',
+      ),
     default_timeout_seconds: z
       .number()
       .int()
@@ -198,6 +215,7 @@ const CapabilitiesDataSchema = z
     sandbox: SandboxCapabilitySchema,
     skill: SkillCapabilitySchema,
     settings: SettingsCapabilitySchema,
+    voice: VoiceCapabilitySchema,
     memory_screen: MemoryScreenCapabilitySchema,
     tool_output_screen: ToolOutputScreenCapabilitySchema.optional(),
     memory_defaults: MemoryDefaultsCapabilitySchema,

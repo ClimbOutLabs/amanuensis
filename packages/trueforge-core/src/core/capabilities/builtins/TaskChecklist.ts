@@ -72,6 +72,7 @@ class TaskChecklistTool extends LocalToolMCP {
       description:
         'Replace the durable task checklist with up to 50 ordered items. Each item has only an id, text, and done flag. Read the current revision from the injected checklist and retry a stale write at most once.',
       schema: ReplaceTaskChecklistRequestSchema,
+      annotations: { readOnlyHint: true, openWorldHint: false },
       handler: input => this.replace(input),
     }),
   ];

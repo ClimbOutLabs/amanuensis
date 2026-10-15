@@ -7,6 +7,10 @@
  *   includes it when it exists.
  * - `memory/YYYY-MM-DD.md`: append-only daily logs. `retain()` appends here.
  *
+ * A persona-scoped client retains into its persona vault and recalls from that vault,
+ * the shared vault, and vaults shared with it; each vault ranks separately and the
+ * results interleave. An unscoped client uses the shared vault only.
+ *
  * `recall()` reads `MEMORY.md` plus recent daily logs and ranks entries by keyword
  * overlap with the query. When an `EmbeddingSubsystem` is attached, recall also
  * ranks by meaning: a local embedding model scores entries by semantic similarity
@@ -25,6 +29,7 @@ import {
   ensureWritableDataDir,
   isDataDirConfigurationError,
 } from '../../utils/dataDir';
+import type { EmbeddingSubsystemResolver, RankedMemory } from './embeddingRetrieval';
 import {
   timeoutFailure,
   type GetOperationOutcome,
@@ -38,7 +43,6 @@ import {
   type RetainOutcome,
   type RetryOperationOutcome,
 } from './hindsightClient';
-import type { EmbeddingSubsystem } from './embeddingRetrieval';
 import {
   appendVaultTombstone,
   estimateTokens,
@@ -53,6 +57,10 @@ import {
   scanVaultEntries,
   splitEntries,
   vaultFilesystemNamespace,
+  vaultReadNamespaces,
+  vaultWriteNamespace,
+  type NamespaceScan,
+  type VaultScope,
 } from './markdownMemoryFiles';
 import type {
   DeleteMemoryVaultEntryOutcome,
@@ -69,10 +77,15 @@ export interface MarkdownMemoryClientConfig {
   /** Tenant namespace; sanitized before use as a directory name. */
   namespace: string;
   /**
-   * Meaning-based recall. When omitted, recall is keyword-only. The subsystem is a
-   * process-wide singleton shared across client instances (see `getEmbeddingSubsystem`).
+   * The vault this client retains into and recalls from. Omitted: the shared vault only.
+   * With a persona: its own vault, the shared vault, and vaults shared with it.
    */
-  embeddings?: EmbeddingSubsystem | undefined;
+  vaultScope?: VaultScope | undefined;
+  /**
+   * Meaning-based recall. When omitted, recall is keyword-only. Subsystems are
+   * process-wide singletons shared across client instances (see `getEmbeddingSubsystem`).
+   */
+  embeddings?: EmbeddingSubsystemResolver | undefined;
 }
 
 /** How many daily log files recall scans, newest first, before the token budget cuts it off. */
@@ -101,6 +114,21 @@ function scoreEntry(words: string[], text: string): number {
     }
   }
   return score;
+}
+
+/** Merges ranked lists best-first, earlier lists leading each round, so no vault starves the others. */
+function interleaveRanked(lists: RankedMemory[][]): RankedMemory[] {
+  const merged: RankedMemory[] = [];
+  const longest = Math.max(0, ...lists.map(list => list.length));
+  for (let rank = 0; rank < longest; rank++) {
+    for (const list of lists) {
+      const item = list[rank];
+      if (item !== undefined) {
+        merged.push(item);
+      }
+    }
+  }
+  return merged;
 }
 
 function failure(reason: string): { ok: false; code: 'request_failed'; reason: string } {
@@ -135,16 +163,24 @@ function failureReason(prefix: string, error: unknown): string {
 export class MarkdownMemoryClient implements MemoryClient {
   private readonly baseDir: string;
   private readonly namespace: string;
-  private readonly embeddings: EmbeddingSubsystem | undefined;
+  private readonly vaultScope: VaultScope | undefined;
+  /** The one vault `retain` appends to; also owns this client's retain operation ids. */
+  private readonly writeNamespace: string;
+  private readonly embeddings: EmbeddingSubsystemResolver | undefined;
 
   constructor(input: MarkdownMemoryClientConfig) {
     this.baseDir = input.baseDir;
     this.namespace = sanitizeNamespace(input.namespace);
+    this.vaultScope = input.vaultScope;
+    this.writeNamespace = sanitizeNamespace(
+      vaultWriteNamespace({ tenantNamespace: this.namespace, scope: input.vaultScope }),
+    );
     this.embeddings = input.embeddings;
   }
 
+  /** Directory of the vault this client writes into. */
   private namespaceDir(): string {
-    return namespaceDirFor(this.baseDir, this.namespace);
+    return namespaceDirFor(this.baseDir, this.writeNamespace);
   }
 
   private dailyDir(): string {
@@ -163,7 +199,6 @@ export class MarkdownMemoryClient implements MemoryClient {
     timeoutMs: number;
   }): Promise<RecallOutcome> {
     try {
-      const words = queryWords(params.query);
       const budget = Math.max(params.maxTokens, 0);
       const results: RecallItem[] = [];
       let usedTokens = 0;
@@ -178,49 +213,39 @@ export class MarkdownMemoryClient implements MemoryClient {
         return true;
       };
 
-      const scan = await scanNamespaceEntries({
+      const readable = await vaultReadNamespaces({
         baseDir: this.baseDir,
-        namespace: this.namespace,
-        maxDailyFiles: RECALL_MAX_DAILY_FILES,
-        // Vault deletes hide entries and vault edits replace their text: recall
-        // must see the same effective entries the vault lists.
-        resolveTombstones: true,
+        tenantNamespace: this.namespace,
+        scope: this.vaultScope,
       });
+      const vaults = await Promise.all(
+        readable.map(async namespace => ({
+          namespace: sanitizeNamespace(namespace),
+          scan: await scanNamespaceEntries({
+            baseDir: this.baseDir,
+            namespace,
+            maxDailyFiles: RECALL_MAX_DAILY_FILES,
+            // Vault deletes hide entries and vault edits replace their text: recall
+            // must see the same effective entries the vault lists.
+            resolveTombstones: true,
+          }),
+        })),
+      );
 
       // Curated memory first: it is the model's own long-term store.
-      if (scan.curated !== undefined) {
-        take({ id: `md:${this.namespace}:MEMORY.md`, text: scan.curated, type: 'markdown' });
-      }
-
-      // Daily logs, newest first, ranked by keyword overlap.
-      const scored = scan.entries
-        .map(entry => ({ entry, score: scoreEntry(words, entry.text) }))
-        .filter(candidate => candidate.score > 0)
-        .sort((a, b) => b.score - a.score || b.entry.file.localeCompare(a.entry.file));
-
-      // Meaning-based rank fuses with (never replaces) the keyword ranking. When the
-      // vector leg cannot contribute, this resolves undefined and ranking stays
-      // keyword-only — identical to the pre-embeddings behavior.
-      let ordered: { id: string; text: string }[] | undefined;
-      if (this.embeddings !== undefined) {
-        this.embeddings.ensureWarmed();
-        const fused = await this.embeddings.fusedRank({
-          query: params.query,
-          keywordHits: scored.map(candidate => ({
-            id: candidate.entry.id,
-            text: candidate.entry.text,
-          })),
-          entryTexts: new Map(scan.entries.map(entry => [entry.id, entry.text])),
-          timeoutMs: params.timeoutMs,
-        });
-        if (fused !== undefined) {
-          ordered = fused;
+      for (const { namespace, scan } of vaults) {
+        if (scan.curated !== undefined) {
+          take({ id: `md:${namespace}:MEMORY.md`, text: scan.curated, type: 'markdown' });
         }
       }
-      const ranked =
-        ordered ??
-        scored.map(candidate => ({ id: candidate.entry.id, text: candidate.entry.text }));
-      for (const item of ranked) {
+
+      // Each vault ranks on its own corpus and index; the lists then interleave.
+      const rankedLists = await Promise.all(
+        vaults.map(({ namespace, scan }) =>
+          this.rankVault({ namespace, scan, query: params.query, timeoutMs: params.timeoutMs }),
+        ),
+      );
+      for (const item of interleaveRanked(rankedLists)) {
         const ok = take({ id: item.id, text: item.text, type: 'markdown' });
         if (!ok) {
           break;
@@ -231,6 +256,37 @@ export class MarkdownMemoryClient implements MemoryClient {
     } catch (error) {
       return failure(failureReason('markdown recall failed', error));
     }
+  }
+
+  /** One vault's entries best-first: keyword overlap, fused with its own meaning index when ready. */
+  private async rankVault(input: {
+    namespace: string;
+    scan: NamespaceScan;
+    query: string;
+    timeoutMs: number;
+  }): Promise<RankedMemory[]> {
+    const words = queryWords(input.query);
+    const scored = input.scan.entries
+      .map(entry => ({ entry, score: scoreEntry(words, entry.text) }))
+      .filter(candidate => candidate.score > 0)
+      .sort((a, b) => b.score - a.score || b.entry.file.localeCompare(a.entry.file));
+    const keywordRanked = scored.map(candidate => ({ id: candidate.entry.id, text: candidate.entry.text }));
+
+    // Meaning-based rank fuses with (never replaces) the keyword ranking. When the
+    // vector leg cannot contribute, this resolves undefined and ranking stays
+    // keyword-only, identical to the pre-embeddings behavior.
+    const embeddings = this.embeddings?.(input.namespace);
+    if (embeddings === undefined) {
+      return keywordRanked;
+    }
+    embeddings.ensureWarmed();
+    const fused = await embeddings.fusedRank({
+      query: input.query,
+      keywordHits: keywordRanked,
+      entryTexts: new Map(input.scan.entries.map(entry => [entry.id, entry.text])),
+      timeoutMs: input.timeoutMs,
+    });
+    return fused ?? keywordRanked;
   }
 
   async retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome> {
@@ -270,7 +326,7 @@ export class MarkdownMemoryClient implements MemoryClient {
         }
         const blocks = items.map((item, offset) => {
           const text = formatRetainEntry(item);
-          indexed.push({ id: `md:${this.namespace}:${day}.md#${String(existing + offset)}`, text });
+          indexed.push({ id: `md:${this.writeNamespace}:${day}.md#${String(existing + offset)}`, text });
           return text;
         });
         // Each block ends with a newline and blocks are blank-line separated,
@@ -287,8 +343,9 @@ export class MarkdownMemoryClient implements MemoryClient {
       // New memories become searchable by meaning without waiting for a backfill.
       // Kicking the warm here (not just on recall) means a retain-only session
       // still downloads the model and builds the index in the background.
-      this.embeddings?.ensureWarmed();
-      this.embeddings?.indexNewEntries(indexed);
+      const embeddings = this.embeddings?.(this.writeNamespace);
+      embeddings?.ensureWarmed();
+      embeddings?.indexNewEntries(indexed);
       return { ok: true };
     } catch (error) {
       return { ok: false, reason: failureReason('markdown retain failed', error) };
@@ -350,9 +407,7 @@ export class MarkdownMemoryClient implements MemoryClient {
   private static readonly VAULT_ENTRY_ID_PATTERN = /^md:([^:]+):([^#]+)#(\d+)$/;
 
   private vaultTenantScope(filesystemNamespace: string): boolean {
-    return (
-      filesystemNamespace === this.namespace || filesystemNamespace.startsWith(`${this.namespace}__`)
-    );
+    return filesystemNamespace === this.namespace || filesystemNamespace.startsWith(`${this.namespace}__`);
   }
 
   private async lookupVaultEntry(
@@ -387,10 +442,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     );
   }
 
-  async listEntries(params: {
-    namespace: string;
-    timeoutMs: number;
-  }): Promise<ListMemoryVaultEntriesOutcome> {
+  async listEntries(params: { namespace: string; timeoutMs: number }): Promise<ListMemoryVaultEntriesOutcome> {
     try {
       const filesystemNamespace = vaultFilesystemNamespace(this.namespace, params.namespace);
       const scanned = await withTimeout(
@@ -445,12 +497,10 @@ export class MarkdownMemoryClient implements MemoryClient {
         params.timeoutMs,
         `markdown vault mark ${params.entryId}`,
       );
-      // The shared vault is the namespace the turn-time client warms, so a vault
-      // edit re-indexes there right away; topic vaults converge on the next warm.
-      if (target.filesystemNamespace === this.namespace) {
-        this.embeddings?.ensureWarmed();
-        this.embeddings?.indexNewEntries([{ id: params.entryId, text: clean }]);
-      }
+      // The edit re-indexes in the vault that owns the entry, never in another vault's store.
+      const embeddings = this.embeddings?.(target.filesystemNamespace);
+      embeddings?.ensureWarmed();
+      embeddings?.indexNewEntries([{ id: params.entryId, text: clean }]);
       return {
         ok: true,
         entry: {
@@ -468,10 +518,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  async deleteEntry(params: {
-    entryId: string;
-    timeoutMs: number;
-  }): Promise<DeleteMemoryVaultEntryOutcome> {
+  async deleteEntry(params: { entryId: string; timeoutMs: number }): Promise<DeleteMemoryVaultEntryOutcome> {
     try {
       const target = await this.lookupVaultEntry(params.entryId, params.timeoutMs);
       if (target === undefined) {
@@ -518,11 +565,6 @@ export class MarkdownMemoryClient implements MemoryClient {
     } catch {
       return timeoutFailure(params.timeoutMs);
     }
-  }
-
-  /** Plain-English embedding status for logs or settings UI; undefined when disabled. */
-  embeddingStatus(): { state: string; detail: string; indexedEntries: number } | undefined {
-    return this.embeddings?.getStatus();
   }
 
   private dayOf(timestamp: string): string {

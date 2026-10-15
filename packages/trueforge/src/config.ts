@@ -19,15 +19,16 @@ import { fileURLToPath } from 'node:url';
 
 import envPaths from 'env-paths';
 
-import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS } from '@truefoundry/trueforge-core/core';
-import { validateRunCodeStartupConfig } from '@truefoundry/trueforge-core/core';
+import { TOKEN_FACTORY_DEFAULT_BASE_URL, validateRunCodeStartupConfig } from '@truefoundry/trueforge-core/core';
 import {
   MEMORY_PROVIDER_MAX_TIMEOUT_MS,
   MEMORY_SETTINGS_LIMITS,
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
-import type { ReflectBudget } from './runtime/memory/hindsightClient';
+import { normalizedOrigin } from './mcp/firstParty';
+import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
+import type { ReflectBudget } from './runtime/memory/hindsightClient';
 
 const DEFAULT_PORT = 8790;
 /** Loopback default; container images set HOST=0.0.0.0 so probes and Service traffic reach the process. */
@@ -48,7 +49,7 @@ const LOCAL_EXECUTOR_ID = 'local';
 /** OS-standard data dir for SQLite in standalone mode. */
 const ENV_PATHS_APP_NAME = 'trueforge';
 const DEFAULT_POSTGRES_USER = 'trueforge';
-const DEFAULT_POSTGRES_PASSWORD = process.env['POSTGRES_PASSWORD'] || 'changeme';
+const DEFAULT_POSTGRES_PASSWORD = process.env['POSTGRES_PASSWORD'] ?? 'changeme';
 const DEFAULT_POSTGRES_DB = 'trueforge';
 const DEFAULT_POSTGRES_HOST = 'localhost';
 const DEFAULT_POSTGRES_PORT = 5432;
@@ -57,7 +58,7 @@ const DEFAULT_REDIS_URL = 'redis://localhost:6379';
  * Fixed local service credential when `STANDALONE=true` and `TRUEFORGE_API_KEY` is unset.
  * Local testing only — not for distributed deployments.
  */
-export const STANDALONE_TRUEFORGE_API_KEY = process.env['TRUEFORGE_API_KEY'] || 'dev-only-placeholder';
+export const STANDALONE_TRUEFORGE_API_KEY = process.env['TRUEFORGE_API_KEY'] ?? 'dev-only-placeholder';
 
 /**
  * `BUILD_REF` when nothing stamped the build: host development, and image builds
@@ -139,6 +140,33 @@ export function parseOidcAllowedEmails(raw: string | undefined): string[] {
 }
 
 /**
+ * Parses `FIRST_PARTY_MCP_ORIGINS`: comma-separated exact origins (scheme, host and optional
+ * port, no path) of the operator's own memory provider. Unset / blank → none, so no connector is
+ * first-party. Each entry is normalized the way a connector URL's origin is, then matched exactly.
+ * Anything else fails the boot: a silently dropped typo would read as "nothing is trusted", and a
+ * path or wildcard would suggest a prefix or suffix match the list never does.
+ */
+export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === '') {
+    return [];
+  }
+  const origins = new Set<string>();
+  for (const entry of raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)) {
+    const origin = normalizedOrigin(entry);
+    if (origin === undefined || origin.includes('*') || new URL(entry).href !== `${origin}/`) {
+      throw new Error(
+        `FIRST_PARTY_MCP_ORIGINS entries must be exact http(s) origins such as https://memory.internal:8443, got: ${entry}`,
+      );
+    }
+    origins.add(origin);
+  }
+  return [...origins];
+}
+
+/**
  * Source reference the running build came from. A Docker `ARG` that the build was
  * never given still reaches the process as an empty string, so blank counts as unset.
  */
@@ -195,6 +223,14 @@ export function parsePositiveInt(options: {
     throw new Error(`Environment variable ${envKey} must be at most ${String(maxValue)}, got "${raw}"`);
   }
   return value;
+}
+
+/** Like parsePositiveInt, but an unset or blank value stays undefined instead of taking a default. */
+export function parseOptionalPositiveInt(options: { envKey: string; raw: string | undefined }): number | undefined {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return undefined;
+  }
+  return parsePositiveInt({ envKey: options.envKey, raw: options.raw, defaultValue: 1 });
 }
 
 /** Parses a float env var constrained to the closed interval [0, 1]; unset/blank falls back to `defaultValue`. */
@@ -269,6 +305,32 @@ function parseMemoryBackend(options: {
   throw new Error(`${options.envKey} must be one of markdown, hindsight; got ${JSON.stringify(options.raw)}`);
 }
 
+/** How turns may route to Nebius Token Factory. */
+export type TokenFactoryMode = 'off' | 'fallback' | 'force';
+
+/**
+ * Parses `TOKEN_FACTORY_MODE`. Unset/blank → `off`. `fallback` tries the configured
+ * local provider first and uses Token Factory when it fails; `force` tries Token
+ * Factory first (for testing and demo paths) and falls back to the local provider.
+ */
+export function parseTokenFactoryMode(options: {
+  envKey: string;
+  raw: string | undefined;
+  defaultValue: TokenFactoryMode;
+}): TokenFactoryMode {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return options.defaultValue;
+  }
+  const value = options.raw.trim().toLowerCase();
+  if (value === 'off' || value === 'fallback' || value === 'force') {
+    return value;
+  }
+  throw new Error(`${options.envKey} must be one of off, fallback, force; got ${JSON.stringify(options.raw)}`);
+}
+
+/** Default Token Factory model used when `TOKEN_FACTORY_MODEL` is unset. */
+export const DEFAULT_TOKEN_FACTORY_MODEL = 'nvidia/nemotron-3-super-120b-a12b';
+
 function parseBoolean(options: { envKey: string; raw: string | undefined; defaultValue: boolean }): boolean {
   const { envKey, raw, defaultValue } = options;
   if (raw === undefined || raw.trim() === '') {
@@ -307,6 +369,54 @@ function parsePublicBaseUrl(raw: string | undefined): string {
   }
   const path = segments.length === 0 ? '' : `/${segments.join('/')}`;
   return `${parsed.origin}${path}`;
+}
+
+/**
+ * Parse a maps upstream URL: must be http(s), no query or hash. Fails fast at
+ * boot like PUBLIC_BASE_URL. Trailing slashes are trimmed; callers join paths.
+ */
+function parseMapsUrl({
+  envKey,
+  raw,
+  defaultValue,
+  requiredPlaceholders = [],
+}: {
+  envKey: string;
+  raw: string | undefined;
+  defaultValue: string;
+  requiredPlaceholders?: readonly string[];
+}): string {
+  const value = raw === undefined || raw.trim() === '' ? defaultValue : raw.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch (error) {
+    throw new Error(`${envKey} must be a valid URL`, { cause: error });
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`${envKey} must be an http(s) URL`);
+  }
+  if (parsed.search !== '' || parsed.hash !== '') {
+    throw new Error(`${envKey} must not include a query or hash`);
+  }
+  for (const placeholder of requiredPlaceholders) {
+    if (!value.includes(placeholder)) {
+      throw new Error(`${envKey} must include the ${placeholder} placeholder`);
+    }
+  }
+  return value.endsWith('/') && value.length > 1 ? value.slice(0, -1) : value;
+}
+
+/** Parses `MAPS_ROUTER_PROVIDER`. Unset/blank → `osrm`. Unknown values throw. */
+function parseMapsRouterProvider(raw: string | undefined): string {
+  if (raw === undefined || raw.trim() === '') {
+    return 'osrm';
+  }
+  const value = raw.trim().toLowerCase();
+  if (value === 'osrm') {
+    return value;
+  }
+  throw new Error(`Environment variable MAPS_ROUTER_PROVIDER must be "osrm", got ${JSON.stringify(raw)}`);
 }
 
 function parseTrueFoundrySandboxProvider(raw: string | undefined): 'daytona' | 'truefoundry' | undefined {
@@ -605,6 +715,13 @@ export interface SharedServerConfiguration {
   /** Max milliseconds for an MCP transport connection. Env: `MCP_CONNECT_TIMEOUT_MS`. Default 30 seconds. */
   MCP_CONNECT_TIMEOUT_MS: number;
   /**
+   * Origins of the operator's own memory provider, as normalized `scheme://host[:port]` strings.
+   * A connector saved as the memory provider on one of these origins is first-party: its tools that
+   * declare `readOnlyHint` true and `openWorldHint` false run without an approval card. Empty means
+   * no connector is first-party. Env: `FIRST_PARTY_MCP_ORIGINS` (comma-separated). Default empty.
+   */
+  FIRST_PARTY_MCP_ORIGINS: string[];
+  /**
    * Max concurrent read-only (Phase-A) tool-call dispatches per assistant batch.
    * Env: `TOOL_DISPATCH_MAX_CONCURRENCY`. Default 4.
    */
@@ -619,6 +736,14 @@ export interface SharedServerConfiguration {
    * Must stay below `SERVER_EXECUTION_TIMEOUT_SECONDS`.
    */
   TOOL_CALL_TIMEOUT_MS: number;
+  /**
+   * Bound in milliseconds on waiting for a model call's first output before
+   * the turn fails visibly instead of hanging. A provider that accepts the
+   * request but never produces a first chunk would otherwise leave the turn
+   * active indefinitely. Env: `MODEL_FIRST_RESPONSE_TIMEOUT_MS`. Default
+   * 600000 (10 minutes).
+   */
+  MODEL_FIRST_RESPONSE_TIMEOUT_MS: number;
   /**
    * Client name used for Dynamic Client Registration (DCR) of MCP servers.
    * This is the client name shown on authorization-server consent screens.
@@ -652,6 +777,12 @@ export interface SharedServerConfiguration {
    * driver is host-local even in distributed mode).
    */
   SANDBOX_RUNS_DIR: string;
+  /**
+   * Directory where the Docker driver remembers its last successful image
+   * signature verification, so readiness works offline.
+   * Derived: `{env-paths data}/sandbox-state`.
+   */
+  SANDBOX_STATE_DIR: string;
   /**
    * Default per-run timeout for run_code, seconds. Env: `SANDBOX_DEFAULT_TIMEOUT_SECONDS`. Default 60.
    */
@@ -710,12 +841,14 @@ export interface SharedServerConfiguration {
    */
   MAX_REQUEST_BODY_BYTES: number;
   /**
-   * Default context size in tokens that triggers compaction, used whenever an agent spec does
-   * not set `config.context_management.compaction.compaction_threshold_tokens` itself; an
-   * explicit spec value always wins over this instance-wide default.
-   * Env: `CONTEXT_COMPACTION_THRESHOLD_TOKENS`. Default 50000.
+   * Instance-wide context size in tokens that triggers compaction, used whenever an agent spec
+   * does not set `config.context_management.compaction.trigger` itself; an explicit spec value
+   * always wins. Unset leaves the threshold to the model's context length (80% of it, lowered so
+   * input plus the configured max output tokens fit, never below 4000), with a fixed 50000-token
+   * fallback when that length is unknown.
+   * Env: `CONTEXT_COMPACTION_THRESHOLD_TOKENS`.
    */
-  CONTEXT_COMPACTION_THRESHOLD_TOKENS: number;
+  CONTEXT_COMPACTION_THRESHOLD_TOKENS: number | undefined;
   /**
    * Max seconds to wait for turn cancellation + connection drain on SIGTERM/SIGINT.
    * Env: `GRACEFUL_TIMEOUT_SECONDS`. Default 30.
@@ -862,6 +995,38 @@ export interface SharedServerConfiguration {
    */
   MEMORY_SCREEN_URL: string;
   /**
+   * Base URL of the `aman-stt` speech-to-text sidecar (`POST {url}/v1/transcribe`).
+   * The browser never calls it directly; the voice endpoints proxy through this server.
+   * Env: `STT_URL`. Default `http://aman-stt:8001`.
+   */
+  STT_URL: string;
+  /**
+   * Base URL of the Nominatim-compatible geocoder used by the embedded maps tools.
+   * Env: `MAPS_GEOCODER_URL`. Default `https://nominatim.openstreetmap.org`.
+   */
+  MAPS_GEOCODER_URL: string;
+  /**
+   * Routing provider id for the embedded maps tools. Only `osrm` is implemented in v1;
+   * the interface leaves room for a traffic-aware provider later.
+   * Env: `MAPS_ROUTER_PROVIDER`. Default `osrm`.
+   */
+  MAPS_ROUTER_PROVIDER: string;
+  /**
+   * Base URL of the routing provider used by the embedded maps tools.
+   * Env: `MAPS_ROUTER_URL`. Default `https://router.project-osrm.org`.
+   */
+  MAPS_ROUTER_URL: string;
+  /**
+   * Tile URL template used by the same-origin tile proxy, with `{z}`, `{x}`, `{y}` placeholders.
+   * Env: `MAPS_TILE_URL`. Default `https://tile.openstreetmap.org/{z}/{x}/{y}.png`.
+   */
+  MAPS_TILE_URL: string;
+  /**
+   * User-Agent sent to the geocoder, router, and tile upstreams.
+   * Env: `MAPS_USER_AGENT`. Default `Amanuensis/<version> (+https://github.com/ClimbOutLabs/amanuensis)`.
+   */
+  MAPS_USER_AGENT: string;
+  /**
    * Bearer token for the memory recall screen classifier. Distinct from any memory-provider
    * credential. Env: `MEMORY_SCREEN_AUTH_TOKEN`. Default empty.
    */
@@ -973,6 +1138,29 @@ export interface SharedServerConfiguration {
    */
   MEMORY_SUMMARIZE: boolean;
   /**
+   * Nebius Token Factory API key. Populated from the Secure Vault into the deployment
+   * environment; never committed or logged. Env: `NEBIUS_API_KEY`. Unset by default.
+   */
+  NEBIUS_API_KEY: string | undefined;
+  /**
+   * Token Factory model id used for fallback and forced routing.
+   * Env: `TOKEN_FACTORY_MODEL`. Default `nvidia/nemotron-3-super-120b-a12b`.
+   */
+  TOKEN_FACTORY_MODEL: string;
+  /**
+   * Token Factory base URL.
+   * Env: `TOKEN_FACTORY_BASE_URL`. Default `https://api.tokenfactory.nebius.com/v1`.
+   */
+  TOKEN_FACTORY_BASE_URL: string;
+  /**
+   * How turns may route to Nebius Token Factory. `off` (the default) disables Token
+   * Factory routing entirely. `fallback` uses the configured local provider first and
+   * fails over to Token Factory when it is unavailable. `force` uses Token Factory
+   * first with the local provider as fallback, for testing and demo paths.
+   * Env: `TOKEN_FACTORY_MODE`. Default `off`.
+   */
+  TOKEN_FACTORY_MODE: TokenFactoryMode;
+  /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
    * memories by meaning in addition to keyword overlap. Everything runs on the
@@ -986,6 +1174,14 @@ export interface SharedServerConfiguration {
    * Env: `MEMORY_EMBEDDINGS_MODEL_DIR`. Default `<MEMORY_MARKDOWN_DIR>/.embedding-model`.
    */
   MEMORY_EMBEDDINGS_MODEL_DIR: string;
+  /**
+   * Root directory for persona knowledge libraries. Each persona gets its own
+   * SQLite database file under a sanitized tenant subdirectory, so knowledge
+   * can never leak across personas. Persist it (Docker volume) or libraries
+   * vanish on container recreate.
+   * Env: `PERSONA_KNOWLEDGE_DIR`. Default `./data/persona-knowledge` (relative to the process cwd).
+   */
+  PERSONA_KNOWLEDGE_DIR: string;
   /**
    * Memories embedded per background-backfill batch. Smaller batches yield to the
    * event loop more often; larger batches finish sooner.
@@ -1207,6 +1403,7 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MCP_CONNECT_TIMEOUT_MS'),
     defaultValue: 30 * 1000,
   }),
+  FIRST_PARTY_MCP_ORIGINS: parseFirstPartyMcpOrigins(getEnv('FIRST_PARTY_MCP_ORIGINS')),
   TOOL_DISPATCH_MAX_CONCURRENCY: parsePositiveInt({
     envKey: 'TOOL_DISPATCH_MAX_CONCURRENCY',
     raw: getEnv('TOOL_DISPATCH_MAX_CONCURRENCY'),
@@ -1225,6 +1422,13 @@ const shared: SharedServerConfiguration = {
     // to the one tool that needs it instead of every tool.
     defaultValue: 240_000,
   }),
+  MODEL_FIRST_RESPONSE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_FIRST_RESPONSE_TIMEOUT_MS',
+    raw: getEnv('MODEL_FIRST_RESPONSE_TIMEOUT_MS'),
+    // Literal mirror of DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS in
+    // trueforge-core's AgentThread.ts (the canonical owner).
+    defaultValue: 600_000,
+  }),
   MCP_DCR_OAUTH_CLIENT_NAME:
     getEnv('MCP_DCR_OAUTH_CLIENT_NAME', { defaultValue: 'truefoundry-harness' }) ?? 'truefoundry-harness',
   SANDBOX_FILE_MAX_BYTES_FOR_DOWNLOAD: parsePositiveInt({
@@ -1239,6 +1443,7 @@ const shared: SharedServerConfiguration = {
   }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
+  SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
   SANDBOX_DEFAULT_TIMEOUT_SECONDS: parsePositiveInt({
     envKey: 'SANDBOX_DEFAULT_TIMEOUT_SECONDS',
     raw: getEnv('SANDBOX_DEFAULT_TIMEOUT_SECONDS'),
@@ -1293,10 +1498,9 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MAX_REQUEST_BODY_BYTES'),
     defaultValue: DEFAULT_MAX_REQUEST_BODY_BYTES,
   }),
-  CONTEXT_COMPACTION_THRESHOLD_TOKENS: parsePositiveInt({
+  CONTEXT_COMPACTION_THRESHOLD_TOKENS: parseOptionalPositiveInt({
     envKey: 'CONTEXT_COMPACTION_THRESHOLD_TOKENS',
     raw: getEnv('CONTEXT_COMPACTION_THRESHOLD_TOKENS'),
-    defaultValue: DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
   }),
   GRACEFUL_TIMEOUT_SECONDS: parsePositiveInt({
     envKey: 'GRACEFUL_TIMEOUT_SECONDS',
@@ -1409,6 +1613,27 @@ const shared: SharedServerConfiguration = {
     defaultValue: false,
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
+  STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
+  MAPS_GEOCODER_URL: parseMapsUrl({
+    envKey: 'MAPS_GEOCODER_URL',
+    raw: getEnv('MAPS_GEOCODER_URL'),
+    defaultValue: 'https://nominatim.openstreetmap.org',
+  }),
+  MAPS_ROUTER_PROVIDER: parseMapsRouterProvider(getEnv('MAPS_ROUTER_PROVIDER', { required: false })),
+  MAPS_ROUTER_URL: parseMapsUrl({
+    envKey: 'MAPS_ROUTER_URL',
+    raw: getEnv('MAPS_ROUTER_URL'),
+    defaultValue: 'https://router.project-osrm.org',
+  }),
+  MAPS_TILE_URL: parseMapsUrl({
+    envKey: 'MAPS_TILE_URL',
+    raw: getEnv('MAPS_TILE_URL'),
+    defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    requiredPlaceholders: ['{z}', '{x}', '{y}'],
+  }),
+  MAPS_USER_AGENT:
+    getEnv('MAPS_USER_AGENT', { required: false }) ??
+    `Amanuensis/${PACKAGE_VERSION} (+https://github.com/ClimbOutLabs/amanuensis)`,
   MEMORY_SCREEN_AUTH_TOKEN: getEnv('MEMORY_SCREEN_AUTH_TOKEN', { defaultValue: '' }) ?? '',
   MEMORY_SCREEN_THRESHOLD: parseUnitInterval({
     envKey: 'MEMORY_SCREEN_THRESHOLD',
@@ -1491,6 +1716,17 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_SUMMARIZE'),
     defaultValue: true,
   }),
+  NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
+  TOKEN_FACTORY_MODEL:
+    getEnv('TOKEN_FACTORY_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_MODEL }) ?? DEFAULT_TOKEN_FACTORY_MODEL,
+  TOKEN_FACTORY_BASE_URL:
+    getEnv('TOKEN_FACTORY_BASE_URL', { defaultValue: TOKEN_FACTORY_DEFAULT_BASE_URL }) ??
+    TOKEN_FACTORY_DEFAULT_BASE_URL,
+  TOKEN_FACTORY_MODE: parseTokenFactoryMode({
+    envKey: 'TOKEN_FACTORY_MODE',
+    raw: getEnv('TOKEN_FACTORY_MODE'),
+    defaultValue: 'off',
+  }),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
     raw: getEnv('MEMORY_EMBEDDINGS_ENABLED'),
@@ -1498,14 +1734,14 @@ const shared: SharedServerConfiguration = {
   }),
   MEMORY_EMBEDDINGS_MODEL_DIR:
     getEnv('MEMORY_EMBEDDINGS_MODEL_DIR') ??
-    defaultEmbeddingModelDir(
-      getEnv('MEMORY_MARKDOWN_DIR', { defaultValue: './data/memory' }) ?? './data/memory',
-    ),
+    defaultEmbeddingModelDir(getEnv('MEMORY_MARKDOWN_DIR', { defaultValue: './data/memory' }) ?? './data/memory'),
   MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE: parsePositiveInt({
     envKey: 'MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE',
     raw: getEnv('MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE'),
     defaultValue: 8,
   }),
+  PERSONA_KNOWLEDGE_DIR:
+    getEnv('PERSONA_KNOWLEDGE_DIR', { defaultValue: './data/persona-knowledge' }) ?? './data/persona-knowledge',
   MEMORY_REFLECT_MAX_TOKENS: parsePositiveInt({
     envKey: 'MEMORY_REFLECT_MAX_TOKENS',
     raw: getEnv('MEMORY_REFLECT_MAX_TOKENS'),
@@ -1598,6 +1834,54 @@ const configuration: ServerConfiguration = standalone
       TRUEFOUNDRY_SANDBOX_SERVER_URL: getEnv('TRUEFOUNDRY_SANDBOX_SERVER_URL', { required: false }),
       TRUEFOUNDRY_SANDBOX_SETTINGS: getEnv('TRUEFOUNDRY_SANDBOX_SETTINGS', { required: false }),
     };
+
+/** The password a connection URL carries, decoded, or undefined when it has none or is not a URL. */
+function urlPassword(raw: string): string | undefined {
+  try {
+    const password = decodeURIComponent(new URL(raw).password);
+    return password === '' ? undefined : password;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The settings that carry secrets: what {@link getConfiguredSecretValues} reads, so a test can supply just these. */
+export type ConfiguredSecretSettings = Pick<
+  SharedServerConfiguration,
+  'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN'
+> &
+  (
+    | { STANDALONE: true }
+    | ({ STANDALONE: false } & Pick<
+        DistributedServerConfiguration,
+        'OIDC' | 'TRUEFOUNDRY_API_KEY' | 'TRUEFOUNDRY_SANDBOX_API_KEY' | 'DATABASE_URL' | 'REDIS_URL'
+      >)
+  );
+
+/**
+ * Secret values this process holds from its own configuration, for the outbound secret guard:
+ * service credentials, the OIDC client secret, and the passwords inside connection URLs. The one
+ * place to extend when a new secret setting is added.
+ */
+export function getConfiguredSecretValues(config: ConfiguredSecretSettings = configuration): string[] {
+  const candidates: (string | undefined)[] = [
+    config.TRUEFORGE_API_KEY,
+    config.NEBIUS_API_KEY,
+    config.MEMORY_SCREEN_AUTH_TOKEN,
+  ];
+  if (!config.STANDALONE) {
+    candidates.push(
+      config.OIDC?.OIDC_CLIENT_SECRET,
+      config.TRUEFOUNDRY_API_KEY,
+      config.TRUEFOUNDRY_SANDBOX_API_KEY,
+      config.DATABASE_URL,
+      urlPassword(config.DATABASE_URL),
+      config.REDIS_URL,
+      urlPassword(config.REDIS_URL),
+    );
+  }
+  return candidates.filter((value): value is string => value !== undefined && value !== '');
+}
 
 export function isOidcConfigured(
   value: ServerConfiguration,
@@ -1867,7 +2151,11 @@ validateRunCodeStartupConfig({
 });
 // The cosign key is only needed once an image is configured; a dormant
 // install must not fail boot for a key it will never use.
-if (runCodeConfigured && configuration.SANDBOX_ISOLATION_DRIVER === 'docker' && configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() === '') {
+if (
+  runCodeConfigured &&
+  configuration.SANDBOX_ISOLATION_DRIVER === 'docker' &&
+  configuration.SANDBOX_COSIGN_PUBLIC_KEY_PATH.trim() === ''
+) {
   throw new Error(
     'SANDBOX_COSIGN_PUBLIC_KEY_PATH is required when SANDBOX_ISOLATION_DRIVER=docker and SANDBOX_IMAGE is set: ' +
       'the sandbox image signature is verified fail-closed. Point it at the release cosign public-key PEM.',

@@ -65,6 +65,7 @@ const CREDENTIAL_PATTERNS = [
   { name: 'OpenAI-style secret key (sk-...)', re: /\bsk-[A-Za-z0-9]{20,}/ },
   { name: 'AWS access key ID (AKIA...)', re: /\bAKIA[A-Z0-9]{16}\b/ },
   { name: 'Slack token (xox[baprs]-...)', re: /\bxox[baprs]-[A-Za-z0-9-]{6,}/ },
+  { name: 'Tailscale tailnet hostname', re: /\b[a-z0-9-]+\.tail[0-9a-f]+\.ts\.net\b/i },
 ];
 
 // (d) .env files. Names ending in one of these are documentation/fixtures by

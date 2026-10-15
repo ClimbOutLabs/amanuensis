@@ -4,33 +4,39 @@ import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import { useEffect, useState } from 'react';
 
-import { useOptionalServer } from '../server/ServerContext.js';
 import {
   hasSessionResync,
   type LastCompactionStatus,
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
+import { useOptionalServer } from '../server/ServerContext.js';
 
 export type CompactionStatusResult = {
   /** Model context limit in tokens, when known from the agent spec. */
   contextLimit: number | null;
   /** Input tokens from the session's most recent turn (what the model last saw). */
   liveTokens: number | null;
+  /** Max output tokens reserved by the model, when known from the agent spec. */
+  maxOutputTokens: number | null;
   /** Most recent compaction, or null when none has run yet. */
   lastCompaction: LastCompactionStatus | null;
   loading: boolean;
 };
 
-/** Reads the model's context length from the agent spec, when present. */
-function useContextLimit(): number | null {
+/** Reads numeric model properties from the agent spec, when present. */
+function useModelProperties(): { contextLength: number | null; maxOutputTokens: number | null } {
   const { agentSpec } = useTrueFoundryAgentSpec();
-  // The agent spec's model ref may carry resolved properties (including
-  // contextLength) depending on the server; treat as unknown and narrow.
+  // The agent spec's model ref may carry resolved properties depending on
+  // the server; treat as unknown and narrow.
   const model: unknown = agentSpec?.model;
-  if (typeof model !== 'object' || model === null) return null;
+  if (typeof model !== 'object' || model === null) return { contextLength: null, maxOutputTokens: null };
   const properties: unknown = (model as { properties?: unknown }).properties;
-  if (typeof properties !== 'object' || properties === null) return null;
-  const contextLength: unknown = (properties as { contextLength?: unknown }).contextLength;
-  return typeof contextLength === 'number' && contextLength > 0 ? contextLength : null;
+  if (typeof properties !== 'object' || properties === null) return { contextLength: null, maxOutputTokens: null };
+  const props = properties as Record<string, unknown>;
+  const read = (key: string): number | null => {
+    const value: unknown = props[key];
+    return typeof value === 'number' && value > 0 ? value : null;
+  };
+  return { contextLength: read('contextLength'), maxOutputTokens: read('maxOutputTokens') };
 }
 
 /**
@@ -42,7 +48,7 @@ function useContextLimit(): number | null {
 export function useCompactionStatus(): CompactionStatusResult {
   const sessionId = useAuiState(state => state.threadListItem?.remoteId);
   const server = useOptionalServer();
-  const contextLimit = useContextLimit();
+  const { contextLength: contextLimit, maxOutputTokens } = useModelProperties();
   const [lastCompaction, setLastCompaction] = useState<LastCompactionStatus | null>(null);
   const [liveTokens, setLiveTokens] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -53,7 +59,7 @@ export function useCompactionStatus(): CompactionStatusResult {
       setLiveTokens(null);
       return;
     }
-    if (!hasSessionResync(server)) return;
+    if (server == null || !hasSessionResync(server)) return;
     let cancelled = false;
     setLoading(true);
     Promise.all([
@@ -73,5 +79,5 @@ export function useCompactionStatus(): CompactionStatusResult {
     };
   }, [sessionId, server]);
 
-  return { contextLimit, liveTokens, lastCompaction, loading };
+  return { contextLimit, liveTokens, maxOutputTokens, lastCompaction, loading };
 }

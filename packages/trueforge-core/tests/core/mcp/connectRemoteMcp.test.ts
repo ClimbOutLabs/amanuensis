@@ -165,7 +165,11 @@ describe('connectRemoteMcp transport selection', () => {
       }
     };
 
-    const conn = await connectRemoteMcp({ ...baseParams(), knownTransportType: 'streamable-http', sessionId: 'sess-1' });
+    const conn = await connectRemoteMcp({
+      ...baseParams(),
+      knownTransportType: 'streamable-http',
+      sessionId: 'sess-1',
+    });
     expect(conn.transportType).toBe('sse');
     expect(mockConnectAttempts).toEqual(['streamable-http', 'sse']);
   });
@@ -175,7 +179,11 @@ describe('connectRemoteMcp transport selection', () => {
       if (type === 'streamable-http') throw new Error('HTTP 500 Internal Server Error');
     };
 
-    const conn = await connectRemoteMcp({ ...baseParams(), knownTransportType: 'streamable-http', sessionId: 'sess-1' });
+    const conn = await connectRemoteMcp({
+      ...baseParams(),
+      knownTransportType: 'streamable-http',
+      sessionId: 'sess-1',
+    });
     expect(conn.transportType).toBe('sse');
     expect(mockConnectAttempts).toEqual(['streamable-http', 'sse']);
   });

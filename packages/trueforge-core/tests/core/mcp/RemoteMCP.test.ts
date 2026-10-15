@@ -27,7 +27,9 @@ interface FakeConnectionState {
   sessionIdRequestedByConnection: (string | undefined)[];
 }
 
-function installFakeConnection(opts: { sessionId?: string | null; failFirstCallToolWith?: unknown } = {}): FakeConnectionState {
+function installFakeConnection(
+  opts: { sessionId?: string | null; failFirstCallToolWith?: unknown } = {},
+): FakeConnectionState {
   const state: FakeConnectionState = {
     connectCalls: 0,
     callToolCalls: 0,

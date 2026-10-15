@@ -13,6 +13,7 @@ import {
   ListImplementationPlanGrantsResponseSchema,
   RevokeImplementationPlanGrantResponseSchema,
 } from '../schemas/implementationPlanGrant';
+import { ListSessionAuditLogRequestQuerySchema, ListSessionAuditLogResponseSchema } from '../schemas/sentinelAudit';
 import {
   CreateSessionRequestSchema,
   GetOrCreateSessionByExternalIdRequestSchema,
@@ -384,6 +385,39 @@ export const revokeImplementationPlanGrantRoute = createRoute({
     409: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'An admitted dispatch has not reached a terminal outcome.',
+    },
+  },
+});
+
+export const getSessionAuditLogRoute = createRoute({
+  method: 'get',
+  path: '/{session_id}/audit-log',
+  tags: [OpenApiTag.AGENT_SESSIONS],
+  summary: 'List Sentinel audit log for a session',
+  description:
+    'List the Sentinel permission audit log for a session (newest first): tiered tool-call decisions with outcomes. Only the session creator may list it.',
+  'x-fern-sdk-group-name': ['sessions'],
+  'x-fern-sdk-method-name': 'get_audit_log',
+  request: {
+    params: SessionIdParamsSchema,
+    query: ListSessionAuditLogRequestQuerySchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: ListSessionAuditLogResponseSchema } },
+      description: 'Audit log entries.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Invalid query parameters.',
+    },
+    403: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Caller is not the session creator.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Session not found.',
     },
   },
 });

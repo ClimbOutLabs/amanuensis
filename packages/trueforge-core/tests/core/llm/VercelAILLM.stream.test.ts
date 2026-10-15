@@ -361,9 +361,9 @@ describe('mapStreamToChunks', () => {
       { type: 'reasoning-delta', id: 'r1', text: repeated },
     ];
 
-    await expect(
-      drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META })),
-    ).rejects.toEqual(new ModelOutputRepetitionError('reasoning'));
+    await expect(drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }))).rejects.toEqual(
+      new ModelOutputRepetitionError('reasoning'),
+    );
   });
 
   it('does not stop a ~200-row methodical build streaming row arguments', async () => {
@@ -408,9 +408,9 @@ describe('mapStreamToChunks', () => {
       { type: 'reasoning-delta', id: 'r1', text: repeated },
     ];
 
-    await expect(
-      drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META })),
-    ).rejects.toEqual(new ModelOutputRepetitionError('reasoning'));
+    await expect(drainStream(mapStreamToChunks({ stream: makeStream(parts), chunkMeta: CHUNK_META }))).rejects.toEqual(
+      new ModelOutputRepetitionError('reasoning'),
+    );
   });
 
   it('allows a long reasoning stream that continues to introduce new information', async () => {
@@ -848,6 +848,23 @@ describe('mapStreamToChunks', () => {
       }),
     ).catch((error: unknown) => error);
     expect(rejection).not.toBeInstanceOf(ModelStreamFault);
+  });
+
+  it('keeps a provider error carrying data.code as a plain Error, not a ModelStreamFault', async () => {
+    // The AI SDK provider error shape (a provider-side 500, for example from a request the
+    // provider rejects): a definite provider response, not a broken stream, so the
+    // compact-and-retry recovery must not apply.
+    const cause = Object.assign(new Error('Internal Server Error'), {
+      data: { message: '', type: 'InternalServerError', param: null, code: 500 },
+    });
+    const rejection: unknown = await drainStream(
+      mapStreamToChunks({
+        stream: makeStream([{ type: 'error', error: cause }]),
+        chunkMeta: CHUNK_META,
+      }),
+    ).catch((error: unknown) => error);
+    expect(rejection).not.toBeInstanceOf(ModelStreamFault);
+    expect(rejection).toBeInstanceOf(Error);
   });
 
   it('raises ModelStreamFault when the stream ends with no text, no tool call, and no finish signal', async () => {

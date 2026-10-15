@@ -6,12 +6,14 @@ import winston from 'winston';
 import { createMcpOAuthRouter } from '../../../src/apis/mcpOAuth';
 import { createMcpServersRouter, createSettingsMcpServersRouter } from '../../../src/apis/mcpServers';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import configuration from '../../../src/config';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import type { IMcpServerWithAuthStore } from '../../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
 
@@ -80,6 +82,7 @@ describe('MCP OAuth authorize + callback', () => {
   let oauthRouter: ReturnType<typeof createMcpOAuthRouter>;
   let mcpServerStore: IMcpServerWithAuthStore;
   let tokenStore: SqliteOAuthTokenStore;
+  let toolGrantStore: SqliteMcpToolGrantStore;
   let withTransaction: <T>(callback: (transaction: unknown) => Promise<T>) => Promise<T>;
   let logger: ReturnType<typeof winston.createLogger>;
 
@@ -87,6 +90,7 @@ describe('MCP OAuth authorize + callback', () => {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     tokenStore = new SqliteOAuthTokenStore(db);
+    toolGrantStore = new SqliteMcpToolGrantStore(db);
     mcpServerStore = new McpServerWithAuthStore({
       store: new SqliteMcpServerStore(db),
       tokenStore,
@@ -95,8 +99,10 @@ describe('MCP OAuth authorize + callback', () => {
     withTransaction = callback => db.transaction().execute(callback);
     logger = winston.createLogger({ silent: true });
     settingsRouter = createSettingsMcpServersRouter({
+      mcpCatalog: McpCatalog.load(),
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
+      toolGrantStore,
       withTransaction,
       logger,
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
@@ -104,6 +110,7 @@ describe('MCP OAuth authorize + callback', () => {
     mcpServersRouter = createMcpServersRouter({
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
+      toolGrantStore,
       withTransaction,
       logger,
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
@@ -231,6 +238,7 @@ describe('MCP OAuth authorize + callback', () => {
     const otherRouter = createMcpServersRouter({
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
+      toolGrantStore,
       withTransaction,
       logger,
       resolveRequestContext: () => ({

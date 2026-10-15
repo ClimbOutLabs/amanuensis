@@ -9,8 +9,8 @@ import { DraftCatalogProvider } from '../atoms/draft/DraftCatalogProvider.js';
 import { DraftSpecPreferenceBridge } from '../atoms/draft/DraftSpecPreferenceBridge.js';
 import { cn } from '../atoms/lib/cn.js';
 import { IS_CREATE_AGENT_METADATA_KEY, isCreateAgentMetadataValue } from '../atoms/lib/sessionCreateAgent.js';
-import { SandboxRuntimeUpgradeProvider } from '../components/SandboxRuntimeUpgradeContext.js';
 import { CurrentUserProvider, type CurrentUser } from '../contexts/CurrentUserContext.js';
+import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { WidgetVisibilityProvider } from '../layouts/WidgetVisibilityContext.js';
 import { HistorySessionSwitchBridge } from '../routing/HistorySessionSwitchBridge.js';
 import { LibrarySessionShareBoot } from '../routing/LibrarySessionShareBoot.js';
@@ -29,7 +29,6 @@ import type { AgentUIServer, CreateSessionRequest } from '../server/types.js';
 import { SlotsProvider, useThemeMode, type SlotOverrides } from '../theme/SlotsProvider.js';
 import type { LayoutProp, ThemeConfig } from '../theme/types.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
-import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { TrueFoundryChatProvider, type TrueFoundryChatProviderProps } from './TrueFoundryChatProvider.js';
 import { useResolvedServer } from './useResolvedServer.js';
 
@@ -61,6 +60,12 @@ export type TrueForgeUIProps = {
    */
   onAgentActivity?: (activity: AmanAvatarActivity) => void;
   /**
+   * Reports the active thread's remote session id (`undefined` for a fresh unsaved chat).
+   * Hosts use this to mount per-session UI outside the chat tree, such as a right-rail
+   * audit feed.
+   */
+  onActiveSessionChange?: (sessionId: string | undefined) => void;
+  /**
    * Agent / library / composer shell mode.
    * Defaults to `{ mode: "AgentLibraryWithComposer" }`.
    */
@@ -86,8 +91,6 @@ export type TrueForgeUIProps = {
   chatFolders?: ChatFolderStore;
   /** Optional host persistence for spaces the model creates and updates through tools. */
   spaces?: SpaceStore;
-  /** Optional host-owned action for explicitly applying a newer sandbox runtime to future sandboxes. */
-  upgradeSandboxRuntime?: (providerId: string) => Promise<void>;
 };
 
 export type TrueForgeUIShellProps = Omit<TrueForgeUIProps, 'withRouter'> & { resolvedRoutes?: ResolvedRoutes };
@@ -303,13 +306,22 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
     routes: _routes,
     chatFolders,
     spaces,
-    upgradeSandboxRuntime,
+    onActiveSessionChange,
     ...providerRest
   } = props;
 
   const resolved = useResolvedServer(serverConfig, onError);
   const [activeRemoteId, setActiveRemoteId] = useState<string | undefined>(undefined);
-  const handleRemoteIdChange = useCallback((id: string | undefined) => setActiveRemoteId(id), []);
+  // The internal route sync only consumes `activeRemoteId`; the host callback reports the
+  // same id outward so per-session UI can live outside the chat tree. The bridge reports
+  // idempotently, so mounting it without routes is harmless.
+  const handleRemoteIdChange = useCallback(
+    (id: string | undefined) => {
+      setActiveRemoteId(id);
+      onActiveSessionChange?.(id);
+    },
+    [onActiveSessionChange],
+  );
 
   if (resolved.status === 'loading') {
     return (
@@ -345,7 +357,7 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
       <ChatProviderFromShell
         server={server}
         onError={onError}
-        onRemoteIdChange={resolvedRoutes != null ? handleRemoteIdChange : undefined}
+        onRemoteIdChange={handleRemoteIdChange}
         {...providerRest}
       >
         {layoutTree}
@@ -362,17 +374,15 @@ export function TrueForgeUIShell(props: TrueForgeUIShellProps) {
         <CustomActionRenderersProvider renderers={customActionRenderers}>
           <ServerProvider server={server}>
             <AgentDetailsPreferenceProvider>
-              <SandboxRuntimeUpgradeProvider upgrade={upgradeSandboxRuntime}>
-                <ChatFolderProvider store={chatFolders}>
-                  <SpaceProvider store={spaces}>
-                    {resolvedRoutes != null ? (
-                      <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
-                    ) : (
-                      visibilityTree
-                    )}
-                  </SpaceProvider>
-                </ChatFolderProvider>
-              </SandboxRuntimeUpgradeProvider>
+              <ChatFolderProvider store={chatFolders}>
+                <SpaceProvider store={spaces}>
+                  {resolvedRoutes != null ? (
+                    <ResolvedRoutesProvider routes={resolvedRoutes}>{visibilityTree}</ResolvedRoutesProvider>
+                  ) : (
+                    visibilityTree
+                  )}
+                </SpaceProvider>
+              </ChatFolderProvider>
             </AgentDetailsPreferenceProvider>
           </ServerProvider>
         </CustomActionRenderersProvider>

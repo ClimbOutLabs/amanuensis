@@ -1,5 +1,6 @@
 'use client';
 
+import { TOKEN_BUDGET_SAFETY_MARGIN } from '@truefoundry/trueforge-core/core/capabilities/builtins/tokenBudgetConstants';
 import { useCompactionStatus } from '../hooks/useCompactionStatus.js';
 import { cn } from './lib/cn.js';
 
@@ -31,23 +32,46 @@ export function formatRelativeTime(isoTimestamp: string, nowMs: number = Date.no
  * most recent compaction outcome. Minimal and unobtrusive; renders nothing
  * while the status is still loading or when no model context limit is known
  * and no compaction has ever run.
+ *
+ * When the context limit and live token count are known, shows a thin
+ * stacked bar breaking the window into input used, output reserved, and
+ * free budget.
  */
 export function CompactionStatusLine({ className }: { className?: string }) {
-  const { contextLimit, liveTokens, lastCompaction, loading } = useCompactionStatus();
+  const { contextLimit, liveTokens, maxOutputTokens, lastCompaction, loading } = useCompactionStatus();
 
   if (loading) return null;
   if (lastCompaction == null && contextLimit == null && liveTokens == null) return null;
 
   const parts: string[] = [];
 
-  if (contextLimit != null) {
+  // Token budget breakdown, when the limit, live count, and output
+  // reservation are all known. The free budget subtracts the backend's
+  // safety margin so the UI reflects the actual usable headroom.
+  const budget =
+    contextLimit != null && contextLimit > 0 && liveTokens != null && maxOutputTokens != null
+      ? {
+          limit: contextLimit,
+          input: liveTokens,
+          output: maxOutputTokens,
+          free: Math.max(0, contextLimit - liveTokens - maxOutputTokens - TOKEN_BUDGET_SAFETY_MARGIN),
+        }
+      : null;
+
+  if (budget != null) {
+    parts.push(
+      `${formatTokenCount(budget.input)} / ${formatTokenCount(budget.limit)} input · ` +
+        `${formatTokenCount(budget.output)} output · ` +
+        `${formatTokenCount(budget.free)} free`,
+    );
+  } else if (contextLimit != null) {
     const usage =
       liveTokens != null
         ? `${formatTokenCount(liveTokens)} / ${formatTokenCount(contextLimit)} tokens`
         : `${formatTokenCount(contextLimit)} token limit`;
     parts.push(usage);
   } else if (liveTokens != null) {
-    parts.push(`${formatTokenCount(liveTokens)} tokens`);
+    parts.push(`${formatTokenCount(liveTokens)} tokens in context`);
   }
 
   if (lastCompaction != null) {
@@ -67,7 +91,29 @@ export function CompactionStatusLine({ className }: { className?: string }) {
       data-slot="aui_compaction-status"
       className={cn('px-1 pt-1 text-[0.6875rem] leading-tight text-text-secondary/70', className)}
     >
-      {parts.join(' · ')}
+      <div>{parts.join(' · ')}</div>
+      {budget != null && (
+        <div
+          className="mt-1 h-1 overflow-hidden rounded-full bg-secondary-bg"
+          role="img"
+          aria-label={
+            `${formatTokenCount(budget.input)} of ${formatTokenCount(budget.limit)} input tokens used, ` +
+            `${formatTokenCount(budget.output)} reserved for output, ` +
+            `${formatTokenCount(budget.free)} free`
+          }
+        >
+          <div className="flex h-full">
+            <div
+              className="h-full shrink-0 bg-primary-button-bg"
+              style={{ width: `${(budget.input / budget.limit) * 100}%` }}
+            />
+            <div
+              className="h-full shrink-0 bg-text-secondary/40"
+              style={{ width: `${(budget.output / budget.limit) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

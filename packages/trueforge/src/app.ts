@@ -17,15 +17,18 @@ import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
 import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
+import { createMapsRouter } from './apis/maps';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
 import { createMemoryVaultRouter } from './apis/memoryVault';
 import { createModelsRouter } from './apis/models';
 import { createPermissionsRouter } from './apis/permissions';
+import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
+import { createSentinelSettingsRouter } from './apis/sentinelSettings';
 import { createSessionFolderAssignmentsRouter, createSessionFoldersRouter } from './apis/sessionFolders';
 import { createInternalMetricsRouter } from './apis/sessionMetrics';
 import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessions';
@@ -33,6 +36,7 @@ import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skills';
 import { createSpacesRouter } from './apis/spaces';
 import { createTurnsRouter } from './apis/turns';
+import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
 import { resolveRequestContext } from './auth/identity';
@@ -40,6 +44,7 @@ import {
   createAdminAuthMiddleware,
   createApiKeyAuthMiddleware,
   createAuthMiddleware,
+  createUiSessionAuthMiddleware,
   truefoundryAdminMiddleware,
 } from './auth/middleware';
 import type { McpCatalog } from './catalog/McpCatalog';
@@ -51,12 +56,15 @@ import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
+import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
+import type { ISentinelAuditStore } from './db/sentinelAuditStore';
+import type { ISentinelSettingsStore } from './db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from './db/sessionCustom';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
@@ -214,6 +222,8 @@ export interface ServerDeps<TTransaction> {
   resolveSkillStore: ResolveSkillStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
+  /** Per-user Always allow grants; the same store backs Sentinel classification. */
+  mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
   skillStore: ISkillStore<TTransaction>;
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
   /** Optional host override; the standard resolver remains the production default. */
@@ -225,6 +235,8 @@ export interface ServerDeps<TTransaction> {
   repositoryStore: IRepositoryStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
   sessionMetricsStore: ISessionMetricsStore;
+  sentinelAuditStore: ISentinelAuditStore;
+  sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
@@ -347,6 +359,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createMcpServersRouter({
         resolveMcpServerStore: deps.resolveMcpServerStore,
         tokenStore: deps.tokenStore,
+        toolGrantStore: deps.mcpToolGrantStore,
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,
@@ -412,9 +425,11 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/settings',
     withAdminAuth(
       createSettingsRouter({
+        mcpCatalog: deps.mcpCatalog,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         tokenStore: deps.tokenStore,
+        toolGrantStore: deps.mcpToolGrantStore,
         resolveSkillStore: deps.resolveSkillStore,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
@@ -487,12 +502,49 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     ),
   );
   app.route(
+    '/api/v1/user/settings/sentinel',
+    withAuth(
+      createSentinelSettingsRouter({
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  // Same-origin tile proxy for embedded maps. Browser session only: bearer
+  // credentials (agents, sandboxes, API clients) are refused.
+  app.route(
+    '/api/maps',
+    withAuth(
+      createMapsRouter({
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  app.route(
     '/api/v1/personas',
     withAuth(
       createPersonasRouter({
         personaStore: deps.personaStore,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveRequestContext,
+        knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/personas',
+    withAuth(
+      createPersonaKnowledgeRouter({
+        personaStore: deps.personaStore,
+        resolveRequestContext,
+        knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+        modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+        logger: deps.logger,
       }),
       authMiddleware,
     ),
@@ -533,6 +585,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createSessionsRouter({
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
+        sentinelAuditStore: deps.sentinelAuditStore,
         activeTurns: deps.activeTurns,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
@@ -571,6 +624,15 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         mcpServerStore: deps.resolveMcpServerStore(),
         globalSettingsStore: deps.globalSettingsStore,
         resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/voice',
+    withAuth(
+      createVoiceRouter({
         logger: deps.logger,
       }),
       authMiddleware,

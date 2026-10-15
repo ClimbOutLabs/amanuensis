@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -7,6 +7,8 @@ import {
   type ImplementationPlanGrant,
 } from '@/components/ImplementationPlanGrantContext.js';
 import { ImplementationPlanGrantControls } from '@/containers/ImplementationPlanGrantControls.js';
+
+import { stubVisibility } from './stubVisibility.js';
 
 const grant: ImplementationPlanGrant = {
   kind: 'implementation_plan.v1',
@@ -128,5 +130,89 @@ describe('ImplementationPlanGrantControls', () => {
     await waitFor(() => {
       expect(screen.queryByText(grant.plan.approach)).not.toBeInTheDocument();
     });
+  });
+
+  it('does not poll while the tab is hidden', async () => {
+    const visibility = stubVisibility();
+    try {
+      vi.useFakeTimers();
+      const listImplementationPlanGrants = vi.fn().mockResolvedValue([grant]);
+      visibility.hide();
+      render(
+        <ImplementationPlanGrantProvider
+          api={{ listImplementationPlanGrants, revokeImplementationPlanGrant: vi.fn().mockResolvedValue(undefined) }}
+        >
+          <ImplementationPlanGrantControls sessionId="session-1" isRunning />
+        </ImplementationPlanGrantProvider>,
+      );
+      // The mount refresh fires once; hidden poll ticks fire nothing.
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(1);
+    } finally {
+      visibility.restore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes once when the tab becomes visible again, then resumes polling', async () => {
+    const visibility = stubVisibility();
+    try {
+      vi.useFakeTimers();
+      const listImplementationPlanGrants = vi.fn().mockResolvedValue([grant]);
+      visibility.hide();
+      render(
+        <ImplementationPlanGrantProvider
+          api={{ listImplementationPlanGrants, revokeImplementationPlanGrant: vi.fn().mockResolvedValue(undefined) }}
+        >
+          <ImplementationPlanGrantControls sessionId="session-1" isRunning />
+        </ImplementationPlanGrantProvider>,
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6_000);
+      });
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        visibility.show();
+      });
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(3);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(4);
+    } finally {
+      visibility.restore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not refresh on visibility change when the thread is idle', async () => {
+    const visibility = stubVisibility();
+    try {
+      const listImplementationPlanGrants = vi.fn().mockResolvedValue([grant]);
+      visibility.hide();
+      render(
+        <ImplementationPlanGrantProvider
+          api={{ listImplementationPlanGrants, revokeImplementationPlanGrant: vi.fn().mockResolvedValue(undefined) }}
+        >
+          <ImplementationPlanGrantControls sessionId="session-1" isRunning={false} />
+        </ImplementationPlanGrantProvider>,
+      );
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        visibility.show();
+      });
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(1);
+    } finally {
+      visibility.restore();
+    }
   });
 });

@@ -36,6 +36,17 @@ import {
   type ImplementationPlanGrantScope,
 } from '../mcp/implementationPlanGrant';
 import { defineTool, LocalToolMCP } from '../mcp/LocalToolMCP';
+import { stampSentinelDecision } from '../mcp/ToolSet';
+import {
+  canonicalFileIdentity,
+  canonicalWriteTarget,
+  classifyContextFor,
+  classifyHostToolCall,
+  observeShellCreatedFiles,
+  type SentinelHostContext,
+} from '../permissions';
+import { toJsonSafeParams } from '../permissions/approvalTokens';
+import { gitLocalConfigIsSafe, hardenAllowlistedGit } from '../permissions/shellAllowlist';
 import type { AbnormalHandoffEvidence } from '../runtime/AbnormalHandoff';
 import {
   DEFERRED_TOOLS_SERVER_ID,
@@ -69,6 +80,13 @@ import { RunCodeInputSchema, type RunCodeInput, type RunCodeResult } from './dri
 import { type HarvestedFile, type RunCodeBackend, type TurnAttachment } from './driver/RunCodeService';
 import { buildExecResultShape } from './execResultSemantics';
 import { getGithubConnectorHint, type GithubConnectorState } from './githubConnectorHint';
+import {
+  buildHostAuthenticatedGit,
+  buildHostAuthenticatedGitConfigProbe,
+  carriesHostAuthenticatedGitToken,
+  isGitNetworkCommand,
+  planHostAuthenticatedGit,
+} from './hostAuthenticatedGit';
 import { ensureExecSuccess, shellEscape, type ExecResult, type SandboxProvider } from './provider/Provider';
 import { SandboxNotAvailableError, validateNoPathTraversal } from './SandboxErrors';
 import { formatSandboxId, rawSandboxId } from './sandboxRef';
@@ -140,28 +158,12 @@ export function buildWriteAndRunScriptCommand(params: { scriptPath: string; scri
   ].join(' && ');
 }
 
-/** Write or clear the git credential-store file at an absolute path (no global git config mutation). */
-function buildSyncGitCredentialsCommand(credentialsContent: string | null, credentialsPath: string): string {
-  const path = shellEscape(credentialsPath);
-  if (credentialsContent === null) {
-    return `rm -f ${path}`;
-  }
-  // Base64 avoids interpolating credentials directly into the shell command.
-  const b64 = Buffer.from(credentialsContent, 'utf-8').toString('base64');
-  return `mkdir -p "$(dirname ${path})" && ` + `echo '${b64}' | base64 -d > ${path} && ` + `chmod 600 ${path}`;
-}
-
 /**
- * Process-scoped credential.helper via GIT_CONFIG_* (avoids shared ~/.gitconfig).
- * Path is whatever the provider returns; providers with a shared FS (TFY) make
- * `store --file` absolute in their own `exec`.
+ * Deletes the credential-store file that earlier releases wrote into persisted sandboxes.
+ * Credentials are never written to the sandbox any more; this keeps old sandboxes clean.
  */
-function buildGitCredentialHelperEnv(credentialsPath: string): Record<string, string> {
-  return {
-    GIT_CONFIG_COUNT: '1',
-    GIT_CONFIG_KEY_0: 'credential.helper',
-    GIT_CONFIG_VALUE_0: `store --file ${credentialsPath}`,
-  };
+function buildScrubLegacyGitCredentialsCommand(credentialsPath: string): string {
+  return `rm -f ${shellEscape(credentialsPath)}`;
 }
 
 export interface SandboxStoredFile {
@@ -210,8 +212,8 @@ export interface SandboxOptions {
   workspaceLeaseOwnerId?: string | undefined;
   skillMounter?: ISkillMounter | undefined;
   fileDownloadEnabled?: boolean | undefined;
-  /** Pre-resolved credential-store file content (null = clear / no git auth). */
-  resolvedGitCredentialsContent?: string | null | undefined;
+  /** GitHub token the host injects into allowlisted network git commands only; never written to the sandbox. */
+  githubGitToken?: string | null | undefined;
   /** Whether the session's agent spec has a GitHub MCP connector configured, regardless of whether its credentials resolved. */
   githubConnectorAttached?: boolean | undefined;
   /** Whether the session's agent spec has a web-search/fetch MCP connector configured. */
@@ -242,6 +244,14 @@ export interface SandboxOptions {
   onRunCodeHarvestedFiles?: ((files: HarvestedFile[]) => Promise<void>) | undefined;
   tracing: AgentTracing;
   logger: Logger;
+  /**
+   * Sentinel classification context: shared services plus the per-turn
+   * identity. When present, toolCallInfo classifies every call and the
+   * classifier result replaces the effect-based approval override. Absent,
+   * no classification runs and the legacy effect-based approval behavior
+   * is preserved.
+   */
+  sentinel?: SentinelHostContext | undefined;
 }
 
 export const SANDBOX_EXEC_TOOL_NAME = 'exec';
@@ -838,7 +848,7 @@ function injectMCPClientEnv(params: {
   };
 }
 
-const sandboxExecSchema = z.object({
+export const sandboxExecSchema = z.object({
   intent: z.string().describe('Why you are running this command (user-facing).'),
   purpose: z
     .enum(SANDBOX_INVOCATION_PURPOSES)
@@ -852,7 +862,12 @@ const sandboxExecSchema = z.object({
     .object({
       head_lines: z.number().int().min(1).max(1000).optional(),
       tail_lines: z.number().int().min(1).max(1000).optional(),
-      grep: z.string().min(1).max(256).optional().describe('Filter lines containing this text.'),
+      grep: z
+        .string()
+        .min(1)
+        .refine(grep => grep.length <= 256, 'must be at most 256 characters')
+        .optional()
+        .describe('Filter lines containing this text.'),
     })
     .refine(value => value.head_lines !== undefined || value.tail_lines !== undefined || value.grep !== undefined, {
       message: 'output must specify head_lines, tail_lines, or grep',
@@ -860,7 +875,7 @@ const sandboxExecSchema = z.object({
     .optional(),
 });
 
-const sandboxRunRegisteredCommandSchema = z.object({
+export const sandboxRunRegisteredCommandSchema = z.object({
   intent: z.string().describe('A brief, user-facing explanation of why the registered repository check is being run.'),
   command_id: z.string().min(1).describe('Stable ID of a host-confirmed repository command.'),
 });
@@ -902,7 +917,7 @@ function resolveOrFailLineArrayField(input: {
   return resolved.value;
 }
 
-const sandboxApplyPatchSchema = z
+export const sandboxApplyPatchSchema = z
   .object({
     intent: z.string().describe('Why you are making this change (user-facing).'),
     cwd: z.string().min(1).describe('Repository root path.'),
@@ -936,7 +951,7 @@ const sandboxApplyPatchSchema = z
     return { ...rest, patch };
   });
 
-const sandboxReplaceTextSchema = z
+export const sandboxReplaceTextSchema = z
   .object({
     intent: z.string().describe('Why you are making this change (user-facing).'),
     cwd: z.string().min(1).describe('Repository root path.'),
@@ -986,7 +1001,7 @@ const sandboxReplaceTextSchema = z
     return { ...rest, old_text: oldText, new_text: newText };
   });
 
-const sandboxWriteFileSchema = z
+export const sandboxWriteFileSchema = z
   .object({
     intent: z.string().describe('Why you are creating this file (user-facing).'),
     cwd: z
@@ -1235,7 +1250,7 @@ type ReplaceTextDispatchOutcome =
 
 export const SANDBOX_EXEC_DESCRIPTION = `Execute shell commands in a persistent sandbox environment.
 Use the cwd argument for the checked-out repository. Setting HOME does not change the working directory.
-IMPORTANT: Never list, print, or expose environment variables or git credential files (~/.git-credentials).
+IMPORTANT: Never list, print, or expose environment variables.
 Use write_file to create a new file, apply_patch for source edits, and replace_text for one exact existing-text replacement. Do not bypass these primitives with sed, Perl, Python, heredocs, or temporary shell patch files.
 For large output, pass output.head_lines, output.tail_lines, and/or output.grep to bound the model-visible result.
 Declare purpose=verify for any command whose successful result should authorize a later commit. Use purpose=commit only for running a \`git commit\` command.
@@ -1254,7 +1269,7 @@ export const SANDBOX_RUN_CODE_DESCRIPTION = `Run Python or Node.js code in an is
 language is 'python' (3.13) or 'node' (22). Code runs with cwd=/scratch; read inputs from /ingress/<name>; write result files under /egress (files left in /scratch are collected too). Returns separate stdout/stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name/size/sha256 — bytes never inline into context; download from the UI). Reference files_out in your response as run_code/<name> (e.g. [chart](run_code/chart.png)) — that is the path the UI uses for download. A non-zero exit is the program's own result, not an infra failure.
 Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. No network and no installs at runtime: if a package is missing, say so instead of installing it.
 files_in is for content you compose yourself (a small CSV or JSON you write). Never re-upload an /ingress file via files_in.
-If run_code fails, do NOT fall back to exec (or any shell tool) to run the code — interpreter invocations in exec are rejected by a harness guard. Fix the code, reduce the input, or report the failure.
+If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; interpreter invocations in exec are rejected by a harness guard. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
 `;
 
 export const SANDBOX_APPLY_PATCH_DESCRIPTION =
@@ -1697,6 +1712,17 @@ export interface WorkspaceVerificationReceiptCandidate extends WorkspaceVerifica
   mutationEpoch: number;
   command: string;
 }
+const GIT_CONFIG_UNSAFE_REFUSAL =
+  "This repository's git settings could run programs, so this command needs your approval. It was not run; use a command that asks the user for approval instead.";
+const HOST_GIT_CONFIG_UNSAFE_REFUSAL =
+  "This repository's git settings could run programs, so the host did not authenticate this git command and it was not run. Remove the unsafe settings from .git/config or use a fresh clone.";
+const HOST_GIT_CONFIG_UNREADABLE_REFUSAL =
+  "Could not read this repository's git settings, so the host did not authenticate this git command and it was not run.";
+const GIT_CONFIG_UNREADABLE_REFUSAL =
+  "Could not read this repository's git settings, so this command needs your approval. It was not run; use a command that asks the user for approval instead.";
+
+/** Runs under the workspace lock just before the command; a string refuses the command with that reason. */
+type ExecPreflight = () => Promise<string | undefined>;
 type VerifiedExecOutcome =
   | { status: 'blocked'; reason: string }
   | {
@@ -1834,6 +1860,7 @@ export class Sandbox extends LocalToolMCP {
   override readonly description = 'Persistent sandbox environment for code execution';
 
   private readonly provider: SandboxProvider;
+  private readonly sentinelContext: SentinelHostContext | undefined;
   private readonly boundRepository: BoundRepository | undefined;
   private readonly loadBoundRepository: (() => Promise<BoundRepository | undefined>) | undefined;
   private implementationPlanGrantContext: ImplementationPlanGrantContext | undefined;
@@ -1852,8 +1879,7 @@ export class Sandbox extends LocalToolMCP {
   private readonly skillMounter?: ISkillMounter | undefined;
   private cachedSkillsSection?: string | undefined;
   private readonly logger: Logger;
-  // Pre-resolved credential-store file content (null = clear / no git auth).
-  private readonly resolvedGitCredentialsContent: string | null;
+  private readonly githubGitToken: string | null;
   private readonly githubConnectorAttached: boolean;
   private readonly webConnectorAttached: boolean;
   private readonly webConnectorToolHint: string;
@@ -1939,13 +1965,14 @@ export class Sandbox extends LocalToolMCP {
     const mcpBoundTimeoutMs = options.mcpRequestTimeoutMs + options.mcpConnectTimeoutMs;
     this.requestTimeoutSeconds = Math.ceil(mcpBoundTimeoutMs / 1000) + NATS_REQUEST_TIMEOUT_BUFFER_SECONDS;
     this.logger = options.logger.child({ module: 'Sandbox' });
-    this.resolvedGitCredentialsContent = options.resolvedGitCredentialsContent ?? null;
+    this.githubGitToken = options.githubGitToken ?? null;
     this.githubConnectorAttached = options.githubConnectorAttached ?? false;
     this.webConnectorAttached = options.webConnectorAttached ?? false;
     this.runCodeService = options.runCodeService;
     this.runCodeHarvestSink = options.onRunCodeHarvestedFiles;
     this.webConnectorToolHint = options.webConnectorToolHint ?? "the web connector's fetch or extract tool";
     this.ocrLanguages = options.ocrLanguages ?? '';
+    this.sentinelContext = options.sentinel;
 
     if (this.existingSandboxId) {
       this.existingSandboxInfo = { sandbox_id: this.existingSandboxId };
@@ -2132,8 +2159,56 @@ export class Sandbox extends LocalToolMCP {
             kind: 'policy_blocked',
             message: structuredEditPreconditionFailure,
           };
+    // Sentinel: authoritative tier classification over the normalized
+    // arguments, but only when the host wired a Sentinel context. Without
+    // one, no classification runs and the legacy effect-based approval
+    // override applies. Invalid calls are fail-closed to
+    // approval-required=false with their existing pre-dispatch failure.
+    const sentinelHost = this.sentinelContext;
+    let sentinelStamp: ReturnType<typeof stampSentinelDecision> | undefined;
+    if (sentinelHost !== undefined) {
+      const sentinelDecision = await classifyHostToolCall({
+        sentinel: sentinelHost,
+        repository_id: this.boundRepository?.repository_id ?? null,
+        // Never the call's own cwd: a model-supplied cwd would make itself the workspace.
+        workspace_cwd:
+          this.boundRepository?.workspace_cwd ?? sentinelHost.workspace_cwd ?? this.provider.getWorkspaceDir() ?? null,
+        action: {
+          tool_name: params.name,
+          canonical_params: effectiveArguments ?? {},
+          tool_type: 'truefoundry-system',
+          sandbox_effect: effect,
+          mcp_hints: {
+            read_only_hint: info.read_only_hint,
+            destructive_hint: info.destructive_hint,
+            open_world_hint: networkIntent ? true : info.open_world_hint,
+          },
+        },
+      });
+      sentinelStamp = stampSentinelDecision({ decision: sentinelDecision });
+    }
+    const invalidCall =
+      invalidGitMetadataEdit ||
+      invalidExecPreflight ||
+      invalidWriteFilePath ||
+      writeFileScopeFailure ||
+      invalidRegisteredCommand ||
+      invalidImplementationPlan ||
+      structuredEditPreconditionFailure !== undefined;
+    // Legacy approval when Sentinel is not configured: the pre-Sentinel
+    // effect-based override. Tools with a classified effect need approval
+    // unless the effect is pure inspection; tools without an effect keep the
+    // source's own stamping.
+    const legacyApprovalRequired =
+      effect !== undefined ? sandboxCommandRequiresApproval(effect) : info.is_approval_required;
     return {
       ...info,
+      // The approval token (if any) was minted over the invoked name and the
+      // normalized effective arguments, not the remapped original_tool_name or
+      // the raw wire arguments. Record the exact mint identity so pre-dispatch
+      // verification hashes the same values.
+      mint_tool_name: params.name,
+      mint_canonical_params: toJsonSafeParams(effectiveArguments ?? {}),
       original_tool_name:
         params.name === SANDBOX_EXEC_TOOL_NAME
           ? purpose === undefined
@@ -2178,23 +2253,22 @@ export class Sandbox extends LocalToolMCP {
                 ? structuredEditPrecondition.summary
                 : `${info.description} ${structuredEditPrecondition.summary}`,
           }),
-      ...(structuredEditPreDispatchFailure === undefined
+      ...(sentinelStamp?.pre_dispatch_failure === undefined
+        ? structuredEditPreDispatchFailure === undefined
+          ? {}
+          : { pre_dispatch_failure: structuredEditPreDispatchFailure }
+        : { pre_dispatch_failure: sentinelStamp.pre_dispatch_failure }),
+      is_approval_required: invalidCall ? false : (sentinelStamp?.is_approval_required ?? legacyApprovalRequired),
+      ...(sentinelStamp === undefined
         ? {}
-        : { pre_dispatch_failure: structuredEditPreDispatchFailure }),
-      is_approval_required:
-        invalidGitMetadataEdit ||
-        invalidExecPreflight ||
-        invalidWriteFilePath ||
-        writeFileScopeFailure ||
-        invalidRegisteredCommand ||
-        invalidImplementationPlan ||
-        structuredEditPreconditionFailure !== undefined
-          ? false
-          : params.name === SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_TOOL_NAME
-            ? true
-            : effect === undefined
-              ? info.is_approval_required
-              : sandboxCommandRequiresApproval(effect),
+        : {
+            tier: sentinelStamp.tier,
+            tier3_card: sentinelStamp.tier3_card,
+            tier2_kind: sentinelStamp.tier2_kind,
+            approval_token_id: sentinelStamp.approval_token_id,
+            approval_binding: sentinelStamp.approval_binding,
+            shell_binding: sentinelStamp.shell_binding,
+          }),
     };
   }
 
@@ -2674,7 +2748,9 @@ export class Sandbox extends LocalToolMCP {
 
     const sandboxInstructions = builder.beginSection('sandbox');
     sandboxInstructions.addContent('The Agent has access to a persistent sandbox environment for executing code.');
-    sandboxInstructions.addContent('The Agent must NOT read or modify any git credential files.');
+    sandboxInstructions.addContent(
+      'The sandbox holds no git credentials. The host authenticates network git (clone, fetch, pull, push, ls-remote over https://github.com) only when it is one plain command: no -c, -C, env overrides, pipes or chaining. Never ask for or search for tokens.',
+    );
     if (this.boundRepository !== undefined) {
       const state = this.boundRepositoryState;
       const commands = this.boundRepository.commands
@@ -3330,6 +3406,10 @@ export class Sandbox extends LocalToolMCP {
     timeoutSeconds?: number | undefined;
     signal?: AbortSignal | undefined;
   }): Promise<ExecResult> {
+    // The in-sandbox lock wrapper resolves mkdir, flock, sh and others through PATH, which a
+    // model can shadow; a command carrying the token never runs inside it. The host-side
+    // workspace mutation lock already serialises it.
+    const useProviderLock = input.workspaceRoot !== undefined && !carriesHostAuthenticatedGitToken(input.env);
     const operation = this.provider.exec({
       sandboxId: input.sandboxId,
       command: input.command,
@@ -3337,7 +3417,9 @@ export class Sandbox extends LocalToolMCP {
       ...(input.env === undefined ? {} : { env: input.env }),
       ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
-      ...(input.workspaceRoot === undefined ? {} : { workspaceLock: { workspaceRoot: input.workspaceRoot } }),
+      ...(useProviderLock && input.workspaceRoot !== undefined
+        ? { workspaceLock: { workspaceRoot: input.workspaceRoot } }
+        : {}),
     });
     return input.signal === undefined ? operation : await awaitWithAbort({ operation, signal: input.signal });
   }
@@ -3464,9 +3546,13 @@ export class Sandbox extends LocalToolMCP {
     }
     const connectorState: GithubConnectorState = !this.githubConnectorAttached
       ? 'not-attached'
-      : this.resolvedGitCredentialsContent === null
+      : this.githubGitToken === null
         ? 'unresolved'
-        : 'attached';
+        : isGitNetworkCommand(input.command) &&
+            (planHostAuthenticatedGit({ command: input.command }) === undefined ||
+              Object.keys(input.env ?? {}).length > 0)
+          ? 'unauthenticated-form'
+          : 'attached';
     const remediation = getGithubConnectorHint({
       command: input.command,
       output: execResultOutputText(result),
@@ -3674,6 +3760,7 @@ export class Sandbox extends LocalToolMCP {
     effect: SandboxCommandEffect,
     planAdmission: { context: ToolInvocationContext | undefined; scope: ImplementationPlanGrantScope } | undefined,
     dispatchMarker: { dispatched: boolean },
+    preflight: ExecPreflight | undefined,
   ): Promise<VerifiedExecOutcome> {
     const guarded = effect === 'verify' || effect === 'commit' || effect === 'edit' || effect === 'execute';
     // A verify or commit purpose only takes the durable coordination path when a repository
@@ -3682,7 +3769,7 @@ export class Sandbox extends LocalToolMCP {
     const requiresDurableCoordination = guarded && this.boundRepository !== undefined;
     if (!requiresDurableCoordination) {
       const workspaceRoot = await this.resolveWorkspaceRoot(sandboxId, input.cwd);
-      const execute = (): Promise<ExecResult> =>
+      const run = (): Promise<ExecResult> =>
         workspaceRoot === undefined
           ? this.provider.exec({
               sandboxId,
@@ -3704,10 +3791,20 @@ export class Sandbox extends LocalToolMCP {
       // this point on means the target may have run, so replay must stop being
       // safe for verify/commit once this flips.
       dispatchMarker.dispatched = true;
-      const result =
+      // The preflight runs inside the same lock as the command so the checked
+      // repository state cannot change in between.
+      const execute = async (): Promise<ExecResult | { refusal: string }> => {
+        const refusal = await preflight?.();
+        return refusal === undefined ? run() : { refusal };
+      };
+      const outcome =
         workspaceRoot === undefined
           ? await execute()
           : await withWorkspaceMutationLock(this.workspaceMutationKey(sandboxId, workspaceRoot), async () => execute());
+      if ('refusal' in outcome) {
+        return { status: 'blocked', reason: outcome.refusal };
+      }
+      const result = outcome;
       return {
         status: 'completed',
         result,
@@ -3778,6 +3875,10 @@ export class Sandbox extends LocalToolMCP {
               // atomic commit) is about to reach the provider from here, so a
               // SandboxNotAvailableError from this point on can no longer be treated
               // as safe to replay for verify/commit.
+              const refusal = await preflight?.();
+              if (refusal !== undefined) {
+                return { status: 'blocked' as const, reason: refusal };
+              }
               dispatchMarker.dispatched = true;
               if (effect !== 'commit') {
                 return {
@@ -4108,7 +4209,7 @@ export class Sandbox extends LocalToolMCP {
     const lines = staged.map(attachment => `- ${attachment.name} (${String(attachment.bytes.length)} bytes)`);
     return (
       SANDBOX_RUN_CODE_DESCRIPTION +
-      `Available in /ingress (read directly by filename — do NOT re-upload via files_in):\n` +
+      `Available in /ingress (read directly by filename, do NOT re-upload via files_in):\n` +
       `${lines.join('\n')}\n`
     );
   }
@@ -4173,6 +4274,129 @@ export class Sandbox extends LocalToolMCP {
     });
   }
 
+  /**
+   * Sentinel: record agent-created or agent-modified files as tracked
+   * executables, so a later attempt to execute them escalates for approval.
+   * Best effort and host-side: paths that do not resolve on the host (for
+   * example a remote sandbox checkout) are skipped silently.
+   */
+  private observeSentinelWrites(input: { paths: readonly string[]; cwd: string }): void {
+    const ctx = classifyContextFor({
+      host: this.sentinelContext,
+      repository_id: this.boundRepository?.repository_id ?? null,
+      workspace_cwd: this.boundRepository?.workspace_cwd ?? null,
+    });
+    const store = ctx.services.tracked_store;
+    const scope = {
+      tenant_id: ctx.tenant_id,
+      created_by: ctx.created_by,
+      repository_id: ctx.repository_id,
+      workspace_cwd: ctx.workspace_cwd,
+    };
+    for (const p of input.paths) {
+      const identity = canonicalFileIdentity({ p, cwd: input.cwd }) ?? canonicalWriteTarget({ p, cwd: input.cwd });
+      if (identity === null) {
+        continue;
+      }
+      store.track({ scope, file_identity: identity });
+    }
+  }
+
+  /**
+   * Allowlisted git runs only under system/global config isolation and only
+   * when the repository's local config holds nothing but known-safe keys; any
+   * other config can make git execute a program. The config check is returned
+   * as a preflight so it runs under the same workspace lock as the command.
+   * Other commands pass through unchanged.
+   */
+  private prepareAllowlistedGit(input: { sandboxId: string; exec: SandboxRuntimeExecInput }): {
+    exec: SandboxRuntimeExecInput;
+    env: Record<string, string>;
+    preflight: ExecPreflight | undefined;
+  } {
+    const allowlist = this.sentinelContext?.services.shell_allowlist;
+    const workspaceRoot = this.boundRepository?.workspace_cwd ?? input.exec.cwd;
+    const hardened =
+      allowlist === undefined || workspaceRoot === undefined
+        ? undefined
+        : hardenAllowlistedGit({ command: input.exec.command, config: allowlist, workspace_root: workspaceRoot });
+    if (hardened === undefined) {
+      return { exec: input.exec, env: {}, preflight: undefined };
+    }
+    const preflight: ExecPreflight = async () => {
+      const probe = await this.provider.exec({
+        sandboxId: input.sandboxId,
+        command: hardened.probe_argv.map(shellEscape).join(' '),
+        cwd: input.exec.cwd,
+        env: { ...hardened.env, LC_ALL: 'C' },
+      });
+      if (!probe.success) {
+        return GIT_CONFIG_UNREADABLE_REFUSAL;
+      }
+      if (probe.response.exitCode !== 0) {
+        return /git repository/iu.test(probe.response.result)
+          ? 'This directory is not a git repository, so this git command cannot run.'
+          : GIT_CONFIG_UNREADABLE_REFUSAL;
+      }
+      return gitLocalConfigIsSafe(probe.response.result) ? undefined : GIT_CONFIG_UNSAFE_REFUSAL;
+    };
+    return {
+      exec: { ...input.exec, command: hardened.argv.map(shellEscape).join(' ') },
+      env: hardened.env,
+      preflight,
+    };
+  }
+
+  /**
+   * Network git against github.com is the one place a token must reach the
+   * sandbox, because no provider offers stdin or a secret channel. The host
+   * therefore rewrites an allowlisted plain command into its own hardened
+   * invocation and supplies the token in that single process's environment,
+   * after proving the checkout's local config cannot run a program. Nothing is
+   * written to disk or to a remote URL, and no other command ever receives it.
+   * Model-supplied env disqualifies the command: it could inject LD_PRELOAD.
+   */
+  private prepareHostAuthenticatedGit(input: { sandboxId: string; exec: SandboxRuntimeExecInput }):
+    | {
+        exec: SandboxRuntimeExecInput;
+        env: Record<string, string>;
+        preflight: ExecPreflight | undefined;
+      }
+    | undefined {
+    const token = this.githubGitToken;
+    if (token === null || Object.keys(input.exec.env ?? {}).length > 0) {
+      return undefined;
+    }
+    const plan = planHostAuthenticatedGit({ command: input.exec.command });
+    if (plan === undefined) {
+      return undefined;
+    }
+    const workspaceRoot = this.boundRepository?.workspace_cwd ?? input.exec.cwd;
+    const built = buildHostAuthenticatedGit({ plan, token, workspaceRoot });
+    const preflight: ExecPreflight | undefined = plan.readsRepositoryConfig
+      ? async () => {
+          const probeExec = buildHostAuthenticatedGitConfigProbe({ workspaceRoot });
+          const probe = await this.provider.exec({
+            sandboxId: input.sandboxId,
+            command: probeExec.command,
+            cwd: input.exec.cwd,
+            env: { ...probeExec.env, LC_ALL: 'C' },
+          });
+          if (!probe.success) {
+            return HOST_GIT_CONFIG_UNREADABLE_REFUSAL;
+          }
+          if (probe.response.exitCode !== 0) {
+            // Outside a repository there is no local config for the command to read.
+            return plan.allowsMissingRepository && /not a git repository/iu.test(probe.response.result)
+              ? undefined
+              : HOST_GIT_CONFIG_UNREADABLE_REFUSAL;
+          }
+          return gitLocalConfigIsSafe(probe.response.result) ? undefined : HOST_GIT_CONFIG_UNSAFE_REFUSAL;
+        }
+      : undefined;
+    return { exec: { ...input.exec, command: built.command }, env: built.env, preflight };
+  }
+
   private async handleExec(
     input: SandboxRuntimeExecInput,
     approvalDecision?: ApprovalDecision,
@@ -4197,10 +4421,19 @@ export class Sandbox extends LocalToolMCP {
       return hostRefusalResponse(preflightFailure);
     }
     const effect = sandboxInvocationPolicy({ command: resolvedInput.command, purpose: resolvedInput.purpose }).effect;
-    if (sandboxCommandRequiresApproval(effect) && approvalDecision === undefined) {
-      return {
-        approvalRequired: { tool_info: await this.toolCallInfo({ name: SANDBOX_EXEC_TOOL_NAME, arguments: input }) },
-      };
+    if (approvalDecision === undefined) {
+      // Same authoritative classification as toolCallInfo: auto-denied calls
+      // are refused, and Tier 3 calls surface the approval card instead of
+      // the old effect-based gate.
+      const tool_info = await this.toolCallInfo({ name: SANDBOX_EXEC_TOOL_NAME, arguments: input });
+      if (tool_info.pre_dispatch_failure !== undefined) {
+        return hostRefusalResponse(tool_info.pre_dispatch_failure.message);
+      }
+      if (tool_info.is_approval_required) {
+        return {
+          approvalRequired: { tool_info },
+        };
+      }
     }
     let sandboxInfo: SandboxInfo;
     let sandboxCreated: SandboxInfo | undefined;
@@ -4233,24 +4466,31 @@ export class Sandbox extends LocalToolMCP {
       codeModeEnv,
       mcpClientInstall: this.mcpClientInstall,
     });
-    const gitAuthEnv =
-      this.resolvedGitCredentialsContent !== null
-        ? buildGitCredentialHelperEnv(this.provider.getGitCredentialsPath(rawId))
-        : {};
-    const env = { ...mcpClientEnv, ...gitAuthEnv };
+    const gitPrep =
+      this.prepareHostAuthenticatedGit({ sandboxId: rawId, exec: resolvedInput }) ??
+      this.prepareAllowlistedGit({ sandboxId: rawId, exec: resolvedInput });
+    const env = { ...mcpClientEnv, ...gitPrep.env };
+    const execInput = gitPrep.exec;
 
     const dispatchMarker = { dispatched: false };
     try {
       const execution = await this.runExecWithVerification(
         rawId,
-        resolvedInput,
+        execInput,
         env,
         effect,
         planScope === undefined ? undefined : { context, scope: planScope },
         dispatchMarker,
+        gitPrep.preflight,
       );
       if (execution.status === 'blocked') {
         return hostRefusalResponse(execution.reason);
+      }
+      if (isExecResultOk(execution.result) && typeof resolvedInput.cwd === 'string') {
+        this.observeSentinelWrites({
+          paths: observeShellCreatedFiles({ command: resolvedInput.command }),
+          cwd: resolvedInput.cwd,
+        });
       }
 
       return {
@@ -4285,6 +4525,9 @@ export class Sandbox extends LocalToolMCP {
       await this.ensureSandboxInitialized();
       const recreatedRawId = this.providerSandboxId(recreated.sandboxInfo.sandbox_id);
       const retryCodeModeEnv = await this.ensureCodeModeStarted(recreatedRawId);
+      const retryGitPrep =
+        this.prepareHostAuthenticatedGit({ sandboxId: recreatedRawId, exec: resolvedInput }) ??
+        this.prepareAllowlistedGit({ sandboxId: recreatedRawId, exec: resolvedInput });
       const retryEnv = {
         ...injectMCPClientEnv({
           env: input.env,
@@ -4292,18 +4535,17 @@ export class Sandbox extends LocalToolMCP {
           codeModeEnv: retryCodeModeEnv,
           mcpClientInstall: this.mcpClientInstall,
         }),
-        ...(this.resolvedGitCredentialsContent !== null
-          ? buildGitCredentialHelperEnv(this.provider.getGitCredentialsPath(recreatedRawId))
-          : {}),
+        ...retryGitPrep.env,
       };
       const retryDispatchMarker = { dispatched: false };
       const retryExecution = await this.runExecWithVerification(
         recreatedRawId,
-        resolvedInput,
+        retryGitPrep.exec,
         retryEnv,
         effect,
         planScope === undefined ? undefined : { context, scope: planScope },
         retryDispatchMarker,
+        retryGitPrep.preflight,
       );
       if (retryExecution.status === 'blocked') {
         return hostRefusalResponse(retryExecution.reason);
@@ -4493,6 +4735,9 @@ export class Sandbox extends LocalToolMCP {
     }
     const write = observedWrite.value;
     const succeeded = write.success && write.response.exitCode === 0;
+    if (succeeded) {
+      this.observeSentinelWrites({ paths: [normalizedPath], cwd: scopeResolution.scope.cwd });
+    }
     if (!succeeded) {
       // Unwrap the script's own JSON error (`{"error": "..."}` on stdout) so a failed write
       // surfaces as a top-level rejection, never nested inside a `write` field a caller has to
@@ -4857,6 +5102,9 @@ export class Sandbox extends LocalToolMCP {
       throw new Error('Patch validation succeeded without an apply result');
     }
     const succeeded = apply.success && apply.response.exitCode === 0;
+    if (succeeded && workspaceRoot !== undefined) {
+      this.observeSentinelWrites({ paths: finalPaths, cwd: workspaceRoot });
+    }
     return {
       result: {
         content: [
@@ -5046,6 +5294,9 @@ export class Sandbox extends LocalToolMCP {
     }
     const { exec: replace, payloadDigest } = outcome;
     const succeeded = replace.success && replace.response.exitCode === 0;
+    if (succeeded) {
+      this.observeSentinelWrites({ paths: [normalizedPath], cwd: input.cwd });
+    }
     if (!succeeded) {
       // Unwrap the script's own JSON error (`{"error": "..."}` on stdout) so a failed replace
       // surfaces as a top-level rejection, never nested inside a `replace` field a caller has to
@@ -5594,13 +5845,12 @@ export class Sandbox extends LocalToolMCP {
     await awaitWithAbort({ operation: this.sandboxInitPromise, signal });
   }
 
-  private async writeGitCredentials(signal?: AbortSignal): Promise<void> {
+  private async scrubLegacyGitCredentials(signal?: AbortSignal): Promise<void> {
     const sandboxId = this.providerSandboxId(this.requiredSandboxInfo.sandbox_id);
-    const credentialsPath = this.provider.getGitCredentialsPath(sandboxId);
     const result = await awaitWithAbort({
       operation: this.provider.exec({
         sandboxId,
-        command: buildSyncGitCredentialsCommand(this.resolvedGitCredentialsContent, credentialsPath),
+        command: buildScrubLegacyGitCredentialsCommand(this.provider.getGitCredentialsPath(sandboxId)),
         ...(signal === undefined ? {} : { signal }),
       }),
       signal,
@@ -5715,7 +5965,7 @@ export class Sandbox extends LocalToolMCP {
         : `Sandbox initialized: MCP client at ${install.remotePath}; skills dir ${skillsDir}`,
     );
 
-    await this.writeGitCredentials(signal);
+    await this.scrubLegacyGitCredentials(signal);
   }
 
   /**

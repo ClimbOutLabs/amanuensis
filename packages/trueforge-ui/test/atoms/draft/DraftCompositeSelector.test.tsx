@@ -6,7 +6,7 @@ import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { DraftCompositeSelector } from '@/atoms/draft/DraftCompositeSelector.js';
 import { CompactLayoutProvider } from '@/atoms/lib/CompactLayoutContext.js';
 import { ServerProvider } from '@/server/ServerContext.js';
-import type { AgentSkill, AgentSpec, CatalogServer, SandboxCatalogServer, SkillCatalogServer } from '@/server/types.js';
+import type { AgentSkill, AgentSpec, CatalogServer, SkillCatalogServer } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
 let agentSpec: AgentSpec;
@@ -23,14 +23,7 @@ const skillCatalog: SkillCatalogServer = {
   createSkill: unavailable,
 };
 
-const sandboxCatalog: SandboxCatalogServer = {
-  getSandboxProviderCatalog: async () => [],
-  listSandboxProviders: async () => [],
-  createSandboxProvider: unavailable,
-  updateSandboxProvider: unavailable,
-};
-
-const settingsCatalog = createMockCatalog({ skillCatalog, sandboxCatalog });
+const settingsCatalog = createMockCatalog({ skillCatalog });
 
 vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryAgentSpec: () => ({ agentSpec }),
@@ -330,10 +323,9 @@ describe('DraftCompositeSelector', () => {
     fireEvent.click(screen.getByRole('button', { name: /Skills/ }));
 
     expect(await screen.findByRole('status')).toHaveTextContent('Skills run in a sandbox, which is not configured.');
-    const emptyState = screen.getByRole('button', { name: /Please configure a Sandbox in the settings/ });
-    fireEvent.click(emptyState);
-
-    expect(setSettingsOpen).toHaveBeenCalledWith(true, 'sandbox');
+    // No provider form exists to send the user to, so the empty state offers no settings link.
+    expect(screen.queryByRole('button', { name: /Please configure/ })).not.toBeInTheDocument();
+    expect(setSettingsOpen).not.toHaveBeenCalled();
   });
 
   it('opens skills settings when skills are empty and a sandbox is already configured', async () => {
@@ -445,7 +437,7 @@ describe('DraftCompositeSelector', () => {
 
     const sandboxSwitch = await screen.findByRole('switch', { name: 'Sandbox' });
     expect(sandboxSwitch).toBeDisabled();
-    expect(screen.getByText('No sandbox provider configured')).toBeInTheDocument();
+    expect(screen.getByText('The sandbox is not available on this server')).toBeInTheDocument();
   });
 
   it('does not offer sandbox settings when the sandbox settings section is unavailable', async () => {

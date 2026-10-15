@@ -11,7 +11,6 @@ import { createLogger } from 'winston';
 
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { beginTurnExecution } from '../../../src/apis/turns';
-import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import type {
@@ -39,6 +38,7 @@ import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscripti
 import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../../../src/runtime/memorySummarizeSettings';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
+import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 
 /** Delegates to a real store while recording every `getSetting` call. */
 class CountingGlobalSettingsStore implements IGlobalSettingsStore {

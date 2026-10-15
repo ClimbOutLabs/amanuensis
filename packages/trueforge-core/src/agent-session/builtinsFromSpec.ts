@@ -5,7 +5,7 @@
 import type { Logger } from 'winston';
 import type { AgentCapability } from '../core/capabilities/AgentCapability';
 import { askUserQuestion } from '../core/capabilities/builtins/AskUserQuestion';
-import { contextCompaction } from '../core/capabilities/builtins/ContextCompaction';
+import { contextCompaction, type CompactionModel } from '../core/capabilities/builtins/ContextCompaction';
 import { currentDateTime } from '../core/capabilities/builtins/CurrentDateTime';
 import { documentCapability } from '../core/capabilities/builtins/DocumentTools';
 import { dynamicSubAgents } from '../core/capabilities/builtins/DynamicSubAgents';
@@ -18,8 +18,7 @@ import {
   type TaskChecklistAccess,
 } from '../core/capabilities/builtins/TaskChecklist';
 import { webSearchRendering } from '../core/capabilities/builtins/WebSearchRendering';
-import type { ILLM } from '../core/llm/ILLM';
-import type { AgentDefinition, ModelParams } from '../core/runtime/AgentDefinition';
+import type { AgentDefinition } from '../core/runtime/AgentDefinition';
 import type { BoundRepository, Sandbox } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import type { AgentSpec } from './schemas/agentSpec';
@@ -32,7 +31,7 @@ export function builtinsFromSpec(input: {
    * Undefined means compaction inherits definition.modelClient/modelParams —
    * the thread's own model.
    */
-  compactionModel: { modelClient: ILLM; modelParams: ModelParams } | undefined;
+  compactionModel: CompactionModel | undefined;
   /** Root thread only — child threads omit interactive builtins. */
   isChild: boolean;
   sandbox: Sandbox | undefined;
@@ -41,9 +40,9 @@ export function builtinsFromSpec(input: {
   logger: Logger;
   compactionContext?: TaskChecklistAccess | undefined;
   /**
-   * Host instance-wide default for compaction_threshold_tokens (from ITurnResourceResolver),
-   * used only when the spec itself leaves compaction_threshold_tokens unset; an explicit spec
-   * value always wins over this. Undefined falls back to contextCompaction's own built-in default.
+   * Host instance-wide compaction trigger (from ITurnResourceResolver), used only when the spec
+   * sets no compaction trigger; an explicit spec value always wins over this. Undefined leaves
+   * the threshold to contextCompaction, which derives it from the model's context length.
    */
   compactionThresholdTokensDefault?: number | undefined;
   boundRepository?: BoundRepository | undefined;
@@ -90,7 +89,7 @@ export function builtinsFromSpec(input: {
         definition,
         compactionModel,
         // An explicit spec value always wins; only an unset spec value falls through to the
-        // host's instance-wide default, which itself falls through to the built-in default.
+        // host's instance-wide value, which itself falls through to the context-length ratio.
         compactionThresholdTokens:
           config.context_management.compaction.trigger?.value ?? compactionThresholdTokensDefault,
         checklist: compactionContext,

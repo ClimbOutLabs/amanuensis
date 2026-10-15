@@ -3,13 +3,13 @@ import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
+  downloadPinnedModelFiles,
   EMBEDDING_DIMENSIONS,
   EMBEDDING_MODEL_ID,
   EMBEDDING_MODEL_REVISION,
   EMBEDDING_PASSAGE_PREFIX,
   EMBEDDING_QUERY_PREFIX,
   EmbeddingModel,
-  downloadPinnedModelFiles,
   toVectorMatrix,
   verifyModelFiles,
   type EmbeddingModelPhase,
@@ -68,7 +68,10 @@ function fakeDownload(harness: FakeHarness, modelDir: string) {
 
 async function writeTinyFiles(modelDir: string): Promise<void> {
   const snapshot = path.join(modelDir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION);
-  for (const [relative, content] of Object.entries({ 'config.json': 'tiny config', 'onnx/model.bin': 'tiny weights' })) {
+  for (const [relative, content] of Object.entries({
+    'config.json': 'tiny config',
+    'onnx/model.bin': 'tiny weights',
+  })) {
     const full = path.join(snapshot, relative);
     await mkdir(path.dirname(full), { recursive: true });
     await writeFile(full, content, 'utf8');
@@ -222,9 +225,9 @@ describe('downloadPinnedModelFiles', () => {
     try {
       const fetchImpl: typeof fetch = async () =>
         new Response('tiny', { headers: { 'content-length': String(10 * 1024 * 1024 * 1024) } });
-      await expect(
-        downloadPinnedModelFiles({ modelDir: dir, expectedFiles: TINY_FILES, fetchImpl }),
-      ).rejects.toThrow('too large');
+      await expect(downloadPinnedModelFiles({ modelDir: dir, expectedFiles: TINY_FILES, fetchImpl })).rejects.toThrow(
+        'too large',
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -280,9 +283,9 @@ describe('downloadPinnedModelFiles', () => {
     const dir = await makeModelDir();
     try {
       const fetchImpl: typeof fetch = async () => new Response('nope', { status: 404 });
-      await expect(
-        downloadPinnedModelFiles({ modelDir: dir, expectedFiles: TINY_FILES, fetchImpl }),
-      ).rejects.toThrow('HTTP 404');
+      await expect(downloadPinnedModelFiles({ modelDir: dir, expectedFiles: TINY_FILES, fetchImpl })).rejects.toThrow(
+        'HTTP 404',
+      );
       expect(await verifyModelFiles(dir, TINY_FILES)).toBe(false);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -329,9 +332,7 @@ describe('EmbeddingModel', () => {
       // Offline loads use the verified revision directory directly, not the
       // model ID: transformers.js with allowRemote=false resolves IDs via
       // env.localModelPath (no revision) and never finds the pinned cache.
-      expect(harness.modelRefs).toEqual([
-        path.join(dir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION),
-      ]);
+      expect(harness.modelRefs).toEqual([path.join(dir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION)]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -357,9 +358,7 @@ describe('EmbeddingModel', () => {
       expect(await model.ensureReady()).toBe(true);
       // The parser is only ever constructed after the bytes verify.
       expect(order).toEqual(['download', 'pipeline']);
-      expect(harness.modelRefs).toEqual([
-        path.join(dir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION),
-      ]);
+      expect(harness.modelRefs).toEqual([path.join(dir, EMBEDDING_MODEL_ID, EMBEDDING_MODEL_REVISION)]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

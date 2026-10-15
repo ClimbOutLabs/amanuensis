@@ -168,9 +168,7 @@ export function createPersonaApi(fetcher: typeof fetch): PersonaApi {
       return parseSessionPersona(await readData(response));
     },
     async listPersonaKnowledge(personaId: string) {
-      const data = await readData(
-        await fetcher(`${PERSONAS_URL}/${encodeURIComponent(personaId)}/knowledge`),
-      );
+      const data = await readData(await fetcher(`${PERSONAS_URL}/${encodeURIComponent(personaId)}/knowledge`));
       if (!Array.isArray(data)) {
         throw new Error('The knowledge response was invalid.');
       }

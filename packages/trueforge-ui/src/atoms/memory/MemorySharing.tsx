@@ -4,9 +4,27 @@ import { useState } from 'react';
 
 import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
 import { Switch } from '@/atoms/primitives/Switch.js';
-import type { MemoryVaultSharing } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
+import {
+  personaVaultNamespace,
+  type MemoryVaultSharing,
+} from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
 
 export type MemorySharingPersona = { id: string; displayName: string };
+
+type SharingVault = { value: string; name: string };
+
+/** Every vault except the persona's own, derived from the persona list rather than from vaults on disk. */
+function readableVaults(options: {
+  persona: MemorySharingPersona;
+  personas: MemorySharingPersona[];
+  topics: Array<{ value: string; label: string }>;
+}): SharingVault[] {
+  const otherPersonas = options.personas
+    .filter(other => other.id !== options.persona.id)
+    .map(other => ({ value: personaVaultNamespace(other.displayName), name: `${other.displayName}'s vault` }));
+  const topics = options.topics.map(topic => ({ value: topic.value, name: `the ${topic.label} vault` }));
+  return [...otherPersonas, ...topics];
+}
 
 /**
  * Cross-persona sharing: which vault namespaces each persona may read.
@@ -14,6 +32,7 @@ export type MemorySharingPersona = { id: string; displayName: string };
  */
 export function MemorySharing(props: {
   personas: MemorySharingPersona[];
+  /** Topic vaults, offered to every persona alongside the other personas' vaults. */
   namespaces: Array<{ value: string; label: string }>;
   sharing: MemoryVaultSharing;
   onSave: (sharing: MemoryVaultSharing) => Promise<void>;
@@ -27,9 +46,7 @@ export function MemorySharing(props: {
     setSaved(false);
     setDraft(previous => {
       const current = previous[personaId] ?? [];
-      const next = enabled
-        ? Array.from(new Set([...current, namespace]))
-        : current.filter(item => item !== namespace);
+      const next = enabled ? Array.from(new Set([...current, namespace])) : current.filter(item => item !== namespace);
       const copy = { ...previous };
       if (next.length === 0) {
         delete copy[personaId];
@@ -56,41 +73,44 @@ export function MemorySharing(props: {
 
   if (props.personas.length === 0) {
     return (
-      <p className="text-sm text-text-secondary">
-        No personas are configured yet, so there is nothing to share with.
-      </p>
+      <p className="text-sm text-text-secondary">No personas are configured yet, so there is nothing to share with.</p>
     );
   }
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-text-secondary">
-        Choose which vaults each persona can read. A persona always reads the shared vault; these
-        toggles grant access to additional vaults.
+        Choose which vaults each persona can read. A persona always reads the shared vault; these toggles grant access
+        to additional vaults.
       </p>
-      {props.personas.map(persona => (
-        <fieldset key={persona.id} className="rounded-xl border border-border bg-card-bg p-4">
-          <legend className="px-1 text-sm font-medium text-text-primary">{persona.displayName}</legend>
-          <div className="flex flex-col gap-3">
-            {props.namespaces.map(namespace => {
-              const enabled = (draft[persona.id] ?? []).includes(namespace.value);
-              return (
-                <label key={namespace.value} className="flex items-center justify-between gap-3">
-                  <span className="text-sm text-text-primary">
-                    Can read the {namespace.label} vault
-                  </span>
-                  <Switch
-                    checked={enabled}
-                    onCheckedChange={checked => toggle(persona.id, namespace.value, checked)}
-                    disabled={saving}
-                    aria-label={`${persona.displayName} can read the ${namespace.label} vault`}
-                  />
-                </label>
-              );
-            })}
-          </div>
-        </fieldset>
-      ))}
+      {props.personas.map(persona => {
+        const vaults = readableVaults({ persona, personas: props.personas, topics: props.namespaces });
+        return (
+          <fieldset key={persona.id} className="rounded-xl border border-border bg-card-bg p-4">
+            <legend className="px-1 text-sm font-medium text-text-primary">{persona.displayName}</legend>
+            {vaults.length === 0 ? (
+              <p className="text-sm text-text-secondary">No other vaults to read yet.</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {vaults.map(vault => {
+                  const enabled = (draft[persona.id] ?? []).includes(vault.value);
+                  return (
+                    <label key={vault.value} className="flex items-center justify-between gap-3">
+                      <span className="text-sm text-text-primary">Can read {vault.name}</span>
+                      <Switch
+                        checked={enabled}
+                        onCheckedChange={checked => toggle(persona.id, vault.value, checked)}
+                        disabled={saving}
+                        aria-label={`${persona.displayName} can read ${vault.name}`}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </fieldset>
+        );
+      })}
       <div className="flex items-center gap-3">
         <button
           type="button"

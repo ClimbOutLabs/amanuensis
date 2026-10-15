@@ -292,11 +292,7 @@ export function queriesAskSameQuestion(input: {
 }
 
 /** Overlap comparison over pre-expanded token sets; see queriesAskSameQuestion. */
-function expandedAskSameQuestion(input: {
-  a: ExpandedTokenSet;
-  b: ExpandedTokenSet;
-  threshold: number;
-}): boolean {
+function expandedAskSameQuestion(input: { a: ExpandedTokenSet; b: ExpandedTokenSet; threshold: number }): boolean {
   if (input.a.size === 0 || input.b.size === 0) {
     return false;
   }
@@ -310,10 +306,7 @@ function expandedAskSameQuestion(input: {
   }
   let shared = 0;
   for (const token of input.a.all) {
-    if (
-      input.b.all.has(token) &&
-      (input.a.originals.has(token) || input.b.originals.has(token))
-    ) {
+    if (input.b.all.has(token) && (input.a.originals.has(token) || input.b.originals.has(token))) {
       shared += 1;
     }
   }
@@ -395,8 +388,7 @@ export function buildInternalSourceToolPolicy(
     }
     // Armed-ness is checked before the query is tokenized: when neither rule
     // can fire, a web_search costs a name comparison and nothing more.
-    const libraryArmed =
-      state.libraryConsulted && !state.libraryAnswered && state.libraryTokens !== undefined;
+    const libraryArmed = state.libraryConsulted && !state.libraryAnswered && state.libraryTokens !== undefined;
     const recallArmed = state.recallTokens !== undefined;
     if (!libraryArmed && !recallArmed) {
       return undefined;
@@ -413,10 +405,7 @@ export function buildInternalSourceToolPolicy(
     }
     if (recallArmed) {
       const recall = recallSet();
-      if (
-        recall !== undefined &&
-        expandedAskSameQuestion({ a: web, b: recall, threshold: RECALL_OVERLAP_THRESHOLD })
-      ) {
+      if (recall !== undefined && expandedAskSameQuestion({ a: web, b: recall, threshold: RECALL_OVERLAP_THRESHOLD })) {
         return { message: MEMORY_BLOCK_MESSAGE };
       }
     }

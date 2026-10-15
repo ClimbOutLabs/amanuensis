@@ -6,12 +6,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ActivePersonaIndicator } from '@/atoms/ActivePersonaIndicator.js';
-import {
-  PersonaProvider,
-  type Persona,
-  type PersonaApi,
-  type SessionPersona,
-} from '@/components/PersonaContext.js';
+import { PersonaProvider, type Persona, type PersonaApi, type SessionPersona } from '@/components/PersonaContext.js';
 import { awaitPendingPersonaMutation } from '@/personaMutationGate.js';
 import { personaKnowledgeApiStubs } from '../personaApiStubs.js';
 

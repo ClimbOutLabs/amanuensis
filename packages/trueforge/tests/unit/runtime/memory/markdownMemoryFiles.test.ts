@@ -1,12 +1,19 @@
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   formatRetainEntry,
   namespaceDirFor,
+  personaForVaultFilesystemNamespace,
   sanitizeNamespace,
   scanNamespaceEntries,
   splitEntries,
+  vaultFilesystemNamespace,
+  vaultReadNamespaces,
+  vaultWriteNamespace,
+  writeVaultSharing,
+  type VaultScope,
 } from '../../../../src/runtime/memory/markdownMemoryFiles';
 
 async function makeDir(): Promise<string> {
@@ -108,6 +115,130 @@ describe('markdownMemoryFiles', () => {
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
+    });
+  });
+
+  describe('vault scope namespaces', () => {
+    const alpha: VaultScope = { personaName: 'Alpha', personaId: 'persona-alpha-id' };
+
+    it('writes to the shared vault without a scope and to the persona vault with one', () => {
+      expect(vaultWriteNamespace({ tenantNamespace: 'tenant-1', scope: undefined })).toBe('tenant-1');
+      expect(vaultWriteNamespace({ tenantNamespace: 'tenant-1', scope: alpha })).toBe('tenant-1__persona_Alpha');
+    });
+
+    it('reads only the shared vault without a scope', async () => {
+      const dir = await makeDir();
+      try {
+        await writeVaultSharing({
+          baseDir: dir,
+          tenantNamespace: 'tenant-1',
+          sharing: { version: 1, shares: { Alpha: ['finance'] } },
+        });
+        expect(await vaultReadNamespaces({ baseDir: dir, tenantNamespace: 'tenant-1', scope: undefined })).toEqual([
+          'tenant-1',
+        ]);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('reads own vault, then shared vault, then granted vaults, without duplicates', async () => {
+      const dir = await makeDir();
+      try {
+        await writeVaultSharing({
+          baseDir: dir,
+          tenantNamespace: 'tenant-1',
+          sharing: {
+            version: 1,
+            shares: { Alpha: ['finance', 'default', 'persona:Beta', 'finance'], 'persona-alpha-id': ['travel'] },
+          },
+        });
+        expect(await vaultReadNamespaces({ baseDir: dir, tenantNamespace: 'tenant-1', scope: alpha })).toEqual([
+          'tenant-1__persona_Alpha',
+          'tenant-1',
+          'tenant-1__finance',
+          'tenant-1__persona_Beta',
+          'tenant-1__travel',
+        ]);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not apply another persona grants or inherited object keys', async () => {
+      const dir = await makeDir();
+      try {
+        await writeVaultSharing({
+          baseDir: dir,
+          tenantNamespace: 'tenant-1',
+          sharing: { version: 1, shares: { Beta: ['finance'] } },
+        });
+        const inherited: VaultScope = { personaName: 'constructor', personaId: '__proto__' };
+        expect(await vaultReadNamespaces({ baseDir: dir, tenantNamespace: 'tenant-1', scope: alpha })).toEqual([
+          'tenant-1__persona_Alpha',
+          'tenant-1',
+        ]);
+        expect(await vaultReadNamespaces({ baseDir: dir, tenantNamespace: 'tenant-1', scope: inherited })).toEqual([
+          'tenant-1__persona_constructor',
+          'tenant-1',
+        ]);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('persona vault directory names', () => {
+    const UUID_TENANT = '3f2b8c1e-5a47-4d90-9be1-0c6d7e8f9a12';
+    const directoryOf = (tenant: string, name: string): string =>
+      sanitizeNamespace(vaultFilesystemNamespace(tenant, `persona:${name}`));
+
+    it('keeps clean short names on their plain directory', () => {
+      expect(vaultFilesystemNamespace('tenant-1', 'persona:planner')).toBe('tenant-1__persona_planner');
+      expect(vaultFilesystemNamespace('tenant-1', 'persona:Ana_Lou-2')).toBe('tenant-1__persona_Ana_Lou-2');
+    });
+
+    it.each([
+      ['accented letters', ['Zoë', 'Zoé', 'Zoe']],
+      ['underscore versus space', ['Ana_Lou', 'Ana Lou', 'Ana-Lou', 'Ana.Lou']],
+      ['same-length CJK names', ['名前一', '名前二', '名前三']],
+      ['case-only differences from unsafe characters', ['Sam!', 'Sam?', 'Sam']],
+    ])('gives distinct directories for %s', (_label, names) => {
+      const directories = names.map(name => directoryOf('tenant-1', name));
+      expect(new Set(directories).size).toBe(names.length);
+    });
+
+    it('gives distinct directories to long names that share a prefix under a UUID tenant', () => {
+      const stem = 'Dr Penelope Featherstonehaugh-Cholmondeley the ';
+      const names = [`${stem}First`, `${stem}Second`, `${stem}Third`];
+      const directories = names.map(name => vaultFilesystemNamespace(UUID_TENANT, `persona:${name}`));
+      expect(new Set(directories.map(sanitizeNamespace)).size).toBe(names.length);
+      for (const directory of directories) {
+        expect(directory.startsWith(`${UUID_TENANT}__persona_`)).toBe(true);
+        expect(sanitizeNamespace(directory)).toBe(directory);
+        expect(directory.length).toBeLessThanOrEqual(64);
+      }
+    });
+
+    it('does not let a plain name imitate the hashed directory of another name', () => {
+      const hash = createHash('sha256').update('persona:Team Zeta', 'utf8').digest('hex').slice(0, 8);
+      const hashed = directoryOf('tenant-1', 'Team Zeta');
+      const imitation = directoryOf('tenant-1', `Team_Zeta_${hash}`);
+      expect(hashed).toContain(hash);
+      expect(imitation).not.toBe(hashed);
+    });
+
+    it('leaves topic and shared vault names as they were', () => {
+      expect(vaultFilesystemNamespace('tenant-1', 'finance')).toBe('tenant-1__finance');
+      expect(vaultFilesystemNamespace('tenant-1', 'Home Budget')).toBe('tenant-1__Home_Budget');
+      expect(vaultFilesystemNamespace('tenant-1', 'default')).toBe('tenant-1');
+    });
+
+    it('recovers a readable persona name from a hashed directory', () => {
+      const clean = vaultFilesystemNamespace('tenant-1', 'persona:planner');
+      const hashed = vaultFilesystemNamespace('tenant-1', 'persona:Ana Lou');
+      expect(personaForVaultFilesystemNamespace('tenant-1', clean)).toBe('planner');
+      expect(personaForVaultFilesystemNamespace('tenant-1', hashed)).toBe('Ana_Lou');
     });
   });
 });

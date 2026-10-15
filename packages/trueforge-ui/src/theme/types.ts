@@ -3,7 +3,7 @@ import type { ComponentType, CSSProperties, FC, ReactNode, SVGProps } from 'reac
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
-export type ThemePreset = 'trueforge' | 'claude' | 'chatgpt' | 'gemini' | 'midnight' | 'forest' | 'sunset' | 'nvidia';
+export type ThemePreset = 'trueforge' | 'claude' | 'chatgpt' | 'gemini' | 'midnight' | 'forest' | 'sunset' | 'volt';
 
 export type SemanticTokens = {
   // Across product
@@ -55,6 +55,28 @@ export type SemanticTokens = {
   failureText: string;
   warningBg: string;
   warningText: string;
+  /**
+   * Vivid semantic foregrounds for status text, dots, and borders. The `*Bg`
+   * tokens above are muted fills; these are the unmistakable hues that carry
+   * meaning (a live recording dot, an error, an active badge).
+   */
+  success: string;
+  warning: string;
+  danger: string;
+  dangerBg: string;
+  info: string;
+  infoBg: string;
+  /** Live microphone indicator. May equal `danger`, but stays a separate name so the privacy cue is never dulled by a theme tweak. */
+  recording: string;
+  /** Categorical data-series colors for charts, read from CSS vars in JS. */
+  chart1: string;
+  chart2: string;
+  chart3: string;
+  chart4: string;
+  chart5: string;
+  chart6: string;
+  chart7: string;
+  chart8: string;
   // Kept internals
   focusRing: string;
   radius: string;
@@ -246,6 +268,21 @@ export const TOKEN_CSS_VARS: Record<keyof SemanticTokens, string> = {
   failureText: '--failure-text',
   warningBg: '--warning-bg',
   warningText: '--warning-text',
+  success: '--success',
+  warning: '--warning',
+  danger: '--danger',
+  dangerBg: '--danger-bg',
+  info: '--info',
+  infoBg: '--info-bg',
+  recording: '--recording',
+  chart1: '--chart-1',
+  chart2: '--chart-2',
+  chart3: '--chart-3',
+  chart4: '--chart-4',
+  chart5: '--chart-5',
+  chart6: '--chart-6',
+  chart7: '--chart-7',
+  chart8: '--chart-8',
   focusRing: '--focus-ring',
   radius: '--radius',
   composerRadius: '--composer-radius',

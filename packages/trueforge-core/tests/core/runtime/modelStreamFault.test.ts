@@ -1,3 +1,4 @@
+import type { TextStreamPart, ToolSet } from 'ai';
 import type {
   AgentContextProcessorOutput,
   AgentThreadExecutionContext,
@@ -7,7 +8,7 @@ import { EventType, newEventId } from '../../../src/core/events/schema';
 import type { ILLM } from '../../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
-import { ModelOutputRepetitionError, ModelStreamFault } from '../../../src/core/llm/VercelAILLM';
+import { mapStreamToChunks, ModelOutputRepetitionError, ModelStreamFault } from '../../../src/core/llm/VercelAILLM';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { ContextMessage, InternalThreadDoneEvent } from '../../../src/core/runtime/AgentThread.types';
 import { InternalEventType } from '../../../src/core/runtime/AgentThread.types';
@@ -154,9 +155,8 @@ describe('ModelStreamFault retry', () => {
       await Promise.resolve();
       throw new ModelOutputRepetitionError('reasoning');
     }
-    const create = jest.fn(
-      (): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
-        repetitionFaultStream(),
+    const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
+      repetitionFaultStream(),
     );
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({
@@ -188,5 +188,57 @@ describe('ModelStreamFault retry', () => {
     // The user gets the actionable guidance, not the misleading context-too-long text.
     expect(doneEvent.error).toBe(new ModelOutputRepetitionError('reasoning').message);
     expect(doneEvent.error).toMatch(/smaller parts/);
+  });
+
+  it('surfaces a definite provider error immediately without compaction or retry', async () => {
+    // The provider error shape (a definite status, not a broken stream): must not trigger the
+    // ModelStreamFault recovery path. Goes through the real mapStreamToChunks classification so
+    // the test fails if the classification regresses.
+    async function* providerErrorParts(): AsyncGenerator<TextStreamPart<ToolSet>> {
+      await Promise.resolve();
+      const cause = Object.assign(new Error('Internal Server Error'), {
+        data: { message: '', type: 'InternalServerError', param: null, code: 500 },
+      });
+      yield { type: 'error', error: cause };
+    }
+    const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
+      mapStreamToChunks({
+        stream: providerErrorParts(),
+        chunkMeta: { id: 'test-id', created: 0, model: 'test-model' },
+      }),
+    );
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const compaction = new RecordingCompaction();
+    const thread = new AgentThread({
+      threadId: 'main',
+      title: 'Main',
+      toolCallMemo: undefined,
+      taskState: undefined,
+      isRequestContinuation: undefined,
+      tracing: NOOP_AGENT_TRACING,
+      logger: makeSilentLogger(),
+      definition: { modelClient, modelId: undefined, configuredModels: undefined, instruction: 'test', toolSets: [] },
+      context: [{ role: 'user', content: 'A question.' }],
+      capabilities: [{ preLLMProcessors: [compaction] }],
+    });
+
+    let doneEvent: InternalThreadDoneEvent | undefined;
+    for await (const event of thread.execute({ signal: new AbortController().signal })) {
+      if (event.type === InternalEventType.AGENT_DONE) {
+        doneEvent = event;
+      }
+    }
+
+    // Exactly one attempt: no retry for a definite provider error.
+    expect(create).toHaveBeenCalledTimes(1);
+    // No forced compaction: the only preLLM pass is the ordinary one before the attempt.
+    expect(compaction.forcedFlags).toEqual([false]);
+    expect(doneEvent?.status).toBe('error');
+    expect(doneEvent?.handoff_cause).not.toBe('model_stream_fault');
+    if (doneEvent?.status !== 'error') {
+      throw new Error('expected an error-status AGENT_DONE event');
+    }
+    expect(doneEvent.error).toBe('Internal Server Error');
+    expect(doneEvent.error).not.toContain('context is too long');
   });
 });

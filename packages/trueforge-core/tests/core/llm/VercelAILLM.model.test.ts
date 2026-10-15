@@ -1,7 +1,7 @@
 /**
  * LanguageModel construction and streamText call-args assembly:
  * buildLanguageModel (per-provider construction + capability flags),
- * resolveMaxOutputTokens, and buildStreamTextArgs (key presence under
+ * and buildStreamTextArgs (key presence under
  * exactOptionalPropertyTypes).
  */
 import type { VercelAIProviderConfig, VercelAIProviderName } from '../../../src/core/llm/VercelAILLM';
@@ -9,7 +9,7 @@ import {
   buildLanguageModel,
   buildStreamTextArgs,
   convertTools,
-  resolveMaxOutputTokens,
+  TOKEN_FACTORY_DEFAULT_BASE_URL,
 } from '../../../src/core/llm/VercelAILLM';
 
 function makeConfig(
@@ -56,6 +56,16 @@ describe('buildLanguageModel', () => {
     expect(buildLanguageModel(makeConfig({ provider: 'alibaba', baseUrl: 'http://localhost/v1' }))).toBeDefined();
   });
 
+  // Token Factory has a single public endpoint, so the server default applies when the
+  // provider record does not set its own (for example the regional endpoint).
+  it('builds tokenfactory against the default endpoint when no baseUrl is configured', () => {
+    expect(TOKEN_FACTORY_DEFAULT_BASE_URL).toBe('https://api.tokenfactory.nebius.com/v1');
+    const model: unknown = buildLanguageModel(makeConfig({ provider: 'tokenfactory' }));
+    if (typeof model !== 'object' || model === null) throw new Error('Expected model to be an object');
+    expect(Reflect.get(model, 'supportsStructuredOutputs')).toBe(true);
+    expect(Reflect.get(model, 'modelId')).toBe('test-model');
+  });
+
   it('throws for unknown provider string (exhaustive default branch)', () => {
     const badConfig = JSON.parse(
       '{"provider":{"type":"unknown-provider","name":"x"},"name":"x","model":{"id":"m","name":"m"},"apiKey":"k","headers":{}}',
@@ -74,33 +84,6 @@ describe('buildLanguageModel', () => {
     );
     if (typeof model !== 'object' || model === null) throw new Error('Expected model to be an object');
     expect(Reflect.get(model, 'modelId')).toBe('claude-sonnet-5');
-  });
-});
-
-// ─────────── resolveMaxOutputTokens ───────────
-
-describe('resolveMaxOutputTokens', () => {
-  it('returns max_completion_tokens when set', () => {
-    expect(resolveMaxOutputTokens({ max_completion_tokens: 512 })).toBe(512);
-  });
-
-  it('falls back to max_tokens when max_completion_tokens is absent', () => {
-    const body = JSON.parse('{"max_tokens":256}');
-    expect(resolveMaxOutputTokens(body)).toBe(256);
-  });
-
-  it('prefers max_completion_tokens over max_tokens', () => {
-    const body = JSON.parse('{"max_completion_tokens":512,"max_tokens":256}');
-    expect(resolveMaxOutputTokens(body)).toBe(512);
-  });
-
-  it('returns undefined when neither is set', () => {
-    expect(resolveMaxOutputTokens({})).toBeUndefined();
-  });
-
-  it('returns undefined for non-numeric values', () => {
-    const body = JSON.parse('{"max_completion_tokens":"not-a-number"}');
-    expect(resolveMaxOutputTokens(body)).toBeUndefined();
   });
 });
 

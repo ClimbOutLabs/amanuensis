@@ -35,8 +35,8 @@ export interface LastCompactionStatus {
   tokensBefore: number;
   /** Estimated context tokens after the compaction attempt. */
   tokensAfter: number;
-  /** Whether the compaction applied, or was skipped as invalid or blocked. */
-  outcome: 'applied' | 'skipped_invalid' | 'skipped_blocked';
+  /** Whether the compaction applied, was skipped, or fell back to truncation. */
+  outcome: TrueForgeApi.ContextCompactionEventOutcome;
 }
 
 /** Host-facing methods beyond the vendor `AgentChatServer` contract. */
@@ -59,17 +59,13 @@ export interface HarnessChatServerExtensions {
    * Read the most recent context compaction event for a session.
    * Returns `null` when no compaction has run yet.
    */
-  getLastCompactionStatus(request: {
-    sessionId: string;
-  }): Promise<LastCompactionStatus | null>;
+  getLastCompactionStatus(request: { sessionId: string }): Promise<LastCompactionStatus | null>;
   /**
    * Read the input token count from the session's most recent turn.
    * This is the actual number the model saw for its last request.
    * Returns `null` when the session has no turns yet or tokens are unknown.
    */
-  getLastTurnInputTokens(request: {
-    sessionId: string;
-  }): Promise<number | null>;
+  getLastTurnInputTokens(request: { sessionId: string }): Promise<number | null>;
 }
 
 /** Type guard for servers that provide the harness chat extensions. */
@@ -98,8 +94,7 @@ export function approvalAutoDenyReason(): string {
   return `Automatically denied: the approval was not answered within ${APPROVAL_AUTO_DENY_MINUTES} minutes.`;
 }
 
-const PENDING_APPROVALS_MESSAGE =
-  'user message cannot be sent while approvals or questions are pending';
+const PENDING_APPROVALS_MESSAGE = 'user message cannot be sent while approvals or questions are pending';
 
 /** True when the error is the server's pending-approvals 422. */
 export function isPendingApprovalsError(error: unknown): boolean {
@@ -115,16 +110,19 @@ function isNoPendingApprovalError(error: unknown): boolean {
   return /no pending approval/i.test(message);
 }
 
-export function createSessionResyncExtensions(
-  client: Pick<TrueForge, 'sessions'>,
-): HarnessChatServerExtensions {
-  async function peekSessionTip({
-    sessionId,
-  }: {
-    sessionId: string;
-  }): Promise<SessionTipInfo | null> {
-    const page = await client.sessions.listTurns(sessionId, { limit: 1 });
-    const tip = page.data[0];
+export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'>): HarnessChatServerExtensions {
+  // `listTurns` is oldest-first, so its first row is the session's first turn, not its tip. The
+  // session event feed is newest-first on the active branch, which names the real tip turn.
+  async function readTipTurn({ sessionId }: { sessionId: string }): Promise<TrueForgeApi.Turn | null> {
+    const page = await client.sessions.listEvents(sessionId, { limit: 1 });
+    const newest = page.data[0];
+    if (newest == null) return null;
+    const response = await client.sessions.getTurn(sessionId, newest.turnId);
+    return response.data;
+  }
+
+  async function peekSessionTip({ sessionId }: { sessionId: string }): Promise<SessionTipInfo | null> {
+    const tip = await readTipTurn({ sessionId });
     if (tip == null) return null;
     const pendingApprovals: PendingApprovalInfo[] = [];
     const state = tip.state;
@@ -179,11 +177,7 @@ export function createSessionResyncExtensions(
     return { dismissed: input.length, alreadyResolved: false };
   }
 
-  async function getLastCompactionStatus({
-    sessionId,
-  }: {
-    sessionId: string;
-  }): Promise<LastCompactionStatus | null> {
+  async function getLastCompactionStatus({ sessionId }: { sessionId: string }): Promise<LastCompactionStatus | null> {
     const page = await client.sessions.listEvents(sessionId, { limit: 100 });
     for (const item of page.data) {
       const event = item.event;
@@ -208,13 +202,8 @@ export function createSessionResyncExtensions(
     return undefined;
   }
 
-  async function getLastTurnInputTokens({
-    sessionId,
-  }: {
-    sessionId: string;
-  }): Promise<number | null> {
-    const page = await client.sessions.listTurns(sessionId, { limit: 1 });
-    const tip = page.data[0];
+  async function getLastTurnInputTokens({ sessionId }: { sessionId: string }): Promise<number | null> {
+    const tip = await readTipTurn({ sessionId });
     if (tip == null) return null;
     const state: unknown = tip.state;
     if (typeof state !== 'object' || state === null) return null;

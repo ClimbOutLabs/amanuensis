@@ -7,6 +7,6 @@
  *     }
  */
 export interface DownloadSandboxFileSessionsRequest {
-    /** Absolute or sandbox-working-directory-relative file path, as listed in the assistant's `sandbox_artifacts` block. */
+    /** Artifact path as listed by the list-turn-artifacts route: exec-sandbox `sandbox_artifacts` rows and run_code harvested files (`run_code/<name>` paths). */
     path: string;
 }

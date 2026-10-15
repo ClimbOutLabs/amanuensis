@@ -72,7 +72,6 @@ export type {
 export { askUserQuestion } from './capabilities/builtins/AskUserQuestion';
 export {
   CONVERSATION_COMPACTION_TEMPLATE,
-  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
   HOST_COMPACTION_TEMPLATE,
   HOST_SUMMARY_PREFACE,
   contextCompaction,
@@ -96,6 +95,7 @@ export {
   taskChecklist,
 } from './capabilities/builtins/TaskChecklist';
 export type { TaskChecklistAccess } from './capabilities/builtins/TaskChecklist';
+export { TOKEN_BUDGET_SAFETY_MARGIN } from './capabilities/builtins/tokenBudgetConstants';
 export { toolOutputScreen } from './capabilities/builtins/ToolOutputScreen';
 export type { ToolOutputScreenClassifier } from './capabilities/builtins/ToolOutputScreen';
 export {
@@ -161,10 +161,17 @@ export {
 export { ToolSet } from './mcp/ToolSet';
 
 // LLM contracts
+export { isFailoverRetryable, withFailover } from './llm/failoverLanguageModel';
+export type { FailoverLanguageModelOptions } from './llm/failoverLanguageModel';
 export type { AgentMetadata, ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './llm/ILLM';
 export { ResponseFormatSchema, toOpenAIResponseFormat } from './llm/responseFormat';
 export type { ResponseFormat } from './llm/responseFormat';
-export { SUPPORTED_REASONING_EFFORTS, VERCEL_AI_PROVIDER_NAMES, VercelAILLM } from './llm/VercelAILLM';
+export {
+  SUPPORTED_REASONING_EFFORTS,
+  TOKEN_FACTORY_DEFAULT_BASE_URL,
+  VERCEL_AI_PROVIDER_NAMES,
+  VercelAILLM,
+} from './llm/VercelAILLM';
 export type { StreamTimeout, VercelAILLMConfig, VercelAIProviderConfig, VercelAIProviderName } from './llm/VercelAILLM';
 
 // Event contracts
@@ -213,10 +220,7 @@ export type {
 } from './events/schema';
 export { CompletionUsageSchema } from './llm/LLMTypes';
 export type { CompletionUsage } from './llm/LLMTypes';
-export type {
-  ChatCompletionContentPartRefusal,
-  ChatCompletionContentPartText,
-} from './llm/openaiSchemas';
+export type { ChatCompletionContentPartRefusal, ChatCompletionContentPartText } from './llm/openaiSchemas';
 export type { ToolCallMemoSnapshot } from './mcp/executeToolCalls';
 export { InternalEventType } from './runtime/AgentThread.types';
 export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread.types';
@@ -246,6 +250,7 @@ export {
 export { REDIS_KEY_NAMESPACE, redisKey } from './redisKeys';
 export { describeUnknownError, extractErrorLogFields } from './util/errorLogFields';
 export { PromiseTimeoutError, withTimeout } from './util/promiseUtils';
+export { isRedirectStatus, redirectTargetOrigin } from './util/redirects';
 
 // Sandbox (concrete implementation; provider details exported for composition)
 export { CodeModeDispatcher } from './sandbox/codeMode/CodeModeDispatcher';
@@ -257,8 +262,10 @@ export { SANDBOX_ALLOWED_EGRESS_DOMAINS, sandboxEgressDomainAllowList } from './
 // run_code isolation-driver stack (Docker v1; Firecracker parked until /dev/kvm is confirmed)
 export { DockerDriver } from './sandbox/driver/DockerDriver';
 export type { DockerDriverOptions } from './sandbox/driver/DockerDriver';
+export { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './sandbox/driver/errors';
 export { classifyExecCommand, interpreterInvocationRefusal } from './sandbox/driver/ExecGuard';
 export type { ExecGuardHost, ExecGuardVerdict } from './sandbox/driver/ExecGuard';
+export { OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX, runCodeProgramPath } from './sandbox/driver/IsolationDriver';
 export type {
   DriverReadiness,
   DriverRunParams,
@@ -266,13 +273,23 @@ export type {
   DriverTermination,
   IsolationDriver,
   RunCodeLanguage,
+  SandboxIdentity,
 } from './sandbox/driver/IsolationDriver';
-export { OUTPUT_EXCEEDED_MARKER, RUN_CODE_RESERVED_PREFIX, runCodeProgramPath } from './sandbox/driver/IsolationDriver';
-export { errorCodeForTermination, errorTextForCode, scrubHostPaths } from './sandbox/driver/errors';
-export { RUN_CODE_ERROR_CODES, RunCodeInputSchema, RunCodeResultSchema } from './sandbox/driver/RunCodeSchemas';
-export type { RunCodeErrorCode, RunCodeInput, RunCodeResult } from './sandbox/driver/RunCodeSchemas';
+export {
+  RUN_CODE_ERROR_CODES,
+  RunCodeInputSchema,
+  RunCodeResultSchema,
+  RunCodeStatusSchema,
+} from './sandbox/driver/RunCodeSchemas';
+export type { RunCodeErrorCode, RunCodeInput, RunCodeResult, RunCodeStatus } from './sandbox/driver/RunCodeSchemas';
 export { RunCodeService, validateRunCodeStartupConfig } from './sandbox/driver/RunCodeService';
-export type { HarvestedFile, RunCodeCallOptions, RunCodeServiceOptions, TurnAttachment } from './sandbox/driver/RunCodeService';
+export type {
+  HarvestedFile,
+  RunCodeCallOptions,
+  RunCodeServiceOptions,
+  TurnAttachment,
+} from './sandbox/driver/RunCodeService';
+export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DaytonaSandboxProvider } from './sandbox/provider/DaytonaProvider';
 export type { DaytonaSandboxProviderOptions } from './sandbox/provider/DaytonaProvider';
 export { absolutizeRelativeExecEnv } from './sandbox/provider/execEnv';
@@ -350,5 +367,70 @@ export {
 export type { GitSkill, ISkillMounter, Skill, SkillMounterOptions, SkillPromptMode } from './sandbox/skills';
 
 // Host tool-call policy: lets the host review model-authored tool calls before dispatch
-export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCall } from './runtime/HostToolCallPolicy';
 export { applyHostToolCallPolicy } from './runtime/HostToolCallPolicy';
+export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCall } from './runtime/HostToolCallPolicy';
+
+// Sentinel: three-tier permission system for tool execution
+export {
+  InMemoryApprovalTokenStore,
+  hasApprovalScope,
+  hashApprovalTokenId,
+  prepareApprovalToken,
+  restoreApprovalToken,
+} from './permissions/approvalTokens';
+export type {
+  ApprovalToken,
+  ApprovalTokenRef,
+  ApprovalTokenStore,
+  ConnectorBinding,
+  MintApprovalTokenInput,
+  ShellApprovalBinding,
+} from './permissions/approvalTokens';
+export { recordClassificationAudit } from './permissions/audit';
+export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './permissions/audit';
+export {
+  canonicalShellForm,
+  classifyHostToolCall,
+  classifyTier,
+  mapsDestinationHosts,
+  shellBindingFromForm,
+} from './permissions/classifier';
+export type { ClassifyContext, SentinelAction } from './permissions/classifier';
+export {
+  DEFAULT_PINNED_PATH,
+  classifyContextFor,
+  createSentinelHostContext,
+  defaultSentinelServices,
+  toDispatchSentinelContext,
+} from './permissions/context';
+export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './permissions/context';
+export { verifyPreDispatch } from './permissions/dispatch';
+export type { DispatchCheckContext, VerifiableCall } from './permissions/dispatch';
+export {
+  MAPS_TOOL_NAMES,
+  RENDER_MAP_TOOL_NAME,
+  RENDER_ROUTE_TOOL_NAME,
+  isMapsToolName,
+} from './permissions/mapsToolNames';
+export {
+  AUTO_DENY_REASONS,
+  TIER2_ACTION_KINDS,
+  Tier3CardSchema,
+  TierSchema,
+  autoDenyDecision,
+  failClosedDecision,
+  tier1Decision,
+  tier2Decision,
+  tier3Decision,
+} from './permissions/tier';
+export type {
+  AutoDenyReason,
+  Tier,
+  Tier2ActionKind,
+  Tier3Card,
+  TierDecision,
+  TrackedExecutionBinding,
+} from './permissions/tier';
+export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
+export { createWebSearchTurnState } from './permissions/webSearch';
+export type { WebSearchTurnState } from './permissions/webSearch';
