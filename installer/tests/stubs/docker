@@ -22,11 +22,13 @@ case "$cmd" in
       exit 1
     fi
     if [ "${1:-}" = "--format" ]; then
-      secopts=$(printf '[name=seccomp,profile=builtin%s]' "${STUB_ROOTLESS:+ name=rootless}")
+      secopts=$(printf '[name=seccomp,profile=builtin%s%s]' "${STUB_ROOTLESS:+ name=rootless}" "${STUB_APPARMOR:+ name=apparmor}")
       case "${2:-}" in
         *ServerVersion*) printf '27.1.1|x86_64|%s|/nonexistent|%s|Docker Engine\n' "$secopts" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ;;
         *MemTotal*) printf '%s\n' "${STUB_DOCKER_MEM_BYTES:-17179869184}" ;;
         *DockerRootDir*) printf '%s\n' "${STUB_DOCKER_ROOT:-}" ;;
+        *CgroupVersion*) printf '%s\n' "${STUB_CGROUP:-2}" ;;
+        *OperatingSystem*) printf '%s\n' "${STUB_DOCKER_OS:-Ubuntu 24.04}" ;;
         *) printf '%s\n' "$secopts" ;;
       esac
       exit 0
@@ -161,6 +163,7 @@ case "$cmd" in
     if [ -f "$S/up/$proj" ]; then
       case "$proj" in
         aman-machine) echo c1 ;;
+        *-slots) printf 'c1\nc2\nc3\nc4\n' ;;
         *)
           if [ -n "$formatted" ]; then
             # id|name|state|status|compose service, as the doctor asks for them
@@ -194,6 +197,12 @@ case "$cmd" in
       prev=$a
     done
     case "$*" in
+      *"--entrypoint cat"*)
+        # The slot setup copied out of the app image.
+        [ -n "${STUB_NO_BUNDLE:-}" ] && exit 1
+        echo "// stub sandbox setup"
+        exit 0
+        ;;
       *"aman hash-password"*)
         cat >"$S/hash_stdin"
         env >"$S/hash_env"
@@ -250,6 +259,12 @@ case "$cmd" in
     case "$sub" in
       up)
         img=$(compose_image "$file")
+        # An external volume has to exist already, as in Compose.
+        missing=$(awk '/^    name: / {n = $2} /external: true/ {print n}' "$file" | while read -r v; do grep -Fxq "$v" "$S/volumes" || echo "$v"; done)
+        if [ -n "$missing" ]; then
+          echo "external volume \"$missing\" not found" >&2
+          exit 1
+        fi
         if [ -n "${STUB_UP_FAIL_UNLESS_TAG:-}" ] && [ "$img" != "$STUB_UP_FAIL_UNLESS_TAG" ] && [ "$proj" != aman-machine ]; then
           echo "container is unhealthy" >&2
           exit 1

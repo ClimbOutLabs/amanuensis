@@ -4,6 +4,12 @@
 # Read-only; needs only Docker (no jq, no Node). The state directory is AMANUENSIS_HOME.
 #
 #   aman doctor [--json] [--only ID] [--instance NAME] [--deep]
+#   aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
+#
+# `doctor sandbox` checks every sandbox slot's attestation and then makes a real call through the app, which is
+# the only part that needs Node.js: the slot setup itself is the copy of packages/trueforge/scripts/sandbox-slots
+# the installer took out of the app image. With --fix it rebuilds the image, reloads the AppArmor profile,
+# recreates missing slot disks and recreates the slots; it asks before any sudo.
 #
 # Exit codes: 0 no failures, 1 at least one failure, 2 usage error.
 # Test hooks: AMAN_DOCTOR_NOW (epoch seconds) replaces the clock.
@@ -45,6 +51,7 @@ APP_CONTAINER=""
 usage() {
   cat >&2 <<'USAGE'
 Usage: aman doctor [--json] [--only ID] [--instance NAME] [--deep]
+       aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
 USAGE
 }
 
@@ -626,6 +633,141 @@ print_text() {
   done
 }
 
+select_instances() {
+  INSTANCES=()
+  if [ -n "$ONLY_INSTANCE" ]; then
+    case "$ONLY_INSTANCE" in
+      '' | *[!a-z0-9-]* | -*) die_usage "Instance names use lowercase letters, digits and hyphens." ;;
+    esac
+    [ -d "${AMAN_HOME}/instances/${ONLY_INSTANCE}" ] || die_usage "No instance named \"${ONLY_INSTANCE}\" under ${AMAN_HOME}/instances."
+    INSTANCES=("$ONLY_INSTANCE")
+  else
+    while IFS= read -r instance_name; do
+      [ -n "$instance_name" ] && INSTANCES+=("$instance_name")
+    done < <(list_instances)
+  fi
+}
+
+# ---------------------------------------------------------------- sandbox
+
+SANDBOX_NODE_MAJOR=22
+SANDBOX_NODE_MINOR=14
+
+sandbox_node_ok() {
+  local v major minor
+  command -v node >/dev/null 2>&1 || return 1
+  v=$(node --version 2>/dev/null) || return 1
+  v=${v#v}
+  major=${v%%.*}
+  minor=${v#*.}
+  minor=${minor%%.*}
+  case "$major$minor" in '' | *[!0-9]*) return 1 ;; esac
+  [ "$major" -gt "$SANDBOX_NODE_MAJOR" ] || { [ "$major" -eq "$SANDBOX_NODE_MAJOR" ] && [ "$minor" -ge "$SANDBOX_NODE_MINOR" ]; }
+}
+
+record_state() { # scope id
+  local scope id state _rest
+  while IFS=$'\t' read -r scope id state _rest; do
+    if [ "$scope" = "$1" ] && [ "$id" = "$2" ]; then
+      printf '%s' "$state"
+      return 0
+    fi
+  done <<<"$RECORDS"
+}
+
+sandbox_instances() { # prints the instances whose app is wired to the slots
+  local name
+  for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
+    if grep -q 'SANDBOX_BACKEND: slots' "${AMAN_HOME}/instances/${name}/compose.yaml" 2>/dev/null; then
+      printf '%s\n' "$name"
+    fi
+  done
+}
+
+doctor_sandbox() {
+  local fix=0 yes=0 passthru=() bundle source repo name args state failed=0 targets=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --fix) fix=1 ;;
+      --yes) yes=1 ;;
+      --no-hard-disk-limit) passthru+=(--no-hard-disk-limit) ;;
+      --disk-gb)
+        [ $# -ge 2 ] || die_usage "--disk-gb needs a number."
+        passthru+=(--disk-gb "$2")
+        shift
+        ;;
+      --instance)
+        [ $# -ge 2 ] || die_usage "--instance needs a name."
+        ONLY_INSTANCE=$2
+        shift
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *) die_usage "Unknown argument: $1" ;;
+    esac
+    shift
+  done
+  if [ "$yes" = 1 ] && [ "$fix" != 1 ]; then die_usage "--yes goes with --fix."; fi
+  select_instances
+  bundle="${AMAN_HOME}/bin/aman-sandbox.mjs"
+  source="${AMAN_HOME}/state/source"
+  if [ ! -f "$bundle" ] || [ ! -r "$source" ]; then
+    printf 'The sandbox tools are not installed under %s. Run install.sh from the checkout; it installs them.\n' "$AMAN_HOME" >&2
+    exit 1
+  fi
+  repo=$(head -n 1 "$source")
+  if [ ! -f "${repo}/docker-compose.slots.yml" ]; then
+    printf 'The checkout the sandbox was installed from is not at %s any more. Run install.sh from the checkout; it records the new place.\n' "$repo" >&2
+    exit 1
+  fi
+  if ! sandbox_node_ok; then
+    printf 'Node.js %s.%s or newer is needed to check or repair the sandbox. Install it (https://nodejs.org or your package manager), then run this again.\n' "$SANDBOX_NODE_MAJOR" "$SANDBOX_NODE_MINOR" >&2
+    exit 1
+  fi
+  check_docker
+  if [ "$DOCKER_OK" != 1 ]; then
+    text_checks machine
+    exit 1
+  fi
+  while IFS= read -r name; do
+    [ -n "$name" ] && targets+=("$name")
+  done < <(sandbox_instances)
+  if [ "${#targets[@]}" -eq 0 ]; then
+    printf 'No instance has the sandbox (it was installed with --no-sandbox, or no instance exists yet).\n'
+    exit 0
+  fi
+  for name in "${targets[@]}"; do
+    printf 'Instance %s\n' "$name"
+    args=(--instance "$name" --repo-root "$repo" --log-file "${AMAN_HOME}/state/sandbox.log" --command-name "aman doctor sandbox" "${passthru[@]+"${passthru[@]}"}")
+    if [ "$fix" = 1 ]; then
+      args+=(--fix --restart)
+      if [ "$yes" = 1 ]; then args+=(--yes); fi
+    else
+      args+=(--check)
+    fi
+    if ! node "$bundle" "${args[@]}"; then
+      failed=1
+      continue
+    fi
+    # The slots are healthy; now the app's own view of them, which is what Settings > Sandbox reports.
+    RECORDS=""
+    ONLY=run_code
+    check_instance_containers "$name"
+    if [ -z "$APP_CONTAINER" ]; then
+      record "$name" run_code fail "The app container is not running, so run_code could not be tried through the app." \
+        "Start the instance with: docker compose --project-directory ${AMAN_HOME}/instances/${name} up -d"
+    else
+      run_in_image_checks "$name"
+    fi
+    text_checks "$name"
+    state=$(record_state "$name" run_code)
+    if [ "$state" != ok ]; then failed=1; fi
+  done
+  exit "$failed"
+}
+
 # ---------------------------------------------------------------- main
 
 case "${1:-}" in
@@ -636,6 +778,11 @@ case "${1:-}" in
     ;;
   *) die_usage "Unknown command: ${1:-(none)}" ;;
 esac
+
+if [ "${1:-}" = sandbox ]; then
+  shift
+  doctor_sandbox "$@"
+fi
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -667,18 +814,7 @@ if [ -n "$ONLY" ] && ! in_list "$ONLY" "$MACHINE_IDS $INSTANCE_IDS"; then
   die_usage "Unknown check \"${ONLY}\". Checks: ${MACHINE_IDS} ${INSTANCE_IDS}"
 fi
 
-INSTANCES=()
-if [ -n "$ONLY_INSTANCE" ]; then
-  case "$ONLY_INSTANCE" in
-    '' | *[!a-z0-9-]* | -*) die_usage "Instance names use lowercase letters, digits and hyphens." ;;
-  esac
-  [ -d "${AMAN_HOME}/instances/${ONLY_INSTANCE}" ] || die_usage "No instance named \"${ONLY_INSTANCE}\" under ${AMAN_HOME}/instances."
-  INSTANCES=("$ONLY_INSTANCE")
-else
-  while IFS= read -r instance_name; do
-    [ -n "$instance_name" ] && INSTANCES+=("$instance_name")
-  done < <(list_instances)
-fi
+select_instances
 
 check_docker
 check_runtime

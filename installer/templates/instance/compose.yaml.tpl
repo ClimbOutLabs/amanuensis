@@ -31,8 +31,17 @@ services:
       - .env
     environment:
       NODE_ENV: production
+@@IF_SANDBOX@@      # Run code, shell and files go to the gVisor sandbox slots (project @@NAME@@-slots), never to Docker.
+@@IF_SANDBOX@@      SANDBOX_BACKEND: slots
+@@IF_SANDBOX@@      SANDBOX_SLOTS: '4'
+@@IF_SANDBOX@@      SANDBOX_SLOTS_DIR: /run/aman-slots
     volumes:
       - data:/data
+@@IF_SANDBOX@@      # Read-only views of each slot's control socket. No Docker socket, no workspace volume.
+@@IF_SANDBOX@@      - slot_ctl_1:/run/aman-slots/1:ro
+@@IF_SANDBOX@@      - slot_ctl_2:/run/aman-slots/2:ro
+@@IF_SANDBOX@@      - slot_ctl_3:/run/aman-slots/3:ro
+@@IF_SANDBOX@@      - slot_ctl_4:/run/aman-slots/4:ro
     depends_on:
       loopback:
         condition: service_started
@@ -90,6 +99,20 @@ volumes:
     name: aman_@@NAME@@_dex
     labels:
       com.amanuensis.instance: @@NAME@@
+
+@@IF_SANDBOX@@  # Created by the slots project, which the installer starts before this one.
+@@IF_SANDBOX@@  slot_ctl_1:
+@@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_1
+@@IF_SANDBOX@@    external: true
+@@IF_SANDBOX@@  slot_ctl_2:
+@@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_2
+@@IF_SANDBOX@@    external: true
+@@IF_SANDBOX@@  slot_ctl_3:
+@@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_3
+@@IF_SANDBOX@@    external: true
+@@IF_SANDBOX@@  slot_ctl_4:
+@@IF_SANDBOX@@    name: @@NAME@@_slot_ctl_4
+@@IF_SANDBOX@@    external: true
 
 networks:
   stt:

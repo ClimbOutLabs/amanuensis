@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Amanuensis installer: plan, local image builds, shared speech-to-text and per-person instances.
+# Amanuensis installer: plan, local image builds, shared speech-to-text, per-person instances and their sandbox.
 # Usage: install.sh [--dry-run] [--yes] [options]
 #        install.sh instance add|list|remove <name>
 #        install.sh backup [<name>]
@@ -30,6 +30,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/release.sh"
 # shellcheck source=lib/templates.sh
 . "$INSTALLER_DIR/lib/templates.sh"
+# shellcheck source=lib/sandbox.sh
+. "$INSTALLER_DIR/lib/sandbox.sh"
 # shellcheck source=lib/instance.sh
 . "$INSTALLER_DIR/lib/instance.sh"
 # shellcheck source=lib/backup.sh
@@ -45,6 +47,8 @@ DRY_RUN=0
 PASSWORD_FROM_STDIN=0
 OPT_INSTALL_DOCKER=0
 OPT_ADD_DOCKER_GROUP=0
+OPT_NO_SANDBOX=0
+OPT_SANDBOX_ROOT=0
 PRINT_ROOT_STEPS=0
 PRINT_NETWORK=0
 PRINT_PROXY=0
@@ -78,9 +82,11 @@ Amanuensis installer
 
 Options
   --home DIR            state directory (default ~/.amanuensis)
-  --yes                 accept the plan and the defaults without asking (never installs Docker or changes groups)
+  --yes                 accept the plan and the defaults without asking (never installs Docker, changes groups or uses sudo)
   --install-docker      let the installer run the printed root steps to install Docker Engine (Debian, Ubuntu)
   --add-docker-group    let the installer add your user to the docker group (needs sudo)
+  --sandbox-root        let the installer run the printed root steps for the sandbox (AppArmor profile, slot disks) without asking
+  --no-sandbox          install without the gVisor sandbox (run code stays off)
   --dry-run             stop after printing the plan
   --name NAME           first instance name (default main)
   --email ADDRESS       owner email
@@ -121,6 +127,8 @@ parse_args() {
       --password-stdin) PASSWORD_FROM_STDIN=1 ;;
       --install-docker) OPT_INSTALL_DOCKER=1 ;;
       --add-docker-group) OPT_ADD_DOCKER_GROUP=1 ;;
+      --sandbox-root) OPT_SANDBOX_ROOT=1 ;;
+      --no-sandbox) OPT_NO_SANDBOX=1 ;;
       --print-root-steps) PRINT_ROOT_STEPS=1 ;;
       --print-network) PRINT_NETWORK=1 ;;
       --print-proxy-requirements) PRINT_PROXY=1 ;;

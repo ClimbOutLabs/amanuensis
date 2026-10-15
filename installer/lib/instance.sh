@@ -87,7 +87,7 @@ machine_running() {
 
 # Rewrites compose.yaml and dex.yaml from the registry and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id
+  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on
   dir=$(instance_dir "$name")
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
@@ -95,9 +95,10 @@ instance_render() {
   login_url=$(reg_get "$name" login_url)
   email=$(reg_get "$name" owner_email)
   client_id=$(reg_get "$name" client_id)
+  if instance_sandbox_wanted "$name"; then sandbox_on=1; else sandbox_on=0; fi
   ensure_private_dir "$dir"
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
-    "NAME=$name" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" \
+    "NAME=$name" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" | write_if_changed "$dir/compose.yaml" 644 || true
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
     "ISSUER=$login_url/dex" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
@@ -147,7 +148,7 @@ run_doctor() {
   local bound=()
   [ -x "$(doctor_shim)" ] || return 127
   if command -v timeout >/dev/null 2>&1; then
-    bound=(timeout 60)
+    bound=(timeout "${DOCTOR_TIMEOUT:-60}")
   fi
   # Same Docker access as the rest of the run (direct, sg or sudo), so a fresh docker group member
   # does not get a failing report for a problem the run itself worked around.
@@ -182,6 +183,8 @@ instance_collect() {
   I_PUBLIC_URL=${OPT_PUBLIC_URL:-}
   I_LOGIN_URL=${OPT_LOGIN_URL:-}
   I_MODEL=${OPT_MODEL_ENDPOINT:-}
+  I_SANDBOX=slots
+  if [ "$OPT_NO_SANDBOX" = 1 ]; then I_SANDBOX=off; fi
   ask I_NAME "Instance name" "$name_default"
   valid_name "$I_NAME" || usage_die "instance name must be 1-24 lowercase letters, digits or hyphens, start with a letter, and not be 'machine'"
   if [ "$DRY_RUN" = 1 ] && [ -z "$I_EMAIL" ]; then
@@ -249,11 +252,13 @@ instance_create() {
   dir=$(instance_dir "$I_NAME")
   if reg_exists "$I_NAME"; then
     say "Instance $I_NAME already exists; making sure it is running"
+    if instance_sandbox_wanted "$I_NAME"; then sandbox_ensure "$I_NAME"; fi
     instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
     instance_up "$I_NAME"
     return
   fi
   issuer_check "$I_ISSUER"
+  if [ "$I_SANDBOX" = slots ]; then sandbox_ensure "$I_NAME"; fi
   remove_instance_dir "$I_NAME"
   ensure_private_dir "$dir"
   cookie=$(rand_hex 4)
@@ -272,7 +277,7 @@ instance_create() {
   created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   reg_write "$I_NAME" "name=$I_NAME" "app_port=$I_PORT" "login_port=$I_LOGIN_PORT" "public_url=$I_PUBLIC_URL" \
     "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
-    "model_endpoint=$I_MODEL" "created=$created"
+    "model_endpoint=$I_MODEL" "sandbox=$I_SANDBOX" "created=$created"
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then
     warn "reusing the existing data volume aman_${I_NAME}_data from an earlier instance with this name"
@@ -327,7 +332,12 @@ print_instance_summary() {
     print_proxy_requirements "$(reg_get "$name" public_url)" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_url)" "$(reg_get "$name" login_port)"
   fi
   print_model_hint "$(reg_get "$name" model_endpoint)"
-  say "  Run code and attachment extraction are off in this version."
+  if instance_sandbox_wanted "$name"; then
+    say "  Run code: on, in the gVisor sandbox (Settings > Sandbox shows its status). Repair: $SANDBOX_REPAIR_COMMAND"
+    say "  Attachment extraction is off in this version."
+  else
+    say "  Run code and attachment extraction are off (installed with --no-sandbox)."
+  fi
 }
 
 # Everything an installed machine already has: the recorded release and the shared network owner.
@@ -355,6 +365,8 @@ cmd_instance_add() {
   if reg_exists "$I_NAME"; then
     instance_create
     print_instance_summary "$I_NAME"
+    if instance_sandbox_wanted "$I_NAME"; then sandbox_verify "$I_NAME"; fi
+    sandbox_finish
     return 0
   fi
   AMAN_PASSWORD=
@@ -370,7 +382,9 @@ cmd_instance_add() {
   instance_create
   AMAN_PASSWORD=
   print_instance_summary "$I_NAME"
+  if [ "$I_SANDBOX" = slots ]; then sandbox_verify "$I_NAME"; fi
   print_signout_note
+  sandbox_finish
 }
 
 # Pads tab-separated columns to the widest cell of each, so long names and addresses stay aligned.
@@ -485,6 +499,7 @@ cmd_instance_remove() {
       stt_detach "$name"
       dc "$name" down || warn "could not stop the stack cleanly; continuing with the removal"
     fi
+    if instance_sandbox_wanted "$name"; then sandbox_down "$name" "${OPT_PURGE:-0}"; fi
     remove_instance_dir "$name"
     reg_remove "$name"
     log_event "instance $name removed"

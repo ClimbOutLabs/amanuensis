@@ -162,7 +162,7 @@ print_plan() {
   say ""
   say "Images are built on this machine from the checkout. Nothing is pushed to any registry."
   if [ "$PLAN_ROOT" -gt 0 ]; then
-    say "Steps marked [root] use sudo and only run if you answer yes when asked (or pass --install-docker / --add-docker-group; --yes alone does not allow them). The docker group is root-equivalent."
+    say "Steps marked [root] use sudo and only run if you answer yes when asked (or pass --install-docker / --add-docker-group / --sandbox-root; --yes alone does not allow them). The docker group is root-equivalent."
   fi
   if [ -n "$DL_LINES" ]; then
     total_gb=$(awk -v mb="$DL_TOTAL_MB" 'BEGIN {printf "%.1f", mb / 1024}')
@@ -172,7 +172,11 @@ print_plan() {
     say "  sources:$(printf '%s' "$DL_HOSTS" | tr ' ' '\n' | sort -u | tr '\n' ' ')"
   fi
   say ""
-  say "Run code and attachment extraction stay off in this version."
+  if sandbox_needed; then
+    say "Run code (Python, shell, files) runs in the gVisor sandbox; attachment extraction stays off in this version."
+  else
+    say "Run code and attachment extraction stay off in this version."
+  fi
 }
 
 # Machine checks that need no answers from the user, so a blocker can stop the run before any prompt.
@@ -204,6 +208,7 @@ plan_preflight() {
     preflight_docker_space
     preflight_docker_memory
   fi
+  preflight_sandbox
 }
 
 report_blockers_and_exit() {
@@ -237,6 +242,8 @@ plan_build() {
   plan_image "$REL_APP_TAG" "Build the app image $REL_APP_TAG from Dockerfile.dev" app-base app-deps dockerfile-frontend
   plan_image "$REL_STT_TAG" "Build the speech-to-text image $REL_STT_TAG from ops/aman-stt" stt-base stt-deps
   plan_image "$REL_DEX_IMAGE" "Pull the login image by digest" dex
+
+  plan_sandbox
 
   if [ -x "$(doctor_shim)" ]; then
     plan_add have "Doctor command $(doctor_shim)"
@@ -348,7 +355,8 @@ install_execute() {
   release_write
   machine_up "$REL_STT_TAG"
   for name in $(reg_names); do
-    if [ "$(instance_state "$name")" != running ]; then
+    if [ "$(instance_state "$name")" != running ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; }; then
+      if instance_sandbox_wanted "$name"; then sandbox_ensure "$name"; fi
       instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
       instance_up "$name" || exit 1
     fi
@@ -366,8 +374,12 @@ install_execute() {
     say ""
     say "Doctor:"
     run_doctor || warn "doctor reported problems; each one lists its fix"
+    for name in $(reg_names); do
+      if instance_sandbox_wanted "$name"; then sandbox_verify "$name"; fi
+    done
   fi
   say ""
   say "Backups: install.sh backup  (kept in $BACKUPS_DIR). Upgrade after pulling new source: install.sh upgrade"
   print_signout_note
+  sandbox_finish
 }

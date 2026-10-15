@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # Stand-in for the doctor shim: prints a fixed document and exits as STUB_DOCTOR_EXIT says.
 printf 'doctor %s\n' "$*" >>"$STUB_LOG"
+# The sandbox check has its own exit code so a failing sandbox is told apart from a failing machine.
+if [ "${2:-}" = sandbox ]; then
+  echo "sandbox check stub"
+  exit "${STUB_SANDBOX_DOCTOR_EXIT:-0}"
+fi
 echo '{"machine":[{"id":"docker","state":"ok","detail":"","fix":""}],"instances":{}}'
 exit "${STUB_DOCTOR_EXIT:-0}"

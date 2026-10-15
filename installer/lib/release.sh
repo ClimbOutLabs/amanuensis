@@ -136,4 +136,5 @@ images_ensure() {
     say "Pulling the login image by digest"
     D pull "$REL_DEX_IMAGE" || die "could not pull $REL_DEX_IMAGE"
   fi
+  sandbox_images_ensure
 }

@@ -9,3 +9,4 @@ stt-deps|200|Python packages fetched while building the speech-to-text image|pyp
 stt-weights|464|Whisper small speech model weights, downloaded once at first start|huggingface.co
 dex|36|Login service image (pinned by digest)|ghcr.io
 embed|120|Search embedding model, downloaded once per instance at first start|huggingface.co
+slot-image|900|Sandbox slot image: base images, Ubuntu packages, Python and npm packages, the gVisor runtime (built once)|registry-1.docker.io archive.ubuntu.com ports.ubuntu.com pypi.org files.pythonhosted.org registry.npmjs.org storage.googleapis.com

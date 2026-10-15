@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Test double for host Node.js running the sandbox slot setup copied out of the app image. It records the call
+# and answers like the real setup: --check reports the state in $STUB_STATE/slots_state, a full run brings the slots up.
+set -u
+printf 'node %s\n' "$*" >>"$STUB_LOG"
+if [ "${1:-}" = --version ]; then
+  echo "${STUB_NODE_VERSION:-v22.22.0}"
+  exit 0
+fi
+shift
+S=$STUB_STATE
+instance=
+mode=up
+fix=0
+json=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --instance) instance=$2; shift ;;
+    --check) mode=check ;;
+    --build-only) mode=build ;;
+    --down) mode=down ;;
+    --fix) fix=1 ;;
+    --json) json=1 ;;
+    --repo-root | --log-file | --command-name) shift ;;
+  esac
+  shift
+done
+state=$(cat "$S/slots_state" 2>/dev/null || echo ready)
+case "$mode" in
+  build)
+    echo "amanuensis-sandbox-slot:local" >>"$S/images"
+    echo "[ok]   Built amanuensis-sandbox-slot:local"
+    exit "${STUB_SLOT_BUILD_RC:-0}"
+    ;;
+  down)
+    rm -f "$S/up/$instance-slots"
+    exit 0
+    ;;
+  check)
+    if [ "$state" = ready ] && [ -f "$S/up/$instance-slots" ]; then
+      [ "$json" = 1 ] && echo '{"ok":true,"checks":[]}'
+      exit 0
+    fi
+    step=attest
+    case "$state" in needs_apparmor) step=apparmor ;; needs_disk) step=disk ;; esac
+    [ "$json" = 1 ] && echo "{\"ok\":false,\"checks\":[],\"step\":\"$step\",\"error\":\"stub\",\"fix\":\"stub\"}"
+    exit 1
+    ;;
+  up)
+    if [ "$state" != ready ] && [ "$fix" != 1 ]; then
+      echo "[fail] $state: needs --fix"
+      exit 1
+    fi
+    echo "[ok]   Started 4 slots"
+    mkdir -p "$S/up"
+    echo slots >"$S/up/$instance-slots"
+    for n in 1 2 3 4; do grep -Fxq "${instance}_slot_ctl_$n" "$S/volumes" || echo "${instance}_slot_ctl_$n" >>"$S/volumes"; done
+    echo ready >"$S/slots_state"
+    exit 0
+    ;;
+esac
