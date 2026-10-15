@@ -1148,7 +1148,9 @@ export interface SharedServerConfiguration {
   MEMORY_SUMMARIZE: boolean;
   /**
    * Nebius Token Factory API key. Populated from the Secure Vault into the deployment
-   * environment; never committed or logged. Env: `NEBIUS_API_KEY`. Unset by default.
+   * environment; never committed or logged. With a key set, startup also writes a read-only
+   * `tokenfactory` provider and makes its default model the chat default.
+   * Env: `NEBIUS_API_KEY`. Unset by default.
    */
   NEBIUS_API_KEY: string | undefined;
   /**
@@ -1171,7 +1173,9 @@ export interface SharedServerConfiguration {
    * How turns may route to Nebius Token Factory. `off` (the default) disables Token
    * Factory routing entirely. `fallback` uses the configured local provider first and
    * fails over to Token Factory when it is unavailable. `force` uses Token Factory
-   * first with the local provider as fallback, for testing and demo paths.
+   * first with the local provider as fallback, for testing and demo paths; it sends
+   * prompts to the cloud first, so it is not local-first. Routing is a no-op when the
+   * chat model already is on Token Factory.
    * Env: `TOKEN_FACTORY_MODE`. Default `off`.
    */
   TOKEN_FACTORY_MODE: TokenFactoryMode;
