@@ -1,0 +1,11 @@
+# id|approximate MB|what|source host
+# Sizes are estimates for the plan; the real totals depend on cache and architecture.
+docker-engine|400|Docker Engine, Compose and Buildx packages (only when Docker is installed for you)|download.docker.com
+dockerfile-frontend|15|BuildKit Dockerfile frontend image|registry-1.docker.io
+app-base|80|Node base image for the app build|registry-1.docker.io
+app-deps|700|npm packages fetched while building the app image|registry.npmjs.org
+stt-base|50|Python base image for the speech-to-text build|registry-1.docker.io
+stt-deps|200|Python packages fetched while building the speech-to-text image|pypi.org files.pythonhosted.org
+stt-weights|464|Whisper small speech model weights, downloaded once at first start|huggingface.co
+dex|36|Login service image (pinned by digest)|ghcr.io
+embed|120|Search embedding model, downloaded once per instance at first start|huggingface.co

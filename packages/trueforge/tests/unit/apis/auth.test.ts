@@ -5,7 +5,7 @@ import winston from 'winston';
 import { createAuthRouter } from '../../../src/apis/auth';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import { createAuthMiddleware } from '../../../src/auth/middleware';
-import { disableOidcAuth, initOidc } from '../../../src/auth/oidc';
+import { disableOidcAuth, initOidc, type OidcDiscoveryHandle } from '../../../src/auth/oidc';
 import { OidcAuthenticator } from '../../../src/auth/oidcAuthenticator';
 import { StandaloneAuthenticator } from '../../../src/auth/standaloneAuthenticator';
 import configuration, { getPublicBaseUrl, getPublicUiBasePath, isTrueFoundryModeEnabled } from '../../../src/config';
@@ -58,10 +58,14 @@ const logger = winston.createLogger({ silent: true });
 
 const ACCESS_TOKEN = 'access-1';
 
+function discoveryHandle(client: () => Configuration | undefined): OidcDiscoveryHandle {
+  return { client, stop: () => undefined };
+}
+
 function createTestAuthRouter(params: { oidcClient: Configuration | undefined }) {
   const authenticator = params.oidcClient ? new OidcAuthenticator() : new StandaloneAuthenticator();
   return createAuthRouter({
-    oidcClient: params.oidcClient,
+    oidcDiscovery: params.oidcClient ? discoveryHandle(() => params.oidcClient) : undefined,
     logger,
     authMiddleware: createAuthMiddleware(authenticator),
   });
@@ -112,6 +116,81 @@ describe('auth router (no identity provider configured)', () => {
         roles: STANDALONE_REQUEST_CONTEXT.roles,
       },
     });
+  });
+});
+
+describe('auth router (identity provider not discovered yet)', () => {
+  let discovered: Configuration | undefined;
+
+  beforeEach(() => {
+    disableOidcAuth();
+    discovered = undefined;
+  });
+
+  function createPendingRouter() {
+    return createAuthRouter({
+      oidcDiscovery: discoveryHandle(() => discovered),
+      logger,
+      authMiddleware: createAuthMiddleware(new OidcAuthenticator()),
+    });
+  }
+
+  it('GET /auth/login serves a plain retry page with 503 and Retry-After', async () => {
+    const res = await createPendingRouter().request('/login', { redirect: 'manual' });
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('5');
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const body = await res.text();
+    expect(body).toContain('Login unavailable, retrying');
+    expect(body).toContain('http-equiv="refresh"');
+    expect(body).not.toContain('<script');
+  });
+
+  it('GET /auth/me stays 401 until discovery succeeds', async () => {
+    const res = await createPendingRouter().request('/me');
+
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /auth/callback redirects home instead of failing', async () => {
+    const res = await createPendingRouter().request('/callback?state=abc&code=def', { redirect: 'manual' });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/');
+  });
+
+  it('serves the retry page on every request until the client appears, then redirects to the IdP', async () => {
+    const router = createPendingRouter();
+    expect((await router.request('/login', { redirect: 'manual' })).status).toBe(503);
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url === `${ISSUER}/.well-known/openid-configuration`) {
+        return Promise.resolve(
+          json({
+            issuer: ISSUER,
+            authorization_endpoint: `${ISSUER}/authorize`,
+            token_endpoint: `${ISSUER}/token`,
+            jwks_uri: `${ISSUER}/jwks`,
+            response_types_supported: ['code'],
+            id_token_signing_alg_values_supported: ['RS256'],
+            subject_types_supported: ['public'],
+          }),
+        );
+      }
+      return Promise.resolve(new Response('unexpected', { status: 404 }));
+    };
+    try {
+      discovered = await initOidc(configuredOidc);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+
+    const res = await router.request('/login', { redirect: 'manual' });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toContain(`${ISSUER}/authorize`);
   });
 });
 

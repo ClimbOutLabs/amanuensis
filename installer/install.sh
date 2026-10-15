@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+# Amanuensis installer: plan, local image builds, shared speech-to-text and per-person instances.
+# Usage: install.sh [--dry-run] [--yes] [options]
+#        install.sh instance add|list|remove <name>
+#        install.sh backup [<name>]
+#        install.sh upgrade [--check] [--force]
+set -euo pipefail
+# Everything written is private unless a file is deliberately made world-readable.
+umask 077
+# A password in the caller's environment is never used and must not reach a child process.
+unset AMAN_PASSWORD
+
+INSTALLER_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=${AMAN_REPO_ROOT:-$(cd -P -- "$INSTALLER_DIR/.." && pwd)}
+TEMPLATES_DIR=$INSTALLER_DIR/templates
+PINS_FILE=$INSTALLER_DIR/release.json
+DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
+
+# shellcheck source=lib/common.sh
+. "$INSTALLER_DIR/lib/common.sh"
+# shellcheck source=lib/docker.sh
+. "$INSTALLER_DIR/lib/docker.sh"
+# shellcheck source=lib/ports.sh
+. "$INSTALLER_DIR/lib/ports.sh"
+# shellcheck source=lib/secrets.sh
+. "$INSTALLER_DIR/lib/secrets.sh"
+# shellcheck source=lib/registry.sh
+. "$INSTALLER_DIR/lib/registry.sh"
+# shellcheck source=lib/release.sh
+. "$INSTALLER_DIR/lib/release.sh"
+# shellcheck source=lib/templates.sh
+. "$INSTALLER_DIR/lib/templates.sh"
+# shellcheck source=lib/instance.sh
+. "$INSTALLER_DIR/lib/instance.sh"
+# shellcheck source=lib/backup.sh
+. "$INSTALLER_DIR/lib/backup.sh"
+# shellcheck source=lib/upgrade.sh
+. "$INSTALLER_DIR/lib/upgrade.sh"
+# shellcheck source=lib/plan.sh
+. "$INSTALLER_DIR/lib/plan.sh"
+
+AMAN_HOME=${AMAN_HOME:-$HOME/.amanuensis}
+ASSUME_YES=0
+DRY_RUN=0
+PASSWORD_FROM_STDIN=0
+OPT_INSTALL_DOCKER=0
+OPT_ADD_DOCKER_GROUP=0
+PRINT_ROOT_STEPS=0
+PRINT_NETWORK=0
+PRINT_PROXY=0
+OPT_CHECK=0
+OPT_FORCE=0
+OPT_PURGE=0
+OPT_NAME=
+OPT_EMAIL=
+OPT_PUBLIC_URL=
+OPT_LOGIN_URL=
+OPT_PORT=
+OPT_LOGIN_PORT=
+OPT_MODEL_ENDPOINT=
+OPT_CONFIRM_NAME=
+COMMAND=install
+SUBCOMMAND=
+LOCK_HELD=0
+AMAN_PASSWORD=
+
+usage() {
+  cat <<'USAGE'
+Amanuensis installer
+
+  install.sh                      plan, build the images locally, start the shared speech service and a first instance
+  install.sh --dry-run            print the plan, change nothing
+  install.sh instance add <name>  add another person's instance
+  install.sh instance list
+  install.sh instance remove <name> [--purge-data]
+  install.sh backup [<name>]
+  install.sh upgrade [--check] [--force]
+
+Options
+  --home DIR            state directory (default ~/.amanuensis)
+  --yes                 accept the plan and the defaults without asking (never installs Docker or changes groups)
+  --install-docker      let the installer run the printed root steps to install Docker Engine (Debian, Ubuntu)
+  --add-docker-group    let the installer add your user to the docker group (needs sudo)
+  --dry-run             stop after printing the plan
+  --name NAME           first instance name (default main)
+  --email ADDRESS       owner email
+  --password-stdin      read the owner password from the first line of stdin, before any prompt
+  --public-url URL      https address you will use from other devices (behind your own reverse proxy)
+  --login-url URL       https address for the sign-in service behind the same proxy
+  --port N              port on this computer for the app
+  --login-port N        port on this computer for the sign-in service
+  --model-endpoint URL  model server endpoint to remind you of at the end
+  --confirm-name NAME   with --purge-data, the instance name typed in advance
+  --print-root-steps    print the root steps for installing Docker and stop
+  --print-network       print every host the installer may contact and stop
+  --print-proxy-requirements  print what a reverse proxy in front of an instance must do and stop
+  --help                this text
+USAGE
+}
+
+set_paths() {
+  STATE_DIR=$AMAN_HOME/state
+  REG_DIR=$STATE_DIR/instances
+  RELEASE_DIR=$AMAN_HOME/release
+  MACHINE_DIR=$AMAN_HOME/machine
+  INSTANCES_DIR=$AMAN_HOME/instances
+  BACKUPS_DIR=$AMAN_HOME/backups
+}
+
+parse_args() {
+  local arg positional=0
+  while [ "$#" -gt 0 ]; do
+    arg=$1
+    case "$arg" in
+      --help | -h)
+        usage
+        exit 0
+        ;;
+      --yes | -y) ASSUME_YES=1 ;;
+      --dry-run) DRY_RUN=1 ;;
+      --password-stdin) PASSWORD_FROM_STDIN=1 ;;
+      --install-docker) OPT_INSTALL_DOCKER=1 ;;
+      --add-docker-group) OPT_ADD_DOCKER_GROUP=1 ;;
+      --print-root-steps) PRINT_ROOT_STEPS=1 ;;
+      --print-network) PRINT_NETWORK=1 ;;
+      --print-proxy-requirements) PRINT_PROXY=1 ;;
+      --check) OPT_CHECK=1 ;;
+      --force) OPT_FORCE=1 ;;
+      --purge-data) OPT_PURGE=1 ;;
+      --home | --name | --email | --public-url | --login-url | --port | --login-port | --model-endpoint | --confirm-name)
+        [ "$#" -ge 2 ] || usage_die "$arg needs a value"
+        set_option "$arg" "$2"
+        shift
+        ;;
+      --home=* | --name=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --model-endpoint=* | --confirm-name=*)
+        set_option "${arg%%=*}" "${arg#*=}"
+        ;;
+      -*) usage_die "unknown option $arg" ;;
+      *)
+        safe_value "$arg" || usage_die "an argument contains a character that is not allowed"
+        positional=$((positional + 1))
+        case "$positional:$COMMAND" in
+          1:install)
+            case "$arg" in
+              instance | backup | upgrade) COMMAND=$arg ;;
+              *) usage_die "unknown command $arg" ;;
+            esac
+            ;;
+          2:instance) SUBCOMMAND=$arg ;;
+          3:instance | 2:backup) OPT_NAME=$arg ;;
+          *) usage_die "unexpected argument $arg" ;;
+        esac
+        ;;
+    esac
+    shift
+  done
+}
+
+set_option() {
+  case "$1" in
+    --home) AMAN_HOME=$2 ;;
+    --name) OPT_NAME=$2 ;;
+    --email) OPT_EMAIL=$2 ;;
+    --public-url) OPT_PUBLIC_URL=$2 ;;
+    --login-url) OPT_LOGIN_URL=$2 ;;
+    --port) OPT_PORT=$2 ;;
+    --login-port) OPT_LOGIN_PORT=$2 ;;
+    --model-endpoint) OPT_MODEL_ENDPOINT=$2 ;;
+    --confirm-name) OPT_CONFIRM_NAME=$2 ;;
+  esac
+  safe_value "$2" || usage_die "$1 contains a character that is not allowed"
+}
+
+print_signout_note() {
+  if [ "$NEEDS_SIGNOUT" = 1 ]; then
+    say ""
+    say "Docker access: this run used your new docker group membership without a re-login."
+    say "Sign out and back in (or run: newgrp docker) once so docker works in your other terminals."
+  fi
+}
+
+on_exit() {
+  local rc=$?
+  trap - EXIT
+  AMAN_PASSWORD=
+  upgrade_on_exit
+  lock_release
+  exit "$rc"
+}
+
+main() {
+  parse_args "$@"
+  set_paths
+  trap on_exit EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  if [ "$PRINT_ROOT_STEPS" = 1 ]; then
+    print_root_steps
+    exit 0
+  fi
+  if [ "$PRINT_NETWORK" = 1 ]; then
+    print_network_destinations
+    exit 0
+  fi
+  if [ "$PRINT_PROXY" = 1 ]; then
+    print_proxy_requirements "https://<app-origin>" "<app port>" "https://<login-origin>" "<login port>"
+    exit 0
+  fi
+  if [ "$DRY_RUN" = 1 ]; then
+    case "$COMMAND:$SUBCOMMAND" in
+      install: | upgrade: | instance:add) ;;
+      *) usage_die "--dry-run applies to install, upgrade and instance add" ;;
+    esac
+  fi
+  case "$COMMAND" in
+    install) cmd_install ;;
+    backup) cmd_backup ;;
+    upgrade) cmd_upgrade ;;
+    instance)
+      case "$SUBCOMMAND" in
+        add) cmd_instance_add ;;
+        list) cmd_instance_list ;;
+        remove) cmd_instance_remove ;;
+        *) usage_die "usage: install.sh instance add|list|remove <name>" ;;
+      esac
+      ;;
+  esac
+}
+
+main "$@"

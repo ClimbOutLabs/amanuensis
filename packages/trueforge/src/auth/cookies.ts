@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { Logger } from 'winston';
 import { z } from 'zod';
-import { getPublicBaseUrl } from '../config';
+import { getAuthCookieSuffix, getPublicBaseUrl } from '../config';
 
 export const OAUTH_STATE_COOKIE = 'oauth_state';
 export const ID_TOKEN_COOKIE = 'id_token';
@@ -15,6 +15,11 @@ const OAuthStateSchema = z.object({
 });
 
 export type OAuthState = z.infer<typeof OAuthStateSchema>;
+
+/** Browsers scope cookies by host, not port, so each instance suffixes every auth cookie name. */
+function authCookieName(base: string): string {
+  return `${base}${getAuthCookieSuffix()}`;
+}
 
 function getAuthCookieAttributes(): {
   httpOnly: boolean;
@@ -31,14 +36,14 @@ function getAuthCookieAttributes(): {
 }
 
 export function setAuthCookie(params: { context: Context; name: string; value: string; maxAgeSeconds: number }): void {
-  setCookie(params.context, params.name, params.value, {
+  setCookie(params.context, authCookieName(params.name), params.value, {
     ...getAuthCookieAttributes(),
     maxAge: params.maxAgeSeconds,
   });
 }
 
 export function readOAuthStateCookie(params: { context: Context; logger: Logger }): OAuthState | undefined {
-  const raw = getCookie(params.context, OAUTH_STATE_COOKIE);
+  const raw = getCookie(params.context, authCookieName(OAUTH_STATE_COOKIE));
   if (!raw) {
     return undefined;
   }
@@ -59,13 +64,13 @@ export function readOAuthStateCookie(params: { context: Context; logger: Logger 
 }
 
 export function clearAuthCookie(params: { context: Context; name: string }): void {
-  deleteCookie(params.context, params.name, getAuthCookieAttributes());
+  deleteCookie(params.context, authCookieName(params.name), getAuthCookieAttributes());
 }
 
 export function readIdTokenCookie(params: { context: Context }): string | undefined {
-  return getCookie(params.context, ID_TOKEN_COOKIE);
+  return getCookie(params.context, authCookieName(ID_TOKEN_COOKIE));
 }
 
 export function readAccessTokenCookie(params: { context: Context }): string | undefined {
-  return getCookie(params.context, ACCESS_TOKEN_COOKIE);
+  return getCookie(params.context, authCookieName(ACCESS_TOKEN_COOKIE));
 }

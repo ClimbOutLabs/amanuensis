@@ -28,6 +28,7 @@ let getConfiguredSecretValues: typeof import('./config').getConfiguredSecretValu
 let assertNetworkAuthRequirement: typeof import('./config').assertNetworkAuthRequirement;
 let getPublicUiBasePath: typeof import('./config').getPublicUiBasePath;
 let TrueForgeAuthMode: typeof import('./config').TrueForgeAuthMode;
+let isPlaceholderTrueForgeApiKey: typeof import('./config').isPlaceholderTrueForgeApiKey;
 
 try {
   ({
@@ -39,6 +40,7 @@ try {
     assertNetworkAuthRequirement,
     getPublicUiBasePath,
     TrueForgeAuthMode,
+    isPlaceholderTrueForgeApiKey,
   } = await import('./config'));
 } catch (error) {
   console.error(
@@ -65,7 +67,7 @@ import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
 import { resolveRequestContext, type RequestContext } from './auth/identity';
-import { initOidc } from './auth/oidc';
+import { startOidcDiscovery } from './auth/oidc';
 import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
 import { SandboxCatalog } from './catalog/SandboxCatalog';
@@ -305,7 +307,7 @@ async function createStandalonePersistence(options: {
   logger: Logger;
 }): Promise<ServerPersistence<Transaction<SqliteDatabase>>> {
   const { sqlitePath, logger } = options;
-  await mkdir(path.dirname(sqlitePath), { recursive: true });
+  await mkdir(path.dirname(sqlitePath), { recursive: true, mode: 0o700 });
   const [{ createSqliteDb }, { migrateSqliteToLatest }, sqliteStores] = await Promise.all([
     import('./db/sqlite/client'),
     import('./db/migrateSqlite'),
@@ -468,6 +470,9 @@ async function createDistributedPersistence(options: {
   });
   await migrateToLatest(db);
   logger.info('Distributed mode: postgres');
+  if (isPlaceholderTrueForgeApiKey(configuration.TRUEFORGE_API_KEY)) {
+    logger.warn('TRUEFORGE_API_KEY is a well-known placeholder; set a real key before any shared deployment');
+  }
   logger.info(`Executor id: ${executorId}`);
   const serviceFoundryClient = createServiceFoundryServerClient(logger);
   const tokenStore = new PostgresOAuthTokenStore(db);
@@ -624,18 +629,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   } else {
     logger.warn('Auth is disabled; browser login is off');
   }
-  const oidcClient = await initOidc(oidc);
+  const oidcDiscovery = oidc ? startOidcDiscovery({ oidc, logger }) : undefined;
 
   let authenticator;
   let authorizer: Authorizer;
   const mode = getTrueForgeAuthMode(configuration);
-  // Fail closed before the authenticator is built: a non-loopback standalone
-  // listener would serve the admin API to the network with no login.
-  assertNetworkAuthRequirement({
-    authMode: mode,
-    host: configuration.HOST,
-    requireAuth: configuration.REQUIRE_AUTH,
-  });
   if (mode === TrueForgeAuthMode.TrueFoundry) {
     if (serviceFoundryClient === undefined) {
       throw new Error('TrueFoundry mode requires TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL');
@@ -715,7 +713,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     requestReplyRouter,
     eventSubscriptions,
     logger,
-    oidcClient,
+    oidcDiscovery,
     authenticator,
     authorizer,
   });
@@ -724,6 +722,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     activeTurns,
     app,
     controller,
+    oidcDiscovery,
     destroyDb,
     redis,
     requestReplyRouter,
@@ -738,6 +737,15 @@ try {
     level: configuration.LOG_LEVEL,
     standalone: configuration.STANDALONE,
     version: PACKAGE_VERSION,
+  });
+
+  // Fail closed before anything is created: standalone never starts without login.
+  // Any CLI subcommand is dispatched in cli.ts before this module is imported, so it never reaches this check.
+  assertNetworkAuthRequirement({
+    authMode: getTrueForgeAuthMode(configuration),
+    standalone: configuration.STANDALONE,
+    host: configuration.HOST,
+    requireAuth: configuration.REQUIRE_AUTH,
   });
 
   // Fail fast on unwritable data directories: the persona knowledge library and
@@ -757,7 +765,11 @@ try {
 
   if (configuration.STANDALONE) {
     printStandaloneStartupBanner({ version: PACKAGE_VERSION, color: shouldColorize() });
-    await prepareCodeModeSocketParent({ path: configuration.CODE_MODE_SOCKET_PARENT, logger });
+    await prepareCodeModeSocketParent({
+      path: configuration.CODE_MODE_SOCKET_PARENT,
+      logger,
+      port: configuration.PORT,
+    });
     await ensureLocalSandboxRootParent(configuration.LOCAL_SANDBOX_ROOT_PARENT);
     const { LocalSandboxProvider } = await import('./sandbox/local/provider/LocalSandboxProvider');
     const support = await LocalSandboxProvider.isSupported({
@@ -785,6 +797,7 @@ try {
     activeTurns,
     app,
     controller,
+    oidcDiscovery,
     destroyDb,
     redis,
     requestReplyRouter,
@@ -1028,6 +1041,7 @@ try {
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       clearInterval(commandExecutionRecoveryTimer);
       clearInterval(artifactRetentionTimer);
+      oidcDiscovery?.stop();
       // Stop serving peer requests (waits for in-flight replies), then close
       // the clients this process owns: the subscriber duplicate and the primary.
       await requestReplyExecutor?.drain();

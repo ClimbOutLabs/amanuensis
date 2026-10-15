@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 #
 # From-source multi-stage build for local smoke / floating-main / SHA-tagged
 # dev images. Production/OSS Helm images use the root Dockerfile (npm install).
@@ -11,7 +11,7 @@
 # See https://pnpm.io/cli/fetch. BuildKit cache mounts are avoided so the same
 # file builds on Railway Metal (which requires a hardcoded service id in mount ids).
 
-FROM node:24-slim AS base
+FROM node:24-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && pnpm config set store-dir /pnpm/store
@@ -59,6 +59,8 @@ COPY packages/trueforge-core packages/trueforge-core
 COPY packages/trueforge-sdk packages/trueforge-sdk
 RUN pnpm --filter @truefoundry/trueforge-sdk build
 COPY packages/trueforge packages/trueforge
+# Caps V8's heap so two parallel stages fit in a 6 GB Docker VM.
+ENV NODE_OPTIONS=--max-old-space-size=3072
 RUN pnpm --filter @truefoundry/trueforge-core build && pnpm --filter @truefoundry/trueforge build
 
 # ---------------------------------------------------------------------------
@@ -81,6 +83,8 @@ RUN pnpm --filter @truefoundry/trueforge-sdk build
 COPY --from=builder /app/packages/trueforge-core/dist packages/trueforge-core/dist
 COPY packages/trueforge-core/src packages/trueforge-core/src
 COPY packages/trueforge-ui packages/trueforge-ui
+# Vite alone peaks above 3 GB; the cap trades build time for staying inside a 6 GB Docker VM.
+ENV NODE_OPTIONS=--max-old-space-size=3072
 RUN pnpm --filter @truefoundry/trueforge-ui build
 COPY packages/frontend packages/frontend
 RUN pnpm --filter frontend build
@@ -153,6 +157,13 @@ RUN mkdir -p /data/memory /data/persona-knowledge \
 # values (compose, runbook templates) override these.
 ENV MEMORY_MARKDOWN_DIR=/data/memory \
   PERSONA_KNOWLEDGE_DIR=/data/persona-knowledge
+
+# `docker run --rm -i <image> aman <command>` (hash-password, backup, doctor).
+# /backup is the mount point for `aman backup --target /backup`; owning it here lets a fresh
+# named volume mounted there be written by the runtime user.
+RUN mkdir -p /backup && chown 10001:10001 /backup \
+  && printf '#!/bin/sh\nexec node /app/packages/trueforge/dist/aman.js "$@"\n' > /usr/local/bin/aman \
+  && chmod 755 /usr/local/bin/aman
 
 EXPOSE 8790
 

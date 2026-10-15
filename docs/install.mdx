@@ -11,7 +11,7 @@ One instance serves one person. If two people in the same household need it, the
 
 ## What you need
 
-- A computer with Docker: Docker Engine with Compose v2 on Linux, or Docker Desktop on macOS. On Windows, run inside WSL2; native Windows is not supported. Rootless Docker and Podman are not supported.
+- A computer with Docker: Docker Engine with Compose v2 or newer on Linux, or Docker Desktop on macOS. On Windows, run inside WSL2; native Windows is not supported. Rootless Docker and Podman are not supported.
 - 10 GB of free disk space.
 - Docker needs at least 6 GB of memory for the first build. The installer blocks below 6 GB and warns between 6 and 8 GB; 8 GB or more is recommended.
 - Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. API keys are entered in the app afterwards, not in the installer. The installer never scans your machine for models; you type the endpoint yourself.
@@ -27,7 +27,7 @@ installer/install.sh
 
 The installer works in phases and shows you a printed plan before changing anything:
 
-1. **Preflight (read-only).** Checks the OS, architecture, Docker, Compose v2, and free disk. On supported Linux without a working Engine, it offers to install Docker for you.
+1. **Preflight (read-only).** Checks the OS, architecture, Docker, Compose v2 or newer, and free disk. On supported Linux without a working Engine, it offers to install Docker for you.
 2. **Plan and confirmation.** Prints each step as done, will do, or needs root, then asks to continue. `--yes` skips the prompt; `--dry-run` prints the plan and stops without changing anything.
 3. **Downloads.** Fetches third-party base images by pinned digest and the model weight files listed in the printed plan.
 4. **Images.** Builds the app and helper images locally from the checked-out source.
@@ -105,7 +105,7 @@ When you set a public URL, that instance's URL and its login issuer switch to HT
 
 ## Doctor
 
-The doctor binary is not on your PATH. It lives at `~/.amanuensis/bin/amanuensis`. Either run it with the full path, or add the folder to your PATH:
+The doctor binary is not on your PATH. It lives at `~/.amanuensis/bin/aman`. Either run it with the full path, or add the folder to your PATH:
 
 ```bash
 export PATH="$HOME/.amanuensis/bin:$PATH"   # add to your shell profile to keep it
@@ -114,10 +114,10 @@ export PATH="$HOME/.amanuensis/bin:$PATH"   # add to your shell profile to keep 
 Doctor checks the whole setup and tells you exactly what to do about anything it finds:
 
 ```bash
-amanuensis doctor                 # everything: machine plus every instance
-amanuensis doctor --instance main # one instance only
-amanuensis doctor --deep          # raises the probe timeout to 30 seconds
-amanuensis doctor --json          # machine-readable output
+aman doctor                 # everything: machine plus every instance
+aman doctor --instance main # one instance only
+aman doctor --deep          # raises the probe timeout to 30 seconds
+aman doctor --json          # machine-readable output
 ```
 
 Each check reports one of four states:
@@ -133,7 +133,7 @@ Common checks and what they mean:
 
 | Check         | Fails when                                      | Fix                                                             |
 | ------------- | ----------------------------------------------- | --------------------------------------------------------------- |
-| docker        | Engine not answering, Compose v2 missing        | Start the daemon; on Linux, accept the installer's Docker offer |
+| docker        | Engine not answering, Compose v2 or newer missing     | Start the daemon; on Linux, accept the installer's Docker offer |
 | docker_memory | Docker has less than 6 GB of memory             | Raise it in Docker Desktop under Settings, Resources, Memory. On Linux, free up memory or add swap |
 | images        | A pinned image is missing locally               | Rerun the installer                                             |
 | service       | An instance's containers are unhealthy          | The check prints the start command                              |
@@ -176,7 +176,7 @@ Running code (`run_code`) and email attachment extraction show as **off** in thi
 
 **Clock skew.** If logins or certificate checks fail right after a sleep or a VM resume, check the machine clock. Turn on automatic time synchronization and run doctor again.
 
-**Login unavailable while the login server starts.** The login server takes a few seconds to come up on a first install. Wait, reload the page, and if it still fails, run `amanuensis doctor` and follow the login check's fix.
+**Login unavailable while the login server starts.** The login server takes a few seconds to come up on a first install. Wait, reload the page, and if it still fails, run `aman doctor` and follow the login check's fix.
 
 ## Privacy notes
 

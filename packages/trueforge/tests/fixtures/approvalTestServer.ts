@@ -150,7 +150,7 @@ function buildApp(input: {
     requestReplyRouter: new RequestReplyRouter(),
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
-    oidcClient: undefined,
+    oidcDiscovery: undefined,
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
     resolveModelProviderStore: () => modelProviderStore,

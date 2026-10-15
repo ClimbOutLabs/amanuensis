@@ -1,9 +1,13 @@
 import {
   assertNetworkAuthRequirement,
+  assertOidcIssuerTransportAllowed,
+  getPublicBaseUrl,
   getPublicUiBasePath,
   isLoopbackHost,
+  parsePublicBaseUrl,
   parseTokenFactoryMode,
   TrueForgeAuthMode,
+  type PublicUrlConfig,
   type ServerConfiguration,
 } from '../../../src/config';
 import { resolveTrueFoundrySandboxProviderConfig } from '../../../src/truefoundry/resolveTrueFoundrySandboxProviderConfig';
@@ -114,26 +118,70 @@ describe('resolveTrueFoundrySandboxProviderConfig', () => {
   });
 });
 
-describe('getPublicUiBasePath', () => {
-  it('ignores a path-bearing PUBLIC_BASE_URL in standalone non-development', () => {
-    expect(
-      getPublicUiBasePath({
-        STANDALONE: true,
-        NODE_ENV: 'production',
-        PORT: 8790,
-        PUBLIC_BASE_URL: 'https://host.example/custom/proxy/path',
-      } as ServerConfiguration),
-    ).toBe('/');
+describe('public base URL', () => {
+  const urlConfig = (overrides: Partial<PublicUrlConfig>): PublicUrlConfig => ({
+    STANDALONE: true,
+    PORT: 8790,
+    PUBLIC_BASE_URL: '',
+    ...overrides,
   });
 
-  it('honors PUBLIC_BASE_URL pathname in standalone development', () => {
+  it('honors PUBLIC_BASE_URL in production standalone', () => {
+    expect(getPublicBaseUrl(urlConfig({ PUBLIC_BASE_URL: 'https://host.example' }))).toBe('https://host.example');
+  });
+
+  it('defaults to the loopback address in standalone when unset', () => {
+    const config = urlConfig({ PORT: 8123 });
+
+    expect(getPublicBaseUrl(config)).toBe('http://localhost:8123');
+    expect(getPublicUiBasePath(config)).toBe('/');
+  });
+
+  it('still requires PUBLIC_BASE_URL in distributed mode', () => {
+    expect(() => getPublicBaseUrl(urlConfig({ STANDALONE: false }))).toThrow(/PUBLIC_BASE_URL is required/);
+  });
+
+  it('honors the PUBLIC_BASE_URL pathname in distributed mode', () => {
     expect(
-      getPublicUiBasePath({
-        STANDALONE: true,
-        NODE_ENV: 'development',
-        PUBLIC_BASE_URL: 'https://host.example/custom/proxy/path',
-      } as ServerConfiguration),
+      getPublicUiBasePath(urlConfig({ STANDALONE: false, PUBLIC_BASE_URL: 'https://host.example/custom/proxy/path' })),
     ).toBe('/custom/proxy/path/');
+  });
+});
+
+describe('parsePublicBaseUrl', () => {
+  it('rejects a path when paths are not allowed', () => {
+    expect(() => parsePublicBaseUrl('https://host.example/app', { allowPath: false })).toThrow(
+      /origin with no path when STANDALONE=true/,
+    );
+  });
+
+  it('accepts a bare origin and a lone slash when paths are not allowed', () => {
+    expect(parsePublicBaseUrl('https://host.example', { allowPath: false })).toBe('https://host.example');
+    expect(parsePublicBaseUrl('https://host.example/', { allowPath: false })).toBe('https://host.example');
+  });
+
+  it('keeps the path when paths are allowed', () => {
+    expect(parsePublicBaseUrl('https://host.example/app/', { allowPath: true })).toBe('https://host.example/app');
+  });
+});
+
+describe('assertOidcIssuerTransportAllowed', () => {
+  it.each([
+    'https://login.example/dex',
+    'http://localhost:5556/dex',
+    'http://127.0.0.1:5556/dex',
+    'http://[::1]:5556/dex',
+  ])('accepts %s', issuer => {
+    expect(() => assertOidcIssuerTransportAllowed(issuer)).not.toThrow();
+  });
+
+  it.each([
+    'http://login.example/dex',
+    'http://192.168.1.10:5556/dex',
+    'http://0.0.0.0:5556/dex',
+    'ftp://localhost/dex',
+  ])('rejects %s', issuer => {
+    expect(() => assertOidcIssuerTransportAllowed(issuer)).toThrow(/https, except http on a loopback host/);
   });
 });
 
@@ -146,6 +194,8 @@ describe('isLoopbackHost', () => {
       '127.0.1.2',
       '127.255.255.255',
       '::1',
+      '[::1]',
+      '[LOCALHOST]',
       '0:0:0:0:0:0:0:1',
       '::ffff:127.0.0.1',
       '::ffff:127.255.255.255',
@@ -179,6 +229,14 @@ describe('isLoopbackHost', () => {
       '127.foo.bar',
       '127.256.0.1',
       '127.0.0',
+      'localhost.evil.com',
+      '127.0.0.1@evil.com',
+      '[::1]x',
+      'x[::1]',
+      '[127.0.0.1',
+      '[localhost.evil.com]',
+      'foo.localhost',
+      'localhost:8790',
     ])('treats %s as a network listener', host => {
       expect(isLoopbackHost(host)).toBe(false);
     });
@@ -186,50 +244,93 @@ describe('isLoopbackHost', () => {
 });
 
 describe('assertNetworkAuthRequirement', () => {
-  it('throws for standalone mode on a non-loopback bind', () => {
-    expect(() =>
-      assertNetworkAuthRequirement({
-        authMode: TrueForgeAuthMode.Standalone,
-        host: '0.0.0.0',
-        requireAuth: true,
-      }),
-    ).toThrow(/Refusing to listen on 0\.0\.0\.0 without authentication/);
+  describe('standalone', () => {
+    it.each(['localhost', '127.0.0.1', '0.0.0.0', '192.168.1.10'])('refuses to start without OIDC on %s', host => {
+      expect(() =>
+        assertNetworkAuthRequirement({
+          authMode: TrueForgeAuthMode.Standalone,
+          standalone: true,
+          host,
+          requireAuth: true,
+        }),
+      ).toThrow(/Refusing to start without login.*OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET/);
+    });
+
+    it('no longer honors REQUIRE_AUTH=false', () => {
+      expect(() =>
+        assertNetworkAuthRequirement({
+          authMode: TrueForgeAuthMode.Standalone,
+          standalone: true,
+          host: '0.0.0.0',
+          requireAuth: false,
+        }),
+      ).toThrow(/Refusing to start without login/);
+    });
+
+    it('starts when OIDC provides login', () => {
+      expect(() =>
+        assertNetworkAuthRequirement({
+          authMode: TrueForgeAuthMode.Oidc,
+          standalone: true,
+          host: 'localhost',
+          requireAuth: true,
+        }),
+      ).not.toThrow();
+    });
   });
 
-  it('names the remediation options in the error', () => {
-    expect(() =>
-      assertNetworkAuthRequirement({
-        authMode: TrueForgeAuthMode.Standalone,
-        host: '192.168.1.10',
-        requireAuth: true,
-      }),
-    ).toThrow(/OIDC|HOST=localhost|REQUIRE_AUTH=false/);
-  });
+  describe('distributed', () => {
+    it('throws on a non-loopback bind without authentication', () => {
+      expect(() =>
+        assertNetworkAuthRequirement({
+          authMode: TrueForgeAuthMode.Standalone,
+          standalone: false,
+          host: '0.0.0.0',
+          requireAuth: true,
+        }),
+      ).toThrow(/Refusing to listen on 0\.0\.0\.0 without authentication/);
+    });
 
-  it('passes for standalone mode on loopback', () => {
-    expect(() =>
-      assertNetworkAuthRequirement({
-        authMode: TrueForgeAuthMode.Standalone,
-        host: 'localhost',
-        requireAuth: true,
-      }),
-    ).not.toThrow();
-  });
+    it('names the remediation options in the error', () => {
+      expect(() =>
+        assertNetworkAuthRequirement({
+          authMode: TrueForgeAuthMode.Standalone,
+          standalone: false,
+          host: '192.168.1.10',
+          requireAuth: true,
+        }),
+      ).toThrow(/OIDC|HOST=localhost|REQUIRE_AUTH=false/);
+    });
 
-  it('passes when OIDC or TrueFoundry provides authentication', () => {
-    for (const authMode of [TrueForgeAuthMode.Oidc, TrueForgeAuthMode.TrueFoundry]) {
-      expect(() => assertNetworkAuthRequirement({ authMode, host: '0.0.0.0', requireAuth: true })).not.toThrow();
-    }
-  });
+    it('passes on loopback', () => {
+      expect(() =>
+        assertNetworkAuthRequirement({
+          authMode: TrueForgeAuthMode.Standalone,
+          standalone: false,
+          host: 'localhost',
+          requireAuth: true,
+        }),
+      ).not.toThrow();
+    });
 
-  it('passes when the operator explicitly opts out with REQUIRE_AUTH=false', () => {
-    expect(() =>
-      assertNetworkAuthRequirement({
-        authMode: TrueForgeAuthMode.Standalone,
-        host: '0.0.0.0',
-        requireAuth: false,
-      }),
-    ).not.toThrow();
+    it('passes when OIDC or TrueFoundry provides authentication', () => {
+      for (const authMode of [TrueForgeAuthMode.Oidc, TrueForgeAuthMode.TrueFoundry]) {
+        expect(() =>
+          assertNetworkAuthRequirement({ authMode, standalone: false, host: '0.0.0.0', requireAuth: true }),
+        ).not.toThrow();
+      }
+    });
+
+    it('passes when the operator explicitly opts out with REQUIRE_AUTH=false', () => {
+      expect(() =>
+        assertNetworkAuthRequirement({
+          authMode: TrueForgeAuthMode.Standalone,
+          standalone: false,
+          host: '0.0.0.0',
+          requireAuth: false,
+        }),
+      ).not.toThrow();
+    });
   });
 });
 
