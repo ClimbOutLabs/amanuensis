@@ -238,6 +238,7 @@ test_install_builds_then_starts_slots_then_the_instance() {
   assert_contains "$OUT" "Sandbox check for instance main:"
   assert_log_has "doctor sandbox --instance main"
   assert_contains "$OUT" "Run code: on, in the gVisor sandbox"
+  assert_contains "$OUT" "Reading attachments (PDFs and images): on, in the same sandbox"
   assert_contains "$OUT" "aman doctor sandbox --fix"
   assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" slots
   sandbox_drop

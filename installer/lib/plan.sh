@@ -176,7 +176,7 @@ print_plan() {
   fi
   say ""
   if sandbox_needed; then
-    say "Run code (Python, shell, files) and reading attachments (PDFs and images) run in the gVisor sandbox."
+    say "Run code (Python, shell, files) runs in the gVisor sandbox, and so does reading attachments (PDFs and images)."
   else
     say "Run code and reading attachments stay off (no sandbox)."
   fi

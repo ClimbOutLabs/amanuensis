@@ -17,6 +17,7 @@ test_dry_run_changes_nothing() {
   assert_contains "$OUT" "total: about"
   assert_contains "$OUT" "Nothing is pushed to any registry"
   assert_contains "$OUT" "Run code (Python, shell, files) runs in the gVisor sandbox"
+  assert_contains "$OUT" "and so does reading attachments (PDFs and images)"
   assert_contains "$OUT" "Dry run: nothing was changed."
   assert_log_lacks "docker build"
   assert_log_lacks "docker pull"
