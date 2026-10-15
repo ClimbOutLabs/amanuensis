@@ -1,6 +1,11 @@
 import { statfs } from 'node:fs/promises';
 
-import { SlotDriver, type DriverReadiness } from '@truefoundry/trueforge-core/core';
+import {
+  probeSlotAttachments,
+  SlotDriver,
+  type DriverReadiness,
+  type SlotAttachmentProbeResult,
+} from '@truefoundry/trueforge-core/core';
 import Database from 'better-sqlite3';
 import winston from 'winston';
 
@@ -23,6 +28,8 @@ export interface DoctorDeps {
   probeDatabaseWritable(options: { path: string; timeoutMs: number }): void;
   /** Asks the sandbox slots the way the app does: every slot's attestation, through their control sockets. */
   slotsReadiness(options: { socketPaths: string[]; timeoutMs: number }): Promise<DriverReadiness>;
+  /** Sends a few bytes into a throwaway slot workspace and asks the guest for the PDF and OCR tools. */
+  slotsAttachments(options: { socketPaths: string[]; timeoutMs: number }): Promise<SlotAttachmentProbeResult>;
   /** The live Token Factory checks for one model; the key never appears in the results. */
   tokenFactoryChecks(options: {
     apiKey: string;
@@ -78,6 +85,20 @@ async function slotsReadiness({
   }
 }
 
+function slotsAttachments({
+  socketPaths,
+  timeoutMs,
+}: {
+  socketPaths: string[];
+  timeoutMs: number;
+}): Promise<SlotAttachmentProbeResult> {
+  return probeSlotAttachments({
+    socketPaths,
+    logger: winston.createLogger({ silent: true }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
 function tokenFactoryChecks({
   apiKey,
   baseUrl,
@@ -100,6 +121,7 @@ export function processDeps(): DoctorDeps {
     freeBytes,
     probeDatabaseWritable,
     slotsReadiness,
+    slotsAttachments,
     tokenFactoryChecks,
   };
 }

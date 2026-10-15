@@ -29,6 +29,8 @@ export type {
   SubAgentCompletionMarker,
 } from './runtime/AgentThread.types';
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
+export { stageAttachment } from './runtime/attachmentStaging';
+export type { StagedAttachment } from './runtime/attachmentStaging';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export { isAgentInputUserMessage, isEmptyMessageContent, isFileContentPart } from './runtime/UserInputMessage';
 export type { AgentInputUserMessage } from './runtime/UserInputMessage';
@@ -355,6 +357,8 @@ export { existingSandboxIdForProvider, formatSandboxId, parseSandboxId, rawSandb
 export type { SandboxRefParts } from './sandbox/sandboxRef';
 export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
+export { probeSlotAttachments } from './sandbox/slots/slotAttachmentProbe';
+export type { SlotAttachmentProbeResult } from './sandbox/slots/slotAttachmentProbe';
 export { slotSocketPathsIn } from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SlotDriver } from './sandbox/slots/SlotDriver';
 export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';

@@ -12,6 +12,7 @@ export function fakeDeps(overrides: Partial<DoctorDeps> = {}): DoctorDeps {
     freeBytes: () => Promise.resolve(50 * 1024 ** 3),
     probeDatabaseWritable: () => undefined,
     slotsReadiness: () => Promise.reject(new Error('unexpected sandbox probe')),
+    slotsAttachments: () => Promise.reject(new Error('unexpected attachment probe')),
     tokenFactoryChecks: () => Promise.reject(new Error('unexpected Token Factory probe')),
     ...overrides,
   };

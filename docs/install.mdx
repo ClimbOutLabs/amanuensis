@@ -215,7 +215,7 @@ Upgrade refuses to start unless doctor shows no failures, unless you pass `--for
 
 ## What is off in this version
 
-Running code (`run_code`, Python and shell in a gVisor sandbox with no network) is on after a normal install. Settings → Sandbox shows it as ready, and new chats have the sandbox enabled. Email attachment extraction and skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` has run code off too.
+Running code (`run_code`, Python and shell in a gVisor sandbox with no network) and reading attachments (PDFs and images) are on after a normal install. Settings → Sandbox shows the sandbox as ready, `aman doctor` reports `run_code` and `attachments` separately, and new chats have the sandbox enabled. Skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` has run code and reading attachments off.
 
 ## Troubleshooting
 

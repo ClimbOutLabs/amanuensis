@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { ChatCompletionContentPart } from 'openai/resources/chat';
 import {
   isSupportedDocumentExtension,
@@ -18,6 +17,7 @@ import {
 import type { LLMUserMessage } from '../llm/LLMTypes';
 import { SandboxFileUploadError, type Sandbox, type SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentSendInput } from './AgentThread.types';
+import { stageAttachment, validatePublicFilename } from './attachmentStaging';
 import { internalSystemTag } from './contextUtils';
 
 export type { AgentInputUserMessage, FileContentPart, TextContentPart, UserContentPart };
@@ -105,36 +105,6 @@ function extractBase64(dataUri: string): Buffer {
     throw new InvalidFileInputError('File data URI contains invalid base64');
   }
   return buffer;
-}
-
-function containsControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const codePoint = character.codePointAt(0);
-    if (codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function validatePublicFilename(filename: string): void {
-  if (!filename.length) {
-    throw new InvalidFileInputError('File name must not be empty');
-  }
-  if (Buffer.byteLength(filename, 'utf8') > 180) {
-    throw new InvalidFileInputError('File name must be 180 UTF-8 bytes or fewer');
-  }
-  if (containsControlCharacter(filename)) {
-    throw new InvalidFileInputError('File name contains control characters');
-  }
-  if (filename.includes('/') || filename.includes('\\') || filename === '.' || filename === '..') {
-    throw new InvalidFileInputError(`File name contains path traversal: ${filename}`);
-  }
-}
-
-function stagedFilename(filename: string, content: Buffer, ordinal: number): string {
-  const digest = createHash('sha256').update(content).digest('hex').slice(0, 32);
-  return `attachment-${String(ordinal).padStart(2, '0')}-${digest}-${filename}`;
 }
 
 function buildUploadedFilesAnnouncement(
@@ -331,13 +301,12 @@ export async function processAgentUserInput(
 
   const modelParts: ChatCompletionContentPart[] = [];
   const visionImageParts: ChatCompletionContentPart[] = [];
-  const filesToUploadToSandbox: { filename: string; stagedFilename: string; buffer: Buffer; mime: string }[] = [];
-  // Staged filenames of vision images: staged for tool use like any other file, but excluded from
-  // OCR ingestion below since the model already reads them directly via their image_url part.
-  const visionImageStagedFilenames = new Set<string>();
+  // Vision images are staged for tool use like any other file, but excluded from OCR ingestion below
+  // since the model already reads them directly via their image_url part.
+  const filesToUploadToSandbox: { filename: string; buffer: Buffer; mime: string; visionImage: boolean }[] = [];
   let totalDecodedBytes = 0;
 
-  for (const [index, filePart] of fileParts.entries()) {
+  for (const filePart of fileParts) {
     const filename = filePart.name.replace(/^\/+/, '');
     if (!filename.length) {
       throw new InvalidFileInputError('File name must not be empty');
@@ -382,15 +351,11 @@ export async function processAgentUserInput(
         `Attachments exceed the ${String(MAX_TOTAL_DOCUMENT_BYTES)} byte cumulative upload limit`,
       );
     }
-    const staged = stagedFilename(filename, buffer, index + 1);
-    if (isImageMime(mime) && modelSupportsVision) {
-      visionImageStagedFilenames.add(staged);
-    }
     filesToUploadToSandbox.push({
       filename,
-      stagedFilename: staged,
       buffer,
       mime,
+      visionImage: isImageMime(mime) && modelSupportsVision,
     });
   }
 
@@ -405,16 +370,19 @@ export async function processAgentUserInput(
     }
 
     const uploadResults = await Promise.allSettled(
-      filesToUploadToSandbox.map(file =>
-        sandbox.uploadUserFile({
-          fileName: file.stagedFilename,
-          content: file.buffer,
+      filesToUploadToSandbox.map((file, index) =>
+        stageAttachment({
+          sandbox,
+          filename: file.filename,
+          bytes: file.buffer,
           mime: file.mime,
+          ordinal: index + 1,
         }),
       ),
     );
 
     const uploadedFiles: { filename: string; path: string; mime: string; size: number; stagedFilename: string }[] = [];
+    const visionImageStagedFilenames = new Set<string>();
     const successfulUploads: { filePath: string }[] = [];
     const uploadFailures: unknown[] = [];
     for (let i = 0; i < uploadResults.length; i++) {
@@ -424,17 +392,20 @@ export async function processAgentUserInput(
         throw new Error('Unreachable: uploadResults/files length mismatch');
       }
       if (result.status === 'fulfilled') {
-        successfulUploads.push({ filePath: result.value.filePath });
+        successfulUploads.push({ filePath: result.value.path });
         if (result.value.sandboxCreated) {
           sandboxCreated = result.value.sandboxCreated;
         }
         uploadedFiles.push({
           filename: file.filename,
-          path: result.value.filePath,
+          path: result.value.path,
           mime: file.mime,
           size: file.buffer.length,
-          stagedFilename: file.stagedFilename,
+          stagedFilename: result.value.stagedName,
         });
+        if (file.visionImage) {
+          visionImageStagedFilenames.add(result.value.stagedName);
+        }
       } else {
         if (result.reason instanceof SandboxFileUploadError) {
           sandboxCreated ??= result.reason.sandboxCreated;

@@ -485,3 +485,12 @@ Approval tokens persist in an `approval_token` table (SQLite and Postgres) so a 
 | packages/trueforge/src/app.ts, config.ts, auth/middleware.ts, runtime/spaceCapability.ts              | The `/api/maps` tile proxy mount (browser session only), the `MAPS_*` settings, and the maps capability in the space turn resolver                                                                                                            |
 | packages/trueforge-ui/src/utils/computeAgentStepsSplit.ts, containers/ToolCallContainer.tsx           | A maps call never folds into agent details; `ToolCallContainer` renders its approval and its inline map card                                                                                                                                  |
 | packages/trueforge-ui/src/utils/toolCallParsing.ts, src/styles.css, package.json                      | `parseMapsResult`, the `.maps-card` styles (theme tokens only), and the `leaflet` dependency                                                                                                                                                  |
+
+## Attachment staging on sandbox slots (resolution: ours)
+
+`stageAttachment` (new file `core/runtime/attachmentStaging.ts`) is the one way a file the server holds gets into the turn's sandbox workspace. It owns the file-name check and the staged-name scheme that used to live in `UserInputMessage.ts`.
+
+| Path                                                         | What we changed                                                                                                                                                                   |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| packages/trueforge-core/src/core/runtime/UserInputMessage.ts | `validatePublicFilename` and `stagedFilename` moved to `attachmentStaging.ts`; chat uploads stage through `stageAttachment`. On a sync conflict keep ours, behaviour is unchanged |
+| packages/trueforge-core/src/core/index.ts                    | Exports `stageAttachment`, `StagedAttachment` and `probeSlotAttachments`                                                                                                          |

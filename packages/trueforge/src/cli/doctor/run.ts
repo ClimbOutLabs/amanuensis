@@ -46,7 +46,7 @@ export async function runInstanceChecks({
     await checkDisk({ deps }),
     checkClock({ deps }),
     await checkRunCode({ deps, timeoutMs }),
-    checkAttachments(),
+    await checkAttachments({ deps, timeoutMs }),
   ];
   // The model check spends a few tokens, so it only runs when asked for or when nothing is filtered.
   if (local) {

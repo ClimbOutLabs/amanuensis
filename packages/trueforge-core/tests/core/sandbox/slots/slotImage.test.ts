@@ -22,6 +22,19 @@ describe('the slot image and the server agree on what is deployed', () => {
     expect(SLOT_RUNSC_VERSION).toBe(`runsc version release-${release}`);
   });
 
+  test('the guest image has the tools the document pipeline runs inside the sandbox', () => {
+    const dockerfile = read('ops/sandbox-slot/Dockerfile');
+    const installed = captured(dockerfile, /apt-get install -y --no-install-recommends (poppler-utils[^\\\n]*)/);
+    // pdfinfo, pdftotext and pdftoppm come from poppler-utils; OCR needs tesseract and its English data.
+    expect(installed.split(/\s+/)).toEqual(
+      expect.arrayContaining(['poppler-utils', 'tesseract-ocr', 'tesseract-ocr-eng']),
+    );
+    const sandbox = read('packages/trueforge-core/src/core/sandbox/Sandbox.ts');
+    for (const tool of ['pdfinfo', 'pdftotext', 'pdftoppm', 'tesseract']) {
+      expect(sandbox).toContain(tool);
+    }
+  });
+
   test('the agent reports the build and platform the server expects', () => {
     const main = read('ops/sandbox-slot/agent/cmd/aman-slot-agent/main.go');
     expect(captured(main, /agentVersion\s*=\s*"([^"]+)"/)).toBe(SLOT_AGENT_VERSION);

@@ -64,6 +64,14 @@ RUN pip install --no-cache-dir --break-system-packages --no-deps --require-hashe
  && npm cache clean --force \
  && rm -rf /tmp/* /root/.npm /root/.cache
 
+# The document pipeline reads attachments inside the guest with pdfinfo, pdftotext and pdftoppm (poppler-utils)
+# and tesseract (English); without them a PDF or image could not be read on the slots. Its own layer, so changing
+# it does not rebuild the Python and npm layers above.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-eng \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/info /usr/share/locale /var/cache/* /var/log/*
+
 # Optional toolchains chosen with `pnpm sandbox:slots --add`; none by default. The archives are mounted from the
 # build context, not copied, so they add nothing to the image beyond the installed toolchain.
 ARG AMAN_PACKS=""
