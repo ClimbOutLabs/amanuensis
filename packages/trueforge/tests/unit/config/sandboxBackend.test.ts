@@ -1,3 +1,5 @@
+export {};
+
 const KEYS = ['SANDBOX_BACKEND', 'SANDBOX_SLOTS', 'SANDBOX_SLOTS_DIR', 'SANDBOX_SESSION_DISK_MB'] as const;
 
 type ConfigModule = typeof import('../../../src/config');
