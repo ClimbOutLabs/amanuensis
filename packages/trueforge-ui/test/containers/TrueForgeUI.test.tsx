@@ -429,14 +429,11 @@ describe('StackChatPanel', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Open schedules' }));
-    // Assert on the 'Back to chat' button, which renders synchronously with
-    // schedulesOpen. The 'Scheduled Agents' heading needs async data loading
-    // and flakes under load waiting for it.
-    expect(await screen.findByRole('button', { name: 'Back to chat' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Scheduled Agents' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to chat' }));
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Back to chat' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Scheduled Agents' })).not.toBeInTheDocument();
     });
   });
 });
