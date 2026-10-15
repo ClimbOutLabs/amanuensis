@@ -1,5 +1,6 @@
 'use client';
 
+import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { useEffect, useState, type ReactNode } from 'react';
 
 import { cn } from '@/atoms/lib/cn.js';
@@ -12,12 +13,7 @@ import {
 } from '@/server/ServerContext.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import { readMemoryEmbeddingsStatus, type MemoryEmbeddingsStatus } from './memoryEmbeddingsCapability.js';
-import {
-  readMemoryScreenStatus,
-  readToolOutputScreenStatus,
-  type MemoryScreenStatus,
-  type ToolOutputScreenStatus,
-} from './memoryScreenCapability.js';
+import { readMemoryScreenStatus, readToolOutputScreenStatus } from './memoryScreenCapability.js';
 import { useMemoryScreenSetting } from './memoryScreenSetting.js';
 import { readMemoryStorageDir } from './memoryStorageCapability.js';
 import { useMemorySummarizeSetting, type MemorySummarizeSettingState } from './memorySummarizeSetting.js';
@@ -106,7 +102,7 @@ function ScreenStatusCard(props: {
   );
 }
 
-function ToolOutputScreenToggle(props: { status: ToolOutputScreenStatus | null }) {
+function ToolOutputScreenToggle(props: { status: TrueForgeApi.ToolOutputScreenCapability | null }) {
   const setting = useToolOutputScreenSetting();
   const toaster = useToasterOptional();
   if (!setting.supported) return null;
@@ -189,7 +185,7 @@ function ToolOutputScreenToggle(props: { status: ToolOutputScreenStatus | null }
   );
 }
 
-function MemoryScreenToggle(props: { status: MemoryScreenStatus | null }) {
+function MemoryScreenToggle(props: { status: TrueForgeApi.MemoryScreenCapability | null }) {
   const setting = useMemoryScreenSetting();
   const toaster = useToasterOptional();
   if (!setting.supported) return null;

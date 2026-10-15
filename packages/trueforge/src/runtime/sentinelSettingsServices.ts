@@ -7,9 +7,10 @@ import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
  */
 export function sentinelSettingsServices(
   store: ISentinelSettingsStore,
-): Pick<SentinelServices, 'isOffline' | 'tier2AutoAllow'> {
+): Pick<SentinelServices, 'isOffline' | 'tier2AutoAllow' | 'searchWithoutAsking'> {
   return {
     isOffline: async input => (await store.get(input)).offline_mode,
     tier2AutoAllow: async input => new Set((await store.get(input)).tier2_auto_allow),
+    searchWithoutAsking: async input => (await store.get(input)).search_without_asking,
   };
 }

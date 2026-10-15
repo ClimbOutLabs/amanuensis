@@ -4,8 +4,8 @@ import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
 
-export const ContextCompactionEventReason: core.serialization.Schema<serializers.ContextCompactionEventReason.Raw, TrueForge.ContextCompactionEventReason> = core.serialization.enum_(["missing_block", "missing_section", "duplicate_section", "self_referential", "over_length"]);
+export const ContextCompactionEventReason: core.serialization.Schema<serializers.ContextCompactionEventReason.Raw, TrueForge.ContextCompactionEventReason> = core.serialization.enum_(["missing_block", "missing_section", "duplicate_section", "self_referential", "over_length", "summarizer_failed", "request_too_large"]);
 
 export declare namespace ContextCompactionEventReason {
-    export type Raw = "missing_block" | "missing_section" | "duplicate_section" | "self_referential" | "over_length";
+    export type Raw = "missing_block" | "missing_section" | "duplicate_section" | "self_referential" | "over_length" | "summarizer_failed" | "request_too_large";
 }

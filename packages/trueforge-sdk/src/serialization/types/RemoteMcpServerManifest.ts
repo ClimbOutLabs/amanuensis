@@ -13,6 +13,8 @@ export const RemoteMcpServerManifest: core.serialization.ObjectSchema<serializer
         "memoryProvider": core.serialization.property("memory_provider", core.serialization.boolean().optional()),
         "memorySettings": core.serialization.property("memory_settings", MemoryProviderSettings.optional()),
         "name": ResourceName,
+        "searchProvider": core.serialization.property("search_provider", core.serialization.boolean().optional()),
+        "searchTools": core.serialization.property("search_tools", core.serialization.list(core.serialization.string()).optional()),
         "type": core.serialization.stringLiteral("remote"),
         "url": core.serialization.string()
     });
@@ -24,6 +26,8 @@ export declare namespace RemoteMcpServerManifest {
         memory_provider?: boolean | null;
         memory_settings?: MemoryProviderSettings.Raw | null;
         name: ResourceName.Raw;
+        search_provider?: boolean | null;
+        search_tools?: string[] | null;
         type: "remote";
         url: string;
     }

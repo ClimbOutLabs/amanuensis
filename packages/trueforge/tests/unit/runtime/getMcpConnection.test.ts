@@ -255,6 +255,65 @@ describe('getMcpConnection', () => {
     });
   });
 
+  describe('search_provider role', () => {
+    async function connectionFor(name: string) {
+      const connection = await getMcpConnection({
+        tenant_id: 'default',
+        name,
+        store: mcpServerStore,
+        userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
+      });
+      if (connection === undefined) {
+        throw new Error(`expected a connection for ${name}`);
+      }
+      return connection;
+    }
+
+    it('reports the role, with its search tools, only for the connector the user designated, plain or OAuth', async () => {
+      const base = { type: 'remote' as const, description: 'Search.' };
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'finder-mcp',
+        manifest: {
+          ...base,
+          name: 'finder-mcp',
+          url: 'https://finder.example/mcp',
+          search_provider: true,
+          search_tools: ['find_pages'],
+        },
+        first_party: false,
+      });
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'finder-oauth-mcp',
+        manifest: {
+          ...base,
+          name: 'finder-oauth-mcp',
+          url: 'https://finder-oauth.example/mcp',
+          auth: { type: 'dcr' },
+          search_provider: true,
+        },
+        first_party: false,
+      });
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'other-search-mcp',
+        manifest: {
+          ...base,
+          name: 'other-search-mcp',
+          url: 'https://other-search.example/mcp',
+          // Not designated: a leftover list means nothing without the role.
+          search_tools: ['find_pages'],
+        },
+        first_party: false,
+      });
+
+      expect((await connectionFor('finder-mcp')).search_provider).toEqual({ tools: ['find_pages'] });
+      expect((await connectionFor('finder-oauth-mcp')).search_provider).toEqual({ tools: [] });
+      expect((await connectionFor('other-search-mcp')).search_provider).toBeUndefined();
+    });
+  });
+
   describe('first_party marker', () => {
     const LISTED_ORIGIN = 'https://hindsight.example.com';
     const MEMORY_URL = `${LISTED_ORIGIN}/mcp/aman`;

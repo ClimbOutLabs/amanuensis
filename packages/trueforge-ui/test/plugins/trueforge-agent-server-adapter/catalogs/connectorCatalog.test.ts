@@ -1,4 +1,4 @@
-import { TrueForge, type TrueForgeApi } from '@truefoundry/trueforge-sdk';
+import { serialization, TrueForge, type TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import assert from 'node:assert/strict';
 import { afterEach, describe, it, vi } from 'vitest';
 
@@ -182,6 +182,69 @@ describe('connectorCatalog mappers', () => {
         authenticated: true,
         memoryProvider: true,
       },
+    );
+  });
+
+  it('maps the search provider role from the manifest the SDK delivers', () => {
+    const base = {
+      type: 'remote' as const,
+      name: 'finder',
+      url: 'https://finder.example/mcp',
+      description: 'Finder.',
+    };
+    const on: TrueForgeApi.McpServerManifest = { ...base, searchProvider: true };
+    assert.equal(
+      toUiConnector({ name: 'finder', manifest: on, authStatus: { status: 'not_required' } }).searchProvider,
+      true,
+    );
+    assert.equal(
+      'searchProvider' in toUiConnector({ name: 'finder', manifest: base, authStatus: { status: 'not_required' } }),
+      false,
+    );
+  });
+
+  it('sends the search provider role through the SDK as the snake_case field and omits it when unset', () => {
+    const request = { name: 'finder', url: 'https://finder.example/mcp', auth: { type: 'none' as const } };
+    const wire = serialization.McpServerManifest.jsonOrThrow(toHarnessManifest({ ...request, searchProvider: true }));
+    assert.deepEqual(wire, {
+      type: 'remote',
+      name: 'finder',
+      url: 'https://finder.example/mcp',
+      description: 'finder MCP server',
+      search_provider: true,
+    });
+    assert.equal('search_provider' in serialization.McpServerManifest.jsonOrThrow(toHarnessManifest(request)), false);
+  });
+
+  it('reads the search provider role and the server’s search tools back from the wire', () => {
+    const manifest = serialization.McpServerManifest.parseOrThrow({
+      type: 'remote',
+      name: 'finder',
+      url: 'https://finder.example/mcp',
+      description: 'Finder.',
+      search_provider: true,
+      search_tools: ['web_search'],
+    });
+    assert.equal(
+      toUiConnector({ name: 'finder', manifest, authStatus: { status: 'not_required' } }).searchProvider,
+      true,
+    );
+  });
+
+  it('carries a catalog preset’s offer to be the search provider, read from the wire', () => {
+    const preset = serialization.CatalogMcpServer.parseOrThrow({
+      type: 'remote',
+      name: 'parallel-web',
+      url: 'https://search.parallel.ai/mcp',
+      description: 'Search the web.',
+      search_provider: true,
+      search_tools: ['web_search', 'web_fetch'],
+    });
+    assert.equal(toUiCatalogEntry(preset).searchProvider, true);
+    assert.equal(
+      'searchProvider' in
+        toUiCatalogEntry({ type: 'remote', name: 'x', url: 'https://x.example/mcp', description: 'X.' }),
+      false,
     );
   });
 

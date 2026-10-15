@@ -55,6 +55,7 @@ import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAu
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../src/runtime/event-subscription';
+import { createOutboundSecretSource } from '../../src/runtime/outboundSecrets';
 import { createSentinelServices } from '../../src/runtime/sentinelServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
 import { INERT_SERVER_NAME, startInertMcpServer, type InertMcpServer } from './inertMcpServer';
@@ -112,6 +113,13 @@ function buildApp(input: {
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
+    outboundSecrets: createOutboundSecretSource({
+      configured: () => [],
+      modelProviders: modelProviderStore,
+      sandboxProviders: sandboxProviderStore,
+      mcpServers: mcpServerStore,
+      tokens: tokenStore,
+    }),
   });
   return createServerApp({
     modelCatalog: ModelCatalog.load(),

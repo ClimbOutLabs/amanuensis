@@ -18,12 +18,15 @@ export function createSentinelServices(stores: {
   settings: ISentinelSettingsStore;
   approvalTokens: ApprovalTokenStore;
   toolGrants: ToolGrantStore;
+  /** Exact secret values the server holds, for the outbound secret guard. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
 }): SentinelServices {
   return {
     ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     audit: stores.audit,
     token_store: stores.approvalTokens,
     tool_grants: stores.toolGrants,
+    outboundSecrets: stores.outboundSecrets,
     ...sentinelSettingsServices(stores.settings),
   };
 }

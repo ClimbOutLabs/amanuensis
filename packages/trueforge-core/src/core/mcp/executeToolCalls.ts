@@ -489,6 +489,7 @@ function parseToolArguments(argumentsJson: string): Record<string, unknown> {
  */
 async function verifySentinelPreDispatch(input: {
   toolCall: InternalEnrichedToolCall;
+  toolInfo: MappedMCPTool;
   approvalDecisions: Map<string, ApprovalDecision>;
   sentinel: { services: SentinelServices; identity: SentinelCallIdentity } | undefined;
 }): Promise<string | undefined> {
@@ -511,6 +512,7 @@ async function verifySentinelPreDispatch(input: {
   } catch {
     return 'Tool arguments could not be parsed; request approval again.';
   }
+  const wireArguments = canonicalParams;
   // Deferred `call_tool` invocations are classified (and their approval tokens
   // minted) against the underlying tool's name and inner input, not the wrapper
   // (see DeferredTool.toolCallInfo). When mint unwrapped, the verifier must hash
@@ -530,8 +532,15 @@ async function verifySentinelPreDispatch(input: {
     tenant_id: sentinel.identity.tenant_id,
     created_by: sentinel.identity.created_by,
   });
+  // Rebuilt from the live tool set, not from the card: a connector that now points elsewhere
+  // no longer matches what the user approved.
+  const connector = input.toolInfo.toolSet.resolveConnector?.({
+    name: input.toolInfo.originalToolName,
+    arguments: wireArguments,
+  });
   return await verifyPreDispatch({
     call: {
+      connector,
       tool_name: info.mint_tool_name ?? info.original_tool_name,
       tool_type: info.type,
       canonical_params: canonicalParams,
@@ -1114,6 +1123,7 @@ export async function executeToolCalls({
     // and never records a side-effect attempt or memo entry.
     const sentinelVerificationError = await verifySentinelPreDispatch({
       toolCall,
+      toolInfo,
       approvalDecisions,
       sentinel,
     });

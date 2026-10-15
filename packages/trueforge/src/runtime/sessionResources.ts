@@ -45,6 +45,8 @@ export interface McpConnection {
   headers: RemoteMcpHeaders;
   /** The stored connector's trust marker, and only while the operator still lists its origin. */
   first_party: boolean;
+  /** Set when the user designated this connector as their search provider: the tools it may run silently. */
+  search_provider: { tools: readonly string[] } | undefined;
 }
 
 const GITHUB_MCP_SERVER_NAME = 'github';
@@ -481,6 +483,10 @@ export async function getMcpConnection({
   const firstParty =
     record.first_party &&
     isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS });
+  const searchProvider =
+    record.manifest.type === 'remote' && record.manifest.search_provider === true
+      ? { tools: record.manifest.search_tools ?? [] }
+      : undefined;
   const needsLiveAuth = record.manifest.auth?.type === 'dcr' || record.manifest.auth?.type === 'oauth_client';
   // Only the live-auth case delegates: a with-auth store's `resolveInvokeHeaders` may be
   // TrueFoundry-managed (mid-turn re-authorization through the gateway) rather than the generic
@@ -492,6 +498,7 @@ export async function getMcpConnection({
       url: record.manifest.url,
       headers: store.resolveInvokeHeaders({ record, userRef }),
       first_party: firstParty,
+      search_provider: searchProvider,
     };
   }
   if (needsLiveAuth && tokenStore !== undefined && clientName !== undefined) {
@@ -505,12 +512,14 @@ export async function getMcpConnection({
         userRef,
       }),
       first_party: firstParty,
+      search_provider: searchProvider,
     };
   }
   return {
     url: record.manifest.url,
     headers: resolveManifestRequestHeaders(record.manifest),
     first_party: firstParty,
+    search_provider: searchProvider,
   };
 }
 

@@ -18,6 +18,8 @@
  * CSS variables to the SDK ThemeProvider mode (class + data-theme).
  */
 @import 'github-markdown-css/github-markdown.css';
+/* Leaflet's stylesheet ships inside dist/styles.css: a bare .css import in the ESM bundle breaks Node consumers. */
+@import 'leaflet/dist/leaflet.css';
 @import './github-markdown-bridge.css';
 @import './fonts.css';
 
@@ -1002,5 +1004,147 @@
   }
   94% {
     transform: scaleY(0.08);
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Embedded maps card. All lengths in rem; colors from theme tokens.
+ * ──────────────────────────────────────────────────────────────────── */
+.maps-card {
+  width: 100%;
+  max-width: 40rem;
+  /* Space between the card and the reply text below it. */
+  margin-bottom: 0.75rem;
+  border: 0.0625rem solid var(--border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background: var(--card-bg);
+}
+
+.maps-card-map {
+  width: 100%;
+  height: clamp(12rem, 50vw, 20rem);
+  background: var(--secondary-bg);
+}
+
+/* Zoom controls: at least 2.75rem touch targets. */
+.maps-card .leaflet-bar a {
+  width: 2.75rem;
+  height: 2.75rem;
+  line-height: 2.75rem;
+}
+
+/* Leaflet draws pins and the route as SVG paths; the theme paints them through these classes. */
+.maps-card .maps-card-pin {
+  stroke: var(--card-bg);
+  fill: var(--danger, var(--failure-bg));
+  fill-opacity: 1;
+}
+
+.maps-card .maps-card-route {
+  stroke: var(--info, var(--approval-banner-accent));
+}
+
+/* Quiet loading state while the tool call runs. */
+.maps-card-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: clamp(12rem, 50vw, 20rem);
+  background: var(--secondary-bg);
+}
+
+.maps-card-loading-spinner {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  border: 0.125rem solid var(--text-secondary);
+  border-top-color: transparent;
+  animation: maps-card-spin 0.9s linear infinite;
+}
+
+@keyframes maps-card-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.maps-card-footer {
+  padding: 0.75rem 1rem;
+}
+
+.maps-card-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.maps-card-subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.maps-card-attribution {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.maps-card-attribution a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.125rem;
+}
+
+.maps-card-blocked {
+  padding: 1.5rem 1rem;
+  text-align: center;
+}
+
+.maps-card-blocked-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.maps-card-blocked-body {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.maps-card-retry {
+  margin-top: 1rem;
+  padding: 0.5rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--primary-button-text);
+  background: var(--primary-button-bg);
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.maps-card-retry:hover {
+  filter: brightness(0.92);
+}
+
+.maps-card-retry:focus-visible {
+  outline: 0.125rem solid var(--focus-ring);
+  outline-offset: 0.125rem;
+}
+
+/* Phone layout: the map fills the card width. */
+@media (max-width: 40rem) {
+  .maps-card {
+    max-width: 100%;
+    border-radius: 0.5rem;
+  }
+
+  .maps-card-footer {
+    padding: 0.5rem 0.75rem;
   }
 }
