@@ -89,7 +89,7 @@ cmd_upgrade() {
   say "Order: check health, back up every instance, build the new images, restart the instances, check health again."
   say "If a restart fails, the old images come back and each database is restored from the new backup."
   if [ -x "$(doctor_shim)" ] && [ "$OPT_FORCE" != 1 ]; then
-    run_doctor --json >/dev/null 2>&1 || die "doctor reports a failure; fix it first or run upgrade --force"
+    run_doctor --json --local >/dev/null 2>&1 || die "doctor reports a failure; fix it first or run upgrade --force"
   fi
   # The backup comes first so every later step has something to return to.
   UPGRADE_BACKUP=
@@ -111,6 +111,6 @@ cmd_upgrade() {
   log_event "upgrade to $REL_APP_TAG"
   say "Upgraded to $REL_APP_TAG. The pre-upgrade backup is ${UPGRADE_BACKUP:-not needed (no instances)}."
   if [ -x "$(doctor_shim)" ]; then
-    run_doctor || warn "doctor reported problems after the upgrade; see its output above"
+    DOCTOR_TIMEOUT=180 run_doctor || warn "doctor reported problems after the upgrade; see its output above"
   fi
 }

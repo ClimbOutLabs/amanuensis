@@ -113,7 +113,7 @@ edge_dns_check() {
       return 0
     fi
     if [ "$got" != "$EDGE_PUBLIC_IP" ]; then
-      EDGE_DNS_PROBLEM="$host resolves to $got, but this computer's public address is $EDGE_PUBLIC_IP. Point its A record at $EDGE_PUBLIC_IP, wait until it resolves, then run this again. Nothing was requested from Let's Encrypt."
+      EDGE_DNS_PROBLEM="$host resolves to $got, but this computer's public address is $EDGE_PUBLIC_IP. Point its A record at $EDGE_PUBLIC_IP, wait until it resolves, then run this again (if the address the VM is reached on is another one, pass it with --public-ip ADDRESS). Nothing was requested from Let's Encrypt."
       return 0
     fi
   done

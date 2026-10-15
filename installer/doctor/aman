@@ -3,7 +3,7 @@
 # the Docker CLI plus each instance's in-image `aman doctor`, combined into one document.
 # Read-only; needs only Docker (no jq, no Node). The state directory is AMANUENSIS_HOME.
 #
-#   aman doctor [--json] [--only ID] [--instance NAME] [--deep]
+#   aman doctor [--json] [--only ID] [--instance NAME] [--deep] [--local]
 #   aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
 #
 # `doctor sandbox` checks every sandbox slot's attestation and then makes a real call through the app. The slot
@@ -14,6 +14,9 @@
 # `public_url` and `public_login` run from this machine against an instance's public https addresses (its health
 # endpoint and the login discovery document), only for an instance installed with https addresses.
 #
+# --local keeps to what needs nothing outside this machine: it skips the model check and the public https checks, which
+# call out to the network. The installer uses it for status lists and the pre-upgrade gate.
+#
 # Exit codes: 0 no failures, 1 at least one failure, 2 usage error.
 # Test hooks: AMAN_DOCTOR_NOW (epoch seconds) replaces the clock.
 
@@ -23,6 +26,7 @@ AMAN_HOME="${AMANUENSIS_HOME:-${HOME:-}/.amanuensis}"
 APP_SERVICE="${AMAN_DOCTOR_APP_SERVICE:-app}"
 AS_JSON=0
 DEEP=0
+LOCAL=0
 ONLY=""
 ONLY_INSTANCE=""
 
@@ -53,7 +57,7 @@ APP_CONTAINER=""
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: aman doctor [--json] [--only ID] [--instance NAME] [--deep]
+Usage: aman doctor [--json] [--only ID] [--instance NAME] [--deep] [--local]
        aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
 USAGE
 }
@@ -519,6 +523,9 @@ run_in_image_checks() { # name
     exec_timeout=90
     args+=(--deep)
   fi
+  if [ "$LOCAL" = 1 ]; then
+    args+=(--local)
+  fi
   if [ -n "$ONLY" ] && in_list "$ONLY" "$IN_IMAGE_IDS"; then
     args+=(--only "$ONLY")
   fi
@@ -622,7 +629,7 @@ check_instance_public() { # name
 
 check_instance() {
   check_instance_core "$1"
-  check_instance_public "$1"
+  if [ "$LOCAL" != 1 ]; then check_instance_public "$1"; fi
 }
 
 check_instance_core() {
@@ -911,6 +918,7 @@ while [ $# -gt 0 ]; do
       DEEP=1
       PROBE_SECONDS=30
       ;;
+    --local) LOCAL=1 ;;
     --only)
       [ $# -ge 2 ] || die_usage "--only needs a check id."
       ONLY=$2

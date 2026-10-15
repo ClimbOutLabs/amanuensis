@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   DAEMON_TIME,
@@ -903,7 +903,10 @@ describe('model check', () => {
   it('exits 1 with the fix when the model check fails', () => {
     make();
     world.set('exec_c1', {
-      out: HEALTHY_INSTANCE_CHECKS.replace(/model\t.*\n/, 'model\tfail\tToken Factory GET /models: HTTP 401\tCreate a new key.\n'),
+      out: HEALTHY_INSTANCE_CHECKS.replace(
+        /model\t.*\n/,
+        'model\tfail\tToken Factory GET /models: HTTP 401\tCreate a new key.\n',
+      ),
       rc: 1,
     });
     const result = world.json();
@@ -1003,6 +1006,20 @@ describe('public https checks', () => {
     assert.equal(login.state, 'fail');
     assert.match(login.detail, /issuer is "https:\/\/elsewhere\.example\.net\/dex"/);
     assert.match(login.fix, /OIDC_ISSUER_URL/);
+  });
+
+  it('--local makes no public request and asks the app container for local checks only', () => {
+    make();
+    world.publicInstance('main');
+    world.curlRoute(HEALTH, { body: 'ok' });
+    const result = world.json(['--local']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(
+      result.doc.instances.main.filter(c => c.id.startsWith('public_')),
+      [],
+    );
+    assert.ok(!world.calls().some(call => call.startsWith('curl')));
+    assert.ok(world.calls().includes(`exec -e AMAN_HOST_EPOCH=${world.now} c1 aman doctor --text --local`));
   });
 
   it('skips with a reason when curl is not installed', () => {

@@ -15,6 +15,7 @@ case "$1" in
     STUB_VIA_SUDO=1 exec "$@"
     ;;
   sh)
+    [ -z "${STUB_SUDO_SH_FAIL:-}" ] || exit 1
     if printf '%s' "$3" | grep -q 'apt-get install -y docker-ce'; then
       cp "$STUB_DOCKER_SRC" "$STUB_BIN/docker"
       printf '%s\n' "$STUB_USER" >"$STUB_STATE/group_members"

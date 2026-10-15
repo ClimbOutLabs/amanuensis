@@ -383,7 +383,8 @@ install_execute() {
   if [ -x "$(doctor_shim)" ]; then
     say ""
     say "Doctor:"
-    run_doctor || warn "doctor reported problems; each one lists its fix"
+    # Includes the model and the public https checks, which wait on the network.
+    DOCTOR_TIMEOUT=180 run_doctor || warn "doctor reported problems; each one lists its fix"
     for name in $(reg_names); do
       if instance_sandbox_wanted "$name"; then sandbox_verify "$name"; fi
     done

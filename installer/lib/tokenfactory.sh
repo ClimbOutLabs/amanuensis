@@ -23,25 +23,23 @@ read_token_factory_key_stdin() {
   AMAN_TF_KEY=$line
 }
 
-# Optional hidden prompt. Enter skips it; a pipe or --yes never blocks on it.
+# Optional hidden prompt, for a person at a terminal only. A pipe never answers it (that is what
+# --token-factory-key-stdin is for), so scripted answers to the other prompts keep their order. Enter skips it.
 prompt_token_factory_key() {
   local line=
-  [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ] || return 0
-  if [ -t 0 ]; then
-    printf 'Token Factory key (optional, hidden; press Enter to use no hosted model): ' >&2
-    IFS= read -rs line || true
-    printf '\n' >&2
-  else
-    printf 'Token Factory key (optional, press Enter to use no hosted model): ' >&2
-    IFS= read -r line || true
-  fi
+  [ "$ASSUME_YES" != 1 ] && [ "$DRY_RUN" != 1 ] && [ -t 0 ] || return 0
+  printf 'Token Factory key (optional, hidden; press Enter to use no hosted model): ' >&2
+  IFS= read -rs line || true
+  printf '\n' >&2
   [ -n "$line" ] || return 0
   [ -z "$(tf_key_problem "$line")" ] || usage_die "$(tf_key_problem "$line")"
   AMAN_TF_KEY=$line
 }
 
+tf_flag_given() { [ "$OPT_TF_KEY_STDIN" = 1 ] || [ -n "$I_TF_MODEL$I_TF_CAP" ]; }
+
 # Sets I_TF (1 when a hosted model is wanted), I_TF_MODEL and I_TF_CAP. A dry run never reads the key, so it
-# plans for a key whenever a flag says one is coming.
+# plans for one whenever a Token Factory flag is given: the real run asks for it at the hidden prompt.
 instance_collect_token_factory() {
   I_TF=0
   I_TF_MODEL=${OPT_TF_MODEL:-}
@@ -51,7 +49,7 @@ instance_collect_token_factory() {
   if [ -z "$AMAN_TF_KEY" ] && [ "$OPT_TF_KEY_STDIN" != 1 ]; then
     prompt_token_factory_key
   fi
-  if [ -n "$AMAN_TF_KEY" ] || { [ "$DRY_RUN" = 1 ] && [ "$OPT_TF_KEY_STDIN" = 1 ]; }; then
+  if [ -n "$AMAN_TF_KEY" ] || { [ "$DRY_RUN" = 1 ] && tf_flag_given; }; then
     I_TF=1
     : "${I_TF_MODEL:=$TF_DEFAULT_MODEL}"
   elif [ -n "$I_TF_MODEL$I_TF_CAP" ]; then

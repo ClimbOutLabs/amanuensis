@@ -224,8 +224,8 @@ test_a_late_dns_change_stops_before_the_root_steps() {
   t_begin "DNS is checked again right before the root steps"
   sandbox_new
   dns_ready
-  # The plan-time check passes; the execute-time lookup then finds another address.
-  sed -i 's|^edge_ensure() {|edge_ensure() { printf "203.0.113.9\\n" > "$STUB_STATE/dns/aman.example.com"|' "$SB_INSTALLER/lib/edge.sh"
+  # The plan-time lookup passes; the one right before the root steps finds another address.
+  printf '203.0.113.9\n' >"$SB_STATE/dns/aman.example.com.later"
   install_tls --tls-root
   assert_rc 1
   assert_contains "$ERR" "aman.example.com resolves to 203.0.113.9"
@@ -237,13 +237,12 @@ test_a_failing_root_script_is_reported() {
   t_begin "a failing Caddy step names what to do and keeps the instance"
   sandbox_new
   dns_ready
-  rm -f "$SB_BIN/sudo"
-  printf '#!/usr/bin/env bash\nprintf "sudo %%s\\n" "$*" >>"$STUB_LOG"\n[ "${1:-}" = sh ] && exit 1\nexit 0\n' >"$SB_BIN/sudo"
-  chmod +x "$SB_BIN/sudo"
+  STUB_SUDO_SH_FAIL=1
   install_tls --tls-root
   assert_rc 1
   assert_contains "$ERR" "the Caddy steps failed"
   assert_file "$AMAN_HOME/state/instances/main.conf"
+  unset STUB_SUDO_SH_FAIL
   sandbox_drop
 }
 

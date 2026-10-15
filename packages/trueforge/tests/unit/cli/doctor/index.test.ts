@@ -78,6 +78,19 @@ describe('aman doctor', () => {
     expect(io.out.join('')).not.toContain('SENTINEL-key');
   });
 
+  it('skips the model check with --local and makes no Token Factory request', async () => {
+    const tokenFactoryChecks = jest.fn();
+    const deps = fakeDeps({
+      env: { ...healthyEnv, NEBIUS_API_KEY: 'SENTINEL-key' },
+      get: healthyGet,
+      tokenFactoryChecks,
+    });
+    const { io } = await run(['--local'], deps);
+    expect(tokenFactoryChecks).not.toHaveBeenCalled();
+    const checks = z.array(CheckSchema).parse(JSON.parse(io.out.join('')));
+    expect(checks.find(c => c.id === 'model')?.state).toBe('off');
+  });
+
   it('uses a longer probe timeout with --deep', async () => {
     const get = jest.fn(healthyGet);
     await run(['--deep'], fakeDeps({ env: healthyEnv, get }));

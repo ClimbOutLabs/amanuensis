@@ -169,7 +169,7 @@ doctor_status() {
     echo n/a
     return 0
   }
-  out=$(run_doctor --json --instance "$1" 2>/dev/null || true)
+  out=$(run_doctor --json --instance "$1" --local 2>/dev/null || true)
   if printf '%s' "$out" | grep -Eq '"state"[[:space:]]*:[[:space:]]*"fail"'; then
     echo fail
   elif printf '%s' "$out" | grep -Eq '"state"[[:space:]]*:[[:space:]]*"warn"'; then

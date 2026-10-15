@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# group docker: the members in $STUB_STATE/group_members. ahostsv4 NAME: the addresses in $STUB_STATE/dns/NAME, one per line.
+# group docker: the members in $STUB_STATE/group_members. ahostsv4 NAME: the addresses in $STUB_STATE/dns/NAME, one per
+# line; a file dns/NAME.later replaces them after the first lookup (a record that changes during the run).
 if [ "$1" = group ] && [ "$2" = docker ]; then
   members=$(cat "$STUB_STATE/group_members" 2>/dev/null || true)
   echo "docker:x:998:$members"
 elif [ "$1" = ahostsv4 ]; then
   [ -f "$STUB_STATE/dns/$2" ] || exit 2
+  answer=$(cat "$STUB_STATE/dns/$2")
+  if [ -f "$STUB_STATE/dns/$2.later" ]; then mv "$STUB_STATE/dns/$2.later" "$STUB_STATE/dns/$2"; fi
   while IFS= read -r ip; do
     printf '%-15s STREAM %s\n' "$ip" "$2"
-  done <"$STUB_STATE/dns/$2"
+  done <<<"$answer"
 fi

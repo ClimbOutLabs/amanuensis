@@ -6,7 +6,7 @@ import { checkModel } from './checks/model';
 import { checkAttachments, checkRunCode } from './checks/sandbox';
 import { checkService } from './checks/service';
 import type { DoctorDeps } from './deps';
-import type { Check } from './schemas';
+import { offCheck, type Check } from './schemas';
 
 export const INSTANCE_CHECK_IDS = [
   'service',
@@ -28,10 +28,13 @@ const MODEL_TIMEOUT_MS = 15_000;
 export async function runInstanceChecks({
   deps,
   deep,
+  local,
   only,
 }: {
   deps: DoctorDeps;
   deep: boolean;
+  /** Skips the checks that call an outside service, so a status list stays fast and spends nothing. */
+  local: boolean;
   only: string | undefined;
 }): Promise<Check[]> {
   const timeoutMs = deep ? DEEP_PROBE_TIMEOUT_MS : PROBE_TIMEOUT_MS;
@@ -46,7 +49,9 @@ export async function runInstanceChecks({
     checkAttachments(),
   ];
   // The model check spends a few tokens, so it only runs when asked for or when nothing is filtered.
-  if (only === undefined || only === 'model') {
+  if (local) {
+    checks.push(offCheck({ id: 'model', detail: 'Skipped: only checks that need no outside service were asked for.' }));
+  } else if (only === undefined || only === 'model') {
     checks.push(await checkModel({ deps, timeoutMs: deep ? DEEP_PROBE_TIMEOUT_MS : MODEL_TIMEOUT_MS }));
   }
   return only === undefined ? checks : checks.filter(check => check.id === only);

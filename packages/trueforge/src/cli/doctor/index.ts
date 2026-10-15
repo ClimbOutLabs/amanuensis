@@ -8,16 +8,17 @@ import { processDeps, type DoctorDeps } from './deps';
 import { INSTANCE_CHECK_IDS, runInstanceChecks } from './run';
 import { CheckSchema, type Check } from './schemas';
 
-const USAGE = 'Usage: aman doctor [--json | --text] [--only <check>] [--deep]';
+const USAGE = 'Usage: aman doctor [--json | --text] [--only <check>] [--deep] [--local]';
 
 interface DoctorOptions {
   text: boolean;
   deep: boolean;
+  local: boolean;
   only: string | undefined;
 }
 
 function parseOptions(args: readonly string[]): DoctorOptions {
-  let values: { json?: boolean; text?: boolean; deep?: boolean; only?: string };
+  let values: { json?: boolean; text?: boolean; deep?: boolean; local?: boolean; only?: string };
   try {
     ({ values } = parseArgs({
       args: [...args],
@@ -25,6 +26,7 @@ function parseOptions(args: readonly string[]): DoctorOptions {
         json: { type: 'boolean' },
         text: { type: 'boolean' },
         deep: { type: 'boolean' },
+        local: { type: 'boolean' },
         only: { type: 'string' },
       },
       allowPositionals: false,
@@ -42,7 +44,7 @@ function parseOptions(args: readonly string[]): DoctorOptions {
   if (only !== undefined && !INSTANCE_CHECK_IDS.some(id => id === only)) {
     throw new UsageError(`Unknown check "${only}". Checks: ${INSTANCE_CHECK_IDS.join(', ')}.`);
   }
-  return { text: values.text === true, deep: values.deep === true, only };
+  return { text: values.text === true, deep: values.deep === true, local: values.local === true, only };
 }
 
 function singleLine(value: string): string {
@@ -59,7 +61,7 @@ export function createDoctor(deps: DoctorDeps): Command {
     const options = parseOptions(args);
     const checks = z
       .array(CheckSchema)
-      .parse(await runInstanceChecks({ deps, deep: options.deep, only: options.only }));
+      .parse(await runInstanceChecks({ deps, deep: options.deep, local: options.local, only: options.only }));
     await io.stdout(options.text ? renderText(checks) : `${JSON.stringify(checks)}\n`);
     return checks.some(check => check.state === 'fail') ? 1 : 0;
   };

@@ -245,6 +245,15 @@ test_dry_run_plans_without_reading_or_printing_the_key() {
   sandbox_drop
 }
 
+test_dry_run_with_only_model_flags_plans_for_the_prompt() {
+  t_begin "a dry run with a model flag and no key flag still plans Token Factory (the real run asks at the prompt)"
+  sandbox_new
+  run_install --dry-run --token-factory-model vendor/m --email owner@example.invalid
+  assert_rc 0
+  assert_contains "$OUT" "Use Token Factory (model vendor/m) as the default model"
+  sandbox_drop
+}
+
 test_a_dry_run_without_tf_flags_has_no_tf_line() {
   t_begin "the plan has no Token Factory line unless one is asked for"
   sandbox_new
@@ -304,6 +313,7 @@ test_model_endpoint_still_works_next_to_a_key
 test_flags_without_a_key_are_refused
 test_bad_values_are_refused_without_echoing_the_key
 test_dry_run_plans_without_reading_or_printing_the_key
+test_dry_run_with_only_model_flags_plans_for_the_prompt
 test_a_dry_run_without_tf_flags_has_no_tf_line
 test_network_list_names_token_factory
 test_instance_add_takes_a_key
