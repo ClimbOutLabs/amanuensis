@@ -1,6 +1,6 @@
 /**
- * Builds the sandbox slot image and starts the slots, so a checkout or an existing Compose deploy gets
- * isolated code execution with one command. Safe to re-run; changes no file of the user's.
+ * Builds the sandbox slot image and starts the slots. The installer and `aman doctor sandbox` run this same
+ * code, and `pnpm sandbox:slots` runs it from a checkout. Safe to re-run; changes no file of the user's.
  */
 import { join } from 'node:path';
 import { PackError, toPackArch, type PackName, type PacksPort } from './packs.js';
@@ -34,7 +34,8 @@ export const DEFAULT_INSTANCE = 'aman';
 export const DEFAULT_DISK_GB = 16;
 export const MIN_DISK_GB = 4;
 export const MAX_DISK_GB = 512;
-export const INSTANCE_PATTERN = /^[a-z][a-z0-9]{0,15}$/;
+/** The installer's instance names (lowercase letters, digits and inner hyphens), so one name serves both. */
+export const INSTANCE_PATTERN = /^[a-z]([a-z0-9-]{0,22}[a-z0-9])?$/;
 /** The variable the compose files read their project and volume names from. */
 export const INSTANCE_ENV = 'AMAN_SLOTS_INSTANCE';
 export function slotsProject(instance: string): string {
@@ -42,10 +43,12 @@ export function slotsProject(instance: string): string {
 }
 const SLOTS_COMPOSE_FILE = 'docker-compose.slots.yml';
 const DISKS_COMPOSE_FILE = 'docker-compose.slots-disks.yml';
-const APP_COMPOSE_FILE = 'docker-compose.slots-app.yml';
 const DISK_SCRIPT = join('ops', 'sandbox-slot', 'disks', 'setup-disks.sh');
 const PROFILE_PATH = join('ops', 'sandbox-slot', 'apparmor', APPARMOR_PROFILE);
 const UP_TIMEOUT_SECONDS = 300;
+
+/** What a run does: `up` builds and starts, `build` only builds the image, `check` only reads. */
+export type SlotsMode = 'up' | 'build' | 'check';
 
 export type SlotsStep = 'docker' | 'compose' | 'apparmor' | 'disk' | 'packs' | 'build' | 'start' | 'attest';
 
@@ -68,7 +71,6 @@ export type SlotsResult =
       ok: true;
       checks: SlotsCheck[];
       image_size_mb: number | undefined;
-      app_compose_file: string;
       disk: { mode: DiskMode; bytes: number | undefined };
       packs: PackName[];
       /** Things that work but weaken the setup, to be shown to the person. */
@@ -83,6 +85,12 @@ export interface SlotsOptions {
   fix: boolean;
   /** Which install's slots to manage. */
   instance: string;
+  /** `up` by default for callers that omit it. */
+  mode: SlotsMode;
+  /** The command a person types to repair the slots, quoted in every fix line; differs per front end. */
+  command: string;
+  /** Recreate running slots instead of leaving them as they are, for a repair. */
+  restart: boolean;
   /** Platform of the machine running this command. */
   platform: NodeJS.Platform;
   /** True when this process is already root, so no sudo is needed. */
@@ -125,6 +133,11 @@ class Slots {
   private packs: PackName[] = [];
 
   constructor(private readonly options: SlotsOptions) {}
+
+  /** Only a full run may use sudo; a read-only check never changes the machine. */
+  private get mayFix(): boolean {
+    return this.options.fix && this.options.mode === 'up';
+  }
 
   private record(check: SlotsCheck): void {
     this.checks.push(check);
@@ -175,20 +188,32 @@ class Slots {
   }
 
   async execute(): Promise<SlotsResult> {
+    const { mode } = this.options;
     try {
       await this.checkDocker();
       const appArmor = await this.detectAppArmor();
       this.diskMode = await this.detectDiskMode();
-      await this.preparePacks();
-      await this.build();
-      if (appArmor) {
-        await this.ensureProfile();
+      if (mode !== 'check') {
+        await this.preparePacks();
+        await this.build();
       }
-      if (this.diskMode === 'hard') {
-        await this.ensureDisks();
+      if (mode === 'check') {
+        await this.checkImage();
       }
-      await this.start();
-      await this.attest();
+      if (mode !== 'build') {
+        if (appArmor) {
+          await this.ensureProfile();
+        }
+        if (this.diskMode === 'hard') {
+          await this.ensureDisks();
+        }
+      }
+      if (mode === 'up') {
+        await this.start();
+      }
+      if (mode !== 'build') {
+        await this.attest();
+      }
     } catch (error: unknown) {
       if (error instanceof StepFailure) {
         return { ok: false, checks: this.checks, step: error.step, error: error.message, fix: error.fix };
@@ -199,7 +224,6 @@ class Slots {
       ok: true,
       checks: this.checks,
       image_size_mb: await this.imageSizeMb(),
-      app_compose_file: join(this.options.repoRoot, APP_COMPOSE_FILE),
       disk: { mode: this.diskMode, bytes: this.diskBytes },
       packs: this.packs,
       warnings: this.warnings(),
@@ -258,7 +282,7 @@ class Slots {
   private warnings(): string[] {
     if (this.options.platform === 'linux' && this.diskMode === 'off') {
       return [
-        "The slots have no disk of their own, so a runaway program could fill this machine's disk. Run pnpm sandbox:slots --fix to give each slot a fixed-size disk.",
+        `The slots have no disk of their own, so a runaway program could fill this machine's disk. Run ${this.options.command} --fix to give each slot a fixed-size disk.`,
       ];
     }
     return [];
@@ -358,11 +382,11 @@ class Slots {
       });
       return;
     }
-    if (!this.options.fix) {
+    if (!this.mayFix) {
       throw new StepFailure(
         'disk',
         "The slot workspaces do not have a disk limit of their own yet, so a runaway program could fill this machine's disk.",
-        'Run pnpm sandbox:slots --fix. It asks first, then your password once, to create four fixed-size disk files that fill only as they are used.',
+        `Run ${this.options.command} --fix. It asks first, then your password once, to create four fixed-size disk files that fill only as they are used.`,
       );
     }
     const staleNote =
@@ -376,7 +400,7 @@ class Slots {
       throw new StepFailure(
         'disk',
         'Setting up the slot disks was not confirmed, so nothing was changed.',
-        'Run pnpm sandbox:slots --fix again and answer yes. Add --yes when no one is at the keyboard.',
+        `Run ${this.options.command} --fix again and answer yes. Add --yes when no one is at the keyboard.`,
       );
     }
     if (stale.length > 0) {
@@ -386,7 +410,7 @@ class Slots {
         throw new StepFailure(
           'disk',
           `The old workspace volumes could not be removed: ${tail(`${down.stderr} ${removed.stderr}`)}`,
-          'Stop anything that still uses the sandbox slots, then run pnpm sandbox:slots --fix again.',
+          `Stop anything that still uses the sandbox slots, then run ${this.options.command} --fix again.`,
         );
       }
     }
@@ -396,7 +420,7 @@ class Slots {
         throw new StepFailure(
           'disk',
           `Creating the slot disks failed: ${tail(created.stderr)}`,
-          'Make sure mkfs.ext4 is installed (sudo apt install e2fsprogs) and that your account may use sudo, then run pnpm sandbox:slots --fix again. On a machine that cannot mount disk files, run pnpm sandbox:slots --no-hard-disk-limit instead.',
+          `Make sure mkfs.ext4 is installed (sudo apt install e2fsprogs) and that your account may use sudo, then run ${this.options.command} --fix again. On a machine that cannot mount disk files, run ${this.options.command} --no-hard-disk-limit instead.`,
         );
       }
     }
@@ -405,7 +429,7 @@ class Slots {
       throw new StepFailure(
         'disk',
         'The slot disks were created but are not mounted.',
-        'Run pnpm sandbox:slots --fix again; if it keeps failing, run pnpm sandbox:slots --no-hard-disk-limit.',
+        `Run ${this.options.command} --fix again; if it keeps failing, run ${this.options.command} --no-hard-disk-limit.`,
       );
     }
     this.diskBytes = after;
@@ -449,6 +473,18 @@ class Slots {
     this.record({ step: 'build', status: 'ok', message: `Built ${SLOT_IMAGE}` });
   }
 
+  private async checkImage(): Promise<void> {
+    const inspect = await this.run({ args: ['image', 'inspect', '--format', '{{.Id}}', SLOT_IMAGE] });
+    if (inspect.exitCode !== 0) {
+      throw new StepFailure(
+        'build',
+        `The sandbox image ${SLOT_IMAGE} is not on this machine.`,
+        `Run ${this.options.command} --fix to build it.`,
+      );
+    }
+    this.record({ step: 'build', status: 'ok', message: `The image ${SLOT_IMAGE} is present` });
+  }
+
   private async profileLoaded(): Promise<boolean> {
     const probe = await this.run({
       args: [
@@ -472,11 +508,11 @@ class Slots {
       return;
     }
     const profile = join(this.options.repoRoot, PROFILE_PATH);
-    if (!this.options.fix) {
+    if (!this.mayFix) {
       throw new StepFailure(
         'apparmor',
         `The AppArmor profile ${APPARMOR_PROFILE} is not loaded on this machine.`,
-        'Run pnpm sandbox:slots --fix. It asks for your password once to load the profile.',
+        `Run ${this.options.command} --fix. It asks for your password once to load the profile.`,
       );
     }
     const loaded = await this.run({
@@ -489,7 +525,7 @@ class Slots {
       throw new StepFailure(
         'apparmor',
         `Loading the AppArmor profile failed: ${tail(loaded.stderr)}`,
-        'Make sure apparmor_parser is installed (sudo apt install apparmor) and that your account may use sudo, then run pnpm sandbox:slots --fix again.',
+        `Make sure apparmor_parser is installed (sudo apt install apparmor) and that your account may use sudo, then run ${this.options.command} --fix again.`,
       );
     }
     this.record({ step: 'apparmor', status: 'ok', message: `Loaded the AppArmor profile ${APPARMOR_PROFILE}` });
@@ -497,7 +533,15 @@ class Slots {
 
   private async start(): Promise<void> {
     const up = await this.run({
-      args: this.composeArgs(['up', '-d', '--no-build', '--wait', '--wait-timeout', String(UP_TIMEOUT_SECONDS)]),
+      args: this.composeArgs([
+        'up',
+        '-d',
+        '--no-build',
+        ...(this.options.restart ? ['--force-recreate'] : []),
+        '--wait',
+        '--wait-timeout',
+        String(UP_TIMEOUT_SECONDS),
+      ]),
       echo: true,
     });
     if (up.exitCode !== 0) {
@@ -505,7 +549,7 @@ class Slots {
       throw new StepFailure(
         'start',
         `The slots did not become healthy: ${tail(`${up.stderr} ${logs.stdout} ${logs.stderr}`)}`,
-        'Read the attestation lines above: each names the safety check that failed. On Ubuntu 24.04 run pnpm sandbox:slots --fix; otherwise see the failure fixes in the test sheet.',
+        `Read the attestation lines above: each names the safety check that failed. On Ubuntu 24.04 run ${this.options.command} --fix; otherwise see the failure fixes in the test sheet.`,
       );
     }
     this.record({ step: 'start', status: 'ok', message: `Started ${String(SLOT_COUNT)} slots` });
@@ -526,7 +570,7 @@ class Slots {
         throw new StepFailure(
           'attest',
           `Slot ${String(slot)} failed its safety checks: ${tail(`${result.stdout} ${result.stderr}`)}`,
-          'Run pnpm sandbox:slots --fix, then again. If the failing check is runsc, see the failure fixes in the test sheet.',
+          `Run ${this.options.command} --fix, then again. If the failing check is runsc, see the failure fixes in the test sheet.`,
         );
       }
     }

@@ -61,6 +61,9 @@ function defaultAnswers(call: Call): Partial<CommandResult> | undefined {
 const BASE_OPTIONS: Omit<SlotsOptions, 'run' | 'fix'> = {
   repoRoot: '/repo',
   instance: 'aman',
+  mode: 'up',
+  command: 'pnpm sandbox:slots',
+  restart: false,
   platform: 'darwin',
   isRoot: false,
   diskGb: 16,
@@ -89,13 +92,9 @@ async function run(
 }
 
 describe('runSandboxSlots', () => {
-  test('builds, starts and attests every slot, then names the app compose file', async () => {
+  test('builds, starts and attests every slot', async () => {
     const { result, calls } = await run(() => undefined);
-    expect(result).toMatchObject({
-      ok: true,
-      image_size_mb: 1717,
-      app_compose_file: '/repo/docker-compose.slots-app.yml',
-    });
+    expect(result).toMatchObject({ ok: true, image_size_mb: 1717 });
     const text = calls.map(joined);
     expect(text.some(line => line.includes('build sandbox-1'))).toBe(true);
     expect(text.some(line => line.includes('up -d --no-build --wait'))).toBe(true);
@@ -448,5 +447,79 @@ describe('the per-slot disks on a native Linux host', () => {
       isRoot: false,
     });
     expect(plain.calls.some(call => call.command === 'sudo')).toBe(false);
+  });
+});
+
+describe('runSandboxSlots modes', () => {
+  test('--check builds and starts nothing and never asks for sudo', async () => {
+    const { result, calls } = await run(() => undefined, true, { mode: 'check' });
+    expect(result.ok).toBe(true);
+    const text = calls.map(joined);
+    expect(text.some(line => line.includes('compose') && /\b(build|up)\b/.test(line))).toBe(false);
+    expect(text.some(line => line.startsWith('image inspect'))).toBe(true);
+    expect(text.filter(line => line.includes('aman-slot-agent healthcheck'))).toHaveLength(SLOT_COUNT);
+    expect(calls.some(call => call.command === 'sudo')).toBe(false);
+  });
+
+  test("--check says where the missing image is built, in the caller's own command", async () => {
+    const { result } = await run(
+      call => (joined(call).startsWith('image inspect') ? { exitCode: 1 } : undefined),
+      false,
+      {
+        mode: 'check',
+        command: 'aman doctor sandbox',
+      },
+    );
+    expect(result).toMatchObject({ ok: false, step: 'build', fix: 'Run aman doctor sandbox --fix to build it.' });
+  });
+
+  test('--check on a host with AppArmor fails without loading the profile when it is not loaded', async () => {
+    const { result, calls } = await run(
+      call => {
+        const text = joined(call);
+        if (text.startsWith('info') && text.includes('SecurityOptions')) {
+          return { stdout: '["name=apparmor","name=seccomp,profile=builtin"]' };
+        }
+        if (text.startsWith('run --rm')) {
+          return { exitCode: 125 };
+        }
+        return undefined;
+      },
+      true,
+      { mode: 'check', command: 'aman doctor sandbox' },
+    );
+    expect(result).toMatchObject({ ok: false, step: 'apparmor' });
+    expect(!result.ok && result.fix).toContain('aman doctor sandbox --fix');
+    expect(calls.some(call => call.command === 'sudo')).toBe(false);
+  });
+
+  test('--build-only builds the image and stops before the profile, the disks and the slots', async () => {
+    const { result, calls } = await run(() => undefined, false, { mode: 'build' });
+    expect(result.ok).toBe(true);
+    const text = calls.map(joined);
+    expect(text.some(line => line.includes('build sandbox-1'))).toBe(true);
+    expect(text.some(line => line.includes('up -d'))).toBe(false);
+    expect(text.some(line => line.includes('aman-slot-agent healthcheck'))).toBe(false);
+  });
+
+  test('--restart recreates the slots', async () => {
+    const { calls } = await run(() => undefined, false, { restart: true });
+    expect(calls.map(joined).some(line => line.includes('up -d --no-build --force-recreate --wait'))).toBe(true);
+  });
+
+  test('fix lines quote the command the caller gave', async () => {
+    const { result } = await run(
+      call => {
+        const text = joined(call);
+        if (text.startsWith('info') && text.includes('OperatingSystem')) {
+          return { stdout: 'Ubuntu 24.04' };
+        }
+        return undefined;
+      },
+      false,
+      { command: 'aman doctor sandbox', platform: 'linux' },
+    );
+    expect(!result.ok && result.fix).toContain('aman doctor sandbox --fix');
+    expect(!result.ok && result.fix).not.toContain('pnpm');
   });
 });

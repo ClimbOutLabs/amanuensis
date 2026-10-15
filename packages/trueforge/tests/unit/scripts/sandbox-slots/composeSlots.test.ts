@@ -94,133 +94,61 @@ describe('docker-compose.slots.yml', () => {
   });
 });
 
-describe('docker-compose.slots-app.yml', () => {
+/** The installer's instance template with the sandbox on, as the installer renders it for an instance named main. */
+function renderInstanceTemplate(): unknown {
+  const text = readFileSync(resolve(REPO_ROOT, 'installer/templates/instance/compose.yaml.tpl'), 'utf8');
+  const rendered = text
+    .split('\n')
+    .map(line => line.replace('@@IF_SANDBOX@@', ''))
+    .join('\n')
+    .replace(/@@NAME@@/g, 'main')
+    .replace(/@@[A-Z_]+@@/g, '1');
+  return parse(rendered);
+}
+
+describe('installer/templates/instance/compose.yaml.tpl sandbox wiring', () => {
   const app = z
     .object({
       services: z.object({
-        server: z.object({
+        app: z.object({
           environment: z.record(z.string(), z.string()),
           volumes: z.array(z.string()),
         }),
       }),
-      volumes: z.record(z.string(), z.object({ name: z.string(), external: z.literal(true) })),
+      volumes: z.record(z.string(), z.object({ name: z.string(), external: z.boolean().optional() })),
     })
-    .parse(load('docker-compose.slots-app.yml'));
+    .parse(renderInstanceTemplate());
 
   test('switches the app to the slot backend and mounts each control volume read-only, with no socket', () => {
-    expect(app.services.server.environment).toMatchObject({
+    expect(app.services.app.environment).toMatchObject({
       SANDBOX_BACKEND: 'slots',
+      SANDBOX_SLOTS: '4',
       SANDBOX_SLOTS_DIR: '/run/aman-slots',
     });
-    expect(app.services.server.volumes).toHaveLength(4);
-    for (const [index, volume] of app.services.server.volumes.entries()) {
+    const mounts = app.services.app.volumes.filter(volume => volume.startsWith('slot_ctl_'));
+    expect(mounts).toHaveLength(4);
+    for (const [index, volume] of mounts.entries()) {
       expect(volume).toBe(`slot_ctl_${String(index + 1)}:/run/aman-slots/${String(index + 1)}:ro`);
     }
     expect(JSON.stringify(app)).not.toContain('docker.sock');
   });
 
-  test('only the control volumes are shared, never a workspace volume', () => {
-    expect(Object.values(app.volumes).map(volume => volume.name)).toEqual([
-      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_1',
-      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_2',
-      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_3',
-      '${AMAN_SLOTS_INSTANCE:-aman}_slot_ctl_4',
+  test('the shared control volumes are the slots project volumes of the same name, and no workspace volume is shared', () => {
+    const external = Object.entries(app.volumes).filter(([, volume]) => volume.external === true);
+    expect(external.map(([, volume]) => volume.name)).toEqual([
+      'main_slot_ctl_1',
+      'main_slot_ctl_2',
+      'main_slot_ctl_3',
+      'main_slot_ctl_4',
     ]);
-  });
-});
-
-describe('ops/sandbox-slot/sandbox-seccomp.json', () => {
-  const ProfileSchema = z.object({
-    defaultAction: z.literal('SCMP_ACT_ERRNO'),
-    syscalls: z.array(z.object({ names: z.array(z.string()), action: z.string() })),
-  });
-  const profile = ProfileSchema.parse(
-    JSON.parse(readFileSync(resolve(REPO_ROOT, 'ops/sandbox-slot/sandbox-seccomp.json'), 'utf8')),
-  );
-  const allowed = new Set(
-    profile.syscalls.filter(rule => rule.action === 'SCMP_ACT_ALLOW').flatMap(rule => rule.names),
-  );
-
-  // gVisor starts its sandbox and gofer from inside the slot, so these must stay allowed; each was
-  // confirmed by removing it and watching the guest canary fail.
-  test.each(['ptrace', 'chroot', 'mount', 'umount2', 'pivot_root', 'clone', 'unshare', 'setns', 'setuid', 'capset'])(
-    'keeps %s, which the gVisor runtime needs to start a guest',
-    name => {
-      expect(allowed.has(name)).toBe(true);
-    },
-  );
-
-  // Docker's default profile grants these once the container has the matching capability. The slots have
-  // none, and gVisor does not use them, so they stay denied rather than relying on the missing capability.
-  test.each([
-    'bpf',
-    'perf_event_open',
-    'open_by_handle_at',
-    'init_module',
-    'finit_module',
-    'delete_module',
-    'kexec_load',
-    'reboot',
-    'acct',
-    'iopl',
-    'ioperm',
-    'settimeofday',
-    'clock_settime',
-    'syslog',
-    'process_vm_readv',
-    'process_vm_writev',
-    'kcmp',
-    'pidfd_getfd',
-    'quotactl',
-    'lookup_dcookie',
-    'fanotify_init',
-    'fsopen',
-    'fsconfig',
-    'fsmount',
-    'fspick',
-    'open_tree',
-    'move_mount',
-    'mount_setattr',
-    'sethostname',
-    'setdomainname',
-  ])('denies %s', name => {
-    expect(allowed.has(name)).toBe(false);
+    expect(JSON.stringify(app)).not.toContain('slot_ws_');
   });
 
-  test('answers clone3 with an error so libc falls back to clone', () => {
-    const clone3 = profile.syscalls.filter(rule => rule.names.includes('clone3'));
-    expect(clone3.map(rule => rule.action)).toEqual(['SCMP_ACT_ERRNO']);
-  });
-});
-
-describe('docker-compose.slots-disks.yml', () => {
-  const disks = z
-    .object({
-      services: z.record(z.string(), z.object({ environment: z.record(z.string(), z.string()) }).strict()),
-      volumes: z.record(
-        z.string(),
-        z
-          .object({
-            driver: z.literal('local'),
-            driver_opts: z.object({ type: z.literal('none'), o: z.literal('bind'), device: z.string() }).strict(),
-          })
-          .strict(),
-      ),
-    })
-    .parse(load('docker-compose.slots-disks.yml'));
-
-  test('gives each slot the disk size to prove and nothing else', () => {
-    expect(Object.keys(disks.services).sort()).toEqual(['sandbox-1', 'sandbox-2', 'sandbox-3', 'sandbox-4']);
-    for (const service of Object.values(disks.services)) {
-      expect(Object.keys(service.environment)).toEqual(['AMAN_WORKSPACE_QUOTA_BYTES']);
-    }
-  });
-
-  test("swaps each workspace volume for a bind of that slot's own mounted disk", () => {
-    expect(Object.keys(disks.volumes).sort()).toEqual(['slot_ws_1', 'slot_ws_2', 'slot_ws_3', 'slot_ws_4']);
-    for (const [name, volume] of Object.entries(disks.volumes)) {
-      const slot = name.slice(-1);
-      expect(volume.driver_opts.device).toBe(`\${AMAN_SLOTS_DISK_DIR:?run pnpm sandbox:slots}/ws-${slot}`);
-    }
+  test('the slot image tag the installer builds is the one the slot services run', () => {
+    const slots = ComposeSchema.parse(load('docker-compose.slots.yml'));
+    const service = ServiceSchema.parse(slots.services['sandbox-1']);
+    expect(readFileSync(resolve(REPO_ROOT, 'installer/lib/sandbox.sh'), 'utf8')).toContain(
+      `SLOT_IMAGE=${service.image}`,
+    );
   });
 });

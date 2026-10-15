@@ -39,6 +39,8 @@ export default defineConfig([
       'controller-main': 'src/controller-main.ts',
       // Config-free `aman <command>` dispatcher for `docker run <image> aman ...`.
       aman: 'src/cli/main.ts',
+      // Sandbox slot setup, run on the host by the installer from a copy taken out of the app image.
+      'sandbox-slots': 'scripts/sandbox-slots/main.ts',
       // Emit both engines under dist/{postgres,sqlite}/migrations/.
       // Runtime selects migrations via STANDALONE (false → postgres, true → sqlite).
       ...migrationEntries('postgres'),
