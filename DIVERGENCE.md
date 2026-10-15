@@ -121,6 +121,25 @@ store backends are listed under Memory subsystem above.
 | packages/trueforge/tests/unit/apis/mcpOAuth.test.ts                                                 | Router is built with the new `toolGrantStore`                                                                                                           |
 | packages/trueforge/tests/unit/apis/modelProviders.test.ts                                           | Same                                                                                                                                                    |
 
+## Google connection (fork-only, resolution: ours)
+
+Additive modules (no upstream counterpart): packages/trueforge-core/src/core/google/**,
+packages/trueforge/src/{apis/google.ts,routes/googleRoutes.ts,schemas/google.ts,db/googleConnectionStore.ts},
+the `google_connection` and `google_oauth_pending` tables with both stores, and the UI
+`GoogleSetupPanel` and `server/googleSetup.ts`. One Google login per user on the user's own OAuth client.
+
+Shared files carrying Google wiring:
+
+| Path                                                                         | What we added                                                                    |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| packages/trueforge/src/app.ts, main.ts, scripts/write-openapi.ts             | `googleConnectionStore` dependency and the `/api/v1/user/settings/google` mount  |
+| packages/trueforge/src/db/{sqlite,postgres}/types.ts, postgres/schema.ts     | The two Google tables                                                            |
+| packages/trueforge/src/runtime/outboundSecrets.ts                            | The user's Google client secret and refresh token join the outbound secret guard |
+| packages/trueforge-ui/...ConnectorSettings.tsx, catalogs/connectorCatalog.ts | A Google row and panel; the port is spread onto the connector catalog            |
+
+The UI reads the Google routes with a direct fetch and local parsers until the generated SDK carries them; switch the
+adapter to the SDK once `pnpm sdk:generate` has run in CI.
+
 ## Product docs (resolution: ours)
 
 | Path                 | Why                                                                                                                                                                                                                                                                                                 |
