@@ -4,6 +4,7 @@ import { SlotDriver, type DriverReadiness } from '@truefoundry/trueforge-core/co
 import Database from 'better-sqlite3';
 import winston from 'winston';
 
+import { runTokenFactorySmoke, type SmokeCheck } from '../../runtime/tokenFactorySmoke';
 import { processEnv, type CliEnv } from '../env';
 
 export interface HttpResponse {
@@ -22,6 +23,13 @@ export interface DoctorDeps {
   probeDatabaseWritable(options: { path: string; timeoutMs: number }): void;
   /** Asks the sandbox slots the way the app does: every slot's attestation, through their control sockets. */
   slotsReadiness(options: { socketPaths: string[]; timeoutMs: number }): Promise<DriverReadiness>;
+  /** The live Token Factory checks for one model; the key never appears in the results. */
+  tokenFactoryChecks(options: {
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+    timeoutMs: number;
+  }): Promise<SmokeCheck[]>;
 }
 
 async function get({ url, timeoutMs }: { url: string; timeoutMs: number }): Promise<HttpResponse> {
@@ -70,6 +78,28 @@ async function slotsReadiness({
   }
 }
 
+function tokenFactoryChecks({
+  apiKey,
+  baseUrl,
+  model,
+  timeoutMs,
+}: {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  timeoutMs: number;
+}): Promise<SmokeCheck[]> {
+  return runTokenFactorySmoke({ apiKey, baseUrl, models: [model], timeoutMs });
+}
+
 export function processDeps(): DoctorDeps {
-  return { env: processEnv(), nowMs: () => Date.now(), get, freeBytes, probeDatabaseWritable, slotsReadiness };
+  return {
+    env: processEnv(),
+    nowMs: () => Date.now(),
+    get,
+    freeBytes,
+    probeDatabaseWritable,
+    slotsReadiness,
+    tokenFactoryChecks,
+  };
 }

@@ -1,6 +1,6 @@
 import { z } from '@hono/zod-openapi';
 
-const REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 const DETAIL_LIMIT = 200;
 
 const ModelListSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
@@ -63,16 +63,18 @@ async function listModelIds({
   baseUrl,
   apiKey,
   fetchImpl,
+  timeoutMs,
 }: {
   baseUrl: string;
   apiKey: string;
   fetchImpl: typeof fetch;
+  timeoutMs: number;
 }): Promise<{ checks: SmokeCheck[]; ids: Set<string> | undefined }> {
   const label = 'GET /models';
   try {
     const response = await fetchImpl(`${baseUrl}/models`, {
       headers: { authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const read = await readResponse({ response, apiKey });
     if (!read.ok) {
@@ -94,11 +96,13 @@ async function probeToolCall({
   apiKey,
   model,
   fetchImpl,
+  timeoutMs,
 }: {
   baseUrl: string;
   apiKey: string;
   model: string;
   fetchImpl: typeof fetch;
+  timeoutMs: number;
 }): Promise<SmokeCheck> {
   const label = `tool call ${model}`;
   try {
@@ -126,7 +130,7 @@ async function probeToolCall({
         temperature: 0,
         max_tokens: 512,
       }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const read = await readResponse({ response, apiKey });
     if (!read.ok) {
@@ -156,13 +160,16 @@ export async function runTokenFactorySmoke({
   baseUrl,
   models,
   fetchImpl = fetch,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
 }: {
   apiKey: string;
   baseUrl: string;
   models: string[];
   fetchImpl?: typeof fetch;
+  /** Per request; callers with a tighter overall budget pass a smaller one. */
+  timeoutMs?: number;
 }): Promise<SmokeCheck[]> {
-  const listed = await listModelIds({ baseUrl, apiKey, fetchImpl });
+  const listed = await listModelIds({ baseUrl, apiKey, fetchImpl, timeoutMs });
   const checks = [...listed.checks];
   for (const model of models) {
     if (listed.ids !== undefined) {
@@ -172,7 +179,7 @@ export async function runTokenFactorySmoke({
           : { ok: false, label: `model listed ${model}`, detail: 'not in /models; check the model id' },
       );
     }
-    checks.push(await probeToolCall({ baseUrl, apiKey, model, fetchImpl }));
+    checks.push(await probeToolCall({ baseUrl, apiKey, model, fetchImpl, timeoutMs }));
   }
   return checks;
 }

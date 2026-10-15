@@ -35,6 +35,7 @@ import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
+import { DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL, DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 
 const DEFAULT_PORT = 8790;
@@ -379,12 +380,6 @@ export function parseTokenFactoryMode(options: {
   }
   throw new Error(`${options.envKey} must be one of off, fallback, force; got ${JSON.stringify(options.raw)}`);
 }
-
-/** Default Token Factory model used when `TOKEN_FACTORY_MODEL` is unset. */
-export const DEFAULT_TOKEN_FACTORY_MODEL = 'nvidia/nemotron-3-super-120b-a12b';
-
-/** Cheaper second model registered next to the default when `TOKEN_FACTORY_CHEAPER_MODEL` is unset. */
-export const DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL = 'openai/gpt-oss-120b';
 
 /** Treats an unset or blank env value as absent; used where blank is the way to switch a default off. */
 function blankToUndefined(raw: string | undefined): string | undefined {

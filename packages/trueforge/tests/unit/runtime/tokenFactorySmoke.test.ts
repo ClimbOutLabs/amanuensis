@@ -177,6 +177,24 @@ describe('runTokenFactorySmoke', () => {
 
     expect(checks[0]).toEqual({ ok: false, label: 'GET /models', detail: 'response has no model list' });
   });
+
+  it('gives up on a request that outlives the per-request timeout', async () => {
+    const hangs: typeof fetch = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+
+    const checks = await runTokenFactorySmoke({
+      apiKey: API_KEY,
+      baseUrl: BASE_URL,
+      models: [DEFAULT_MODEL],
+      fetchImpl: hangs,
+      timeoutMs: 20,
+    });
+
+    expect(checks.every(check => !check.ok)).toBe(true);
+    expect(checks).toHaveLength(2);
+  });
 });
 
 describe('formatSmokeLine', () => {

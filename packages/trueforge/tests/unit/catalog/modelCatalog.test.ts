@@ -1,5 +1,8 @@
 import { ModelCatalog } from '../../../src/catalog/ModelCatalog';
-import { DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL, DEFAULT_TOKEN_FACTORY_MODEL } from '../../../src/config';
+import {
+  DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL,
+  DEFAULT_TOKEN_FACTORY_MODEL,
+} from '../../../src/runtime/tokenFactoryDefaults';
 import { envManagedDefaultModelName, tokenFactoryModelName } from '../../../src/runtime/tokenFactoryProvider';
 
 describe('shipped model catalog', () => {

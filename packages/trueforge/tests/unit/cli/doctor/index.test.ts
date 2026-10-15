@@ -33,6 +33,7 @@ describe('aman doctor', () => {
       ['clock', 'ok'],
       ['run_code', 'off'],
       ['attachments', 'off'],
+      ['model', 'off'],
     ]);
   });
 
@@ -62,6 +63,21 @@ describe('aman doctor', () => {
     expect(z.array(CheckSchema).parse(JSON.parse(io.out.join('')))).toHaveLength(1);
   });
 
+  it('runs the model check only when it is asked for or nothing is filtered', async () => {
+    const tokenFactoryChecks = jest.fn().mockResolvedValue([{ ok: true, label: 'GET /models', detail: '1 models' }]);
+    const deps = fakeDeps({
+      env: { ...healthyEnv, NEBIUS_API_KEY: 'SENTINEL-key' },
+      get: healthyGet,
+      tokenFactoryChecks,
+    });
+    await run(['--only', 'service'], deps);
+    expect(tokenFactoryChecks).not.toHaveBeenCalled();
+    const { io } = await run(['--only', 'model'], deps);
+    expect(tokenFactoryChecks).toHaveBeenCalledTimes(1);
+    expect(z.array(CheckSchema).parse(JSON.parse(io.out.join('')))).toMatchObject([{ id: 'model', state: 'ok' }]);
+    expect(io.out.join('')).not.toContain('SENTINEL-key');
+  });
+
   it('uses a longer probe timeout with --deep', async () => {
     const get = jest.fn(healthyGet);
     await run(['--deep'], fakeDeps({ env: healthyEnv, get }));
@@ -75,7 +91,7 @@ describe('aman doctor', () => {
     const deps = fakeDeps({ env: healthyEnv, get: () => Promise.reject(networkError('ECONNREFUSED')) });
     const { io } = await run(['--text'], deps);
     const lines = io.out.join('').trimEnd().split('\n');
-    expect(lines).toHaveLength(7);
+    expect(lines).toHaveLength(8);
     const [id, state, detail, fix] = lines[0]?.split('\t') ?? [];
     expect([id, state]).toEqual(['service', 'fail']);
     expect(detail).not.toBe('');
