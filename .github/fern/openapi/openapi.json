@@ -1332,6 +1332,11 @@
       "CatalogWellKnownModelProvider": {
         "additionalProperties": false,
         "properties": {
+          "base_url": {
+            "description": "Preset API base URL; absent means the provider type's default.",
+            "format": "uri",
+            "type": "string"
+          },
           "logo": {
             "description": "URL of the provider logo asset",
             "format": "uri",
@@ -1551,6 +1556,10 @@
       "ConfiguredModelProvider": {
         "additionalProperties": false,
         "properties": {
+          "env_managed": {
+            "description": "True when the server derives this provider from its environment; it is read-only here.",
+            "type": "boolean"
+          },
           "manifest": {
             "$ref": "#/components/schemas/ModelProviderManifest"
           },
@@ -17705,6 +17714,16 @@
               }
             },
             "description": "The request is well-formed but cannot be processed: a referenced resource is missing (named agent, model, MCP server, skill, or sandbox provider), sandbox is required but unavailable (e.g. file uploads), or the turn input conflicts with current state (e.g. unresolved tool calls or approvals, tool name collision)."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Today's Token Factory token budget is used up (`error.code` is `token_factory_daily_cap_reached`). It resets at midnight UTC."
           }
         },
         "summary": "Create and execute a turn in a session",
@@ -18831,7 +18850,7 @@
                 }
               }
             },
-            "description": "A model provider with this name already exists."
+            "description": "A model provider with this name already exists, or the provider is managed by the server environment (`error.code` is `env_managed_provider`)."
           },
           "424": {
             "content": {
@@ -18887,6 +18906,16 @@
             },
             "description": "Invalid request body, or redacted API key with no stored secret to keep."
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The provider is managed by the server environment (`error.code` is `env_managed_provider`)."
+          },
           "424": {
             "content": {
               "application/json": {
@@ -18941,6 +18970,16 @@
               }
             },
             "description": "No model provider with this name"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The provider is managed by the server environment (`error.code` is `env_managed_provider`)."
           }
         },
         "summary": "Delete a model provider",
