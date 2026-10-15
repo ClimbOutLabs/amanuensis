@@ -75,6 +75,7 @@ import { createController } from './controller';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
+import type { IGoogleConnectionStore } from './db/googleConnectionStore';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerStore';
 import { McpServerWithAuthStore } from './db/McpServerWithAuthStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
@@ -159,6 +160,7 @@ interface ServerPersistence<TTransaction> {
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
+  googleConnectionStore: IGoogleConnectionStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   approvalTokenStore: ApprovalTokenStore;
@@ -328,6 +330,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore'),
       import('./db/sqlite/approval-token-store/SqliteApprovalTokenStore'),
       import('./db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore'),
+      import('./db/sqlite/google-connection-store/SqliteGoogleConnectionStore'),
     ]),
   ]);
   const [
@@ -349,6 +352,7 @@ async function createStandalonePersistence(options: {
     { SqliteSentinelSettingsStore },
     { SqliteApprovalTokenStore },
     { SqliteMcpToolGrantStore },
+    { SqliteGoogleConnectionStore },
   ] = sqliteStores;
 
   const db = createSqliteDb(sqlitePath);
@@ -383,6 +387,7 @@ async function createStandalonePersistence(options: {
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
+    googleConnectionStore: new SqliteGoogleConnectionStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
@@ -437,6 +442,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/sentinel-settings-store/PostgresSentinelSettingsStore'),
       import('./db/postgres/approval-token-store/PostgresApprovalTokenStore'),
       import('./db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore'),
+      import('./db/postgres/google-connection-store/PostgresGoogleConnectionStore'),
     ]),
   ]);
   const [
@@ -458,6 +464,7 @@ async function createDistributedPersistence(options: {
     { PostgresSentinelSettingsStore },
     { PostgresApprovalTokenStore },
     { PostgresMcpToolGrantStore },
+    { PostgresGoogleConnectionStore },
   ] = postgresStores;
 
   const db = createDb({
@@ -540,6 +547,7 @@ async function createDistributedPersistence(options: {
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
+    googleConnectionStore: new PostgresGoogleConnectionStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
@@ -577,6 +585,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     turnArtifactStore,
     globalSettingsStore,
     mcpToolGrantStore,
+    googleConnectionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
     approvalTokenStore,
@@ -614,6 +623,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       sandboxProviders: sandboxProviderStore,
       mcpServers: mcpOAuthStore,
       tokens: tokenStore,
+      googleConnections: googleConnectionStore,
     }),
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
@@ -694,6 +704,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     withTransaction,
     tokenStore,
     mcpToolGrantStore,
+    googleConnectionStore,
     scheduleStore,
     agentStore,
     skillStore,

@@ -27,6 +27,7 @@ import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentin
 import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import { SqliteGoogleConnectionStore } from '../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import { SqliteMcpServerStore } from '../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
@@ -86,6 +87,7 @@ const app = createServerApp({
   agentStore,
   skillStore,
   mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
+  googleConnectionStore: new SqliteGoogleConnectionStore(db),
   personalizationStore: new SqlitePersonalizationStore(db),
   personaStore: new SqlitePersonaStore(db),
   spaceStore: new SqliteSpaceStore(db),
