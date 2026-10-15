@@ -16,6 +16,7 @@
     "changeset:sdk-regen": "bash scripts/changeset-sdk-regen.sh",
     "clean:all": "node scripts/clean.mjs --dependencies",
     "clean": "node scripts/clean.mjs",
+    "demo:seed": "pnpm --filter @truefoundry/trueforge demo:seed",
     "dev:infra": "docker compose -f docker-compose.dev.yml up",
     "dev:no-watch": "cross-env STANDALONE=false NODE_ENV=development pnpm --parallel --filter @truefoundry/trueforge --filter frontend dev:no-watch",
     "dev:server:ui": "pnpm --filter frontend build && pnpm --filter @truefoundry/trueforge build:frontend-assets && cross-env STANDALONE=false NODE_ENV=development pnpm --parallel --filter @truefoundry/trueforge-core --filter @truefoundry/trueforge dev",
