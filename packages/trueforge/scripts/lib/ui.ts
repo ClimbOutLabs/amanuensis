@@ -365,12 +365,16 @@ export class Ui {
 
   // ---- prompts (stderr) ----
 
-  /** "  > Label [default] " without a newline. */
-  promptHead({ label, fallback }: { label: string; fallback?: string | undefined }): void {
+  /** "  > Label [default] " without a newline, as one string; sudo prints its own prompt from such a string. */
+  promptText({ label, fallback }: { label: string; fallback?: string | undefined }): string {
     const view = this.stderr();
     const bracket =
       fallback === undefined || fallback === '' ? '' : ` ${view.style({ code: COLOR.dim, text: `[${fallback}]` })}`;
-    this.options.err.write(`  ${view.style({ code: COLOR.bold, text: this.symbols.prompt })} ${label}${bracket} `);
+    return `  ${view.style({ code: COLOR.bold, text: this.symbols.prompt })} ${label}${bracket} `;
+  }
+
+  promptHead(input: { label: string; fallback?: string | undefined }): void {
+    this.options.err.write(this.promptText(input));
   }
 
   /**

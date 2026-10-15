@@ -23,13 +23,13 @@ export async function checkService({ deps, timeoutMs }: { deps: DoctorDeps; time
     return failCheck({
       id,
       detail: `The app health check returned status ${String(response.status)}.`,
-      fix: 'Read the app log with "docker logs" for this instance, fix what it reports, then restart the instance.',
+      fix: 'Run `aman doctor instance --fix`; it restarts the instance and, if that does not help, saves its log for a bug report.',
     });
   } catch (error) {
     return failCheck({
       id,
       detail: `The app did not answer its health check (${describeNetworkError(error)}).`,
-      fix: 'The app may still be starting. Wait a minute and run doctor again; if it stays down, read its log with "docker logs" and restart the instance.',
+      fix: 'The app may still be starting. Wait a minute and run doctor again; if it stays down, run `aman doctor instance --fix`.',
     });
   }
 }

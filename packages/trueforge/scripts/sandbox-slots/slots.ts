@@ -54,6 +54,9 @@ export type SlotsMode = 'up' | 'build' | 'check';
 
 export type SlotsStep = 'docker' | 'compose' | 'apparmor' | 'disk' | 'packs' | 'build' | 'start' | 'attest';
 
+/** The parts of a run, in order, for a front end that shows progress; a part with nothing to do is still announced. */
+export type SlotsStage = 'docker' | 'image' | 'profile' | 'disks' | 'start' | 'attest';
+
 /** `hard`: each slot has its own fixed-size disk. `vm`: Docker's VM bounds the disk. `off`: only the soft per-chat limit. */
 export type DiskMode = 'hard' | 'vm' | 'off';
 
@@ -78,7 +81,15 @@ export type SlotsResult =
       /** Things that work but weaken the setup, to be shown to the person. */
       warnings: string[];
     }
-  | { ok: false; checks: SlotsCheck[]; step: SlotsStep; error: string; fix: string };
+  | {
+      ok: false;
+      checks: SlotsCheck[];
+      step: SlotsStep;
+      error: string;
+      fix: string;
+      /** The tool output `error` ends with, for a front end that shows it only on request. */
+      detail: string | undefined;
+    };
 
 export interface SlotsOptions {
   repoRoot: string;
@@ -109,6 +120,13 @@ export interface SlotsOptions {
   /** Asks the person to agree before system files are touched; false when they decline or cannot be asked. */
   confirm: (question: string) => Promise<boolean>;
   onCheck: ((check: SlotsCheck) => void) | undefined;
+  /** Called as each part of the run begins. */
+  onStage: ((stage: SlotsStage) => void) | undefined;
+  /**
+   * Called once before the first step that needs sudo, so the password is asked in one predictable place. Returns
+   * true when sudo then works without asking again, which lets the step's output go to the log instead of the terminal.
+   */
+  prepareRoot: (() => Promise<boolean>) | undefined;
 }
 
 class StepFailure extends Error {
@@ -117,9 +135,15 @@ class StepFailure extends Error {
     message: string,
     readonly fix: string,
     cause?: unknown,
+    readonly detail?: string,
   ) {
     super(message, cause === undefined ? undefined : { cause });
   }
+}
+
+/** A message that ends with a tool's output, split so the output can be shown apart from the sentence. */
+function withDetail({ sentence, detail }: { sentence: string; detail: string }): { message: string; detail: string } {
+  return { message: `${sentence}: ${detail}`, detail };
 }
 
 function tail(text: string): string {
@@ -133,8 +157,28 @@ class Slots {
   /** Set once the disks are mounted; from then on every compose call carries the disk file. */
   private disksReady = false;
   private packs: PackName[] = [];
+  private rootAsked = false;
+  /** True once sudo works without a password prompt, so root steps can run with their output captured. */
+  private rootCached = false;
 
   constructor(private readonly options: SlotsOptions) {}
+
+  private stage(stage: SlotsStage): void {
+    this.options.onStage?.(stage);
+  }
+
+  /** Asks for the sudo password once, before the first root step. */
+  private async prepareRoot(): Promise<void> {
+    if (this.options.isRoot || this.rootAsked || this.options.prepareRoot === undefined) {
+      return;
+    }
+    this.rootAsked = true;
+    this.rootCached = await this.options.prepareRoot();
+  }
+
+  private get rootNeedsTerminal(): boolean {
+    return !this.options.isRoot && !this.rootCached;
+  }
 
   /** Only a full run may use sudo; a read-only check never changes the machine. */
   private get mayFix(): boolean {
@@ -192,9 +236,11 @@ class Slots {
   async execute(): Promise<SlotsResult> {
     const { mode } = this.options;
     try {
+      this.stage('docker');
       await this.checkDocker();
       const appArmor = await this.detectAppArmor();
       this.diskMode = await this.detectDiskMode();
+      this.stage('image');
       if (mode !== 'check') {
         await this.preparePacks();
         await this.build();
@@ -203,22 +249,33 @@ class Slots {
         await this.checkImage();
       }
       if (mode !== 'build') {
+        this.stage('profile');
         if (appArmor) {
           await this.ensureProfile();
         }
+        this.stage('disks');
         if (this.diskMode === 'hard') {
           await this.ensureDisks();
         }
       }
       if (mode === 'up') {
+        this.stage('start');
         await this.start();
       }
       if (mode !== 'build') {
+        this.stage('attest');
         await this.attest();
       }
     } catch (error: unknown) {
       if (error instanceof StepFailure) {
-        return { ok: false, checks: this.checks, step: error.step, error: error.message, fix: error.fix };
+        return {
+          ok: false,
+          checks: this.checks,
+          step: error.step,
+          error: error.message,
+          fix: error.fix,
+          detail: error.detail,
+        };
       }
       throw error;
     }
@@ -248,10 +305,13 @@ class Slots {
       throw error;
     }
     if (version.exitCode !== 0) {
+      const failed = withDetail({ sentence: 'Docker is installed but not responding', detail: tail(version.stderr) });
       throw new StepFailure(
         'docker',
-        `Docker is installed but not responding: ${tail(version.stderr)}`,
+        failed.message,
         'Start Docker (on Linux: sudo systemctl start docker) and make sure your account can use it, then run this again.',
+        undefined,
+        failed.detail,
       );
     }
     this.record({ step: 'docker', status: 'ok', message: `Docker ${version.stdout.trim()} is running` });
@@ -362,10 +422,11 @@ class Slots {
 
   private async runDiskScript(args: string[]): Promise<CommandResult> {
     const script = join(this.options.repoRoot, DISK_SCRIPT);
+    await this.prepareRoot();
     return this.run({
       command: this.options.isRoot ? 'sh' : 'sudo',
       args: this.options.isRoot ? [script, ...args] : ['sh', script, ...args],
-      interactive: !this.options.isRoot,
+      interactive: this.rootNeedsTerminal,
       echo: true,
     });
   }
@@ -409,20 +470,29 @@ class Slots {
       const down = await this.run({ args: this.composeArgs(['down']), echo: true });
       const removed = await this.run({ args: ['volume', 'rm', '--force', ...stale] });
       if (down.exitCode !== 0 || removed.exitCode !== 0) {
+        const failed = withDetail({
+          sentence: 'The old workspace volumes could not be removed',
+          detail: tail(`${down.stderr} ${removed.stderr}`),
+        });
         throw new StepFailure(
           'disk',
-          `The old workspace volumes could not be removed: ${tail(`${down.stderr} ${removed.stderr}`)}`,
+          failed.message,
           `Stop anything that still uses the sandbox slots, then run ${this.options.command} --fix again.`,
+          undefined,
+          failed.detail,
         );
       }
     }
     if (mounted === undefined) {
       const created = await this.runDiskScript(['setup', root, String(this.options.diskGb), String(SLOT_COUNT)]);
       if (created.exitCode !== 0) {
+        const failed = withDetail({ sentence: 'Creating the slot disks failed', detail: tail(created.stderr) });
         throw new StepFailure(
           'disk',
-          `Creating the slot disks failed: ${tail(created.stderr)}`,
+          failed.message,
           `Make sure mkfs.ext4 is installed (sudo apt install e2fsprogs) and that your account may use sudo, then run ${this.options.command} --fix again. On a machine that cannot mount disk files, run ${this.options.command} --no-hard-disk-limit instead.`,
+          undefined,
+          failed.detail,
         );
       }
     }
@@ -466,10 +536,13 @@ class Slots {
   private async build(): Promise<void> {
     const built = await this.run({ args: this.composeArgs(['build', 'sandbox-1']), echo: true });
     if (built.exitCode !== 0) {
+      const failed = withDetail({ sentence: 'Building the sandbox image failed', detail: tail(built.stderr) });
       throw new StepFailure(
         'build',
-        `Building the sandbox image failed: ${tail(built.stderr)}`,
+        failed.message,
         'Check that this machine can reach Docker Hub and the Ubuntu package mirror (the build downloads packages once), then run this again. A Docker Hub rate-limit message means: run docker login first.',
+        undefined,
+        failed.detail,
       );
     }
     this.record({ step: 'build', status: 'ok', message: `Built ${SLOT_IMAGE}` });
@@ -519,24 +592,31 @@ class Slots {
     }
     const asRoot = (args: string[]): { command: string; args: string[] } =>
       this.options.isRoot ? { command: args[0] ?? '', args: args.slice(1) } : { command: 'sudo', args };
+    await this.prepareRoot();
     const installed = await this.run({
       ...asRoot(['install', '-m', '0644', profile, APPARMOR_INSTALLED_PATH]),
-      interactive: !this.options.isRoot,
+      interactive: this.rootNeedsTerminal,
       echo: true,
     });
     const loaded =
       installed.exitCode === 0
         ? await this.run({
             ...asRoot(['apparmor_parser', '-r', '-W', APPARMOR_INSTALLED_PATH]),
-            interactive: !this.options.isRoot,
+            interactive: this.rootNeedsTerminal,
             echo: true,
           })
         : installed;
     if (loaded.exitCode !== 0 || !(await this.profileLoaded())) {
+      const failed = withDetail({
+        sentence: 'Installing and loading the AppArmor profile failed',
+        detail: tail(loaded.stderr),
+      });
       throw new StepFailure(
         'apparmor',
-        `Installing and loading the AppArmor profile failed: ${tail(loaded.stderr)}`,
+        failed.message,
         `Make sure apparmor_parser is installed (sudo apt install apparmor) and that your account may use sudo, then run ${this.options.command} --fix again.`,
+        undefined,
+        failed.detail,
       );
     }
     this.record({
@@ -561,10 +641,16 @@ class Slots {
     });
     if (up.exitCode !== 0) {
       const logs = await this.run({ args: this.composeArgs(['logs', '--no-color', '--tail', '15']) });
+      const failed = withDetail({
+        sentence: 'The slots did not become healthy',
+        detail: tail(`${up.stderr} ${logs.stdout} ${logs.stderr}`),
+      });
       throw new StepFailure(
         'start',
-        `The slots did not become healthy: ${tail(`${up.stderr} ${logs.stdout} ${logs.stderr}`)}`,
+        failed.message,
         `Read the attestation lines above: each names the safety check that failed. On Ubuntu 24.04 run ${this.options.command} --fix; otherwise see the failure fixes in the test sheet.`,
+        undefined,
+        failed.detail,
       );
     }
     this.record({ step: 'start', status: 'ok', message: `Started ${String(SLOT_COUNT)} slots` });
@@ -582,10 +668,16 @@ class Slots {
         ]),
       });
       if (result.exitCode !== 0) {
+        const failed = withDetail({
+          sentence: `Slot ${String(slot)} failed its safety checks`,
+          detail: tail(`${result.stdout} ${result.stderr}`),
+        });
         throw new StepFailure(
           'attest',
-          `Slot ${String(slot)} failed its safety checks: ${tail(`${result.stdout} ${result.stderr}`)}`,
+          failed.message,
           `Run ${this.options.command} --fix, then again. If the failing check is runsc, see the failure fixes in the test sheet.`,
+          undefined,
+          failed.detail,
         );
       }
     }

@@ -21,7 +21,7 @@ async function run(args: string[], deps = fakeDeps({ env: healthyEnv, get: healt
 }
 
 describe('aman doctor', () => {
-  it('prints a JSON array of checks and exits 0 when nothing fails', async () => {
+  it('prints a JSON array of checks and exits 0 when nothing fails (a missing model is only a warning)', async () => {
     const { code, io } = await run([]);
     expect(code).toBe(0);
     const checks = z.array(CheckSchema).parse(JSON.parse(io.out.join('')));
@@ -34,7 +34,7 @@ describe('aman doctor', () => {
       ['run_code', 'off'],
       ['attachments', 'off'],
       ['demo', 'off'],
-      ['model', 'off'],
+      ['model', 'warn'],
     ]);
   });
 
