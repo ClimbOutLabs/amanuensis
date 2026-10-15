@@ -58,10 +58,11 @@ sandbox_drop() {
   rm -rf "$SB"
 }
 
-# A tiny git checkout standing in for the repository: the installer only needs the two build contexts.
+# A tiny git checkout standing in for the repository: the build contexts and the slots compose file the doctor looks for.
 fixture_repo() {
   mkdir -p "$1/ops/aman-stt"
   printf 'FROM scratch\n' >"$1/Dockerfile.dev"
+  printf 'name: slots\n' >"$1/docker-compose.slots.yml"
   printf 'FROM scratch\n' >"$1/ops/aman-stt/Dockerfile"
   (
     cd "$1"

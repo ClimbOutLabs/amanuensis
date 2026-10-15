@@ -3,7 +3,7 @@ import { chmodSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
-import { DAEMON_TIME, GIB, GIB_KB, HEALTHY_INSTANCE_CHECKS, createWorld, find, sanitize } from './world.mjs';
+import { DAEMON_TIME, GIB, GIB_KB, HEALTHY_INSTANCE_CHECKS, RUN_CODE_READY, createWorld, find, sanitize } from './world.mjs';
 
 let world;
 const make = options => (world = createWorld(options));
@@ -668,5 +668,152 @@ describe('instance service health', () => {
         .state,
       'ok',
     );
+  });
+});
+
+describe('doctor sandbox', () => {
+  const sandboxCalls = () => world.calls().filter(line => line.startsWith('node ') && !line.startsWith('node --version'));
+
+  function ready() {
+    const repo = world.sandbox();
+    world.set('exec_c1', { out: RUN_CODE_READY, rc: 0 });
+    return repo;
+  }
+
+  it('checks each slot with the installed setup, then tries run_code through the app, and exits 0', () => {
+    make();
+    const repo = ready();
+    const result = world.shim(['doctor', 'sandbox']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(sandboxCalls(), [
+      `node ${world.home}/bin/aman-sandbox.mjs --instance main --repo-root ${repo} --log-file ${world.home}/state/sandbox.log --command-name aman doctor sandbox --check`,
+    ]);
+    assert.ok(world.calls().some(line => /^exec .*c1 aman doctor --text --only run_code$/.test(line)));
+    assert.match(result.stdout, /Instance main/);
+    assert.match(result.stdout, /\[ok {2}\] run_code/);
+  });
+
+  it('fails without trying the app when the slots fail their check', () => {
+    make();
+    ready();
+    world.set('node', { rc: 1 });
+    const result = world.shim(['doctor', 'sandbox']);
+    assert.equal(result.code, 1);
+    assert.ok(!world.calls().some(line => line.includes('--only run_code')));
+  });
+
+  it('fails with the fix when the app cannot use the slots', () => {
+    make();
+    ready();
+    world.set('exec_c1', {
+      out: 'run_code\tfail\tThe sandbox slots are not running.\tRun `aman doctor sandbox --fix`, then check again.\n',
+      rc: 1,
+    });
+    const result = world.shim(['doctor', 'sandbox']);
+    assert.equal(result.code, 1);
+    assert.match(result.stdout, /FAIL\] run_code/);
+    assert.match(result.stdout, /Fix: Run `aman doctor sandbox --fix`/);
+  });
+
+  it('fails when the app container is not running', () => {
+    make();
+    ready();
+    world.containers('main', [world.psLine({ id: 'c2', name: 'aman-main-dex-1', service: 'dex' })]);
+    const result = world.shim(['doctor', 'sandbox']);
+    assert.equal(result.code, 1);
+    assert.match(result.stdout, /app container is not running/);
+  });
+
+  it('--fix repairs with the same setup: fix, restart, and no prompt of its own', () => {
+    make();
+    const repo = ready();
+    const result = world.shim(['doctor', 'sandbox', '--fix']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(sandboxCalls(), [
+      `node ${world.home}/bin/aman-sandbox.mjs --instance main --repo-root ${repo} --log-file ${world.home}/state/sandbox.log --command-name aman doctor sandbox --fix --restart`,
+    ]);
+  });
+
+  it('--fix --yes and the disk options are handed on', () => {
+    make();
+    ready();
+    world.shim(['doctor', 'sandbox', '--fix', '--yes', '--disk-gb', '8', '--no-hard-disk-limit']);
+    const [call] = sandboxCalls();
+    assert.match(call, /--disk-gb 8 --no-hard-disk-limit --fix --restart --yes$/);
+  });
+
+  it('--yes without --fix is a usage error', () => {
+    make();
+    ready();
+    const result = world.shim(['doctor', 'sandbox', '--yes']);
+    assert.equal(result.code, 2);
+    assert.deepEqual(sandboxCalls(), []);
+  });
+
+  it('only instances wired to the slots are checked, and --instance picks one', () => {
+    make({ instances: ['main', 'plain', 'other'] });
+    world.sandbox({ wired: ['main', 'other'] });
+    world.set('exec_c1', { out: RUN_CODE_READY, rc: 0 });
+    const all = world.shim(['doctor', 'sandbox']);
+    assert.equal(all.code, 0, all.stderr);
+    assert.deepEqual(
+      sandboxCalls().map(line => /--instance (\S+)/.exec(line)?.[1]),
+      ['main', 'other'],
+    );
+    const one = world.shim(['doctor', 'sandbox', '--instance', 'other']);
+    assert.equal(one.code, 0);
+    assert.equal(sandboxCalls().length, 3);
+    const unknown = world.shim(['doctor', 'sandbox', '--instance', 'nope']);
+    assert.equal(unknown.code, 2);
+  });
+
+  it('says so when no instance has the sandbox', () => {
+    make();
+    world.sandbox({ wired: [] });
+    const result = world.shim(['doctor', 'sandbox']);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /No instance has the sandbox/);
+  });
+
+  it('points to the installer when the setup copy or the checkout record is missing', () => {
+    make();
+    const none = world.shim(['doctor', 'sandbox']);
+    assert.equal(none.code, 1);
+    assert.match(none.stderr, /Run install\.sh from the checkout/);
+    const repo = ready();
+    rmSync(path.join(repo, 'docker-compose.slots.yml'));
+    const moved = world.shim(['doctor', 'sandbox']);
+    assert.equal(moved.code, 1);
+    assert.match(moved.stderr, /not at .* any more/);
+  });
+
+  it('asks for Node.js when it is missing or too old', () => {
+    make();
+    ready();
+    const old = world.shim(['doctor', 'sandbox'], { env: { FAKE_NODE_VERSION: 'v22.13.0' } });
+    assert.equal(old.code, 1);
+    assert.match(old.stderr, /Node\.js 22\.14 or newer/);
+    world.uninstall('node');
+    const missing = world.shim(['doctor', 'sandbox']);
+    assert.equal(missing.code, 1);
+    assert.match(missing.stderr, /Node\.js 22\.14 or newer/);
+  });
+
+  it('stops with the Docker problem when Docker cannot be reached', () => {
+    make();
+    ready();
+    world.set('info', { err: 'Cannot connect to the Docker daemon', rc: 1 });
+    const result = world.shim(['doctor', 'sandbox']);
+    assert.equal(result.code, 1);
+    assert.match(result.stdout, /engine is not running/);
+    assert.deepEqual(sandboxCalls(), []);
+  });
+
+  it('leaves the plain doctor document unchanged and never runs the setup', () => {
+    make();
+    ready();
+    const result = world.json();
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(sandboxCalls(), []);
   });
 });

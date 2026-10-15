@@ -47,6 +47,15 @@ if [ -e "$dir/$key.rc" ]; then exit "$(cat "$dir/$key.rc")"; fi
 exit 0
 `;
 
+const FAKE_NODE = `#!/usr/bin/env bash
+dir="$FAKE_DOCKER_DIR"
+echo "node $*" >> "$dir/calls.log"
+if [ "$1" = --version ]; then echo "\${FAKE_NODE_VERSION:-v22.22.0}"; exit 0; fi
+[ -e "$dir/node.out" ] && cat "$dir/node.out"
+if [ -e "$dir/node.rc" ]; then exit "$(cat "$dir/node.rc")"; fi
+exit 0
+`;
+
 export function sanitize(value) {
   return value.replace(/[^A-Za-z0-9\n]/g, '_');
 }
@@ -128,6 +137,24 @@ export function createWorld({ instances = ['main'] } = {}) {
       world.install(`docker-credential-${store}`, `#!/usr/bin/env bash\nexit ${rc}\n`);
     },
     instanceDir: name => path.join(home, 'instances', name),
+    /** The state the installer leaves for the sandbox: the setup copy, the checkout record and the wired compose file. */
+    sandbox({ wired = instances } = {}) {
+      const repo = path.join(root, 'checkout');
+      mkdirSync(repo, { recursive: true });
+      writeFileSync(path.join(repo, 'docker-compose.slots.yml'), 'name: x\n');
+      mkdirSync(path.join(home, 'bin'), { recursive: true });
+      writeFileSync(path.join(home, 'bin', 'aman-sandbox.mjs'), '// setup\n');
+      mkdirSync(path.join(home, 'state'), { recursive: true });
+      writeFileSync(path.join(home, 'state', 'source'), `${repo}\n`);
+      world.install('node', FAKE_NODE);
+      for (const name of wired) {
+        writeFileSync(
+          path.join(world.instanceDir(name), 'compose.yaml'),
+          'services:\n  app:\n    environment:\n      SANDBOX_BACKEND: slots\n',
+        );
+      }
+      return repo;
+    },
     writeEnv(name, mode = 0o600) {
       const file = path.join(world.instanceDir(name), '.env');
       writeFileSync(file, 'ENV_SECRET=SENTINEL-secret-value\n');
@@ -222,6 +249,8 @@ export const HEALTHY_INSTANCE_CHECKS =
     'run_code\toff\trun_code is not available: no sandbox isolation driver is configured for this deployment.\t',
     'attachments\toff\tReading email attachments is not available.\t',
   ].join('\n') + '\n';
+
+export const RUN_CODE_READY = 'run_code\tok\trun_code is ready: the sandbox slots answer through the app.\t\n';
 
 export function find(checks, id) {
   return checks.find(check => check.id === id);

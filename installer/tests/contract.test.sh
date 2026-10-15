@@ -43,6 +43,31 @@ test_installer_calls_the_shim_as_documented() {
   sandbox_drop
 }
 
+test_doctor_sandbox_reads_what_the_installer_wrote() {
+  t_begin "the real 'doctor sandbox' finds the setup copy, the checkout and the wired instance the installer left"
+  sandbox_new
+  install_machine
+  local out rc=0
+  out=$(real_doctor sandbox) || rc=$?
+  assert_eq "$rc" 0 "doctor sandbox exit code right after an install"
+  assert_contains "$out" "Instance main"
+  assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --instance main --repo-root $REPO"
+  assert_log_has "--command-name aman doctor sandbox --check"
+  assert_log_has "aman doctor --text --only run_code"
+  sandbox_drop
+}
+
+test_doctor_sandbox_fix_uses_the_same_entry() {
+  t_begin "'doctor sandbox --fix' runs the same setup copy with --fix --restart"
+  sandbox_new
+  install_machine
+  local rc=0
+  real_doctor sandbox --fix --yes >/dev/null || rc=$?
+  assert_eq "$rc" 0
+  assert_log_has "--fix --restart --yes"
+  sandbox_drop
+}
+
 test_layout_and_release_record() {
   t_begin "instances/<name>/ and release/release.json have the shape the doctor reads"
   sandbox_new
@@ -92,6 +117,8 @@ test_public_base_url_is_the_host_facing_origin() {
 
 test_doctor_reads_what_the_installer_wrote
 test_installer_calls_the_shim_as_documented
+test_doctor_sandbox_reads_what_the_installer_wrote
+test_doctor_sandbox_fix_uses_the_same_entry
 test_layout_and_release_record
 test_compose_service_and_project_names
 test_public_base_url_is_the_host_facing_origin

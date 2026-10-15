@@ -178,7 +178,7 @@ case "$cmd" in
     ;;
   exec)
     # `docker exec <container> aman doctor --text`: one tab-separated check per line.
-    printf 'service\tok\tstub\t\n'
+    printf 'service\tok\tstub\t\nrun_code\tok\tstub\t\n'
     exit 0
     ;;
   run)

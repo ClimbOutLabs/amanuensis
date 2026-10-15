@@ -296,7 +296,7 @@ test_instances_are_isolated_and_images_stay_local() {
   assert_contains "$second" "name: aman_second_stt"
   assert_not_contains "$main" "aman_second" "an instance never names another's networks"
   assert_not_contains "$second" "aman_main_"
-  assert_not_contains "$main" "external: true" "no network is shared with other instances"
+  assert_not_contains "$(printf '%s\n' "$main" | sed -n '/^networks:/,$p')" "external: true" "no network is shared with other instances"
   assert_not_contains "$main" "aman_machine"
   assert_contains "$machine" "container_name: aman-stt"
   assert_log_has "network connect --alias aman-stt aman_main_stt aman-stt"

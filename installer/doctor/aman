@@ -676,11 +676,12 @@ record_state() { # scope id
 }
 
 sandbox_instances() { # prints the instances whose app is wired to the slots
-  local name
+  local name compose
   for name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
-    if grep -q 'SANDBOX_BACKEND: slots' "${AMAN_HOME}/instances/${name}/compose.yaml" 2>/dev/null; then
-      printf '%s\n' "$name"
-    fi
+    compose=$(cat "${AMAN_HOME}/instances/${name}/compose.yaml" 2>/dev/null)
+    case "$compose" in
+      *"SANDBOX_BACKEND: slots"*) printf '%s\n' "$name" ;;
+    esac
   done
 }
 
