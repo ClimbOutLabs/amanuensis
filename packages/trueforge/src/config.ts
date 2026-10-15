@@ -1161,6 +1161,12 @@ export interface SharedServerConfiguration {
    */
   TOKEN_FACTORY_MODE: TokenFactoryMode;
   /**
+   * Marks this instance as a demo. Only `aman demo-seed` reads it: the seed refuses to run
+   * unless it is true, so it can never touch a real instance.
+   * Env: `DEMO_MODE`. Default false.
+   */
+  DEMO_MODE: boolean;
+  /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
    * memories by meaning in addition to keyword overlap. Everything runs on the
@@ -1727,6 +1733,7 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('TOKEN_FACTORY_MODE'),
     defaultValue: 'off',
   }),
+  DEMO_MODE: parseBoolean({ envKey: 'DEMO_MODE', raw: getEnv('DEMO_MODE'), defaultValue: false }),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
     raw: getEnv('MEMORY_EMBEDDINGS_ENABLED'),
