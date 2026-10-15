@@ -1,0 +1,360 @@
+# Expected rendering of the terminal style helpers, read by installer/tests/ui.test.sh and
+# packages/trueforge/tests/unit/scripts/lib/ui.test.ts. \e is the escape byte.
+# Modes: color (UTF-8 terminal), nocolor (NO_COLOR), plain (no terminal), ascii (LANG=C).
+# Streams are merged in call order. Prompt lines end with a ui_newline call.
+
+== lines
+call ui_title "Setting up a private assistant on this computer"
+call ui_phase "Checking this computer" 1 6
+call ui_ok "Linux on arm64"
+call ui_ok "Built the app image" "12m 40s"
+call ui_warn "7.4 GB free for Docker data, 10 GB is recommended" "aman doctor disk --fix"
+call ui_fail "Docker Compose is missing" "aman doctor docker --fix" "docker compose version returned an error"
+call ui_skip "Run code and attachments: not in this version"
+call ui_hint "Enter keeps the value in brackets."
+call ui_phase "Plain header"
+-- color
+\e[1mSetting up a private assistant on this computer\e[0m
+
+\e[1mChecking this computer\e[0m \e[2m(1 of 6)\e[0m
+  \e[32m✓\e[0m Linux on arm64
+  \e[32m✓\e[0m Built the app image  \e[2m12m 40s\e[0m
+  \e[33m!\e[0m 7.4 GB free for Docker data, 10 GB is recommended
+    Next: aman doctor disk --fix
+  \e[31m✗\e[0m Docker Compose is missing
+    Next: aman doctor docker --fix
+    \e[2mDetails:\e[0m \e[2m--verbose\e[0m
+  · \e[2mRun code and attachments: not in this version\e[0m
+  \e[2mEnter keeps the value in brackets.\e[0m
+
+\e[1mPlain header\e[0m
+-- nocolor
+Setting up a private assistant on this computer
+
+Checking this computer (1 of 6)
+  ✓ Linux on arm64
+  ✓ Built the app image  12m 40s
+  ! 7.4 GB free for Docker data, 10 GB is recommended
+    Next: aman doctor disk --fix
+  ✗ Docker Compose is missing
+    Next: aman doctor docker --fix
+    Details: --verbose
+  · Run code and attachments: not in this version
+  Enter keeps the value in brackets.
+
+Plain header
+-- plain
+Setting up a private assistant on this computer
+
+Checking this computer (1 of 6)
+  ✓ Linux on arm64
+  ✓ Built the app image  12m 40s
+  ! 7.4 GB free for Docker data, 10 GB is recommended
+    Next: aman doctor disk --fix
+  ✗ Docker Compose is missing
+    Next: aman doctor docker --fix
+    Details: --verbose
+  · Run code and attachments: not in this version
+  Enter keeps the value in brackets.
+
+Plain header
+-- ascii
+Setting up a private assistant on this computer
+
+Checking this computer (1 of 6)
+  + Linux on arm64
+  + Built the app image  12m 40s
+  ! 7.4 GB free for Docker data, 10 GB is recommended
+    Next: aman doctor disk --fix
+  x Docker Compose is missing
+    Next: aman doctor docker --fix
+    Details: --verbose
+  - Run code and attachments: not in this version
+  Enter keeps the value in brackets.
+
+Plain header
+
+== details-with-verbose
+set verbose 1
+call ui_fail "Docker Compose is missing" "aman doctor docker --fix" "docker compose version returned an error"
+call ui_warn "Docker has 7.0 GB of memory" "" "MemTotal 7516192768"
+-- color
+  \e[31m✗\e[0m Docker Compose is missing
+    Next: aman doctor docker --fix
+    \e[2mDetails:\e[0m \e[2mdocker compose version returned an error\e[0m
+  \e[33m!\e[0m Docker has 7.0 GB of memory
+    \e[2mDetails:\e[0m \e[2mMemTotal 7516192768\e[0m
+-- nocolor
+  ✗ Docker Compose is missing
+    Next: aman doctor docker --fix
+    Details: docker compose version returned an error
+  ! Docker has 7.0 GB of memory
+    Details: MemTotal 7516192768
+-- plain
+  ✗ Docker Compose is missing
+    Next: aman doctor docker --fix
+    Details: docker compose version returned an error
+  ! Docker has 7.0 GB of memory
+    Details: MemTotal 7516192768
+-- ascii
+  x Docker Compose is missing
+    Next: aman doctor docker --fix
+    Details: docker compose version returned an error
+  ! Docker has 7.0 GB of memory
+    Details: MemTotal 7516192768
+
+== long-lines-wrap
+call ui_fail "The sandbox slot image could not be built because the package mirror did not answer for a long time" "Check this computer's network access to Docker Hub and the Ubuntu mirror, then run aman doctor sandbox --fix again"
+call ui_ok "A very long address that has no break http://127.0.0.1:8791/some/very/long/path/that/never/ends/in/a/space/at/all"
+-- color
+  \e[31m✗\e[0m The sandbox slot image could not be built because the package mirror
+    did not answer for a long time
+    Next: Check this computer's network access to Docker Hub and the
+          Ubuntu mirror, then run aman doctor sandbox --fix again
+  \e[32m✓\e[0m A very long address that has no break
+    http://127.0.0.1:8791/some/very/long/path/that/never/ends/in/a/space/at/all
+-- nocolor
+  ✗ The sandbox slot image could not be built because the package mirror
+    did not answer for a long time
+    Next: Check this computer's network access to Docker Hub and the
+          Ubuntu mirror, then run aman doctor sandbox --fix again
+  ✓ A very long address that has no break
+    http://127.0.0.1:8791/some/very/long/path/that/never/ends/in/a/space/at/all
+-- plain
+  ✗ The sandbox slot image could not be built because the package mirror
+    did not answer for a long time
+    Next: Check this computer's network access to Docker Hub and the
+          Ubuntu mirror, then run aman doctor sandbox --fix again
+  ✓ A very long address that has no break
+    http://127.0.0.1:8791/some/very/long/path/that/never/ends/in/a/space/at/all
+-- ascii
+  x The sandbox slot image could not be built because the package mirror
+    did not answer for a long time
+    Next: Check this computer's network access to Docker Hub and the
+          Ubuntu mirror, then run aman doctor sandbox --fix again
+  + A very long address that has no break
+    http://127.0.0.1:8791/some/very/long/path/that/never/ends/in/a/space/at/all
+
+== plan-rows
+call ui_phase "The plan" 3 6
+call ui_done "Docker is reachable"
+call ui_todo "Create the state directory ~/.amanuensis"
+call ui_admin "Set up the sandbox on this computer"
+call ui_detail "Install the AppArmor profile and load it, create 4 slot disk files of 16 GB under /var/lib/aman-slots, add 4 lines to /etc/fstab and mount them"
+call ui_todo "Create instance main for you@example.com at http://127.0.0.1:8791 (port 8791 on this computer), sign-in service on port 5556"
+-- color
+
+\e[1mThe plan\e[0m \e[2m(3 of 6)\e[0m
+  \e[32m✓\e[0m \e[32mdone\e[0m         Docker is reachable
+  \e[36m›\e[0m \e[36mto do\e[0m        Create the state directory ~/.amanuensis
+  \e[33m!\e[0m \e[33mneeds admin\e[0m  Set up the sandbox on this computer
+                 \e[2mInstall the AppArmor profile and load it, create 4 slot\e[0m
+                 \e[2mdisk files of 16 GB under /var/lib/aman-slots, add 4\e[0m
+                 \e[2mlines to /etc/fstab and mount them\e[0m
+  \e[36m›\e[0m \e[36mto do\e[0m        Create instance main for you@example.com at
+                 http://127.0.0.1:8791 (port 8791 on this computer),
+                 sign-in service on port 5556
+-- nocolor
+
+The plan (3 of 6)
+  ✓ done         Docker is reachable
+  › to do        Create the state directory ~/.amanuensis
+  ! needs admin  Set up the sandbox on this computer
+                 Install the AppArmor profile and load it, create 4 slot
+                 disk files of 16 GB under /var/lib/aman-slots, add 4
+                 lines to /etc/fstab and mount them
+  › to do        Create instance main for you@example.com at
+                 http://127.0.0.1:8791 (port 8791 on this computer),
+                 sign-in service on port 5556
+-- plain
+
+The plan (3 of 6)
+  ✓ done         Docker is reachable
+  › to do        Create the state directory ~/.amanuensis
+  ! needs admin  Set up the sandbox on this computer
+                 Install the AppArmor profile and load it, create 4 slot
+                 disk files of 16 GB under /var/lib/aman-slots, add 4
+                 lines to /etc/fstab and mount them
+  › to do        Create instance main for you@example.com at
+                 http://127.0.0.1:8791 (port 8791 on this computer),
+                 sign-in service on port 5556
+-- ascii
+
+The plan (3 of 6)
+  + done         Docker is reachable
+  > to do        Create the state directory ~/.amanuensis
+  ! needs admin  Set up the sandbox on this computer
+                 Install the AppArmor profile and load it, create 4 slot
+                 disk files of 16 GB under /var/lib/aman-slots, add 4
+                 lines to /etc/fstab and mount them
+  > to do        Create instance main for you@example.com at
+                 http://127.0.0.1:8791 (port 8791 on this computer),
+                 sign-in service on port 5556
+
+== rule
+call ui_rule
+-- color
+\e[2m────────────────────────────────────────────────────────────────────────\e[0m
+-- nocolor
+────────────────────────────────────────────────────────────────────────
+-- plain
+────────────────────────────────────────────────────────────────────────
+-- ascii
+------------------------------------------------------------------------
+
+== summary-with-warning
+call ui_warn "Docker has 7.0 GB of memory" "Raise it in Docker Desktop under Settings, Resources, Memory"
+call ui_summary ok "Ready. Instance main is running."
+call ui_row "Open" "http://127.0.0.1:8791"
+call ui_row "Sign in" "you@example.com, with the password you chose"
+call ui_heading "Next"
+call ui_line "Open http://127.0.0.1:8791 in your browser. Use 127.0.0.1, not localhost."
+call ui_summary_end "16m 03s"
+-- color
+  \e[33m!\e[0m Docker has 7.0 GB of memory
+    Next: Raise it in Docker Desktop under Settings, Resources, Memory
+
+\e[2m────────────────────────────────────────────────────────────────────────\e[0m
+\e[1;32mReady. Instance main is running.\e[0m
+
+  Open      http://127.0.0.1:8791
+  Sign in   you@example.com, with the password you chose
+
+\e[1mNext\e[0m
+  Open http://127.0.0.1:8791 in your browser. Use 127.0.0.1, not
+  localhost.
+
+\e[1mWarnings\e[0m
+  \e[33m!\e[0m Docker has 7.0 GB of memory
+
+\e[2mDone in 16m 03s\e[0m
+\e[2m────────────────────────────────────────────────────────────────────────\e[0m
+-- nocolor
+  ! Docker has 7.0 GB of memory
+    Next: Raise it in Docker Desktop under Settings, Resources, Memory
+
+────────────────────────────────────────────────────────────────────────
+Ready. Instance main is running.
+
+  Open      http://127.0.0.1:8791
+  Sign in   you@example.com, with the password you chose
+
+Next
+  Open http://127.0.0.1:8791 in your browser. Use 127.0.0.1, not
+  localhost.
+
+Warnings
+  ! Docker has 7.0 GB of memory
+
+Done in 16m 03s
+────────────────────────────────────────────────────────────────────────
+-- plain
+  ! Docker has 7.0 GB of memory
+    Next: Raise it in Docker Desktop under Settings, Resources, Memory
+
+────────────────────────────────────────────────────────────────────────
+Ready. Instance main is running.
+
+  Open      http://127.0.0.1:8791
+  Sign in   you@example.com, with the password you chose
+
+Next
+  Open http://127.0.0.1:8791 in your browser. Use 127.0.0.1, not
+  localhost.
+
+Warnings
+  ! Docker has 7.0 GB of memory
+
+Done in 16m 03s
+────────────────────────────────────────────────────────────────────────
+-- ascii
+  ! Docker has 7.0 GB of memory
+    Next: Raise it in Docker Desktop under Settings, Resources, Memory
+
+------------------------------------------------------------------------
+Ready. Instance main is running.
+
+  Open      http://127.0.0.1:8791
+  Sign in   you@example.com, with the password you chose
+
+Next
+  Open http://127.0.0.1:8791 in your browser. Use 127.0.0.1, not
+  localhost.
+
+Warnings
+  ! Docker has 7.0 GB of memory
+
+Done in 16m 03s
+------------------------------------------------------------------------
+
+== summary-failed
+call ui_summary fail "Stopped before changing anything."
+call ui_line "Fix the item above, then run install.sh again. It picks up where it left off."
+call ui_summary_end
+-- color
+
+\e[2m────────────────────────────────────────────────────────────────────────\e[0m
+\e[1;31mStopped before changing anything.\e[0m
+
+  Fix the item above, then run install.sh again. It picks up where it
+  left off.
+\e[2m────────────────────────────────────────────────────────────────────────\e[0m
+-- nocolor
+
+────────────────────────────────────────────────────────────────────────
+Stopped before changing anything.
+
+  Fix the item above, then run install.sh again. It picks up where it
+  left off.
+────────────────────────────────────────────────────────────────────────
+-- plain
+
+────────────────────────────────────────────────────────────────────────
+Stopped before changing anything.
+
+  Fix the item above, then run install.sh again. It picks up where it
+  left off.
+────────────────────────────────────────────────────────────────────────
+-- ascii
+
+------------------------------------------------------------------------
+Stopped before changing anything.
+
+  Fix the item above, then run install.sh again. It picks up where it
+  left off.
+------------------------------------------------------------------------
+
+== prompts
+call ui_prompt_head "Instance name (a-z, 0-9, hyphen; starts with a letter)" main
+call ui_newline
+call ui_prompt_head "Model server address (optional)"
+call ui_newline
+-- color
+  \e[1m›\e[0m Instance name (a-z, 0-9, hyphen; starts with a letter) \e[2m[main]\e[0m 
+  \e[1m›\e[0m Model server address (optional) 
+-- nocolor
+  › Instance name (a-z, 0-9, hyphen; starts with a letter) [main] 
+  › Model server address (optional) 
+-- plain
+  › Instance name (a-z, 0-9, hyphen; starts with a letter) [main] 
+  › Model server address (optional) 
+-- ascii
+  > Instance name (a-z, 0-9, hyphen; starts with a letter) [main] 
+  > Model server address (optional) 
+
+== confirm-with-yes-flag
+set assume_yes 1
+call ui_confirm "Go ahead?" y
+call ui_confirm "Create the slot disks?" n
+-- color
+  \e[1m›\e[0m Go ahead? [Y/n] yes (--yes)
+  \e[1m›\e[0m Create the slot disks? [y/N] no (--yes)
+-- nocolor
+  › Go ahead? [Y/n] yes (--yes)
+  › Create the slot disks? [y/N] no (--yes)
+-- plain
+  › Go ahead? [Y/n] yes (--yes)
+  › Create the slot disks? [y/N] no (--yes)
+-- ascii
+  > Go ahead? [Y/n] yes (--yes)
+  > Create the slot disks? [y/N] no (--yes)
