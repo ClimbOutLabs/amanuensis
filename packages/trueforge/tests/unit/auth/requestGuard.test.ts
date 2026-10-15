@@ -202,3 +202,41 @@ describe('request guard: Origin', () => {
     ).toBe(403);
   });
 });
+
+describe('request guard: instance opened on the local network', () => {
+  const app = () => appFor({ port: 8790, publicBaseUrl: 'http://192.168.1.20:18791' });
+
+  it.each(['192.168.1.20:18791', '127.0.0.1:18791', 'localhost:18791', '[::1]:18791'])('accepts %s', async host => {
+    expect(await status({ app: app(), headers: { host } })).toBe(200);
+  });
+
+  it.each([
+    '192.168.1.21:18791',
+    '192.168.1.20:9999',
+    '192.168.1.20',
+    'evil.example:18791',
+    'localhost.evil.example:18791',
+    '10.0.0.5:18791',
+  ])('rejects %s with 421', async host => {
+    expect(await status({ app: app(), headers: { host } })).toBe(421);
+  });
+
+  it.each(['http://192.168.1.20:18791', 'http://127.0.0.1:18791', 'http://localhost:18791'])(
+    'accepts Origin %s on writes',
+    async origin => {
+      expect(await status({ app: app(), method: 'POST', headers: { host: '127.0.0.1:18791', origin } })).toBe(200);
+    },
+  );
+
+  it.each(['http://192.168.1.21:18791', 'https://127.0.0.1:18791', 'http://evil.example:18791'])(
+    'rejects Origin %s on writes',
+    async origin => {
+      expect(await status({ app: app(), method: 'POST', headers: { host: '127.0.0.1:18791', origin } })).toBe(403);
+    },
+  );
+
+  it('does not widen a public address to loopback names on its port', async () => {
+    const remote = appFor({ port: 8790, publicBaseUrl: 'http://203.0.113.9:18791' });
+    expect(await status({ app: remote, headers: { host: '127.0.0.1:18791' } })).toBe(421);
+  });
+});

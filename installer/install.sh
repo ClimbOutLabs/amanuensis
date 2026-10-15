@@ -4,6 +4,7 @@
 #        install.sh instance add|list|remove <name>
 #        install.sh instance add-user|remove-user|list-users
 #        install.sh instance demo-seed [--reset]
+#        install.sh instance refresh <name> [--new-address]
 #        install.sh backup [<name>]
 #        install.sh upgrade [--check] [--force]
 set -euo pipefail
@@ -26,6 +27,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/diagnose.sh"
 # shellcheck source=lib/docker.sh
 . "$INSTALLER_DIR/lib/docker.sh"
+# shellcheck source=lib/network.sh
+. "$INSTALLER_DIR/lib/network.sh"
 # shellcheck source=lib/ports.sh
 . "$INSTALLER_DIR/lib/ports.sh"
 # shellcheck source=lib/secrets.sh
@@ -73,6 +76,8 @@ OPT_CHECK=0
 OPT_FORCE=0
 OPT_PURGE=0
 OPT_DEMO=0
+OPT_LOCAL_ONLY=0
+OPT_NEW_ADDRESS=0
 OPT_RESET=0
 OPT_NAME=
 OPT_INSTANCE=
@@ -108,6 +113,7 @@ Amanuensis installer
   install.sh instance remove-user <name> [--instance NAME]
   install.sh instance list-users [--instance NAME]
   install.sh instance demo-seed [--reset] [--instance NAME] [--demo-user ADDRESS]
+  install.sh instance refresh <name> [--new-address]
   install.sh backup [<name>]
   install.sh upgrade [--check] [--force]
 
@@ -133,7 +139,8 @@ Options
   --demo                mark the instance as a demo (DEMO_MODE=true) and seed its synthetic demo world once it is healthy
   --demo-user ADDRESS   the user the demo world is seeded for (default: the owner)
   --reset               with instance demo-seed, remove the synthetic demo records instead of seeding
-  --public-url URL      https address you will use from other devices (behind your own reverse proxy)
+  --local-only          open Aman only at 127.0.0.1 on this computer (by default it also answers at this computer's address on the local network)
+  --public-url URL      https address of Aman behind your own reverse proxy; the ports then stay on 127.0.0.1
   --login-url URL       https address for the sign-in service behind the same proxy
   --port N              port on this computer for the app
   --login-port N        port on this computer for the sign-in service
@@ -188,6 +195,8 @@ parse_args() {
       --purge-data) OPT_PURGE=1 ;;
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
+      --local-only) OPT_LOCAL_ONLY=1 ;;
+      --new-address) OPT_NEW_ADDRESS=1 ;;
       --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --token-factory-model | --token-factory-daily-cap | --demo-user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
@@ -255,6 +264,12 @@ check_demo_options() {
   if [ "$OPT_RESET" = 1 ] && [ "$seeding" != 1 ]; then
     usage_die "--reset applies to instance demo-seed"
   fi
+  if [ "$OPT_NEW_ADDRESS" = 1 ] && [ "$SUBCOMMAND" != refresh ]; then
+    usage_die "--new-address applies to instance refresh"
+  fi
+  if [ "$OPT_LOCAL_ONLY" = 1 ] && [ -n "$OPT_PUBLIC_URL" ]; then
+    usage_die "--local-only and --public-url are opposites; pick one."
+  fi
   if [ -n "$OPT_DEMO_USER" ]; then
     [ "$OPT_DEMO" = 1 ] || [ "$seeding" = 1 ] || usage_die "--demo-user applies with --demo or instance demo-seed"
     valid_email "$OPT_DEMO_USER" || usage_die "--demo-user must be an email address"
@@ -314,7 +329,8 @@ main() {
         remove-user) cmd_instance_remove_user ;;
         list-users) cmd_instance_list_users ;;
         demo-seed) cmd_instance_demo_seed ;;
-        *) usage_die "usage: install.sh instance add|list|remove|add-user|remove-user|list-users|demo-seed" ;;
+        refresh) cmd_instance_refresh ;;
+        *) usage_die "usage: install.sh instance add|list|remove|add-user|remove-user|list-users|demo-seed|refresh" ;;
       esac
       ;;
   esac

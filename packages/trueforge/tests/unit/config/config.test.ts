@@ -171,17 +171,38 @@ describe('assertOidcIssuerTransportAllowed', () => {
     'http://localhost:5556/dex',
     'http://127.0.0.1:5556/dex',
     'http://[::1]:5556/dex',
+    'http://192.168.1.10:5556/dex',
+    'http://10.0.0.5:5556/dex',
+    'http://172.16.0.9:5556/dex',
+    'http://172.31.255.1:5556/dex',
+    'http://100.64.0.1:5556/dex',
+    'http://100.127.255.254:5556/dex',
+    'http://169.254.10.2:5556/dex',
+    'http://spark.local:5556/dex',
+    'http://spark.example.ts.net:5556/dex',
+    'http://spark:5556/dex',
   ])('accepts %s', issuer => {
     expect(() => assertOidcIssuerTransportAllowed(issuer)).not.toThrow();
   });
 
   it.each([
     'http://login.example/dex',
-    'http://192.168.1.10:5556/dex',
+    'http://203.0.113.9:5556/dex',
+    'http://8.8.8.8:5556/dex',
+    'http://172.15.0.1:5556/dex',
+    'http://172.32.0.1:5556/dex',
+    'http://100.63.255.255:5556/dex',
+    'http://100.128.0.1:5556/dex',
+    'http://192.169.1.1:5556/dex',
     'http://0.0.0.0:5556/dex',
+    'http://aman.example.com:5556/dex',
+    'http://spark.local.evil.example:5556/dex',
+    'http://[fd00::1]:5556/dex',
     'ftp://localhost/dex',
   ])('rejects %s', issuer => {
-    expect(() => assertOidcIssuerTransportAllowed(issuer)).toThrow(/https, except http on a loopback host/);
+    expect(() => assertOidcIssuerTransportAllowed(issuer)).toThrow(
+      /https, except http on this computer or a private network/,
+    );
   });
 });
 

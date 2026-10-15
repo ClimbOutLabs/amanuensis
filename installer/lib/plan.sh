@@ -361,7 +361,11 @@ plan_build() {
     done
   fi
   if need_new_instance; then
-    plan_add todo "Create instance $I_NAME for $I_EMAIL" "The app opens at $I_PUBLIC_URL (port $I_PORT on this computer); the sign-in service uses port $I_LOGIN_PORT."
+    if [ "$I_NETWORK" = 1 ]; then
+      plan_add todo "Create instance $I_NAME for $I_EMAIL" "The app opens at $I_PUBLIC_URL, and at http://127.0.0.1:$I_PORT on this computer; the sign-in service uses port $I_LOGIN_PORT. Both ports are open to your network."
+    else
+      plan_add todo "Create instance $I_NAME for $I_EMAIL" "The app opens at $I_PUBLIC_URL (port $I_PORT on this computer); the sign-in service uses port $I_LOGIN_PORT."
+    fi
     if [ "$I_TF" = 1 ]; then
       plan_add todo "Use Token Factory (model $I_TF_MODEL) as the default model" "$(tf_plan_detail)"
     fi

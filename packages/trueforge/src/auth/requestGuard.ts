@@ -1,7 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 
-import { isLoopbackHost } from '../config';
+import { isLoopbackHost, isPrivateNetworkHost } from '../config';
 import { readBearerToken } from './token';
 
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -33,8 +33,9 @@ function isPathExempt(path: string): boolean {
 /**
  * Standalone request guard for cookie-authenticated sessions. Forwarded-* headers are never read.
  * - Host must be a loopback name on the instance port or the public URL's host, else 421
- *   (defeats DNS rebinding). When the public URL is itself loopback, any loopback name
- *   on its port is accepted too, so `localhost` works for a `127.0.0.1` public URL. A request with no Host header passes: browsers always send one.
+ *   (defeats DNS rebinding). When the public URL is itself on this computer or a private network (an instance
+ *   opened on the local network), any loopback name on its port is accepted too, so `127.0.0.1` and `localhost`
+ *   work next to the address other devices use. A request with no Host header passes: browsers always send one.
  * - State-changing requests need a same-origin signal: an allowed Origin, else
  *   `Sec-Fetch-Site: same-origin|none`, else a Bearer header; otherwise 403.
  */
@@ -42,12 +43,12 @@ export function createRequestGuardMiddleware(options: { port: number; publicBase
   const publicUrl = new URL(options.publicBaseUrl);
   const publicHost = { hostname: publicUrl.hostname, port: canonicalPort(publicUrl.port) };
   const instancePort = canonicalPort(String(options.port));
-  const publicIsLoopback = isLoopbackHost(publicUrl.hostname);
-  const loopbackPorts = new Set([instancePort, ...(publicIsLoopback ? [publicHost.port] : [])]);
+  const publicIsPrivate = isPrivateNetworkHost(publicUrl.hostname);
+  const loopbackPorts = new Set([instancePort, ...(publicIsPrivate ? [publicHost.port] : [])]);
   const allowedOrigins = new Set([
     publicUrl.origin,
     ...LOOPBACK_ORIGIN_HOSTS.map(host => `http://${host}:${String(options.port)}`),
-    ...(publicIsLoopback
+    ...(publicIsPrivate
       ? LOOPBACK_ORIGIN_HOSTS.map(
           host => `${publicUrl.protocol}//${host}${publicUrl.port === '' ? '' : `:${publicUrl.port}`}`,
         )

@@ -9,7 +9,7 @@ storage:
     file: /var/dex/dex.db
 
 # Plain http inside the instance network namespace; the owner's reverse proxy terminates TLS for a
-# public URL. The port equals the published loopback port so the issuer name works from the browser
+# public URL. The port equals the published port so the issuer name works from the browser
 # and from the app container.
 web:
   http: 0.0.0.0:@@LOGIN_PORT@@
@@ -37,3 +37,6 @@ staticClients:
     secretEnv: OIDC_CLIENT_SECRET
     redirectURIs:
       - @@PUBLIC_URL@@/api/v1/auth/callback
+@@IF_NETWORK@@      # Opened on this computer's own loopback name, the app signs in at that address.
+@@IF_NETWORK@@      - http://127.0.0.1:@@APP_PORT@@/api/v1/auth/callback
+@@IF_NETWORK@@      - http://localhost:@@APP_PORT@@/api/v1/auth/callback

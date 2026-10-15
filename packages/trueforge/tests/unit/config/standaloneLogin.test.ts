@@ -71,9 +71,9 @@ describe('standalone login configuration', () => {
     );
   });
 
-  it('rejects a non-loopback http issuer at load', async () => {
+  it('rejects an http issuer on a public name at load', async () => {
     await expect(loadConfig({ ...OIDC_ENV, OIDC_ISSUER_URL: 'http://login.example/dex' })).rejects.toThrow(
-      /https, except http on a loopback host/,
+      /https, except http on this computer or a private network/,
     );
   });
 

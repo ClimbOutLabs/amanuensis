@@ -12,7 +12,7 @@ import {
   randomState,
 } from 'openid-client';
 import type { Logger } from 'winston';
-import { getPublicBaseUrl, type OIDCConfig } from '../config';
+import { getPublicBaseUrl, isPrivateNetworkHost, type OIDCConfig } from '../config';
 import { buildAuthorizationRequestParams, type IdTokenClaims } from './claims';
 import { ID_TOKEN_COOKIE, OAUTH_STATE_COOKIE, setAuthCookie } from './cookies';
 import { assertEmailAllowed } from './emailAllowlist';
@@ -66,7 +66,7 @@ export async function initOidc(oidc: OIDCConfig | undefined): Promise<Configurat
   }
 
   const issuer = new URL(oidc.OIDC_ISSUER_URL);
-  // Config load already limited http issuers to loopback hosts; every other issuer stays https-only.
+  // Config load already limited http issuers to this computer and private networks; every other issuer stays https-only.
   const client = await discovery(
     issuer,
     oidc.OIDC_CLIENT_ID,
@@ -134,8 +134,25 @@ export function startOidcDiscovery(params: { oidc: OIDCConfig; logger: Logger })
   };
 }
 
-function authCallbackUrl(): string {
+/**
+ * Where the browser comes back after signing in. Normally the public address. An instance opened on the local network
+ * is also opened at 127.0.0.1 or localhost on the same port; signing in there must return there, or the sign-in
+ * cookies (set per host) would not be sent back. Only those two names are used, since only they are registered with
+ * the IdP, and the request guard has already checked the Host header.
+ */
+function authCallbackUrl(context: Context): string {
   const publicBaseUrl = getPublicBaseUrl();
+  const publicUrl = new URL(publicBaseUrl);
+  if (isPrivateNetworkHost(publicUrl.hostname)) {
+    const requestUrl = new URL(context.req.url);
+    if (
+      (requestUrl.hostname === '127.0.0.1' || requestUrl.hostname === 'localhost') &&
+      requestUrl.port === publicUrl.port &&
+      requestUrl.protocol === publicUrl.protocol
+    ) {
+      return `${requestUrl.protocol}//${requestUrl.host}${CALLBACK_PATH}`;
+    }
+  }
   return `${publicBaseUrl}${CALLBACK_PATH}`;
 }
 
@@ -156,7 +173,7 @@ export async function buildLoginAuthorization(params: {
   const codeVerifier = randomPKCECodeVerifier();
   const state = randomState();
   const authorizationUrl = buildAuthorizationUrl(params.client, {
-    redirect_uri: authCallbackUrl(),
+    redirect_uri: authCallbackUrl(params.context),
     scope: scopes.join(' '),
     claims: JSON.stringify(claims),
     code_challenge: await calculatePKCECodeChallenge(codeVerifier),
@@ -184,8 +201,8 @@ export async function exchangeAuthorizationCode(params: {
   codeVerifier: string;
   state: string;
 }): Promise<void> {
-  // Origin and path come from config so redirect_uri matches the one registered with the IdP.
-  const callbackUrl = new URL(authCallbackUrl());
+  // The origin is one the login started on, so redirect_uri matches the one sent then and registered with the IdP.
+  const callbackUrl = new URL(authCallbackUrl(params.context));
   callbackUrl.search = params.callbackParams.toString();
   const oidcConfig = getOidcVerify()?.oidcConfig;
   if (!oidcConfig) {

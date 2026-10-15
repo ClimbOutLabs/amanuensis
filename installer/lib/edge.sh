@@ -21,14 +21,6 @@ edge_installed_file() { printf '%s/aman.d/%s.caddyfile' "$CADDY_ETC" "$1"; }
 # The main Caddyfile is the installer's minimal one, not the package's default site.
 edge_main_managed() { grep -q 'Managed by the Amanuensis installer' "$CADDY_ETC/Caddyfile" 2>/dev/null; }
 
-valid_ipv4() {
-  local ip=$1 part
-  matches_whole "$ip" '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || return 1
-  for part in ${ip//./ }; do
-    [ "$((10#$part))" -le 255 ] || return 1
-  done
-}
-
 # A DNS name Let's Encrypt can issue for: dotted labels, no port, not an address.
 valid_edge_host() {
   matches_whole "$1" '^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$' && ! matches_whole "$1" '^[0-9.]+$'

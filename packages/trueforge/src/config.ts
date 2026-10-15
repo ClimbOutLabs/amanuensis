@@ -654,7 +654,7 @@ function buildPostgresConnectionString(parts: {
   return connectionString;
 }
 
-/** An http issuer is accepted only on a loopback host; anything else must be https. */
+/** An http issuer is accepted only on this computer or a private network; anything else must be https. */
 export function assertOidcIssuerTransportAllowed(issuerUrl: string): void {
   let parsed: URL;
   try {
@@ -665,10 +665,12 @@ export function assertOidcIssuerTransportAllowed(issuerUrl: string): void {
   if (parsed.protocol === 'https:') {
     return;
   }
-  if (parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname)) {
+  if (parsed.protocol === 'http:' && isPrivateNetworkHost(parsed.hostname)) {
     return;
   }
-  throw new Error('OIDC_ISSUER_URL must use https, except http on a loopback host (localhost, 127.0.0.1, ::1)');
+  throw new Error(
+    'OIDC_ISSUER_URL must use https, except http on this computer or a private network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16, .local, .ts.net or a single-label name)',
+  );
 }
 
 /** Cookie-name-safe suffix appended to every auth cookie name so instances on one hostname stay apart. */
@@ -2232,6 +2234,48 @@ export function isLoopbackHost(host: string): boolean {
   }
 
   return false;
+}
+
+/** A private IPv4 address: RFC 1918, link-local, or the 100.64.0.0/10 range Tailscale uses. Loopback is not included. */
+function isPrivateIpv4(addr: string): boolean {
+  const octets = addr.split('.').map(part => Number.parseInt(part, 10));
+  const [a, b] = octets;
+  if (octets.length !== 4 || octets.some(octet => Number.isNaN(octet) || octet < 0 || octet > 255)) {
+    return false;
+  }
+  if (a === 10) {
+    return true;
+  }
+  if (a === 192 && b === 168) {
+    return true;
+  }
+  if (a === 169 && b === 254) {
+    return true;
+  }
+  if (a === 172 && b !== undefined && b >= 16 && b <= 31) {
+    return true;
+  }
+  return a === 100 && b !== undefined && b >= 64 && b <= 127;
+}
+
+/**
+ * Whether `host` is this computer or sits on a private network: loopback, a private IPv4 address, a `.local` or
+ * `.ts.net` name, or a single-label name. Plain http sign-in is only allowed for these; a public address needs https.
+ */
+export function isPrivateNetworkHost(host: string): boolean {
+  if (isLoopbackHost(host)) {
+    return true;
+  }
+  const lowered = host.trim().toLowerCase();
+  const bare = lowered.startsWith('[') && lowered.endsWith(']') ? lowered.slice(1, -1) : lowered;
+  const ipVersion = isIP(bare);
+  if (ipVersion === 4) {
+    return isPrivateIpv4(bare);
+  }
+  if (ipVersion === 6 || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(bare)) {
+    return false;
+  }
+  return !bare.includes('.') || bare.endsWith('.local') || bare.endsWith('.ts.net');
 }
 
 export interface NetworkAuthRequirement {

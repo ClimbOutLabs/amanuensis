@@ -92,7 +92,7 @@ machine_running() {
 
 # Rewrites compose.yaml and dex.yaml from the registry (owner and added users) and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on edge_on login_host members members_on=0
+  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on edge_on login_host members members_on=0 network_on=0 bind=127.0.0.1:
   dir=$(instance_dir "$name")
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
@@ -101,6 +101,11 @@ instance_render() {
   email=$(reg_get "$name" owner_email)
   client_id=$(reg_get "$name" client_id)
   if instance_sandbox_wanted "$name"; then sandbox_on=1; else sandbox_on=0; fi
+  # An instance opened on the network publishes its ports on every interface; any other stays on 127.0.0.1.
+  if [ "$(reg_get "$name" network)" = 1 ]; then
+    network_on=1
+    bind=
+  fi
   edge_on=0
   login_host=
   if edge_wanted "$name"; then
@@ -111,13 +116,13 @@ instance_render() {
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
     "NAME=$name" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
-    "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" | write_if_changed "$dir/compose.yaml" 644 || true
+    "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "BIND=$bind" | write_if_changed "$dir/compose.yaml" 644 || true
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
   members=$(dex_members_yaml "$name")
   if [ -n "$members" ]; then members_on=1; fi
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
     "ISSUER=$login_url/dex" "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" \
-    "OWNER_EMAIL=$email" "CLIENT_ID=$client_id" "PUBLIC_URL=$public_url" \
+    "OWNER_EMAIL=$email" "CLIENT_ID=$client_id" "PUBLIC_URL=$public_url" "APP_PORT=$app_port" "IF_NETWORK=$network_on" \
     "IF_MEMBERS=$members_on" "MEMBER_USERS=$members" | write_if_changed "$dir/dex.yaml" 644 || true
 }
 
@@ -136,9 +141,10 @@ instance_state() {
 }
 
 instance_up() {
-  local name=$1 rc=0
+  local name=$1 rc=0 recreate=()
+  if [ "${2:-}" = recreate ]; then recreate=(--force-recreate); fi
   step_begin "start-$name" "Starting instance $name and waiting for it to be healthy"
-  dc "$name" up -d --wait --wait-timeout 240 >"$STEP_LOG" 2>&1 || rc=$?
+  dc "$name" up -d ${recreate[@]+"${recreate[@]}"} --wait --wait-timeout 240 >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
     instance_unhealthy "$name"
     return 1
@@ -273,7 +279,7 @@ instance_collect_tls() {
 
 # Picks ports and derives URLs. Read-only: nothing is written, so the plan can show the result.
 instance_derive() {
-  local reserved_app reserved_login all_reserved
+  local reserved_app reserved_login all_reserved net_ip
   reserved_app=$(reg_all app_port)
   reserved_login=$(reg_all login_port)
   all_reserved="$reserved_app $reserved_login"
@@ -289,18 +295,34 @@ instance_derive() {
   else
     I_LOGIN_PORT=$(pick_port 5556 "$all_reserved $I_PORT") || die "no free port found on this computer for sign-in near 5556"
   fi
+  I_NETWORK=0
   if [ -z "$I_PUBLIC_URL" ]; then
-    I_PUBLIC_URL="http://127.0.0.1:$I_PORT"
-    I_LOGIN_URL="http://127.0.0.1:$I_LOGIN_PORT"
+    net_ip=
+    if [ "$OPT_LOCAL_ONLY" != 1 ]; then net_ip=$(network_primary_ip); fi
+    if [ -n "$net_ip" ] && private_ipv4 "$net_ip"; then
+      # Open on this computer's own address too, so other devices on the network can use it.
+      I_NETWORK=1
+      I_PUBLIC_URL="http://$net_ip:$I_PORT"
+      I_LOGIN_URL="http://$net_ip:$I_LOGIN_PORT"
+    else
+      if [ -n "$net_ip" ]; then
+        warn "This computer's address ($net_ip) is a public one, so Aman opens only on this computer. To reach it from elsewhere, set up HTTPS with --public-url."
+      fi
+      I_PUBLIC_URL="http://127.0.0.1:$I_PORT"
+      I_LOGIN_URL="http://127.0.0.1:$I_LOGIN_PORT"
+    fi
   fi
   I_ISSUER="$I_LOGIN_URL/dex"
 }
 
-# An http issuer is only allowed on loopback; anything else must be https.
+# An http issuer is only allowed on this computer or a private network; anything else must be https.
 issuer_check() {
   case "$1" in
     https://*) ;;
-    *) is_loopback_origin "${1%/dex}" || die "a sign-in address without https is only allowed on this computer; use an https address" ;;
+    *)
+      is_loopback_origin "${1%/dex}" || private_host "$(origin_host "${1%/dex}")" ||
+        die "A sign-in address without https is only allowed on this computer or a private network; use an https address."
+      ;;
   esac
 }
 
@@ -340,7 +362,7 @@ instance_create() {
   created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   reg_write "$I_NAME" "name=$I_NAME" "app_port=$I_PORT" "login_port=$I_LOGIN_PORT" "public_url=$I_PUBLIC_URL" \
     "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
-    "sandbox=$I_SANDBOX" "tls=$I_TLS" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
+    "network=$I_NETWORK" "sandbox=$I_SANDBOX" "tls=$I_TLS" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
     "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then
@@ -379,7 +401,12 @@ print_instance_summary() {
   url=$(reg_get "$name" public_url)
   count=$(reg_names | wc -l | tr -d ' ')
   if [ "$count" -gt 1 ]; then ui_heading "Instance $name"; fi
-  ui_row "Open" "$url"
+  if [ "$(reg_get "$name" network)" = 1 ]; then
+    ui_row "Open" "$url, from this computer and from other devices on your network or Tailscale"
+    ui_row "Or" "http://127.0.0.1:$(reg_get "$name" app_port), on this computer only"
+  else
+    ui_row "Open" "$url"
+  fi
   ui_row "Sign in" "$(reg_get "$name" owner_email), with the password you chose"
   ui_row "Service" "Sign-in service (used by the app automatically, not a page to open): $(reg_get "$name" login_url)/dex"
   ui_row "Data" "Docker volumes aman_${name}_data and aman_${name}_dex"
@@ -397,12 +424,14 @@ print_instance_summary() {
   fi
   ui_heading "Next"
   open_line="Open $url in your browser."
-  if is_loopback_origin "$url"; then open_line="$open_line Use 127.0.0.1, not localhost."; fi
+  if [ "$(reg_get "$name" network)" != 1 ] && is_loopback_origin "$url"; then open_line="$open_line Use 127.0.0.1, not localhost."; fi
   if [ "$(reg_get "$name" token_factory)" != 1 ]; then open_line="$open_line Then add a model in Settings $S_PROMPT Models."; fi
   ui_line "$open_line"
   print_model_next "$name"
   if edge_wanted "$name"; then
     edge_print_firewall_hint
+  elif [ "$(reg_get "$name" network)" = 1 ]; then
+    ui_line "Sign-in from other devices is not encrypted on a home network; Tailscale encrypts it."
   elif is_loopback_origin "$url"; then
     ui_line "To reach it from other devices later, see: install.sh --print-proxy-requirements"
   else
@@ -430,6 +459,35 @@ load_installed_release() {
   REL_STT_TAG=$CUR_STT_TAG
   REL_DEX_IMAGE=$CUR_DEX_IMAGE
   docker_image_exists "$REL_APP_TAG" || die "image $REL_APP_TAG is missing; run install.sh to rebuild it"
+}
+
+# Renders an instance again from its record and restarts it, so a change in the record (or in this computer's network
+# address, with --new-address) takes effect. The data and the secrets stay as they are.
+cmd_instance_refresh() {
+  local name=${OPT_NAME:-} ip app_port login_port env
+  [ -n "$name" ] || usage_die "usage: install.sh instance refresh <name> [--new-address]"
+  valid_name "$name" || usage_die "$(name_problem "$name")"
+  reg_exists "$name" || die "Instance $name does not exist."
+  require_installed
+  docker_prepare
+  lock_acquire
+  load_installed_release
+  if [ "$OPT_NEW_ADDRESS" = 1 ]; then
+    [ "$(reg_get "$name" network)" = 1 ] || die "Instance $name is open on this computer only, so it has no network address to update."
+    ip=$(network_primary_ip)
+    private_ipv4 "$ip" || die "This computer has no private network address right now. Connect it to your network and run this again."
+    app_port=$(reg_get "$name" app_port)
+    login_port=$(reg_get "$name" login_port)
+    env="$(instance_dir "$name")/.env"
+    reg_set "$name" public_url "http://$ip:$app_port"
+    reg_set "$name" login_url "http://$ip:$login_port"
+    env_managed_set "$env" PUBLIC_BASE_URL "http://$ip:$app_port"
+    env_managed_set "$env" OIDC_ISSUER_URL "http://$ip:$login_port/dex"
+    log_event "instance $name moved to $ip"
+  fi
+  instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+  instance_up "$name" recreate
+  print_instance_block "$name"
 }
 
 cmd_instance_add() {
