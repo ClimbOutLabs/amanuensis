@@ -16,12 +16,12 @@ beforeAll(() => {
 
 const grantOption: ApprovalOption = {
   id: 'allow-chat',
-  label: 'Allow in this chat',
+  label: 'Approve for this chat',
   variant: 'primary',
   grants: ['filesystem:write', 'network:egress'],
 };
 
-const plainOption: ApprovalOption = { id: 'allow-once', label: 'Allow once', variant: 'secondary' };
+const plainOption: ApprovalOption = { id: 'allow-once', label: 'Approve', variant: 'secondary' };
 
 function renderBar(onSelect: (optionId: string) => void) {
   render(
@@ -40,7 +40,7 @@ describe('ToolApprovalBar grant confirmation', () => {
     const onSelect = vi.fn();
     renderBar(onSelect);
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Allow in this chat' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Approve for this chat' }));
 
     expect(onSelect).not.toHaveBeenCalled();
     const dialog = screen.getByTestId('approval-grant-confirm-dialog');
@@ -53,7 +53,7 @@ describe('ToolApprovalBar grant confirmation', () => {
     const onSelect = vi.fn();
     renderBar(onSelect);
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Allow in this chat' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Approve for this chat' }));
     fireEvent.click(screen.getByTestId('approval-grant-cancel'));
 
     expect(onSelect).not.toHaveBeenCalled();
@@ -64,7 +64,7 @@ describe('ToolApprovalBar grant confirmation', () => {
     const onSelect = vi.fn();
     renderBar(onSelect);
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Allow in this chat' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Approve for this chat' }));
     fireEvent.click(screen.getByTestId('approval-grant-confirm'));
 
     expect(onSelect).toHaveBeenCalledOnce();
@@ -76,7 +76,7 @@ describe('ToolApprovalBar grant confirmation', () => {
     const onSelect = vi.fn();
     renderBar(onSelect);
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Allow once' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Approve' }));
 
     expect(onSelect).toHaveBeenCalledOnce();
     expect(onSelect).toHaveBeenCalledWith('allow-once');

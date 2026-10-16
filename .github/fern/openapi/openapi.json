@@ -7863,7 +7863,7 @@
             "$ref": "#/components/schemas/SessionAgent"
           },
           "approval_grants": {
-            "description": "Server-derived exact-tool grants created by \"Allow for this chat\" (server:tool pairs).",
+            "description": "Server-derived exact-tool grants created by \"Approve for this chat\" (server:tool pairs).",
             "items": {
               "type": "string"
             },
@@ -8234,6 +8234,30 @@
           "event"
         ],
         "type": "object"
+      },
+      "SessionEventType": {
+        "enum": [
+          "turn.created",
+          "turn.done",
+          "model.message",
+          "tool.execution_started",
+          "tool.response.v2",
+          "tool.response",
+          "thread.created",
+          "thread.done",
+          "mcp.auth_required",
+          "mcp.initialize",
+          "sandbox.created",
+          "document.ingestion",
+          "tool.approval_required",
+          "tool.response_required",
+          "agent.context.compaction",
+          "aman.memory.recall",
+          "aman.profile.learned",
+          "aman.skill.used",
+          "aman.sandbox.provisioning"
+        ],
+        "type": "string"
       },
       "SessionFolder": {
         "additionalProperties": false,
@@ -17161,6 +17185,33 @@
               "maximum": 100,
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "description": "Event types to include; at most 19 entries.",
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "description": "Event types to include; at most 19 entries.",
+              "items": {
+                "$ref": "#/components/schemas/SessionEventType"
+              },
+              "maxItems": 19,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          {
+            "description": "Only list events whose id sorts after this event id. Pass the newest event id already seen to fetch just the newer events.",
+            "in": "query",
+            "name": "after_event_id",
+            "required": false,
+            "schema": {
+              "description": "Only list events whose id sorts after this event id. Pass the newest event id already seen to fetch just the newer events.",
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
             }
           }
         ],
