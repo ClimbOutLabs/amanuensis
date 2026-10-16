@@ -8,6 +8,7 @@ import {
   isLoopbackHost,
   isPrivateNetworkHost,
   parseAllowedOrigins,
+  parseLoginUpstreamUrl,
   parsePublicBaseUrl,
   parseTokenFactoryMode,
   TrueForgeAuthMode,
@@ -469,4 +470,19 @@ describe('parseAllowedOrigins', () => {
       'http://10.0.0.1',
     ]);
   });
+});
+
+describe('parseLoginUpstreamUrl', () => {
+  it('is empty when unset and keeps a loopback address with a path', () => {
+    expect(parseLoginUpstreamUrl(undefined)).toBe('');
+    expect(parseLoginUpstreamUrl(' ')).toBe('');
+    expect(parseLoginUpstreamUrl('http://127.0.0.1:5556/dex/')).toBe('http://127.0.0.1:5556/dex');
+  });
+
+  it.each(['http://192.168.1.20:5556/dex', 'https://127.0.0.1:5556/dex', 'http://127.0.0.1:5556', 'nonsense'])(
+    'refuses %s',
+    value => {
+      expect(() => parseLoginUpstreamUrl(value)).toThrow(/LOGIN_UPSTREAM_URL/);
+    },
+  );
 });

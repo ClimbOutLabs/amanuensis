@@ -28,10 +28,17 @@ export function createRequestGuardMiddleware(options: {
   publicBaseUrl: string;
   /** The addresses an instance opened on the local network answers at; empty for a single public address. */
   allowedOrigins?: readonly string[];
+  /**
+   * The sign-in service's public address, when the app passes its pages through: that address is served only under the
+   * service's own path, and writes there are checked by the sign-in service, not by an Origin signal.
+   */
+  loginGatewayUrl?: string;
 }): MiddlewareHandler {
   const allowedOrigins = options.allowedOrigins ?? [];
   const publicUrl = new URL(options.publicBaseUrl);
   const publicIsLoopback = isLoopbackHost(publicUrl.hostname);
+  const gatewayUrl = options.loginGatewayUrl === undefined ? undefined : new URL(options.loginGatewayUrl);
+  const gatewayPrefix = gatewayUrl?.pathname.replace(/\/$/, '') ?? '';
   const instanceUrl = new URL(`http://localhost:${String(options.port)}`);
   const allowedOriginSet = new Set([
     publicUrl.origin,
@@ -53,6 +60,14 @@ export function createRequestGuardMiddleware(options: {
     const rawHost = c.req.header('host');
     if (rawHost !== undefined) {
       const host = parseHostHeader(rawHost);
+      if (host !== undefined && gatewayUrl !== undefined && !hostMatchesUrl({ host, url: publicUrl })) {
+        if (hostMatchesUrl({ host, url: gatewayUrl })) {
+          if (path.startsWith(`${gatewayPrefix}/`)) {
+            return next();
+          }
+          throw new HTTPException(421, { message: 'Misdirected request: unrecognized Host' });
+        }
+      }
       const allowed =
         host !== undefined &&
         (hostMatchesUrl({ host, url: publicUrl }) ||

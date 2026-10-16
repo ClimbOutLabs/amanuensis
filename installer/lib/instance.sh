@@ -419,6 +419,7 @@ instance_create() {
   if [ "$OPT_DEMO" = 1 ]; then demo_on=1; fi
   render_template "$TEMPLATES_DIR/instance/env.tpl" \
     "PUBLIC_URL=$I_PUBLIC_URL" "IF_NETWORK=$network_on" "ORIGINS=$I_ORIGINS" "COOKIE_SUFFIX=$cookie" "ISSUER=$I_ISSUER" "CLIENT_ID=$client_id" \
+    "IF_GATEWAY=$(gateway_flag "$I_ORIGINS" "$I_PUBLIC_URL")" "LOGIN_PORT=$I_LOGIN_PORT" \
     "CLIENT_SECRET=$client_secret" "OWNER_EMAIL=$I_EMAIL" "API_KEY=$api_key" \
     "IF_TOKEN_FACTORY=$I_TF" "TF_KEY=$AMAN_TF_KEY" "TF_MODEL=$I_TF_MODEL" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$I_TF_CAP" "IF_DEMO=$demo_on" |
     write_if_changed "$dir/.env" 600 || true
@@ -441,8 +442,8 @@ print_proxy_requirements() {
   say "Requirements for your reverse proxy (nothing is configured for you):"
   say "  - One https origin for the app and a separate one for login. Never a path prefix."
   say "      $1  ->  forward to http://127.0.0.1:$2"
-  say "      $3  ->  forward to http://127.0.0.1:$4"
-  say "  - Forward the original Host header unchanged."
+  say "      $3  ->  forward to the same http://127.0.0.1:$2 (the app passes sign-in pages through and limits guessing)"
+  say "  - Forward the original Host header unchanged, and set X-Forwarded-For to the visitor's address."
   say "  - Do not buffer responses: chat replies stream. Allow read timeouts of at least 10 minutes."
   say "  - Allow request bodies of at least 36 MiB."
   say "  - Containers on this machine must resolve both names and trust their certificates;"
@@ -521,7 +522,7 @@ print_instance_summary() {
     ui_line "Sign-in on your home network is not encrypted. Use the Tailscale address to keep it private."
     if [ -n "$bookmark" ]; then ui_line "Bookmark $bookmark: it keeps working when this computer's address changes."; fi
   elif ! is_loopback_origin "$url"; then
-    print_proxy_requirements "$url" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_url)" "$(reg_get "$name" login_port)"
+    print_proxy_requirements "$url" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_url)"
   fi
 }
 
@@ -579,6 +580,11 @@ load_installed_release() {
   docker_image_exists "$REL_APP_TAG" || die "image $REL_APP_TAG is missing; run install.sh to rebuild it"
 }
 
+# 1 for an instance with a public https address: its app then passes the sign-in pages through and limits guessing.
+gateway_flag() { # origins public_url
+  if [ -z "$1" ] && ! is_loopback_origin "$2"; then printf 1; else printf 0; fi
+}
+
 # Puts back the settings an instance's .env lost, from its record and the template that wrote it. A setting that is
 # still there is never changed, so existing secrets stay; a lost secret gets a new value that the app and the sign-in
 # service both read from this file. The Token Factory key cannot be made again and is skipped.
@@ -609,6 +615,7 @@ instance_env_repair() {
   done < <(render_template "$TEMPLATES_DIR/instance/env.tpl" \
     "PUBLIC_URL=$(reg_get "$name" public_url)" "IF_NETWORK=$network_on" "ORIGINS=$(reg_get "$name" origins)" \
     "COOKIE_SUFFIX=$(reg_get "$name" cookie_suffix)" "ISSUER=$(reg_get "$name" login_url)/dex" "CLIENT_ID=$(reg_get "$name" client_id)" \
+    "IF_GATEWAY=$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
     "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "API_KEY=$(rand_hex 32)" \
     "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on")
   if [ "$restored" -gt 0 ]; then ui_ok "Put back $restored lost settings of instance $name"; fi

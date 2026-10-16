@@ -20,5 +20,6 @@
 	header ?X-Content-Type-Options nosniff
 	header ?Referrer-Policy strict-origin-when-cross-origin
 	header ?X-Frame-Options DENY
-	reverse_proxy 127.0.0.1:@@LOGIN_PORT@@
+	# The app passes the sign-in pages through and limits password guessing; Caddy tells it each visitor's address.
+	reverse_proxy 127.0.0.1:@@APP_PORT@@
 }

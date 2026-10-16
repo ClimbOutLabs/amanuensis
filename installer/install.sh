@@ -329,7 +329,7 @@ main() {
     exit 0
   fi
   if [ "$PRINT_PROXY" = 1 ]; then
-    print_proxy_requirements "https://<app-origin>" "<app port>" "https://<login-origin>" "<login port>"
+    print_proxy_requirements "https://<app-origin>" "<app port>" "https://<login-origin>"
     exit 0
   fi
   if [ "$DRY_RUN" = 1 ]; then

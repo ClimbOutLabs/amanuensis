@@ -431,6 +431,26 @@ export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath
   return `${parsed.origin}${path}`;
 }
 
+/** The loopback address of the sign-in service, or empty. */
+export function parseLoginUpstreamUrl(raw: string | undefined): string {
+  const text = (raw ?? '').trim();
+  if (text === '') {
+    return '';
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(text);
+  } catch (error) {
+    throw new Error('LOGIN_UPSTREAM_URL must be a valid URL', { cause: error });
+  }
+  if (parsed.protocol !== 'http:' || !isLoopbackHost(parsed.hostname) || parsed.pathname.replace(/\/$/, '') === '') {
+    throw new Error(
+      'LOGIN_UPSTREAM_URL must be an http address on this computer with a path, like http://127.0.0.1:5556/dex',
+    );
+  }
+  return `${parsed.origin}${parsed.pathname.replace(/\/$/, '')}`;
+}
+
 /** True for a host written like an address but not as four plain decimal parts, which URL parsing would quietly rewrite. */
 function writesAddressInAnotherBase(text: string): boolean {
   const host = /^[a-z][a-z0-9+.-]*:\/\/([^/?#:]*)/i.exec(text)?.[1] ?? '';
@@ -1126,6 +1146,12 @@ export interface SharedServerConfiguration {
    * `/dex` itself. Empty keeps the single `PUBLIC_BASE_URL` origin. Env: `ALLOWED_ORIGINS`.
    */
   ALLOWED_ORIGINS: string[];
+  /**
+   * Where the sign-in service listens on this computer (loopback http, with the issuer's path), for an instance whose
+   * issuer is a public https address: the app then passes sign-in pages under that address through itself and limits
+   * password guessing. Empty leaves the issuer's address to answer for itself. Env: `LOGIN_UPSTREAM_URL`.
+   */
+  LOGIN_UPSTREAM_URL: string;
   /**
    * Max tokens requested from the memory provider's recall endpoint.
    * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 2048.
@@ -2030,6 +2056,7 @@ const shared: SharedServerConfiguration = {
   DOCUMENT_OCR_LANGUAGES: getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: 'eng hin mar' }) ?? 'eng hin mar',
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),
   ALLOWED_ORIGINS: parseAllowedOrigins(getEnv('ALLOWED_ORIGINS', { defaultValue: '' })),
+  LOGIN_UPSTREAM_URL: parseLoginUpstreamUrl(getEnv('LOGIN_UPSTREAM_URL', { defaultValue: '' })),
   SERVER_URL:
     getEnv('SERVER_URL', { defaultValue: `http://localhost:${String(port)}` }) ?? `http://localhost:${String(port)}`,
   TRUEFORGE_API_KEY: resolveTrueForgeApiKey({ standalone }),

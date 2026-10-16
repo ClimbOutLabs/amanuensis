@@ -33,35 +33,52 @@ export function isProxiableIssuer(issuerUrl: string): boolean {
   }
 }
 
+/**
+ * The address a request came from. Behind a reverse proxy on this computer every connection is a loopback one, so the
+ * address that proxy recorded last is taken instead; a header from any other connection is never read.
+ */
 function defaultClientKey(c: Context): string {
+  let remote = 'unknown';
   try {
-    return getConnInfo(c).remote.address ?? 'unknown';
+    remote = getConnInfo(c).remote.address ?? 'unknown';
   } catch {
-    return 'unknown';
+    return remote;
   }
+  const forwarded = c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim();
+  if (isLoopbackHost(remote) && forwarded !== undefined && forwarded !== '') {
+    return forwarded;
+  }
+  return remote;
 }
 
 /**
  * Passes the sign-in pages through under the app's own address, so a browser on any listed address reaches them without
- * a second open port. It talks only to the issuer's origin, only to the browser paths under the issuer's path, and
+ * a second open port. It talks only to the sign-in service's own origin, only to the browser paths under its path, and
  * sends no cookie either way. Password posts are rate limited by client address.
  */
 export function createLoginProxy({
   issuerUrl,
+  upstreamUrl = issuerUrl,
   allowedOrigins,
   limiter = new LoginAttemptLimiter(),
   clientKey = defaultClientKey,
 }: {
   issuerUrl: string;
+  /** Where the sign-in service is reached when that differs from the address browsers know it by. */
+  upstreamUrl?: string;
   allowedOrigins: readonly string[];
   limiter?: LoginAttemptLimiter;
   clientKey?: (c: Context) => string;
 }): Handler {
-  if (!isProxiableIssuer(issuerUrl)) {
+  if (!isProxiableIssuer(upstreamUrl)) {
     throw new Error('The sign-in service can be passed through only when it is on a loopback host with a path');
   }
-  const issuer = new URL(issuerUrl);
-  const prefix = issuer.pathname.replace(/\/$/, '');
+  const service = new URL(upstreamUrl);
+  const ownNames = [service.origin, new URL(issuerUrl).origin];
+  const prefix = service.pathname.replace(/\/$/, '');
+  if (new URL(issuerUrl).pathname.replace(/\/$/, '') !== prefix) {
+    throw new Error('The sign-in service must have the same path where it runs and where browsers find it');
+  }
 
   const tooMany = (retryAfterSeconds: number): Response =>
     new Response(`Too many sign-in attempts. Wait ${String(retryAfterSeconds)} seconds and try again.`, {
@@ -83,11 +100,11 @@ export function createLoginProxy({
       return c.text(ADDRESS_NOT_LISTED_MESSAGE, 421);
     }
     const requested = new URL(c.req.url);
-    const upstream = new URL(`${requested.pathname}${requested.search}`, issuer.origin);
+    const upstream = new URL(`${requested.pathname}${requested.search}`, service.origin);
     // An encoded slash or backslash could be read as a path separator by the service, so it is never passed on.
     const hidesSeparator = /%2f|%5c/i.test(upstream.pathname);
     const sub = upstream.pathname.startsWith(`${prefix}/`) ? upstream.pathname.slice(prefix.length) : '';
-    if (upstream.origin !== issuer.origin || hidesSeparator || !BROWSER_PATHS.some(path => path.test(sub))) {
+    if (upstream.origin !== service.origin || hidesSeparator || !BROWSER_PATHS.some(path => path.test(sub))) {
       return c.text('Not found', 404);
     }
     const guessing = method === 'POST' && PASSWORD_POST_PATH.test(sub);
@@ -134,10 +151,8 @@ export function createLoginProxy({
     const location = response.headers.get('location');
     if (location !== null) {
       // The service names itself by its own address; the browser stays on the listed address it came to.
-      out.set(
-        'location',
-        location.startsWith(`${issuer.origin}/`) ? `${matchedOrigin}${location.slice(issuer.origin.length)}` : location,
-      );
+      const own = ownNames.find(name => location.startsWith(`${name}/`));
+      out.set('location', own === undefined ? location : `${matchedOrigin}${location.slice(own.length)}`);
     }
     return new Response(method === 'HEAD' ? null : response.body, { status: response.status, headers: out });
   };

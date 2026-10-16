@@ -324,6 +324,90 @@ describe('login proxy', () => {
   });
 });
 
+describe('login proxy in front of a public sign-in address', () => {
+  const realFetch = globalThis.fetch;
+  const seen: string[] = [];
+
+  beforeEach(() => {
+    seen.length = 0;
+    globalThis.fetch = input => {
+      seen.push(String(input));
+      return Promise.resolve(
+        new Response(null, { status: 302, headers: { location: 'https://login.example.com/dex/approval?req=1' } }),
+      );
+    };
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  function gateway(clientKey?: () => string): Hono {
+    const hono = new Hono();
+    hono.all(
+      '*',
+      createLoginProxy({
+        issuerUrl: 'https://login.example.com/dex',
+        upstreamUrl: 'http://127.0.0.1:5556/dex',
+        allowedOrigins: ['https://login.example.com'],
+        ...(clientKey === undefined ? {} : { clientKey }),
+      }),
+    );
+    return hono;
+  }
+
+  it('reaches the sign-in service on this computer and keeps the browser on the public address', async () => {
+    const res = await gateway().request('https://login.example.com/dex/auth/local/login', {
+      method: 'POST',
+      headers: { host: 'login.example.com' },
+    });
+    expect(seen).toEqual(['http://127.0.0.1:5556/dex/auth/local/login']);
+    expect(res.headers.get('location')).toBe('https://login.example.com/dex/approval?req=1');
+  });
+
+  it('limits each visitor behind a reverse proxy on this computer by the address it recorded, and ignores that header elsewhere', async () => {
+    globalThis.fetch = () => Promise.resolve(new Response('form', { status: 200 }));
+    const app = gateway();
+    const post = (remoteAddress: string, forwardedFor: string) =>
+      app.fetch(
+        new Request('https://login.example.com/dex/auth/local/login', {
+          method: 'POST',
+          headers: { host: 'login.example.com', 'x-forwarded-for': forwardedFor },
+        }),
+        { incoming: { socket: { remoteAddress } } },
+      );
+    for (let i = 0; i < 5; i += 1) {
+      expect((await post('127.0.0.1', '203.0.113.5')).status).toBe(200);
+    }
+    expect((await post('127.0.0.1', '203.0.113.5')).status).toBe(429);
+    expect((await post('127.0.0.1', '198.51.100.7')).status).toBe(200);
+    for (let i = 0; i < 5; i += 1) {
+      expect((await post('192.168.1.40', `10.0.0.${String(i)}`)).status).toBe(200);
+    }
+    expect((await post('192.168.1.40', '10.9.9.9')).status).toBe(429);
+  });
+
+  it('needs the service to have the same path in both places', () => {
+    expect(() =>
+      createLoginProxy({
+        issuerUrl: 'https://login.example.com/other',
+        upstreamUrl: 'http://127.0.0.1:5556/dex',
+        allowedOrigins: [],
+      }),
+    ).toThrow(/same path/);
+  });
+
+  it('refuses an upstream that is not on this computer', () => {
+    expect(() =>
+      createLoginProxy({
+        issuerUrl: 'https://login.example.com/dex',
+        upstreamUrl: 'http://10.0.0.5:5556/dex',
+        allowedOrigins: [],
+      }),
+    ).toThrow(/loopback/);
+  });
+});
+
 describe('isProxiableIssuer', () => {
   it.each(['http://127.0.0.1:5556/dex', 'http://localhost:5556/dex/', 'http://[::1]:5556/auth'])(
     'accepts %s',
