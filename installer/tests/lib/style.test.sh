@@ -19,7 +19,7 @@ Go ahead?=>y
 $PASSWORD_ANSWERS"
   assert_eq "$RC" 0
   assert_contains "$OUT" "Instance name (a-z, 0-9, hyphen; starts with a letter) [main]"
-  assert_contains "$OUT" "Example: main"
+  assert_contains "$OUT" "Each person gets a new instance. Example: main"
   assert_contains "$OUT" "Your email, used to sign in"
   assert_contains "$OUT" "Example: you@example.com"
   assert_contains "$OUT" "Go ahead? [Y/n]"
