@@ -27,6 +27,14 @@ function hasMemoryVaultPort(server: object): server is { memoryVault: MemoryVaul
 
 export type NamespaceOption = { value: string; label: string };
 
+// Accepts a bare array or an export object with an `entries` array.
+function readImportItems(parsed: unknown): unknown[] | null {
+  if (Array.isArray(parsed)) return parsed;
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const entries: unknown = Reflect.get(parsed, 'entries');
+  return Array.isArray(entries) ? entries : null;
+}
+
 /**
  * All memory-list and sharing state for one surface. The standalone memory page and the
  * Settings Memory section share this hook so switching between the Memories and Sharing
@@ -139,25 +147,16 @@ export function useMemoryVaultState() {
       .text()
       .then(text => {
         const parsed: unknown = JSON.parse(text);
-        const items = Array.isArray(parsed)
-          ? parsed
-          : typeof parsed === 'object' && parsed !== null && Array.isArray(Reflect.get(parsed, 'entries'))
-            ? (Reflect.get(parsed, 'entries') as unknown[])
-            : null;
+        const items = readImportItems(parsed);
         if (items === null) {
           throw new Error('That file does not look like a memory export.');
         }
         const entriesToImport = items.flatMap(item => {
-          if (typeof item === 'object' && item !== null && typeof Reflect.get(item, 'text') === 'string') {
-            const timestamp = Reflect.get(item, 'timestamp');
-            return [
-              {
-                text: Reflect.get(item, 'text') as string,
-                ...(typeof timestamp === 'string' ? { timestamp } : {}),
-              },
-            ];
-          }
-          return [];
+          if (typeof item !== 'object' || item === null) return [];
+          const text: unknown = Reflect.get(item, 'text');
+          if (typeof text !== 'string') return [];
+          const timestamp: unknown = Reflect.get(item, 'timestamp');
+          return [{ text, ...(typeof timestamp === 'string' ? { timestamp } : {}) }];
         });
         if (entriesToImport.length === 0) {
           throw new Error('No importable facts found in that file.');
