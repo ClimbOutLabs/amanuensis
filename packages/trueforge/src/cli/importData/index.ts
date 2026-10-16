@@ -96,7 +96,7 @@ export function createImportData(deps: ImportDataDeps): Command {
     if (options.in === undefined || options.in.trim() === '') {
       throw new UsageError('Missing --in <file.zip>.');
     }
-    if (options.user !== undefined && options.user.trim() === '') {
+    if (options.user?.trim() === '') {
       throw new UsageError('--user needs a user id.');
     }
     const file = path.resolve(options.in);
@@ -112,7 +112,8 @@ export function createImportData(deps: ImportDataDeps): Command {
           `--user must be this instance's owner (${session.owner}). The instance has one account, so an import is only made for its owner.`,
         );
       }
-      const displayName = options['display-name']?.trim() || userId;
+      const named = options['display-name']?.trim();
+      const displayName = named === undefined || named === '' ? userId : named;
       const result = await session.importArchive({ archive, userId, displayName }).catch((error: unknown) => {
         throw describeFailure(error);
       });

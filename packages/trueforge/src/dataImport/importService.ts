@@ -344,7 +344,7 @@ function validateCrossReferences(contents: ArchiveContents): void {
     }
     const custom = session.custom;
     if (custom !== null && custom !== undefined && !(typeof custom === 'object' && Object.keys(custom).length === 0)) {
-      throw damaged(`chat ${session.session_id} carries data this version cannot restore.`);
+      throw damaged(`chat ${session.session_id} has custom data that this version does not store.`);
     }
     const turnIds = new Set<string>();
     for (const { turn } of entry.turns) {
@@ -359,7 +359,7 @@ function validateCrossReferences(contents: ArchiveContents): void {
         parseTurnCustom(turn.custom ?? null);
       } catch (cause) {
         throw new DataImportError(
-          `This export is damaged: a turn in chat ${session.session_id} carries data this version cannot restore. Nothing was imported.`,
+          `This export is damaged: a turn in chat ${session.session_id} has custom data that this version does not store. Nothing was imported.`,
           400,
           { cause },
         );
@@ -667,7 +667,7 @@ function planMarkdownMemory(
   input: { targetTenantId: string; personaSegBySource: ReadonlyMap<string, string> },
 ): PlannedMemoryFile[] {
   const planned: PlannedMemoryFile[] = [];
-  const knownFiles = new Set(['MEMORY.md', '.vault-tombstones.md', '.vault-sharing.json']);
+  const knownFiles = new Set(['MEMORY.md', '.vault-tombstones.md']);
   for (const [name, data] of contents.files) {
     if (!name.startsWith('memory/')) {
       continue;

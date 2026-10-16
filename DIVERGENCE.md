@@ -486,6 +486,18 @@ Approval tokens persist in an `approval_token` table (SQLite and Postgres) so a 
 | packages/trueforge-ui/src/utils/computeAgentStepsSplit.ts, containers/ToolCallContainer.tsx           | A maps call never folds into agent details; `ToolCallContainer` renders its approval and its inline map card                                                                                                                                  |
 | packages/trueforge-ui/src/utils/toolCallParsing.ts, src/styles.css, package.json                      | `parseMapsResult`, the `.maps-card` styles (theme tokens only), and the `leaflet` dependency                                                                                                                                                  |
 
+## Data import (resolution: ours)
+
+Restoring a data export into a fresh instance (`dataImport/`, `aman import-data`, `install.sh instance import`) is fork-only. These upstream-owned files carry the write paths it needs; each edit is additive, so keep ours on a sync conflict.
+
+| Path                                                                                                                                                 | What we added                                                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| packages/trueforge-core/src/agent-session/store/ISessionStore.ts, InMemorySessionStore.ts, index.ts, tests/agent-session/store/storeContractSuite.ts | `stampImportedSession`, the import-only write that puts archived dates and totals back on a restored chat and its turns; its input type and contract tests |
+| packages/trueforge/src/db/postgres/session-store/\*, db/sqlite/session-store/\*                                                                      | The same method for both backends                                                                                                                          |
+| packages/trueforge/src/db/agentStore.ts, db/postgres/agent-store/PostgresAgentStore.ts, db/sqlite/agent-store/SqliteAgentStore.ts                    | An optional caller-supplied `id` on `createAgent`, so imported chats and schedules keep pointing at their agent                                            |
+| packages/trueforge/src/db/scheduleStore.ts and the schedule stores                                                                                   | An optional caller-supplied `id` on `createScheduleAndRun`                                                                                                 |
+| packages/trueforge/src/app.ts, config.ts                                                                                                             | The import route is mounted for administrators only, under a larger body cap (`DATA_IMPORT_MAX_BYTES`)                                                     |
+
 ## Installer: sign-in from any address, app data dir, sandbox slots (resolution: ours)
 
 The installer (`installer/`) is fork-only. These upstream-owned files carry the wiring it needs; keep ours in each,

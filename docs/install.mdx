@@ -232,6 +232,27 @@ installer/install.sh upgrade           # back up, rebuild, restart, health-check
 
 Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. It backs up every instance first, rebuilds the images, restarts each stack, and checks health. If the upgrade fails after the restart begins, it restores the backup and the previous images, then tells you what it did.
 
+## Moving your data in from another Aman
+
+An export (made by `aman export-data` on the old Aman) can be restored into a fresh instance. Each instance has one account, its owner, and everything imported belongs to that owner.
+
+```bash
+installer/install.sh instance import main ~/aman-export.zip
+```
+
+The installer stops the app of the instance, restores the export in a one-off container that has the instance's data and no network, and starts the app again. The same restore is available by hand as `aman import-data --in <file.zip> [--user <owner>]`; `--user` can only be the owner, and the app must be stopped first. Administrators can also upload an export to `POST /api/v1/data/import`; anyone else gets a 403.
+
+What moves: chats with their dates and totals, folders, agents (with their ids), personas and their knowledge, memories, spaces, schedules (all switched off), connector entries without their sign-ins, the memory and tool-output switches the new instance has not set itself, and the owner's permission settings. Model keys, connector sign-ins, OAuth tokens and Always allow choices never travel; set them up again in Settings.
+
+Before it writes anything the import checks the whole file, then checks that none of its ids already exist here. A failure undoes what the import wrote, and if the process is killed the next import cleans up first. Knowledge is searched by meaning, so the search model must have finished downloading (open the app once and wait a few minutes). If it has not, the import stops with "the knowledge index is still downloading, retry in a few minutes" and writes nothing.
+
+An import only runs into a fresh instance. If it says the instance already has chats, agents or other data, remove the instance and add it again, then import:
+
+```bash
+installer/install.sh instance remove main --purge-data
+installer/install.sh instance add main --email you@example.com
+```
+
 ## What is off in this version
 
 Running code (`run_code`, Python and shell in a gVisor sandbox with no network) is on after a normal install. Settings → Sandbox shows it as ready, and new chats have the sandbox enabled. Email attachment extraction and skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` has run code off too.

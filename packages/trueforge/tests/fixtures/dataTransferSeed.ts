@@ -8,7 +8,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { AgentSpecSchema, MAIN_THREAD_ID } from '@truefoundry/trueforge-core/agent-session';
+import { AgentSpecSchema, MAIN_THREAD_ID, type SessionMetrics } from '@truefoundry/trueforge-core/agent-session';
 import { ContextCompactionEventSchema, ThreadOverwriteContextEventSchema } from '@truefoundry/trueforge-core/core';
 import {
   makeCreateTurnInput,
@@ -51,7 +51,15 @@ export const SEED_IDS = {
  * The dates and totals the seeded chats are given after creation, so a
  * round trip can prove they come back instead of being re-stamped "now".
  */
-export const SEED_HISTORY = {
+interface SeedChatHistory {
+  created_at: string;
+  updated_at: string;
+  last_activity_timestamp_ms: number;
+  metrics: SessionMetrics;
+  turns: Record<string, { created_at: string; updated_at: string }>;
+}
+
+export const SEED_HISTORY: Record<string, SeedChatHistory> = {
   [SEED_IDS.sessionMain]: {
     created_at: '2026-09-01T08:00:00.000Z',
     updated_at: '2026-09-03T18:30:00.000Z',
@@ -81,7 +89,7 @@ export const SEED_HISTORY = {
       'session-3-turn-1': { created_at: '2026-09-12T12:00:01.000Z', updated_at: '2026-09-12T12:00:05.000Z' },
     },
   },
-} as const;
+};
 
 export const SEED_MEMORY = {
   curated: '# About\n\nPrefers dark mode and short answers.',

@@ -13,6 +13,19 @@ function stderrLogger() {
   });
 }
 
+/** Migration progress is printed with console.log, but stdout is reserved for the one JSON result. */
+async function withLogsOnStderr<T>(run: () => Promise<T>): Promise<T> {
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    console.error(...args);
+  };
+  try {
+    return await run();
+  } finally {
+    console.log = original;
+  }
+}
+
 /**
  * Server config validates the environment when it is imported, so it is loaded only here, after the
  * command line has been accepted. Writes to the standalone instance's SQLite database and its
@@ -62,7 +75,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
   await mkdir(path.dirname(configuration.SQLITE_PATH), { recursive: true });
   const db = createSqliteDb(configuration.SQLITE_PATH);
   try {
-    await migrateSqliteToLatest(db);
+    await withLogsOnStderr(() => migrateSqliteToLatest(db));
   } catch (error) {
     await db.destroy();
     throw error;

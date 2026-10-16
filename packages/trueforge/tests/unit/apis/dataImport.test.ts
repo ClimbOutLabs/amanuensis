@@ -123,6 +123,11 @@ describe('Data import route', () => {
     configuration.PERSONA_KNOWLEDGE_DIR = targetKnowledgeDir;
     configuration.DATA_IMPORT_MAX_BYTES = 1024 * 1024;
     targetServer = await startApprovalTestServer({ authenticator: headerAuthenticator });
+    // The test server registers a connector of its own; an import only runs into an instance with none.
+    const targetMcp = new SqliteMcpServerStore(targetServer.db());
+    for (const server of await targetMcp.listServers({ tenant_id: TENANT_ID, names: undefined })) {
+      await targetMcp.deleteServer({ tenant_id: TENANT_ID, name: server.name });
+    }
   });
 
   afterAll(async () => {
