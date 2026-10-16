@@ -211,6 +211,7 @@ describe('PermissionApprovalCard for mail', () => {
     subject: 'Lease',
     body: 'Thursday works.\n\nBest,\nAda',
     replaces: null,
+    reply_in_thread: null,
   };
 
   function renderMail(overrides: Partial<SentinelApprovalEmail> = {}) {
@@ -275,6 +276,16 @@ describe('PermissionApprovalCard for mail', () => {
     renderMail({ action: 'change', replaces: { subject: 'Old lease', to: ['sam@example.com'] } });
     expect(screen.getByText('Replaces')).toBeInTheDocument();
     expect(screen.getByText('Old lease (to sam@example.com)')).toBeInTheDocument();
+  });
+
+  it('says which thread a reply is in', () => {
+    renderMail({ reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' } });
+    expect(screen.getByText('Reply in the thread: Lease renewal, from Grace <grace@example.com>')).toBeInTheDocument();
+  });
+
+  it('says nothing of a thread for a message that is not a reply', () => {
+    renderMail();
+    expect(screen.queryByText(/Reply in the thread/)).not.toBeInTheDocument();
   });
 
   it('uses surface tokens that flip with the theme, not a tint of the button colour', () => {

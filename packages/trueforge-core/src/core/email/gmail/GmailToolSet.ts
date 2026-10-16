@@ -19,6 +19,7 @@ import { GmailApi, GmailApiError, mapSkippingMissing } from './gmailApi';
 import type { GmailMessage } from './gmailWire';
 import { headerOf, listAttachments, rawHeaderOf } from './message';
 import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
+import { checkReplyThreading, isReply, type AnsweredMessage } from './replyThread';
 import {
   getDraftResult,
   listDraftsResult,
@@ -83,6 +84,15 @@ interface GmailToolSetOptions {
   reviews: DraftReviewLedger;
   /** How long a list call may spend before it returns the rows it has. */
   listDeadlineMs: number;
+}
+
+/** Ends every refusal of a send, so a refused message is never mistaken for one the user approved. */
+const NEW_APPROVAL =
+  'The user approved only the draft they were shown. Any other or changed draft needs its own new approval, and you must not tell the user a different draft is the message they approved.';
+
+/** A refusal of a send in words the model can relay: what was refused, that nothing went out, and what to do. */
+function sendRefusal(reason: string): string {
+  return `${reason} Nothing was sent. ${NEW_APPROVAL}`;
 }
 
 function errorResult(error: string) {
@@ -245,10 +255,12 @@ export class GmailToolSet extends LocalToolMCP {
     const info = await super.toolCallInfo(params, resolveUnderlyingTool);
     // A scheduled run is refused by the classifier before anything is loaded to show.
     const prepared = this.#options.sentinel.services.unattended
-      ? { draft: undefined, replaces: undefined }
+      ? { draft: undefined, replaces: undefined, answered: undefined }
       : await this.#prepareWrite(params);
     if ('failure' in prepared) {
-      return { ...info, pre_dispatch_failure: { kind: 'policy_blocked', message: prepared.failure } };
+      // Not a permission wall: the message just cannot be shown as it stands, and the model can fix that. A
+      // policy block would count toward the turn's "tool not allowed here" stop.
+      return { ...info, pre_dispatch_failure: { kind: 'pre_dispatch_failed', message: prepared.failure } };
     }
     const decision = await classifyHostToolCall({
       sentinel: this.#options.sentinel,
@@ -266,6 +278,7 @@ export class GmailToolSet extends LocalToolMCP {
         },
         ...(prepared.draft === undefined ? {} : { mail_draft: prepared.draft }),
         ...(prepared.replaces === undefined ? {} : { mail_replaces: prepared.replaces }),
+        ...(prepared.answered === undefined ? {} : { mail_reply_in_thread: prepared.answered }),
       },
     });
     return { ...info, ...stampSentinelDecision({ decision }) };
@@ -280,10 +293,15 @@ export class GmailToolSet extends LocalToolMCP {
   }
 
   /** What a write call will do, for its card; a failure says why the call cannot be shown and so is not offered. */
-  async #prepareWrite(
-    params: CallToolRequest['params'],
-  ): Promise<{ draft: ReviewableDraft | undefined; replaces: ReviewableDraft | undefined } | { failure: string }> {
-    const none = { draft: undefined, replaces: undefined };
+  async #prepareWrite(params: CallToolRequest['params']): Promise<
+    | {
+        draft: ReviewableDraft | undefined;
+        replaces: ReviewableDraft | undefined;
+        answered: AnsweredMessage | undefined;
+      }
+    | { failure: string }
+  > {
+    const none = { draft: undefined, replaces: undefined, answered: undefined };
     if (!isGmailWriteToolName(params.name)) {
       return none;
     }
@@ -293,20 +311,21 @@ export class GmailToolSet extends LocalToolMCP {
         if (!parsed.success) {
           return { failure: 'send_draft needs a draft_id.' };
         }
-        const assessed = assessDraft({
-          message: await this.#liveDraft(parsed.data.draft_id),
-          account: this.#options.account,
-          forSend: true,
-        });
+        const live = await this.#liveDraft(parsed.data.draft_id);
+        const assessed = assessDraft({ message: live, account: this.#options.account, forSend: true });
         if (!assessed.ok) {
-          return { failure: assessed.reason };
+          return { failure: sendRefusal(assessed.reason) };
+        }
+        const threading = await this.#threading({ draft: assessed.draft, draftMessageId: live.id });
+        if (!threading.ok) {
+          return { failure: sendRefusal(threading.reason) };
         }
         this.#options.reviews.record({
           ...this.#owner,
           draft_id: parsed.data.draft_id,
           hash: hashDraft(assessed.draft),
         });
-        return { draft: assessed.draft, replaces: undefined };
+        return { draft: assessed.draft, replaces: undefined, answered: threading.answered ?? undefined };
       }
       const invalid = { failure: 'The draft details were not valid, so nothing was saved.' };
       if (params.name === UPDATE_DRAFT_TOOL_NAME) {
@@ -319,15 +338,18 @@ export class GmailToolSet extends LocalToolMCP {
           return existing;
         }
         const resolved = await this.#resolveContent({ input: parsed.data, existing: existing.message });
-        return { draft: resolved.reviewable, replaces: existing.reviewable };
+        return { draft: resolved.reviewable, replaces: existing.reviewable, answered: resolved.answered };
       }
       const parsed = DraftEmailSchema.safeParse(params.arguments);
       if (!parsed.success) {
         return invalid;
       }
       const resolved = await this.#resolveContent({ input: parsed.data, existing: undefined });
-      return { draft: resolved.reviewable, replaces: undefined };
+      return { draft: resolved.reviewable, replaces: undefined, answered: resolved.answered };
     } catch (error) {
+      if (error instanceof RangeError) {
+        return { failure: `The draft could not be shown to you, so nothing was saved. ${error.message}` };
+      }
       if (
         error instanceof GoogleReconnectRequiredError ||
         error instanceof GmailApiError ||
@@ -350,30 +372,53 @@ export class GmailToolSet extends LocalToolMCP {
       : { failure: `This draft cannot be changed here, so nothing was changed. ${assessed.reason}` };
   }
 
+  /** Reads the thread a draft claims to reply in and checks its reply headers against it. */
+  async #threading(input: { draft: ReviewableDraft; draftMessageId: string }) {
+    const thread = isReply(input.draft)
+      ? await this.#options.api.getThreadReplyHeaders(input.draft.threadId)
+      : undefined;
+    return checkReplyThreading({ ...input, thread });
+  }
+
   /**
    * Settles what a new or changed draft contains: a reply takes its thread, its reply headers and the subject
-   * "Re: <original>" from the message it answers; a changed draft keeps the thread and reply headers it had.
+   * "Re: <original>" from the message it answers; a changed draft keeps the thread and reply headers it had,
+   * after they are checked against the thread again. Throws a RangeError when a reply cannot be threaded.
    */
   async #resolveContent(input: { input: DraftContent; existing: GmailMessage | undefined }): Promise<{
     content: RawDraftContent;
     reply: ReplyTarget | undefined;
     threadId: string | undefined;
     reviewable: ReviewableDraft;
+    answered: AnsweredMessage | undefined;
   }> {
     const { input: call, existing } = input;
     let reply: ReplyTarget | undefined;
     // Blank space at the edges would not show on the card, so a draft is written without it.
     let subject = call.subject.trim();
     let threadId = call.thread_id;
+    let answered: AnsweredMessage | undefined;
     if (call.in_reply_to !== undefined) {
       const original = await this.#options.api.getMessage(call.in_reply_to);
       const part = original.payload;
+      if (threadId !== undefined && threadId !== original.threadId) {
+        throw new RangeError('thread_id is not the thread of the message being replied to. Leave it out.');
+      }
       reply = {
         messageIdHeader: part === undefined ? '' : rawHeaderOf({ part, name: 'message-id' }),
         referencesHeader: part === undefined ? '' : rawHeaderOf({ part, name: 'references' }),
       };
+      if (replyHeaders(reply).inReplyTo === '') {
+        throw new RangeError(
+          'The message being replied to has no usable Message-ID, so a threaded reply cannot be made.',
+        );
+      }
       subject = replySubject(headerOf({ message: original, name: 'Subject' }));
-      threadId ??= original.threadId;
+      threadId = original.threadId;
+      answered = {
+        subject: headerOf({ message: original, name: 'Subject' }),
+        from: headerOf({ message: original, name: 'From' }),
+      };
     } else if (existing?.payload !== undefined) {
       reply = {
         messageIdHeader: rawHeaderOf({ part: existing.payload, name: 'in-reply-to' }),
@@ -383,22 +428,26 @@ export class GmailToolSet extends LocalToolMCP {
     }
     const body = call.body.trim();
     const content: RawDraftContent = { to: call.to, cc: call.cc, bcc: call.bcc, subject, body };
-    return {
-      content,
-      reply,
-      threadId,
-      reviewable: {
-        to: call.to,
-        cc: call.cc ?? [],
-        bcc: call.bcc ?? [],
-        subject,
-        body,
-        threadId: threadId ?? '',
-        inReplyTo: replyHeaders(reply).inReplyTo,
-        references: replyHeaders(reply).references,
-        fromName: '',
-      },
+    const reviewable: ReviewableDraft = {
+      to: call.to,
+      cc: call.cc ?? [],
+      bcc: call.bcc ?? [],
+      subject,
+      body,
+      threadId: threadId ?? '',
+      inReplyTo: replyHeaders(reply).inReplyTo,
+      references: replyHeaders(reply).references,
+      fromName: '',
     };
+    if (answered === undefined && existing !== undefined) {
+      // Headers kept from a saved draft are not the model's, but anyone may have edited that draft in Gmail.
+      const kept = await this.#threading({ draft: reviewable, draftMessageId: existing.id });
+      if (!kept.ok) {
+        throw new RangeError(kept.reason);
+      }
+      answered = kept.answered ?? undefined;
+    }
+    return { content, reply, threadId, reviewable, answered };
   }
 
   async #listThreads(input: z.infer<typeof ListInboxThreadsSchema>) {
@@ -595,20 +644,25 @@ export class GmailToolSet extends LocalToolMCP {
     try {
       const reviewed = this.#options.reviews.take({ ...this.#owner, draft_id: input.draft_id });
       if (reviewed === undefined) {
-        return errorResult('This send needs your OK again. Nothing was sent. Ask to send the draft again.');
+        return errorResult(
+          `This send needs your OK again. Nothing was sent. Ask to send the draft again. ${NEW_APPROVAL}`,
+        );
       }
-      const assessed = assessDraft({
-        message: await this.#liveDraft(input.draft_id),
-        account: this.#options.account,
-        forSend: true,
-      });
+      const live = await this.#liveDraft(input.draft_id);
+      const assessed = assessDraft({ message: live, account: this.#options.account, forSend: true });
       if (!assessed.ok) {
-        return errorResult(assessed.reason);
+        return errorResult(sendRefusal(assessed.reason));
       }
       if (reviewed !== hashDraft(assessed.draft)) {
         return errorResult(
-          'The draft changed after you reviewed it, so nothing was sent. Ask to send it again to review the new text.',
+          sendRefusal(
+            'The draft changed after you reviewed it (its text, recipients or the thread it replies in). Ask to send it again so the user can review the new text.',
+          ),
         );
+      }
+      const threading = await this.#threading({ draft: assessed.draft, draftMessageId: live.id });
+      if (!threading.ok) {
+        return errorResult(sendRefusal(threading.reason));
       }
       const sent = await this.#options.api.sendDraft(input.draft_id);
       return jsonResult({

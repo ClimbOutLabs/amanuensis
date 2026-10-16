@@ -191,6 +191,7 @@ describe('extractSentinelFromEvent', () => {
                 subject: 'Lease',
                 body: 'Thursday works.\n\nAda',
                 replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+                reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' },
               },
             },
           },
@@ -206,6 +207,7 @@ describe('extractSentinelFromEvent', () => {
       subject: 'Lease',
       body: 'Thursday works.\n\nAda',
       replaces: { subject: 'Old lease', to: ['sam@example.com'] },
+      reply_in_thread: { subject: 'Lease renewal', from: 'Grace <grace@example.com>' },
     });
   });
 

@@ -90,6 +90,11 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
   return (
     <div className="rounded border border-border bg-primary-bg px-3 py-2">
       <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
+      {email.reply_in_thread !== null && (
+        <p className="break-words text-sm text-text-primary">
+          Reply in the thread: {email.reply_in_thread.subject}, from {email.reply_in_thread.from}
+        </p>
+      )}
       <p className="break-words text-sm text-text-primary">To: {email.to.join(', ')}</p>
       {email.cc.length > 0 && <p className="break-words text-sm text-text-primary">Copy: {email.cc.join(', ')}</p>}
       {email.bcc.length > 0 && (
