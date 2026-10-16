@@ -1,7 +1,6 @@
 'use client';
 
 import { parseClientJson } from '@truefoundry/trueforge-core/core/google/clientJson';
-import type { GoogleFeature } from '@truefoundry/trueforge-core/core/google/scopes';
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 
 import { auiInputClass } from '@/atoms/lib/inputClasses.js';
@@ -12,6 +11,7 @@ import type {
   GoogleClientDraft,
   GoogleConnectionStatus,
   GoogleConsentStart,
+  GoogleFeature,
   GoogleSetupPort,
 } from '@/server/googleSetup.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
@@ -197,7 +197,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
       });
       setClient(current => ({ ...current, clientSecret: '' }));
       setBegun(start);
-      window.open(start.authorization_url, '_blank', 'noopener');
+      window.open(start.authorizationUrl, '_blank', 'noopener');
       if (start.setup.mode !== 'paste') void waitForConsent(status);
     });
 
@@ -214,7 +214,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
   const testConnection = () =>
     run(async () => {
       const result = await port.testGoogleConnection();
-      setTestMessage(describeTest(result.result, result.account_email));
+      setTestMessage(describeTest(result.result, result.accountEmail));
       await refreshStatus();
     });
 
@@ -233,7 +233,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
     });
 
   const setup = status?.setup;
-  const clientTypeName = setup?.client_type === 'web' ? 'Web application' : 'Desktop app';
+  const clientTypeName = setup?.clientType === 'web' ? 'Web application' : 'Desktop app';
 
   return (
     <CenteredModal
@@ -272,7 +272,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 Testing: open the consent screen and set the publishing status to Production.
               </p>
             ) : (
-              <p className="text-text-secondary">{status.account_email ?? 'Your Google account'}</p>
+              <p className="text-text-secondary">{status.accountEmail ?? 'Your Google account'}</p>
             )}
             <ul className="space-y-1 text-text-secondary">
               {status.features.map(item => (
@@ -381,12 +381,12 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
             <li>
               <p className="font-medium">Create the client</p>
               <p className="text-text-secondary">
-                {setup.client_type === 'web'
+                {setup.clientType === 'web'
                   ? 'This install has a public address, so choose Web application and add this exact authorized redirect URI:'
                   : 'Choose Desktop app. It needs no redirect address.'}
               </p>
               <CopyField label="Application type" value={clientTypeName} />
-              {setup.client_type === 'web' ? <CopyField label="Redirect URI" value={setup.redirect_uri} /> : null}
+              {setup.clientType === 'web' ? <CopyField label="Redirect URI" value={setup.redirectUri} /> : null}
               <CopyField label="Credentials link" value={GOOGLE_CREDENTIALS_URL} />
             </li>
             <li>

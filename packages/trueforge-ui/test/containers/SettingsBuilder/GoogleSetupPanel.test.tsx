@@ -35,22 +35,22 @@ afterEach(() => {
 
 const CLIENT_ID = '123456789012-abcdefghijklmnop.apps.googleusercontent.com';
 const CLIENT_SECRET = 'GOCSPX-synthetic-secret-value';
-const PASTE_SETUP = { mode: 'paste', client_type: 'desktop', redirect_uri: 'http://127.0.0.1:53682/callback' } as const;
+const PASTE_SETUP = { mode: 'paste', clientType: 'desktop', redirectUri: 'http://127.0.0.1:53682/callback' } as const;
 const WEB_SETUP = {
   mode: 'web',
-  client_type: 'web',
-  redirect_uri: 'https://aman.example.org/api/v1/user/settings/google/oauth/callback',
+  clientType: 'web',
+  redirectUri: 'https://aman.example.org/api/v1/user/settings/google/oauth/callback',
 } as const;
 
 function statusOf(overrides: Partial<GoogleConnectionStatus> = {}): GoogleConnectionStatus {
   return {
     state: 'not_connected',
-    account_email: null,
+    accountEmail: null,
     features: [
       { feature: 'gmail_read', label: 'Read and search your email', granted: false },
       { feature: 'gmail_compose', label: 'Save drafts and send email you approve', granted: false },
     ],
-    has_saved_client: false,
+    hasSavedClient: false,
     setup: PASTE_SETUP,
     ...overrides,
   };
@@ -59,8 +59,8 @@ function statusOf(overrides: Partial<GoogleConnectionStatus> = {}): GoogleConnec
 function connectedStatus(overrides: Partial<GoogleConnectionStatus> = {}): GoogleConnectionStatus {
   return statusOf({
     state: 'connected',
-    account_email: 'ada@example.com',
-    has_saved_client: true,
+    accountEmail: 'ada@example.com',
+    hasSavedClient: true,
     features: [
       { feature: 'gmail_read', label: 'Read and search your email', granted: true },
       { feature: 'gmail_compose', label: 'Save drafts and send email you approve', granted: false },
@@ -71,7 +71,7 @@ function connectedStatus(overrides: Partial<GoogleConnectionStatus> = {}): Googl
 
 function makePort(overrides: Partial<GoogleSetupPort> = {}) {
   const begin = vi.fn<GoogleSetupPort['beginGoogleConsent']>(async () => ({
-    authorization_url: 'https://accounts.example.test/auth',
+    authorizationUrl: 'https://accounts.example.test/auth',
     setup: PASTE_SETUP,
   }));
   const complete = vi.fn<GoogleSetupPort['completeGoogleConsent']>(async () => connectedStatus());
@@ -80,7 +80,7 @@ function makePort(overrides: Partial<GoogleSetupPort> = {}) {
     checkGoogleClient: async () => ({ ok: true, problems: [] }),
     beginGoogleConsent: begin,
     completeGoogleConsent: complete,
-    testGoogleConnection: async () => ({ result: 'ok', account_email: 'ada@example.com' }),
+    testGoogleConnection: async () => ({ result: 'ok', accountEmail: 'ada@example.com' }),
     disconnectGoogle: async () => ({ disconnected: true }),
     ...overrides,
   };
@@ -119,10 +119,10 @@ describe('GoogleSetupPanel', () => {
     renderPanel(makePort({ getGoogleStatus: async () => statusOf({ setup: WEB_SETUP }) }).port);
 
     expect(await screen.findByLabelText('Application type')).toHaveTextContent('Web application');
-    expect(screen.getByLabelText('Redirect URI')).toHaveTextContent(WEB_SETUP.redirect_uri);
+    expect(screen.getByLabelText('Redirect URI')).toHaveTextContent(WEB_SETUP.redirectUri);
     fireEvent.click(screen.getByRole('button', { name: 'Copy Redirect URI' }));
     await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith(WEB_SETUP.redirect_uri);
+      expect(writeText).toHaveBeenCalledWith(WEB_SETUP.redirectUri);
     });
   });
 
@@ -240,7 +240,7 @@ describe('GoogleSetupPanel', () => {
     renderPanel(
       makePort({
         beginGoogleConsent: async () => ({
-          authorization_url: 'https://accounts.example.test/auth',
+          authorizationUrl: 'https://accounts.example.test/auth',
           setup: { ...PASTE_SETUP, mode: 'loopback' },
         }),
       }).port,

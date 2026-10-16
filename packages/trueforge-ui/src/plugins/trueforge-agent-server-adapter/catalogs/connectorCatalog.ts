@@ -363,7 +363,7 @@ export function createConnectorCatalog(
   }
 
   return {
-    ...createGoogleSetupApi(clientOptions),
+    ...createGoogleSetupApi(client),
     getConnectorCatalog: async () => {
       const body = await client.catalogs.mcpServers.list();
       return body.data.map(toUiCatalogEntry);
