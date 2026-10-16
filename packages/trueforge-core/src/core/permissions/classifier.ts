@@ -1115,7 +1115,7 @@ async function holdSearchCall(input: {
     card: {
       plain_what: `Search the web through ${server} for: ${shown}`,
       plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'Once a query leaves this machine it cannot be taken back.',
+      cannot_be_undone: null,
       why_asked_again: input.why === '' ? null : `Held for approval: ${input.why}.`,
       destination: action.mcp_server_name ?? null,
       recipient: null,
@@ -1515,7 +1515,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
         card: {
           plain_what: mapsPlainWhat(action),
           plain_why: plainWhy(ctx.agent_intent),
-          cannot_be_undone: 'Once the place names leave this machine they cannot be taken back.',
+          cannot_be_undone: null,
           why_asked_again: null,
           destination: null,
           recipient: null,

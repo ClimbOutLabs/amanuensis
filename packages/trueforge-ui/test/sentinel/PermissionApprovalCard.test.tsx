@@ -115,6 +115,14 @@ describe('PermissionApprovalCard', () => {
     expect(note.closest('p')?.className).not.toMatch(/warning/);
   });
 
+  it('renders a card with a null cannot-be-undone note without an empty row or the word null', () => {
+    renderCard({ cannot_be_undone: null });
+    expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
+    expect(screen.queryByText(/null/i)).not.toBeInTheDocument();
+    expect(document.querySelector('p:empty')).toBeNull();
+    expect(document.querySelectorAll('p > svg')).toHaveLength(0);
+  });
+
   it("labels the reason as the agent's own words", () => {
     renderCard({ plain_why: 'Looking up a listing.' });
     expect(screen.getByText('Agent says: Looking up a listing.')).toBeInTheDocument();
