@@ -1407,6 +1407,25 @@ describe("SessionsClient", () => {
             }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
     });
           
+    test("create_turn_stream (10)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "stream" : true };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/sessions/session_id/turns").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(429).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessions.createTurnStream("session_id", {})
+            }).rejects.toThrow(TrueForgeTypes.TooManyRequestsError);
+    });
+          
     test("create_turn (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
@@ -1608,6 +1627,25 @@ describe("SessionsClient", () => {
             await expect(async () => {
                 return await client.sessions.createTurn("session_id", {})
             }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+    });
+          
+    test("create_turn (10)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "stream" : false };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/sessions/session_id/turns").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(429).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.sessions.createTurn("session_id", {})
+            }).rejects.toThrow(TrueForgeTypes.TooManyRequestsError);
     });
           
     test("get_turn (1)", async () => {

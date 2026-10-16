@@ -7,7 +7,7 @@ description: 'Install Amanuensis from a fresh clone with no Docker, connect a mo
 
 Amanuensis (Aman) is a private, local-first AI workbench: a browser chat interface backed by your own choice of model, with optional tools (MCP connectors), reusable skills, sandboxed code execution, and memory. Nothing about a chat leaves your machine except the calls you explicitly configure — to a model provider, a connector, or a memory bank you point it at. This page takes a fresh checkout to a working chat end to end: install the prerequisites, start the app, connect one model, and send a first message.
 
-The app runs in two modes: **standalone** — one process on your own machine, SQLite storage, no login screen, meant for personal use — and **hosted** — Postgres and Redis, meant for a small team, gated by login once you configure it. This guide uses **standalone**: no Docker, no containers, just the app running on your machine. It is the fastest path to a working chat. The Docker Compose path, which runs the full hosted topology locally, is covered as an alternative under [Other ways to run it](#other-ways-to-run-it). See [Deployment Security](/deployment-security) before anyone besides you can reach the app.
+The app runs in two modes: **standalone** — one process on your own machine, SQLite storage, login required, meant for personal use — and **hosted** — Postgres and Redis, meant for a small team, gated by login once you configure it. This guide uses **standalone**: no database server and no containers for the app itself; only the local login provider runs in Docker. It is the fastest path to a working chat. The Docker Compose path, which runs the full hosted topology locally, is covered as an alternative under [Other ways to run it](#other-ways-to-run-it). See [Deployment Security](/deployment-security) before anyone besides you can reach the app.
 
 ## Prerequisites
 
@@ -29,10 +29,15 @@ git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
 corepack enable
 pnpm install --frozen-lockfile
 cp packages/trueforge/.env.example packages/trueforge/.env
+```
+
+Login is mandatory in standalone mode, and the server refuses to start without it. In a second terminal run `pnpm dev:login`: it starts a local [Dex](https://dexidp.io) identity provider in Docker and prints the `OIDC_*` lines (and the account to sign in with). Add them to `packages/trueforge/.env`, together with `PUBLIC_BASE_URL=http://localhost:3000`. Any other OIDC provider works too; see [Setup Login](/authentication/overview). Then start the app:
+
+```bash
 pnpm standalone:dev
 ```
 
-The install takes a few minutes the first time. When it finishes, open [http://localhost:3000](http://localhost:3000) — that is the app.
+The install takes a few minutes the first time. When it finishes, open [http://localhost:3000](http://localhost:3000) and sign in — that is the app.
 
 <Note>
   `pnpm standalone:dev` starts the API server without the file watcher: on some Windows machines the watcher
@@ -41,12 +46,12 @@ The install takes a few minutes the first time. When it finishes, open [http://l
   the package-level watch scripts instead (`pnpm --filter @truefoundry/trueforge dev`).
 </Note>
 
-The defaults in `packages/trueforge/.env` work as-is for a local install; nothing else needs editing to reach this point. Two values worth knowing about:
+Besides the `OIDC_*` lines from `pnpm dev:login`, the defaults in `packages/trueforge/.env` work as-is for a local install. Two values worth knowing about:
 
 | Variable | Default | What it is |
 | --- | --- | --- |
-| `TRUEFORGE_API_KEY` | `placeholder-value-please-generate-your-own` | Shared secret the internal schedule controller uses to call the server. Standalone defaults to a local-only value, so this is fine as-is for personal use; generate your own (`openssl rand -hex 32`) before a shared deployment. |
-| <Tooltip tip="Public origin at which users and external services reach the app. Used to build MCP OAuth and OIDC login callbacks." cta="See the FAQ" href="/quickstart#faq">`PUBLIC_BASE_URL`</Tooltip> | `http://localhost:<port>` | Only needs changing if you put the app behind a different host or port. |
+| `TRUEFORGE_API_KEY` | unset (commented out in `.env.example`) | Shared secret the internal schedule controller uses to call the server. Standalone generates a random key for each process when it is unset, and refuses placeholder values such as `placeholder-value-please-generate-your-own`. Leave it unset, or pin your own key (`openssl rand -hex 32`). |
+| <Tooltip tip="Public origin at which users and external services reach the app. Used to build MCP OAuth and OIDC login callbacks." cta="See the FAQ" href="/quickstart#faq">`PUBLIC_BASE_URL`</Tooltip> | `http://localhost:<port>` | Standalone takes an origin with no path. Set it to `http://localhost:3000` for `pnpm standalone:dev` (the Vite address), or to your HTTPS origin behind a reverse proxy. |
 
 <Note>
   Standalone mode stores its data in a SQLite file in your operating system's application-data directory — no database to
@@ -100,7 +105,7 @@ None of these are required to chat with a model. Each is one sentence plus where
 - **Sandbox** — lets an agent run code and use skills that need a filesystem, via [Daytona](https://www.daytona.io). Standalone mode also supports a built-in local adapter on supported macOS and Linux hosts; hosted mode needs a configured provider. See [Sandbox](/sandbox).
 - **Memory (Hindsight)** — a self-hosted, long-term memory bank the app recalls from and writes to automatically. See the [Memory runbook](/../ops/memory/RUNBOOK.md) and the README's [Memory](https://github.com/ClimbOutLabs/amanuensis#memory) section.
 - **Prompt Guard** — an optional classifier sidecar that screens recalled memories and tool output for prompt injection before they reach the model. See [Deployment Security → Prompt Guard screens](/deployment-security#prompt-guard-screens).
-- **OIDC login** — required before this app is reachable by anyone but you; without it every request is one shared admin identity. See [Setup Login](/authentication/overview).
+- **OIDC login** — always on in standalone; in hosted mode it is required before the app is reachable by anyone but you, since without it every request is one shared admin identity. See [Setup Login](/authentication/overview).
 
 ## Troubleshooting
 
@@ -156,7 +161,7 @@ None of these are required to chat with a model. Each is one sentence plus where
     | --- | --- | --- |
     | `POSTGRES_USER` / `POSTGRES_DB` | `trueforge` / `trueforge` | Credentials for the Postgres container this stack starts for you. |
     | `POSTGRES_PASSWORD` | `trueforge` | Change it before running on any shared machine. |
-    | `TRUEFORGE_API_KEY` | `placeholder-value-please-generate-your-own` | Shared secret the internal schedule controller uses to call the server. Fine as-is for a local, single-machine install; generate your own (`openssl rand -hex 32`) before a shared deployment. |
+    | `TRUEFORGE_API_KEY` | unset (commented out in `.env.example`) | Shared secret the internal schedule controller uses to call the server. This stack runs hosted mode, which falls back to the well-known `placeholder-value-please-generate-your-own` and logs a warning, so it starts with no setup; fine while the ports stay on `127.0.0.1`. To use your own, set `TRUEFORGE_API_KEY` in `packages/trueforge/.env` (`openssl rand -hex 32`). Standalone generates a random key for each process and refuses placeholder values. |
     | `PUBLIC_BASE_URL` | `http://localhost:8791` | Set by `docker-compose.yml` for this stack (the `.env.example` entry is commented out). Only needs changing if you put the app behind a different host or port. |
     | Host ports | `8791`, `5433`, `6380` | App, Postgres, and Redis, all bound to `127.0.0.1` only by this Compose file — not reachable from other machines by default. |
 

@@ -153,7 +153,7 @@ export class RunCodeService implements RunCodeBackend {
     this.sleepMs = options.sleepMs ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
   }
 
-  get driverKind(): 'docker' | 'firecracker' {
+  get driverKind(): IsolationDriver['kind'] {
     return this.driver.kind;
   }
 

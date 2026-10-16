@@ -1,7 +1,17 @@
 import type { ILLM } from '@truefoundry/trueforge-core/core';
+import type { Server } from 'node:http';
 import winston from 'winston';
+import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
 import { type IModelProviderStore } from '../../../../src/db/modelProviderStore';
+import { createSqliteDb } from '../../../../src/db/sqlite/client';
+import { SqliteModelProviderStore } from '../../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
+import { SqliteTokenFactoryUsageStore } from '../../../../src/db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore';
 import { buildSummarizationMessages, summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
+import { createTokenFactoryBudget } from '../../../../src/runtime/tokenFactoryBudget';
+import { ensureEnvManagedTokenFactoryProvider } from '../../../../src/runtime/tokenFactoryProvider';
+import { TENANT_ID } from '../../../../src/tenancy';
+import { startModelEndpointStub } from '../../../fixtures/modelEndpointStub';
+import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 function makeLogger() {
   return winston.createLogger({ silent: true });
@@ -65,6 +75,7 @@ describe('summarizeTurnContent', () => {
     tenantId: 'tenant-1',
     modelProviderStore: fakeModelProviderStore(),
     summarizationModelFqn: 'openai/gpt-4o',
+    tokenFactoryBudget: uncappedTokenFactoryBudget,
     logger: makeLogger(),
   };
 
@@ -188,5 +199,93 @@ describe('summarizeTurnContent', () => {
     );
     expect(maxInFlight).toBeLessThanOrEqual(2);
     expect(maxInFlight).toBeGreaterThan(0);
+  });
+});
+
+describe('summarizeTurnContent on Token Factory', () => {
+  const NOW = new Date('2026-10-15T09:00:00.000Z');
+  const TODAY = '2026-10-15';
+  const CAP = 1000;
+  const servers: Server[] = [];
+
+  afterEach(() => {
+    for (const server of servers.splice(0)) {
+      server.close();
+    }
+  });
+
+  async function setup(providerType: 'tokenfactory' | 'custom') {
+    const stub = await startModelEndpointStub({
+      usage: { prompt_tokens: 150, completion_tokens: 25 },
+      content: '- User has a synthetic test robot named Bleep-Bloop.',
+    });
+    servers.push(stub.server);
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const modelProviderStore = new SqliteModelProviderStore(db);
+    if (providerType === 'tokenfactory') {
+      await ensureEnvManagedTokenFactoryProvider({
+        store: modelProviderStore,
+        tenant_id: TENANT_ID,
+        settings: {
+          apiKey: 'sk-nebius',
+          baseUrl: stub.baseUrl,
+          model: 'nvidia/nemotron-3-super-120b-a12b',
+          cheaperModel: undefined,
+        },
+        logger: makeLogger(),
+      });
+    } else {
+      await modelProviderStore.upsertProvider({
+        tenant_id: TENANT_ID,
+        name: 'local-vllm',
+        manifest: {
+          type: 'custom',
+          name: 'local-vllm',
+          base_url: stub.baseUrl,
+          models: [{ model_id: 'local-model', name: 'local-model', properties: {} }],
+        },
+      });
+    }
+    const usageStore = new SqliteTokenFactoryUsageStore(db);
+    const tokenFactoryBudget = createTokenFactoryBudget({ store: usageStore, cap: CAP, now: () => NOW });
+    const summarizationModelFqn =
+      providerType === 'tokenfactory' ? 'tokenfactory/nemotron-3-super-120b-a12b' : 'local-vllm/local-model';
+    const run = () =>
+      summarizeTurnContent({
+        userText: 'My robot is named Bleep-Bloop.',
+        assistantText: 'Got it.',
+        tenantId: TENANT_ID,
+        modelProviderStore,
+        summarizationModelFqn,
+        tokenFactoryBudget,
+        logger: makeLogger(),
+      });
+    return { run, usageStore };
+  }
+
+  it('counts the tokens its call reports', async () => {
+    const { run, usageStore } = await setup('tokenfactory');
+
+    expect((await run()).status).toBe('summarized');
+
+    expect((await usageStore.getUsage({ usage_date: TODAY }))?.used_tokens).toBe(175);
+  });
+
+  it('falls back to the verbatim transcript, without a call, once the cap is reached', async () => {
+    const { run, usageStore } = await setup('tokenfactory');
+    await usageStore.addUsage({ usage_date: TODAY, tokens: CAP });
+
+    expect((await run()).status).toBe('failed');
+
+    expect((await usageStore.getUsage({ usage_date: TODAY }))?.used_tokens).toBe(CAP);
+  });
+
+  it('counts nothing on another provider', async () => {
+    const { run, usageStore } = await setup('custom');
+
+    expect((await run()).status).toBe('summarized');
+
+    expect(await usageStore.getUsage({ usage_date: TODAY })).toBeUndefined();
   });
 });

@@ -7,7 +7,6 @@ import type { RequestReplyRouter } from '@truefoundry/trueforge-core/request-rep
 import type { Context, ErrorHandler, MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
-import type { Configuration } from 'openid-client';
 import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 import { createAgentImportRouter } from './apis/agentImport';
@@ -41,6 +40,8 @@ import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
 import { resolveRequestContext } from './auth/identity';
+import { listedOriginMiddleware } from './auth/listedOriginContext';
+import { createLoginProxy, isProxiableIssuer } from './auth/loginProxy';
 import {
   createAdminAuthMiddleware,
   createApiKeyAuthMiddleware,
@@ -48,11 +49,20 @@ import {
   createUiSessionAuthMiddleware,
   truefoundryAdminMiddleware,
 } from './auth/middleware';
+import type { OidcDiscoveryHandle } from './auth/oidc';
+import { createRequestGuardMiddleware } from './auth/requestGuard';
 import type { McpCatalog } from './catalog/McpCatalog';
 import type { ModelCatalog } from './catalog/ModelCatalog';
 import type { SandboxCatalog } from './catalog/SandboxCatalog';
 import type { SkillCatalog } from './catalog/SkillCatalog';
-import configuration, { getPublicUiBasePath, getTrueForgeAuthMode, TrueForgeAuthMode } from './config';
+import configuration, {
+  getAllowedOrigins,
+  getPublicBaseUrl,
+  getPublicUiBasePath,
+  getTrueForgeAuthMode,
+  isTrueFoundryModeEnabled,
+  TrueForgeAuthMode,
+} from './config';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
@@ -80,6 +90,8 @@ import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import type { resolveSandboxProvider } from './runtime/sessionResources';
+import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
+import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
 import { InvalidCronError } from './schemas/schedule';
 import { zodErrorResponse, zodValidationHook } from './zodErrorResponse';
@@ -133,6 +145,9 @@ export function createAppErrorHandler(params: { logger: Logger }): ErrorHandler 
     }
     if (error instanceof InvalidCronError) {
       return c.json({ error: { message: error.message } }, 400);
+    }
+    if (error instanceof TokenFactoryDailyCapError) {
+      return c.json({ error: { message: error.message, type: 'rate_limit', code: error.code } }, 429);
     }
     if (error instanceof HTTPException) {
       if (error.status >= 500) {
@@ -244,6 +259,8 @@ export interface ServerDeps<TTransaction> {
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Per-instance daily Token Factory token cap, enforced when a turn starts on Token Factory. */
+  tokenFactoryBudget: TokenFactoryBudget;
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   sessions: Sessions<SessionCustom, TurnCustom>;
@@ -257,8 +274,8 @@ export interface ServerDeps<TTransaction> {
   /** Hands out each turn's resumable event stream to the create and subscribe handlers. */
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
   logger: Logger;
-  /** Discovered openid-client configuration; undefined when browser login is disabled. */
-  oidcClient: Configuration | undefined;
+  /** Background OIDC discovery; undefined when browser login is disabled. */
+  oidcDiscovery: OidcDiscoveryHandle | undefined;
   /** Startup-selected authenticator; middleware is built from this once per app. */
   authenticator: Authenticator;
   /** Startup-selected agent authorization policy. */
@@ -271,6 +288,10 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const adminAuthMiddleware = createAdminAuthMiddleware(deps.authenticator);
   const scheduleExecutionAuthMiddleware = createApiKeyAuthMiddleware(configuration.TRUEFORGE_API_KEY);
   const authEnabled = getTrueForgeAuthMode() !== TrueForgeAuthMode.Standalone;
+  const envManagedProviders = envManagedModelProviderNames({
+    apiKey: configuration.NEBIUS_API_KEY,
+    managedByTrueFoundry: isTrueFoundryModeEnabled(),
+  });
   const scheduleTurnDeps = {
     scheduleStore: deps.scheduleStore,
     sessions: deps.sessions,
@@ -291,6 +312,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     turnArtifactStore: deps.turnArtifactStore,
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
+    tokenFactoryBudget: deps.tokenFactoryBudget,
   };
 
   if (configuration.ACCESS_LOGS) {
@@ -299,14 +321,43 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   if (!configuration.STANDALONE && configuration.TRUEFORGE_MTLS_ENABLED) {
     app.use('*', createClientCertificateMiddleware(deps.logger));
   }
+  // Standalone sessions are cookies, so reject foreign Hosts and cross-origin writes before any router.
+  if (configuration.STANDALONE && authEnabled) {
+    app.use(
+      '*',
+      createRequestGuardMiddleware({
+        port: configuration.PORT,
+        publicBaseUrl: getPublicBaseUrl(),
+        allowedOrigins: getAllowedOrigins(),
+      }),
+    );
+  }
+  // Connector sign-in returns to the listed address the request came to, however deep in the request it is built.
+  if (configuration.STANDALONE && getAllowedOrigins().length > 0) {
+    app.use('*', listedOriginMiddleware(getAllowedOrigins));
+  }
   app.use('*', createRequestBodyLimitMiddleware(configuration.MAX_REQUEST_BODY_BYTES));
+
+  // An instance opened on several addresses serves its sign-in service under the app's own origin.
+  if (
+    configuration.STANDALONE &&
+    configuration.OIDC !== undefined &&
+    getAllowedOrigins().length > 0 &&
+    isProxiableIssuer(configuration.OIDC.OIDC_ISSUER_URL)
+  ) {
+    const issuerPath = new URL(configuration.OIDC.OIDC_ISSUER_URL).pathname.replace(/\/$/, '');
+    app.all(
+      `${issuerPath}/*`,
+      createLoginProxy({ issuerUrl: configuration.OIDC.OIDC_ISSUER_URL, allowedOrigins: getAllowedOrigins() }),
+    );
+  }
 
   app.get('/healthz', c => c.json({ status: 'ok', version: PACKAGE_VERSION }));
 
   app.route(
     '/api/v1/auth',
     createAuthRouter({
-      oidcClient: deps.oidcClient,
+      oidcDiscovery: deps.oidcDiscovery,
       logger: deps.logger,
       authMiddleware,
     }),
@@ -332,6 +383,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveModelProviderStore: deps.resolveModelProviderStore,
         withTransaction: deps.withTransaction,
         resolveRequestContext,
+        globalSettingsStore: deps.globalSettingsStore,
+        logger: deps.logger,
       }),
       authMiddleware,
     ),
@@ -438,6 +491,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveSkillStore: deps.resolveSkillStore,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
+        envManagedModelProviderNames: envManagedProviders,
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,
@@ -709,6 +763,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         repositoryStore: deps.repositoryStore,
         turnArtifactStore: deps.turnArtifactStore,
         globalSettingsStore: deps.globalSettingsStore,
+        tokenFactoryBudget: deps.tokenFactoryBudget,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         sandboxProviderResolver: deps.sandboxProviderResolver,

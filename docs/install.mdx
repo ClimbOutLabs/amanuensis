@@ -11,8 +11,9 @@ One instance serves one person. If two people in the same household need it, the
 
 ## What you need
 
-- A computer with Docker: Docker Engine with Compose v2 on Linux, or Docker Desktop on macOS. On Windows, run inside WSL2; native Windows is not supported. Rootless Docker and Podman are not supported.
-- 10 GB of free disk space.
+- A computer with Docker: Docker Engine with Compose v2 or newer on Linux, or Docker Desktop on macOS. On Windows, run inside WSL2; native Windows is not supported. Rootless Docker and Podman are not supported.
+- 10 GB of free disk space, and on Linux 20 GB more under `/var/lib` for the sandbox's slot disks (they are sparse and use real space only as code runs).
+- Nothing else: no Node.js is needed. For the sandbox setup the installer downloads a pinned Node.js from nodejs.org (about 35 MB, checked against a SHA-256 pinned in the repository) into `~/.amanuensis/runtime/node`, and uses it only to run that setup. `--use-host-node` uses your own Node.js 22.14 or newer instead; `--no-sandbox` skips all of it.
 - Docker needs at least 6 GB of memory for the first build. The installer blocks below 6 GB and warns between 6 and 8 GB; 8 GB or more is recommended.
 - Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. API keys are entered in the app afterwards, not in the installer. The installer never scans your machine for models; you type the endpoint yourself.
 - A git checkout of this repository. The installer runs from the checkout and builds the images from source.
@@ -27,13 +28,13 @@ installer/install.sh
 
 The installer works in phases and shows you a printed plan before changing anything:
 
-1. **Preflight (read-only).** Checks the OS, architecture, Docker, Compose v2, and free disk. On supported Linux without a working Engine, it offers to install Docker for you.
+1. **Preflight (read-only).** Checks the OS, architecture, Docker, Compose v2 or newer, and free disk. On supported Linux without a working Engine, it offers to install Docker for you.
 2. **Plan and confirmation.** Prints each step as done, will do, or needs root, then asks to continue. `--yes` skips the prompt; `--dry-run` prints the plan and stops without changing anything.
 3. **Downloads.** Fetches third-party base images by pinned digest and the model weight files listed in the printed plan.
-4. **Images.** Builds the app and helper images locally from the checked-out source.
+4. **Images.** Downloads the pinned Node.js runtime for the sandbox setup, builds the app and helper images locally from the checked-out source, then the sandbox slot image (its build log goes to `~/.amanuensis/state/sandbox.log`; the terminal shows one progress line).
 5. **Machine services.** Starts the shared speech-to-text service.
-6. **First instance.** Prompts for the instance details and starts your stack.
-7. **Doctor and summary.** Runs the health checks and prints your URLs, versions, backup location, and next steps.
+6. **First instance.** Prompts for the instance details, starts the four sandbox slots (asking before the `sudo` steps on Linux: installing the AppArmor profile in `/etc/apparmor.d` and loading it, creating the slot disks, and enabling Docker at boot if it is not), then starts your stack connected to them.
+7. **Doctor and summary.** Runs the health checks, then proves the sandbox: every slot's safety checks and a real call from the app to the slots. Prints your URLs, versions, backup location, and next steps.
 
 ### What it asks
 
@@ -43,7 +44,8 @@ For the first instance it prompts, with defaults in brackets:
 - Owner email
 - Address you will use from other devices (press Enter to use this computer only)
 - If you give a public address: address for the sign-in service (its own https address, never a path of the first one)
-- Model server address (optional)
+- Token Factory key (optional; typed hidden, never echoed). Giving one makes Nebius Token Factory the default model and skips the next question
+- Model server address (optional; skipped when you gave a Token Factory key)
 - Password (typed twice, never echoed; at least 8 characters, at most 72 bytes)
 
 Everything else is generated: ports, secrets, and the login setup.
@@ -56,11 +58,34 @@ The printed plan lists every first-run download with its approximate size, inclu
 
 - `--confirm-name NAME`: with `--purge-data`, the instance name typed in advance so it does not prompt.
 - `--password-stdin`: read the owner password from the first line of stdin, before any prompt.
+- `--token-factory-key-stdin`: read the Token Factory key from stdin (the line after the password when `--password-stdin` is also given). The key is never accepted as a command-line value, and it is written only to the instance `.env` (mode 600). See [Feeding the Token Factory key safely](#feeding-the-token-factory-key-safely). On an instance that already exists it replaces the key and restarts the app.
+- `--token-factory-model ID`: the Token Factory model to use (default `nvidia/nemotron-3-super-120b-a12b`).
+- `--token-factory-daily-cap N`: stop answering after N Token Factory tokens per day (default: no cap).
+- `--tls caddy`: serve `--public-url` and `--login-url` over https with Caddy on this computer. See [Https with Caddy](#https-with-caddy).
+- `--tls-root`: let the installer run the printed root steps for `--tls caddy` (and for the Caddy removal of `instance remove`) without asking. `--yes` alone never uses sudo.
+- `--public-ip ADDRESS`: this computer's public IPv4 address for the DNS check of `--tls caddy`, instead of asking a lookup service.
 - `--install-docker`: let the installer run the printed root steps to install Docker Engine (Debian, Ubuntu).
 - `--add-docker-group`: let the installer add your user to the docker group (needs sudo).
+- `--sandbox-root`: let the installer run the printed root steps for the sandbox (AppArmor profile, slot disks) without asking. `--yes` alone never uses sudo.
+- `--no-sandbox`: install without the gVisor sandbox. Run code stays off.
+- `--use-host-node`: run the sandbox setup on this computer's Node.js 22.14 or newer instead of downloading a pinned copy.
 - `--print-root-steps`: print the root steps for installing Docker and stop.
 - `--print-network`: print every host the installer may contact and stop.
 - `--print-proxy-requirements`: print what a reverse proxy in front of an instance must do and stop.
+
+### Feeding the Token Factory key safely
+
+Type the key at the hidden prompt, or read it hidden into a shell variable and hand it over on stdin. A command-line value or `echo KEY |` would put the key in your shell history and in the process list, so the installer refuses the first and these docs never use the second.
+
+```bash
+read -rs KEY                                   # type or paste the key; nothing is shown
+printf '%s\n' "$KEY" | installer/install.sh --yes --token-factory-key-stdin
+unset KEY
+```
+
+`printf` is a shell builtin, so the key never appears as an argument of any process. With `--password-stdin` as well, the password is the first line and the key the second.
+
+To rotate the key, run the same command again on the machine. For an instance that already exists, the installer replaces `NEBIUS_API_KEY` in the managed block of its `.env` (mode 600, written atomically), prints `Token Factory key updated; restarting the app`, and recreates the app container. Add `--name <instance>` when there is more than one instance and none is called `main`.
 
 ### Fresh Docker installs on Linux
 
@@ -68,7 +93,9 @@ If the installer just installed Docker for you, it finishes the same run without
 
 ## First login
 
-When the installer finishes, it prints an address like `http://127.0.0.1:<port>` (`localhost` works too). Open it in your browser and sign in with the owner email and the password you set. The first run is local only: the app and its login server are reached over plain HTTP on loopback.
+When the installer finishes, it prints a short table with the addresses to open. By default Aman answers at every address this computer has on a private network (`127.0.0.1`, `localhost`, its LAN address, its Tailscale address, its host name, `<name>.local` and its MagicDNS name), and signing in works from each of them: open any one in a browser, from this computer or another device, and sign in with the owner email and the password you set. The sign-in service itself stays on this computer; the app passes its pages through under its own address.
+
+On a home network the connection is plain HTTP, so the password is not encrypted on the way; Tailscale encrypts it. A public address is never used over plain HTTP: for access from the internet use `--public-url`, `--login-url` and `--tls caddy`. `--address <name or private address>` (repeatable) adds a name this computer cannot work out itself, and `--local-only` keeps the app on `127.0.0.1` alone. If this computer gets a new address later, `aman doctor network` says so and `aman doctor network --fix` adds it.
 
 Your password is never stored anywhere. The installer hashes it once and keeps only the hash.
 
@@ -84,13 +111,29 @@ installer/install.sh instance remove <name> # stop and remove it; data volumes a
 
 `instance add` prompts for the new owner's details, picks free loopback ports by testing binds (override with `--port` and `--login-port`), generates fresh secrets, and waits for the instance to answer its health check.
 
-`instance remove` stops the stack and deletes its containers and config, but keeps the data volumes. To delete the data too:
+`instance remove` stops the stack and its sandbox slots and deletes their containers and config, but keeps the data volumes. To delete the data too:
 
 ```bash
 installer/install.sh instance remove <name> --purge-data
 ```
 
 This asks you to type the instance name to confirm (or pass it in advance with `--confirm-name`). The installer never deletes a volume otherwise.
+
+An instance served with `--tls caddy` also has a site file in `/etc/caddy/aman.d`. `instance remove` prints the root steps that delete it and reload Caddy (`sudo rm -f /etc/caddy/aman.d/<name>.caddyfile`, then `systemctl reload-or-restart caddy`) and runs them after you answer yes or pass `--tls-root`. Without consent the instance is still removed, a warning says that Caddy keeps serving its names, and the steps stay yours to run.
+
+## Adding sign-in users to an instance
+
+To let other people (for example hackathon judges) sign in to one instance without giving them their own, add members:
+
+```bash
+installer/install.sh instance add-user <name> --email <address> [--role member] [--instance <instance>]
+installer/install.sh instance list-users
+installer/install.sh instance remove-user <name>
+```
+
+`add-user` generates a password, prints it once, and stores only its hash in the instance's `dex.env`. To choose the password yourself, pass `--password-stdin` and give it on the first line of stdin; it is never a command-line value. The command adds the user to the sign-in service and to the app's `OIDC_ALLOWED_EMAILS`, then restarts both. Running it again for the same user changes nothing and keeps the password; to reset a password, run `remove-user` and `add-user`.
+
+Members can chat and see their own history. Only the owner is an admin: members cannot open server settings (model providers, connectors, sandbox, skills) and see only their own sessions. `--role member` is the only role. Users are kept in the installer's registry, so a re-run, an upgrade or an instance restart keeps them. `list-users` shows names, emails and roles, never hashes, and `aman doctor` reports the user count. With several instances, pass `--instance`.
 
 ## Using it from other devices
 
@@ -103,9 +146,27 @@ The first run is local only. To reach an instance from another device on your ne
 
 When you set a public URL, that instance's URL and its login issuer switch to HTTPS behind your proxy. An HTTP login issuer is only allowed for loopback addresses.
 
+### Https with Caddy
+
+On an Ubuntu or Debian machine with a public address you can let the installer be that proxy:
+
+```bash
+installer/install.sh --public-url https://<app-name> --login-url https://<login-name> --tls caddy
+```
+
+Create two DNS A records first, one for each name, both pointing at this machine's public address. The installer then:
+
+1. Checks that both names resolve to this machine's public address. If not, it says which one does not and stops before anything is requested from Let's Encrypt.
+2. Prints the root steps and runs them only after you answer yes (or pass `--tls-root`): install Caddy from the Ubuntu package archive, replace the package's default `:80` site with a main Caddyfile that only imports `/etc/caddy/aman.d` (the original is kept once as `/etc/caddy/Caddyfile.aman-orig`, and the admin API stays on localhost), check the new site file together with the other instances' files before it replaces the previous one, and reload Caddy. A file Caddy rejects never replaces a working one. No container image is pulled for Caddy.
+3. Lets the app reach the login name through this machine (an `extra_hosts` entry), so sign-in does not depend on the machine reaching its own public address.
+
+Both names are served with `Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy` and `X-Frame-Options: DENY`, each added only when the app or the login service did not send it. The installer changes no firewall. Open only TCP 443 to the internet, plus SSH from your own address; port 80 can stay closed. The names are only ever given on the command line or at the prompts; nothing in the installer or its files contains a domain.
+
+`aman doctor` then also tries the public health address and the login discovery document over https, and (with a Token Factory key) the model.
+
 ## Doctor
 
-The doctor binary is not on your PATH. It lives at `~/.amanuensis/bin/amanuensis`. Either run it with the full path, or add the folder to your PATH:
+The doctor binary is not on your PATH. It lives at `~/.amanuensis/bin/aman`. Either run it with the full path, or add the folder to your PATH:
 
 ```bash
 export PATH="$HOME/.amanuensis/bin:$PATH"   # add to your shell profile to keep it
@@ -114,10 +175,14 @@ export PATH="$HOME/.amanuensis/bin:$PATH"   # add to your shell profile to keep 
 Doctor checks the whole setup and tells you exactly what to do about anything it finds:
 
 ```bash
-amanuensis doctor                 # everything: machine plus every instance
-amanuensis doctor --instance main # one instance only
-amanuensis doctor --deep          # raises the probe timeout to 30 seconds
-amanuensis doctor --json          # machine-readable output
+aman doctor                 # everything: machine plus every instance
+aman doctor --instance main # one instance only
+aman doctor --deep          # raises the probe timeout to 30 seconds
+aman doctor --json          # machine-readable output
+aman doctor sandbox         # sandbox: every slot's safety checks, then a real call through the app
+aman doctor sandbox --fix   # repair the sandbox: rebuild the image, reload AppArmor, recreate disks, restart the slots
+aman doctor network         # are all this computer's addresses listed for sign-in?
+aman doctor network --fix   # add the new ones and restart the instance
 ```
 
 Each check reports one of four states:
@@ -127,13 +192,13 @@ Each check reports one of four states:
 - **fail**: broken; the check prints the exact command that fixes it.
 - **off**: intentionally disabled; silent.
 
-The command exits 0 when nothing fails, 1 when anything fails, and 2 on a usage error. Doctor is read-only; to repair, rerun the installer.
+The command exits 0 when nothing fails, 1 when anything fails, and 2 on a usage error. `aman doctor` is read-only; to repair, rerun the installer. The one repair it does itself is `aman doctor sandbox --fix`, which asks before any `sudo` and runs on the same pinned Node.js (or your own, if you installed with `--use-host-node`).
 
 Common checks and what they mean:
 
 | Check         | Fails when                                      | Fix                                                             |
 | ------------- | ----------------------------------------------- | --------------------------------------------------------------- |
-| docker        | Engine not answering, Compose v2 missing        | Start the daemon; on Linux, accept the installer's Docker offer |
+| docker        | Engine not answering, Compose v2 or newer missing     | Start the daemon; on Linux, accept the installer's Docker offer |
 | docker_memory | Docker has less than 6 GB of memory             | Raise it in Docker Desktop under Settings, Resources, Memory. On Linux, free up memory or add swap |
 | images        | A pinned image is missing locally               | Rerun the installer                                             |
 | service       | An instance's containers are unhealthy          | The check prints the start command                              |
@@ -141,6 +206,10 @@ Common checks and what they mean:
 | database      | SQLite is not writable or migrations are behind | The check prints the start command                              |
 | disk          | Under 2 GB free is a fail                       | Free space or prune unused images                               |
 | clock         | Machine clock disagrees with the containers     | Enable automatic time sync                                      |
+| run_code      | The app cannot reach the sandbox slots, or a slot fails a safety check | Run `aman doctor sandbox --fix`                   |
+| model         | Token Factory refuses the key, does not list the model, or the model answers a tool call without `tool_calls` | The check says which; fix `NEBIUS_API_KEY` or `TOKEN_FACTORY_MODEL` in the instance `.env` and restart |
+| public_url    | The public https address does not answer the health check (https instances only) | Check DNS, Caddy (`sudo systemctl status caddy`) and port 443 |
+| public_login  | The login discovery document is not served over https with the configured issuer | Same as above; the issuer in the instance `.env` must be the address Caddy serves for sign-in |
 
 A fresh install never warns about backups until the first backup exists.
 
@@ -164,7 +233,7 @@ Upgrade refuses to start unless doctor shows no failures, unless you pass `--for
 
 ## What is off in this version
 
-Running code (`run_code`) and email attachment extraction show as **off** in this version, with the plain reason shown in the app. The sandbox broker that serves them ships in a later version. Everything else works.
+After a normal install the assistant can run code (Python and shell, in a sandbox with no network) and read PDFs and images you attach in a chat, including scanned pages and text in many languages (English, Portuguese, Spanish, French, German, Italian, Dutch, Hindi, Marathi, Arabic, Russian, Chinese, Japanese and Korean). Settings → Sandbox shows whether the sandbox is ready, `aman doctor` reports code and attachments separately, and new chats have the sandbox enabled. Email attachments are read the same way once an email connection hands them over. Skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` can do neither. An install from before this release gets PDF and image reading with `install.sh upgrade`, which rebuilds the sandbox image (about 140 MB larger) and starts it again.
 
 ## Troubleshooting
 
@@ -176,7 +245,7 @@ Running code (`run_code`) and email attachment extraction show as **off** in thi
 
 **Clock skew.** If logins or certificate checks fail right after a sleep or a VM resume, check the machine clock. Turn on automatic time synchronization and run doctor again.
 
-**Login unavailable while the login server starts.** The login server takes a few seconds to come up on a first install. Wait, reload the page, and if it still fails, run `amanuensis doctor` and follow the login check's fix.
+**Login unavailable while the login server starts.** The login server takes a few seconds to come up on a first install. Wait, reload the page, and if it still fails, run `aman doctor` and follow the login check's fix.
 
 ## Privacy notes
 

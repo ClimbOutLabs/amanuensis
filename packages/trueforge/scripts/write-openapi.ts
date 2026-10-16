@@ -41,10 +41,12 @@ import { SqliteSessionMetricsStore } from '../src/db/sqlite/session-metrics/Sqli
 import { SqliteSessionStore } from '../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSkillStore } from '../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteSpaceStore } from '../src/db/sqlite/space-store/SqliteSpaceStore';
+import { SqliteTokenFactoryUsageStore } from '../src/db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore';
 import { SqliteOAuthTokenStore } from '../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../src/runtime/event-subscription';
+import { createTokenFactoryBudget } from '../src/runtime/tokenFactoryBudget';
 import { TurnDrainRegistry } from '../src/runtime/turnDrains';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -107,6 +109,7 @@ const app = createServerApp({
   scheduleStore: new SqliteScheduleStore(db),
   turnArtifactStore: new SqliteTurnArtifactStore(db),
   globalSettingsStore: new SqliteGlobalSettingsStore(db),
+  tokenFactoryBudget: createTokenFactoryBudget({ store: new SqliteTokenFactoryUsageStore(db), cap: undefined }),
   tokenStore,
   sessionStore,
   sessionMetricsStore: new SqliteSessionMetricsStore(db),
@@ -118,7 +121,7 @@ const app = createServerApp({
   requestReplyRouter: new RequestReplyRouter(),
   eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
   logger: winston.createLogger({ silent: true }),
-  oidcClient: undefined,
+  oidcDiscovery: undefined,
   authenticator: new StandaloneAuthenticator(),
   authorizer: new TrueForgeAuthorizer(),
 });

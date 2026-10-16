@@ -274,6 +274,13 @@ export interface GlobalSettingsTable {
   updated_at: string;
 }
 
+/** One row per UTC day (`YYYY-MM-DD`); not tenant-scoped. */
+export interface TokenFactoryUsageTable {
+  usage_date: string;
+  used_tokens: number;
+  updated_at: string;
+}
+
 /** Durable grant rows. `revoked_at` blocks future dispatch reservations. */
 export interface ImplementationPlanGrantTable {
   tenant_id: string;
@@ -729,4 +736,5 @@ export interface Database {
   artifact_blob: ArtifactBlobTable;
   turn_artifact: TurnArtifactTable;
   global_settings: GlobalSettingsTable;
+  token_factory_usage: TokenFactoryUsageTable;
 }

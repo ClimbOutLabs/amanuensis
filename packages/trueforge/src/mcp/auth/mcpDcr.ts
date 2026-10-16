@@ -21,6 +21,7 @@ import {
   mcpAuthorizationServerOrigin,
   mcpClientInformation,
   mcpOAuthCallbackUrl,
+  mcpOAuthRedirectUris,
   oauthTokensToOAuthToken,
 } from './mcpOAuthHelpers';
 import type {
@@ -176,10 +177,11 @@ async function discoverMcpAuthorizationServerMetadata(params: {
 export async function createMcpOAuthClient(params: {
   mcpServerUrl: string;
   mcpServerName: string;
-  redirectUri: string;
+  /** Registered together; the first is the one this request uses. */
+  redirectUris: string[];
   clientName: string;
 }): Promise<OAuthClientRecord> {
-  const { mcpServerUrl, mcpServerName, redirectUri, clientName } = params;
+  const { mcpServerUrl, mcpServerName, redirectUris, clientName } = params;
   let discovered: Awaited<ReturnType<typeof discoverOAuthServerInfo>>;
   try {
     discovered = await discoverOAuthServerInfo(mcpServerUrl, { fetchFn: mcpOAuthFetch });
@@ -207,19 +209,33 @@ export async function createMcpOAuthClient(params: {
       `Authorization server for MCP server '${mcpServerName}' advertises PKCE methods without S256`,
     );
   }
-  return registerMcpClientWithAuthMethodFallback({
-    authorizationServerUrl,
-    metadata,
-    clientMetadata: {
-      client_name: clientName,
-      redirect_uris: [redirectUri],
-      grant_types: ['authorization_code', 'refresh_token'],
-      response_types: ['code'],
-    },
-    mcpServerName,
-    authorizationEndpoint: metadata.authorization_endpoint,
-    tokenEndpoint: metadata.token_endpoint,
-  });
+  const register = (uris: string[]): Promise<OAuthClientRecord> =>
+    registerMcpClientWithAuthMethodFallback({
+      authorizationServerUrl,
+      metadata,
+      clientMetadata: {
+        client_name: clientName,
+        redirect_uris: uris,
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+      },
+      mcpServerName,
+      authorizationEndpoint: metadata.authorization_endpoint,
+      tokenEndpoint: metadata.token_endpoint,
+    });
+  const [first] = redirectUris;
+  if (first === undefined) {
+    throw new McpDcrConfigurationError(`No OAuth callback address for MCP server '${mcpServerName}'`);
+  }
+  try {
+    return await register(redirectUris);
+  } catch (error: unknown) {
+    // A server that refuses some of the addresses (for example plain http ones) still gets this request's own.
+    if (redirectUris.length === 1) {
+      throw error;
+    }
+    return register([first]);
+  }
 }
 
 /**
@@ -282,7 +298,7 @@ export async function ensureMcpClientRegistered(params: {
   const client = await createMcpOAuthClient({
     mcpServerUrl: params.mcpServerUrl,
     mcpServerName: params.mcpServerName,
-    redirectUri: mcpOAuthCallbackUrl(),
+    redirectUris: mcpOAuthRedirectUris(),
     clientName: params.clientName,
   });
   await params.mcpServerStore.saveClient({ id: params.serverId, record: client });
