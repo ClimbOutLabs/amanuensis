@@ -32,7 +32,7 @@ const approval = {
 };
 const pre = { type: 'text' as const, text: "I'll run that calculation for you." };
 
-const scenes: Record<string, { messages: ThreadMessageLike[]; isRunning: boolean }> = {
+const scenes: Record<'done' | 'streaming' | 'approval', { messages: ThreadMessageLike[]; isRunning: boolean }> = {
   done: {
     isRunning: false,
     messages: [
@@ -65,7 +65,7 @@ const scenes: Record<string, { messages: ThreadMessageLike[]; isRunning: boolean
 };
 
 function Harness() {
-  const current = scenes[scene] ?? scenes.done;
+  const current = scene === 'streaming' ? scenes.streaming : scene === 'approval' ? scenes.approval : scenes.done;
   const runtime = useExternalStoreRuntime<ThreadMessageLike>({
     messages: current.messages,
     isRunning: current.isRunning,
