@@ -28,6 +28,7 @@ export const CatalogWellKnownModelProviderSchema = z
   .object({
     type: CatalogWellKnownModelProviderTypeSchema,
     logo: z.url().optional().describe('URL of the provider logo asset'),
+    base_url: z.url().optional().describe("Preset API base URL; absent means the provider type's default."),
     models: z.array(CatalogModelSchema).describe('Preset models'),
   })
   .strict()

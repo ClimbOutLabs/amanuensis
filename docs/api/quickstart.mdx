@@ -22,12 +22,12 @@ Point the client at your server's `baseUrl`, and pass a `token` only when the se
 
 | Server mode | Token | What to do |
 | --- | --- | --- |
-| **No login** (local `npx`, the default) | Not needed | Omit `token`. The SDK talks to the server as the shared local admin. |
-| **OIDC login** (hosted / team deployments) | Required | Send your OIDC **ID token** as a bearer token. |
+| **No login** (hosted mode with OIDC unset) | Not needed | Omit `token`. The SDK talks to the server as the shared local admin. |
+| **OIDC login** (standalone, and hosted / team deployments) | Required | Send your OIDC **ID token** as a bearer token. |
 
 <Tabs>
-  <Tab title="No login (default)">
-    Local mode has no login, so you connect with just a `baseUrl`:
+  <Tab title="No login (hosted, OIDC unset)">
+    Standalone mode always requires login. A hosted server with OIDC unset has none, so you connect with just a `baseUrl`:
 <CodeGroup>
     ```typescript wrap
     import { TrueForge } from '@truefoundry/trueforge-sdk';

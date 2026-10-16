@@ -115,6 +115,37 @@ describe('listMemoryTurnContext', () => {
   });
 });
 
+describe('listMemoryTurnContext server-side filtering', () => {
+  it('asks only for recall and profile events, and only newer ones when given a cursor', async () => {
+    const requested: URL[] = [];
+    const fetchMock: typeof fetch = async input => {
+      const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+      requested.push(url);
+      return eventsPage([{ turn_id: 'trn_3', event: profileEventRaw }]);
+    };
+    const client = createTrueForgeClient({ fetch: fetchMock });
+
+    await listMemoryTurnContext(client, { sessionId: 'ses_1' });
+    const context = await listMemoryTurnContext(client, { sessionId: 'ses_1', afterEventId: 'evt_recall_1' });
+
+    assert.deepEqual(
+      requested.map(url => url.searchParams.getAll('types')),
+      [
+        ['aman.memory.recall', 'aman.profile.learned'],
+        ['aman.memory.recall', 'aman.profile.learned'],
+      ],
+    );
+    assert.deepEqual(
+      requested.map(url => url.searchParams.get('after_event_id')),
+      [null, 'evt_recall_1'],
+    );
+    assert.deepEqual(
+      context.map(item => [item.turnId, item.profile?.revision]),
+      [['trn_3', 1]],
+    );
+  });
+});
+
 describe('createHarnessChatServer listEvents / createTurn', () => {
   it('excludes aman.memory.recall and aman.profile.learned from the vendor-typed listEvents result', async () => {
     const fetchMock: typeof fetch = async input => {

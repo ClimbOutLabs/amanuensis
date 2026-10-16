@@ -19,6 +19,7 @@ import type { ProfileLearningDrainMember, ProfileLearningPassConfig } from '../.
 import { resolveSandboxProvider } from '../../../src/runtime/sessionResources';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 function tick(): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, 25));
@@ -121,6 +122,7 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
         personalizationStore,
         eventStore: new RecordingEventStore(),
         modelProviderStore: new SqliteModelProviderStore(db),
+        tokenFactoryBudget: uncappedTokenFactoryBudget,
         memoryClient: undefined,
         tenantId: 'default',
         createdBy: 'user-a',

@@ -18,6 +18,7 @@ import type { Logger } from 'winston';
 import type { AgentRecord, IAgentStore } from '../../db/agentStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import { getModelDetails } from '../sessionResources';
+import { meterHelperLlm, type TokenFactoryBudget } from '../tokenFactoryBudget';
 
 /** Bounded model call; summaries are short and must not delay the drain. */
 const SUMMARIZE_TIMEOUT_MS = 30_000;
@@ -144,6 +145,7 @@ export async function summarizeTurnContent(params: {
   modelProviderStore: IModelProviderStore;
   /** Model to summarize with; when undefined the turn is not summarized. */
   summarizationModelFqn: string | undefined;
+  tokenFactoryBudget: TokenFactoryBudget;
   logger: Logger;
   /** Test seam; production leaves it unset and resolves a VercelAILLM over the configured provider. */
   resolveLlm?: ((modelFqn: string) => Promise<ILLM>) | undefined;
@@ -179,11 +181,16 @@ export async function summarizeTurnContent(params: {
             name,
             store: modelProviderStore,
           });
-          return new VercelAILLM({
-            providerConfig,
+          return meterHelperLlm({
+            llm: new VercelAILLM({
+              providerConfig,
+              logger,
+              signal: AbortSignal.timeout(SUMMARIZE_TIMEOUT_MS),
+              streamTimeout,
+            }),
+            providerType: providerConfig.provider.type,
+            budget: params.tokenFactoryBudget,
             logger,
-            signal: AbortSignal.timeout(SUMMARIZE_TIMEOUT_MS),
-            streamTimeout,
           });
         });
       const llm = await resolveLlm(summarizationModelFqn);

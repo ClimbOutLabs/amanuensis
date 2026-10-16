@@ -391,8 +391,31 @@
       },
       "ApprovalToolCallRef": {
         "properties": {
+          "can_always_allow": {
+            "description": "Whether the owner may allow this tool for good.",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "description": "ISO 8601 time after which a held action can no longer be approved.",
+            "type": "string"
+          },
+          "held": {
+            "description": "Set when a scheduled run held this action for the owner. The run did not wait for an answer.",
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
           "id": {
             "description": "Tool call id awaiting action.",
+            "type": "string"
+          },
+          "not_saved": {
+            "description": "Set when a scheduled run could not save this action for the owner, and why. It will not run.",
+            "enum": [
+              "too_many",
+              "helper_agent"
+            ],
             "type": "string"
           },
           "source_event_id": {
@@ -1332,6 +1355,11 @@
       "CatalogWellKnownModelProvider": {
         "additionalProperties": false,
         "properties": {
+          "base_url": {
+            "description": "Preset API base URL; absent means the provider type's default.",
+            "format": "uri",
+            "type": "string"
+          },
           "logo": {
             "description": "URL of the provider logo asset",
             "format": "uri",
@@ -1551,6 +1579,10 @@
       "ConfiguredModelProvider": {
         "additionalProperties": false,
         "properties": {
+          "env_managed": {
+            "description": "True when the server derives this provider from its environment; it is read-only here.",
+            "type": "boolean"
+          },
           "manifest": {
             "$ref": "#/components/schemas/ModelProviderManifest"
           },
@@ -2694,6 +2726,14 @@
         "properties": {
           "data": {
             "properties": {
+              "backend": {
+                "description": "Which backend runs code: docker, or the isolated sandbox slots.",
+                "enum": [
+                  "docker",
+                  "slots"
+                ],
+                "type": "string"
+              },
               "detail": {
                 "description": "Technical detail from the sandbox check. Absent when the state says it all.",
                 "type": "string"
@@ -2709,7 +2749,8 @@
                   "signature_unverified",
                   "image_unavailable",
                   "isolation_refused",
-                  "unsupported_platform"
+                  "unsupported_platform",
+                  "slots_unavailable"
                 ],
                 "type": "string"
               }
@@ -17883,7 +17924,7 @@
                 }
               }
             },
-            "description": "The turn conflicts with the session as stored. `error.code` says which: `stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), `previous_turn_running` (the prior turn is still executing), `turn_already_exists` (that turn id is taken), or `approval_conflict` (a resubmitted decision contradicts the one already recorded)."
+            "description": "The turn conflicts with the session as stored. `error.code` says which: `stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), `previous_turn_running` (the prior turn is still executing), `turn_already_exists` (that turn id is taken), or `approval_conflict` (a resubmitted decision contradicts the one already recorded), or `held_action_expired`, `held_action_changed`, `held_action_not_allowed`, `held_action_tool_gone` or `held_action_sign_in` (a held action cannot run now; nothing was done)."
           },
           "412": {
             "content": {
@@ -17914,6 +17955,16 @@
               }
             },
             "description": "The request is well-formed but cannot be processed: a referenced resource is missing (named agent, model, MCP server, skill, or sandbox provider), sandbox is required but unavailable (e.g. file uploads), or the turn input conflicts with current state (e.g. unresolved tool calls or approvals, tool name collision)."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Today's Token Factory token budget is used up (`error.code` is `token_factory_daily_cap_reached`). It resets at midnight UTC."
           }
         },
         "summary": "Create and execute a turn in a session",
@@ -19040,7 +19091,7 @@
                 }
               }
             },
-            "description": "A model provider with this name already exists."
+            "description": "A model provider with this name already exists, or the provider is managed by the server environment (`error.code` is `env_managed_provider`)."
           },
           "424": {
             "content": {
@@ -19096,6 +19147,16 @@
             },
             "description": "Invalid request body, or redacted API key with no stored secret to keep."
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The provider is managed by the server environment (`error.code` is `env_managed_provider`)."
+          },
           "424": {
             "content": {
               "application/json": {
@@ -19150,6 +19211,16 @@
               }
             },
             "description": "No model provider with this name"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The provider is managed by the server environment (`error.code` is `env_managed_provider`)."
           }
         },
         "summary": "Delete a model provider",

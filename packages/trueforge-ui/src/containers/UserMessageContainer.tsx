@@ -3,6 +3,7 @@
 import { useActionBarCopy, useActionBarEdit, useThreadIsRunning } from '@assistant-ui/core/react';
 import { MessagePrimitive, useAui, useAuiState } from '@assistant-ui/react';
 
+import { copyText } from '@/utils/copyText.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { MessageAttachmentsContainer } from './AttachmentsContainer.js';
@@ -22,7 +23,7 @@ export function UserMessageContainer() {
   );
   const { edit, disabled: editDisabled } = useActionBarEdit();
   const { copy, isCopied } = useActionBarCopy({
-    copyToClipboard: value => navigator.clipboard.writeText(value),
+    copyToClipboard: value => copyText(value),
   });
 
   return (
