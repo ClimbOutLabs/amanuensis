@@ -18,7 +18,7 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { ConnectorBinding, ShellApprovalBinding } from './approvalTokens';
 import { actionIdFor, verifyApprovalToken, type ApprovalToken } from './approvalTokens';
-import { canonicalShellForm } from './classifier';
+import { canonicalShellFormFor } from './classifier';
 import type { SentinelCallIdentity, SentinelServices } from './context';
 import { extractCardFields } from './extractorRegistry';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
@@ -27,10 +27,14 @@ import type { Tier, TrackedExecutionBinding } from './tier';
 import {
   canonicalFileIdentity,
   canonicalWriteTarget,
+  contentDigest,
   extractExecutedFileOperand,
-  sha256FileContent,
+  isUnderRoot,
+  lexicalPath,
   splitWordsLenient,
   writeTargetTouchesGitControl,
+  type FileDigest,
+  type PathResolution,
 } from './trackedExecutables';
 
 export interface VerifiableCall {
@@ -48,6 +52,10 @@ export interface VerifiableCall {
 export interface DispatchCheckContext extends SentinelCallIdentity {
   services: SentinelServices;
   offline: boolean;
+  /** How the call's paths are resolved; must be the value the classifier used. Absent means the server's filesystem. */
+  path_resolution?: PathResolution | undefined;
+  /** Reads file digests from the remote sandbox the call runs in. */
+  file_digest?: FileDigest | undefined;
 }
 
 /** Build a VerifiableCall from a classified tool call's host-only info. */
@@ -91,6 +99,19 @@ function offlineViolation(call: VerifiableCall, ctx: DispatchCheckContext): stri
   return undefined;
 }
 
+/** The working directory a call names. A relative one is read below the workspace in a remote sandbox, as the classifier read it. */
+function callCwd(input: {
+  params: Record<string, unknown>;
+  workspace_root: string;
+  resolution: PathResolution | undefined;
+}): string {
+  const raw = stringParam(input.params, 'cwd');
+  if (raw === null) {
+    return input.workspace_root;
+  }
+  return input.resolution === 'remote' ? (lexicalPath({ p: raw, cwd: input.workspace_root }) ?? '/') : raw;
+}
+
 /**
  * Tier 2 decisions and silent (Tier 1) shell commands promise workspace
  * containment whether or not they asked: the classifier escalates
@@ -99,26 +120,35 @@ function offlineViolation(call: VerifiableCall, ctx: DispatchCheckContext): stri
  * symlinked parent repointed between classification and dispatch could
  * otherwise turn an in-workspace operation into an out-of-workspace one.
  */
-function verifyTier2Containment(input: { call: VerifiableCall; workspace_root: string }): string | undefined {
-  const { call, workspace_root } = input;
-  let root: string;
+function verifyTier2Containment(input: {
+  call: VerifiableCall;
+  workspace_root: string;
+  resolution: PathResolution | undefined;
+}): string | undefined {
+  const { call, workspace_root, resolution } = input;
+  let root: string | null;
   try {
-    root = realpathSync(workspace_root);
+    root = resolution === 'remote' ? lexicalPath({ p: workspace_root, cwd: '/' }) : realpathSync(workspace_root);
   } catch {
+    root = null;
+  }
+  if (root === null) {
     return 'Tier 2 workspace check failed at dispatch; request approval again.';
   }
-  const insideRoot = (identity: string): boolean => identity === root || identity.startsWith(`${root}${path.sep}`);
+  const containingRoot = root;
+  const separator = resolution === 'remote' ? '/' : path.sep;
+  const insideRoot = (identity: string): boolean => isUnderRoot({ identity, root: containingRoot, separator });
 
   if (call.tool_name === 'write_file' || call.tool_name === 'apply_patch' || call.tool_name === 'replace_text') {
     const target = stringParam(call.canonical_params, 'path') ?? stringParam(call.canonical_params, 'target');
     if (target !== null) {
-      const cwd = stringParam(call.canonical_params, 'cwd') ?? workspace_root;
+      const cwd = callCwd({ params: call.canonical_params, workspace_root, resolution });
       // The target may not exist yet: resolve via its parent directory.
-      const identity = canonicalWriteTarget({ p: target, cwd });
+      const identity = canonicalWriteTarget({ p: target, cwd, resolution });
       if (identity === null || !insideRoot(identity)) {
         return 'Tier 2 write target is outside the workspace at dispatch; request approval again.';
       }
-      if (writeTargetTouchesGitControl({ p: target, cwd })) {
+      if (writeTargetTouchesGitControl({ p: target, cwd, resolution })) {
         return 'Tier 2 write target is Git control state at dispatch; request approval again.';
       }
     }
@@ -131,8 +161,8 @@ function verifyTier2Containment(input: { call: VerifiableCall; workspace_root: s
     if (parsed === undefined) {
       return 'Tier 2 shell command cannot be parsed at dispatch; request approval again.';
     }
-    const cwd = stringParam(call.canonical_params, 'cwd') ?? workspace_root;
-    const cwdIdentity = canonicalFileIdentity({ p: cwd, cwd: '/' });
+    const cwd = callCwd({ params: call.canonical_params, workspace_root, resolution });
+    const cwdIdentity = canonicalFileIdentity({ p: cwd, cwd: '/', resolution });
     if (cwdIdentity === null || !insideRoot(cwdIdentity)) {
       return 'Tier 2 shell working directory is outside the workspace at dispatch; request approval again.';
     }
@@ -140,7 +170,8 @@ function verifyTier2Containment(input: { call: VerifiableCall; workspace_root: s
       if (token.startsWith('-')) {
         continue;
       }
-      const identity = canonicalFileIdentity({ p: token, cwd }) ?? canonicalWriteTarget({ p: token, cwd });
+      const identity =
+        canonicalFileIdentity({ p: token, cwd, resolution }) ?? canonicalWriteTarget({ p: token, cwd, resolution });
       // Unresolvable operands were not bound at classify time; only a
       // resolved-outside operand invalidates the Tier 2 grant.
       if (identity !== null && !insideRoot(identity)) {
@@ -176,13 +207,15 @@ export async function verifyPreDispatch(input: {
     // Silent only because it was contained; with no workspace there is nothing to check against.
     return workspaceRoot === null
       ? 'No workspace is set for this shell command at dispatch; request approval again.'
-      : verifyTier2Containment({ call, workspace_root: workspaceRoot });
+      : verifyTier2Containment({ call, workspace_root: workspaceRoot, resolution: ctx.path_resolution });
   }
 
   if (call.tier === 2) {
     const workspaceRoot = ctx.workspace_cwd;
     const containmentError =
-      workspaceRoot === null ? undefined : verifyTier2Containment({ call, workspace_root: workspaceRoot });
+      workspaceRoot === null
+        ? undefined
+        : verifyTier2Containment({ call, workspace_root: workspaceRoot, resolution: ctx.path_resolution });
     if (containmentError !== undefined || call.approval_token_id === null) {
       return containmentError;
     }
@@ -213,12 +246,14 @@ export async function verifyPreDispatch(input: {
 
   // Rebuild the canonical params identically to classify time, with fresh hashes.
   if (call.shell_binding !== null) {
-    const form = canonicalShellForm({
+    const form = await canonicalShellFormFor({
       command: stringParam(call.canonical_params, 'command') ?? '',
       cwd: stringParam(call.canonical_params, 'cwd'),
       env: envOverrides(call.canonical_params),
       allowlist: services.shell_allowlist,
       workspace_cwd: ctx.workspace_cwd,
+      path_resolution: ctx.path_resolution,
+      file_digest: ctx.file_digest,
     });
     const verification = verifyApprovalToken({
       token,
@@ -234,10 +269,32 @@ export async function verifyPreDispatch(input: {
     const parsed = parseSimpleCommand(command);
     const argv = parsed !== undefined ? parsed.argv : splitWordsLenient(command);
     const executedOperand = extractExecutedFileOperand({ argv });
-    const identityCwd = stringParam(call.canonical_params, 'cwd') ?? ctx.workspace_cwd ?? '/';
+    const identityCwd =
+      ctx.path_resolution === 'remote' && ctx.workspace_cwd !== null
+        ? callCwd({ params: call.canonical_params, workspace_root: ctx.workspace_cwd, resolution: 'remote' })
+        : (stringParam(call.canonical_params, 'cwd') ?? ctx.workspace_cwd ?? '/');
     const identity =
-      executedOperand === undefined ? null : canonicalFileIdentity({ p: executedOperand, cwd: identityCwd });
-    const contentHash = identity === null ? null : sha256FileContent(identity);
+      executedOperand === undefined
+        ? null
+        : canonicalFileIdentity({ p: executedOperand, cwd: identityCwd, resolution: ctx.path_resolution });
+    if (ctx.path_resolution === 'remote' && ctx.file_digest === undefined) {
+      // The sandbox offers no way to read its files, so there is no content to bind and no grant to keep:
+      // the token covers the call's own parameters and the file's normalized path, and every run asks again.
+      const sameFile = identity !== null && identity === binding.file_identity;
+      const verified = verifyApprovalToken({
+        token,
+        action_id: actionIdFor({ tool_name: call.tool_name, canonical_params: call.canonical_params }),
+        canonical_params: call.canonical_params,
+      });
+      if (!sameFile) {
+        return 'Approval invalid: the approved script path changed since approval; request approval again.';
+      }
+      return verified.valid ? undefined : `Approval invalid: ${verified.reason}; request approval again.`;
+    }
+    const contentHash =
+      identity === null
+        ? null
+        : await contentDigest({ identity, resolution: ctx.path_resolution, digest: ctx.file_digest });
     const argvHash = hashArgv(argv);
     const grantParams = {
       file_identity: binding.file_identity,

@@ -3,6 +3,7 @@
 import { useState, type FC } from 'react';
 
 import { Switch } from '../atoms/primitives/Switch.js';
+import { APPROVAL_CHOICES } from './approvalChoices.js';
 import type { Tier2ActionKind } from './types.js';
 
 export type Tier2RelaxationToggleProps = {
@@ -15,7 +16,7 @@ export type Tier2RelaxationToggleProps = {
 };
 
 /**
- * "Run without asking" switch for one Tier 2 action kind. Off by default, so Tier 2
+ * "Always allow" switch for one Tier 2 action kind. Off by default, so Tier 2
  * asks; the checked state always reflects the server settings, and flipping it writes
  * through the user settings API. Lives in the audit feed next to the kind it controls.
  */
@@ -42,15 +43,15 @@ export const Tier2RelaxationToggle: FC<Tier2RelaxationToggleProps> = ({
 
   return (
     <span className="inline-flex items-center gap-2">
-      <span className="inline-flex items-center gap-1.5">
+      <span className="inline-flex items-center gap-1.5" title={APPROVAL_CHOICES.alwaysAllow.hint}>
         <Switch
           size="sm"
           checked={relaxed}
           disabled={disabled || busy}
           onCheckedChange={handleChange}
-          aria-label={`Run without asking: ${actionType}`}
+          aria-label={`${APPROVAL_CHOICES.alwaysAllow.label}: ${actionType}`}
         />
-        <span className="text-[0.6875rem] text-text-secondary">Run without asking</span>
+        <span className="text-[0.6875rem] text-text-secondary">{APPROVAL_CHOICES.alwaysAllow.label}</span>
       </span>
       {error !== null && (
         <span className="text-[0.6875rem] text-failure-bg" role="alert">

@@ -66,7 +66,8 @@ export const createModelProviderRoute = createRoute({
     },
     409: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'A model provider with this name already exists.',
+      description:
+        'A model provider with this name already exists, or the provider is managed by the server environment (`error.code` is `env_managed_provider`).',
     },
     424: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
@@ -93,6 +94,10 @@ export const deleteModelProviderRoute = createRoute({
     404: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'No model provider with this name',
+    },
+    409: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The provider is managed by the server environment (`error.code` is `env_managed_provider`).',
     },
   },
 });
@@ -121,6 +126,10 @@ export const putModelProviderRoute = createRoute({
     400: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Invalid request body, or redacted API key with no stored secret to keep.',
+    },
+    409: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The provider is managed by the server environment (`error.code` is `env_managed_provider`).',
     },
     424: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

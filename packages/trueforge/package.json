@@ -3,7 +3,7 @@
   "version": "0.2.0-rc.8",
   "description": "TrueForge Agent Harness: server, HTTP API, and chat UI (npx @truefoundry/trueforge)",
   "author": "TrueFoundry",
-  "license": "MIT",
+  "license": "MPL-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/truefoundry/trueforge.git",
@@ -23,12 +23,15 @@
   "files": [
     "dist",
     "README.md",
-    "scripts"
+    "scripts",
+    "LICENSE",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=22.14.0"
   },
   "scripts": {
+    "prepack": "node ../../scripts/copy-license-files.mjs",
     "build:frontend-assets": "node scripts/copy-frontend.mjs",
     "build:gen:local-sandbox": "node scripts/generate-local-sandbox-scripts.mjs",
     "build:gen:watch": "node --watch-path=catalog/model-catalog.yaml --watch-path=catalog/mcp-catalog.yaml --watch-path=catalog/skill-catalog.yaml --watch-path=catalog/sandbox-catalog.yaml --watch-path=src/sandbox/local/scripts scripts/generate-dev.mjs",
@@ -42,6 +45,7 @@
     "postinstall": "node scripts/prune-embedding-deps.mjs",
     "dev:controller": "cross-env NODE_OPTIONS=--conditions=trueforge-dev NODE_ENV=development tsx watch --env-file=.env src/controller-main.ts",
     "dev:controller:no-watch": "cross-env NODE_OPTIONS=--conditions=trueforge-dev NODE_ENV=development tsx --env-file=.env src/controller-main.ts",
+    "demo:seed": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --env-file=.env src/cli/main.ts demo-seed",
     "start": "cross-env NODE_ENV=production node --env-file=.env dist/main.js",
     "start:controller": "cross-env NODE_ENV=production node --env-file=.env dist/controller-main.js",
     "push-sandbox-image-to-daytona": "node scripts/push-sandbox-image-to-daytona.mjs",
@@ -57,6 +61,8 @@
     "test:local-sandbox:contract": "pnpm run build:gen && cross-env NODE_OPTIONS=--conditions=trueforge-dev node --env-file=.env.test ./node_modules/jest/bin/jest.js --config jest.local-sandbox.contract.config.cjs",
     "smoke:local-sandbox": "pnpm run build:gen && cross-env NODE_OPTIONS=--conditions=trueforge-dev jest --config jest.local-sandbox.smoke.config.cjs --runInBand --forceExit tests/sandbox/local/smoke.test.ts",
     "smoke:local-sandbox:lima": "bash scripts/local-sandbox/smoke-lima.sh",
+    "sandbox:slots": "tsx scripts/sandbox-slots/main.ts",
+    "smoke:tokenfactory": "cross-env NODE_OPTIONS=--conditions=trueforge-dev tsx --env-file=.env.test scripts/smoke-tokenfactory.ts",
     "probe:loopback": "pnpm exec tsx scripts/local-sandbox/probe-loopback.ts",
     "pretypecheck": "pnpm -w run sdk:types",
     "typecheck": "pnpm run typecheck:only",
@@ -72,6 +78,7 @@
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@truefoundry/trueforge-core": "workspace:*",
     "@truefoundry/trueforge-sdk": "workspace:*",
+    "bcryptjs": "3.0.3",
     "better-sqlite3": "^13.0.3",
     "cron-parser": "^5.10.1",
     "env-paths": "^4.0.0",

@@ -86,4 +86,30 @@ describe('useThrottledMarkdownText', () => {
 
     expect(result.current).toBe('partial final document');
   });
+
+  it('resets to the new text when resetKey changes, even if shorter', () => {
+    const { result, rerender } = renderHook(
+      ({ text, resetKey }) => useThrottledMarkdownText(text, { enabled: true, isComplete: false, resetKey }),
+      { initialProps: { text: 'previous turn response', resetKey: 'msg-1' } },
+    );
+
+    expect(result.current).toBe('previous turn response');
+
+    // New message starts with empty text: without a reset the stale guard
+    // would keep showing the old text because "" is shorter.
+    rerender({ text: '', resetKey: 'msg-2' });
+    expect(result.current).toBe('');
+  });
+
+  it('does not reset when resetKey is unchanged', () => {
+    const { result, rerender } = renderHook(
+      ({ text, resetKey }) => useThrottledMarkdownText(text, { enabled: true, isComplete: false, resetKey }),
+      { initialProps: { text: 'abcdef', resetKey: 'msg-1' } },
+    );
+
+    expect(result.current).toBe('abcdef');
+    // Shorter text with the same key keeps the anti-rewind guard.
+    rerender({ text: 'abc', resetKey: 'msg-1' });
+    expect(result.current).toBe('abcdef');
+  });
 });

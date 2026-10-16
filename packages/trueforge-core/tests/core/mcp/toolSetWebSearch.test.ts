@@ -218,6 +218,7 @@ describe('the designated search provider', () => {
     const h = harness({ searchProvider: true, searchWithoutAsking: false, unattended: true });
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'weather in Oslo' } });
     expect(info.tier).toBe(3);
+    expect(info.is_approval_required).toBe(true);
     expect(info.pre_dispatch_failure).toBeUndefined();
   });
 });
@@ -237,32 +238,22 @@ describe('the outbound guard on the designated provider', () => {
     expect(h.audit).toEqual([]);
   });
 
-  it('denies in a scheduled run, audits the rule without the query, and lets the run continue', async () => {
+  it('asks in a scheduled run too, so the run can hold it for the owner instead of denying it', async () => {
     const h = harness({ searchProvider: true, secrets: [secret], unattended: true });
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `debug ${secret}` } });
-    expect(info.is_approval_required).toBe(false);
-    expect(info.pre_dispatch_failure).toEqual({
-      kind: 'policy_blocked',
-      message: expect.stringContaining('Auto-denied'),
-    });
-    expect(info.pre_dispatch_failure?.message).not.toContain(secret);
-    expect(h.audit).toEqual([
-      expect.objectContaining({ tier: 3, outcome: 'auto_denied', auto_deny_reason: 'outbound_guard' }),
-    ]);
-    expect(JSON.stringify(h.audit)).not.toContain(secret);
+    expect(info.tier).toBe(3);
+    expect(info.is_approval_required).toBe(true);
+    expect(info.pre_dispatch_failure).toBeUndefined();
+    expect(info.tier3_card?.plain_what).toContain(secret);
     expect(h.dispatched).toEqual([]);
   });
 
-  it('holds a private key block, and a long query, the same way', async () => {
+  it('asks about a private key block, and a long query, the same way', async () => {
     const h = harness({ searchProvider: true, unattended: true });
     const header = ['-----BEGIN ', 'EC ', 'PRIVATE ', 'KEY-----'].join('');
-    expect(
-      (await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: header } })).pre_dispatch_failure,
-    ).toBeDefined();
+    expect((await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: header } })).tier).toBe(3);
     const long = 'weather forecast for the coming week '.repeat(8);
-    expect(
-      (await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: long } })).pre_dispatch_failure,
-    ).toBeDefined();
+    expect((await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: long } })).tier).toBe(3);
   });
 
   it('reads every string argument, not only a field called query', async () => {
@@ -271,7 +262,7 @@ describe('the outbound guard on the designated provider', () => {
       name: 'lookup',
       arguments: { objective: 'weather', search_queries: ['oslo', { nested: secret }] },
     });
-    expect(info.pre_dispatch_failure).toBeDefined();
+    expect(info.tier).toBe(3);
   });
 });
 
@@ -291,11 +282,12 @@ describe('the loop breaker', () => {
     expect(next.tier3_card?.why_asked_again).toContain(String(SILENT_SEARCH_LIMIT));
   });
 
-  it('denies instead in a scheduled run', async () => {
+  it('asks in a scheduled run too, so the run holds it', async () => {
     const h = harness({ searchProvider: true, unattended: true });
     h.host.web_search.silentSearches = SILENT_SEARCH_LIMIT;
     const next = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: 'one more' } });
-    expect(next.pre_dispatch_failure?.kind).toBe('policy_blocked');
+    expect(next.tier).toBe(3);
+    expect(next.pre_dispatch_failure).toBeUndefined();
   });
 
   it('counts at dispatch, so a batch settled as silent cannot run past the limit', async () => {
@@ -374,11 +366,12 @@ describe('links', () => {
     expect(info.tier).toBe(3);
   });
 
-  it('denies a composed URL in a scheduled run', async () => {
+  it('asks about a composed URL in a scheduled run too', async () => {
     const h = harness({ searchProvider: true, searchTools: ['read_page'], result: results, unattended: true });
     await runSearch(h, 'oslo weather');
     const info = await fetchTier(h, `${page}?x=1`);
-    expect(info.pre_dispatch_failure?.kind).toBe('policy_blocked');
+    expect(info.tier).toBe(3);
+    expect(info.pre_dispatch_failure).toBeUndefined();
   });
 
   it('remembers URLs only from the designated provider, and only for the turn that saw them', async () => {
@@ -617,8 +610,9 @@ describe('a secret sent in pieces over several searches', () => {
 
     const scheduled = harness({ searchProvider: true, secrets: [secret], unattended: true });
     await runSearch(scheduled, secret.slice(0, 14));
-    const denied = await scheduled.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
-    expect(denied.pre_dispatch_failure?.kind).toBe('policy_blocked');
+    const held = await scheduled.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
+    expect(held.tier).toBe(3);
+    expect(held.pre_dispatch_failure).toBeUndefined();
   });
 
   it('is not remembered from a search the user approved, so one approval does not hold the rest of the turn', async () => {
@@ -637,16 +631,15 @@ describe('a secret sent in pieces over several searches', () => {
   });
 });
 
-describe('a call the host auto-denied', () => {
+describe('a search that would ask in a scheduled run', () => {
   const secret = 'synthetic-provider-key-000111';
 
-  it('never runs, even when a caller dispatches it without first reading its tool info', async () => {
+  it('never runs without an answer, even when a caller dispatches it without first reading its tool info', async () => {
     const h = harness({ searchProvider: true, secrets: [secret], unattended: true });
     const response = await runSearch(h, `debug ${secret}`);
     expect(isCallToolResponseResult(response) && response.result.isError).toBe(true);
     expect(JSON.stringify(response)).not.toContain(secret);
     expect(h.dispatched).toEqual([]);
-    expect(h.audit.every(row => row.outcome === 'auto_denied')).toBe(true);
     expect(JSON.stringify(h.audit)).not.toContain(secret);
   });
 });

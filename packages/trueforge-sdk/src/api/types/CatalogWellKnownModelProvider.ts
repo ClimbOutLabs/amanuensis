@@ -3,6 +3,8 @@
 import * as TrueForge from "../index.js";
 
 export interface CatalogWellKnownModelProvider {
+    /** Preset API base URL; absent means the provider type's default. */
+    baseUrl?: string;
     /** URL of the provider logo asset */
     logo?: string;
     /** Preset models */
