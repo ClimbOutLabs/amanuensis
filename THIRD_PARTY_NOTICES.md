@@ -6,11 +6,12 @@ Amanuensis (Aman) is licensed under the Mozilla Public License 2.0 (see `LICENSE
 
 1. sharp and libvips (LGPL-3.0-or-later)
 2. Inter Tight font (OFL-1.1)
-3. Sandbox image tools: poppler-utils and ffmpeg (GPL-2.0-or-later)
+3. Image tools: poppler-utils, ffmpeg and bundled codecs (GPL-2.0-or-later)
 4. License elections for dual-licensed dependencies
 5. Vendored Apache-2.0 code
 6. mcp/gmail (MIT)
-7. Dependencies with no declared license
+7. Llama Prompt Guard 2 (Llama 4 Community License)
+8. Dependencies with no declared license
 
 ## 1. sharp and libvips (LGPL-3.0-or-later)
 
@@ -288,11 +289,26 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 ```
 
-## 3. Sandbox image tools: poppler-utils and ffmpeg (GPL-2.0-or-later)
+## 3. Image tools: poppler-utils, ffmpeg and bundled codecs (GPL-2.0-or-later)
 
-The sandbox image built from `ops/nightona-sandbox` installs the Debian packages `poppler-utils`, `ffmpeg` and `tesseract-ocr` (Apache-2.0) on top of a pinned base image. `poppler-utils` is GPL-2.0-or-later and `ffmpeg` is built by Debian with GPL components (GPL-2.0-or-later per its Debian copyright file). Aman does not link against them. They are separate programs that the sandbox runs as subprocesses, communicating over the command line, files and pipes, so their licenses do not apply to Aman's own code.
+Three images in this repository add GPL or LGPL software on top of their base images:
 
-Written source offer: for any image that contains these programs, the complete corresponding source is the Debian source package of the exact version installed. The pinned versions are in `ops/nightona-sandbox/Dockerfile` (`POPPLER_UTILS_VERSION`, `FFMPEG_VERSION`; Debian 13 "trixie", base image digest pinned in the same file). Get it with `apt-get source poppler=<version>` and `apt-get source ffmpeg=<version>` against a Debian `deb-src` entry, or from https://snapshot.debian.org and https://sources.debian.org. This offer is valid for at least three years from the date you received the image. If you cannot retrieve the source from those locations, open an issue at https://github.com/ClimbOutLabs/amanuensis and the maintainer will provide it.
+| Image                                              | Added software                                                                                                           | Pinned in                                                                                                       |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `ops/nightona-sandbox`                             | Debian `poppler-utils`, `ffmpeg`, `tesseract-ocr` (Apache-2.0)                                                           | `POPPLER_UTILS_VERSION`, `FFMPEG_VERSION` in `ops/nightona-sandbox/Dockerfile` (Debian 13 "trixie")             |
+| `packages/trueforge-core/scripts/sandbox-run-code` | Debian `poppler-utils`, `tesseract-ocr` (Apache-2.0)                                                                     | `POPPLER_UTILS_VERSION` in `packages/trueforge-core/scripts/sandbox-run-code/Dockerfile` (Debian 12 "bookworm") |
+| `ops/aman-stt`                                     | PyAV (`av`, BSD-3-Clause), whose Linux wheels bundle FFmpeg libraries plus codec libraries including libx264 and libx265 | `ops/aman-stt/requirements.txt` (hash-pinned `av` version)                                                      |
+
+The other Dockerfiles (`Dockerfile`, `Dockerfile.dev`, `mcp/gmail/Dockerfile`, `ops/prompt-guard`, `benchmark/Dockerfile`) install no additional GPL or LGPL system packages. Every image built on a Debian-based base image (`node`, `python`, the Nightona base) also contains that distribution's own packages (for example `bash`, `coreutils`, glibc), each under its own license; their copyright files are in `/usr/share/doc/<package>/copyright` inside the image.
+
+`poppler-utils` is GPL-2.0-or-later and Debian's `ffmpeg` is built with GPL components (GPL-2.0-or-later per its Debian copyright file). Aman does not link against them. They are separate programs that the sandboxes run as subprocesses, communicating over the command line, files and pipes, so their licenses do not apply to Aman's own code. In `ops/aman-stt` the FFmpeg and codec libraries are shared libraries inside the PyAV wheel, used unmodified and replaceable by installing a different `av` build; libx264 and libx265 are GPL-2.0-or-later and the LGPL libraries (for example libmp3lame and the FFmpeg libraries) carry their own terms.
+
+Written source offer: for any image that contains these programs or libraries, the complete corresponding source is the following, for the exact version installed in that image:
+
+- Debian packages (`poppler-utils`, `ffmpeg`, and the base image packages): the Debian source package of the installed version. Get it with `apt-get source <package>=<version>` against a Debian `deb-src` entry for the release named in the table (the Debian release of each image is fixed by its pinned base image digest), or from https://snapshot.debian.org and https://sources.debian.org.
+- PyAV wheels (`ops/aman-stt`): the PyAV source at https://github.com/PyAV-Org/PyAV and the build recipes and pinned upstream sources of the bundled libraries at https://github.com/PyAV-Org/pyav-ffmpeg (FFmpeg: https://ffmpeg.org, x264: https://www.videolan.org/developers/x264.html, x265: https://www.x265.org).
+
+This offer is valid for at least three years from the date you received the image. If you cannot retrieve the source from those locations, open an issue at https://github.com/ClimbOutLabs/amanuensis and the maintainer will provide it.
 
 The GNU General Public License, version 2, is reproduced below. It was copied from `/usr/share/common-licenses/GPL-2` (Debian `base-files`).
 
@@ -655,7 +671,17 @@ Where a dependency offers a choice of licenses, Aman elects the permissive one:
 
 `mcp/gmail` is a fork of the Gmail MCP server (https://github.com/george43g/gmail-mcp), itself a history-preserving fork of https://github.com/GongRzhe/Gmail-MCP-Server. It is MIT licensed, Copyright (c) 2025 GongRzhe and Copyright (c) 2026 George G. The upstream license text is in `mcp/gmail/LICENSE`.
 
-## 7. Dependencies with no declared license
+## 7. Llama Prompt Guard 2 (Llama 4 Community License)
+
+The optional Prompt Guard sidecar in `ops/prompt-guard` runs the Llama Prompt Guard 2 (86M) classifier. Aman does not ship or bundle the model weights: the operator downloads them (the Meta weights `meta-llama/Llama-Prompt-Guard-2-86M`, or the ONNX mirror `gravitee-io/Llama-Prompt-Guard-2-86M-onnx`) and mounts them into the container, accepting Meta's terms at download time.
+
+Built with Llama.
+
+Llama 4 is licensed under the Llama 4 Community License, Copyright © Meta Platforms, Inc. All Rights Reserved.
+
+The license text is available at https://github.com/meta-llama/llama-models/blob/main/models/llama4/LICENSE, and its Acceptable Use Policy at https://www.llama.com/llama4/use-policy. Section 1.b.iii of the license requires the attribution notice above, quoted verbatim, to be retained in a `Notice` text file distributed with copies of the Llama Materials; section 1.b.i requires a copy of the license to accompany any distributed Llama Materials and "Built with Llama" to be displayed on related documentation. If you redistribute the model weights, for example by baking them into an image, include the license text and this notice with them.
+
+## 8. Dependencies with no declared license
 
 The following transitive dependencies (via `bash-parser`, which is MIT) ship no license file and declare no license in their package metadata. No license is granted by their authors, so they are listed here rather than relicensed:
 

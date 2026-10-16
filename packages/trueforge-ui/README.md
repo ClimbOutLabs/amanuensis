@@ -681,6 +681,6 @@ pnpm --filter @truefoundry/trueforge-ui build
 
 ## License
 
-MPL-2.0; see [LICENSE-MPL-2.0](./LICENSE-MPL-2.0). Portions derived from TrueForge are MIT licensed; see [LICENSE](./LICENSE) and the [NOTICE](../../NOTICE) at the repository root.
+MPL-2.0; see [LICENSE-MPL-2.0](./LICENSE-MPL-2.0). Portions derived from TrueForge are MIT licensed; see [LICENSE](./LICENSE) and the [NOTICE](https://github.com/ClimbOutLabs/amanuensis/blob/main/NOTICE) at the repository root.
 
 Security: [SECURITY.md](./SECURITY.md) · Conduct: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) · Changes: [CHANGELOG.md](./CHANGELOG.md)

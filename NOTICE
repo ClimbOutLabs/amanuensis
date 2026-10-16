@@ -1,6 +1,8 @@
 Amanuensis (Aman). Copyright (c) 2026 ClimbOutLabs. Licensed under the Mozilla Public License 2.0; see LICENSE.
 
-Third-party components with their own terms (LGPL, OFL, GPL tools in the sandbox image, license elections) are listed in THIRD_PARTY_NOTICES.md: https://github.com/ClimbOutLabs/amanuensis/blob/main/THIRD_PARTY_NOTICES.md
+Third-party components with their own terms (LGPL, OFL, GPL tools in the container images, the Llama Prompt Guard model, license elections) are listed in THIRD_PARTY_NOTICES.md: https://github.com/ClimbOutLabs/amanuensis/blob/main/THIRD_PARTY_NOTICES.md
+
+Llama 4 is licensed under the Llama 4 Community License, Copyright © Meta Platforms, Inc. All Rights Reserved. The optional Prompt Guard sidecar (ops/prompt-guard) runs the Llama Prompt Guard 2 model.
 
 This product includes software derived from TrueForge (https://github.com/truefoundry/trueforge), Copyright (c) 2024-2026 TrueFoundry, licensed under the MIT License:
 

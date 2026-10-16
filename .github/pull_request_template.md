@@ -24,7 +24,6 @@
 - [ ] Ran `python3 scripts/private-data-scan.py` on changed files (exit 0 = clean)
 - [ ] No Private Info
 
-No new dependencies with copyleft or AGPL licenses
-Aman is licensed under MPL-2.0; per-file headers are not required.
-
-License OK
+- [ ] No new dependencies with copyleft or AGPL licenses
+- [ ] Aman is licensed under MPL-2.0; per-file headers are not required
+- [ ] License OK

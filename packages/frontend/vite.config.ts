@@ -1,5 +1,6 @@
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Plugin, ProxyOptions } from 'vite';
 import { defaultClientConditions, defineConfig } from 'vite';
 import { compression } from 'vite-plugin-compression2';
@@ -7,6 +8,8 @@ import { compression } from 'vite-plugin-compression2';
 import monacoEditorPlugin from 'vite-plugin-monaco-editor-esm';
 
 import { rewriteShellAssetUrls } from './src/shellBaseToken';
+
+const gatewaySdkStub = fileURLToPath(new URL('./src/gatewaySdkStub.ts', import.meta.url));
 
 const SERVER = process.env.VITE_SERVER_URL ?? 'http://localhost:8790';
 const PORT = Number(process.env.FRONTEND_PORT ?? 3000);
@@ -62,6 +65,7 @@ export default defineConfig(({ command }) => ({
     // Never add 'import'/'require' here: Vite applies those per import kind, and
     // forcing 'import' makes CJS deps require @babel/runtime's ESM helpers.
     conditions: ['trueforge-dev', ...defaultClientConditions],
+    alias: [{ find: /^truefoundry-gateway-sdk(\/.*)?$/, replacement: gatewaySdkStub }],
     dedupe: ['react', 'react-dom', '@assistant-ui/core', '@assistant-ui/store', '@assistant-ui/react'],
   },
   server: {

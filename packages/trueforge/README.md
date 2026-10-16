@@ -27,4 +27,4 @@ Guides, hosted deployment, API reference, and the UI SDK live at **[trueforge.de
 
 ## License
 
-[MPL-2.0](../../LICENSE). Portions derived from TrueForge are MIT licensed; see [NOTICE](../../NOTICE).
+[MPL-2.0](https://github.com/ClimbOutLabs/amanuensis/blob/main/LICENSE). Portions derived from TrueForge are MIT licensed; see [NOTICE](https://github.com/ClimbOutLabs/amanuensis/blob/main/NOTICE).

@@ -41,8 +41,9 @@ for draft). This package owns the host-facing `Server` façade and adapters.
 
 ## Interfaces (target)
 
-Chat types are imported from `@truefoundry/assistant-ui-runtime`. Builder catalog types are **SDK-minimal**
-(fields this UI reads); hosts keep extras typed with `T extends Base`.
+Chat types are imported from `@truefoundry/assistant-ui-runtime`. Builder catalog
+types are **SDK-minimal** (fields this UI reads); hosts keep extras typed with
+`T extends Base`.
 
 ```ts
 import type { AgentSession, AgentDraftSession, Turn, TurnStreamData } from '@truefoundry/assistant-ui-runtime';
@@ -129,7 +130,7 @@ interface AgentChatServer {
 
 /**
  * Builder catalog + persist.
- * Not part of the runtime — host/BFF provides these.
+ * Not part of the runtime; the host/BFF provides these.
  * Like MUI Table: bases declare what the SDK needs; T extends Base keeps host extras typed.
  */
 interface AgentBuilderServer<
