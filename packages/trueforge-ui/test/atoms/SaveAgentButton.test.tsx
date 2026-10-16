@@ -377,6 +377,8 @@ describe('SaveAgentButton', () => {
         updatedAt: '2026-08-12T08:00:00.000Z',
       }),
     );
+    expect(screen.getByRole('button', { name: 'Update Agent' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save Agent' })).not.toBeInTheDocument();
   });
 
   it('preserves opaque mount fields without exposing resource editors', async () => {
