@@ -27,7 +27,7 @@
   <img src="./packages/frontend/public/readme-hero.png" alt="Amanuensis after sign-in: the New Chat screen with the left navigation rail, an empty chat history, the message composer with a model selector, and the assistant panel on the right" width="850">
 </p>
 
-Amanuensis (Aman) is a private, local-first AI workbench built on the TrueForge agent harness. It combines a browser chat interface with configurable models, MCP tools, reusable agents and skills, sandboxed execution, session persistence, and Aman-specific personalization and memory features.
+Amanuensis (Aman) is a private, local-first AI workbench. It combines a browser chat interface with configurable models, MCP tools, reusable agents and skills, sandboxed execution, session persistence, and personalization and memory features that stay under your control.
 
 ## ✨ Features
 

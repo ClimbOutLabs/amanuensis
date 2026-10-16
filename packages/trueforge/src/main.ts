@@ -28,6 +28,7 @@ let getConfiguredSecretValues: typeof import('./config').getConfiguredSecretValu
 let assertNetworkAuthRequirement: typeof import('./config').assertNetworkAuthRequirement;
 let getPublicUiBasePath: typeof import('./config').getPublicUiBasePath;
 let TrueForgeAuthMode: typeof import('./config').TrueForgeAuthMode;
+let UNSTAMPED_BUILD_REF: typeof import('./config').UNSTAMPED_BUILD_REF;
 let isPlaceholderTrueForgeApiKey: typeof import('./config').isPlaceholderTrueForgeApiKey;
 
 try {
@@ -40,6 +41,7 @@ try {
     assertNetworkAuthRequirement,
     getPublicUiBasePath,
     TrueForgeAuthMode,
+    UNSTAMPED_BUILD_REF,
     isPlaceholderTrueForgeApiKey,
   } = await import('./config'));
 } catch (error) {
@@ -804,7 +806,10 @@ try {
   }
 
   if (configuration.STANDALONE) {
-    printStandaloneStartupBanner({ version: PACKAGE_VERSION, color: shouldColorize() });
+    printStandaloneStartupBanner({
+      buildRef: configuration.BUILD_REF === UNSTAMPED_BUILD_REF ? undefined : configuration.BUILD_REF,
+      color: shouldColorize(),
+    });
     await prepareCodeModeSocketParent({
       path: configuration.CODE_MODE_SOCKET_PARENT,
       logger,
@@ -830,7 +835,7 @@ try {
       });
     }
   } else {
-    logger.info('TrueForge starting', { mode: 'distributed' });
+    logger.info('Aman starting in distributed mode');
   }
 
   const {

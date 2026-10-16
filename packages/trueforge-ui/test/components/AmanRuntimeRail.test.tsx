@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 import { fireEvent, render, screen } from '@testing-library/react';
+import { APP_DISPLAY_VERSION } from '@truefoundry/trueforge-core/core/displayVersion';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanRuntimeRail } from '@/components/AmanRuntimeRail.js';
@@ -176,47 +177,37 @@ describe('AmanRuntimeRail', () => {
     expect(avatarRule).not.toMatch(/animation|transition|transform/);
   });
 
-  it('calls the build line a release, with a shortened reference', () => {
-    render(
-      <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail version="0.4.2" buildRef="4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90" />
-      </RuntimeHarness>,
-    );
-
-    const value = screen.getByText('Release 0.4.2 · 4f2a91c');
-    expect(value).toBeInTheDocument();
-    expect(value).toHaveAttribute('title', 'Release 0.4.2 · 4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90');
-    expect(screen.queryByText(/Session/)).not.toBeInTheDocument();
-  });
-
-  it('leaves a tag-shaped build reference whole in the release line', () => {
-    render(
-      <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail version="0.4.2" buildRef="v0.4.2-rc1" />
-      </RuntimeHarness>,
-    );
-
-    expect(screen.getByText('Release 0.4.2 · v0.4.2-rc1')).toBeInTheDocument();
-  });
-
-  it('shows the version alone in the release line when the build carries no reference', () => {
-    render(
-      <RuntimeHarness messages={[]}>
-        <AmanRuntimeRail version="0.4.2" />
-      </RuntimeHarness>,
-    );
-
-    expect(screen.getByText('Release 0.4.2')).toBeInTheDocument();
-  });
-
-  it('leaves out the release line when the server reports no version', () => {
+  it('calls the build line a release, with the display version and a shortened reference', () => {
     render(
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail buildRef="4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90" />
       </RuntimeHarness>,
     );
 
-    expect(screen.queryByText(/^Release /)).not.toBeInTheDocument();
+    const value = screen.getByText(`Release ${APP_DISPLAY_VERSION} · 4f2a91c`);
+    expect(value).toBeInTheDocument();
+    expect(value).toHaveAttribute('title', `Release ${APP_DISPLAY_VERSION} · 4f2a91c8d3b7e6510a2c9f4b8d1e7a3c5b6d8e90`);
+    expect(screen.queryByText(/Session/)).not.toBeInTheDocument();
+  });
+
+  it('leaves a tag-shaped build reference whole in the release line', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail buildRef="v0.4.2-rc1" />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByText(`Release ${APP_DISPLAY_VERSION} · v0.4.2-rc1`)).toBeInTheDocument();
+  });
+
+  it('reads as a dev build in the release line when the build carries no reference', () => {
+    render(
+      <RuntimeHarness messages={[]}>
+        <AmanRuntimeRail />
+      </RuntimeHarness>,
+    );
+
+    expect(screen.getByText(`Release ${APP_DISPLAY_VERSION} · dev`)).toBeInTheDocument();
   });
 
   it('shows the memory bank in use', () => {
@@ -334,7 +325,6 @@ describe('AmanRuntimeRail', () => {
       <RuntimeHarness messages={[]}>
         <AmanRuntimeRail
           modelName="local-model"
-          version="0.4.2"
           memoryBank={{ name: 'amantest', connected: true }}
           userName="Alex"
           personaName="Mannie"

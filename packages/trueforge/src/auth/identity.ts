@@ -31,7 +31,7 @@ export const STANDALONE_REQUEST_CONTEXT: RequestContext = {
   subject: {
     id: 'trueforge-default',
     type: 'user',
-    display_name: 'trueforge-default',
+    display_name: 'Owner',
   },
   roles: [STANDALONE_ADMIN_ROLE],
   user_credential: null,

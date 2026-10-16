@@ -8,11 +8,11 @@
     { "source": "/create-agent/generative-ui", "destination": "/create-agent/overview#whats-in-an-agent" },
     { "source": "/create-agent/agent-spec", "destination": "/create-agent/overview#create-an-agent-via-the-api" }
   ],
-  "name": "TrueForge",
+  "name": "Aman",
   "logo": {
     "light": "/logo/light.svg",
     "dark": "/logo/dark.svg",
-    "href": "https://trueforge.dev"
+    "href": "https://github.com/ClimbOutLabs/amanuensis"
   },
   "favicon": {
     "light": "/logo/favicon-light.svg",
@@ -43,7 +43,7 @@
             "pages": ["introduction", "install", "quickstart"]
           },
           {
-            "group": "TrueForge Harness",
+            "group": "Aman",
             "pages": [
               {
                 "group": "Initial Setup",
@@ -127,21 +127,14 @@
     "links": [
       {
         "label": "GitHub",
-        "href": "https://github.com/truefoundry/trueforge",
+        "href": "https://github.com/ClimbOutLabs/amanuensis",
         "icon": "github"
       }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "TrueFoundry",
-      "href": "https://www.truefoundry.com"
-    }
+    ]
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/truefoundry",
-      "x": "https://x.com/truefoundry",
-      "linkedin": "https://in.linkedin.com/company/truefoundry"
+      "github": "https://github.com/ClimbOutLabs/amanuensis"
     }
   }
 }
