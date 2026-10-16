@@ -1,6 +1,6 @@
 # Demo script for the judges
 
-Aman, Personal AI track, Nebius x NVIDIA Global AI Hackathon. Live version: 2 minutes. Video version: 3 minutes (same beats, with the pauses marked below). The persona is Maya, an invented person; every name, address and file in the demo world is made up. Her inbox is a test Gmail account seeded with invented mail in three languages only: English, Portuguese and Spanish.
+Aman, Personal AI track, Nebius x NVIDIA Global AI Hackathon. Live version: 2 minutes. Video version: 3 minutes (same beats, with the pauses marked below). The persona is Maya, an invented person; every name, address and file in the demo world is made up. She lives in Lisbon. Her inbox is a test Gmail account seeded with invented mail in three languages only: English, Portuguese and Spanish.
 
 Judging criteria, short names used below: **Tech** (technological implementation), **Design**, **Impact** (potential impact), **Idea** (quality of the idea).
 
@@ -24,17 +24,17 @@ Presenter: "Your AI assistant knows your mother's birthday, your boss's mood and
 ### 2. Inbox triage with a non-English email (20 seconds) serves Impact, Design
 
 - Type: `What's in my inbox? One line each, in English.`
-- On screen: one line per message: the flight confirmation, the dentist reminder, the landlord's repair visit, the Spanish internet bill with its amount in euros, and the Portuguese message from Rui asking which day suits for lunch on the weekend.
+- On screen: one line per message: the flight confirmation, the dentist reminder, the landlord's repair visit, the Portuguese internet bill with its amount in euros, and the Spanish message from Marta asking which day suits for lunch on the weekend.
 - Presenter: "Three languages in that mailbox. Aman reads them all and gives Maya her day in one screen."
-- Video pause: hover the Portuguese line so the original text is visible for a second.
-- Fallback: if the model stalls on the full list, type `Read me the message from Rui` and show only that one.
+- Video pause: hover the Spanish line so the original text is visible for a second.
+- Fallback: if the model stalls on the full list, type `Read me the message from Marta` and show only that one.
 
 ### 3. Draft, approval card, send (30 seconds) serves Tech, Design
 
-- Type: `Reply to Rui in Portuguese: Saturday works, 1 pm, his choice of place. Keep it warm and short.`
-- On screen: the draft appears in the chat with recipient, subject and body, in Rui's thread. Then the approval card: who it goes to, the subject, a body preview, and four buttons: **Approve**, **Approve for this chat**, **Always allow**, **Deny**.
+- Type: `Reply to Marta in Spanish: Saturday works, 1 pm, her choice of place. Keep it warm and short.`
+- On screen: the draft appears in the chat with recipient, subject and body, in Marta's thread. Then the approval card: who it goes to, the subject, a body preview, and four buttons: **Approve**, **Approve for this chat**, **Always allow**, **Deny**.
 - Presenter: "Nothing leaves this computer until I press this. Approve once, approve for this chat, or always. And a setting you turn off stays off."
-- Click **Approve**. On screen: "Sent" in the thread, with the reply shown under Rui's message.
+- Click **Approve**. On screen: "Sent" in the thread, with the reply shown under Marta's message.
 - Fallback: if the send fails with a provider error, the card keeps the draft and shows Retry; press it once. If Gmail is disconnected, show the draft only and say "the card is the only door out, and today it stays shut."
 
 ### 4. Attachments in the sandbox (30 seconds) serves Tech, Impact
@@ -67,22 +67,22 @@ Record the full 3-minute version once on the judges' instance the day before, at
 
 Status key: **exists** (already in the demo seed or the mailbox fixtures on the test-mailbox branch), **add** (must be created before the demo). The mailbox fixtures in Arabic, Hindi, Japanese, Sinhala, Chinese, Russian and Persian are not delivered to Maya's account.
 
-| Beat | Data                                                                                                                                                                                               | Status                                                    |
-| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| all  | Persona name "Maya". The seed names her Mara Hollis and the mailbox fixtures address Alex Rivera; both must say Maya (seed world, fixture generator, expectations file).                           | add                                                       |
-| all  | The judges' instance limits sends to a fixed list of invented addresses. Rui, Maya's mother and the landlord must be on it.                                                                        | add                                                       |
-| 1    | Memory notes: short friendly style, leaves 15 minutes early for medical visits, today's 4 pm check-up with Dr. Halloran, referral letter, blue wallet, Teo's coffee.                               | exists (demo seed)                                        |
-| 1    | A pre-written chat "Brief me before my 4 pm appointment" as the fallback.                                                                                                                          | exists (demo seed)                                        |
-| 2    | Email, Spanish: from Fibra Hogar, subject "Your October bill is ready", body "42.18 euros charged on November 3 for fibre and a mobile line."                                                      | exists (fixture 17)                                       |
-| 2, 3 | Email, Portuguese: from Rui Almeida, subject "Almoço no fim de semana?", body "Sábado ou domingo? Escolhe o dia e eu escolho o sítio." He is a friend; the reply goes to his thread.               | add                                                       |
-| 2    | Emails, English: flight confirmation (fixture 01), dentist reminder (02), landlord repair visit (04). Fixture dates are fixed to October 2026; regenerate them a week ahead of the demo day.       | exists, dates to refresh                                  |
-| 3    | Gmail connected on the judges' instance with read and send grants, and the fixtures delivered to Maya's account with the send script.                                                              | add                                                       |
-| 4    | Email, English: from Metro Power and Light, subject "Your October bill is ready", body the amount and due date, with the PDF statement attached.                                                   | exists (fixture 03, PDF included)                         |
-| 4    | Email, English: from the landlord Maria Santos, subject "Repair notice", body "the notice is attached", with a one-page Word document stating the plumber's visit on a weekday morning next week.  | add (depends on .docx support)                            |
-| 5    | A schedule named "morning briefing" at 07:30 in the instance time zone, task: "Read my inbox and my calendar for the week. Draft anything I would want to send and hold it for me. Keep it short." | add (the seeded schedule maps a route; it drafts nothing) |
-| 5    | Google Calendar connected read-only on the judges' instance, with an all-day event "Mum's birthday" three days after the demo day.                                                                 | add (depends on Calendar read)                            |
-| 5    | Email, English: from the landlord Maria Santos, subject "Kitchen faucet repair visit", body asking Maya to confirm a plumber visit on a weekday morning next week.                                 | exists (fixture 04), date to refresh                      |
-| 6    | Nothing beyond the seed.                                                                                                                                                                           | exists                                                    |
+| Beat | Data                                                                                                                                                                                                                                               | Status                                                    |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| all  | Persona name "Maya", living in Lisbon. The seed names her Mara Hollis in Barcelona and the mailbox fixtures address Alex Rivera; both must say Maya, and the seed's places must move to Lisbon (seed world, fixture generator, expectations file). | add                                                       |
+| all  | The judges' instance limits sends to a fixed list of invented addresses. Marta, Maya's mother and the landlord must be on it.                                                                                                                      | add                                                       |
+| 1    | Memory notes: short friendly style, leaves 15 minutes early for medical visits, today's 4 pm check-up with Dr. Halloran, referral letter, blue wallet, Teo's coffee.                                                                               | exists (demo seed)                                        |
+| 1    | A pre-written chat "Brief me before my 4 pm appointment" as the fallback.                                                                                                                                                                          | exists (demo seed)                                        |
+| 2    | Email, Portuguese: from Fibra Casa, subject "A sua fatura de outubro", body "42,18 euros debitados a 3 de novembro, fibra e linha móvel", with the bill as a PDF. Fixture 17 is the same bill in Spanish; translate it.                            | add (adapt fixture 17)                                    |
+| 2, 3 | Email, Spanish: from Marta Jiménez, subject "¿Comemos el fin de semana?", body "¿Sábado o domingo? Elige el día y yo elijo el sitio." She is a friend visiting from Madrid; the reply goes to her thread.                                          | add                                                       |
+| 2    | Emails, English: flight confirmation (fixture 01), dentist reminder (02), landlord repair visit (04). Fixture dates are fixed to October 2026; regenerate them a week ahead of the demo day.                                                       | exists, dates to refresh                                  |
+| 3    | Gmail connected on the judges' instance with read and send grants, and the fixtures delivered to Maya's account with the send script.                                                                                                              | add                                                       |
+| 4    | Email, English: from Metro Power and Light, subject "Your October bill is ready", body the amount and due date, with the PDF statement attached.                                                                                                   | exists (fixture 03, PDF included)                         |
+| 4    | Email, English: from the landlord Maria Santos, subject "Repair notice", body "the notice is attached", with a one-page Word document stating the plumber's visit on a weekday morning next week.                                                  | add (depends on .docx support)                            |
+| 5    | A schedule named "morning briefing" at 07:30 in the instance time zone, task: "Read my inbox and my calendar for the week. Draft anything I would want to send and hold it for me. Keep it short."                                                 | add (the seeded schedule maps a route; it drafts nothing) |
+| 5    | Google Calendar connected read-only on the judges' instance, with an all-day event "Mum's birthday" three days after the demo day.                                                                                                                 | add (depends on Calendar read)                            |
+| 5    | Email, English: from the landlord Maria Santos, subject "Kitchen faucet repair visit", body asking Maya to confirm a plumber visit on a weekday morning next week.                                                                                 | exists (fixture 04), date to refresh                      |
+| 6    | Nothing beyond the seed.                                                                                                                                                                                                                           | exists                                                    |
 
 ## Pre-demo checklist
 
@@ -93,7 +93,7 @@ Status key: **exists** (already in the demo seed or the mailbox fixtures on the 
    ```
 2. Clear Maya's mailbox of yesterday's sent replies and held drafts, then redeliver the fixtures: `pnpm send-test-mailbox --dry-run`, check that only the English, Portuguese and Spanish messages are listed, then `pnpm send-test-mailbox`.
 3. Model: `aman doctor` shows Token Factory on with the Nemotron model, and a test chat answers in under 5 seconds. The key was given at install time with `--token-factory-key-stdin`; never paste it on screen.
-4. Gmail and Calendar: Settings, Connectors shows Gmail connected with read and send, and Calendar connected read-only; the send allowlist holds the three demo recipients; the morning schedule has run once today without error.
+4. Gmail and Calendar: Settings, Connectors shows Gmail connected with read and send, and Calendar connected read-only; the send allowlist holds Marta, Maya's mother and the landlord; the morning schedule has run once today without error.
 5. Sandbox: Settings, Sandbox shows the image downloaded and the signature verified; press Re-check.
 6. Memory: Settings, Memory shows recall on and the seeded notes present.
 7. Browser: a fresh window, 125 percent zoom, sidebar open, no other tabs except the backup recording, notifications off, dark or light theme matching the slides.
