@@ -353,7 +353,8 @@ export class GmailToolSet extends LocalToolMCP {
   }> {
     const { input: call, existing } = input;
     let reply: ReplyTarget | undefined;
-    let subject = call.subject;
+    // Blank space at the edges would not show on the card, so a draft is written without it.
+    let subject = call.subject.trim();
     let threadId = call.thread_id;
     if (call.in_reply_to !== undefined) {
       const original = await this.#options.api.getMessage(call.in_reply_to);
@@ -371,7 +372,8 @@ export class GmailToolSet extends LocalToolMCP {
       };
       threadId ??= existing.threadId;
     }
-    const content: RawDraftContent = { to: call.to, cc: call.cc, bcc: call.bcc, subject, body: call.body };
+    const body = call.body.trim();
+    const content: RawDraftContent = { to: call.to, cc: call.cc, bcc: call.bcc, subject, body };
     return {
       content,
       reply,
@@ -381,7 +383,7 @@ export class GmailToolSet extends LocalToolMCP {
         cc: call.cc ?? [],
         bcc: call.bcc ?? [],
         subject,
-        body: call.body,
+        body,
         threadId: threadId ?? '',
         inReplyTo: reply?.messageIdHeader ?? '',
       },

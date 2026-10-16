@@ -5,7 +5,7 @@ import {
   charsetOf,
   decodeBytes,
   decodeEncodedWords,
-  hasHiddenCharacters,
+  isUsableCharset,
   sniffHtmlCharset,
   stripInvisible,
 } from './mimeText';
@@ -55,14 +55,16 @@ export function headerOf(input: { message: GmailMessage; name: string }): string
   return value.length > MAX_HEADER_CHARS ? `${value.slice(0, MAX_HEADER_CHARS)}...` : value;
 }
 
-function decodePart(input: { part: MessagePart; data: string }): string {
+function decodePart(input: { part: MessagePart; data: string }): { text: string; usable: boolean } {
   const bytes = Uint8Array.from(Buffer.from(input.data, 'base64url'));
   const declared = charsetOf(rawHeaderOf({ part: input.part, name: 'content-type' }));
   const charset = declared ?? (input.part.mimeType === 'text/html' ? sniffHtmlCharset(bytes) : null);
-  return decodeBytes({ bytes, charset });
+  return { text: decodeBytes({ bytes, charset }), usable: charset === null || isUsableCharset(charset) };
 }
 
 interface Collected {
+  /** A text part declared a charset that is UTF-7 or unknown, so what it holds was shown as raw bytes. */
+  charsetProblem: boolean;
   plain: string[];
   html: string[];
   attachments: AttachmentInfo[];
@@ -80,10 +82,10 @@ function collect(part: MessagePart, into: Collected): void {
       size: part.body?.size ?? 0,
     });
   } else if (part.body?.data !== undefined && (part.filename === undefined || part.filename === '')) {
-    if (part.mimeType === 'text/plain') {
-      into.plain.push(decodePart({ part, data: part.body.data }));
-    } else if (part.mimeType === 'text/html') {
-      into.html.push(decodePart({ part, data: part.body.data }));
+    if (part.mimeType === 'text/plain' || part.mimeType === 'text/html') {
+      const decoded = decodePart({ part, data: part.body.data });
+      (part.mimeType === 'text/plain' ? into.plain : into.html).push(decoded.text);
+      into.charsetProblem ||= !decoded.usable;
     }
   }
   for (const child of part.parts ?? []) {
@@ -92,9 +94,12 @@ function collect(part: MessagePart, into: Collected): void {
 }
 
 export interface ReadMessage {
+  /** The message text for reading: hidden characters removed, surrounding whitespace trimmed. */
   body: string;
-  /** Whether the text had characters that do not show, which were taken out of `body`. */
-  hadHiddenText: boolean;
+  /** The plain-text part exactly as written, with nothing removed or trimmed: what a send delivers. */
+  plainText: string;
+  /** A text part declared a charset that is UTF-7 or unknown. */
+  charsetProblem: boolean;
   attachments: AttachmentInfo[];
   /** Whether the message has an HTML alternative, which a send would not carry. */
   hasHtml: boolean;
@@ -102,7 +107,7 @@ export interface ReadMessage {
 
 /** The message text (plain text when it has any, otherwise its HTML as text) and its attachments. */
 export function readMessage(message: GmailMessage): ReadMessage {
-  const found: Collected = { plain: [], html: [], attachments: [] };
+  const found: Collected = { charsetProblem: false, plain: [], html: [], attachments: [] };
   if (message.payload !== undefined) {
     collect(message.payload, found);
   }
@@ -110,7 +115,8 @@ export function readMessage(message: GmailMessage): ReadMessage {
   const body = plain.trim() !== '' ? plain : htmlToText(found.html.join('\n'));
   return {
     body: stripInvisible(body).trim(),
-    hadHiddenText: hasHiddenCharacters(body),
+    plainText: plain,
+    charsetProblem: found.charsetProblem,
     attachments: found.attachments,
     hasHtml: found.html.length > 0,
   };

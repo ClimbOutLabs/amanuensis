@@ -6,7 +6,7 @@
 import type { ReviewableDraft } from './draftReview';
 import type { GmailMessage } from './gmailWire';
 import { decodedHeaderOf, headerOf, headerOverflows, rawHeaderOf, readMessage } from './message';
-import { hasHiddenCharacters } from './mimeText';
+import { hasAmbiguousEncodedWord, hasHiddenCharacters } from './mimeText';
 import { addressesIn, addressListIsPlain } from './results';
 
 /** Longest body a send card shows; anything longer is refused because no one reads it in full. */
@@ -57,11 +57,21 @@ function fromAddress(raw: string): string | null {
   return /^[^\s,;"<>()]+$/.test(inner) ? inner.toLowerCase() : null;
 }
 
+/** No leading whitespace and at most one closing newline: blank space at the edges would not show on the card. */
+function hasOrdinaryEdges(body: string): boolean {
+  const withoutClosingNewline = body.replace(/\r?\n$/, '');
+  return withoutClosingNewline === withoutClosingNewline.trimEnd() && body === body.trimStart();
+}
+
 const REFUSALS = {
   formatting:
     'This draft has formatting or parts that Aman cannot show you in full, usually because it was edited in Gmail. Ask me to write it again.',
   headers:
     'This draft sets headers that Aman cannot show you, such as a reply address or sender. Ask me to write it again.',
+  charset:
+    'This draft uses a text encoding (such as UTF-7) that Aman cannot read for certain, so it cannot show you what would be sent. Ask me to write it again.',
+  whitespace:
+    'This draft starts with blank space or ends with more than one blank line, which would not show on the card. Ask me to write it again.',
   hidden:
     'This draft contains characters that do not show, so what you see would not be all of what is sent. Ask me to write it again.',
 } as const;
@@ -101,11 +111,17 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
       return { ok: false, reason: REFUSALS.headers };
     }
   }
+  if (
+    read.charsetProblem ||
+    ['From', 'Subject', 'To', 'Cc', 'Bcc'].some(name => hasAmbiguousEncodedWord(rawHeaderOf({ part: payload, name })))
+  ) {
+    return { ok: false, reason: REFUSALS.charset };
+  }
   const decodedSubject = decodedHeaderOf({ message, name: 'Subject' });
   const hiddenInHeaders = ['Subject', 'To', 'Cc', 'Bcc'].some(name =>
     hasHiddenCharacters(decodedHeaderOf({ message, name })),
   );
-  if (read.hadHiddenText || hiddenInHeaders) {
+  if (hasHiddenCharacters(read.plainText) || hiddenInHeaders) {
     return { ok: false, reason: REFUSALS.hidden };
   }
   const draft: ReviewableDraft = {
@@ -113,7 +129,7 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
     cc: addressesIn({ message, name: 'Cc' }),
     bcc: addressesIn({ message, name: 'Bcc' }),
     subject: headerOf({ message, name: 'Subject' }),
-    body: read.body,
+    body: read.plainText,
     threadId: message.threadId,
     inReplyTo: rawHeaderOf({ part: payload, name: 'in-reply-to' }),
   };
@@ -127,6 +143,9 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
         reason:
           'This draft has a subject too long to show you in full, so it was not offered for sending. Ask me to shorten it.',
       };
+    }
+    if (!hasOrdinaryEdges(draft.body)) {
+      return { ok: false, reason: REFUSALS.whitespace };
     }
     if (draft.body.length > MAX_SENDABLE_BODY_CHARS) {
       return {

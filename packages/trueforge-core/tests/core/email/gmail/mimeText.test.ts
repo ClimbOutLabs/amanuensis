@@ -76,8 +76,10 @@ describe('plain text bodies in their declared charset', () => {
     expect(decodeBytes({ bytes: Uint8Array.from([0x80, 0x93, 0x94, 0xe9]), charset: 'iso-8859-1' })).toBe('€“”é');
   });
 
-  it('falls back safely on a charset name nothing knows', () => {
-    expect(decodeBytes({ bytes: Buffer.from('Olá', 'utf8'), charset: 'x-made-up' })).toBe('Olá');
+  it('shows the bytes as they are for a charset nothing here reads, and for UTF-7, instead of guessing', () => {
+    expect(decodeBytes({ bytes: Buffer.from('Ola +AGE-', 'utf8'), charset: 'x-made-up' })).toBe('Ola +AGE-');
+    expect(decodeBytes({ bytes: Buffer.from('+ADw-b+AD4-hi', 'utf8'), charset: 'utf-7' })).toBe('+ADw-b+AD4-hi');
+    expect(decodeEncodedWords('=?utf-7?Q?+AGE-?=')).toBe('+AGE-');
   });
 });
 

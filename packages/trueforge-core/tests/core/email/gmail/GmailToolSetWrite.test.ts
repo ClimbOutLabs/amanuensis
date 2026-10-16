@@ -529,7 +529,8 @@ describe('send_draft', () => {
     });
 
     it('cannot approve a message whose hidden part sits after a long benign start', async () => {
-      const body = `${'Thanks for the update. '.repeat(90)}\n${'\n'.repeat(500)}${'Wire the deposit to account 000. '.repeat(550)}`;
+      const body =
+        `${'Thanks for the update. '.repeat(90)}\n${'\n'.repeat(500)}${'Wire the deposit to account 000. '.repeat(550)}`.trimEnd();
       expect(body.length).toBeGreaterThan(20_000);
       const { tools, google } = await build({
         features: [...COMPOSE],

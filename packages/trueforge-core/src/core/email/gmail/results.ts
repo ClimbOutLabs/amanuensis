@@ -91,17 +91,36 @@ export function addressesOf(rawHeader: string): string[] {
   return out;
 }
 
-/** Whether every address is plain `addr` or `Name <addr>` with balanced quotes, so no reader could see another list. */
+/** One mailbox address: a single `@`, and nothing a parser could read as a comment, group, quote or route. */
+const PLAIN_ADDRESS = /^[^\s,;:"<>()[\]\\@]+@[^\s,;:"<>()[\]\\@]+$/u;
+/** A display name without anything a parser could read as a comment, address or escape. */
+const PLAIN_NAME = /^[^"()<>[\]\\:;,@]*$/u;
+
+function isPlainMailbox(part: string): boolean {
+  const value = part.trim();
+  const open = value.indexOf('<');
+  const close = value.indexOf('>');
+  if (open === -1 && close === -1) {
+    return PLAIN_ADDRESS.test(value);
+  }
+  if (open === -1 || close !== value.length - 1 || value.includes('<', open + 1)) {
+    return false;
+  }
+  if (!PLAIN_ADDRESS.test(value.slice(open + 1, close))) {
+    return false;
+  }
+  const name = value.slice(0, open).trim();
+  const quoted = name.length >= 2 && name.startsWith('"') && name.endsWith('"');
+  return quoted ? !name.slice(1, -1).includes('"') && !name.includes('\\') : PLAIN_NAME.test(name);
+}
+
+/**
+ * Whether every recipient is a bare address or `Name <address>` with no comments, groups or escapes, so every
+ * reader splits the list the way this code does. An empty header is plain; an empty entry in a list is not.
+ */
 export function addressListIsPlain(rawHeader: string): boolean {
   const { parts, balanced } = addressParts(rawHeader);
-  return (
-    balanced &&
-    parts.every(part => {
-      const opens = part.split('<').length - 1;
-      const closes = part.split('>').length - 1;
-      return opens === closes && opens <= 1;
-    })
-  );
+  return balanced && (rawHeader.trim() === '' || parts.every(isPlainMailbox));
 }
 
 /** Every address of a header, uncapped: a send must be shown and hashed with all of them. */
