@@ -31,7 +31,7 @@ function check(message: string, target: Target, personas: Persona[] = [ZARA, MIL
   return isUnambiguousDirectPersonaInvocation({
     message,
     target,
-    defaultAssistantName: 'Mannie',
+    defaultAssistantName: 'Aman',
     personas,
   });
 }
@@ -51,7 +51,7 @@ describe('isUnambiguousDirectPersonaInvocation', () => {
     expect(check(message, ZARA_TARGET)).toEqual({ ok: true });
   });
 
-  it.each([['switch to default'], ['switch to Default'], ['switch back to Mannie'], ['please switch to Mannie']])(
+  it.each([['switch to default'], ['switch to Default'], ['switch back to Aman'], ['please switch to Aman']])(
     'accepts an unambiguous default-assistant invocation: %s',
     message => {
       expect(check(message, DEFAULT_TARGET)).toEqual({ ok: true });

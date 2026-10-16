@@ -254,7 +254,7 @@ function matchesInvocation(probe: string, key: string, options?: { leadInOnly?: 
   const unprefixed = stripPolitenessPrefix(probe);
   // Direct address: the name, then the punctuation that marks it as address.
   // Skipped for leadInOnly matching: addressing the default assistant by name
-  // ("Mannie, I have a friend named Inez.") is ordinary conversation, not a
+  // ("Aman, I have a friend named Inez.") is ordinary conversation, not a
   // request to switch speakers.
   if (!options?.leadInOnly && unprefixed.startsWith(key)) {
     const next = unprefixed.charAt(key.length);
@@ -302,7 +302,7 @@ function matchesInvocation(probe: string, key: string, options?: { leadInOnly?: 
  * order personas happen to be stored in.
  *
  * With `leadInOnly`, the direct-address form is skipped: the default
- * assistant's name shows up in ordinary conversation ("Mannie, I have a
+ * assistant's name shows up in ordinary conversation ("Aman, I have a
  * friend named Inez."), so only an explicit lead-in counts as a switch.
  */
 export function matchPersonaInvocation<T extends PersonaContent>(input: {

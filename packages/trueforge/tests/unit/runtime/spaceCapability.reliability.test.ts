@@ -2,7 +2,7 @@
  * Reliability tests for update_space (Phase 1 circuit breaker + Phase 2 block anchors).
  *
  * Same style as spaceCapability.delta.test.ts: a stateful in-memory store drives the real
- * tool sequence the way Mannie would. Each test gets its own session id so the
+ * tool sequence the way Aman would. Each test gets its own session id so the
  * process-wide breaker map (keyed per tenant/user/session/space, like production) stays
  * isolated between tests.
  */
