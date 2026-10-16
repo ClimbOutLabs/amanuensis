@@ -55,11 +55,23 @@ shred -u ~/tf.key
 
 `--demo` turns on `DEMO_MODE=true` and runs `aman demo-seed` once the app is healthy. It seeds a persona, memory notes, a morning-briefing schedule and a finished briefing chat for the owner (or `--demo-user ADDRESS`). Dates are relative to today (Europe/Madrid).
 
-- The seeded user in the code is called Mara, not Maya.
+- On main the seeded user is called Mara, not Maya. A separate change renames her; check `world.ts` before judging.
 - The seed needs a configured model. The Token Factory model is added to the app when it starts, so this works right after the install.
-- DEMO_MODE only enables the seeder. It does not block any Google or other connector.
+- On main, `DEMO_MODE` only enables the seeder. The Gmail work (PR #153) adds a demo-mode refusal of Google, and a follow-up is meant to allow Google in demo mode with sends limited to a fixed list of invented addresses. Until both land on the commit you deploy, do not connect Maya's Gmail.
 
-## 5. Check it
+### Maya's mailbox (depends on unmerged work)
+
+The plan is Maya's real test Gmail account, filled with the invented emails from `test-fixtures/assistant-mailbox` in English, Portuguese and Spanish, plus two PDFs and a Word file, loaded by a `demo:import-mailbox` script. That script, the Portuguese emails and the `.docx` are being built elsewhere and are not on main yet. The Arabic, Hindi, Japanese, Sinhala, Chinese and Russian fixtures are left out. Check that the script exists on your commit before relying on this.
+
+## 5. Order on the day
+
+1. Install (sections 3 and 4), a day early.
+2. Import the invented emails into Maya's Gmail with `demo:import-mailbox`.
+3. Add the birthday to her Google Calendar by hand: an all-day event a few days after the judging date, with an invented name, and not on the dentist date (Oct 22).
+4. On the morning of judging, run `./installer/install.sh instance demo-seed` (section 7 first if you need a reset), so the dates are relative to that day.
+5. Run `aman doctor` and send one test message.
+
+## 6. Check it
 
 ```
 aman doctor
@@ -67,18 +79,18 @@ aman doctor
 
 Then open `https://203-0-113-10.sslip.io` and sign in as `judge@example.com`. Send one message and confirm the answer comes from the Nemotron model.
 
-## 6. Reset before judging
+## 7. Reset before judging
 
 ```
 ./installer/install.sh instance demo-seed --reset
 ./installer/install.sh instance demo-seed
 ```
 
-The first removes the synthetic records only; the second seeds them again. Chats the judges made are not synthetic, so they stay. For a fully clean start, remove the instance and install again (section 7).
+The first removes the synthetic records only; the second seeds them again. Chats the judges made are not synthetic, so they stay. For a fully clean start, remove the instance and install again (section 8).
 
 Re-seed on the morning of judging, since the seeded dates are relative to the day it runs.
 
-## 7. Tear down after judging
+## 8. Tear down after judging
 
 ```
 ./installer/install.sh instance remove main --purge-data --tls-root
