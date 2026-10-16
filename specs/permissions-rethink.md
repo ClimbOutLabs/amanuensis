@@ -46,9 +46,9 @@ Actions that are irreversible or leave the machine:
 - Executing files outside the workspace
 - Any action the classifier cannot categorize
 
-Each approval covers one call. There is no batch approval for Tier 3. The card states what will happen (one sentence), why the agent wants to do it, what cannot be undone, and the verifiable destination: recipient address, destination service or URL, and amount where applicable. Tier 3 shell cards show the exact server-parsed command.
+Without a grant, each approval covers one call: there is no batch approval for Tier 3. A call covered by a chat-scope or Always allow grant is admitted by that grant instead of a fresh card (see Durable Approvals). The card states what will happen (one sentence), why the agent wants to do it, what cannot be undone, and the verifiable destination: recipient address, destination service or URL, and amount where applicable. Tier 3 shell cards show the exact server-parsed command.
 
-Three cases never reach a card and are denied outright, with the denial recorded in the audit feed: the destination cannot be verified from the call's parameters; offline mode is on and the action needs the network; or the outbound secret guard trips over text the call would send off the machine. Shell commands have their own offline rule: while offline, only the offline subset of the allowlist may run.
+Two cases never reach a card and are denied outright, with the denial recorded in the audit feed: the destination cannot be verified from the call's parameters, or offline mode is on and the action needs the network. Shell commands have their own offline rule: while offline, only the offline subset of the allowlist may run.
 
 ## Connector Tools
 
@@ -58,21 +58,21 @@ Three standing trusts run a connector call without a card instead. Each runs as 
 
 - First-party connector tools that declare themselves read-only and closed-world. A third-party tool's own hints never lower its tier; the hints admit a tool only under this host trust or the next one.
 - A tool the user has given a standing Always allow grant (see Durable Approvals).
-- Web search through the user's designated search provider, while the search switch in Sentinel settings is on (it is on by default). Silent search is bounded: the outbound secret guard must pass over the text the search would send, at most 20 silent searches run per turn, and a silent fetch may only name URLs the provider's own results returned. When any bound fails, the search asks instead, or is denied outright in an unattended run.
+- Web search through the user's designated search provider, while the "Web searches" switch in Settings, under Permissions, is on (it is on by default). This path is separate from the hint-based trusts: it needs no closed-world hint, the host's search-tool list can name a tool as a search tool even when it carries no read-only hint, and an open-world hint does not escalate it there. Silent search is bounded: the outbound secret guard must pass over the text the search would send, at most 20 silent searches run per turn, and a silent fetch may only name URLs the provider's own results returned. When any bound fails, the search asks instead, or is denied outright in an unattended run. The outbound secret guard runs only on this path; it is not a general Tier 3 check.
 
 ## Durable Approvals
 
 An approval is given at one of three scopes, chosen on the card:
 
-- **Once.** The approval is a single-use token recorded in the server's database, bound to a hash of the action's exact parameters. It survives restarts, so an approval given before a restart still stands for the action it covered. Immediately before the call runs, the server re-verifies the parameters byte-for-byte; anything the hash covers that changed after approval invalidates the token and the agent must ask again. A changed action (different parameters) always requires a fresh approval, and a once approval cannot be replayed for a later action.
-- **Approve for this chat.** The exact tool is granted for the rest of the session: later calls to it in the same chat are admitted without a card. The grant applies only where the tool allows chat scope, and it ends with the session.
+- **Once.** The approval is a single-use token recorded in the server's database, bound to a hash of the action's exact parameters. It survives restarts, so an approval given before a restart still stands for the action it covered. The token expires 24 hours after it is issued. Immediately before the call runs, the server re-verifies the parameters byte-for-byte; anything the hash covers that changed after approval invalidates the token and the agent must ask again. A changed action (different parameters) always requires a fresh approval, and a once approval cannot be replayed for a later action.
+- **Approve for this chat.** Chat scope is offered only for calls whose effect is inspect or verify, or that carry an implementation-plan grant. For a connector tool, the grant covers that tool for the rest of the session: later calls to it in the same chat are admitted without a card. For sandbox exec, the grant key is per invocation (a digest of purpose, command, working directory, and environment), so approving one invocation never authorizes a different one. The grant ends with the session.
 - **Always allow.** A standing per-user grant for one read-only connector tool on one connector, recorded in the server's database and applied until the user revokes it. Calls it admits run as Tier 1 and are recorded in the audit feed. It never crosses to another user, connector, or tool.
 
 Approving an implementation plan is a separate path: it admits the calls the plan covers, under the plan's own binding, rather than any of the three scopes above.
 
 ## Classification
 
-Classification is computed once, server-side, at action invocation. The tier travels with the action to the UI on a server-owned field. The UI renders the propagated tier; it never re-derives it. Actions the classifier cannot categorize default to Tier 3. Tool-supplied metadata is otherwise ignored, with one bounded exception: the MCP read-only and destructive hints. The hints can always escalate. They lower a connector call to Tier 1 only under host trust (a first-party connector, or the user's standing grant), only while the tool still declares itself read-only and closed-world, and never for a sensitive read.
+The classifier is the only authority on tiers. It runs server-side, and the same call may be classified more than once on its way to dispatch; dispatch re-verifies connector trust rather than trusting an earlier classification. The tier travels with the action to the UI on a server-owned field. The UI renders the propagated tier; it never re-derives it. Actions the classifier cannot categorize default to Tier 3. Tool-supplied metadata is otherwise ignored, with one bounded exception: the MCP hints (read-only, destructive, and open-world). The destructive hint, and an open-world hint on a tool that does not declare itself read-only, always escalate. The hints lower a connector call to Tier 1 only under host trust (a first-party connector, or the user's standing grant), only while the tool still declares itself read-only and closed-world (open-world hint explicitly false), and never for a sensitive read. The designated search provider is a separate path: it needs no closed-world hint, the host's search-tool list can admit a tool with no read-only hint, and an open-world hint does not escalate it there.
 
 ## Privacy
 
@@ -82,11 +82,13 @@ Classification is computed once, server-side, at action invocation. The tier tra
 
 ## Testing
 
+All tests use synthetic data, never the user's real data.
+
 - Tier 1 actions run without prompting
 - Tier 2 asks by default and respects the per-user relaxation toggle
-- Scheduled runs never apply relaxations: an action that would ask parks for approval, and a held search is denied
-- Tier 3 always asks, one call at a time, with no batch approval
-- A Tier 3 action with an unverifiable destination, a network need while offline, or a payload the outbound secret guard trips on is denied without a card
+- Scheduled runs never apply relaxations: an action that would ask parks for approval. A held search is denied outright only when it was held for the outbound guard, the silent-search cap, or an unreturned URL; a search held because the search switch is off still parks
+- Tier 3 asks one call at a time, with no batch approval, unless a chat-scope or Always allow grant admits the call
+- A Tier 3 action with an unverifiable destination or a network need while offline is denied without a card
 - Web search through the designated provider runs silently within its bounds (guard pass, turn cap, returned URLs only) and asks when the switch is off or a bound fails
 - First-party read-only closed-world connector tools, and tools holding an Always allow grant, run without a card and are audited
 - Chat-scope and Always allow approvals admit later calls at their scope; a once approval cannot be replayed
@@ -97,4 +99,4 @@ Classification is computed once, server-side, at action invocation. The tier tra
 
 - Per-task auto-approval for Tier 3
 - Granular per-command allowlist editing in the UI
-- Offline mode: a separate switch in Sentinel settings, specified elsewhere; inside the tier system it only auto-denies actions that need the network and narrows the shell allowlist to its offline subset
+- Offline mode: a separate switch in Settings, under Permissions, specified elsewhere; inside the tier system it only auto-denies actions that need the network and narrows the shell allowlist to its offline subset
