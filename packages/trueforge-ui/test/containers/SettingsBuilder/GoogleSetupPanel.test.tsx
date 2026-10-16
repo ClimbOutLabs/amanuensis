@@ -1,13 +1,26 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import GoogleSetupPanel from '@/containers/SettingsBuilder/GoogleSetupPanel.js';
+import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
+import type { SentinelApi } from '@/sentinel/types.js';
 import type { GoogleConnectionStatus, GoogleSetupPort } from '@/server/googleSetup.js';
 
 // jsdom does not implement <dialog>.showModal()/close(); CenteredModal calls both.
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
+
+/** A stand-in for the tab the panel opens: a window whose location, opener and close the test can read. */
+function makeTab() {
+  const fake: Window = Object.create(window);
+  Object.defineProperty(fake, 'location', { value: { href: '' } });
+  Object.defineProperty(fake, 'opener', { value: 'original', writable: true });
+  Object.defineProperty(fake, 'close', { value: vi.fn() });
+  return fake;
+}
+
+let tab = makeTab();
 
 beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
@@ -22,7 +35,8 @@ beforeEach(() => {
       this.open = false;
     },
   });
-  vi.spyOn(window, 'open').mockReturnValue(null);
+  tab = makeTab();
+  vi.spyOn(window, 'open').mockImplementation(() => tab);
 });
 
 afterEach(() => {
@@ -108,7 +122,7 @@ describe('GoogleSetupPanel', () => {
     expect(screen.getByText('On the page, click Enable.')).toBeInTheDocument();
     expect(
       screen.getByText(
-        /On the Audience page, click Publish app\. Until then, Google asks you to sign in again every 7 days\./,
+        /Testing \(what you have now\): nothing more to do\. Google asks you to sign in again every 7 days\./,
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(/For application type, choose Desktop app\./)).toBeInTheDocument();
@@ -211,7 +225,9 @@ describe('GoogleSetupPanel', () => {
       client: { clientId: CLIENT_ID, clientSecret: CLIENT_SECRET },
       features: ['gmail_read'],
     });
-    expect(window.open).toHaveBeenCalledWith('https://accounts.example.test/auth', '_blank', 'noopener');
+    expect(window.open).toHaveBeenCalledWith('', '_blank');
+    expect(tab.location.href).toBe('https://accounts.example.test/auth');
+    expect(tab.opener).toBeNull();
   });
 
   it('asks for both features when drafts and sending are ticked', async () => {
@@ -311,7 +327,12 @@ describe('GoogleSetupPanel', () => {
     const { port, begin } = makePort({ getGoogleStatus: async () => connectedStatus({ state: 'needs_reconnect' }) });
     renderPanel(port);
     expect(await screen.findByText('Reconnect needed')).toBeInTheDocument();
-    expect(screen.getByText(/on the Audience page, click Publish app\./)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Google sign-in expired\. Mail is paused, and other parts of Aman keep working\. Select Reconnect to sign in again\./,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/open Audience and choose Publish app, then reconnect once\./)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Test connection' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
     await waitFor(() => expect(begin).toHaveBeenCalledWith({ client: null, features: ['gmail_read'] }));
@@ -340,5 +361,154 @@ describe('GoogleSetupPanel', () => {
     await screen.findByLabelText('Client ID');
     expect(container.textContent).not.toContain('—');
     expect(document.body.textContent).not.toContain('—');
+  });
+
+  it('tells the user to add themselves as a test user, and offers Testing and Production in plain words', async () => {
+    renderPanel(makePort().port);
+    expect(await screen.findByText('Add yourself as a test user')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /under Test users, click Add users and add the Gmail address you will connect as\. Without it, Google blocks sign-in with an access_denied error\./,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Choose Testing or Production')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Production: on the Audience page, click Publish app\. Google then shows an "unverified app" screen once; click Advanced, then continue\./,
+      ),
+    ).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Publish app\. Until then/);
+  });
+
+  it('tells Mac and iPhone users how to copy the whole address, since Safari hides http://', async () => {
+    renderPanel(makePort().port);
+    await screen.findByLabelText('Client ID');
+    fillClient();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
+    await screen.findByLabelText('Address from the address bar');
+    expect(
+      screen.getByText(
+        /In Safari on a Mac, click the address bar, then Select All \(Cmd\+A\) and Copy \(Cmd\+C\), because Safari hides "http:\/\/"/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/On an iPhone or iPad, tap the address bar, choose Select All, then Copy/),
+    ).toBeInTheDocument();
+  });
+
+  it('opens the Google tab inside the click, before the server answers, and points it at Google afterwards', async () => {
+    let answer: (start: Awaited<ReturnType<GoogleSetupPort['beginGoogleConsent']>>) => void = () => undefined;
+    const { port } = makePort({
+      beginGoogleConsent: () =>
+        new Promise(resolve => {
+          answer = resolve;
+        }),
+    });
+    renderPanel(port);
+    await screen.findByLabelText('Client ID');
+    fillClient();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
+    expect(window.open).toHaveBeenCalledTimes(1);
+    expect(tab.location.href).toBe('');
+    await act(async () => {
+      answer({ authorizationUrl: 'https://accounts.example.test/auth', setup: PASTE_SETUP });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(tab.location.href).toBe('https://accounts.example.test/auth');
+    });
+    expect(tab.opener).toBeNull();
+    expect(screen.getByRole('link', { name: 'open Google sign-in here' })).toHaveAttribute(
+      'href',
+      'https://accounts.example.test/auth',
+    );
+  });
+
+  it('closes the tab it opened when the server refuses to start the sign-in, and keeps the error', async () => {
+    renderPanel(
+      makePort({
+        beginGoogleConsent: async () => {
+          throw new Error('That client cannot be used.');
+        },
+      }).port,
+    );
+    await screen.findByLabelText('Client ID');
+    fillClient();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('That client cannot be used.');
+    expect(tab.close).toHaveBeenCalledTimes(1);
+  });
+
+  describe('in offline mode', () => {
+    const OFFLINE = 'Gmail needs network access. Turn off offline mode in Settings to connect.';
+    const offlineApi = (offlineMode: boolean): SentinelApi => ({
+      listAuditEntries: async () => [],
+      getUserSettings: async () => ({ offline_mode: offlineMode, tier2_auto_allow: [], search_without_asking: true }),
+      updateUserSettings: async () => ({
+        offline_mode: offlineMode,
+        tier2_auto_allow: [],
+        search_without_asking: true,
+      }),
+      listSentinelSessionContext: async () => ({ approvals: [] }),
+    });
+    const renderWithSentinel = (port: GoogleSetupPort, offlineMode: boolean) =>
+      render(
+        <SentinelApiProvider api={offlineApi(offlineMode)}>
+          <GoogleSetupPanel open onOpenChange={() => undefined} port={port} onChanged={() => undefined} />
+        </SentinelApiProvider>,
+      );
+
+    it('says so and will not start a sign-in', async () => {
+      const { port, begin } = makePort();
+      renderWithSentinel(port, true);
+      expect(await screen.findByText(OFFLINE)).toBeInTheDocument();
+      await screen.findByLabelText('Client ID');
+      fillClient();
+      expect(screen.getByRole('button', { name: 'Connect Google' })).toBeDisabled();
+      expect(begin).not.toHaveBeenCalled();
+    });
+
+    it('also blocks Reconnect, Test connection and Allow drafts and sending for a saved login', async () => {
+      const { port } = makePort({ getGoogleStatus: async () => connectedStatus() });
+      renderWithSentinel(port, true);
+      expect(await screen.findByText(OFFLINE)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Test connection' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Allow drafts and sending' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Disconnect' })).toBeEnabled();
+    });
+
+    it('says nothing when offline mode is off', async () => {
+      renderWithSentinel(makePort().port, false);
+      await screen.findByLabelText('Client ID');
+      expect(screen.queryByText(OFFLINE)).not.toBeInTheDocument();
+      fillClient();
+      expect(screen.getByRole('button', { name: 'Connect Google' })).toBeEnabled();
+    });
+  });
+
+  it('says what the panel is for and that the user brings their own project, with no verification needed', async () => {
+    renderPanel(makePort().port);
+    expect(
+      await screen.findByText('Not connected. Connect your own Google account to read your email.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Use a Google Cloud project you created yourself. Aman uses your project, not a shared one, so no verification or security review is needed for your own use.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/After you publish, reconnect once, so the saved sign-in is issued in production mode\./),
+    ).toBeInTheDocument();
+  });
+
+  it("says a connected login is on the user's own project, and warns about Testing mode", async () => {
+    renderPanel(makePort({ getGoogleStatus: async () => connectedStatus() }).port);
+    expect(await screen.findByText(/Connected with your own Google project\./)).toBeInTheDocument();
+    expect(screen.getByText(/choose Advanced, then continue\./)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /If your Google project is in Testing mode, Google will disconnect this sign-in 7 days after you connect\. In Google Cloud, open Audience and choose Publish app to keep it connected, then reconnect once/,
+      ),
+    ).toBeInTheDocument();
   });
 });

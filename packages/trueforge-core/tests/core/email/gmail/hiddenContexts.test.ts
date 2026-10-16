@@ -235,7 +235,9 @@ describe('a Content-Type that readers could resolve differently is refused for a
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier3_card ?? null).toBeNull();
     expect(info.pre_dispatch_failure?.message).toContain('text encoding');
-    expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain('not reviewed');
+    expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain(
+      'needs your OK again',
+    );
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 
@@ -344,7 +346,7 @@ describe('every header of a sent draft is either checked and shown, or in a clos
       const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
       expect(info.tier3_card ?? null).toBeNull();
       expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain(
-        'not reviewed',
+        'needs your OK again',
       );
       expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
     });

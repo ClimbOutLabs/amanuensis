@@ -119,7 +119,9 @@ describe('assessDraft refuses a draft that hides text', () => {
       arguments: { draft_id: 'd1', to: ['grace@example.com'], subject: 'Lease', body: 'clean' },
     });
     expect(update.tier3_card ?? null).toBeNull();
-    expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain('not reviewed');
+    expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain(
+      'needs your OK again',
+    );
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 

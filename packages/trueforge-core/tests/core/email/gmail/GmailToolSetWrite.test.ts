@@ -290,7 +290,7 @@ describe('send_draft', () => {
   it('will not send a draft nobody reviewed', async () => {
     const { tools, google } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
     const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    expect(text(response)).toContain('not reviewed');
+    expect(text(response)).toContain('needs your OK again');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 
@@ -299,7 +299,7 @@ describe('send_draft', () => {
     await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     const second = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    expect(text(second)).toContain('not reviewed');
+    expect(text(second)).toContain('needs your OK again');
     expect(google.urls.filter(entry => entry.includes('/drafts/send'))).toHaveLength(1);
   });
 
@@ -413,7 +413,7 @@ describe('send_draft', () => {
     await first.tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     const restarted = await build({ features: [...COMPOSE], routes: [draftRoute()], reviews: new DraftReviewLedger() });
     const response = await restarted.tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    expect(text(response)).toContain('not reviewed');
+    expect(text(response)).toContain('Aman restarted, so this send needs your OK again.');
   });
 
   it('voids the review when the draft is changed through update_draft', async () => {
@@ -433,7 +433,7 @@ describe('send_draft', () => {
       arguments: { draft_id: 'd1', to: ['grace@example.com'], subject: 'Lease', body: 'New text.' },
     });
     const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    expect(text(response)).toContain('not reviewed');
+    expect(text(response)).toContain('needs your OK again');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 
@@ -513,7 +513,7 @@ describe('send_draft', () => {
       expect(info.pre_dispatch_failure?.message).toContain(says);
       expect(info.tier3_card).toBeFalsy();
       const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-      expect(text(response)).toContain('not reviewed');
+      expect(text(response)).toContain('needs your OK again');
       expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
     });
   });
@@ -542,7 +542,7 @@ describe('send_draft', () => {
       expect(info.tier3_card).toBeFalsy();
       expect(info.pre_dispatch_failure?.message).toContain('too long to show you in full');
       const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-      expect(text(response)).toContain('not reviewed');
+      expect(text(response)).toContain('needs your OK again');
       expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
     });
   });

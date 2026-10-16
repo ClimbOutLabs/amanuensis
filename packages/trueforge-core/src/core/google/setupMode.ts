@@ -16,6 +16,8 @@ export const GOOGLE_CALLBACK_PATH = '/api/v1/user/settings/google/oauth/callback
 /** Where a paste-mode consent ends: an address nothing serves, whose bar holds the code and state. */
 export const PASTE_REDIRECT_URI = 'http://127.0.0.1:53682/callback';
 
+const PASTE_REDIRECT_HOST_AND_PATH = PASTE_REDIRECT_URI.replace(/^http:\/\//, '');
+
 export const GOOGLE_SETUP_MODES = ['web', 'loopback', 'paste'] as const;
 export type GoogleSetupMode = (typeof GOOGLE_SETUP_MODES)[number];
 
@@ -101,8 +103,11 @@ export type PastedAddress = { ok: true; code: string; state: string } | { ok: fa
 /** Reads the code and state out of the address the user copied from the browser bar after consent. */
 export function parsePastedAddress(text: string): PastedAddress {
   let url: URL;
+  const trimmed = text.trim();
+  // Safari hides the scheme, so an address copied from it starts at the host; only the return address is completed.
+  const complete = trimmed.startsWith(PASTE_REDIRECT_HOST_AND_PATH) ? `http://${trimmed}` : trimmed;
   try {
-    url = new URL(text.trim());
+    url = new URL(complete);
   } catch {
     return {
       ok: false,

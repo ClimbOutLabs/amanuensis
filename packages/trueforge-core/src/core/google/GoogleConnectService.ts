@@ -198,10 +198,13 @@ export class GoogleConnectService {
     try {
       accountEmail = await fetchProfileEmail({ access_token: tokens.access_token, fetchImpl: this.#fetchImpl });
     } catch (error) {
+      const refused = error instanceof GoogleOAuthError && error.status === 403;
       throw new GoogleConsentError(
-        error instanceof GoogleOAuthError && error.status === 403
-          ? 'You signed in, but Gmail would not answer. Check that the Gmail API is turned on in your Google project (step 2), then connect again.'
-          : 'You signed in, but Aman could not reach Gmail. Try connecting again in a minute.',
+        refused && !grantedFeatures(tokens.scopes).includes('gmail_read')
+          ? "Aman wasn't given permission to read mail. Connect again and leave the read box ticked."
+          : refused
+            ? 'You signed in, but Gmail would not answer. Check that the Gmail API is turned on in your Google project (step 2), then connect again.'
+            : 'You signed in, but Aman could not reach Gmail. Try connecting again in a minute.',
         { cause: error },
       );
     }
