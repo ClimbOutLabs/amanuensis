@@ -5,7 +5,7 @@ import { failCheck, offCheck, okCheck, type Check } from '../schemas';
 
 const DEFAULT_SLOTS = 4;
 
-/** run_code through the app's own slot driver: ready only when a slot proves every safety limit to it. */
+/** run_code through the app's own slot driver: ready only when a sandbox proves every safety limit to it. */
 export async function checkRunCode({ deps, timeoutMs }: { deps: DoctorDeps; timeoutMs: number }): Promise<Check> {
   const id = 'run_code';
   if (deps.env['SANDBOX_BACKEND'] !== 'slots') {
@@ -20,7 +20,7 @@ export async function checkRunCode({ deps, timeoutMs }: { deps: DoctorDeps; time
   if (dir === '' || !Number.isInteger(count) || count < 1) {
     return failCheck({
       id,
-      detail: 'The sandbox settings of this instance are incomplete (SANDBOX_SLOTS_DIR or SANDBOX_SLOTS).',
+      detail: 'The sandbox settings of this instance are incomplete.',
       fix: 'Run aman doctor sandbox --fix',
     });
   }
@@ -29,7 +29,7 @@ export async function checkRunCode({ deps, timeoutMs }: { deps: DoctorDeps; time
     if (readiness.ready) {
       return okCheck({
         id,
-        detail: 'run_code is ready: the app reached the sandbox slots and they passed every safety check.',
+        detail: 'run_code is ready: the app reached the sandboxes and they passed every safety check.',
       });
     }
     return failCheck({
@@ -40,7 +40,7 @@ export async function checkRunCode({ deps, timeoutMs }: { deps: DoctorDeps; time
   } catch (error) {
     return failCheck({
       id,
-      detail: `The sandbox slots could not be asked (${describeNetworkError(error)}).`,
+      detail: `The sandboxes could not be asked (${describeNetworkError(error)}).`,
       fix: `Run "${SLOT_FIX_COMMAND}" on the host, then run doctor again.`,
     });
   }

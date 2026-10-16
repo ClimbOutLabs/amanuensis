@@ -323,29 +323,64 @@ describe('runSandboxSlots', () => {
     });
   });
 
-  test('slots that never become healthy fail with their log lines', async () => {
+  test('sandboxes that never become healthy name the failed check in plain words and keep the raw line as detail', async () => {
     const { result } = await run(call => {
       const text = joined(call);
       if (text.includes('up -d')) {
         return { exitCode: 1, stderr: 'container is unhealthy' };
       }
       if (text.includes(' logs ')) {
-        return { stdout: 'attestation FAILED seccomp: Seccomp is "0"' };
+        return { stdout: 'sandbox-2  | FAIL network: interfaces: erspan0 gre0 lo' };
       }
       return undefined;
     });
     expect(result).toMatchObject({ ok: false, step: 'start' });
-    expect(!result.ok && result.error).toContain('attestation FAILED seccomp');
+    if (result.ok) {
+      throw new Error('expected a failure');
+    }
+    expect(result.error).toContain('it has a network connection it should not have');
+    expect(result.detail).toBe('network: interfaces: erspan0 gre0 lo');
+    expect(result.fix).toBe('Run code stays off on this computer. The rest of Aman works.');
   });
 
-  test('a slot whose attestation fails after start fails the run', async () => {
+  test('a failed check that the fix command can cure points at that one command', async () => {
+    const { result } = await run(call => {
+      const text = joined(call);
+      if (text.includes('up -d')) {
+        return { exitCode: 1, stderr: 'container is unhealthy' };
+      }
+      if (text.includes(' logs ')) {
+        return { stdout: 'FAIL seccomp: Seccomp is "0"' };
+      }
+      return undefined;
+    });
+    expect(result).toMatchObject({ ok: false, step: 'start', fix: 'Run pnpm sandbox:slots --fix.' });
+    expect(!result.ok && result.error).toContain('its system-call filter is off');
+  });
+
+  test('unhealthy sandboxes without a failed check line keep the tool output as detail', async () => {
+    const { result } = await run(call =>
+      joined(call).includes('up -d') ? { exitCode: 1, stderr: 'container is unhealthy' } : undefined,
+    );
+    expect(result).toMatchObject({ ok: false, step: 'start', fix: 'Run pnpm sandbox:slots --fix.' });
+    expect(!result.ok && result.detail).toContain('container is unhealthy');
+  });
+
+  test('a sandbox whose safety checks fail after start fails the run, and no message uses internal terms', async () => {
     const { result } = await run(call =>
       joined(call).includes('sandbox-3') && joined(call).includes('healthcheck')
-        ? { exitCode: 1, stderr: 'attestation failed: apparmor: wrong profile' }
+        ? { exitCode: 1, stdout: 'ok   pid1: x\nFAIL runsc: canary failed\nFAIL network: interfaces: eth0\n' }
         : undefined,
     );
     expect(result).toMatchObject({ ok: false, step: 'attest' });
-    expect(!result.ok && result.error).toContain('Sandbox 3');
+    if (result.ok) {
+      throw new Error('expected a failure');
+    }
+    expect(result.error).toContain('Sandbox 3');
+    expect(result.error).toContain('the code runner does not start on this computer');
+    expect(result.detail).toBe('runsc: canary failed\nnetwork: interfaces: eth0');
+    const shown = `${result.error.replace(result.detail ?? '', '')} ${result.fix}`;
+    expect(shown).not.toMatch(/attestation|slot|runsc|gvisor|apparmor|seccomp|cgroup|test sheet|ubuntu/i);
   });
 });
 

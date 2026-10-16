@@ -157,8 +157,8 @@ print_root_steps() {
     say "Root steps to install Docker Engine (run as root, key fingerprint pinned to $DOCKER_APT_KEY_FPR):"
     docker_root_steps_script | sed 's/^/    /'
   else
-    say "This system is not Debian or Ubuntu with apt, so the installer cannot install Docker for you."
-    say "Follow the Docker Engine install guide for your distribution, or install Docker Desktop on macOS and Windows."
+    say "This computer does not use apt, so the installer cannot install Docker for you."
+    say "Follow the Docker Engine install guide for your Linux system, or install Docker Desktop on macOS and Windows."
   fi
 }
 

@@ -37,7 +37,7 @@ test_dry_run_plans_the_front_end() {
   run_install --dry-run --email owner@example.invalid "${TLS_ARGS[@]}"
   assert_rc 0
   assert_flat_contains "$OUT" "done DNS: aman.example.com and login.example.com resolve to this computer's public address $PUBLIC_IP"
-  assert_flat_contains "$OUT" "needs admin Install Caddy from the Ubuntu package archive"
+  assert_flat_contains "$OUT" "needs admin Install Caddy from the system package archive"
   assert_flat_contains "$OUT" "needs admin Apply the Caddyfile for aman.example.com and login.example.com"
   assert_flat_contains "$OUT" "exactly those two names"
   assert_flat_contains "$OUT" "Open only TCP 443"
@@ -58,7 +58,7 @@ test_plan_skips_the_install_line_when_caddy_is_there() {
   run_install --dry-run --email owner@example.invalid "${TLS_ARGS[@]}"
   assert_rc 0
   assert_flat_contains "$OUT" "done Caddy is installed"
-  assert_not_contains "$OUT" "Install Caddy from the Ubuntu package archive"
+  assert_not_contains "$OUT" "Install Caddy from the system package archive"
   assert_flat_contains "$OUT" "needs admin Apply the Caddyfile"
   sandbox_drop
 }

@@ -516,7 +516,8 @@ print_proxy_requirements() {
   say "  - One https origin for the app and a separate one for login. Never a path prefix."
   say "      $1  ->  forward to http://127.0.0.1:$2"
   say "      $3  ->  forward to the same http://127.0.0.1:$2 (the app passes sign-in pages through and limits guessing)"
-  say "  - Forward the original Host header unchanged, and set X-Forwarded-For to the visitor's address."
+  say "  - Pass on the address people typed in their browser unchanged, and tell the app each visitor's own address."
+  if [ "$UI_VERBOSE" = 1 ]; then say "      (forward the Host header unchanged, and set X-Forwarded-For to the visitor's address)"; fi
   say "  - Do not buffer responses: chat replies stream. Allow read timeouts of at least 10 minutes."
   say "  - Allow request bodies of at least 36 MiB."
   say "  - Containers on this machine must resolve both names and trust their certificates;"

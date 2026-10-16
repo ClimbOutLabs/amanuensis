@@ -138,11 +138,11 @@ Amanuensis installer
 Options
   --home DIR            state directory (default ~/.amanuensis)
   --yes                 accept the plan and the defaults without asking (never installs Docker, changes groups or uses sudo)
-  --install-docker      let the installer run the printed root steps to install Docker Engine (Debian, Ubuntu)
+  --install-docker      let the installer run the printed root steps to install Docker Engine (Linux systems that use apt)
   --add-docker-group    let the installer add your user to the docker group (needs sudo)
-  --sandbox-root        let the installer run the printed root steps for the sandbox (AppArmor profile, slot disks) without asking
+  --sandbox-root        let the installer run the printed root steps for the sandbox (its security rule and disks) without asking
   --tls-root            let the installer run the printed root steps for --tls caddy (install Caddy, apply its configuration) without asking
-  --no-sandbox          install without the gVisor sandbox (run code stays off)
+  --no-sandbox          install without the sandbox (run code stays off)
   --use-host-node       run the sandbox setup on this computer's Node.js 22.14 or newer instead of downloading a pinned copy
   --verbose             show technical details and the full list of downloads
   --dry-run             stop after printing the plan
@@ -165,7 +165,7 @@ Options
   --port N              port on this computer for the app
   --login-port N        port on this computer for the sign-in service
   --tls local|off|caddy  https on your network with a certificate from this computer (default), plain http, or
-                        --public-url and --login-url over https with Caddy on this computer (Ubuntu package, Let's Encrypt)
+                        --public-url and --login-url over https with Caddy on this computer (the system's Caddy package, Let's Encrypt)
   --public-ip ADDRESS   this computer's public IPv4 address for the --tls DNS check (default: ask a lookup service)
   --confirm-name NAME   with --purge-data, the instance name typed in advance
   --print-root-steps    print the root steps for installing Docker and stop

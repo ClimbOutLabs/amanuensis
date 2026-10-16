@@ -48,13 +48,13 @@ describe('attestationProblem', () => {
     expect(attestationProblem({ ...attestation(), ok: false }, now)).toBe('the agent reported a failed attestation');
   });
 
-  test('a stale or future attestation is not current', () => {
+  test('a stale or future safety check result is out of date', () => {
     const old = attestation({ checkedAt: new Date(now - 16 * 60_000) });
     const future = attestation({ checkedAt: new Date(now + 5 * 60_000) });
-    expect(attestationProblem(old, now)).toBe('the attestation is not current');
-    expect(attestationProblem(future, now)).toBe('the attestation is not current');
+    expect(attestationProblem(old, now)).toBe('the safety check result is out of date');
+    expect(attestationProblem(future, now)).toBe('the safety check result is out of date');
     expect(attestationProblem({ ...attestation(), checked_at: 'yesterday' }, now)).toBe(
-      'the attestation is not current',
+      'the safety check result is out of date',
     );
   });
 

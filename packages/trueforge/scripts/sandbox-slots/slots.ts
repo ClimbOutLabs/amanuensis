@@ -150,6 +150,55 @@ function tail(text: string): string {
   return text.replace(/\s+/g, ' ').trim().slice(-400);
 }
 
+/** Each safety check in plain words, and whether the fix command can cure it. A cure is not possible when the cause is this computer itself. */
+const SAFETY_CHECKS: ReadonlyMap<string, { problem: string; fixable: boolean }> = new Map([
+  ['pid1', { problem: 'its main process is not the one expected', fixable: true }],
+  ['identity', { problem: 'it runs as the wrong user', fixable: true }],
+  ['capabilities', { problem: 'it holds extra system privileges', fixable: true }],
+  ['no_new_privs', { problem: 'it could gain extra privileges', fixable: true }],
+  ['seccomp', { problem: 'its system-call filter is off', fixable: true }],
+  ['read_only_root', { problem: 'its system files are not read-only', fixable: true }],
+  ['network', { problem: 'it has a network connection it should not have', fixable: false }],
+  ['no_docker_socket', { problem: 'it can reach Docker', fixable: true }],
+  ['cgroup_limits', { problem: 'its memory or process limits are not the expected ones', fixable: true }],
+  ['apparmor', { problem: 'its security profile is not in force', fixable: true }],
+  ['proc_fs', { problem: 'parts of the system it should not change are writable', fixable: true }],
+  ['workspace_quota', { problem: 'its disk limit is not the expected one', fixable: true }],
+  ['runsc', { problem: 'the code runner does not start on this computer', fixable: false }],
+]);
+
+/** The lines `FAIL <check>: <detail>` that the sandbox's own check prints, wherever they sit in tool output. */
+function failedCheckLines(text: string): { name: string; line: string }[] {
+  return Array.from(text.matchAll(/\bFAIL\s+([a-z0-9_]+):[ \t]*([^\n]*)/g), match => ({
+    name: match[1] ?? '',
+    line: `${match[1] ?? ''}: ${(match[2] ?? '').trim()}`,
+  }));
+}
+
+/** The plain sentence and fix for sandboxes that failed safety checks; the raw lines are the verbose detail. */
+function describeFailedChecks({ text, subject, command }: { text: string; subject: string; command: string }): {
+  message: string;
+  fix: string;
+  detail: string;
+} {
+  const failed = failedCheckLines(text);
+  if (failed.length === 0) {
+    const generic = withDetail({ sentence: subject, detail: tail(text) });
+    return { ...generic, fix: `Run ${command} --fix.` };
+  }
+  const known = failed.map(check => SAFETY_CHECKS.get(check.name));
+  const problems = [...new Set(known.map(check => check?.problem ?? 'a check did not pass'))];
+  const withDetailLines = withDetail({
+    sentence: `${subject} (${problems.join('; ')})`,
+    detail: failed.map(check => check.line).join('\n'),
+  });
+  const fixable = known.some(check => check === undefined || check.fixable);
+  return {
+    ...withDetailLines,
+    fix: fixable ? `Run ${command} --fix.` : 'Run code stays off on this computer. The rest of Aman works.',
+  };
+}
+
 class Slots {
   readonly checks: SlotsCheck[] = [];
   private diskMode: DiskMode = 'off';
@@ -334,8 +383,8 @@ class Slots {
       step: 'apparmor',
       status: 'info',
       message: present
-        ? 'AppArmor is on in this Docker host, so the sandboxes must run under the aman-sandbox-slot profile'
-        : 'No AppArmor in this Docker host; the other safety checks still apply',
+        ? "Docker here enforces security profiles, so the sandboxes run under Aman's own profile"
+        : 'Docker here has no security profiles; the other safety checks still apply',
     });
     return present;
   }
@@ -457,7 +506,7 @@ class Slots {
         ? ''
         : ' The scratch files of earlier test chats in the existing workspace volumes will be deleted.';
     const agreed = await this.options.confirm(
-      `This will create ${String(SLOT_COUNT)} disk files of ${String(this.options.diskGb)} GB each under ${root} (they use real space only as the slots write), add ${String(SLOT_COUNT)} lines to /etc/fstab so they mount again after a reboot, and mount them. It needs root.${staleNote}`,
+      `This will create ${String(SLOT_COUNT)} disk files of ${String(this.options.diskGb)} GB each under ${root} (they use real space only as the sandboxes write), add ${String(SLOT_COUNT)} lines to /etc/fstab so they mount again after a reboot, and mount them. It needs root.${staleNote}`,
     );
     if (!agreed) {
       throw new StepFailure(
@@ -540,7 +589,7 @@ class Slots {
       throw new StepFailure(
         'build',
         failed.message,
-        'Check that this machine can reach Docker Hub and the Ubuntu package mirror (the build downloads packages once), then run this again. A Docker Hub rate-limit message means: run docker login first.',
+        'Check that this computer can reach Docker Hub and the package servers (the build downloads packages once), then run this again. A Docker Hub rate-limit message means: run docker login first.',
         undefined,
         failed.detail,
       );
@@ -579,14 +628,14 @@ class Slots {
 
   private async ensureProfile(): Promise<void> {
     if (await this.profileLoaded()) {
-      this.record({ step: 'apparmor', status: 'ok', message: `AppArmor profile ${APPARMOR_PROFILE} is loaded` });
+      this.record({ step: 'apparmor', status: 'ok', message: 'The security profile for the sandboxes is loaded' });
       return;
     }
     const profile = join(this.options.repoRoot, PROFILE_PATH);
     if (!this.mayFix) {
       throw new StepFailure(
         'apparmor',
-        `The AppArmor profile ${APPARMOR_PROFILE} is not loaded on this machine.`,
+        'The security profile for the sandboxes is not loaded on this computer.',
         `Run ${this.options.command} --fix. It asks for your password once to load the profile.`,
       );
     }
@@ -608,13 +657,13 @@ class Slots {
         : installed;
     if (loaded.exitCode !== 0 || !(await this.profileLoaded())) {
       const failed = withDetail({
-        sentence: 'Installing and loading the AppArmor profile failed',
+        sentence: 'Loading the security profile for the sandboxes failed',
         detail: tail(loaded.stderr),
       });
       throw new StepFailure(
         'apparmor',
         failed.message,
-        `Make sure apparmor_parser is installed (sudo apt install apparmor) and that your account may use sudo, then run ${this.options.command} --fix again.`,
+        `Make sure your account may use sudo, then run ${this.options.command} --fix again. Add --verbose to see what failed.`,
         undefined,
         failed.detail,
       );
@@ -622,7 +671,7 @@ class Slots {
     this.record({
       step: 'apparmor',
       status: 'ok',
-      message: `Installed the AppArmor profile ${APPARMOR_PROFILE} in /etc/apparmor.d and loaded it (it loads again at boot)`,
+      message: 'Installed and loaded the security profile for the sandboxes (it loads again at boot)',
     });
   }
 
@@ -641,17 +690,12 @@ class Slots {
     });
     if (up.exitCode !== 0) {
       const logs = await this.run({ args: this.composeArgs(['logs', '--no-color', '--tail', '15']) });
-      const failed = withDetail({
-        sentence: 'The sandboxes did not become healthy',
-        detail: tail(`${up.stderr} ${logs.stdout} ${logs.stderr}`),
+      const failed = describeFailedChecks({
+        text: `${up.stderr}\n${logs.stdout}\n${logs.stderr}`,
+        subject: 'The sandboxes did not become healthy',
+        command: this.options.command,
       });
-      throw new StepFailure(
-        'start',
-        failed.message,
-        `Read the attestation lines above: each names the safety check that failed. On Ubuntu 24.04 run ${this.options.command} --fix; otherwise see the failure fixes in the test sheet.`,
-        undefined,
-        failed.detail,
-      );
+      throw new StepFailure('start', failed.message, failed.fix, undefined, failed.detail);
     }
     this.record({ step: 'start', status: 'ok', message: `Started ${String(SLOT_COUNT)} sandboxes` });
   }
@@ -668,17 +712,12 @@ class Slots {
         ]),
       });
       if (result.exitCode !== 0) {
-        const failed = withDetail({
-          sentence: `Sandbox ${String(slot)} failed its safety checks`,
-          detail: tail(`${result.stdout} ${result.stderr}`),
+        const failed = describeFailedChecks({
+          text: `${result.stdout}\n${result.stderr}`,
+          subject: `Sandbox ${String(slot)} failed a safety check`,
+          command: this.options.command,
         });
-        throw new StepFailure(
-          'attest',
-          failed.message,
-          `Run ${this.options.command} --fix, then again. If the failing check is runsc, see the failure fixes in the test sheet.`,
-          undefined,
-          failed.detail,
-        );
+        throw new StepFailure('attest', failed.message, failed.fix, undefined, failed.detail);
       }
     }
     this.record({

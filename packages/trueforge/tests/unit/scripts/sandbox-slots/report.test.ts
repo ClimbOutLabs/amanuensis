@@ -82,7 +82,7 @@ describe('SlotsReporter', () => {
       'docker',
       check('docker', 'Docker 29.1.0 aarch64 is running'),
       check('compose', 'Docker Compose 2.40.0'),
-      check('apparmor', 'No AppArmor in this Docker host; the other safety checks still apply', 'info'),
+      check('apparmor', 'Docker here has no security profiles; the other safety checks still apply', 'info'),
       'image',
       check('build', 'Built amanuensis-sandbox-slot:local'),
       'profile',
@@ -140,13 +140,13 @@ describe('SlotsReporter', () => {
         ok: false,
         checks: [],
         step: 'apparmor',
-        error: 'Installing and loading the AppArmor profile failed: sudo: apparmor_parser: command not found',
+        error: 'Loading the security profile for the sandboxes failed: sudo: apparmor_parser: command not found',
         fix: 'Make sure apparmor_parser is installed (sudo apt install apparmor), then run pnpm sandbox:slots --fix again.',
         detail: 'sudo: apparmor_parser: command not found',
       },
     });
     const err = c.err();
-    expect(err).toContain('x Installing and loading the AppArmor profile failed');
+    expect(err).toContain('x Loading the security profile for the sandboxes failed');
     expect(err).not.toContain('command not found');
     expect(err).toContain('Details: --verbose');
     expect(err).toContain('Next: Make sure apparmor_parser is installed');
@@ -189,7 +189,7 @@ describe('SlotsReporter', () => {
       'docker',
       check('docker', 'Docker 29.1.0 aarch64 is running'),
       check('compose', 'Docker Compose 2.40.0'),
-      check('apparmor', 'AppArmor is on', 'info'),
+      check('apparmor', 'Docker here enforces security profiles', 'info'),
       'image',
       check('build', 'Built amanuensis-sandbox-slot:local'),
     ]);

@@ -245,6 +245,9 @@ test_print_only_flags() {
   assert_contains "$OUT" "Requirements for your reverse proxy"
   assert_contains "$OUT" "forward to http://127.0.0.1:<app port>"
   assert_flat_contains "$OUT" "forward to the same http://127.0.0.1:<app port>"
+  assert_flat_contains "$OUT" "tell the app each visitor's own address"
+  assert_not_contains "$OUT" "X-Forwarded-For"
+  run_install --print-proxy-requirements --verbose
   assert_flat_contains "$OUT" "set X-Forwarded-For to the visitor's address"
   run_install --print-network
   assert_rc 0

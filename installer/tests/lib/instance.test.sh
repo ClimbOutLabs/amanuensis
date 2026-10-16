@@ -234,7 +234,7 @@ test_public_url_rules() {
   assert_contains "$(cat "$STUB_LOG")" "--force-recreate --no-deps --wait --wait-timeout 120 app"
   assert_eq "$(env_value pub LOGIN_UPSTREAM_URL)" "http://127.0.0.1:$(sed -n 's/^login_port=//p' "$AMAN_HOME/state/instances/pub.conf")/dex"
   assert_contains "$OUT" "Never a path prefix"
-  assert_contains "$OUT" "Forward the original Host header"
+  assert_contains "$OUT" "Pass on the address people typed in their browser unchanged"
   assert_contains "$OUT" "Do not buffer responses"
   local product
   for product in nginx caddy traefik apache haproxy cloudflare envoy; do

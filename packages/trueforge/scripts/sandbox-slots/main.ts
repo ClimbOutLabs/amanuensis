@@ -225,7 +225,7 @@ async function main(): Promise<number> {
   const commandName = values['command-name'] ?? 'pnpm sandbox:slots';
   // Tool output goes to a private log file; with --json and no file it stays on stderr as it always did.
   const logFile =
-    values['log-file'] ?? (json ? undefined : join(mkdtempSync(join(tmpdir(), 'aman-slots-')), 'slots.log'));
+    values['log-file'] ?? (json ? undefined : join(mkdtempSync(join(tmpdir(), 'aman-sandbox-')), 'sandbox.log'));
   const run = createRunCommand({ logFile });
   const diskGb = values['disk-gb'] === undefined ? DEFAULT_DISK_GB : Number(values['disk-gb']);
   if (!Number.isInteger(diskGb) || diskGb < MIN_DISK_GB || diskGb > MAX_DISK_GB) {
@@ -293,7 +293,7 @@ async function main(): Promise<number> {
     hardDiskLimit: values['no-hard-disk-limit'] !== true,
     confirm: async question => {
       reporter.explain(question);
-      const label = 'Create the slot disks?';
+      const label = 'Create the sandbox disks?';
       if (values.yes === true) {
         // --yes is this command's own approval of the one question it asks.
         ui.promptHead({ label: `${label} [y/N]` });

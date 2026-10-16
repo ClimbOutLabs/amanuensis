@@ -128,7 +128,7 @@ preflight_system() {
     Darwin) pretty=macOS ;;
     *)
       unsupported=1
-      check_block "Operating system $os is not supported" "On Windows, run this inside the WSL2 distribution that Docker Desktop integrates with."
+      check_block "Operating system $os is not supported" "On Windows, run this inside the WSL2 Linux system that Docker Desktop integrates with."
       ;;
   esac
   case "$arch" in

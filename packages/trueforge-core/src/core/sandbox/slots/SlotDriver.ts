@@ -59,7 +59,7 @@ export function attestationProblem(attestation: SlotAttestation, nowMs: number):
   }
   const checkedAt = Date.parse(attestation.checked_at);
   if (Number.isNaN(checkedAt) || nowMs - checkedAt > SLOT_ATTESTATION_MAX_AGE_MS || checkedAt - nowMs > 60_000) {
-    problems.push('the attestation is not current');
+    problems.push('the safety check result is out of date');
   }
   if (attestation.agent_version !== SLOT_AGENT_VERSION) {
     problems.push(`agent version ${attestation.agent_version} is not the expected ${SLOT_AGENT_VERSION}`);
@@ -147,7 +147,7 @@ export class SlotDriver implements IsolationDriver {
 
   provision(): Promise<void> {
     return Promise.reject(
-      new Error(`Sandbox slots are prepared outside the app. Run \`${SLOT_FIX_COMMAND}\`, then check again.`),
+      new Error(`The sandboxes are prepared outside the app. Run \`${SLOT_FIX_COMMAND}\`, then check again.`),
     );
   }
 
@@ -227,7 +227,7 @@ export class SlotDriver implements IsolationDriver {
       const index = this.nextFreeSlot();
       if (index === undefined) {
         if (this.now() > deadline) {
-          return this.failure({ terminatedBy: 'internal', message: 'every sandbox slot stayed busy for too long' });
+          return this.failure({ terminatedBy: 'internal', message: 'every sandbox stayed busy for too long' });
         }
         await this.sleepMs(SLOT_QUEUE_POLL_MS);
         continue;
@@ -281,7 +281,7 @@ export class SlotDriver implements IsolationDriver {
     }
     return this.failure({
       terminatedBy: 'internal',
-      message: `no sandbox slot could be reached (${lastError?.message ?? 'none configured'}). Run \`${SLOT_FIX_COMMAND}\`.`,
+      message: `no sandbox could be reached (${lastError?.message ?? 'none configured'}). Run \`${SLOT_FIX_COMMAND}\`.`,
     });
   }
 

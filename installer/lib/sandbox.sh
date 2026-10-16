@@ -159,9 +159,9 @@ preflight_sandbox() {
     # The slot agent reads the limits of either cgroup version, so v1 is no blocker; it only reports a different line.
     cgroup=$(D info --format '{{.CgroupVersion}}' 2>/dev/null || true)
     case "$cgroup" in
-      1) check_warn "Docker here uses cgroup v1. The sandbox runs on it; memory limits are read from the v1 files" ;;
+      1) check_warn "Docker here uses an older memory-limit setup. The sandbox runs on it; its limits are read from the older files" ;;
       2 | '') ;;
-      *) check_block "Docker reports an unknown cgroup setup ($cgroup), which the sandbox cannot check" "Pass --no-sandbox to install without run code." ;;
+      *) check_block "Docker reports an unknown memory-limit setup ($cgroup), which the sandbox cannot check" "Pass --no-sandbox to install without run code." ;;
     esac
   fi
   if sandbox_native_linux; then
