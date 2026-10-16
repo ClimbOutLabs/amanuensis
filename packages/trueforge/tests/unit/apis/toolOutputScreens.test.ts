@@ -43,10 +43,6 @@ class ReadFailingGlobalSettingsStore implements IGlobalSettingsStore {
   deleteSetting(input: GetGlobalSettingInput): Promise<void> {
     return this.inner.deleteSetting(input);
   }
-
-  listSettings(): Promise<GlobalSettingRecord[]> {
-    return Promise.reject(new Error('transient store read failure'));
-  }
 }
 
 async function createRouter() {

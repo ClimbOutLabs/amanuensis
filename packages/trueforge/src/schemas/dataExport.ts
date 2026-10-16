@@ -1,12 +1,11 @@
 import { z } from '@hono/zod-openapi';
 
-export const ExportDataRequestQuerySchema = z
+export const ExportDataRequestSchema = z
   .object({
     include_uploads: z
-      .stringbool()
+      .boolean()
       .optional()
-      .describe('When true, uploaded file bytes are included under files/. Defaults to false.')
-      .openapi({ type: 'boolean' }),
+      .describe('When true, uploaded file bytes are included under files/. Defaults to false.'),
   })
-  .openapi('ExportDataRequestQuery');
-export type ExportDataRequestQuery = z.infer<typeof ExportDataRequestQuerySchema>;
+  .openapi('ExportDataRequest');
+export type ExportDataRequest = z.infer<typeof ExportDataRequestSchema>;

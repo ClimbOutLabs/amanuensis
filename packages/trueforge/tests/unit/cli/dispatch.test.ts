@@ -61,6 +61,15 @@ describe('aman dispatcher', () => {
     expect(failure.err.join('')).not.toBe('');
   });
 
+  it('routes export-data and answers its usage without loading the server config', async () => {
+    const io = fakeIo();
+    expect(await runCli({ argv: ['export-data', '--help'], io })).toBe(0);
+    expect(io.err.join('')).toContain('aman export-data --list-users');
+    const bad = fakeIo();
+    expect(await runCli({ argv: ['export-data'], io: bad })).toBe(2);
+    expect(bad.err.join('')).toContain('--list-users');
+  });
+
   it('routes doctor to its own parser', async () => {
     const io = fakeIo();
     expect(await runCli({ argv: ['doctor', '--only', 'nope'], io })).toBe(2);

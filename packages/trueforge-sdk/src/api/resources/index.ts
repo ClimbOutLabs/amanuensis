@@ -4,6 +4,8 @@ export * as auth from "./auth/index.js";
 export * as bugReports from "./bugReports/index.js";
 export * from "./bugReports/client/requests/index.js";
 export * as catalogs from "./catalogs/index.js";
+export * as data from "./data/index.js";
+export * from "./data/client/requests/index.js";
 export * as internal from "./internal/index.js";
 export * from "./internal/client/requests/index.js";
 export * as mcpServers from "./mcpServers/index.js";

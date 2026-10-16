@@ -1,30 +1,33 @@
 /**
- * GET /api/v1/data/export: streams the signed-in user's data export archive.
+ * POST /api/v1/data/export: streams the signed-in user's data export archive.
  *
- * Scope is the caller plus the agents they manage, resolved the same way as
- * the session APIs. One audit row is recorded per completed export (who and
- * when, never content).
+ * Scope is what the caller created, plus instance-wide memory for administrators. One audit row
+ * is recorded per export, completed or failed (who and when, never content). A failed export
+ * drops the connection, so a client can never mistake a short archive for a whole one.
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
+import { extractErrorLogFields, type SentinelServices } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
-import { HTTPException } from 'hono/http-exception';
-import { stream } from 'hono/streaming';
-import { Writable } from 'node:stream';
-import { finished } from 'node:stream/promises';
-
 import type { Logger } from 'winston';
+
 import type { Authorizer } from '../auth/authorizer';
-import { resolveRequestContext } from '../auth/identity';
+import { hasAdminRole, resolveRequestContext } from '../auth/identity';
 import configuration from '../config';
-import { runDataExport, type MemoryExportSource } from '../dataExport/exportService';
-import { collectStoredSecrets } from '../dataExport/secretCollection';
-import type { AgentRecord, IAgentStore } from '../db/agentStore';
+import { ExportBodyCancelledError, exportResponseBody } from '../dataExport/exportBody';
+import { runDataExport } from '../dataExport/exportService';
+import { resolveMemoryExportSource } from '../dataExport/memorySource';
+import { normalizeSecrets } from '../dataExport/secretScrub';
+import {
+  ZipEntryLimitExceededError,
+  ZipOutputClosedError,
+  ZipSizeCapExceededError,
+} from '../dataExport/zipStreamWriter';
+import type { IAgentStore } from '../db/agentStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
-import type { IModelProviderStore } from '../db/modelProviderStore';
-import type { IPersonaStore } from '../db/personaStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
+import type { IPersonaStore } from '../db/personaStore';
 import type { IScheduleStore } from '../db/scheduleStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
@@ -34,12 +37,9 @@ import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { PACKAGE_VERSION } from '../packageVersion';
 import { exportDataRoute } from '../routes/dataExportRoutes';
-import { createMemoryClient } from '../runtime/memory/createMemoryClient';
-import type { MemoryClient } from '../runtime/memory/memoryClient';
-import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
-import { resolveManagedAgentIds } from './agentAccess';
+import { listManageableAgents } from './agentAccess';
 
-export interface DataExportDeps<TTransaction> {
+export interface DataExportRouterDeps<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   personaStore: IPersonaStore<TTransaction>;
   personalizationStore: IPersonalizationStore<TTransaction>;
@@ -50,149 +50,125 @@ export interface DataExportDeps<TTransaction> {
   sentinelAuditStore: ISentinelAuditStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
-  resolveMcpServerStore: (c?: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore<TTransaction>;
-  resolveModelProviderStore: (c: Context, runAsAgent?: AgentRecord) => IModelProviderStore<TTransaction>;
+  resolveMcpServerStore: (c?: Context) => IMcpServerWithAuthStore<TTransaction>;
   resolveAgentStore: (c: Context) => IAgentStore<TTransaction>;
   authorizer: Authorizer;
+  /** Every secret value this server holds; the same source the outbound secret guard reads. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
   logger: Logger;
 }
 
-async function resolveMemorySource<TTransaction>(
-  deps: DataExportDeps<TTransaction>,
-  c: Context,
-  input: { tenantId: string; subjectId: string },
-): Promise<MemoryExportSource> {
-  if (configuration.MEMORY_BACKEND === 'markdown') {
-    return { kind: 'markdown', markdownDir: configuration.MEMORY_MARKDOWN_DIR };
+/** A fixed phrase per failure kind: the audit row must never carry content or an error message. */
+function failureReason(error: unknown): string {
+  if (error instanceof ZipSizeCapExceededError) {
+    return 'over the size limit';
   }
-  const provider = await resolveMemoryProvider({
-    mcpServerStore: deps.resolveMcpServerStore(c),
-    tokenStore: deps.tokenStore,
-    tenantId: input.tenantId,
-    clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
-    userRef: input.subjectId,
-    logger: deps.logger,
-  });
-  const client: MemoryClient | undefined = createMemoryClient({
-    backend: configuration.MEMORY_BACKEND,
-    markdownDir: configuration.MEMORY_MARKDOWN_DIR,
-    namespace: input.tenantId,
-    hindsight:
-      provider === undefined
-        ? undefined
-        : { apiBase: provider.apiBase, bank: provider.bank, headers: provider.headers },
-  });
-  if (client === undefined) {
-    // Memory is part of the export; an instance whose memory backend cannot
-    // be read must fail loudly rather than ship an archive without it.
-    throw new HTTPException(500, { message: 'The memory backend is unavailable, so the export cannot run.' });
+  if (error instanceof ZipEntryLimitExceededError) {
+    return 'too many files';
   }
-  return { kind: 'client', client };
+  if (error instanceof ZipOutputClosedError || error instanceof ExportBodyCancelledError) {
+    return 'the download was cancelled';
+  }
+  return 'an internal error';
 }
 
-export function createDataExportRouter<TTransaction>(deps: DataExportDeps<TTransaction>): OpenAPIHono {
+export function createDataExportRouter<TTransaction>(deps: DataExportRouterDeps<TTransaction>): OpenAPIHono {
   const app = new OpenAPIHono();
 
   app.openapi(exportDataRoute, async c => {
+    // A cross-site request cannot set this header without a CORS preflight, which is what keeps a
+    // page on another origin from starting an export with the user's cookie.
+    if (!/^application\/json\b/i.test(c.req.header('content-type') ?? '')) {
+      return c.json({ error: { message: 'Unsupported Media Type' } }, 415);
+    }
     const requestContext = resolveRequestContext(c);
     const tenantId = requestContext.tenant_id;
     const subjectId = requestContext.subject.id;
-    const includeUploads = c.req.valid('query').include_uploads ?? false;
+    const includeUploads = c.req.valid('json').include_uploads ?? false;
 
     const mcpServerStore = deps.resolveMcpServerStore(c);
-    const modelProviderStore = deps.resolveModelProviderStore(c);
-    const managedAgentIds = await resolveManagedAgentIds({
-      store: deps.resolveAgentStore(c),
-      context: requestContext,
-      authorizer: deps.authorizer,
-    });
-    const secrets = await collectStoredSecrets({
-      modelProviderStore,
+    const agentStore = deps.resolveAgentStore(c);
+    const secrets = normalizeSecrets(await deps.outboundSecrets({ tenant_id: tenantId, created_by: subjectId }));
+    const memorySource = await resolveMemoryExportSource({
       mcpServerStore,
       tokenStore: deps.tokenStore,
       tenantId,
       subjectId,
+      logger: deps.logger,
     });
-    const memorySource = await resolveMemorySource(deps, c, { tenantId, subjectId });
     const exportedAt = new Date();
 
-    c.header('Content-Type', 'application/zip');
-    c.header('Content-Disposition', `attachment; filename="aman-export-${exportedAt.toISOString().slice(0, 10)}.zip"`);
-    c.header('Cache-Control', 'private, no-store');
-
-    return stream(c, async streamApi => {
-      const writable = new Writable({
-        write(chunk: Buffer, _encoding, callback) {
-          streamApi.write(new Uint8Array(chunk)).then(
-            () => {
-              callback();
-            },
-            (error: unknown) => {
-              callback(error instanceof Error ? error : new Error(String(error)));
-            },
-          );
-        },
-      });
+    const recordAudit = async (description: string): Promise<void> => {
       try {
-        const result = await runDataExport(
-          {
-            sessionStore: deps.sessionStore,
-            personaStore: deps.personaStore,
-            personalizationStore: deps.personalizationStore,
-            spaceStore: deps.spaceStore,
-            scheduleStore: deps.scheduleStore,
-            globalSettingsStore: deps.globalSettingsStore,
-            sentinelSettingsStore: deps.sentinelSettingsStore,
-            turnArtifactStore: deps.turnArtifactStore,
-            mcpServerStore,
-            memorySource,
-            personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
-          },
-          {
-            subject: { tenantId, subjectId, agentIds: managedAgentIds, includeUploads },
-            secrets,
-            exportedAt,
-            appVersion: PACKAGE_VERSION,
-            maxBytes: configuration.DATA_EXPORT_MAX_BYTES,
-          },
-          writable,
-        );
-        // The zip writer queues into this Writable; end it and wait for the
-        // flush so the response stream cannot close ahead of the last bytes.
-        writable.end();
-        await finished(writable);
-        deps.logger.info('Data export completed', {
-          subject_id: subjectId,
+        await deps.sentinelAuditStore.record({
           tenant_id: tenantId,
-          bytes: result.bytesWritten,
-          include_uploads: includeUploads,
+          created_by: subjectId,
+          conversation_id: '',
+          tier: 1,
+          tool_name: 'data_export',
+          description,
+          outcome: 'logged',
+          auto_deny_reason: null,
         });
-        try {
-          await deps.sentinelAuditStore.record({
-            tenant_id: tenantId,
-            created_by: subjectId,
-            conversation_id: '',
-            tier: 1,
-            tool_name: 'data_export',
-            description: `Exported their data (${String(result.bytesWritten)} bytes${includeUploads ? ', uploaded files included' : ''}).`,
-            outcome: 'logged',
-            auto_deny_reason: null,
-          });
-        } catch (auditError) {
-          deps.logger.error('Failed to record data export audit row', {
-            error: auditError instanceof Error ? auditError.message : String(auditError),
-          });
-        }
-      } catch (error) {
-        // The response is already streaming; ending it mid-archive is the
-        // visible failure (a truncated zip), and the cap error lands here too.
-        deps.logger.error('Data export failed', {
-          subject_id: subjectId,
-          tenant_id: tenantId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        writable.destroy();
+      } catch (auditError) {
+        deps.logger.error('Failed to record data export audit row', extractErrorLogFields(auditError));
       }
+    };
+
+    const body = exportResponseBody({
+      produce: async out => {
+        try {
+          const result = await runDataExport(
+            {
+              sessionStore: deps.sessionStore,
+              personaStore: deps.personaStore,
+              personalizationStore: deps.personalizationStore,
+              spaceStore: deps.spaceStore,
+              scheduleStore: deps.scheduleStore,
+              globalSettingsStore: deps.globalSettingsStore,
+              sentinelSettingsStore: deps.sentinelSettingsStore,
+              turnArtifactStore: deps.turnArtifactStore,
+              mcpServerStore,
+              listAgents: () =>
+                listManageableAgents({ store: agentStore, context: requestContext, authorizer: deps.authorizer }),
+              memorySource,
+              personaKnowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+            },
+            {
+              subject: { tenantId, subjectId, includeUploads, includeInstanceData: hasAdminRole(requestContext) },
+              secrets,
+              exportedAt,
+              appVersion: PACKAGE_VERSION,
+              maxBytes: configuration.DATA_EXPORT_MAX_BYTES,
+            },
+            out,
+          );
+          deps.logger.info('Data export completed', {
+            subject_id: subjectId,
+            tenant_id: tenantId,
+            bytes: result.bytesWritten,
+            redactions: result.redactions,
+            include_uploads: includeUploads,
+          });
+          await recordAudit(
+            `Exported their data (${String(result.bytesWritten)} bytes${includeUploads ? ', uploaded files included' : ''}).`,
+          );
+        } catch (error) {
+          deps.logger.error('Data export failed', {
+            subject_id: subjectId,
+            tenant_id: tenantId,
+            ...extractErrorLogFields(error),
+          });
+          await recordAudit(`Data export failed (${failureReason(error)}).`);
+          throw error;
+        }
+      },
+    });
+
+    return c.body(body, 200, {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="aman-export-${exportedAt.toISOString().slice(0, 10)}.zip"`,
+      'Cache-Control': 'private, no-store',
     });
   });
 

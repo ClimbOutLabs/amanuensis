@@ -5,6 +5,7 @@ import {
   makeTurnDoneEvent,
 } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 
+import { internalSystemMessage } from '../../../../trueforge-core/src/core/runtime/contextUtils';
 import { sessionToCommonChat } from '../../../src/dataExport/chatMapping';
 import { CommonChatSchema } from '../../../src/dataExport/commonChatFormat';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
@@ -34,6 +35,7 @@ async function buildSession() {
           context: [
             { role: 'system', content: 'You are a test assistant.' },
             { role: 'user', content: 'First question' },
+            internalSystemMessage('Host note: do not show this in the chat.'),
             { role: 'assistant', content: 'First answer' },
             { role: 'tool', tool_call_id: 'call-1', content: 'tool output that is not chat' },
           ],
@@ -93,6 +95,7 @@ describe('sessionToCommonChat', () => {
     expect(parsed.messages[0]?.time).toBe(turns[0]?.created_at.toISOString());
     expect(parsed.messages[2]?.time).toBe(turns[1]?.created_at.toISOString());
     expect(parsed.created_at).toBe(session.created_at.toISOString());
+    expect(JSON.stringify(parsed)).not.toContain('Host note');
   });
 
   it('omits the folder when the session has none', async () => {

@@ -3,7 +3,7 @@
  * directory (the streaming writer's entries carry data descriptors, so
  * local headers alone do not know the sizes) and verifies each entry's CRC.
  */
-import { crc32 } from '../../src/privacy/zipWriter';
+import { crc32 } from 'node:zlib';
 
 export interface ZipEntryData {
   name: string;
@@ -57,5 +57,6 @@ export function zipEntryText(entries: readonly ZipEntryData[], name: string): st
 }
 
 export function zipEntryJson(entries: readonly ZipEntryData[], name: string): unknown {
-  return JSON.parse(zipEntryText(entries, name));
+  const parsed: unknown = JSON.parse(zipEntryText(entries, name));
+  return parsed;
 }

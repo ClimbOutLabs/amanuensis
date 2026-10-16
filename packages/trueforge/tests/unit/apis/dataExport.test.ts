@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
+import { z } from 'zod';
+import { internalSystemMessage } from '../../../../trueforge-core/src/core/runtime/contextUtils';
 import {
   makeCreateTurnInput,
   makeModelMessageEvent,
@@ -28,6 +30,7 @@ import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/Sqlite
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
+import { personaVaultNamespace, vaultFilesystemNamespace } from '../../../src/runtime/memory/markdownMemoryFiles';
 import { startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 import { readZipEntries, zipEntryJson, zipEntryText } from '../../fixtures/zipReader';
 
@@ -41,7 +44,15 @@ const CONNECTOR_HEADER_SECRET = 'test-header-secret-value-abcdef123456';
 const OAUTH_ACCESS_TOKEN = 'test-oauth-access-token-abcdef123456';
 // Not stored anywhere: only the credential-pattern layer can catch it.
 const PASTED_GITHUB_TOKEN = ['ghp', 'pastedtoken1234567890abcdef'].join('_');
+const CONNECTOR_PATH_TOKEN = ['ghp', 'connectorpathtoken1234567890'].join('_');
+const CONNECTOR_QUERY_SECRET = 'query-secret-value-9876543210';
+const APPROVAL_TOKEN_ID = 'approval-token-id-should-not-ship';
+const AUTH_URL = 'https://login.example.com/authorize?state=should-not-ship';
 
+const RESEARCHER_VAULT = vaultFilesystemNamespace(TENANT_ID, personaVaultNamespace('Researcher'));
+const BOB_VAULT = vaultFilesystemNamespace(TENANT_ID, personaVaultNamespace('Bob Persona'));
+
+/** `x-test-user` names the caller; `x-test-admin` gives them the administrator role. */
 const headerAuthenticator: Authenticator = {
   authenticate: c => {
     const user = c.req.header('x-test-user');
@@ -51,34 +62,74 @@ const headerAuthenticator: Authenticator = {
     const context: RequestContext = {
       tenant_id: TENANT_ID,
       subject: { id: user, type: 'user', display_name: user },
-      roles: [],
+      roles: c.req.header('x-test-admin') === undefined ? [] : ['admin'],
       user_credential: null,
     };
     return Promise.resolve(context);
   },
 };
 
-function asUser(user: string): RequestInit {
-  return { headers: { 'x-test-user': user } };
-}
-
 function subject(user: string) {
   return { subject_id: user, subject_type: 'user' as const, subject_display_name: user };
 }
 
+const ManifestSchema = z.object({
+  format: z.string(),
+  schema_version: z.number(),
+  tenant_id: z.string(),
+  include_uploads: z.boolean(),
+  sections: z.array(z.string()),
+  redactions: z.number(),
+  memory: z.object({
+    backend: z.string(),
+    status: z.string(),
+    vaults: z.number(),
+    shared_vaults_included: z.boolean(),
+  }),
+});
+
+const SessionEntrySchema = z.object({
+  session: z.object({
+    session_id: z.string(),
+    created_at: z.string(),
+    updated_at: z.string(),
+    last_activity_timestamp_ms: z.number(),
+    metrics: z.object({ total_turns: z.number() }),
+  }),
+  turns: z.array(
+    z.object({
+      turn: z.object({ created_at: z.string(), updated_at: z.string(), snapshot: z.record(z.string(), z.unknown()) }),
+      events: z.array(z.object({ type: z.string() }).passthrough()),
+    }),
+  ),
+  artifacts: z.array(z.object({ path: z.string(), created_at: z.string(), updated_at: z.string() })),
+});
+
+const Timestamped = z.object({ created_at: z.string(), updated_at: z.string() });
+
 async function seedSession(
   server: ApprovalTestServer,
-  input: { user: string; sessionId: string; folderId?: string; userText: string; assistantText: string },
+  input: {
+    user: string;
+    sessionId: string;
+    folderId?: string;
+    userText: string;
+    assistantText: string;
+    agentId?: string;
+  },
 ): Promise<void> {
   const store = server.sessionStore();
   await store.createSession({
     tenant_id: TENANT_ID,
     session_id: input.sessionId,
     created_by_subject: subject(input.user),
-    agent: {
-      type: 'inline',
-      spec: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' }),
-    },
+    agent:
+      input.agentId === undefined
+        ? {
+            type: 'inline',
+            spec: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' }),
+          }
+        : { type: 'reference', id: input.agentId, name: 'reporter' },
     custom: null,
     metadata: {},
     external_id: null,
@@ -96,12 +147,32 @@ async function seedSession(
     makeCreateTurnInput({
       sessionId: input.sessionId,
       turnId: `${input.sessionId}-turn-1`,
+      sandbox_info: { sandbox_id: 'sandbox-handle-should-not-ship' },
       new_context_appends: [
         {
           thread_id: 'main',
           context: [
             { role: 'user', content: input.userText },
+            internalSystemMessage('Host note: the user is on a trip.'),
             { role: 'assistant', content: input.assistantText },
+            {
+              role: 'assistant',
+              content: '',
+              tool_calls: [
+                {
+                  id: 'call-1',
+                  type: 'function',
+                  function: { name: 'lookup', arguments: '{}' },
+                  tool_info: {
+                    type: 'mcp',
+                    mcp_server_id: '',
+                    mcp_server_name: '',
+                    original_tool_name: 'lookup',
+                    approval_token_id: APPROVAL_TOKEN_ID,
+                  },
+                },
+              ],
+            },
           ],
           current_context_usage: null,
         },
@@ -111,7 +182,24 @@ async function seedSession(
   await store.appendToEvents({
     session_id: input.sessionId,
     turn_id: `${input.sessionId}-turn-1`,
-    events: [makeTurnCreatedEvent(`${input.sessionId}-turn-1`), makeModelMessageEvent()],
+    events: [
+      makeTurnCreatedEvent(`${input.sessionId}-turn-1`),
+      makeModelMessageEvent(),
+      {
+        type: 'sandbox.created',
+        id: 'evt-sandbox',
+        created_at: new Date().toISOString(),
+        sandbox_id: 'sandbox-handle-should-not-ship',
+        thread_id: null,
+      },
+      {
+        type: 'mcp.auth_required',
+        id: 'evt-auth',
+        created_at: new Date().toISOString(),
+        thread_id: null,
+        mcp_servers: [{ id: 'server-1', name: 'planted-connector', auth_url: AUTH_URL }],
+      },
+    ],
   });
 }
 
@@ -136,7 +224,26 @@ describe('Data export route', () => {
     server = await startApprovalTestServer({ authenticator: headerAuthenticator });
     const db = server.db();
 
-    // Folder + sessions: alice has one in a folder, bob has his own.
+    // Agents: alice has one, bob has one of his own.
+    const agentStore = new SqliteAgentStore(db);
+    const agent = await agentStore.createAgent({
+      tenant_id: TENANT_ID,
+      created_by_subject: subject('alice'),
+      name: 'reporter',
+      description: 'Test agent.',
+      manifest: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'Report daily.' }),
+      external_id: 'reporter-external',
+    });
+    await agentStore.createAgent({
+      tenant_id: TENANT_ID,
+      created_by_subject: subject('bob'),
+      name: 'bob-agent',
+      description: 'Bob only.',
+      manifest: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'Bob secret.' }),
+      external_id: null,
+    });
+
+    // Folder + sessions: alice has one in a folder, bob has his own, and one bound to alice's agent.
     const sessionStore = server.sessionStore();
     const folder = await sessionStore.createSessionFolder({
       tenant_id: TENANT_ID,
@@ -158,17 +265,15 @@ describe('Data export route', () => {
       userText: 'bob private question',
       assistantText: 'bob private answer',
     });
-
-    // Agent + schedule (alice) and a schedule owned by bob.
-    const agentStore = new SqliteAgentStore(db);
-    const agent = await agentStore.createAgent({
-      tenant_id: TENANT_ID,
-      created_by_subject: subject('alice'),
-      name: 'reporter',
-      description: 'Test agent.',
-      manifest: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' }),
-      external_id: null,
+    await seedSession(server, {
+      user: 'bob',
+      sessionId: 'bob-on-alice-agent',
+      userText: 'bob asks the shared agent',
+      assistantText: 'shared agent answer for bob',
+      agentId: agent.id,
     });
+
+    // Schedules: one each.
     const scheduleStore = new SqliteScheduleStore(db);
     await scheduleStore.createScheduleAndRun({
       tenant_id: TENANT_ID,
@@ -189,7 +294,7 @@ describe('Data export route', () => {
       runFrom: new Date(),
     });
 
-    // Persona + personalization + knowledge.
+    // Personas + personalization + knowledge.
     const personaStore = new SqlitePersonaStore(db);
     await personaStore.createPersona({
       tenant_id: TENANT_ID,
@@ -265,7 +370,7 @@ describe('Data export route', () => {
       format: 'markdown',
     });
 
-    // Connector with header auth + OAuth token + model provider key.
+    // Connector with header auth + credentials in its URL, an OAuth token, and a model provider key.
     const mcpStore = new SqliteMcpServerStore(db);
     const connector = await mcpStore.createServer({
       tenant_id: TENANT_ID,
@@ -274,7 +379,7 @@ describe('Data export route', () => {
       manifest: {
         type: 'remote',
         name: 'planted-connector',
-        url: 'https://connector.example.com/mcp',
+        url: `https://user:pw@connector.example.com/mcp/${CONNECTOR_PATH_TOKEN}/v1?api=${CONNECTOR_QUERY_SECRET}#frag`,
         description: 'Connector with credentials.',
         auth: { type: 'header', headers: { Authorization: `Bearer ${CONNECTOR_HEADER_SECRET}` } },
       },
@@ -307,8 +412,10 @@ describe('Data export route', () => {
       },
     });
 
-    // Settings.
-    await new SqliteGlobalSettingsStore(db).setSetting({ key: 'export_test_setting', value: 'enabled' });
+    // Settings: an exported toggle, and one that must stay behind.
+    const globalSettings = new SqliteGlobalSettingsStore(db);
+    await globalSettings.setSetting({ key: 'tool_output_screen_enabled', value: 'true' });
+    await globalSettings.setSetting({ key: 'export_test_unlisted_setting', value: 'enabled' });
     await new SqliteSentinelSettingsStore(db).patch({
       tenant_id: TENANT_ID,
       created_by: 'alice',
@@ -317,7 +424,7 @@ describe('Data export route', () => {
       search_without_asking: undefined,
     });
 
-    // Uploaded files: one text artifact quoting the OAuth token, one binary.
+    // Uploaded files: a text artifact quoting the OAuth token, a binary, and a path that tries to escape.
     const artifactStore = new SqliteTurnArtifactStore(db);
     await artifactStore.recordStoredArtifact({
       tenant_id: TENANT_ID,
@@ -337,8 +444,18 @@ describe('Data export route', () => {
       data: Buffer.from([0x00, 0x9f, 0xff, 0x10, 0x42]),
       mime: 'application/octet-stream',
     });
+    await artifactStore.recordStoredArtifact({
+      tenant_id: TENANT_ID,
+      session_id: 'alice-session-1',
+      turn_id: 'alice-session-1-turn-1',
+      path: '..\\..\\C:\\escape.txt',
+      name: 'escape.txt',
+      data: Buffer.from('escape attempt'),
+      mime: 'text/plain',
+    });
 
-    // Markdown memory: tenant vault plus a persona vault, with a derived cache that must stay behind.
+    // Markdown memory: the shared vault (with a derived cache that must stay behind and a sharing
+    // config naming personas), both users' persona vaults, a topic vault, and a lookalike directory.
     await mkdir(join(memoryDir, TENANT_ID, 'memory'), { recursive: true });
     await writeFile(join(memoryDir, TENANT_ID, 'MEMORY.md'), '# Memory\n\nThe connector secret is in the vault.\n');
     await writeFile(
@@ -347,8 +464,15 @@ describe('Data export route', () => {
     );
     await writeFile(join(memoryDir, TENANT_ID, '.vault-tombstones.md'), '<!-- tombstones -->\n');
     await writeFile(join(memoryDir, TENANT_ID, '.embeddings.json'), '{"derived":true}\n');
-    await mkdir(join(memoryDir, `${TENANT_ID}__persona-Researcher`, 'memory'), { recursive: true });
-    await writeFile(join(memoryDir, `${TENANT_ID}__persona-Researcher`, 'MEMORY.md'), '# Persona memory\n');
+    await writeFile(join(memoryDir, TENANT_ID, '.vault-sharing.json'), '{"shares":{"Bob Persona":["trips"]}}\n');
+    await mkdir(join(memoryDir, RESEARCHER_VAULT, 'memory'), { recursive: true });
+    await writeFile(join(memoryDir, RESEARCHER_VAULT, 'MEMORY.md'), '# Researcher memory\n');
+    await mkdir(join(memoryDir, BOB_VAULT, 'memory'), { recursive: true });
+    await writeFile(join(memoryDir, BOB_VAULT, 'MEMORY.md'), '# Bob private memory\n');
+    await mkdir(join(memoryDir, `${TENANT_ID}__trips`, 'memory'), { recursive: true });
+    await writeFile(join(memoryDir, `${TENANT_ID}__trips`, 'MEMORY.md'), '# Trips\n');
+    await mkdir(join(memoryDir, `${TENANT_ID}s-other`, 'memory'), { recursive: true });
+    await writeFile(join(memoryDir, `${TENANT_ID}s-other`, 'MEMORY.md'), '# Another tenant\n');
   }, 120_000);
 
   afterAll(async () => {
@@ -359,123 +483,301 @@ describe('Data export route', () => {
     await rm(scratchDir, { recursive: true, force: true });
   });
 
-  async function exportZip(user: string, query = ''): Promise<Buffer> {
-    const response = await server.request(`${EXPORT_PATH}${query}`, asUser(user));
+  function requestExport(user: string, options?: { uploads?: boolean; admin?: boolean }): Promise<Response> {
+    return server.request(EXPORT_PATH, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-test-user': user,
+        ...(options?.admin === true ? { 'x-test-admin': 'yes' } : {}),
+      },
+      body: JSON.stringify(options?.uploads === true ? { include_uploads: true } : {}),
+    });
+  }
+
+  async function exportZip(user: string, options?: { uploads?: boolean; admin?: boolean }): Promise<Buffer> {
+    const response = await requestExport(user, options);
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('application/zip');
     return Buffer.from(await response.arrayBuffer());
   }
 
+  async function auditDescriptions(user: string): Promise<string[]> {
+    const rows = await new SentinelAuditStore(server.db()).list({
+      tenant_id: TENANT_ID,
+      created_by: user,
+      conversation_id: '',
+      limit: 100,
+      offset: 0,
+    });
+    return rows.filter(row => row.tool_name === 'data_export').map(row => row.description);
+  }
+
   it('requires authentication', async () => {
-    expect((await server.request(EXPORT_PATH)).status).toBe(401);
+    const response = await server.request(EXPORT_PATH, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it('only accepts a JSON body, so a cross-site form cannot start an export', async () => {
+    const asAlice = { 'x-test-user': 'alice' };
+    const form = await server.request(EXPORT_PATH, {
+      method: 'POST',
+      headers: { ...asAlice, 'content-type': 'application/x-www-form-urlencoded' },
+      body: 'include_uploads=true',
+    });
+    expect(form.status).toBe(415);
+    const plain = await server.request(EXPORT_PATH, {
+      method: 'POST',
+      headers: { ...asAlice, 'content-type': 'text/plain' },
+      body: '{}',
+    });
+    expect(plain.status).toBe(415);
+    const none = await server.request(EXPORT_PATH, { method: 'POST', headers: asAlice });
+    expect(none.status).toBe(415);
+    const get = await server.request(EXPORT_PATH, { headers: asAlice });
+    expect(get.status).toBe(404);
   });
 
   it('exports every section for the caller, in the common chat format', async () => {
-    const zipBytes = await exportZip('alice');
-    const entries = readZipEntries(zipBytes);
+    const entries = readZipEntries(await exportZip('alice', { admin: true }));
     const names = entries.map(entry => entry.name);
 
-    const manifest = zipEntryJson(entries, 'manifest.json') as {
-      format: string;
-      schema_version: number;
-      include_uploads: boolean;
-    };
+    const manifest = ManifestSchema.parse(zipEntryJson(entries, 'manifest.json'));
     expect(manifest.format).toBe('aman-export');
     expect(manifest.schema_version).toBe(1);
+    expect(manifest.tenant_id).toBe(TENANT_ID);
     expect(manifest.include_uploads).toBe(false);
+    expect(manifest.redactions).toBeGreaterThan(0);
+    expect(manifest.sections).toEqual([
+      'chats.json',
+      'sessions.json',
+      'folders.json',
+      'personas.json',
+      'personalization.json',
+      'spaces.json',
+      'agents.json',
+      'schedules.json',
+      'connectors.json',
+      'settings.json',
+    ]);
+    for (const section of manifest.sections) {
+      expect(names).toContain(section);
+    }
+    expect(manifest.memory).toMatchObject({ backend: 'markdown', status: 'included', shared_vaults_included: true });
 
-    // chats.json is the common chat format.
+    // chats.json is the common chat format, and host notes are not chat.
     const chats = CommonChatExportFileSchema.parse(JSON.parse(zipEntryText(entries, 'chats.json')));
     expect(chats).toHaveLength(1);
     expect(chats[0]?.folder).toBe('Research');
     expect(chats[0]?.messages.map(message => message.author)).toEqual(['you', 'assistant']);
     expect(chats[0]?.messages[0]?.text).toContain('please use it');
+    expect(zipEntryText(entries, 'chats.json')).not.toContain('Host note');
 
     // Full-fidelity sessions with events, and artifact index rows.
-    const sessions = zipEntryJson(entries, 'sessions.json') as {
-      session: { session_id: string };
-      turns: { events: unknown[] }[];
-      artifacts: { path: string }[];
-    }[];
+    const sessions = z.array(SessionEntrySchema).parse(zipEntryJson(entries, 'sessions.json'));
     expect(sessions.map(entry => entry.session.session_id)).toEqual(['alice-session-1']);
     expect(sessions[0]?.turns).toHaveLength(1);
     expect(sessions[0]?.turns[0]?.events.length).toBeGreaterThanOrEqual(2);
-    expect(sessions[0]?.artifacts.map(artifact => artifact.path).sort()).toEqual(['blob.bin', 'notes.txt']);
-
-    expect((zipEntryJson(entries, 'folders.json') as { name: string }[]).map(folder => folder.name)).toEqual([
-      'Research',
+    expect(sessions[0]?.artifacts.map(artifact => artifact.path).sort()).toEqual([
+      '..\\..\\C:\\escape.txt',
+      'blob.bin',
+      'notes.txt',
     ]);
 
-    const personas = zipEntryJson(entries, 'personas.json') as {
-      persona: { display_name: string };
-      knowledge: { documents: { chunks: { text: string }[] }[] };
-    }[];
+    expect(
+      z
+        .array(z.object({ name: z.string() }).merge(Timestamped))
+        .parse(zipEntryJson(entries, 'folders.json'))
+        .map(folder => folder.name),
+    ).toEqual(['Research']);
+
+    const personas = z
+      .array(
+        z.object({
+          persona: z.object({ display_name: z.string() }).merge(Timestamped),
+          knowledge: z.object({ documents: z.array(z.object({ chunks: z.array(z.object({ text: z.string() })) })) }),
+        }),
+      )
+      .parse(zipEntryJson(entries, 'personas.json'));
     expect(personas.map(entry => entry.persona.display_name)).toEqual(['Researcher']);
     expect(personas[0]?.knowledge.documents[0]?.chunks[0]?.text).toContain('tide pools');
 
-    const personalization = zipEntryJson(entries, 'personalization.json') as { assistant_name: string | null };
+    const personalization = z
+      .object({ assistant_name: z.string().nullable() })
+      .parse(zipEntryJson(entries, 'personalization.json'));
     expect(personalization.assistant_name).toBe('Helper');
 
-    const spaces = zipEntryJson(entries, 'spaces.json') as { space: { name: string }; revisions: { body: string }[] }[];
+    const spaces = z
+      .array(
+        z.object({
+          space: z.object({ name: z.string() }).merge(Timestamped),
+          revisions: z.array(z.object({ body: z.string() }).merge(Timestamped)),
+        }),
+      )
+      .parse(zipEntryJson(entries, 'spaces.json'));
     expect(spaces).toHaveLength(1);
     expect(spaces[0]?.revisions.map(revision => revision.body)).toEqual(['First version body', 'Second version body']);
 
-    const schedules = zipEntryJson(entries, 'schedules.json') as { name: string }[];
+    const schedules = z
+      .array(z.object({ name: z.string() }).merge(Timestamped))
+      .parse(zipEntryJson(entries, 'schedules.json'));
     expect(schedules.map(schedule => schedule.name)).toEqual(['alice-daily']);
 
-    const connectors = zipEntryJson(entries, 'connectors.json') as {
-      name: string;
-      manifest: Record<string, unknown>;
-    }[];
-    const planted = connectors.find(connector => connector.name === 'planted-connector');
-    expect(planted).toBeDefined();
-    expect(planted?.manifest).not.toHaveProperty('auth');
-
-    const settings = zipEntryJson(entries, 'settings.json') as {
-      global: { key: string; value: string }[];
-      permission_settings: { offline_mode: boolean };
-    };
-    expect(settings.global).toContainEqual({ key: 'export_test_setting', value: 'enabled' });
+    const settings = z
+      .object({
+        instance: z.array(z.object({ key: z.string(), value: z.string() })),
+        permission_settings: z.object({ offline_mode: z.boolean() }),
+      })
+      .parse(zipEntryJson(entries, 'settings.json'));
+    expect(settings.instance).toEqual([{ key: 'tool_output_screen_enabled', value: 'true' }]);
     expect(settings.permission_settings.offline_mode).toBe(true);
-
-    // Memory files: verbatim layout, derived cache excluded.
-    expect(names).toContain('memory/default/MEMORY.md');
-    expect(names).toContain('memory/default/memory/2026-10-01.md');
-    expect(names).toContain('memory/default/.vault-tombstones.md');
-    expect(names).toContain('memory/default__persona-Researcher/MEMORY.md');
-    expect(names.some(name => name.includes('.embeddings.json'))).toBe(false);
 
     // No uploaded file bytes without the tick.
     expect(names.some(name => name.startsWith('files/'))).toBe(false);
   });
 
+  it('exports the agents the caller manages, with full definitions and timestamps', async () => {
+    const entries = readZipEntries(await exportZip('alice'));
+    const agents = z
+      .array(
+        z
+          .object({
+            id: z.string(),
+            name: z.string(),
+            description: z.string(),
+            external_id: z.string().nullable(),
+            created_by_subject: z.object({ subject_id: z.string() }),
+            manifest: z.object({ instructions: z.string(), model: z.object({ name: z.string() }) }),
+          })
+          .merge(Timestamped),
+      )
+      .parse(zipEntryJson(entries, 'agents.json'));
+    expect(agents).toHaveLength(1);
+    expect(agents[0]).toMatchObject({
+      name: 'reporter',
+      description: 'Test agent.',
+      external_id: 'reporter-external',
+      created_by_subject: { subject_id: 'alice' },
+      manifest: { instructions: 'Report daily.', model: { name: 'test-provider/test-model' } },
+    });
+    const bytes = zipEntryText(entries, 'agents.json');
+    expect(bytes).not.toContain('bob-agent');
+    expect(bytes).not.toContain('Bob secret.');
+  });
+
+  it('carries the timestamps and counters an import restores', async () => {
+    const entries = readZipEntries(await exportZip('alice', { uploads: true }));
+    const [entry] = z.array(SessionEntrySchema).parse(zipEntryJson(entries, 'sessions.json'));
+    expect(Date.parse(entry?.session.created_at ?? '')).not.toBeNaN();
+    expect(Date.parse(entry?.session.updated_at ?? '')).not.toBeNaN();
+    expect(entry?.session.last_activity_timestamp_ms).toBeGreaterThan(0);
+    expect(entry?.session.metrics.total_turns).toBeGreaterThanOrEqual(0);
+    expect(Date.parse(entry?.turns[0]?.turn.created_at ?? '')).not.toBeNaN();
+    expect(Date.parse(entry?.turns[0]?.turn.updated_at ?? '')).not.toBeNaN();
+    for (const artifact of entry?.artifacts ?? []) {
+      expect(Date.parse(artifact.created_at)).not.toBeNaN();
+      expect(artifact.updated_at).toBe(artifact.created_at);
+    }
+  });
+
+  it('takes only the memory the caller may export', async () => {
+    const adminNames = readZipEntries(await exportZip('alice', { admin: true })).map(entry => entry.name);
+    expect(adminNames).toContain(`memory/${TENANT_ID}/MEMORY.md`);
+    expect(adminNames).toContain(`memory/${TENANT_ID}/memory/2026-10-01.md`);
+    expect(adminNames).toContain(`memory/${TENANT_ID}/.vault-tombstones.md`);
+    expect(adminNames).toContain(`memory/${RESEARCHER_VAULT}/MEMORY.md`);
+    expect(adminNames).toContain(`memory/${TENANT_ID}__trips/MEMORY.md`);
+    expect(adminNames.some(name => name.includes('.embeddings.json'))).toBe(false);
+    expect(adminNames.some(name => name.includes('.vault-sharing.json'))).toBe(false);
+    expect(adminNames.some(name => name.includes(BOB_VAULT))).toBe(false);
+    expect(adminNames.some(name => name.includes(`${TENANT_ID}s-other`))).toBe(false);
+
+    const memberEntries = readZipEntries(await exportZip('alice'));
+    const memberMemory = memberEntries.map(entry => entry.name).filter(name => name.startsWith('memory/'));
+    expect(memberMemory.every(name => name.startsWith(`memory/${RESEARCHER_VAULT}/`))).toBe(true);
+    expect(memberMemory).toContain(`memory/${RESEARCHER_VAULT}/MEMORY.md`);
+    expect(ManifestSchema.parse(zipEntryJson(memberEntries, 'manifest.json')).memory.shared_vaults_included).toBe(
+      false,
+    );
+    const settings = z.object({ instance: z.array(z.unknown()) }).parse(zipEntryJson(memberEntries, 'settings.json'));
+    expect(settings.instance).toEqual([]);
+  });
+
   it('keeps every planted secret out of the archive', async () => {
-    const zipBytes = await exportZip('alice', '?include_uploads=true');
-    for (const secret of [PROVIDER_API_KEY, CONNECTOR_HEADER_SECRET, OAUTH_ACCESS_TOKEN, PASTED_GITHUB_TOKEN]) {
+    const zipBytes = await exportZip('alice', { uploads: true, admin: true });
+    for (const secret of [
+      PROVIDER_API_KEY,
+      CONNECTOR_HEADER_SECRET,
+      OAUTH_ACCESS_TOKEN,
+      PASTED_GITHUB_TOKEN,
+      CONNECTOR_PATH_TOKEN,
+      CONNECTOR_QUERY_SECRET,
+    ]) {
       expect(zipBytes.includes(Buffer.from(secret))).toBe(false);
     }
-    // The scrubbed content itself still ships.
+    // The scrubbed content itself still ships, around the redactions.
     const entries = readZipEntries(zipBytes);
     const chats = zipEntryText(entries, 'chats.json');
     expect(chats).toContain('please use it');
     expect(chats).toContain('[redacted]');
+    expect(chats).toContain('Also saw this token');
   });
 
-  it("never includes another user's data", async () => {
+  it('exports connectors without credentials, query strings or token path segments', async () => {
+    const entries = readZipEntries(await exportZip('alice'));
+    const connectors = z
+      .array(z.object({ name: z.string(), manifest: z.object({ url: z.string() }).passthrough() }))
+      .parse(zipEntryJson(entries, 'connectors.json'));
+    const planted = connectors.find(connector => connector.name === 'planted-connector');
+    expect(planted?.manifest).not.toHaveProperty('auth');
+    expect(planted?.manifest.url).toBe('https://connector.example.com/mcp/[redacted]/v1');
+  });
+
+  it('leaves out deployment-bound session fields', async () => {
     const zipBytes = await exportZip('alice');
-    for (const marker of ['bob-session-1', 'bob private question', 'Bob Persona', 'bob-weekly', 'Bob weekly task']) {
+    for (const marker of ['sandbox-handle-should-not-ship', AUTH_URL, 'sandbox.created', 'sandbox_info']) {
       expect(zipBytes.includes(Buffer.from(marker))).toBe(false);
     }
-    const bobZip = await exportZip('bob');
-    const bobSessions = zipEntryJson(readZipEntries(bobZip), 'sessions.json') as { session: { session_id: string } }[];
-    expect(bobSessions.map(entry => entry.session.session_id)).toEqual(['bob-session-1']);
+    const [entry] = z.array(SessionEntrySchema).parse(zipEntryJson(readZipEntries(zipBytes), 'sessions.json'));
+    expect(entry?.turns[0]?.events.map(event => event.type)).toContain('mcp.auth_required');
+    expect(entry?.turns[0]?.events.map(event => event.type)).not.toContain('sandbox.created');
+    expect(zipBytes.includes(Buffer.from(APPROVAL_TOKEN_ID))).toBe(false);
   });
 
-  it('includes uploaded files only when requested, scrubbing text payloads', async () => {
-    const withUploads = readZipEntries(await exportZip('alice', '?include_uploads=true'));
+  it("never includes another user's data, including agent-bound sessions and schedules", async () => {
+    const zipBytes = await exportZip('alice', { admin: true });
+    for (const marker of [
+      'bob-session-1',
+      'bob private question',
+      'bob-on-alice-agent',
+      'bob asks the shared agent',
+      'Bob Persona',
+      'bob-weekly',
+      'Bob weekly task',
+      'Bob private memory',
+    ]) {
+      expect(zipBytes.includes(Buffer.from(marker))).toBe(false);
+    }
+    const bobEntries = readZipEntries(await exportZip('bob'));
+    const bobSessions = z.array(SessionEntrySchema).parse(zipEntryJson(bobEntries, 'sessions.json'));
+    expect(bobSessions.map(entry => entry.session.session_id).sort()).toEqual(['bob-on-alice-agent', 'bob-session-1']);
+    expect(zipEntryText(bobEntries, 'agents.json')).toContain('bob-agent');
+    expect(zipEntryText(bobEntries, 'agents.json')).not.toContain('reporter');
+    const bobMemory = bobEntries.map(entry => entry.name).filter(name => name.startsWith('memory/'));
+    expect(bobMemory.every(name => name.startsWith(`memory/${BOB_VAULT}/`))).toBe(true);
+  });
+
+  it('includes uploaded files only when requested, scrubbing text and normalizing names', async () => {
+    const withUploads = readZipEntries(await exportZip('alice', { uploads: true }));
     const names = withUploads.map(entry => entry.name);
     expect(names).toContain('files/alice-session-1/notes.txt');
     expect(names).toContain('files/alice-session-1/blob.bin');
+    expect(names).toContain('files/alice-session-1/escape.txt');
+    expect(names.every(name => !name.includes('..') && !name.includes('\\') && !name.startsWith('/'))).toBe(true);
     const notes = zipEntryText(withUploads, 'files/alice-session-1/notes.txt');
     expect(notes).toContain('remember the token');
     expect(notes).not.toContain(OAUTH_ACCESS_TOKEN);
@@ -483,38 +785,51 @@ describe('Data export route', () => {
     expect(blob?.data.equals(Buffer.from([0x00, 0x9f, 0xff, 0x10, 0x42]))).toBe(true);
   });
 
-  it('enforces the size cap instead of shipping a truncated archive', async () => {
+  it('fails the download, not just truncates it, when the size cap is hit', async () => {
     configuration.DATA_EXPORT_MAX_BYTES = 512;
     try {
-      const response = await server.request(EXPORT_PATH, asUser('alice'));
-      // The download must fail visibly: either reading the body errors, or
-      // the bytes are an incomplete archive with no end record.
-      let bytes: Buffer | undefined;
-      try {
-        bytes = Buffer.from(await response.arrayBuffer());
-      } catch {
-        bytes = undefined;
-      }
-      if (bytes !== undefined) {
-        expect(() => readZipEntries(bytes)).toThrow();
-      }
+      const response = await requestExport('alice');
+      // The archive cannot be completed, so reading the body must fail.
+      await expect(response.arrayBuffer()).rejects.toThrow();
     } finally {
       configuration.DATA_EXPORT_MAX_BYTES = originalConfig.DATA_EXPORT_MAX_BYTES;
     }
+    expect((await auditDescriptions('alice')).some(text => text === 'Data export failed (over the size limit).')).toBe(
+      true,
+    );
   });
 
-  it('records one audit row per export', async () => {
-    await exportZip('alice');
-    const auditStore = new SentinelAuditStore(server.db());
-    const rows = await auditStore.list({
+  it('stops producing when the client goes away', async () => {
+    const big = Buffer.alloc(3 * 1024 * 1024, 0x61);
+    await new SqliteTurnArtifactStore(server.db()).recordStoredArtifact({
       tenant_id: TENANT_ID,
-      created_by: 'alice',
-      conversation_id: '',
-      limit: 100,
-      offset: 0,
+      session_id: 'bob-session-1',
+      turn_id: 'bob-session-1-turn-1',
+      path: 'big.bin',
+      name: 'big.bin',
+      data: Buffer.concat([big, Buffer.from([0xff])]),
+      mime: 'application/octet-stream',
     });
-    const exports = rows.filter(row => row.tool_name === 'data_export');
-    expect(exports.length).toBeGreaterThanOrEqual(1);
-    expect(exports[0]?.description).not.toContain('tide pools');
+    const response = await requestExport('bob', { uploads: true });
+    const reader = response.body?.getReader();
+    expect(reader).toBeDefined();
+    await reader?.read();
+    await reader?.cancel();
+    const deadline = Date.now() + 10_000;
+    let cancelledRecorded = false;
+    while (!cancelledRecorded && Date.now() < deadline) {
+      cancelledRecorded = (await auditDescriptions('bob')).includes('Data export failed (the download was cancelled).');
+      if (!cancelledRecorded) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    }
+    expect(cancelledRecorded).toBe(true);
+  });
+
+  it('records one audit row per completed export, without content', async () => {
+    await exportZip('alice');
+    const descriptions = await auditDescriptions('alice');
+    expect(descriptions.some(text => text.startsWith('Exported their data'))).toBe(true);
+    expect(descriptions.join('\n')).not.toContain('tide pools');
   });
 });

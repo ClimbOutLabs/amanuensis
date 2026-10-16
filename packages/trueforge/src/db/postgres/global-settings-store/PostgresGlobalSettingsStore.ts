@@ -45,12 +45,6 @@ export class PostgresGlobalSettingsStore implements IGlobalSettingsStore<Transac
     });
   }
 
-  async listSettings(transaction?: Transaction<Database>): Promise<GlobalSettingRecord[]> {
-    const db = transaction ?? this.#db;
-    const rows = await db.selectFrom('global_settings').selectAll().orderBy('key', 'asc').execute();
-    return rows.map(toRecord);
-  }
-
   async deleteSetting(input: GetGlobalSettingInput, transaction?: Transaction<Database>): Promise<void> {
     await this.#write(transaction, async trx => {
       await trx.deleteFrom('global_settings').where('key', '=', input.key).execute();
