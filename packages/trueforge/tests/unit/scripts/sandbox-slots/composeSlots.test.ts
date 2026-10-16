@@ -103,6 +103,7 @@ function renderInstanceTemplate(): unknown {
     .map(line => line.replace('@@IF_SANDBOX@@', ''))
     .join('\n')
     .replace(/@@NAME@@/g, 'main')
+    .replace('@@APP_PORTS@@', "      - '127.0.0.1:1:8790'")
     .replace(/@@[A-Z_]+@@/g, '1');
   return parse(rendered);
 }
