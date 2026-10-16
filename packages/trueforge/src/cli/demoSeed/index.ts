@@ -1,20 +1,24 @@
 import { parseArgs } from 'node:util';
 import type { Command } from '../command';
 import { UsageError, type CliIo } from '../io';
-import { isValidTimeZone } from './calendar';
+import { isValidTimeZone, parseIsoDay } from './calendar';
 import type { DemoSeedSession } from './session';
 import { DEFAULT_DEMO_TIME_ZONE, DEFAULT_DEMO_USER } from './world';
 
-const USAGE = `Usage: aman demo-seed [--reset] [--user <email>] [--timezone <iana>] [--model <provider/model>]
+const USAGE = `Usage: aman demo-seed [--reset] [--user <email>] [--timezone <iana>] [--today <YYYY-MM-DD>] [--model <provider/model>]
 
-Seeds one synthetic demo world (a persona, memory notes, a morning-briefing schedule and a finished
-briefing chat) for the demo user. Every record is marked demo_synthetic. Re-running it is safe, and
-dates are relative to today in the user's time zone. Needs DEMO_MODE=true.
+Seeds one synthetic demo world for the demo user: Maya, a fictional designer who moved to Lisbon. It writes
+two personas with knowledge libraries, memory notes, a Tasks space, a Morning brief schedule and a finished
+route chat. Her email and calendar are not seeded here; they live in her connected Google account. Every
+record is marked demo_synthetic. Dates are relative to "today" in the user's time zone, so any day gives a
+coherent week. Re-running it on the same day keeps the Tasks space as it is; --reset removes the synthetic
+records. Needs DEMO_MODE=true.
 
   --reset              Remove the synthetic records only, then stop
   --user <email>       Demo user's login (default: ${DEFAULT_DEMO_USER})
   --timezone <iana>    Time zone that defines "today" (default: ${DEFAULT_DEMO_TIME_ZONE})
-  --model <p/model>    Model for the persona and briefing agent (default: first configured model)
+  --today <day>        Treat this day as "today", for rehearsing on a fixed day (default: the real today)
+  --model <p/model>    Model for the personas and briefing agent (default: first configured model)
 `;
 
 export interface DemoSeedDeps {
@@ -45,6 +49,7 @@ function parseOptions(args: readonly string[]) {
         reset: { type: 'boolean', default: false },
         user: { type: 'string' },
         timezone: { type: 'string' },
+        today: { type: 'string' },
         model: { type: 'string' },
         help: { type: 'boolean', short: 'h', default: false },
       },
@@ -87,7 +92,12 @@ export function createDemoSeed(deps: DemoSeedDeps): Command {
     }
     const timeZone = options.timezone ?? DEFAULT_DEMO_TIME_ZONE;
     if (!isValidTimeZone(timeZone)) {
-      throw new UsageError(`Unknown time zone "${timeZone}". Use an IANA name such as Europe/Madrid.`);
+      throw new UsageError(`Unknown time zone "${timeZone}". Use an IANA name such as Europe/Lisbon.`);
+    }
+
+    const today = options.today === undefined ? undefined : parseIsoDay(options.today);
+    if (options.today !== undefined && today === undefined) {
+      throw new UsageError('--today must be a real day written YYYY-MM-DD, such as 2026-10-26.');
     }
 
     if (!(await deps.demoModeEnabled())) {
@@ -104,9 +114,26 @@ export function createDemoSeed(deps: DemoSeedDeps): Command {
         return 0;
       }
       const modelName = pickModel({ requested: options.model, available: session.models });
-      const report = await session.seed({ userId, now: deps.now(), timeZone, modelName });
-      await io.stderr(`Seeded the synthetic demo world for ${userId} (today in ${timeZone}).\n`);
-      await printJson({ io, value: { action: 'seed', user: userId, time_zone: timeZone, model: modelName, report } });
+      const report = await session.seed({ userId, now: deps.now(), timeZone, modelName, today });
+      await io.stderr(
+        `Seeded the synthetic demo world for ${userId} (${options.today === undefined ? `today in ${timeZone}` : `pretending today is ${options.today}`}).\n`,
+      );
+      if (report.knowledge.still_indexing > 0) {
+        await io.stderr(
+          `${String(report.knowledge.still_indexing)} knowledge document(s) are still indexing; restart the app to finish them.\n`,
+        );
+      }
+      await printJson({
+        io,
+        value: {
+          action: 'seed',
+          user: userId,
+          time_zone: timeZone,
+          today: options.today ?? null,
+          model: modelName,
+          report,
+        },
+      });
       return 0;
     } finally {
       await session.close();

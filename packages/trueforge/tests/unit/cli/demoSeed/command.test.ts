@@ -4,16 +4,26 @@ import type { DemoSeedSession } from '../../../../src/cli/demoSeed/session';
 import { runCli } from '../../../../src/cli/dispatch';
 import { UsageError, type CliIo } from '../../../../src/cli/io';
 
-const NOW = new Date('2026-10-15T08:00:00Z');
+const NOW = new Date('2026-10-26T08:00:00Z');
 const SEED_REPORT: SeedReport = {
-  persona: 'created',
+  personas: { 'demo-synthetic-persona-june': 'created', 'demo-synthetic-persona-theo': 'created' },
   profile: 'created',
   agent: 'created',
   schedule: 'created',
   briefing: 'created',
-  memory: { created: 8, updated: 0, unchanged: 0, removed: 0 },
+  spaces: { created: 1, updated: 0, unchanged: 0 },
+  knowledge: { created: 11, unchanged: 0, removed: 0, still_indexing: 0 },
+  memory: { created: 22, updated: 0, unchanged: 0, removed: 0 },
 };
-const RESET_REPORT: ResetReport = { persona: 1, profile: 1, agent: 1, schedule: 1, sessions: 1, memory: 8 };
+const RESET_REPORT: ResetReport = {
+  personas: 2,
+  profile: 1,
+  agent: 1,
+  schedule: 1,
+  sessions: 1,
+  spaces: 1,
+  memory: 22,
+};
 
 function fakeIo() {
   const out: string[] = [];
@@ -93,7 +103,13 @@ describe('aman demo-seed', () => {
     expect(await createDemoSeed(deps)({ args: [], io })).toBe(0);
 
     expect(calls.seed).toEqual([
-      { userId: 'judge@example.com', now: NOW, timeZone: 'Europe/Madrid', modelName: 'demo-provider/demo-model' },
+      {
+        userId: 'judge@example.com',
+        now: NOW,
+        timeZone: 'Europe/Lisbon',
+        modelName: 'demo-provider/demo-model',
+        today: undefined,
+      },
     ]);
     expect(calls.closed).toBe(1);
     expect(JSON.parse(out.join(''))).toMatchObject({ action: 'seed', user: 'judge@example.com', report: SEED_REPORT });
@@ -106,8 +122,38 @@ describe('aman demo-seed', () => {
     expect(await createDemoSeed(deps)({ args, io: fakeIo().io })).toBe(0);
 
     expect(calls.seed).toEqual([
-      { userId: 'maria@example.com', now: NOW, timeZone: 'America/New_York', modelName: 'b/two' },
+      { userId: 'maria@example.com', now: NOW, timeZone: 'America/New_York', modelName: 'b/two', today: undefined },
     ]);
+  });
+
+  it('--today seeds a fixed day for rehearsals and says so', async () => {
+    const { deps, calls } = fakeDeps({ enabled: true });
+    const { io, err, out } = fakeIo();
+
+    expect(await createDemoSeed(deps)({ args: ['--today', '2026-10-26'], io })).toBe(0);
+
+    expect(calls.seed).toEqual([
+      expect.objectContaining({ today: { year: 2026, month: 10, day: 26 }, timeZone: 'Europe/Lisbon' }),
+    ]);
+    expect(err.join('')).toContain('pretending today is 2026-10-26');
+    expect(JSON.parse(out.join(''))).toMatchObject({ action: 'seed', today: '2026-10-26' });
+  });
+
+  it('tells the operator when knowledge documents are still indexing', async () => {
+    const { deps } = fakeDeps({ enabled: true });
+    const slow: DemoSeedDeps = {
+      ...deps,
+      open: async () => ({
+        ...(await deps.open()),
+        seed: () =>
+          Promise.resolve({ ...SEED_REPORT, knowledge: { created: 11, unchanged: 0, removed: 0, still_indexing: 4 } }),
+      }),
+    };
+    const { io, err } = fakeIo();
+
+    expect(await createDemoSeed(slow)({ args: [], io })).toBe(0);
+
+    expect(err.join('')).toContain('4 knowledge document(s) are still indexing; restart the app to finish them.');
   });
 
   it('--reset removes the synthetic records and does not seed', async () => {
@@ -145,6 +191,8 @@ describe('aman demo-seed', () => {
   it.each([
     [['--model', 'nope/none'], 'Unknown model'],
     [['--timezone', 'Mars/Olympus'], 'Unknown time zone'],
+    [['--today', '2026-02-30'], '--today must be a real day'],
+    [['--today', 'tomorrow'], '--today must be a real day'],
     [['--user', 'two words'], '--user'],
     [['--bogus'], 'bogus'],
   ])('rejects bad arguments %j as a usage error', async (args, message) => {

@@ -1,77 +1,149 @@
-import { buildDemoWorld, DEMO_MARKER } from '../../../../src/cli/demoSeed/world';
+import { dayInZone, parseIsoDay, type CalendarDay } from '../../../../src/cli/demoSeed/calendar';
+import { buildDemoWorld, DEFAULT_DEMO_TIME_ZONE, DEMO_MARKER } from '../../../../src/cli/demoSeed/world';
 import { PersonaContentSchema } from '../../../../src/schemas/persona';
 import { PersonalizationProfileContentSchema } from '../../../../src/schemas/personalization';
+import { SpaceContentSchema } from '../../../../src/schemas/space';
 
-const base = { timeZone: 'Europe/Madrid', modelName: 'demo-provider/demo-model' };
+const MODEL_NAME = 'demo-provider/demo-model';
+const MONDAY: CalendarDay = { year: 2026, month: 10, day: 26 };
 
-describe('buildDemoWorld', () => {
-  it('anchors every date to today in the user zone', () => {
-    // 23:30 UTC on Oct 14 is already Oct 15 in Madrid.
-    const world = buildDemoWorld({ ...base, now: new Date('2026-10-14T23:30:00Z') });
-    const byKey = Object.fromEntries(world.notes.map(note => [note.key, note.body]));
-    expect(world.day).toBe('2026-10-15');
-    expect(byKey['appointment-today']).toContain('Appointment today, Thursday, October 15, at 4:00 pm');
-    expect(byKey['week-overview']).toContain('- Friday, October 16: return the library books.');
-    expect(byKey['project-balcony']).toContain('planned for Saturday, October 17');
+function worldOn(today: CalendarDay, timeZone = 'Europe/Lisbon') {
+  return buildDemoWorld({ today, timeZone, modelName: MODEL_NAME });
+}
+
+function day(text: string): CalendarDay {
+  const parsed = parseIsoDay(text);
+  if (parsed === undefined) {
+    throw new Error(`Not a day: ${text}`);
+  }
+  return parsed;
+}
+
+function tasksBody(world: ReturnType<typeof worldOn>): string {
+  const space = world.spaces.find(candidate => candidate.content.name === 'Tasks');
+  if (space === undefined) {
+    throw new Error('No Tasks space');
+  }
+  return space.content.body;
+}
+
+function noteBody(world: ReturnType<typeof worldOn>, key: string): string {
+  const note = world.notes.find(candidate => candidate.key === key);
+  if (note === undefined) {
+    throw new Error(`No note ${key}`);
+  }
+  return note.body;
+}
+
+describe('buildDemoWorld dates', () => {
+  it('dates the tasks from the seed day', () => {
+    const body = tasksBody(worldOn(MONDAY));
+
+    expect(body).toContain('- [ ] Find English-speaking GP (in progress) - due Friday, October 30');
+    expect(body).toContain('- [x] Get NIF (tax number) - done Sunday, October 18');
+    expect(noteBody(worldOn(MONDAY), 'newcomers')).toContain('Thursday, Nov 5 at Café do Cais');
   });
 
-  it('keeps errands on sensible days and lists them in date order', () => {
-    const world = buildDemoWorld({ ...base, now: new Date('2026-10-15T09:00:00Z') });
-    const overview = world.notes
-      .find(note => note.key === 'week-overview')
-      ?.body.split('\n')
-      .slice(1);
-    expect(overview).toEqual([
-      '- Thursday, October 15: 4:00 pm appointment with Dr. Halloran at Hospital Clinic, Barcelona.',
-      '- Friday, October 16: return the library books.',
-      '- Saturday, October 17: buy a larger pot for the basil.',
-      '- Sunday, October 18: call Teo about the Lisbon dates.',
-      '- Monday, October 19: team sync at 10:00 in the Poblenou office.',
-      '- Tuesday, October 20: pay the quarterly utility bill.',
-    ]);
+  it('changes only dated content when the day moves', () => {
+    const first = worldOn(MONDAY);
+    const later = worldOn(day('2026-11-02'));
+
+    const changed = first.notes.filter(note => noteBody(later, note.key) !== note.body).map(note => note.key);
+    expect(changed).toEqual(['newcomers']);
+    expect(tasksBody(later)).not.toBe(tasksBody(first));
+    expect(later.day).toBe('2026-11-02');
   });
 
-  it('moves the dated content when the day moves', () => {
-    const first = buildDemoWorld({ ...base, now: new Date('2026-10-15T09:00:00Z') });
-    const later = buildDemoWorld({ ...base, now: new Date('2026-10-20T09:00:00Z') });
-    expect(later.day).toBe('2026-10-20');
-    expect(later.notes.find(note => note.key === 'appointment-today')?.body).toContain('Tuesday, October 20');
-    expect(later.notes.find(note => note.key === 'appointment-today')?.body).not.toContain('October 15');
-    // Undated notes stay byte-identical, which is what lets a re-seed leave them alone.
-    expect(later.notes.find(note => note.key === 'style')).toEqual(first.notes.find(note => note.key === 'style'));
+  it('reads the day in the user zone when a caller derives it from the clock', () => {
+    // 23:30 UTC on Oct 25 is already Oct 26 in Madrid and still Oct 25 in Lisbon on UTC+0.
+    const now = new Date('2026-10-25T23:30:00Z');
+
+    expect(worldOn(dayInZone({ now, timeZone: 'Europe/Madrid' })).day).toBe('2026-10-26');
+    expect(worldOn(dayInZone({ now, timeZone: 'Europe/Lisbon' })).day).toBe('2026-10-25');
+  });
+});
+
+describe('buildDemoWorld content', () => {
+  it('lives in Lisbon', () => {
+    expect(DEFAULT_DEMO_TIME_ZONE).toBe('Europe/Lisbon');
   });
 
-  it('plans the leave time from the route and the 15-minutes-early rule', () => {
-    const world = buildDemoWorld({ ...base, now: new Date('2026-10-15T09:00:00Z') });
-    expect(world.briefing.finalText).toContain('Leave by 3:15 pm');
-    expect(world.briefing.routeResult.duration_min).toBe(16);
+  it('seeds a Morning brief that reads calendar and inbox, drafts replies and never sends', () => {
+    const { scheduleManifest } = worldOn(MONDAY, DEFAULT_DEMO_TIME_ZONE);
+
+    expect(scheduleManifest).toMatchObject({ cron: '30 7 * * *', timezone: 'Europe/Lisbon', status: 'active' });
+    expect(scheduleManifest.task).toContain('calendar for today and my inbox');
+    expect(scheduleManifest.task).toContain('Draft a reply');
+    expect(scheduleManifest.task).toContain('do not send anything');
+    expect(scheduleManifest.task).toContain('Needs your OK');
+  });
+
+  it('seeds the two personas with a knowledge vault each', () => {
+    const world = worldOn(MONDAY);
+
+    expect(world.personas.map(persona => persona.content.display_name)).toEqual(['June', 'Theo']);
+    const [june, theo] = world.personas;
+    expect(june?.knowledge.map(document => document.title)).toContain('Visa and residence permit checklist');
+    expect(june?.knowledge.map(document => document.title)).toContain('Emergency numbers and key phrases');
+    expect(theo?.knowledge.map(document => document.title)).toContain('Twelve places to shoot in Lisbon');
+    const twelve = theo?.knowledge.find(document => document.title === 'Twelve places to shoot in Lisbon');
+    expect(twelve?.text.match(/^\d+\. /gm)).toHaveLength(12);
+    expect(june?.content.model_name).toBe(MODEL_NAME);
+  });
+
+  it('keeps the vaults free of dates, so a new day does not rebuild a library', () => {
+    expect(worldOn(MONDAY).personas.map(persona => persona.knowledge)).toEqual(
+      worldOn(day('2026-12-01')).personas.map(persona => persona.knowledge),
+    );
+  });
+
+  it('writes one memory note per fact with unique keys the vault accepts', () => {
+    const { notes } = worldOn(MONDAY);
+
+    expect(notes).toHaveLength(22);
+    expect(new Set(notes.map(note => note.key)).size).toBe(notes.length);
+    for (const note of notes) {
+      expect(note.key).toMatch(/^[a-z0-9-]+$/);
+    }
+    expect(notes.map(note => note.body).join('\n')).toContain('allergic to penicillin');
+    expect(noteBody(worldOn(MONDAY), 'gp-search')).toContain('do not suggest it as a GP');
   });
 
   it('produces content the real schemas accept', () => {
-    const world = buildDemoWorld({ ...base, now: new Date('2026-10-15T09:00:00Z') });
-    expect(PersonaContentSchema.safeParse(world.persona).success).toBe(true);
-    expect(PersonalizationProfileContentSchema.safeParse(world.profile).success).toBe(true);
-    expect(world.scheduleManifest).toMatchObject({ cron: '30 7 * * *', timezone: 'Europe/Madrid', status: 'active' });
-  });
+    const world = worldOn(MONDAY);
 
-  it('is clearly fictional: example.com addresses only, neighborhoods not addresses', () => {
-    const world = buildDemoWorld({ ...base, now: new Date('2026-10-15T09:00:00Z') });
-    const everything = JSON.stringify(world);
-    const emails = everything.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi) ?? [];
-    expect(emails.length).toBeGreaterThan(0);
-    for (const email of emails) {
-      expect(email.endsWith('@example.com')).toBe(true);
+    for (const persona of world.personas) {
+      expect(PersonaContentSchema.safeParse(persona.content).success).toBe(true);
     }
-    expect(everything).not.toMatch(/(\+\d{1,3}[\s-]?)?\(?\d{3}\)?[\s-]\d{3}[\s-]\d{2,4}/);
+    expect(PersonalizationProfileContentSchema.safeParse(world.profile).success).toBe(true);
+    for (const space of world.spaces) {
+      expect(SpaceContentSchema.safeParse(space.content).success).toBe(true);
+      expect(space.id.startsWith('demo-synthetic-')).toBe(true);
+    }
     expect(world.profile.user_profile).toContain(DEMO_MARKER);
   });
 
-  it('turns the sandbox on for the agent and tells it to degrade to plain text', () => {
-    const world = buildDemoWorld({ ...base, now: new Date('2026-10-15T09:00:00Z') });
+  it('turns the sandbox on for the agent and tells every voice to degrade to plain text', () => {
+    const world = worldOn(MONDAY);
+
     expect(world.agentSpec.config?.sandbox?.enabled).toBe(true);
-    for (const text of [world.agentSpec.instructions, world.persona.instructions]) {
+    for (const text of [world.agentSpec.instructions, ...world.personas.map(persona => persona.content.instructions)]) {
       expect(text).toContain('run_code');
       expect(text).toContain('If run_code is not available');
+      expect(text).toContain('connected Google account');
+      expect(text).toContain('leave every send for her OK');
     }
+  });
+
+  it('pre-bakes a walk from Campo de Ourique to the GP', () => {
+    const { briefing } = worldOn(MONDAY);
+
+    expect(briefing.routeArguments).toEqual({
+      from_place: 'Rua Ferreira Borges 31, Campo de Ourique, Lisboa',
+      to_place: 'R. de São Bernardo 92, Lisboa',
+    });
+    expect(briefing.routeResult.route_geometry.length).toBeGreaterThan(10);
+    expect(briefing.finalText).toContain('15-minute walk');
+    expect(briefing.finalText).toContain('penicillin');
   });
 });

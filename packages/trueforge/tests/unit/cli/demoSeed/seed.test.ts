@@ -1,20 +1,30 @@
 import { Sessions } from '@truefoundry/trueforge-core/agent-session';
+import { dayInZone, parseIsoDay } from '../../../../src/cli/demoSeed/calendar';
 import { resetDemoWorld, seedDemoWorld } from '../../../../src/cli/demoSeed/seed';
 import {
   buildDemoWorld,
   DEMO_AGENT_NAME,
+  DEMO_JUNE_ID,
   DEMO_MARKER,
-  DEMO_PERSONA_ID,
   DEMO_SCHEDULE_NAME,
+  DEMO_TASKS_SPACE_ID,
+  DEMO_THEO_ID,
 } from '../../../../src/cli/demoSeed/world';
 import { createTestWorld, MODEL_NAME, TENANT_ID, USER_ID, type TestStores, type TestWorld } from './testStores';
 
 const scope = { tenantId: TENANT_ID, userId: USER_ID };
-const DAY_ONE = new Date('2026-10-15T08:00:00Z');
-const DAY_TWO = new Date('2026-10-20T08:00:00Z');
+const owner = { tenant_id: TENANT_ID, created_by: USER_ID };
+const DAY_ONE = new Date('2026-10-26T08:00:00Z');
+const DAY_TWO = new Date('2026-11-02T08:00:00Z');
+const NOTE_COUNT = buildDemoWorld({
+  today: { year: 2026, month: 10, day: 26 },
+  timeZone: 'Europe/Lisbon',
+  modelName: MODEL_NAME,
+}).notes.length;
 
 function worldFor(now: Date) {
-  return buildDemoWorld({ now, timeZone: 'Europe/Madrid', modelName: MODEL_NAME });
+  const timeZone = 'Europe/Lisbon';
+  return buildDemoWorld({ today: dayInZone({ now, timeZone }), timeZone, modelName: MODEL_NAME });
 }
 
 async function seed(stores: TestStores, now: Date) {
@@ -46,6 +56,10 @@ async function sessionsOf(stores: TestStores, userId: string) {
   return data;
 }
 
+async function spaceBody(stores: TestStores, spaceId: string): Promise<string | undefined> {
+  return (await stores.spaceStore.getSpace({ ...owner, space_id: spaceId }))?.body;
+}
+
 describe('demo seed against the real stores', () => {
   let world: TestWorld;
   let stores: TestStores;
@@ -59,32 +73,29 @@ describe('demo seed against the real stores', () => {
     await world.teardown();
   });
 
-  it('seeds the persona, memory, schedule and a finished briefing chat', async () => {
+  it('seeds the personas, memory, Tasks space, Morning brief schedule and a finished route chat', async () => {
     const report = await seed(stores, DAY_ONE);
 
     expect(report).toMatchObject({
-      persona: 'created',
+      personas: { [DEMO_JUNE_ID]: 'created', [DEMO_THEO_ID]: 'created' },
       profile: 'created',
       agent: 'created',
       schedule: 'created',
       briefing: 'created',
-      memory: { created: 8, updated: 0, unchanged: 0, removed: 0 },
+      spaces: { created: 1, updated: 0, unchanged: 0 },
+      knowledge: { created: 11, unchanged: 0, removed: 0, still_indexing: 0 },
+      memory: { created: NOTE_COUNT, updated: 0, unchanged: 0, removed: 0 },
     });
 
-    const persona = await stores.personaStore.getPersona({
-      tenant_id: TENANT_ID,
-      created_by: USER_ID,
-      id: DEMO_PERSONA_ID,
-    });
-    expect(persona?.display_name).toBe('Sol');
-
+    const june = await stores.personaStore.getPersona({ ...owner, id: DEMO_JUNE_ID });
+    const theo = await stores.personaStore.getPersona({ ...owner, id: DEMO_THEO_ID });
+    expect([june?.display_name, theo?.display_name]).toEqual(['June', 'Theo']);
     const agent = await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: DEMO_AGENT_NAME });
     expect(agent?.manifest.config?.sandbox?.enabled).toBe(true);
 
     const entries = await vault(stores);
-    expect(entries).toHaveLength(8);
+    expect(entries).toHaveLength(NOTE_COUNT);
     expect(entries.every(entry => entry.text.includes(`> ${DEMO_MARKER}:`))).toBe(true);
-    expect(entries.find(entry => entry.text.includes('Appointment today'))?.text).toContain('Thursday, October 15');
 
     const { data: schedules } = await stores.scheduleStore.listSchedules({
       tenant_id: TENANT_ID,
@@ -94,11 +105,11 @@ describe('demo seed against the real stores', () => {
       created_by_or_agent_ids: undefined,
     });
     expect(schedules.map(schedule => schedule.name)).toEqual([DEMO_SCHEDULE_NAME]);
-    expect(schedules[0]?.manifest.cron).toBe('30 7 * * *');
+    expect(schedules[0]?.manifest).toMatchObject({ cron: '30 7 * * *', timezone: 'Europe/Lisbon' });
 
     const [session] = await sessionsOf(stores, USER_ID);
-    expect(session?.title).toBe('Brief me before my 4 pm appointment');
-    expect(session?.metadata).toMatchObject({ [DEMO_MARKER]: 'true', demo_seed_day: '2026-10-15' });
+    expect(session?.title).toBe('From Campo de Ourique to the GP');
+    expect(session?.metadata).toMatchObject({ [DEMO_MARKER]: 'true', demo_seed_day: '2026-10-26' });
     const handle = await new Sessions({ sessionStore: stores.sessionStore }).get({
       tenant_id: TENANT_ID,
       session_id: session?.session_id ?? '',
@@ -117,7 +128,48 @@ describe('demo seed against the real stores', () => {
     expect(turns?.data[0]?.state.status).toBe('done');
   });
 
-  it('recalls the appointment into the pre-baked briefing from the seeded memory', async () => {
+  it('saves the Tasks space the assistant can read', async () => {
+    await seed(stores, DAY_ONE);
+
+    const spaces = await stores.spaceStore.listSpaces({ ...owner, status: undefined, limit: 50 });
+
+    expect(spaces.map(space => space.name)).toEqual(['Tasks']);
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('- [ ] Find English-speaking GP');
+  });
+
+  it('keeps each persona library apart and has every document indexed', async () => {
+    await seed(stores, DAY_ONE);
+
+    const june = await stores.knowledge.listDocuments({ personaId: DEMO_JUNE_ID });
+    const theo = await stores.knowledge.listDocuments({ personaId: DEMO_THEO_ID });
+
+    expect(june.map(document => document.title)).toContain('Public transport basics');
+    expect(theo.map(document => document.title)).toContain('Twelve places to shoot in Lisbon');
+    expect(june.map(document => document.title)).not.toContain('Twelve places to shoot in Lisbon');
+    expect([...june, ...theo].every(document => document.status === 'ready')).toBe(true);
+    expect([...june, ...theo].every(document => document.source_label.startsWith(`${DEMO_MARKER}:`))).toBe(true);
+    expect(world.queued).toHaveLength(11);
+  });
+
+  it('reports documents the indexer has not finished, and does not wait forever for them', async () => {
+    await world.teardown();
+    world = await createTestWorld({ indexes: false });
+    stores = world.stores;
+    const slow = {
+      ...stores,
+      knowledge: {
+        ...stores.knowledge,
+        settle: (input: { personaId: string; timeoutMs: number }) =>
+          stores.knowledge.settle({ ...input, timeoutMs: 1 }),
+      },
+    };
+
+    const report = await seedDemoWorld({ stores: slow, scope, world: worldFor(DAY_ONE), now: DAY_ONE });
+
+    expect(report.knowledge.still_indexing).toBe(11);
+  });
+
+  it('recalls the GP shortlist into the pre-baked route chat from the seeded memory', async () => {
     await seed(stores, DAY_ONE);
     const [session] = await sessionsOf(stores, USER_ID);
     const handle = await new Sessions({ sessionStore: stores.sessionStore }).get({
@@ -126,28 +178,55 @@ describe('demo seed against the real stores', () => {
     });
     const events = await handle?.listEvents({ limit: 100 });
     const recall = events?.data.find(item => item.event.type === 'aman.memory.recall')?.event;
-    expect(JSON.stringify(recall)).toContain('Appointment today, Thursday, October 15');
+    expect(JSON.stringify(recall)).toContain('Brightwater Family Clinic');
   });
 
   it('is idempotent: a second run on the same day changes nothing', async () => {
     await seed(stores, DAY_ONE);
-    const before = { vault: await vault(stores), sessions: await sessionsOf(stores, USER_ID) };
+    const before = {
+      vault: await vault(stores),
+      sessions: await sessionsOf(stores, USER_ID),
+    };
 
     const report = await seed(stores, DAY_ONE);
 
     expect(report).toMatchObject({
-      persona: 'unchanged',
+      personas: { [DEMO_JUNE_ID]: 'unchanged', [DEMO_THEO_ID]: 'unchanged' },
       profile: 'unchanged',
       agent: 'unchanged',
       schedule: 'unchanged',
       briefing: 'unchanged',
-      memory: { created: 0, updated: 0, unchanged: 8, removed: 0 },
+      spaces: { created: 0, updated: 0, unchanged: 1 },
+      knowledge: { created: 0, unchanged: 11, removed: 0 },
+      memory: { created: 0, updated: 0, unchanged: NOTE_COUNT, removed: 0 },
     });
     expect(await vault(stores)).toEqual(before.vault);
     expect((await sessionsOf(stores, USER_ID)).map(session => session.session_id)).toEqual(
       before.sessions.map(session => session.session_id),
     );
-    expect(await stores.personaStore.listPersonas({ tenant_id: TENANT_ID, created_by: USER_ID })).toHaveLength(1);
+    expect(await stores.personaStore.listPersonas(owner)).toHaveLength(2);
+    expect(world.queued).toHaveLength(11);
+  });
+
+  it('keeps what the demo did on the same day: a ticked task survives a second run', async () => {
+    await seed(stores, DAY_ONE);
+    const tasks = await stores.spaceStore.getSpace({ ...owner, space_id: DEMO_TASKS_SPACE_ID });
+    const aggregate = await stores.spaceStore.getAggregate(owner);
+    await stores.spaceStore.updateSpace({
+      ...owner,
+      space_id: DEMO_TASKS_SPACE_ID,
+      name: 'Tasks',
+      purpose: tasks?.purpose ?? 'Tasks',
+      status: 'active',
+      format: 'markdown',
+      body: 'Edited by the assistant.',
+      expected_revision: tasks?.revision ?? 0,
+      expected_aggregate_revision: aggregate.revision,
+    });
+
+    await seed(stores, DAY_ONE);
+
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toBe('Edited by the assistant.');
   });
 
   it('moves the dated content forward on the next day without duplicating anything', async () => {
@@ -155,16 +234,30 @@ describe('demo seed against the real stores', () => {
 
     const report = await seed(stores, DAY_TWO);
 
-    // Appointment, week overview and the balcony project carry dates; the other five notes do not.
-    expect(report.memory).toEqual({ created: 0, updated: 3, unchanged: 5, removed: 0 });
+    // Only the meetup note carries a date.
+    expect(report.memory).toEqual({ created: 0, updated: 1, unchanged: NOTE_COUNT - 1, removed: 0 });
     expect(report.briefing).toBe('updated');
-    const entries = await vault(stores);
-    expect(entries).toHaveLength(8);
-    expect(entries.find(entry => entry.text.includes('Appointment today'))?.text).toContain('Tuesday, October 20');
-    expect(entries.map(entry => entry.text).join('\n')).not.toContain('Appointment today, Thursday');
+    expect(report.spaces).toEqual({ created: 0, updated: 1, unchanged: 0 });
+    expect(report.knowledge).toMatchObject({ created: 0, unchanged: 11, removed: 0 });
+    expect(await vault(stores)).toHaveLength(NOTE_COUNT);
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Nov 4, 10:00');
     const sessions = await sessionsOf(stores, USER_ID);
     expect(sessions).toHaveLength(1);
-    expect(sessions[0]?.metadata['demo_seed_day']).toBe('2026-10-20');
+    expect(sessions[0]?.metadata['demo_seed_day']).toBe('2026-11-02');
+  });
+
+  it('seeds a rehearsal day that is not the real today', async () => {
+    const today = parseIsoDay('2026-10-26');
+    if (today === undefined) {
+      throw new Error('Not a day.');
+    }
+    const rehearsal = buildDemoWorld({ today, timeZone: 'Europe/Lisbon', modelName: MODEL_NAME });
+
+    await seedDemoWorld({ stores, scope, world: rehearsal, now: DAY_TWO });
+
+    const [session] = await sessionsOf(stores, USER_ID);
+    expect(session?.metadata['demo_seed_day']).toBe('2026-10-26');
+    expect(await spaceBody(stores, DEMO_TASKS_SPACE_ID)).toContain('Appointment Oct 28, 10:00');
   });
 
   it('never overwrites a profile the user wrote themselves', async () => {
@@ -201,6 +294,12 @@ describe('demo seed against the real stores', () => {
         instructions: 'A real persona.',
         model_name: MODEL_NAME,
       });
+      await stores.knowledge.addTextDocument({
+        personaId: 'real-persona',
+        title: 'My notes',
+        text: 'Mine.',
+        sourceLabel: 'Pasted text',
+      });
       const agent = await stores.agentStore.createAgent({
         tenant_id: TENANT_ID,
         name: 'real-agent',
@@ -231,6 +330,16 @@ describe('demo seed against the real stores', () => {
         external_id: null,
         metadata: { topic: 'mine' },
       });
+      await stores.spaceStore.createSpace({
+        ...real,
+        id: 'real-space',
+        name: 'My trip',
+        purpose: 'Mine.',
+        status: 'active',
+        format: 'markdown',
+        body: 'Packing list.',
+        expected_aggregate_revision: (await stores.spaceStore.getAggregate(real)).revision,
+      });
       const retained = await stores.memory.retain({
         items: [{ content: 'A real note about my dog.', timestamp: DAY_ONE.toISOString(), document_id: 'real-note' }],
         operationId: 'real-op',
@@ -242,16 +351,22 @@ describe('demo seed against the real stores', () => {
     it('removes the synthetic records and nothing else', async () => {
       await addRealRecords();
       await seed(stores, DAY_ONE);
-
       const removed = await resetDemoWorld({ stores, scope });
 
-      expect(removed).toEqual({ persona: 1, profile: 1, agent: 1, schedule: 1, sessions: 1, memory: 8 });
-      expect(
-        await stores.personaStore.getPersona({ tenant_id: TENANT_ID, created_by: USER_ID, id: DEMO_PERSONA_ID }),
-      ).toBeUndefined();
-      expect(
-        await stores.personaStore.getPersona({ tenant_id: TENANT_ID, created_by: USER_ID, id: 'real-persona' }),
-      ).toBeDefined();
+      expect(removed).toEqual({
+        personas: 2,
+        profile: 1,
+        agent: 1,
+        schedule: 1,
+        sessions: 1,
+        spaces: 1,
+        memory: NOTE_COUNT,
+      });
+      expect(await stores.personaStore.getPersona({ ...owner, id: DEMO_JUNE_ID })).toBeUndefined();
+      expect(await stores.personaStore.getPersona({ ...owner, id: DEMO_THEO_ID })).toBeUndefined();
+      expect(await stores.personaStore.getPersona({ ...owner, id: 'real-persona' })).toBeDefined();
+      expect(await stores.knowledge.listDocuments({ personaId: 'real-persona' })).toHaveLength(1);
+      expect(await stores.knowledge.listDocuments({ personaId: DEMO_JUNE_ID })).toEqual([]);
       expect(await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: DEMO_AGENT_NAME })).toBeUndefined();
       expect(await stores.agentStore.getAgent({ tenant_id: TENANT_ID, name: 'real-agent' })).toBeDefined();
       const { data: schedules } = await stores.scheduleStore.listSchedules({
@@ -263,6 +378,9 @@ describe('demo seed against the real stores', () => {
       });
       expect(schedules.map(schedule => schedule.name)).toEqual(['real-schedule']);
       expect((await sessionsOf(stores, USER_ID)).map(session => session.session_id)).toEqual(['real-session']);
+      expect(
+        (await stores.spaceStore.listSpaces({ ...owner, status: undefined, limit: 50 })).map(space => space.id),
+      ).toEqual(['real-space']);
       expect((await vault(stores)).map(entry => entry.text)).toEqual([
         expect.stringContaining('A real note about my dog.'),
       ]);
@@ -293,11 +411,12 @@ describe('demo seed against the real stores', () => {
 
     it('is a no-op on an empty instance and can seed again afterwards', async () => {
       expect(await resetDemoWorld({ stores, scope })).toEqual({
-        persona: 0,
+        personas: 0,
         profile: 0,
         agent: 0,
         schedule: 0,
         sessions: 0,
+        spaces: 0,
         memory: 0,
       });
 
@@ -305,8 +424,9 @@ describe('demo seed against the real stores', () => {
       await resetDemoWorld({ stores, scope });
       const again = await seed(stores, DAY_ONE);
 
-      expect(again.memory).toEqual({ created: 8, updated: 0, unchanged: 0, removed: 0 });
-      expect(await vault(stores)).toHaveLength(8);
+      expect(again.memory).toEqual({ created: NOTE_COUNT, updated: 0, unchanged: 0, removed: 0 });
+      expect(again.knowledge).toMatchObject({ created: 11, unchanged: 0 });
+      expect(await vault(stores)).toHaveLength(NOTE_COUNT);
     });
   });
 });

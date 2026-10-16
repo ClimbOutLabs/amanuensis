@@ -16,7 +16,7 @@ import { ulid } from 'ulid';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import type { FormattedMemoryBlock } from '../../runtime/memory/memoryCapability';
 import type { MemoryRecallPersistedEvent } from '../../schemas/memoryEvents';
-import type { DemoBriefing } from './world';
+import type { DemoBriefing } from './model';
 
 const ROUTE_CALL_ID = 'call_demo_synthetic_route';
 const MAPS_SERVER_ID = 'maps';
@@ -130,7 +130,7 @@ export async function seedBriefingTurn({
     id: newEventId(),
     thread_id: MAIN_THREAD_ID,
     created_at: stamp(2),
-    content: 'I found your appointment. Let me map the trip.',
+    content: briefing.routeIntro,
     finish_reason: 'tool_calls',
     tool_calls: [
       {
