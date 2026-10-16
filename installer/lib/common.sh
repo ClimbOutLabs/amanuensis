@@ -2,7 +2,7 @@
 # Output, prompts, locking and small filesystem helpers shared by every command.
 
 say() { printf '%s\n' "$*"; }
-# Warnings and failures use the shared line style on stderr; ui.sh remembers warnings for the closing block.
+# Warnings and failures use the shared line style on stderr.
 warn() { UI_FD=2 ui_warn "$*"; }
 die() {
   ui_step_abort

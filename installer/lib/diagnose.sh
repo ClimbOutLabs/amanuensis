@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# What a failed container log says, in one plain sentence. The installer and the doctor both use it, so a person is
-# never sent to read container logs; a log it does not recognise prints nothing and the caller calls it a bug.
+# What a failed container log says, in one plain sentence, so a person is never sent to read container logs.
+# A log it does not recognise prints nothing and the caller calls it a bug.
 
 # A permission error while the app starts is never something the person can fix on their computer: the image
 # decides where the app may write.

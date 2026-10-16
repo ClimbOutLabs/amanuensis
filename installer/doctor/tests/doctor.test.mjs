@@ -1277,6 +1277,16 @@ describe('network address check', () => {
     assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
   });
 
+  it('does not offer a carrier-grade address unless Tailscale is on this computer', () => {
+    make();
+    world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', '100.101.102.103'] });
+    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
+    world.install('tailscale', '#!/usr/bin/env bash\nexit 1\n');
+    const check = find(world.json().doc.instances.main, 'network');
+    assert.equal(check.state, 'warn');
+    assert.match(check.detail, /100\.101\.102\.103/);
+  });
+
   it('--fix refreshes the instance through the installer, after a yes', () => {
     make();
     const repo = world.sandbox();

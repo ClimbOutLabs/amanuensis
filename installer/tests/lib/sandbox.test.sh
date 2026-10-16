@@ -296,12 +296,12 @@ test_root_steps_need_consent_yes_is_not_enough() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_flat_contains "$ERR" "root steps that were not approved"
+  assert_flat_contains "$ERR" "administrator rights that were not given"
   assert_flat_contains "$ERR" "--sandbox-root"
-  assert_contains "$OUT" "sudo install -m 0644 $REPO/ops/sandbox-slot/apparmor/aman-sandbox-slot /etc/apparmor.d/aman-sandbox-slot"
-  assert_contains "$OUT" "sudo apparmor_parser -r -W /etc/apparmor.d/aman-sandbox-slot"
-  assert_contains "$OUT" "loaded again by the system at every boot"
-  assert_contains "$OUT" "setup-disks.sh setup /var/lib/aman-slots/<instance> 16 4"
+  assert_flat_contains "$OUT" "The sandbox needs administrator rights on this computer."
+  assert_flat_contains "$OUT" "adds a security rule for the sandbox"
+  assert_flat_contains "$OUT" "sets up 4 disks of up to 16 GB that use space only as they fill"
+  assert_not_contains "$OUT" "setup-disks.sh"
   assert_log_lacks "--fix"
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
   assert_log_lacks "docker compose --project-name aman-main"
@@ -332,7 +332,7 @@ Back up automatically=>y
 Go ahead?=>y
 Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD
-Run these root steps now?=>y"
+Set up the sandbox now?=>y"
   assert_eq "$RC" 0
   assert_contains "$OUT" "The sandbox needs these steps as root"
   assert_contains "$OUT" "setup-disks.sh setup /var/lib/aman-slots/<instance> 16 4"
@@ -351,7 +351,7 @@ Back up automatically=>y
 Go ahead?=>y
 Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD
-Run these root steps now?=>n"
+Set up the sandbox now?=>n"
   assert_eq "$RC" 1
   assert_contains "$OUT" "were not approved"
   assert_log_lacks "--fix --yes"
@@ -528,8 +528,8 @@ test_docker_is_enabled_at_boot_with_consent() {
   INSTALL_EXTRA=(--sandbox-root)
   install_machine
   assert_eq "$RC" 0
-  assert_flat_contains "$OUT" "Docker does not start at boot here"
-  assert_contains "$OUT" "sudo systemctl enable docker"
+  assert_flat_contains "$OUT" "Docker does not start when this computer does"
+  assert_not_contains "$OUT" "systemctl"
   assert_log_has "sudo systemctl enable docker"
   sandbox_drop
 }

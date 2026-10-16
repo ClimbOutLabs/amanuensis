@@ -1,5 +1,4 @@
-# Expected rendering of the terminal style helpers, read by installer/tests/ui.test.sh and
-# packages/trueforge/tests/unit/scripts/lib/ui.test.ts. \e is the escape byte.
+# Expected rendering of the terminal style helpers. \e is the escape byte.
 # Modes: color (UTF-8 terminal), nocolor (NO_COLOR), plain (no terminal), ascii (LANG=C).
 # Streams are merged in call order. Prompt lines end with a ui_newline call.
 

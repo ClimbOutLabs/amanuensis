@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Small helpers the installer and the doctor both use; each file that needs them sources this one.
+# Small helpers with one owner for the installer and the doctor.
 
 SANDBOX_NODE_MAJOR=22
 SANDBOX_NODE_MINOR=14

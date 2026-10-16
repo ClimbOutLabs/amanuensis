@@ -267,15 +267,12 @@ sandbox_first_instance() {
 }
 
 sandbox_print_root_steps() {
-  local step=$1 repo=$REPO_ROOT
-  ui_line "The sandbox needs these steps as root on this computer:"
+  local step=$1
+  ui_line "The sandbox needs administrator rights on this computer."
   if [ "$step" = apparmor ]; then
-    say "  sudo install -m 0644 $repo/ops/sandbox-slot/apparmor/aman-sandbox-slot $SLOT_APPARMOR_FILE"
-    say "  sudo apparmor_parser -r -W $SLOT_APPARMOR_FILE"
-    say "    (a file in /etc/apparmor.d is loaded again by the system at every boot)"
+    ui_hint "It adds a security rule for the sandbox, which the system loads again at every start."
   fi
-  say "  sudo sh $repo/ops/sandbox-slot/disks/setup-disks.sh setup $SLOT_DISK_ROOT/<instance> $SLOT_DISK_GB $SLOT_COUNT"
-  say "    (creates $SLOT_COUNT sparse disk files, adds $SLOT_COUNT lines to /etc/fstab, mounts them; each only if missing)"
+  ui_hint "It sets up $SLOT_COUNT disks of up to $SLOT_DISK_GB GB that use space only as they fill."
 }
 
 # Brings up the slots of one instance, with a root step only after a yes. Runs before the instance starts, because
@@ -296,8 +293,8 @@ sandbox_ensure() {
   case "$step" in
     apparmor | disk)
       sandbox_print_root_steps "$step"
-      if ! consent_root "Run these root steps now?" "$OPT_SANDBOX_ROOT"; then
-        die "The sandbox needs root steps that were not approved, so instance $name was not started. Answer yes when asked, or pass --sandbox-root (--yes alone never uses sudo), or pass --no-sandbox to install without run code."
+      if ! consent_root "Set up the sandbox now?" "$OPT_SANDBOX_ROOT"; then
+        die "The sandbox needs administrator rights that were not given, so instance $name was not started. Answer yes when asked, or pass --sandbox-root (--yes alone never uses sudo), or pass --no-sandbox to install without run code."
       fi
       fix_args=(--fix --yes)
       ;;
@@ -315,9 +312,8 @@ sandbox_docker_boot_ensure() {
   command -v systemctl >/dev/null 2>&1 || return 0
   systemctl cat docker.service >/dev/null 2>&1 || return 0
   if systemctl is-enabled --quiet docker 2>/dev/null; then return 0; fi
-  ui_line "Docker does not start at boot here, so the sandbox would stay down after a restart. This needs administrator rights (sudo):"
-  say "    sudo systemctl enable docker"
-  if consent_root "Run it now?" "$OPT_SANDBOX_ROOT"; then
+  ui_line "Docker does not start when this computer does, so the sandbox would stay down after a restart. Changing that needs administrator rights."
+  if consent_root "Make Docker start with this computer?" "$OPT_SANDBOX_ROOT"; then
     run_root systemctl enable docker || warn "Could not make Docker start at boot. Run: aman doctor sandbox --fix"
   else
     warn "Docker was left as it was; after a restart the sandbox stays down until you run: aman doctor sandbox --fix"

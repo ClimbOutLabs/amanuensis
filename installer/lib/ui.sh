@@ -2,7 +2,6 @@
 # Terminal output style shared by the installer and the doctor shim. One symbol and one sentence per line.
 # Human lines go to the stream in UI_FD (stdout unless a caller sets 2); prompts and progress always use stderr.
 # Color goes on markers, status words and verdicts only. Bash 3.2 compatible; nothing here needs tput.
-# The Node twin is packages/trueforge/scripts/lib/ui.ts; installer/tests/ui-fixtures.txt pins both.
 
 UI_FD=1
 UI_UTF8=0

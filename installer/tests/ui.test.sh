@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The terminal style helpers against installer/tests/ui-fixtures.txt, which the Node twin is tested against too.
+# The terminal style helpers against the expected renderings in ui-fixtures.txt.
 set -euo pipefail
 # shellcheck source=helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
@@ -37,6 +37,8 @@ test_fixtures_match() {
   }
   flush() {
     commit_mode
+    t_begin "ui fixture $case_name has every mode"
+    assert_eq "${modes[*]}" "color nocolor plain ascii" "a case shows all four modes, in order"
     for i in "${!modes[@]}"; do
       actual=$(run_mode "${modes[$i]}" "$script")
       t_begin "ui fixture $case_name (${modes[$i]})"

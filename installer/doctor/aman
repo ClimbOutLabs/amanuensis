@@ -10,8 +10,7 @@
 #   aman backup [NAME]
 #   aman upgrade [--check] [--force]
 #
-# The text report uses the terminal style of <home>/lib/ui.sh (the installer puts it beside this file's folder);
-# --json never loads it and is the same document as before.
+# --json never loads the terminal style and is the same document as before.
 #
 # `doctor sandbox` checks every sandbox slot's attestation and then makes a real call through the app. The slot
 # setup is the copy of packages/trueforge/scripts/sandbox-slots the installer took out of the app image; it runs on
@@ -91,9 +90,8 @@ die_usage() {
   exit 2
 }
 
-# The terminal style lives in <home>/lib/ui.sh, or installer/lib/ui.sh next to installer/doctor in a checkout. Only
-# the text report needs it, so --json works without it.
-load_lib() { # name: sources ../lib/<name>.sh beside this file; returns 1 when it is not there
+# Helper files sit in ../lib beside this file's folder, installed and in a checkout alike.
+load_lib() { # name: sources ../lib/<name>.sh; returns 1 when it is not there
   local src=${BASH_SOURCE[0]} target file
   while [ -L "$src" ] && command -v readlink >/dev/null 2>&1; do
     target=$(readlink "$src")

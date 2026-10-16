@@ -1,7 +1,6 @@
 /**
  * Terminal output style for the scripts: one symbol and one sentence per line, color on markers and verdicts only.
- * Same rendering as installer/lib/ui.sh; installer/tests/ui-fixtures.txt pins both. Line methods write to stdout
- * unless taken from `stderr()`; prompts and progress always use stderr.
+ * Line methods write to stdout unless taken from `stderr()`; prompts and progress always use stderr.
  */
 
 export interface UiStream {
