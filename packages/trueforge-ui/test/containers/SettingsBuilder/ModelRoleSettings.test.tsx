@@ -43,7 +43,7 @@ describe('ModelRoleSettings', () => {
   it('names the four roles that have a real model call behind them', async () => {
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'Model roles' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Roles and Personas' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Main chat model' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Coding / subagent model' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Compaction model' })).toBeInTheDocument();
@@ -53,7 +53,7 @@ describe('ModelRoleSettings', () => {
   it('explains why bounded control-plane checks reuse the main model', async () => {
     renderPage();
 
-    await screen.findByRole('heading', { name: 'Model roles' });
+    await screen.findByRole('heading', { name: 'Roles and Personas' });
     expect(screen.getByText(/control-plane checks.*reuse the main chat model/i)).toBeInTheDocument();
     expect(screen.getByText(/approvals are decided without a model/i)).toBeInTheDocument();
   });
