@@ -260,8 +260,7 @@ export function MemoryTurnContextProvider({ children }: PropsWithChildren) {
     return () => clearTimeout(timeoutId);
   }, [inGracePeriod]);
 
-  const shouldPoll =
-    api != null && sessionId != null && (isRunning || (inGracePeriod && !latestTurnHasProfile));
+  const shouldPoll = api != null && sessionId != null && (isRunning || (inGracePeriod && !latestTurnHasProfile));
 
   // Skip poll ticks while the tab is hidden (matching SentinelAuditFeed) so a hidden tab
   // fires no requests.

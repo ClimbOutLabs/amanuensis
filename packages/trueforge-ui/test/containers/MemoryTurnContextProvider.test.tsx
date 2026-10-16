@@ -548,7 +548,7 @@ describe('MemoryTurnContextProvider', () => {
       useThreadIsRunning.mockReturnValue(true);
       visibility.hide();
       const listMemoryTurnContext = vi.fn().mockResolvedValue([]);
-      renderProvider({ listMemoryTurnContext });
+      render(tree({ listMemoryTurnContext }));
 
       // The mount refresh fires once; hidden poll ticks fire nothing.
       expect(listMemoryTurnContext).toHaveBeenCalledTimes(1);
@@ -567,7 +567,7 @@ describe('MemoryTurnContextProvider', () => {
       useThreadIsRunning.mockReturnValue(true);
       visibility.hide();
       const listMemoryTurnContext = vi.fn().mockResolvedValue([]);
-      renderProvider({ listMemoryTurnContext });
+      render(tree({ listMemoryTurnContext }));
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(6_000);
