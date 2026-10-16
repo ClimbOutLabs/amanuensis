@@ -85,6 +85,53 @@ export function contentTypeCharset(contentType: string): ContentTypeCharset {
   return only === undefined || only === '' ? { kind: 'none' } : { kind: 'one', charset: only };
 }
 
+/**
+ * True for a Content-Type that is exactly `text/plain` with one plain charset, and at most `format=flowed` and
+ * `delsp=yes`, each once. Any other parameter (a name, a filename, a note) could carry text that is neither shown
+ * nor checked, so a send does not accept it.
+ */
+export function isPlainTextContentType(contentType: string): boolean {
+  const params: string[] = [];
+  let inQuotes = false;
+  let start = 0;
+  for (let index = 0; index < contentType.length; index += 1) {
+    const character = contentType[index];
+    if (character === '"') {
+      inQuotes = !inQuotes;
+    } else if (character === ';' && !inQuotes) {
+      params.push(contentType.slice(start, index));
+      start = index + 1;
+    }
+  }
+  params.push(contentType.slice(start));
+  const [mediaType, ...rest] = params;
+  if (inQuotes || mediaType?.trim().toLowerCase() !== 'text/plain') {
+    return false;
+  }
+  const seen = new Set<string>();
+  for (const param of rest) {
+    const equals = param.indexOf('=');
+    if (equals === -1) {
+      return false;
+    }
+    const name = param.slice(0, equals).trim().toLowerCase();
+    const value = param
+      .slice(equals + 1)
+      .trim()
+      .replace(/^"(.*)"$/s, '$1')
+      .toLowerCase();
+    const allowed =
+      (name === 'charset' && /^[a-z0-9._:-]{1,60}$/.test(value)) ||
+      (name === 'format' && value === 'flowed') ||
+      (name === 'delsp' && value === 'yes');
+    if (!allowed || seen.has(name)) {
+      return false;
+    }
+    seen.add(name);
+  }
+  return seen.has('charset');
+}
+
 /** The charset an HTML document declares in a leading `<meta>` tag, or null. Reads only the first 2 KB. */
 export function sniffHtmlCharset(bytes: Uint8Array): string | null {
   const head = Buffer.from(bytes.subarray(0, 2048)).toString('latin1');

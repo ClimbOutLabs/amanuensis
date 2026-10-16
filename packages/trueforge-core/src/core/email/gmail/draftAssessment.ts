@@ -6,11 +6,12 @@
 import type { ReviewableDraft } from './draftReview';
 import type { GmailMessage } from './gmailWire';
 import { decodedHeaderOf, headerOf, headerOverflows, rawHeaderOf, readMessage } from './message';
+import { MAX_REFERENCES, parseIdList } from './messageId';
 import {
-  contentTypeCharset,
   countIdeographicSelectors,
   hasAmbiguousEncodedWord,
   hasHiddenCharacters,
+  isPlainTextContentType,
   MAX_IDEOGRAPHIC_SELECTORS,
 } from './mimeText';
 import { addressesIn, addressListIsPlain } from './results';
@@ -42,12 +43,15 @@ const ALLOWED_HEADERS = new Set([
  * list, a version number, a date. Each is matched whole, with no spare space, no comment and nothing but
  * printable ASCII. Patterns have no overlapping quantifiers.
  */
-const STRICT_HEADERS: Record<string, RegExp> = {
-  'in-reply-to': /^<[!-;=?-~]+>(?: <[!-;=?-~]+>)*$/,
-  references: /^<[!-;=?-~]+>(?: <[!-;=?-~]+>)*$/,
-  'message-id': /^<[!-;=?A-~]+@[!-;=?A-~]+>$/,
-  'mime-version': /^1\.0$/,
-  date: /^(?:[A-Z][a-z]{2}, )?\d{1,2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}(?::\d{2})? (?:[+-]\d{4}|[A-Z]{1,5})(?: \([A-Z]{2,5}\))?$/,
+const STRICT_HEADERS: Record<string, (value: string) => boolean> = {
+  'in-reply-to': value => parseIdList({ value, max: MAX_REFERENCES }) !== null,
+  references: value => parseIdList({ value, max: MAX_REFERENCES }) !== null,
+  'message-id': value => parseIdList({ value, max: 1 }) !== null,
+  'mime-version': value => value === '1.0',
+  date: value =>
+    /^(?:[A-Z][a-z]{2}, )?\d{1,2} [A-Z][a-z]{2} \d{4} \d{1,2}:\d{2}(?::\d{2})? (?:[+-]\d{4}|[A-Z]{1,5})(?: \([A-Z]{2,5}\))? ?$/.test(
+      value,
+    ),
 };
 
 /** The transfer encodings a reader decodes the same way. */
@@ -79,6 +83,15 @@ function fromAddress(raw: string): string | null {
   }
   const inner = value.slice(value.indexOf('<') + 1, -1).trim();
   return PLAIN_ASCII_ADDRESS.test(inner) ? inner.toLowerCase() : null;
+}
+
+const MAX_FROM_NAME_CHARS = 200;
+
+/** The display name of a decoded From header, without its quotes; empty when there is none. */
+function fromNameOf(decodedFrom: string): string {
+  const open = decodedFrom.indexOf('<');
+  const name = open === -1 ? '' : decodedFrom.slice(0, open).trim();
+  return name.length >= 2 && name.startsWith('"') && name.endsWith('"') ? name.slice(1, -1) : name;
 }
 
 /** No leading whitespace and at most one closing newline: blank space at the edges would not show on the card. */
@@ -129,14 +142,13 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
     }
     seen.add(name);
   }
-  for (const [name, pattern] of Object.entries(STRICT_HEADERS)) {
+  for (const [name, check] of Object.entries(STRICT_HEADERS)) {
     const value = rawHeaderOf({ part: payload, name });
-    if (seen.has(name) && !pattern.test(value)) {
+    if (seen.has(name) && !check(value)) {
       return { ok: false, reason: REFUSALS.format };
     }
   }
-  const contentType = contentTypeCharset(rawHeaderOf({ part: payload, name: 'content-type' }));
-  if (contentType.kind !== 'one') {
+  if (!isPlainTextContentType(rawHeaderOf({ part: payload, name: 'content-type' }))) {
     return { ok: false, reason: REFUSALS.charset };
   }
   const transferEncoding = rawHeaderOf({ part: payload, name: 'content-transfer-encoding' }).trim().toLowerCase();
@@ -175,6 +187,7 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
   if (hasHiddenCharacters(read.plainText) || hiddenInHeaders) {
     return { ok: false, reason: REFUSALS.hidden };
   }
+  const fromName = fromNameOf(decodedHeaderOf({ message, name: 'From' }));
   const draft: ReviewableDraft = {
     to: addressesIn({ message, name: 'To' }),
     cc: addressesIn({ message, name: 'Cc' }),
@@ -183,8 +196,19 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
     body: read.plainText,
     threadId: message.threadId,
     inReplyTo: rawHeaderOf({ part: payload, name: 'in-reply-to' }),
+    references: rawHeaderOf({ part: payload, name: 'references' }),
+    fromName,
   };
   if (input.forSend) {
+    if (
+      ['From', 'Subject', 'To', 'Cc', 'Bcc'].some(
+        name =>
+          /[\r\n]/.test(rawHeaderOf({ part: payload, name })) || /[\r\n]/.test(decodedHeaderOf({ message, name })),
+      ) ||
+      fromName.length > MAX_FROM_NAME_CHARS
+    ) {
+      return { ok: false, reason: REFUSALS.format };
+    }
     if (draft.to.length + draft.cc.length + draft.bcc.length === 0) {
       return { ok: false, reason: 'The draft has no recipients.' };
     }

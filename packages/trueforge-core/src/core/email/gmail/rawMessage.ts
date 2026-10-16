@@ -1,4 +1,5 @@
 /** Builds the RFC 5322 message Gmail stores as a draft. Plain text only, always UTF-8. */
+import { idsIn, MAX_REFERENCES } from './messageId';
 import type { DraftContent } from './toolContract';
 
 /** The original message a reply answers: its RFC 5322 identifiers, which only Gmail's own ids lead to. */
@@ -49,9 +50,19 @@ function wrapBase64(text: string): string {
   ).join('\r\n');
 }
 
-/** An RFC 5322 message id list such as `<a@b> <c@d>`; anything else is dropped rather than copied into a header. */
+/** The valid ids of a header; anything else is dropped rather than copied into a header. */
 function messageIds(value: string): string[] {
-  return singleLine({ value, field: 'reply headers' }).match(/<[!-;=?-~]{1,300}>/g) ?? [];
+  return idsIn(singleLine({ value, field: 'reply headers' }));
+}
+
+/** The threading headers a reply writes: the id it answers, and the chain so far (newest 20, each once). */
+export function replyHeaders(reply: ReplyTarget | undefined): { inReplyTo: string; references: string } {
+  if (reply === undefined) {
+    return { inReplyTo: '', references: '' };
+  }
+  const answered = messageIds(reply.messageIdHeader);
+  const chain = [...new Set([...messageIds(reply.referencesHeader), ...answered])].slice(-MAX_REFERENCES);
+  return { inReplyTo: answered.join(' '), references: answered.length === 0 ? '' : chain.join(' ') };
 }
 
 /** `Re: <original subject>` without stacking prefixes. */
@@ -68,13 +79,7 @@ export function replySubject(original: string): string {
 export function buildRawMessage(input: { content: RawDraftContent; reply: ReplyTarget | undefined }): string {
   const { content } = input;
   const subject = singleLine({ value: content.subject, field: 'subject' });
-  const replyId = input.reply === undefined ? '' : messageIds(input.reply.messageIdHeader).join(' ');
-  const references =
-    input.reply === undefined
-      ? ''
-      : [...new Set([...messageIds(input.reply.referencesHeader), ...messageIds(input.reply.messageIdHeader)])].join(
-          ' ',
-        );
+  const { inReplyTo: replyId, references } = replyHeaders(input.reply);
   const headers = [
     `To: ${content.to.join(', ')}`,
     ...(content.cc === undefined || content.cc.length === 0 ? [] : [`Cc: ${content.cc.join(', ')}`]),

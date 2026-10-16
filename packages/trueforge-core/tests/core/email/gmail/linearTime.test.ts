@@ -5,10 +5,12 @@
 import { assessDraft } from '../../../../src/core/email/gmail/draftAssessment';
 import { decodeEntities, htmlToText } from '../../../../src/core/email/gmail/htmlText';
 import { headerOf, readMessage } from '../../../../src/core/email/gmail/message';
+import { idsIn, parseIdList } from '../../../../src/core/email/gmail/messageId';
 import {
   contentTypeCharset,
   decodeEncodedWords,
   hasHiddenCharacters,
+  isPlainTextContentType,
   sniffHtmlCharset,
   stripInvisible,
 } from '../../../../src/core/email/gmail/mimeText';
@@ -63,6 +65,8 @@ const HOSTILE: [string, string][] = [
   ['tag letters and no end', `\u{1F3F4}${'\u{E0067}'.repeat(MB / 2)}`],
   ['black flags and tags', '\u{1F3F4}\u{E0067}'.repeat(MB / 4)],
   ['joiners in Indic text', 'ශ්\u200Dර'.repeat(MB / 4)],
+  ['ids with dots', `<${'a.'.repeat(MB / 4)}@x>`],
+  ['many id openers', '<a@b> '.repeat(MB / 6)],
   ['spaces between Thai letters', 'ก\u200Bข'.repeat(MB / 3)],
   ['keycaps', '1\uFE0F\u20E3'.repeat(MB / 3)],
   ['Mongolian selectors', 'ᠠ\u180B'.repeat(MB / 2)],
@@ -78,6 +82,9 @@ describe.each(HOSTILE)('1 MB of %s', (_name, text) => {
     ['addressListIsPlain', () => addressListIsPlain(text)],
     ['decodeEncodedWords', () => decodeEncodedWords(text)],
     ['contentTypeCharset', () => contentTypeCharset(text)],
+    ['isPlainTextContentType', () => isPlainTextContentType(`text/plain; ${text}`)],
+    ['parseIdList', () => parseIdList({ value: text, max: 20 })],
+    ['idsIn', () => idsIn(text)],
     ['sniffHtmlCharset', () => sniffHtmlCharset(Buffer.from(text))],
     ['decodeEntities', () => decodeEntities(text)],
     ['htmlToText', () => htmlToText(text)],

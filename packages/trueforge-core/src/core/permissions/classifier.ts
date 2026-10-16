@@ -1263,7 +1263,10 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
   ];
   const subject = cardSubject(content.subject);
   const replaces = action.mail_replaces;
-  const recipientsLine = parts.join('. ');
+  const recipientsLine = [
+    ...parts,
+    ...(content.fromName === '' ? [] : [`Sent as ${escapeDisplayText(content.fromName)}`]),
+  ].join('. ');
   const plainWhat =
     kind === 'send'
       ? `Send ${subject} from your Gmail ${recipientsLine}.`

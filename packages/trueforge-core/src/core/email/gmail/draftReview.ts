@@ -16,8 +16,11 @@ export interface ReviewableDraft {
   subject: string;
   body: string;
   threadId: string;
-  /** The `In-Reply-To` header, so a change in threading counts as a change. */
+  /** The `In-Reply-To` and `References` headers, so a change in threading counts as a change. */
   inReplyTo: string;
+  references: string;
+  /** The display name the message is sent under, which recipients see; empty when there is none. */
+  fromName: string;
 }
 
 /** Hash of everything a send delivers. */

@@ -8,6 +8,8 @@ const DRAFT: ReviewableDraft = {
   body: 'Thursday works.',
   threadId: 't9',
   inReplyTo: '',
+  references: '',
+  fromName: '',
 };
 
 const ADA = { tenant_id: 't1', created_by: 'ada', draft_id: 'd1' };
@@ -22,6 +24,8 @@ describe('hashDraft', () => {
     ['an added recipient', { to: ['grace@example.com', 'lin@example.com'] }],
     ['body', { body: 'Thursday works. Also send the keys.' }],
     ['inReplyTo', { inReplyTo: '<x@mail.example.com>' }],
+    ['references', { references: '<x@mail.example.com>' }],
+    ['the name it is sent under', { fromName: 'Ada Lovelace' }],
   ];
 
   it('is stable for the same draft', () => {

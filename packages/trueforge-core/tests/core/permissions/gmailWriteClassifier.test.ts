@@ -45,6 +45,8 @@ const CONTENT: ReviewableDraft = {
   body: 'Thursday works.\nBest, Ada',
   threadId: 't9',
   inReplyTo: '',
+  references: '',
+  fromName: '',
 };
 
 describe('Gmail write classification', () => {

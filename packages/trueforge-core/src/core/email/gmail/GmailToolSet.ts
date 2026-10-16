@@ -14,7 +14,7 @@ import { hashDraft, type DraftReviewLedger, type ReviewableDraft } from './draft
 import { GmailApi, GmailApiError, mapSkippingMissing } from './gmailApi';
 import type { GmailMessage } from './gmailWire';
 import { headerOf, rawHeaderOf, readMessage } from './message';
-import { buildRawMessage, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
+import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
 import {
   getDraftResult,
   listDraftsResult,
@@ -385,7 +385,9 @@ export class GmailToolSet extends LocalToolMCP {
         subject,
         body,
         threadId: threadId ?? '',
-        inReplyTo: reply?.messageIdHeader ?? '',
+        inReplyTo: replyHeaders(reply).inReplyTo,
+        references: replyHeaders(reply).references,
+        fromName: '',
       },
     };
   }
