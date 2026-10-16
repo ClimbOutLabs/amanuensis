@@ -647,6 +647,16 @@ function envOverrides(params: Record<string, unknown>): Record<string, string> |
   );
 }
 
+const EXEC_INTERNET_NOTE = 'This command tries to reach the internet.';
+
+/** Says so on the card when the host flagged the command as reaching the network. */
+function withInternetNote({ decision, action }: { decision: TierDecision; action: SentinelAction }): TierDecision {
+  if (action.mcp_hints.open_world_hint !== true || decision.card === null) {
+    return decision;
+  }
+  return { ...decision, card: { ...decision.card, plain_what: `${decision.card.plain_what} ${EXEC_INTERNET_NOTE}` } };
+}
+
 async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const command = stringParam(action.canonical_params, 'command') ?? '';
@@ -1558,7 +1568,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   // fail-closed Tier 3 default below.
   if (action.tool_type === 'truefoundry-system') {
     if (name === 'exec') {
-      return classifyExecShell(action, ctx);
+      return withInternetNote({ decision: await classifyExecShell(action, ctx), action });
     }
     if (name === 'write_file' || name === 'apply_patch' || name === 'replace_text') {
       return classifySandboxWrite(action, ctx);
