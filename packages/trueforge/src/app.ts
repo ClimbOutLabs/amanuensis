@@ -523,28 +523,27 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       authMiddleware,
     ),
   );
+  // Only the import path is admin-only, so the export route next to it keeps its own answers.
+  app.use('/api/v1/data/import', adminAuthMiddleware);
   app.route(
     '/api/v1/data',
-    withAdminAuth(
-      createDataImportRouter({
-        sessionStore: deps.sessionStore,
-        personaStore: deps.personaStore,
-        personalizationStore: deps.personalizationStore,
-        spaceStore: deps.spaceStore,
-        scheduleStore: deps.scheduleStore,
-        globalSettingsStore: deps.globalSettingsStore,
-        sentinelSettingsStore: deps.sentinelSettingsStore,
-        sentinelAuditStore: deps.sentinelAuditStore,
-        turnArtifactStore: deps.turnArtifactStore,
-        tokenStore: deps.tokenStore,
-        resolveMcpServerStore: deps.resolveMcpServerStore,
-        resolveAgentStore: deps.resolveAgentStore,
-        withTransaction: deps.withTransaction,
-        authorizer: deps.authorizer,
-        logger: deps.logger,
-      }),
-      adminAuthMiddleware,
-    ),
+    createDataImportRouter({
+      sessionStore: deps.sessionStore,
+      personaStore: deps.personaStore,
+      personalizationStore: deps.personalizationStore,
+      spaceStore: deps.spaceStore,
+      scheduleStore: deps.scheduleStore,
+      globalSettingsStore: deps.globalSettingsStore,
+      sentinelSettingsStore: deps.sentinelSettingsStore,
+      sentinelAuditStore: deps.sentinelAuditStore,
+      turnArtifactStore: deps.turnArtifactStore,
+      tokenStore: deps.tokenStore,
+      resolveMcpServerStore: deps.resolveMcpServerStore,
+      resolveAgentStore: deps.resolveAgentStore,
+      withTransaction: deps.withTransaction,
+      authorizer: deps.authorizer,
+      logger: deps.logger,
+    }),
   );
   app.route(
     '/api/v1/settings',
