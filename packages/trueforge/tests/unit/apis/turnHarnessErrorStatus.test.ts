@@ -67,6 +67,7 @@ async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response
           repository_id: null,
           workspace_cwd: null,
         },
+        answersOnlyHeldActions: () => Promise.resolve(false),
         createTurn: () => Promise.reject(error),
         classifyApprovalResubmission: () => Promise.resolve({ outcome: 'unrecorded' }),
       }),
