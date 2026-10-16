@@ -13,7 +13,7 @@ import { message, thread } from './fixtures';
 const context = { account: 'ada@example.com', attachmentsOpenable: true };
 
 describe('message reading', () => {
-  it('prefers the plain text part and lists attachments with their ids', () => {
+  it('prefers the plain text part and lists attachments by their stable handle', () => {
     const read = readMessage(
       message({
         id: 'm1',
@@ -23,7 +23,16 @@ describe('message reading', () => {
       }),
     );
     expect(read.body).toBe('See attached.');
-    expect(read.attachments).toEqual([{ id: 'att-1', filename: 'lease.pdf', mimeType: 'application/pdf', size: 1234 }]);
+    expect(read.attachments).toEqual([
+      {
+        handle: '2',
+        attachmentId: 'att-1',
+        data: undefined,
+        filename: 'lease.pdf',
+        mimeType: 'application/pdf',
+        size: 1234,
+      },
+    ]);
   });
 
   it('falls back to HTML as text, without scripts or tags', () => {

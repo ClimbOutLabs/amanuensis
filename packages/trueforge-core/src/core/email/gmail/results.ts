@@ -219,7 +219,7 @@ function cleanSnippet(snippet: string | undefined): string {
 }
 
 function attachmentEntry(file: AttachmentInfo) {
-  return { id: file.id, filename: file.filename, mime_type: file.mimeType, size: file.size };
+  return { handle: file.handle, filename: file.filename, mime_type: file.mimeType, size: file.size };
 }
 
 /** The attachments a message names that fit the budget, and how many of its attachments are not named. */

@@ -196,7 +196,9 @@ describe('GmailToolSet untrusted content', () => {
     const outputs = [
       text(await tools.callTool({ name: 'list_drafts', arguments: {} })),
       text(await tools.callTool({ name: 'get_draft', arguments: { draft_id: 'd1' } })),
-      text(await tools.callTool({ name: 'download_attachment', arguments: { message_id: 'm1', attachment_id: 'a1' } })),
+      text(
+        await tools.callTool({ name: 'download_attachment', arguments: { message_id: 'm1', attachment_handle: '2' } }),
+      ),
     ];
     for (const output of outputs) {
       expect(output).not.toMatch(/<\s*\/?\s*tfy-/i);
@@ -230,7 +232,7 @@ describe('GmailToolSet attachments', () => {
   it('lists attachment metadata on the message', async () => {
     const { tools } = await build({ routes: [route('/messages/m1', withAttachment())] });
     const result = JSON.parse(text(await tools.callTool({ name: 'read_email', arguments: { message_id: 'm1' } })));
-    expect(result.attachments).toEqual([{ id: 'att-1', filename: 'lease.pdf', mime_type: 'application/pdf', size: 5 }]);
+    expect(result.attachments).toEqual([{ handle: '2', filename: 'lease.pdf', mime_type: 'application/pdf', size: 5 }]);
   });
 
   it('hands the bytes to the injected workspace helper and returns only the path', async () => {
@@ -254,7 +256,7 @@ describe('GmailToolSet attachments', () => {
     });
     const result = JSON.parse(
       text(
-        await tools.callTool({ name: 'download_attachment', arguments: { message_id: 'm1', attachment_id: 'att-1' } }),
+        await tools.callTool({ name: 'download_attachment', arguments: { message_id: 'm1', attachment_handle: '2' } }),
       ),
     );
     expect(saved).toHaveLength(1);
@@ -277,9 +279,128 @@ describe('GmailToolSet attachments', () => {
     });
     const response = await tools.callTool({
       name: 'download_attachment',
-      arguments: { message_id: 'm1', attachment_id: 'someone-elses' },
+      arguments: { message_id: 'm1', attachment_handle: '9' },
     });
-    expect(text(response)).toContain('Attachment not found');
+    expect(JSON.parse(text(response)).error).toContain('No attachment with handle "9"');
+    expect(google.urls.some(entry => entry.includes('/attachments/'))).toBe(false);
+  });
+
+  it("never shows Gmail's own attachment id to the model", async () => {
+    const { tools } = await build({ routes: [route('/messages/m1', withAttachment())] });
+    expect(text(await tools.callTool({ name: 'read_email', arguments: { message_id: 'm1' } }))).not.toContain('att-1');
+  });
+
+  it('finds the file by its handle even though Gmail issues a new attachment id on every read', async () => {
+    let reads = 0;
+    const saved: Buffer[] = [];
+    const fetched: string[] = [];
+    const { tools } = await build({
+      stager: {
+        stageAttachment: input => {
+          saved.push(input.bytes);
+          return Promise.resolve({ filename: input.filename, path: '/w/lease.pdf', sandboxCreated: undefined });
+        },
+      },
+      routes: [
+        url => {
+          if (url.pathname !== '/gmail/v1/users/me/messages/m1') {
+            return undefined;
+          }
+          reads += 1;
+          return json(
+            message({
+              id: 'm1',
+              body: 'see',
+              attachments: [
+                { id: `read-${String(reads)}-id`, filename: 'lease.pdf', mimeType: 'application/pdf', size: 5 },
+              ],
+            }),
+          );
+        },
+        url => {
+          const match = /\/attachments\/(.+)$/.exec(url.pathname);
+          if (match === null) {
+            return undefined;
+          }
+          fetched.push(decodeURIComponent(match[1] ?? ''));
+          return json({ size: 5, data: b64url('%PDF-') });
+        },
+      ],
+    });
+    const listed = JSON.parse(text(await tools.callTool({ name: 'read_email', arguments: { message_id: 'm1' } })));
+    const handle = listed.attachments[0].handle;
+    const result = JSON.parse(
+      text(
+        await tools.callTool({
+          name: 'download_attachment',
+          arguments: { message_id: 'm1', attachment_handle: handle },
+        }),
+      ),
+    );
+    expect(result.path).toBe('/w/lease.pdf');
+    expect(fetched).toEqual(['read-2-id']);
+    expect(saved[0]?.toString()).toBe('%PDF-');
+  });
+
+  it('lists the available handles and file names when the handle does not exist', async () => {
+    const two = message({
+      id: 'm1',
+      body: 'see',
+      attachments: [
+        { id: 'x1', filename: 'lease.pdf', mimeType: 'application/pdf', size: 5 },
+        { id: 'x2', filename: 'photo.png', mimeType: 'image/png', size: 5 },
+      ],
+    });
+    const { tools, google } = await build({
+      stager: {
+        stageAttachment: input => Promise.resolve({ filename: input.filename, path: '/x', sandboxCreated: undefined }),
+      },
+      routes: [route('/messages/m1', two)],
+    });
+    const response = JSON.parse(
+      text(
+        await tools.callTool({
+          name: 'download_attachment',
+          arguments: { message_id: 'm1', attachment_handle: 'nope' },
+        }),
+      ),
+    ).error;
+    expect(response).toContain('Available: 2 (lease.pdf), 3 (photo.png).');
+    expect(google.urls.some(entry => entry.includes('/attachments/'))).toBe(false);
+  });
+
+  it('stages a small attachment Gmail returned inline, with no attachment fetch', async () => {
+    const saved: Buffer[] = [];
+    const inline = message({
+      id: 'm1',
+      body: 'see',
+      attachments: [
+        { id: '', filename: 'invite.ics', mimeType: 'text/calendar', size: 9, partId: '1.2', inlineData: 'BEGIN:VCAL' },
+      ],
+    });
+    const { tools, google } = await build({
+      stager: {
+        stageAttachment: input => {
+          saved.push(input.bytes);
+          return Promise.resolve({ filename: input.filename, path: '/w/invite.ics', sandboxCreated: undefined });
+        },
+      },
+      routes: [route('/messages/m1', inline)],
+    });
+    const listed = JSON.parse(text(await tools.callTool({ name: 'read_email', arguments: { message_id: 'm1' } })));
+    expect(listed.attachments).toEqual([
+      { handle: '1.2', filename: 'invite.ics', mime_type: 'text/calendar', size: 9 },
+    ]);
+    const result = JSON.parse(
+      text(
+        await tools.callTool({
+          name: 'download_attachment',
+          arguments: { message_id: 'm1', attachment_handle: '1.2' },
+        }),
+      ),
+    );
+    expect(result.path).toBe('/w/invite.ics');
+    expect(saved[0]?.toString()).toBe('BEGIN:VCAL');
     expect(google.urls.some(entry => entry.includes('/attachments/'))).toBe(false);
   });
 
@@ -297,7 +418,7 @@ describe('GmailToolSet attachments', () => {
     });
     const response = await tools.callTool({
       name: 'download_attachment',
-      arguments: { message_id: 'm1', attachment_id: 'att-1' },
+      arguments: { message_id: 'm1', attachment_handle: '2' },
     });
     expect(text(response)).toContain('larger than 25 MB');
     expect(google.urls.some(entry => entry.includes('/attachments/'))).toBe(false);
