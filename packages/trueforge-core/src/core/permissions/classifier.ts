@@ -1265,7 +1265,9 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
   const replaces = action.mail_replaces;
   const recipientsLine = [
     ...parts,
-    ...(content.fromName === '' ? [] : [`Sent as ${escapeDisplayText(content.fromName)}`]),
+    ...(content.fromName === ''
+      ? []
+      : [`Sent as "${escapeDisplayText(content.fromName).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`]),
   ].join('. ');
   const plainWhat =
     kind === 'send'

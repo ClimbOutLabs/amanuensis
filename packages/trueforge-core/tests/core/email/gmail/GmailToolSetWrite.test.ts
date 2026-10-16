@@ -242,7 +242,7 @@ describe('send_draft', () => {
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info).toMatchObject({ tier: 3, is_approval_required: true });
     expect(info.tier3_card?.plain_what).toBe(
-      'Send "Lease" from your Gmail to grace@example.com and lin@example.com. Sent as Ada.',
+      'Send "Lease" from your Gmail to grace@example.com and lin@example.com. Sent as "Ada".',
     );
     expect(info.tier3_card?.cannot_be_undone).toBe("Once this is sent, it can't be unsent.");
     expect(info.tier3_card?.email).toMatchObject({
@@ -274,7 +274,7 @@ describe('send_draft', () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute(mail)] });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier3_card?.plain_what).toBe(
-      'Send "Lease" from your Gmail to a@example.com and b@example.com. Copy: c@example.com. Hidden copy (Bcc): d@example.com. Sent as Ada.',
+      'Send "Lease" from your Gmail to a@example.com and b@example.com. Copy: c@example.com. Hidden copy (Bcc): d@example.com. Sent as "Ada".',
     );
   });
 

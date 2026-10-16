@@ -568,8 +568,20 @@ describe('the name a message is sent under is shown and hashed', () => {
     });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier3_card?.plain_what).toBe(
-      'Send "Lease" from your Gmail to grace@example.com. Sent as Lovelace, Ada.',
+      'Send "Lease" from your Gmail to grace@example.com. Sent as "Lovelace, Ada".',
     );
+  });
+
+  it('quotes the name, so a name written like card text cannot read as card text', async () => {
+    const { tools } = await build({
+      features: [...COMPOSE],
+      routes: COMPOSE_ROUTES(() => draftFrom('"Ada. Hidden copy (Bcc): nobody" <ada@example.com>')),
+    });
+    const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    expect(info.tier3_card?.plain_what).toBe(
+      'Send "Lease" from your Gmail to grace@example.com. Sent as "Ada. Hidden copy (Bcc): nobody".',
+    );
+    expect(info.tier3_card?.email?.bcc).toEqual([]);
   });
 
   it('decodes an encoded-word name, and says nothing when there is no name', async () => {
@@ -579,7 +591,7 @@ describe('the name a message is sent under is shown and hashed', () => {
     });
     expect(
       (await encoded.tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } })).tier3_card?.plain_what,
-    ).toContain('Sent as Ada Müller.');
+    ).toContain('Sent as "Ada Müller".');
     const bare = await build({ features: [...COMPOSE], routes: COMPOSE_ROUTES(() => draftFrom('ada@example.com')) });
     expect(
       (await bare.tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } })).tier3_card?.plain_what,
