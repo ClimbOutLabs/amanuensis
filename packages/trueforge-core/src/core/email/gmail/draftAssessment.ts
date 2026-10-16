@@ -37,6 +37,19 @@ const ALLOWED_HEADERS = new Set([
   'content-transfer-encoding',
 ]);
 
+/**
+ * Headers Aman neither shows on the card nor decodes must be in a closed format that cannot carry text: an id
+ * list, a version number, a date. Each is matched whole, with no spare space, no comment and nothing but
+ * printable ASCII. Patterns have no overlapping quantifiers.
+ */
+const STRICT_HEADERS: Record<string, RegExp> = {
+  'in-reply-to': /^<[!-;=?-~]+>(?: <[!-;=?-~]+>)*$/,
+  references: /^<[!-;=?-~]+>(?: <[!-;=?-~]+>)*$/,
+  'message-id': /^<[!-;=?A-~]+@[!-;=?A-~]+>$/,
+  'mime-version': /^1\.0$/,
+  date: /^(?:[A-Z][a-z]{2}, )?\d{1,2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}(?::\d{2})? (?:[+-]\d{4}|[A-Z]{1,5})(?: \([A-Z]{2,5}\))?$/,
+};
+
 /** The transfer encodings a reader decodes the same way. */
 const TRANSFER_ENCODINGS = new Set(['7bit', '8bit', 'binary', 'quoted-printable', 'base64']);
 
@@ -49,6 +62,8 @@ export type DraftAssessment = { ok: true; draft: ReviewableDraft } | { ok: false
  * The one address of a From header, or null when it is anything but `addr` or `Name <addr>`. Only the address
  * inside the angle brackets counts, so a display name that looks like another address decides nothing.
  */
+const PLAIN_ASCII_ADDRESS = /^[!#-'*+\--9=?-Z^-~]+$/;
+
 function fromAddress(raw: string): string | null {
   const value = raw.trim();
   if (value.split('"').length % 2 === 0) {
@@ -57,13 +72,13 @@ function fromAddress(raw: string): string | null {
   const opens = value.split('<').length - 1;
   const closes = value.split('>').length - 1;
   if (opens === 0 && closes === 0) {
-    return /^[^\s,;"<>()]+$/.test(value) ? value.toLowerCase() : null;
+    return PLAIN_ASCII_ADDRESS.test(value) ? value.toLowerCase() : null;
   }
   if (opens !== 1 || closes !== 1 || !value.endsWith('>')) {
     return null;
   }
   const inner = value.slice(value.indexOf('<') + 1, -1).trim();
-  return /^[^\s,;"<>()]+$/.test(inner) ? inner.toLowerCase() : null;
+  return PLAIN_ASCII_ADDRESS.test(inner) ? inner.toLowerCase() : null;
 }
 
 /** No leading whitespace and at most one closing newline: blank space at the edges would not show on the card. */
@@ -75,6 +90,7 @@ function hasOrdinaryEdges(body: string): boolean {
 const REFUSALS = {
   formatting:
     'This draft has formatting or parts that Aman cannot show you in full, usually because it was edited in Gmail. Ask me to write it again.',
+  format: 'This draft has a header that Aman cannot show you or check, so it cannot be sent. Ask me to write it again.',
   headers:
     'This draft sets headers that Aman cannot show you, such as a reply address or sender. Ask me to write it again.',
   selectors:
@@ -113,6 +129,12 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
     }
     seen.add(name);
   }
+  for (const [name, pattern] of Object.entries(STRICT_HEADERS)) {
+    const value = rawHeaderOf({ part: payload, name });
+    if (seen.has(name) && !pattern.test(value)) {
+      return { ok: false, reason: REFUSALS.format };
+    }
+  }
   const contentType = contentTypeCharset(rawHeaderOf({ part: payload, name: 'content-type' }));
   if (contentType.kind !== 'one') {
     return { ok: false, reason: REFUSALS.charset };
@@ -140,14 +162,14 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
   const selectors = [
     read.plainText,
     decodedSubject,
-    ...['To', 'Cc', 'Bcc'].map(name => decodedHeaderOf({ message, name })),
+    ...['From', 'To', 'Cc', 'Bcc'].map(name => decodedHeaderOf({ message, name })),
   ]
     .map(countIdeographicSelectors)
     .reduce((sum, count) => sum + count, 0);
   if (selectors > MAX_IDEOGRAPHIC_SELECTORS) {
     return { ok: false, reason: REFUSALS.selectors };
   }
-  const hiddenInHeaders = ['Subject', 'To', 'Cc', 'Bcc'].some(name =>
+  const hiddenInHeaders = ['From', 'Subject', 'To', 'Cc', 'Bcc'].some(name =>
     hasHiddenCharacters(decodedHeaderOf({ message, name })),
   );
   if (hasHiddenCharacters(read.plainText) || hiddenInHeaders) {

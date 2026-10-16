@@ -122,6 +122,19 @@ describe('buildRawMessage', () => {
     ).toBe(subject);
   });
 
+  it('keeps only ids written in printable ASCII, so the reply headers it writes can be sent later', () => {
+    const message = parse(
+      buildRawMessage({
+        content: BASE,
+        reply: {
+          messageIdHeader: '<orig@mail.example.com>',
+          referencesHeader: '<ok@mail.example.com> <ä@mail.example.com>',
+        },
+      }),
+    );
+    expect(headerOf({ message, name: 'References' })).toBe('<ok@mail.example.com> <orig@mail.example.com>');
+  });
+
   it('refuses a line break in the subject, which would inject a header', () => {
     expect(() =>
       buildRawMessage({ content: { ...BASE, subject: 'Hi\r\nBcc: mallory@example.com' }, reply: undefined }),

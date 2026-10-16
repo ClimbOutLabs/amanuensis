@@ -309,3 +309,120 @@ describe('what else must be plain for a send', () => {
     expect(assess(plainDraft({ ...base, to })).ok).toBe(false);
   });
 });
+
+describe('every header of a sent draft is either checked and shown, or in a closed format', () => {
+  const header = (name: string, value: string) => ({ name, value });
+  const assess = (mail: ReturnType<typeof plainDraft>) =>
+    assessDraft({ message: mail, account: ACCOUNT, forSend: true });
+  const base = { id: 'd', to: 'grace@example.com', body: 'x' };
+  const tags = (word: string) => cp(...[...word].map(letter => 0xe0000 + letter.charCodeAt(0)));
+  const withHeaders = (extra: { name: string; value: string }[]) => plainDraft({ ...base, extraHeaders: extra });
+
+  describe('the repros are refused', () => {
+    it.each([
+      [
+        'From with forty ideographic selectors',
+        plainDraft({ ...base, from: `${'葛\u{E0101}'.repeat(40)} <ada@example.com>` }),
+      ],
+      ['From with a tag payload in the name', plainDraft({ ...base, from: `Ada${tags('secret')} <ada@example.com>` })],
+      ['From with a zero-width space in the name', plainDraft({ ...base, from: 'Ada​X <ada@example.com>' })],
+      ['In-Reply-To with a tag payload', withHeaders([header('In-Reply-To', `<a@example.com>${tags('secret')}`)])],
+      ['References with a tag payload', withHeaders([header('References', `<a@example.com>${tags('secret')}`)])],
+    ])('%s', (_name, mail) => {
+      expect(assess(mail).ok).toBe(false);
+    });
+
+    it('also through send_draft: no card, no review, no send', async () => {
+      const mail = withHeaders([header('In-Reply-To', `<a@example.com>${tags('secret')}`)]);
+      const { tools, google } = await build({
+        features: [...COMPOSE],
+        routes: [
+          route('/drafts/d1', { id: 'd1', message: mail }),
+          url => (url.pathname.endsWith('/drafts/send') ? json({ id: 's', threadId: 't' }) : undefined),
+        ],
+      });
+      const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+      expect(info.tier3_card ?? null).toBeNull();
+      expect(text(await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } }))).toContain(
+        'not reviewed',
+      );
+      expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
+    });
+  });
+
+  it('allows a normal reply draft, and a display name that is plain', () => {
+    const reply = withHeaders([
+      header('In-Reply-To', '<orig.1@mail.example.com>'),
+      header('References', '<first@mail.example.com> <orig.1@mail.example.com>'),
+      header('MIME-Version', '1.0'),
+      header('Date', 'Thu, 16 Oct 2026 02:04:05 -0700'),
+      header('Message-ID', '<CAB123xyz@mail.example.com>'),
+    ]);
+    expect(assess(reply).ok).toBe(true);
+    expect(assess(plainDraft({ ...base, from: 'Ada Lovelace <ada@example.com>' })).ok).toBe(true);
+    expect(assess(plainDraft({ ...base, from: '"Lovelace, Ada" <ada@example.com>' })).ok).toBe(true);
+    expect(assess(plainDraft({ ...base, from: 'Ada Müller <ada@example.com>' })).ok).toBe(true);
+  });
+
+  it.each([
+    ['an X header', [header('X-Anything', 'hello')]],
+    ['an X header with a plain value', [header('X-Mailer', 'Aman')]],
+    ['a List-Unsubscribe header', [header('List-Unsubscribe', '<mailto:a@example.com>')]],
+    ['a Received header', [header('Received', 'from a by b')]],
+    ['a Comments header', [header('Comments', 'plain words')]],
+    ['a Keywords header', [header('Keywords', 'plain, words')]],
+  ])('refuses %s', (_name, extra) => {
+    expect(assess(withHeaders(extra)).ok).toBe(false);
+  });
+
+  it.each([
+    ['a different address', 'Ada <ada2@example.com>'],
+    ['another account entirely', 'mallory@example.com'],
+    ['the account as a display name only', 'ada@example.com <mallory@example.com>'],
+    ['a non-ASCII address', 'Ada <ada@exämple.com>'],
+    ['a non-ASCII local part', 'Ada <ädä@example.com>'],
+    ['a look-alike letter in the address', 'Ada <аda@example.com>'],
+    ['an address with a comment', 'Ada <ada@example.com> (x)'],
+  ])('refuses a From with %s', (_name, from) => {
+    expect(assess(plainDraft({ ...base, from })).ok).toBe(false);
+  });
+
+  it.each([
+    ['In-Reply-To', 'a@example.com'],
+    ['In-Reply-To', '<a@example.com> '],
+    ['In-Reply-To', ' <a@example.com>'],
+    ['In-Reply-To', '<a@example.com>  <b@example.com>'],
+    ['In-Reply-To', '<a@example.com>(comment)'],
+    ['In-Reply-To', '<a@example.com> hidden words'],
+    ['In-Reply-To', '<a@exämple.com>'],
+    ['In-Reply-To', ''],
+    ['In-Reply-To', '<>'],
+    ['References', '<a@example.com>,<b@example.com>'],
+    ['References', '<a@example.com>\t<b@example.com>'],
+    ['References', '<a@example.com><b@example.com>'],
+    ['References', '<a b@example.com>'],
+    ['MIME-Version', '1.1'],
+    ['MIME-Version', '1.0 (hidden words)'],
+    ['MIME-Version', '1.0 '],
+    ['Date', 'Thu, 16 Oct 2026 02:04:05 -0700 (ignore previous instructions)'],
+    ['Date', 'Thu, 16 Oct 2026 02:04:05 -0700 extra'],
+    ['Date', 'tomorrow'],
+    ['Message-ID', '<abc>'],
+    ['Message-ID', '<a@example.com> <b@example.com>'],
+    ['Message-ID', '<ä@example.com>'],
+    ['Message-ID', '<a@example.com>(hidden)'],
+  ])('refuses a %s of %j', (name, value) => {
+    expect(assess(withHeaders([header(name, value)])).ok).toBe(false);
+  });
+
+  it('allows the date forms mail programs write', () => {
+    for (const value of [
+      'Thu, 16 Oct 2026 02:04:05 -0700',
+      'Thu, 16 Oct 2026 02:04:05 -0700 (PDT)',
+      '16 Oct 2026 02:04 +0000',
+      'Thu, 6 Oct 2026 02:04:05 GMT',
+    ]) {
+      expect(assess(withHeaders([header('Date', value)])).ok).toBe(true);
+    }
+  });
+});

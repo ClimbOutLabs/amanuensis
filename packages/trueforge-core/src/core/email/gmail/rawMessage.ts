@@ -51,7 +51,7 @@ function wrapBase64(text: string): string {
 
 /** An RFC 5322 message id list such as `<a@b> <c@d>`; anything else is dropped rather than copied into a header. */
 function messageIds(value: string): string[] {
-  return singleLine({ value, field: 'reply headers' }).match(/<[^<>\s]{1,300}>/g) ?? [];
+  return singleLine({ value, field: 'reply headers' }).match(/<[!-;=?-~]{1,300}>/g) ?? [];
 }
 
 /** `Re: <original subject>` without stacking prefixes. */
