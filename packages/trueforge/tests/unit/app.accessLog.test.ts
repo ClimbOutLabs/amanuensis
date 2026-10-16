@@ -155,7 +155,7 @@ describe('createAccessLogMiddleware', () => {
         duration_ms: expect.any(Number),
       }),
     );
-    const fields: unknown = debug.mock.calls[0]?.[1];
+    const fields: unknown = Reflect.get(debug.mock.calls[0] ?? [], 1);
     expect(fields).toEqual(expect.objectContaining({ duration_ms: expect.any(Number) }));
     expect(Reflect.get(Object(fields), 'duration_ms')).toBeGreaterThanOrEqual(0);
   });
