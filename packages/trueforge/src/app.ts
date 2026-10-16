@@ -342,13 +342,21 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     const issuerUrl = configuration.OIDC.OIDC_ISSUER_URL;
     const issuerPath = new URL(issuerUrl).pathname.replace(/\/$/, '');
     if (getAllowedOrigins().length > 0 && isProxiableIssuer(issuerUrl)) {
-      app.all(`${issuerPath}/*`, createLoginProxy({ issuerUrl, allowedOrigins: getAllowedOrigins() }));
+      app.all(
+        `${issuerPath}/*`,
+        createLoginProxy({
+          issuerUrl,
+          allowedOrigins: getAllowedOrigins(),
+          trustedProxies: configuration.TRUSTED_PROXY_ADDRESSES,
+        }),
+      );
     } else if (configuration.LOGIN_UPSTREAM_URL !== '') {
       app.all(
         `${issuerPath}/*`,
         createLoginProxy({
           issuerUrl,
           upstreamUrl: configuration.LOGIN_UPSTREAM_URL,
+          trustedProxies: configuration.TRUSTED_PROXY_ADDRESSES,
           allowedOrigins: [new URL(issuerUrl).origin],
         }),
       );

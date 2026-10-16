@@ -7,8 +7,13 @@ describe('login attempt limiter', () => {
   const limiter = (options = {}) => new LoginAttemptLimiter({ now: () => clock, ...options });
 
   /** One finished attempt from the address. */
-  function attempt(l: LoginAttemptLimiter, key: string, outcome: 'success' | 'failure' | 'abandon' = 'failure') {
-    const permit = l.begin(key);
+  function attempt(
+    l: LoginAttemptLimiter,
+    key: string,
+    outcome: 'success' | 'failure' | 'abandon' = 'failure',
+    account = '',
+  ) {
+    const permit = l.begin(key, account);
     if (permit.allowed) {
       permit.finish(outcome);
     }
@@ -147,5 +152,54 @@ describe('login attempt limiter', () => {
     expect(l.allowPageStart('b').allowed).toBe(true);
     clock += 60_000;
     expect(l.allowPageStart('a').allowed).toBe(true);
+  });
+
+  it('does not let a sign-in to one account start the guessing over for another', () => {
+    const l = limiter();
+    for (let round = 0; round < 3; round += 1) {
+      for (let i = 0; i < 4; i += 1) {
+        expect(attempt(l, 'a', 'failure', 'owner@example.com').allowed).toBe(true);
+      }
+      expect(attempt(l, 'a', 'success', 'member@example.com').allowed).toBe(true);
+      expect(attempt(l, 'a', 'failure', 'owner@example.com')).toMatchObject({ allowed: true });
+      expect(l.begin('a', 'owner@example.com').allowed).toBe(false);
+      clock += 31 * 60_000;
+    }
+  });
+
+  it('keeps the lockout history of guesses at one account when another account signs in', () => {
+    const l = limiter();
+    for (let i = 0; i < 5; i += 1) {
+      attempt(l, 'a', 'failure', 'owner@example.com');
+    }
+    clock += 31_000;
+    attempt(l, 'a', 'success', 'member@example.com');
+    for (let i = 0; i < 5; i += 1) {
+      attempt(l, 'a', 'failure', 'owner@example.com');
+    }
+    expect(l.begin('a', 'owner@example.com')).toEqual({ allowed: false, retryAfterSeconds: 60 });
+  });
+
+  it('clears an account the person signs in to after their own typing mistakes', () => {
+    const l = limiter();
+    for (let round = 0; round < 3; round += 1) {
+      for (let i = 0; i < 4; i += 1) {
+        expect(attempt(l, 'a', 'failure', 'Me@Example.com').allowed).toBe(true);
+      }
+      expect(attempt(l, 'a', 'success', 'me@example.com').allowed).toBe(true);
+    }
+  });
+
+  it('forgives the lockout history of an account that earned it once that account signs in', () => {
+    const l = limiter();
+    for (let i = 0; i < 5; i += 1) {
+      attempt(l, 'a', 'failure', 'me@example.com');
+    }
+    clock += 31_000;
+    attempt(l, 'a', 'success', 'me@example.com');
+    for (let i = 0; i < 5; i += 1) {
+      attempt(l, 'a', 'failure', 'me@example.com');
+    }
+    expect(l.begin('a', 'me@example.com')).toEqual({ allowed: false, retryAfterSeconds: 30 });
   });
 });

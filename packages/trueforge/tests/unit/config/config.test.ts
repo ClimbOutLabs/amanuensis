@@ -11,6 +11,7 @@ import {
   parseLoginUpstreamUrl,
   parsePublicBaseUrl,
   parseTokenFactoryMode,
+  parseTrustedProxyAddresses,
   TrueForgeAuthMode,
   type PublicUrlConfig,
   type ServerConfiguration,
@@ -483,6 +484,20 @@ describe('parseLoginUpstreamUrl', () => {
     'refuses %s',
     value => {
       expect(() => parseLoginUpstreamUrl(value)).toThrow(/LOGIN_UPSTREAM_URL/);
+    },
+  );
+});
+
+describe('parseTrustedProxyAddresses', () => {
+  it('is empty when unset and keeps IP addresses', () => {
+    expect(parseTrustedProxyAddresses(undefined)).toEqual([]);
+    expect(parseTrustedProxyAddresses(' 172.17.0.1, fd00::1 ')).toEqual(['172.17.0.1', 'fd00::1']);
+  });
+
+  it.each(['proxy.example.com', '172.17.0.0/16', '*'])(
+    'refuses %s, so a name or range cannot widen the trust',
+    value => {
+      expect(() => parseTrustedProxyAddresses(value)).toThrow(/TRUSTED_PROXY_ADDRESSES/);
     },
   );
 });

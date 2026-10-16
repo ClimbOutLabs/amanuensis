@@ -6,6 +6,7 @@
 //   node pki.mjs issue <ca-dir> <leaf-dir> <names...>      issues when missing, expiring or for other names
 //   node pki.mjs info <ca-dir> <leaf-dir>                   one line of JSON: when each expires and for which names
 
+import { Buffer } from 'node:buffer';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,9 +20,13 @@ export const RENEW_BEFORE_DAYS = 60;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function length(n) {
-  if (n < 0x80) return Buffer.from([n]);
+  if (n < 0x80) {
+    return Buffer.from([n]);
+  }
   const bytes = [];
-  for (let rest = n; rest > 0; rest >>>= 8) bytes.unshift(rest & 0xff);
+  for (let rest = n; rest > 0; rest >>>= 8) {
+    bytes.unshift(rest & 0xff);
+  }
   return Buffer.from([0x80 | bytes.length, ...bytes]);
 }
 
@@ -39,8 +44,12 @@ const explicit = (n, ...parts) => der(0xa0 + n, ...parts);
 
 function integer(buffer) {
   let bytes = Buffer.from(buffer);
-  while (bytes.length > 1 && bytes[0] === 0 && (bytes[1] & 0x80) === 0) bytes = bytes.subarray(1);
-  if (bytes[0] & 0x80) bytes = Buffer.concat([Buffer.from([0]), bytes]);
+  while (bytes.length > 1 && bytes[0] === 0 && (bytes[1] & 0x80) === 0) {
+    bytes = bytes.subarray(1);
+  }
+  if (bytes[0] & 0x80) {
+    bytes = Buffer.concat([Buffer.from([0]), bytes]);
+  }
   return der(0x02, bytes);
 }
 
@@ -49,7 +58,9 @@ function oid(text) {
   const bytes = [parts[0] * 40 + parts[1]];
   for (const part of parts.slice(2)) {
     const chunk = [part & 0x7f];
-    for (let rest = part >>> 7; rest > 0; rest >>>= 7) chunk.unshift((rest & 0x7f) | 0x80);
+    for (let rest = part >>> 7; rest > 0; rest >>>= 7) {
+      chunk.unshift((rest & 0x7f) | 0x80);
+    }
     bytes.push(...chunk);
   }
   return der(0x06, Buffer.from(bytes));
@@ -67,7 +78,9 @@ const ECDSA_SHA256 = seq(oid('1.2.840.10045.4.3.2'));
 const extension = (id, value, critical = false) => seq(oid(id), ...(critical ? [bool(true)] : []), octets(value));
 
 function generalName(text) {
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(text)) return der(0x87, Buffer.from(text.split('.').map(Number)));
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(text)) {
+    return der(0x87, Buffer.from(text.split('.').map(Number)));
+  }
   return der(0x82, Buffer.from(text, 'ascii'));
 }
 
@@ -113,7 +126,9 @@ export function ensureCa({ caDir, now = new Date() }) {
   if (fs.existsSync(certFile) && fs.existsSync(keyFile)) {
     const current = new crypto.X509Certificate(fs.readFileSync(certFile)).validToDate;
     // An authority about to end is replaced; devices then trust the new one the way they did the first.
-    if (current.getTime() - now.getTime() > ROOT_REPLACE_DAYS * DAY_MS) return { created: false, notAfter: current };
+    if (current.getTime() - now.getTime() > ROOT_REPLACE_DAYS * DAY_MS) {
+      return { created: false, notAfter: current };
+    }
   }
   const { publicKey, privateKey } = makeKey();
   const notBefore = new Date(now.getTime() - DAY_MS);
@@ -148,7 +163,9 @@ function namesOf(cert) {
 /** True when the leaf there is still good for these names, under this root, for long enough. */
 export function leafIsCurrent({ caDir, leafDir, names, now = new Date() }) {
   const leafFile = path.join(leafDir, 'leaf.crt');
-  if (!fs.existsSync(leafFile) || !fs.existsSync(path.join(leafDir, 'leaf.key'))) return false;
+  if (!fs.existsSync(leafFile) || !fs.existsSync(path.join(leafDir, 'leaf.key'))) {
+    return false;
+  }
   const leaf = new crypto.X509Certificate(fs.readFileSync(leafFile));
   const root = new crypto.X509Certificate(fs.readFileSync(path.join(caDir, 'root.crt')));
   return (
@@ -160,8 +177,12 @@ export function leafIsCurrent({ caDir, leafDir, names, now = new Date() }) {
 
 /** Issues the leaf for the names unless the current one already serves them; the key never leaves leafDir. */
 export function issueLeaf({ caDir, leafDir, names, now = new Date() }) {
-  if (names.length === 0) throw new Error('A certificate needs at least one name or address');
-  if (leafIsCurrent({ caDir, leafDir, names, now })) return { issued: false };
+  if (names.length === 0) {
+    throw new Error('A certificate needs at least one name or address');
+  }
+  if (leafIsCurrent({ caDir, leafDir, names, now })) {
+    return { issued: false };
+  }
   const rootKey = crypto.createPrivateKey(fs.readFileSync(path.join(caDir, 'root.key')));
   const root = new crypto.X509Certificate(fs.readFileSync(path.join(caDir, 'root.crt')));
   const { publicKey, privateKey } = makeKey();

@@ -34,21 +34,29 @@ export function isProxiableIssuer(issuerUrl: string): boolean {
 }
 
 /**
- * The address a request came from. Behind a reverse proxy on this computer every connection is a loopback one, so the
- * address that proxy recorded last is taken instead; a header from any other connection is never read.
+ * The address a request came from. Behind a reverse proxy on this computer the connection is a loopback one, or one
+ * from the address of the proxy's network (a published port reaches the app from the Docker bridge); then the address
+ * that proxy recorded last is taken instead. A header from any other connection is never read.
  */
-function defaultClientKey(c: Context): string {
-  let remote = 'unknown';
-  try {
-    remote = getConnInfo(c).remote.address ?? 'unknown';
-  } catch {
+function clientKeyFor(trustedProxies: readonly string[]): (c: Context) => string {
+  return c => {
+    let remote = 'unknown';
+    try {
+      remote = (getConnInfo(c).remote.address ?? 'unknown').replace(/^::ffff:/, '');
+    } catch {
+      return remote;
+    }
+    const forwarded = c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim();
+    if ((isLoopbackHost(remote) || trustedProxies.includes(remote)) && forwarded !== undefined && forwarded !== '') {
+      return forwarded;
+    }
     return remote;
-  }
-  const forwarded = c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim();
-  if (isLoopbackHost(remote) && forwarded !== undefined && forwarded !== '') {
-    return forwarded;
-  }
-  return remote;
+  };
+}
+
+/** The account a password post is for, as the sign-in form names it. */
+function accountOf(body: ArrayBuffer): string {
+  return new URLSearchParams(new TextDecoder().decode(body)).get('login') ?? '';
 }
 
 /**
@@ -61,13 +69,16 @@ export function createLoginProxy({
   upstreamUrl = issuerUrl,
   allowedOrigins,
   limiter = new LoginAttemptLimiter(),
-  clientKey = defaultClientKey,
+  trustedProxies = [],
+  clientKey = clientKeyFor(trustedProxies),
 }: {
   issuerUrl: string;
   /** Where the sign-in service is reached when that differs from the address browsers know it by. */
   upstreamUrl?: string;
   allowedOrigins: readonly string[];
   limiter?: LoginAttemptLimiter;
+  /** Addresses of a reverse proxy whose X-Forwarded-For is believed, besides this computer's own. */
+  trustedProxies?: readonly string[];
   clientKey?: (c: Context) => string;
 }): Handler {
   if (!isProxiableIssuer(upstreamUrl)) {
@@ -115,7 +126,15 @@ export function createLoginProxy({
         return tooMany(page.retryAfterSeconds);
       }
     }
-    const permit = guessing ? limiter.begin(key) : undefined;
+    let body: ArrayBuffer | undefined;
+    if (METHODS_WITH_BODY.has(method)) {
+      try {
+        body = await c.req.arrayBuffer();
+      } catch {
+        return c.text('The request could not be read.', 400);
+      }
+    }
+    const permit = guessing && body !== undefined ? limiter.begin(key, accountOf(body)) : undefined;
     if (permit !== undefined && !permit.allowed) {
       return tooMany(permit.retryAfterSeconds);
     }
@@ -131,7 +150,7 @@ export function createLoginProxy({
       response = await fetch(upstream, {
         method,
         headers,
-        ...(METHODS_WITH_BODY.has(method) ? { body: await c.req.arrayBuffer() } : {}),
+        ...(body === undefined ? {} : { body }),
         redirect: 'manual',
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       });

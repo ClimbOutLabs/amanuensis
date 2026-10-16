@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -1523,6 +1524,47 @@ describe('the folder Aman runs its installer from', () => {
     assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
   });
 
+  it('is not used when its installer holds a link, which could point at a file anyone can change', () => {
+    const repo = checkoutWith(0o755);
+    const elsewhere = path.join(world.root, 'elsewhere.sh');
+    writeFileSync(elsewhere, '#!/bin/sh\necho pwned\n', { mode: 0o666 });
+    rmSync(path.join(repo, 'installer', 'install.sh'));
+    symlinkSync(elsewhere, path.join(repo, 'installer', 'install.sh'));
+    const result = world.shim(['backup']);
+    assert.equal(result.code, 1);
+    assert.match(
+      result.stderr.replace(/\s+/g, ' '),
+      /contains links, so Aman will not run it\. Copy the folder to one of yours/,
+    );
+    const shown = world.shim(['doctor', 'checkout']);
+    assert.equal(shown.code, 1);
+    assert.match(shown.stdout.replace(/\s+/g, ' '), /contains links/);
+    assert.equal(
+      world.shim(['doctor', 'checkout', '--fix', '--yes']).code,
+      1,
+      'a link is never made right by changing modes',
+    );
+  });
+
+  it('is not used when the folder that holds it can be changed by other users, until --fix makes it private', () => {
+    checkoutWith(0o755);
+    chmodSync(world.root, 0o775);
+    const refused = world.shim(['backup']);
+    assert.equal(refused.code, 1);
+    assert.match(
+      refused.stderr.replace(/\s+/g, ' '),
+      /folder that holds the folder Aman was installed from can be changed by other users/,
+    );
+    assert.match(
+      world.shim(['doctor', 'checkout']).stdout.replace(/\s+/g, ' '),
+      /Next: Run aman doctor checkout --fix/,
+    );
+    const fixed = world.shim(['doctor', 'checkout', '--fix', '--yes']);
+    assert.equal(fixed.code, 0, fixed.stdout + fixed.stderr);
+    assert.equal(statSync(world.root).mode & 0o022, 0);
+    assert.equal(world.shim(['backup']).code, 0);
+  });
+
   it('says nothing about a folder that is private to the user', () => {
     checkoutWith(0o755);
     const result = world.shim(['doctor', 'checkout']);
@@ -1546,15 +1588,30 @@ exit ${rc}
     );
   }
 
-  it('puts a missing file back through the installer and carries on', () => {
+  it('puts a missing helper file back through the installer and carries on', () => {
+    make();
+    const repo = world.sandbox();
+    restoringInstaller(repo);
+    installCommand({ libs: true });
+    rmSync(path.join(world.home, 'lib', 'network.sh'));
+    const result = runInstalled(['backup']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} command`));
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
+  });
+
+  it('runs nothing by itself when the file with the safety checks is the one that is missing, and prints the command', () => {
     make();
     const repo = world.sandbox();
     restoringInstaller(repo);
     installCommand({ libs: false });
     const result = runInstalled(['backup']);
-    assert.equal(result.status, 0, result.stderr);
-    assert.ok(world.calls().includes(`install.sh --home ${world.home} command`));
-    assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
+    assert.equal(result.status, 1);
+    assert.equal(
+      result.stderr.trim(),
+      `Aman is missing one of its own files. Run: bash ${path.join(repo, 'installer', 'install.sh')} --home ${world.home} command`,
+    );
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
   });
 
   it('puts back one missing file among the others', () => {
@@ -1572,7 +1629,8 @@ exit ${rc}
     make();
     const repo = world.sandbox();
     restoringInstaller(repo, { rc: 1 });
-    installCommand({ libs: false });
+    installCommand({ libs: true });
+    rmSync(path.join(world.home, 'lib', 'schedule.sh'));
     const result = runInstalled(['backup']);
     assert.equal(result.status, 1);
     assert.equal(

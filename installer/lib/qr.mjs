@@ -1,6 +1,8 @@
 // QR code for a short link: byte mode, error correction level M, versions 1 to 10 (up to 213 characters).
 // Run as `node qr.mjs <text>`: prints the code as two rows of modules per line for a terminal.
 
+import { TextEncoder } from 'node:util';
+
 const SIZE_LIMIT_VERSION = 10;
 const ECC_PER_BLOCK = [10, 16, 26, 18, 24, 16, 18, 22, 22, 26];
 const BLOCKS = [1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
@@ -10,7 +12,9 @@ function rawModules(version) {
   if (version >= 2) {
     const aligns = Math.floor(version / 7) + 2;
     result -= (25 * aligns - 10) * aligns - 55;
-    if (version >= 7) result -= 36;
+    if (version >= 7) {
+      result -= 36;
+    }
   }
   return result;
 }
@@ -20,12 +24,16 @@ function dataCodewords(version) {
 }
 
 function alignmentPositions(version) {
-  if (version === 1) return [];
+  if (version === 1) {
+    return [];
+  }
   const count = Math.floor(version / 7) + 2;
   const size = version * 4 + 17;
   const step = Math.ceil((version * 4 + 4) / (count * 2 - 2)) * 2;
   const positions = [6];
-  for (let pos = size - 7; positions.length < count; pos -= step) positions.splice(1, 0, pos);
+  for (let pos = size - 7; positions.length < count; pos -= step) {
+    positions.splice(1, 0, pos);
+  }
   return positions;
 }
 
@@ -37,9 +45,13 @@ const LOG = new Array(256);
     EXP[i] = x;
     LOG[x] = i;
     x <<= 1;
-    if (x & 0x100) x ^= 0x11d;
+    if (x & 0x100) {
+      x ^= 0x11d;
+    }
   }
-  for (let i = 255; i < 512; i += 1) EXP[i] = EXP[i - 255];
+  for (let i = 255; i < 512; i += 1) {
+    EXP[i] = EXP[i - 255];
+  }
 })();
 
 function multiply(a, b) {
@@ -60,7 +72,9 @@ function reedSolomon(data, degree) {
   for (const byte of data) {
     const factor = byte ^ remainder.shift();
     remainder.push(0);
-    for (let i = 0; i < degree; i += 1) remainder[i] ^= multiply(generator[i + 1], factor);
+    for (let i = 0; i < degree; i += 1) {
+      remainder[i] ^= multiply(generator[i + 1], factor);
+    }
   }
   return remainder;
 }
@@ -68,17 +82,27 @@ function reedSolomon(data, degree) {
 function dataBytes(bytes, version) {
   const bits = [];
   const push = (value, length) => {
-    for (let i = length - 1; i >= 0; i -= 1) bits.push((value >>> i) & 1);
+    for (let i = length - 1; i >= 0; i -= 1) {
+      bits.push((value >>> i) & 1);
+    }
   };
   push(0b0100, 4);
   push(bytes.length, version <= 9 ? 8 : 16);
-  for (const byte of bytes) push(byte, 8);
+  for (const byte of bytes) {
+    push(byte, 8);
+  }
   const capacity = dataCodewords(version) * 8;
   push(0, Math.min(4, capacity - bits.length));
-  while (bits.length % 8 !== 0) bits.push(0);
+  while (bits.length % 8 !== 0) {
+    bits.push(0);
+  }
   const out = [];
-  for (let i = 0; i < bits.length; i += 8) out.push(parseInt(bits.slice(i, i + 8).join(''), 2));
-  for (let pad = 0xec; out.length < dataCodewords(version); pad ^= 0xec ^ 0x11) out.push(pad);
+  for (let i = 0; i < bits.length; i += 8) {
+    out.push(parseInt(bits.slice(i, i + 8).join(''), 2));
+  }
+  for (let pad = 0xec; out.length < dataCodewords(version); pad ^= 0xec ^ 0x11) {
+    out.push(pad);
+  }
   return out;
 }
 
@@ -99,10 +123,14 @@ function interleave(data, version) {
   const out = [];
   for (let i = 0; i < shortLength - eccLength + 1; i += 1) {
     split.forEach(({ part }, j) => {
-      if (i !== shortLength - eccLength || j >= short) out.push(part[i]);
+      if (i !== shortLength - eccLength || j >= short) {
+        out.push(part[i]);
+      }
     });
   }
-  for (let i = 0; i < eccLength; i += 1) split.forEach(({ ecc }) => out.push(ecc[i]));
+  for (let i = 0; i < eccLength; i += 1) {
+    split.forEach(({ ecc }) => out.push(ecc[i]));
+  }
   return out;
 }
 
@@ -115,7 +143,9 @@ function makeGrid(size) {
 }
 
 function setFunction(grid, x, y, dark) {
-  if (x < 0 || y < 0 || x >= grid.size || y >= grid.size) return;
+  if (x < 0 || y < 0 || x >= grid.size || y >= grid.size) {
+    return;
+  }
   grid.dark[y][x] = dark;
   grid.fixed[y][x] = true;
 }
@@ -123,17 +153,27 @@ function setFunction(grid, x, y, dark) {
 function drawFormat(grid, mask) {
   const data = (0 << 3) | mask; // level M is 0
   let rem = data;
-  for (let i = 0; i < 10; i += 1) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+  for (let i = 0; i < 10; i += 1) {
+    rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+  }
   const bits = ((data << 10) | rem) ^ 0x5412;
   const bit = i => ((bits >>> i) & 1) !== 0;
   const { size } = grid;
-  for (let i = 0; i <= 5; i += 1) setFunction(grid, 8, i, bit(i));
+  for (let i = 0; i <= 5; i += 1) {
+    setFunction(grid, 8, i, bit(i));
+  }
   setFunction(grid, 8, 7, bit(6));
   setFunction(grid, 8, 8, bit(7));
   setFunction(grid, 7, 8, bit(8));
-  for (let i = 9; i < 15; i += 1) setFunction(grid, 14 - i, 8, bit(i));
-  for (let i = 0; i < 8; i += 1) setFunction(grid, size - 1 - i, 8, bit(i));
-  for (let i = 8; i < 15; i += 1) setFunction(grid, 8, size - 15 + i, bit(i));
+  for (let i = 9; i < 15; i += 1) {
+    setFunction(grid, 14 - i, 8, bit(i));
+  }
+  for (let i = 0; i < 8; i += 1) {
+    setFunction(grid, size - 1 - i, 8, bit(i));
+  }
+  for (let i = 8; i < 15; i += 1) {
+    setFunction(grid, 8, size - 15 + i, bit(i));
+  }
   setFunction(grid, 8, size - 8, true);
 }
 
@@ -158,18 +198,22 @@ function drawFunctionPatterns(grid, version) {
   const positions = alignmentPositions(version);
   positions.forEach((cx, i) => {
     positions.forEach((cy, j) => {
-      if ((i === 0 && j === 0) || (i === 0 && j === positions.length - 1) || (i === positions.length - 1 && j === 0))
+      if ((i === 0 && j === 0) || (i === 0 && j === positions.length - 1) || (i === positions.length - 1 && j === 0)) {
         return;
+      }
       for (let dy = -2; dy <= 2; dy += 1) {
-        for (let dx = -2; dx <= 2; dx += 1)
+        for (let dx = -2; dx <= 2; dx += 1) {
           setFunction(grid, cx + dx, cy + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+        }
       }
     });
   });
   drawFormat(grid, 0);
   if (version >= 7) {
     let rem = version;
-    for (let i = 0; i < 12; i += 1) rem = (rem << 1) ^ ((rem >>> 11) * 0x1f25);
+    for (let i = 0; i < 12; i += 1) {
+      rem = (rem << 1) ^ ((rem >>> 11) * 0x1f25);
+    }
     const bits = (version << 12) | rem;
     for (let i = 0; i < 18; i += 1) {
       const dark = ((bits >>> i) & 1) !== 0;
@@ -185,7 +229,9 @@ function drawCodewords(grid, codewords) {
   const { size } = grid;
   let i = 0;
   for (let right = size - 1; right >= 1; right -= 2) {
-    if (right === 6) right = 5;
+    if (right === 6) {
+      right = 5;
+    }
     for (let vertical = 0; vertical < size; vertical += 1) {
       for (let j = 0; j < 2; j += 1) {
         const x = right - j;
@@ -214,7 +260,9 @@ const MASKS = [
 function applyMask(grid, mask) {
   for (let y = 0; y < grid.size; y += 1) {
     for (let x = 0; x < grid.size; x += 1) {
-      if (!grid.fixed[y][x] && MASKS[mask](x, y)) grid.dark[y][x] = !grid.dark[y][x];
+      if (!grid.fixed[y][x] && MASKS[mask](x, y)) {
+        grid.dark[y][x] = !grid.dark[y][x];
+      }
     }
   }
 }
@@ -229,23 +277,29 @@ function penalty(grid) {
       for (let b = 1; b < size; b += 1) {
         const same = horizontal ? dark[a][b] === dark[a][b - 1] : dark[b][a] === dark[b - 1][a];
         run = same ? run + 1 : 1;
-        if (run === 5) score += 3;
-        else if (run > 5) score += 1;
+        if (run === 5) {
+          score += 3;
+        } else if (run > 5) {
+          score += 1;
+        }
       }
     }
   }
   let darkCount = 0;
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
-      if (dark[y][x]) darkCount += 1;
+      if (dark[y][x]) {
+        darkCount += 1;
+      }
       if (
         x + 1 < size &&
         y + 1 < size &&
         dark[y][x] === dark[y][x + 1] &&
         dark[y][x] === dark[y + 1][x] &&
         dark[y][x] === dark[y + 1][x + 1]
-      )
+      ) {
         score += 3;
+      }
     }
   }
   const total = size * size;
@@ -257,9 +311,12 @@ function penalty(grid) {
 export function encode(text) {
   const bytes = [...new TextEncoder().encode(text)];
   let version = 1;
-  while (version <= SIZE_LIMIT_VERSION && (version <= 9 ? 12 : 20) + bytes.length * 8 > dataCodewords(version) * 8)
+  while (version <= SIZE_LIMIT_VERSION && (version <= 9 ? 12 : 20) + bytes.length * 8 > dataCodewords(version) * 8) {
     version += 1;
-  if (version > SIZE_LIMIT_VERSION) throw new Error('The text is too long for a QR code here');
+  }
+  if (version > SIZE_LIMIT_VERSION) {
+    throw new Error('The text is too long for a QR code here');
+  }
   const codewords = interleave(dataBytes(bytes, version), version);
   const size = version * 4 + 17;
   let best;

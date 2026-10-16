@@ -97,7 +97,14 @@ case "$cmd" in
     shift
     touch "$S/networks" "$S/network_links"
     case "$sub" in
-      inspect) grep -Fxq "$1" "$S/networks"; exit $? ;;
+      inspect)
+        # With a format: the gateway of an instance's own network.
+        case "$*" in
+          *--format*) case "$1" in aman-*_default) echo "172.30.0.1 "; exit 0 ;; esac ;;
+        esac
+        grep -Fxq "$1" "$S/networks"
+        exit $?
+        ;;
       connect)
         # connect [--alias NAME] NETWORK CONTAINER
         [ "$1" = --alias ] && shift 2

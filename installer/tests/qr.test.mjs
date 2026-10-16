@@ -4,6 +4,8 @@ import { describe, it } from 'node:test';
 
 import { encode, render } from '../lib/qr.mjs';
 
+const ESC = String.fromCharCode(27);
+const ANSI = new RegExp(`${ESC}\\[[0-9;]*m`, 'g');
 const LINK = 'http://192.168.1.20:8791/trust';
 
 function finderAt(modules, x0, y0) {
@@ -45,7 +47,7 @@ describe('the QR code for a short link', () => {
     assert.equal(lines.length, Math.ceil((29 + 4) / 2));
     for (const line of lines) {
       assert.ok(line.startsWith('\u001b[30;107m') && line.endsWith('\u001b[0m'));
-      assert.equal([...line.replace(/\u001b\[[0-9;]*m/g, '')].length, 33);
+      assert.equal([...line.replace(ANSI, '')].length, 33);
     }
   });
 });

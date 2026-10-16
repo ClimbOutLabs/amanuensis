@@ -120,24 +120,6 @@ checkout_dir() {
   printf '%s' "$repo"
 }
 
-# What makes the installer in that folder unsafe to run for the person: another user can change it, or it belongs to
-# another user. Prints "writable" or "owner" and returns 0 for a problem; returns 1 when it is fine.
-checkout_problem() { # dir
-  local dir=$1 me
-  me=$(id -u)
-  if [ -n "$(find "$dir" "$dir/installer" -maxdepth 0 ! -type l \( -perm -g+w -o -perm -o+w \) -print 2>/dev/null)" ] ||
-    [ -n "$(find "$dir/installer" ! -type l \( -perm -g+w -o -perm -o+w \) -print -quit 2>/dev/null)" ]; then
-    printf writable
-    return 0
-  fi
-  if [ -n "$(find "$dir" "$dir/installer" -maxdepth 0 ! -uid "$me" ! -uid 0 -print 2>/dev/null)" ] ||
-    [ -n "$(find "$dir/installer" ! -uid "$me" ! -uid 0 -print -quit 2>/dev/null)" ]; then
-    printf owner
-    return 0
-  fi
-  return 1
-}
-
 # The installer of the folder Aman was installed from; it is what fixes the machine. A folder other users can change
 # is never run: the installer runs as the person, and often as root.
 checkout_installer() {
@@ -153,11 +135,7 @@ installer_failure() { # prints "sentence|fix"
   if ! repo=$(checkout_dir); then
     printf 'Aman cannot find the folder it was installed from.|Run install.sh again from that folder.'
   elif problem=$(checkout_problem "$repo"); then
-    if [ "$problem" = writable ]; then
-      printf 'The folder Aman was installed from can be changed by other users, so Aman will not run its installer from it.|Run aman doctor checkout --fix'
-    else
-      printf 'The folder Aman was installed from belongs to another user, so Aman will not run its installer from it.|Copy it to a folder of yours and run install.sh from there.'
-    fi
+    checkout_problem_words "$problem"
   fi
 }
 
@@ -169,18 +147,21 @@ fail_no_installer() {
 
 # Loads a helper file; one that went missing is put back by the installer once, and if that cannot be done the exact
 # command that does it is printed.
+# The checks that keep the installer's folder safe to run live in shared.sh, so when that file is the one missing nothing
+# is run by itself: the command that puts it back is printed for the person to run.
 require_lib() { # name
-  local installer failure
+  local repo installer problem words
   load_lib "$1" && return 0
-  if installer=$(checkout_installer) && bash "$installer" --home "$AMAN_HOME" command >/dev/null 2>&1 && load_lib "$1"; then
+  if [ "$1" != shared ] && installer=$(checkout_installer) && bash "$installer" --home "$AMAN_HOME" command >/dev/null 2>&1 && load_lib "$1"; then
     return 0
   fi
-  if [ -n "${installer:-}" ]; then
-    printf 'Aman is missing one of its own files. Run: bash %s --home %s command\n' "$installer" "$AMAN_HOME" >&2
-  elif failure=$(installer_failure) && [ "${failure#*|}" != "Run install.sh again from that folder." ]; then
-    printf 'Aman is missing one of its own files. %s\n' "${failure%%|*}" >&2
-  else
+  if ! repo=$(checkout_dir); then
     printf 'Aman is missing one of its own files and cannot find the folder it was installed from. Run the installer there: installer/install.sh command\n' >&2
+  elif [ "$1" != shared ] && problem=$(checkout_problem "$repo"); then
+    words=$(checkout_problem_words "$problem")
+    printf 'Aman is missing one of its own files. %s\n' "${words%%|*}" >&2
+  else
+    printf 'Aman is missing one of its own files. Run: bash %s/installer/install.sh --home %s command\n' "$repo" "$AMAN_HOME" >&2
   fi
   exit 1
 }
@@ -629,13 +610,11 @@ check_backup() {
 
 # Nothing is recorded until Aman has been installed from a folder.
 check_checkout() {
-  local repo problem
+  local repo problem words
   repo=$(checkout_dir) || return 0
   if problem=$(checkout_problem "$repo"); then
-    case "$problem" in
-      writable) record machine checkout fail "The folder Aman was installed from can be changed by other users, so Aman will not run its installer from it." "Run aman doctor checkout --fix" ;;
-      *) record machine checkout fail "The folder Aman was installed from belongs to another user, so Aman will not run its installer from it." "Copy it to a folder of yours and run install.sh from there." ;;
-    esac
+    words=$(checkout_problem_words "$problem")
+    record machine checkout fail "${words%%|*}" "${words#*|}"
   else
     record machine checkout ok "The folder Aman was installed from can only be changed by you." ""
   fi
@@ -712,8 +691,8 @@ check_tls() {
 fix_checkout() {
   local repo
   repo=$(checkout_dir) || return 0
-  if [ "$(checkout_problem "$repo")" = owner ]; then return 1; fi
-  chmod go-w "$repo" && chmod -R go-w "$repo/installer"
+  tighten_checkout "$repo" || true
+  ! checkout_problem "$repo" >/dev/null
 }
 
 # ---------------------------------------------------------------- instance checks

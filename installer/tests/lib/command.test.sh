@@ -88,6 +88,21 @@ test_upgrade_restores_the_command_and_its_files() {
   sandbox_drop
 }
 
+test_a_group_writable_checkout_is_made_private_once() {
+  t_begin "a checkout made with a permissive umask is made private to its owner at install, with one plain line, and left alone after"
+  sandbox_new
+  mkdir -p "$REPO/installer"
+  chmod -R g+w "$REPO"
+  chmod g+w "$SB"
+  install_machine
+  assert_flat_contains "$OUT" "private to you, so only you can change what the installer runs"
+  assert_eq "$(find "$REPO" "$REPO/installer" "$SB" -maxdepth 0 -perm -g+w | wc -l | tr -d ' ')" 0 "the folder, its installer and the folder holding it"
+  assert_eq "$(find "$REPO/installer" -perm -g+w | wc -l | tr -d ' ')" 0
+  run_install --yes
+  assert_not_contains "$OUT" "private to you"
+  sandbox_drop
+}
+
 test_the_command_subcommand_puts_the_files_back() {
   t_begin "install.sh command restores a missing shim and helper files and touches nothing else"
   sandbox_new
@@ -161,6 +176,7 @@ test_an_unsafe_folder_never_reaches_a_profile
 test_zsh_gets_its_own_profile
 test_the_plan_names_the_command_row
 test_upgrade_restores_the_command_and_its_files
+test_a_group_writable_checkout_is_made_private_once
 test_the_command_subcommand_puts_the_files_back
 test_a_rerun_with_nothing_to_do_still_checks_run_code
 test_a_busy_port_moves_the_instance

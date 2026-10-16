@@ -8,6 +8,8 @@ export interface LoginAttemptLimiterOptions {
   windowMs?: number;
   baseLockoutMs?: number;
   maxLockoutMs?: number;
+  /** Most account names one address is tracked for; the rest share one entry. */
+  maxAccountsPerKey?: number;
   /** Sign-in page requests one address may make per minute. */
   maxPageStartsPerMinute?: number;
   /** Most addresses remembered at once; the oldest are forgotten first. */
@@ -16,7 +18,11 @@ export interface LoginAttemptLimiterOptions {
 }
 
 interface KeyState {
+  /** Failures of every account tried from this address together; each account's own count is in `accounts`. */
   failures: number;
+  accounts: Map<string, number>;
+  /** Accounts whose failures earned the lockouts so far; the history is forgotten when all of them have signed in. */
+  culprits: Set<string>;
   inflight: number;
   windowStart: number;
   lockedUntil: number;
@@ -45,6 +51,7 @@ export class LoginAttemptLimiter {
   readonly #baseLockoutMs: number;
   readonly #maxLockoutMs: number;
   readonly #maxPageStarts: number;
+  readonly #maxAccountsPerKey: number;
   readonly #maxKeys: number;
   readonly #now: () => number;
   readonly #keys = new Map<string, KeyState>();
@@ -61,12 +68,17 @@ export class LoginAttemptLimiter {
     this.#baseLockoutMs = options.baseLockoutMs ?? 30_000;
     this.#maxLockoutMs = options.maxLockoutMs ?? 10 * 60_000;
     this.#maxPageStarts = options.maxPageStartsPerMinute ?? 30;
+    this.#maxAccountsPerKey = options.maxAccountsPerKey ?? 20;
     this.#maxKeys = options.maxKeys ?? 10_000;
     this.#now = options.now ?? Date.now;
   }
 
-  /** Takes a slot for one password attempt, or says how long to wait. The slot is given back by `finish`. */
-  begin(key: string): Permit {
+  /**
+   * Takes a slot for one password attempt on an account, or says how long to wait. The slot is given back by `finish`.
+   * A sign-in clears only that account's failures from this address: guesses at another account stay counted, so a
+   * login of one's own cannot be used to start over.
+   */
+  begin(key: string, account = ''): Permit {
     const now = this.#now();
     const state = this.#state(key, now);
     const known = state.lastSuccess > 0 && now - state.lastSuccess < DAY_MS;
@@ -93,12 +105,16 @@ export class LoginAttemptLimiter {
         finished = true;
         state.inflight -= 1;
         this.#globalInflight -= 1;
+        const name = this.#accountName(state, account);
         if (outcome === 'failure') {
-          this.#recordFailure(state);
+          this.#recordFailure(state, name);
         } else if (outcome === 'success') {
-          state.failures = 0;
-          state.lockouts = 0;
-          state.lockedUntil = 0;
+          state.failures = Math.max(0, state.failures - (state.accounts.get(name) ?? 0));
+          state.accounts.delete(name);
+          state.culprits.delete(name);
+          if (state.failures === 0 && state.culprits.size === 0) {
+            state.lockouts = 0;
+          }
           state.lastSuccess = this.#now();
         }
       },
@@ -126,6 +142,8 @@ export class LoginAttemptLimiter {
   #state(key: string, now: number): KeyState {
     const state = this.#keys.get(key) ?? {
       failures: 0,
+      accounts: new Map<string, number>(),
+      culprits: new Set<string>(),
       inflight: 0,
       windowStart: now,
       lockedUntil: 0,
@@ -137,6 +155,11 @@ export class LoginAttemptLimiter {
     this.#keys.set(key, state);
     this.#forgetOldest(this.#keys, entry => entry.inflight === 0);
     return state;
+  }
+
+  #accountName(state: KeyState, account: string): string {
+    const name = account.trim().toLowerCase().slice(0, 200);
+    return state.accounts.has(name) || state.accounts.size < this.#maxAccountsPerKey ? name : '\u0000other';
   }
 
   #forgetOldest<T>(map: Map<string, T>, removable: (value: T) => boolean): void {
@@ -154,11 +177,13 @@ export class LoginAttemptLimiter {
   #expireWindows(state: KeyState, now: number): void {
     if (now - state.windowStart > this.#windowMs) {
       state.failures = 0;
+      state.accounts.clear();
       state.windowStart = now;
     }
     // A day without a failure forgets the lockout history, so one slip long ago does not lengthen a later lockout.
     if (state.lastFailure > 0 && now - state.lastFailure > DAY_MS) {
       state.lockouts = 0;
+      state.culprits.clear();
     }
     if (now - this.#globalWindowStart > this.#windowMs) {
       this.#globalWindowStart = now;
@@ -166,7 +191,7 @@ export class LoginAttemptLimiter {
     }
   }
 
-  #recordFailure(state: KeyState): void {
+  #recordFailure(state: KeyState, account: string): void {
     const now = this.#now();
     this.#expireWindows(state, now);
     this.#globalFailures += 1;
@@ -176,10 +201,15 @@ export class LoginAttemptLimiter {
     }
     state.lastFailure = now;
     state.failures += 1;
+    state.accounts.set(account, (state.accounts.get(account) ?? 0) + 1);
     if (state.failures >= this.#maxFailuresPerKey) {
       state.lockouts += 1;
       state.lockedUntil = now + Math.min(this.#baseLockoutMs * 2 ** (state.lockouts - 1), this.#maxLockoutMs);
+      for (const account of state.accounts.keys()) {
+        state.culprits.add(account);
+      }
       state.failures = 0;
+      state.accounts.clear();
     }
   }
 }

@@ -176,6 +176,22 @@ instance_up() {
   # From now on the instance may hold data worth backing up; an instance that never got here holds none.
   if reg_exists "$name"; then reg_set "$name" healthy 1; fi
   step_ok "Instance $name is running and healthy"
+  proxy_trust_sync "$name"
+}
+
+# A reverse proxy on this computer reaches an instance with a public address through a published port, so the app sees
+# its network's gateway as the peer. That address is the one whose X-Forwarded-For the app believes about visitors; the
+# app restarts once when it is learned or changes.
+proxy_trust_sync() { # name
+  local name=$1 gateway env
+  reg_exists "$name" || return 0
+  [ "$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" = 1 ] || return 0
+  env="$(instance_dir "$name")/.env"
+  gateway=$(D network inspect "aman-${name}_default" --format '{{range .IPAM.Config}}{{.Gateway}} {{end}}' 2>/dev/null | awk '{ print $1 }')
+  valid_ipv4 "$gateway" || return 0
+  [ "$(env_get "$env" TRUSTED_PROXY_ADDRESSES)" != "$gateway" ] || return 0
+  env_managed_set "$env" TRUSTED_PROXY_ADDRESSES "$gateway"
+  dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 120 app >"$STEP_LOG" 2>&1 || warn "The app of instance $name did not restart cleanly; run: aman doctor instance --fix"
 }
 
 # False only for an instance that was created and never became healthy; a record from before this was kept counts as
@@ -243,6 +259,11 @@ install_doctor_shim() {
   write_if_changed "$AMAN_HOME/lib/pki.mjs" 644 <"$INSTALLER_DIR/lib/pki.mjs" || true
   record_source_checkout
   install_path_block
+  # A checkout made with a permissive umask can be changed by its group, and the command runs this installer for the
+  # person later, so it is made private once here instead of asking them to.
+  if tighten_checkout "$REPO_ROOT"; then
+    ui_ok "Made $(ui_path "$REPO_ROOT") private to you, so only you can change what the installer runs"
+  fi
 }
 
 # install.sh command: puts the aman command, its helper files and its path line back, and nothing else.

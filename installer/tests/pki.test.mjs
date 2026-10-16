@@ -20,7 +20,9 @@ describe('the local certificate authority', () => {
     return { caDir: path.join(dir, 'ca'), leafDir: path.join(dir, 'leaf') };
   };
   afterEach(() => {
-    if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
+    if (dir !== undefined) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('makes a root that lasts years, keeps its key to its owner, and makes it only once', () => {

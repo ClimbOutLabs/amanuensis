@@ -283,6 +283,27 @@ describe('login proxy', () => {
       }
     });
 
+    it('counts guesses at one account across a sign-in to another, from the same address', async () => {
+      const post = (account: string) =>
+        get('/dex/auth/local/login?back=&state=s', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: `login=${account}&password=guess`,
+        });
+      answer = () => new Response('<html>form</html>', { status: 200 });
+      for (let round = 0; round < 3; round += 1) {
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          expect((await post('owner%40example.com')).status).toBe(200);
+        }
+        answer = () => new Response(null, { status: 303, headers: { location: '/dex/approval?req=a' } });
+        expect((await post('member%40example.com')).status).toBe(303);
+        answer = () => new Response('<html>form</html>', { status: 200 });
+        await post('owner%40example.com');
+        expect((await post('owner%40example.com')).status).toBe(429);
+        clock += 31 * 60_000;
+      }
+    });
+
     it('limits how often one address can start a sign-in, which stores a request in the sign-in service', async () => {
       for (let attempt = 0; attempt < 30; attempt += 1) {
         expect((await get('/dex/auth?client_id=x&state=s')).status).toBe(200);
@@ -385,6 +406,42 @@ describe('login proxy in front of a public sign-in address', () => {
       expect((await post('192.168.1.40', `10.0.0.${String(i)}`)).status).toBe(200);
     }
     expect((await post('192.168.1.40', '10.9.9.9')).status).toBe(429);
+  });
+
+  it('believes X-Forwarded-For from a configured proxy address, and from no other address', async () => {
+    globalThis.fetch = () => Promise.resolve(new Response('form', { status: 200 }));
+    const hono = new Hono();
+    hono.all(
+      '*',
+      createLoginProxy({
+        issuerUrl: 'https://login.example.com/dex',
+        upstreamUrl: 'http://127.0.0.1:5556/dex',
+        allowedOrigins: ['https://login.example.com'],
+        trustedProxies: ['172.17.0.1'],
+      }),
+    );
+    const post = (remoteAddress: string, forwardedFor: string) =>
+      hono.fetch(
+        new Request('https://login.example.com/dex/auth/local/login', {
+          method: 'POST',
+          headers: {
+            host: 'login.example.com',
+            'x-forwarded-for': forwardedFor,
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+          body: 'login=a%40b.c&password=x',
+        }),
+        { incoming: { socket: { remoteAddress } } },
+      );
+    for (let i = 0; i < 5; i += 1) {
+      expect((await post('172.17.0.1', '203.0.113.5')).status).toBe(200);
+    }
+    expect((await post('172.17.0.1', '203.0.113.5')).status).toBe(429);
+    expect((await post('::ffff:172.17.0.1', '198.51.100.7')).status).toBe(200);
+    for (let i = 0; i < 5; i += 1) {
+      expect((await post('172.18.0.9', `10.0.0.${String(i)}`)).status).toBe(200);
+    }
+    expect((await post('172.18.0.9', '10.9.9.9')).status).toBe(429);
   });
 
   it('needs the service to have the same path in both places', () => {

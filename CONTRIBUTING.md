@@ -133,6 +133,7 @@ See [`packages/trueforge/.env.example`](packages/trueforge/.env.example) for eve
 - `PUBLIC_BASE_URL` - public application URL for MCP OAuth / OIDC callbacks. Required for distributed mode and for `pnpm dev` (e.g. `http://localhost:3000` for Vite). Standalone takes an origin with no path and falls back to `http://localhost:$PORT` when unset.
 - `ALLOWED_ORIGINS` - standalone only: comma-separated origins the app may be opened at (http only for loopback and private networks, https otherwise). Sign-in returns to the origin of the request when it is listed, the app passes the issuer's path through, and any other address gets a plain 400. Unset keeps the single `PUBLIC_BASE_URL` origin.
 - `LOGIN_UPSTREAM_URL` - standalone only: where the sign-in service listens on this computer (loopback http with the issuer path), for an instance whose issuer is a public https address. The app then serves the issuer address's `/dex` pages itself, with a limit on password guessing; the reverse proxy must set `X-Forwarded-For`.
+- `TRUSTED_PROXY_ADDRESSES` - standalone only: comma-separated IP addresses of a reverse proxy, besides this computer's own, whose `X-Forwarded-For` is believed when limiting password guessing per visitor.
 - `AUTH_COOKIE_SUFFIX` - suffix on every auth cookie name; set a distinct value per instance sharing a hostname
 - `FRONTEND_DIR` - directory of a built UI for the server to serve
 - `SQLITE_PATH` - SQLite file location in standalone mode

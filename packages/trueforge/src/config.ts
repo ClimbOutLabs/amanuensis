@@ -431,6 +431,22 @@ export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath
   return `${parsed.origin}${path}`;
 }
 
+/** The addresses of proxies believed about visitor addresses: plain IP addresses only, so a name cannot widen it. */
+export function parseTrustedProxyAddresses(raw: string | undefined): string[] {
+  const addresses: string[] = [];
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim();
+    if (text === '') {
+      continue;
+    }
+    if (isIP(text) === 0) {
+      throw new Error(`TRUSTED_PROXY_ADDRESSES has an entry that is not an IP address: ${text}`);
+    }
+    addresses.push(text);
+  }
+  return addresses;
+}
+
 /** The loopback address of the sign-in service, or empty. */
 export function parseLoginUpstreamUrl(raw: string | undefined): string {
   const text = (raw ?? '').trim();
@@ -1152,6 +1168,12 @@ export interface SharedServerConfiguration {
    * password guessing. Empty leaves the issuer's address to answer for itself. Env: `LOGIN_UPSTREAM_URL`.
    */
   LOGIN_UPSTREAM_URL: string;
+  /**
+   * Addresses of a reverse proxy in front of the app, besides this computer's own, whose X-Forwarded-For says which
+   * visitor a request came from (so password guessing is limited per visitor, not per proxy). Comma separated IP
+   * addresses. Env: `TRUSTED_PROXY_ADDRESSES`.
+   */
+  TRUSTED_PROXY_ADDRESSES: string[];
   /**
    * Max tokens requested from the memory provider's recall endpoint.
    * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 2048.
@@ -2057,6 +2079,7 @@ const shared: SharedServerConfiguration = {
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),
   ALLOWED_ORIGINS: parseAllowedOrigins(getEnv('ALLOWED_ORIGINS', { defaultValue: '' })),
   LOGIN_UPSTREAM_URL: parseLoginUpstreamUrl(getEnv('LOGIN_UPSTREAM_URL', { defaultValue: '' })),
+  TRUSTED_PROXY_ADDRESSES: parseTrustedProxyAddresses(getEnv('TRUSTED_PROXY_ADDRESSES', { defaultValue: '' })),
   SERVER_URL:
     getEnv('SERVER_URL', { defaultValue: `http://localhost:${String(port)}` }) ?? `http://localhost:${String(port)}`,
   TRUEFORGE_API_KEY: resolveTrueForgeApiKey({ standalone }),
