@@ -335,6 +335,48 @@ test_dry_run_instance_add() {
   sandbox_drop
 }
 
+test_refresh_puts_back_lost_settings() {
+  t_begin "instance refresh puts back each lost setting, changes no setting that is there, and keeps the file private"
+  sandbox_new
+  install_machine
+  local env="$AMAN_HOME/instances/main/.env" keys key before after other
+  keys=$(sed -n 's/^\([A-Z_]*\)=.*/\1/p' "$env")
+  assert_contains "$keys" OIDC_CLIENT_SECRET
+  for key in $keys; do
+    before=$(cat "$env")
+    grep -v "^$key=" "$env" >"$SB/env.cut"
+    cat "$SB/env.cut" >"$env"
+    run_install instance refresh main
+    assert_rc 0
+    assert_contains "$(cat "$env")" "$key=" "$key is back"
+    assert_eq "$(grep -c "^$key=" "$env")" 1 "$key is there once"
+    assert_mode "$env" 600
+    after=$(cat "$env")
+    for other in $keys; do
+      [ "$other" = "$key" ] && continue
+      assert_eq "$(printf '%s\n' "$after" | grep "^$other=")" "$(printf '%s\n' "$before" | grep "^$other=")" "$other is unchanged"
+    done
+    case "$key" in
+      OIDC_CLIENT_SECRET | TRUEFORGE_API_KEY) ;;
+      *) assert_eq "$(printf '%s\n' "$after" | grep "^$key=")" "$(printf '%s\n' "$before" | grep "^$key=")" "$key comes back as it was" ;;
+    esac
+  done
+  sandbox_drop
+}
+
+test_refresh_leaves_a_complete_file_alone() {
+  t_begin "instance refresh of an instance whose settings are all there rewrites none of them"
+  sandbox_new
+  install_machine
+  local before
+  before=$(cat "$AMAN_HOME/instances/main/.env")
+  run_install instance refresh main
+  assert_rc 0
+  assert_eq "$(cat "$AMAN_HOME/instances/main/.env")" "$before"
+  assert_not_contains "$OUT$ERR" "Put back"
+  sandbox_drop
+}
+
 test_list_without_docker() {
   t_begin "list still shows registered instances when Docker is down"
   sandbox_new
@@ -360,6 +402,8 @@ test_dry_run_only_where_it_means_something() {
 }
 
 test_three_instances_never_share_values
+test_refresh_puts_back_lost_settings
+test_refresh_leaves_a_complete_file_alone
 test_list_without_docker
 test_dry_run_only_where_it_means_something
 test_skips_ports_in_use

@@ -106,16 +106,38 @@ load_lib() { # name: sources ../lib/<name>.sh; returns 1 when it is not there
   . "$file"
 }
 
-if ! load_lib shared; then
-  printf 'The doctor is missing a helper file (lib/shared.sh next to its folder). Run install.sh again; it puts the file back.\n' >&2
+# The installer of the folder Aman was installed from; it is what fixes the machine.
+checkout_installer() {
+  local source="${AMAN_HOME}/state/source" repo
+  [ -r "$source" ] || return 1
+  repo=$(head -n 1 "$source")
+  [ -f "${repo}/installer/install.sh" ] || return 1
+  printf '%s' "${repo}/installer/install.sh"
+}
+
+# Loads a helper file; one that went missing is put back by the installer once, and if that cannot be done the exact
+# command that does it is printed.
+require_lib() { # name
+  local installer
+  load_lib "$1" && return 0
+  if installer=$(checkout_installer) && bash "$installer" --home "$AMAN_HOME" command >/dev/null 2>&1 && load_lib "$1"; then
+    return 0
+  fi
+  if [ -n "${installer:-}" ]; then
+    printf 'Aman is missing one of its own files. Run: bash %s --home %s command\n' "$installer" "$AMAN_HOME" >&2
+  else
+    printf 'Aman is missing one of its own files and cannot find the folder it was installed from. Run the installer there: installer/install.sh command\n' >&2
+  fi
   exit 1
-fi
+}
+
+require_lib shared
+require_lib diagnose
+require_lib network
+require_lib schedule
 
 load_ui() {
-  if ! load_lib ui; then
-    printf 'The doctor is missing its display file (lib/ui.sh next to its folder). Run install.sh again; it puts the file back.\n' >&2
-    exit 1
-  fi
+  require_lib ui
   ui_init
 }
 
@@ -172,7 +194,6 @@ registry_value() { # instance key
 # CAUSE_IDS holds the containers that are not running or not healthy.
 container_cause_sentence() {
   local id log="" cause
-  if ! load_lib diagnose; then return 0; fi
   for id in $CAUSE_IDS; do
     log="${log}$(bounded "$PROBE_SECONDS" docker logs --tail 50 "$id" 2>&1)"$'\n'
   done
@@ -519,10 +540,8 @@ check_backup() {
   fi
   STATE_DIR="${AMAN_HOME}/state"
   mode=""
-  if load_lib schedule; then
-    mode=$(backups_mode)
-    if backup_schedule_present; then scheduled=1; fi
-  fi
+  mode=$(backups_mode)
+  if backup_schedule_present; then scheduled=1; fi
   case "$mode" in
     daily)
       if [ "$scheduled" != 1 ]; then
@@ -827,10 +846,6 @@ check_instance_network() {
   local name=$1 origins port host missing='' count
   origins=$(registry_value "$name" origins)
   [ -n "$origins" ] || return 0
-  if ! load_lib network; then
-    record "$name" network off "Skipped: the network helper file (lib/network.sh next to the doctor's folder) is missing." ""
-    return
-  fi
   port=$(registry_value "$name" app_port)
   # shellcheck disable=SC2046,SC2086 # the extra hosts are checked names without spaces
   for host in $(network_default_hosts) $(registry_value "$name" extra_hosts); do
@@ -1228,14 +1243,6 @@ doctor_sandbox() {
 }
 
 # The installer the sandbox tools were set up from, which knows how to render an instance again.
-checkout_installer() {
-  local source="${AMAN_HOME}/state/source" repo
-  [ -r "$source" ] || return 1
-  repo=$(head -n 1 "$source")
-  [ -f "${repo}/installer/install.sh" ] || return 1
-  printf '%s' "${repo}/installer/install.sh"
-}
-
 # aman doctor instance|network [--fix [--yes]] [--instance NAME]: show the check and, with --fix, let the installer
 # render the instance again from its record and restart it.
 doctor_repair() { # kind

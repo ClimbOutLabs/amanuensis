@@ -1316,6 +1316,34 @@ describe('network address check', () => {
   });
 });
 
+const LIB_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'lib');
+
+/** The command as the installer lays it out: <home>/bin/aman with the helper files in <home>/lib, or without them. */
+function installCommand({ libs }) {
+  mkdirSync(path.join(world.home, 'lib'), { recursive: true });
+  mkdirSync(path.join(world.home, 'bin'), { recursive: true });
+  if (libs) {
+    for (const file of readdirSync(LIB_DIR)) {
+      copyFileSync(path.join(LIB_DIR, file), path.join(world.home, 'lib', file));
+    }
+  }
+  copyFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'aman'),
+    path.join(world.home, 'bin', 'aman'),
+  );
+}
+
+function runInstalled(args) {
+  return spawnSync('bash', [path.join(world.home, 'bin', 'aman'), ...args], {
+    encoding: 'utf8',
+    env: {
+      PATH: `${world.bin}:${path.join(world.root, 'tools')}`,
+      HOME: world.root,
+      FAKE_DOCKER_DIR: path.join(world.root, 'fake'),
+    },
+  });
+}
+
 describe('aman backup and aman upgrade', () => {
   it('run the installer from the recorded checkout, with the state directory and the arguments given', () => {
     make();
@@ -1338,28 +1366,73 @@ describe('aman backup and aman upgrade', () => {
     make();
     const repo = world.sandbox();
     world.installerStub(repo);
-    mkdirSync(path.join(world.home, 'lib'), { recursive: true });
-    mkdirSync(path.join(world.home, 'bin'), { recursive: true });
-    for (const file of readdirSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'lib'))) {
-      copyFileSync(
-        path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'lib', file),
-        path.join(world.home, 'lib', file),
-      );
-    }
-    copyFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'aman'),
-      path.join(world.home, 'bin', 'aman'),
-    );
-    const result = spawnSync('bash', [path.join(world.home, 'bin', 'aman'), 'backup'], {
-      encoding: 'utf8',
-      env: {
-        PATH: `${world.bin}:${path.join(world.root, 'tools')}`,
-        HOME: world.root,
-        FAKE_DOCKER_DIR: path.join(world.root, 'fake'),
-      },
-    });
+    installCommand({ libs: true });
+    const result = runInstalled(['backup']);
     assert.equal(result.status, 0, result.stderr);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
+  });
+});
+
+describe('aman with its helper files missing', () => {
+  /** An installer stand-in whose `command` puts the helper files back, as the real one does. */
+  function restoringInstaller(repo, { rc = 0 } = {}) {
+    const dir = path.join(repo, 'installer');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, 'install.sh'),
+      `#!/usr/bin/env bash
+echo "install.sh $*" >> "$FAKE_DOCKER_DIR/calls.log"
+if [ "$3" = command ] && [ ${rc} = 0 ]; then /bin/cp ${LIB_DIR}/*.sh "$2/lib/"; fi
+exit ${rc}
+`,
+    );
+  }
+
+  it('puts a missing file back through the installer and carries on', () => {
+    make();
+    const repo = world.sandbox();
+    restoringInstaller(repo);
+    installCommand({ libs: false });
+    const result = runInstalled(['backup']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} command`));
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
+  });
+
+  it('puts back one missing file among the others', () => {
+    make();
+    const repo = world.sandbox();
+    restoringInstaller(repo);
+    installCommand({ libs: true });
+    rmSync(path.join(world.home, 'lib', 'schedule.sh'));
+    const result = runInstalled(['backup']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} command`));
+  });
+
+  it('prints the one command that repairs it when the installer cannot', () => {
+    make();
+    const repo = world.sandbox();
+    restoringInstaller(repo, { rc: 1 });
+    installCommand({ libs: false });
+    const result = runInstalled(['backup']);
+    assert.equal(result.status, 1);
+    assert.equal(
+      result.stderr.trim(),
+      `Aman is missing one of its own files. Run: bash ${path.join(repo, 'installer', 'install.sh')} --home ${world.home} command`,
+    );
+    assert.doesNotMatch(result.stderr, /Run install\.sh again/);
+  });
+
+  it('says where to run the installer when the folder Aman was installed from is gone', () => {
+    make();
+    installCommand({ libs: false });
+    const result = runInstalled(['backup']);
+    assert.equal(result.status, 1);
+    assert.match(
+      result.stderr,
+      /cannot find the folder it was installed from\. Run the installer there: installer\/install\.sh command/,
+    );
   });
 });
 

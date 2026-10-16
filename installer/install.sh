@@ -9,6 +9,7 @@
 #        install.sh backups daily|off
 #        install.sh upgrade [--check] [--force]
 #        install.sh docker
+#        install.sh command
 set -euo pipefail
 # Everything written is private unless a file is deliberately made world-readable.
 umask 077
@@ -128,6 +129,7 @@ Amanuensis installer
   install.sh backups daily|off
   install.sh upgrade [--check] [--force]
   install.sh docker               install or start Docker, or update its Compose plugin, asking before sudo
+  install.sh command              put the aman command and its files back
 
 Options
   --home DIR            state directory (default ~/.amanuensis)
@@ -225,7 +227,7 @@ parse_args() {
         case "$positional:$COMMAND" in
           1:install)
             case "$arg" in
-              instance | backup | backups | upgrade | docker) COMMAND=$arg ;;
+              instance | backup | backups | upgrade | docker | command) COMMAND=$arg ;;
               *) usage_die "unknown command $arg" ;;
             esac
             ;;
@@ -341,6 +343,7 @@ main() {
     backup) cmd_backup ;;
     backups) cmd_backups ;;
     docker) docker_fix ;;
+    command) cmd_command ;;
     upgrade) cmd_upgrade ;;
     instance)
       case "$SUBCOMMAND" in

@@ -67,6 +67,23 @@ test_upgrade_restores_the_command_and_its_files() {
   sandbox_drop
 }
 
+test_the_command_subcommand_puts_the_files_back() {
+  t_begin "install.sh command restores a missing shim and helper files and touches nothing else"
+  sandbox_new
+  install_machine
+  rm -f "$AMAN_HOME/bin/aman" "$AMAN_HOME/lib/shared.sh" "$AMAN_HOME/lib/network.sh"
+  local builds
+  builds=$(log_count "docker build")
+  run_install command
+  assert_rc 0
+  assert_flat_contains "$OUT" "The aman command is installed"
+  assert_eq "$(cmp -s "$SB_INSTALLER/doctor/aman" "$AMAN_HOME/bin/aman" && echo same)" same
+  assert_eq "$(cmp -s "$SB_INSTALLER/lib/shared.sh" "$AMAN_HOME/lib/shared.sh" && echo same)" same
+  assert_eq "$(cmp -s "$SB_INSTALLER/lib/network.sh" "$AMAN_HOME/lib/network.sh" && echo same)" same
+  assert_eq "$(log_count "docker build")" "$builds"
+  sandbox_drop
+}
+
 test_a_rerun_with_nothing_to_do_still_checks_run_code() {
   t_begin "a run with nothing to change still checks Run code, says it is not ready, and exits 1"
   sandbox_new
@@ -122,6 +139,7 @@ test_the_path_line_is_managed_once
 test_zsh_gets_its_own_profile
 test_the_plan_names_the_command_row
 test_upgrade_restores_the_command_and_its_files
+test_the_command_subcommand_puts_the_files_back
 test_a_rerun_with_nothing_to_do_still_checks_run_code
 test_a_busy_port_moves_the_instance
 test_the_proxy_requirements_belong_to_public_urls
