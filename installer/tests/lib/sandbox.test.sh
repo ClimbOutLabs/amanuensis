@@ -4,6 +4,8 @@ set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
+slot_starts() { grep -c "aman-sandbox.mjs --instance main --repo-root" "$STUB_LOG" || true; }
+
 first_line_of() { grep -Fn -- "$1" "$STUB_LOG" | head -n 1 | cut -d: -f1; }
 
 test_dry_run_plans_the_sandbox() {
@@ -378,13 +380,16 @@ test_rerun_restarts_healthy_slots_when_the_image_changed() {
   install_machine
   run_install --yes
   assert_rc 0
-  assert_not_contains "$OUT" "Starting the 4 sandbox slots"
+  assert_eq "$(slot_starts)" 1 "the first install starts the slots once"
+  run_install --yes
+  assert_rc 0
+  assert_eq "$(slot_starts)" 1 "a re-run with the same image leaves the slots alone"
   printf 'rebuilt\n' >"$SB_STATE/image_id"
   run_install --yes
   assert_rc 0
-  assert_contains "$OUT" "Starting the 4 sandbox slots of instance main"
+  assert_eq "$(slot_starts)" 2 "a rebuilt image starts the slots again"
   run_install --yes
-  assert_not_contains "$OUT" "Starting the 4 sandbox slots"
+  assert_eq "$(slot_starts)" 2 "and the next re-run leaves them alone"
   sandbox_drop
 }
 
