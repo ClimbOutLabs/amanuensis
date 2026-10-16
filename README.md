@@ -226,4 +226,4 @@ Useful targeted commands include `pnpm test:trueforge-core`, `pnpm test:trueforg
 
 Amanuensis is derived from [TrueForge](https://github.com/truefoundry/trueforge), an open-source agent harness by [TrueFoundry](https://truefoundry.com). Upstream package names, copyright notices, source lineage, and attribution are retained; see [the attribution note](docs/AMANUENSIS_ATTRIBUTION.md).
 
-Licensed under the Mozilla Public License 2.0. Portions derived from TrueForge are MIT licensed, Copyright 2024-2026 TrueFoundry; see NOTICE.
+Licensed under the Mozilla Public License 2.0. Portions derived from TrueForge are MIT licensed, Copyright 2024-2026 TrueFoundry; see NOTICE. Third-party components with their own terms are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

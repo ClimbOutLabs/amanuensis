@@ -2,7 +2,7 @@
 
 Thanks for your interest in contributing! This document covers how to set up a development environment, run the test suites, and open a pull request.
 
-Amanuensis is a personal project maintained by its author. Bug reports and docs improvements are the most helpful contributions; code pull requests are welcome but keep them focused. By contributing you agree that your contributions are licensed under the [Mozilla Public License 2.0](LICENSE).
+Amanuensis is a personal project maintained by its author. Bug reports and docs improvements are the most helpful contributions. By contributing you agree that your contributions are licensed under the [Mozilla Public License 2.0](LICENSE).
 
 ## Code contributions
 

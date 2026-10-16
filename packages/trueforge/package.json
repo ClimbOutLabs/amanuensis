@@ -23,12 +23,15 @@
   "files": [
     "dist",
     "README.md",
-    "scripts"
+    "scripts",
+    "LICENSE",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=22.14.0"
   },
   "scripts": {
+    "prepack": "node ../../scripts/copy-license-files.mjs",
     "build:frontend-assets": "node scripts/copy-frontend.mjs",
     "build:gen:local-sandbox": "node scripts/generate-local-sandbox-scripts.mjs",
     "build:gen:watch": "node --watch-path=catalog/model-catalog.yaml --watch-path=catalog/mcp-catalog.yaml --watch-path=catalog/skill-catalog.yaml --watch-path=catalog/sandbox-catalog.yaml --watch-path=src/sandbox/local/scripts scripts/generate-dev.mjs",

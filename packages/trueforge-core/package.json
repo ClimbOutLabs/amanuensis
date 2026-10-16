@@ -80,12 +80,15 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
+    "prepack": "node ../../scripts/copy-license-files.mjs",
     "build:gen": "node scripts/generate-sandbox-scripts.mjs",
     "build:gen:watch": "node --watch-path=src/core/sandbox/scripts scripts/generate-sandbox-scripts.mjs",
     "build": "pnpm run build:gen && tsc --noEmit && pnpm run build:js && pnpm run build:dts && pnpm run build:pkg && pnpm run build:check",
