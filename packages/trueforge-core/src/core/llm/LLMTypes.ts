@@ -107,6 +107,12 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       'Canonical params the approval token was minted over, when they differ from the raw arguments (sandbox normalizes structured-edit args before minting). Never model-authored.',
     ),
+  path_resolution: z
+    .enum(['host', 'remote'])
+    .optional()
+    .describe(
+      'How the Sentinel reads this call\'s file paths: the sandbox provider says "remote" when the sandbox filesystem is not the server\'s. Never model-authored.',
+    ),
   is_client_side: z.boolean().optional().describe('Whether the client must supply the tool result.'),
   // Runtime + wire: deviation from origin/main OpenAPI (which omitted this field) is accepted.
   is_thread_creation: z.boolean().optional().describe('Whether this tool call creates a subagent thread.'),
@@ -155,6 +161,16 @@ export const InternalToolCallInfoSchema = z.object({
     .string()
     .optional()
     .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
+  held_for_owner: z
+    .object({ expires_at: z.string(), duplicate: z.literal(true).optional() })
+    .optional()
+    .describe(
+      'Set when an unattended run held this call for the owner instead of asking; duplicate marks a repeat of a call already held in the same batch. Never model-authored.',
+    ),
+  search_provider_call: z
+    .literal(true)
+    .optional()
+    .describe('Set on every call to the connector the user designated as search provider. Never model-authored.'),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
     .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),

@@ -12,6 +12,24 @@ import {
 } from '../components/ImplementationPlanGrantContext.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
 
+const POLL_INTERVAL_MS = 2_000;
+
+/** Grants are immutable once minted, so the same ids and plan hashes in order mean nothing changed. */
+function sameGrants({
+  shown,
+  next,
+}: {
+  shown: readonly ImplementationPlanGrant[];
+  next: readonly ImplementationPlanGrant[];
+}): boolean {
+  return (
+    shown.length === next.length &&
+    shown.every(
+      (grant, index) => grant.grant_id === next[index]?.grant_id && grant.plan_hash === next[index]?.plan_hash,
+    )
+  );
+}
+
 export type ImplementationPlanGrantControlsProps = {
   sessionId?: string | null;
   isRunning?: boolean;
@@ -28,6 +46,11 @@ function ImplementationPlanGrantControlsWithApi({
   const sessionIdRef = useRef(sessionId);
   const requestVersionRef = useRef(0);
   sessionIdRef.current = sessionId;
+  // What is on screen, so a poll that changes nothing dispatches no state update at all.
+  const shownRef = useRef({ grants, loadError });
+  useEffect(() => {
+    shownRef.current = { grants, loadError };
+  });
 
   const { listImplementationPlanGrants, revokeImplementationPlanGrant } = api;
 
@@ -44,20 +67,29 @@ function ImplementationPlanGrantControlsWithApi({
     }
 
     let cancelled = false;
+    let inFlight = false;
     const refresh = () => {
+      // A tick that lands while the previous read is still out skips rather than stacking requests.
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
       const requestVersion = requestVersionRef.current + 1;
       requestVersionRef.current = requestVersion;
       void listImplementationPlanGrants(sessionId)
         .then(next => {
           if (!cancelled && requestVersionRef.current === requestVersion) {
-            setGrants(next);
-            setLoadError(null);
+            if (!sameGrants({ shown: shownRef.current.grants, next })) setGrants(next);
+            if (shownRef.current.loadError !== null) setLoadError(null);
           }
         })
         .catch(error => {
           if (!cancelled && requestVersionRef.current === requestVersion) {
             setLoadError(getErrorMessage(error, 'Could not load implementation-plan grants.'));
           }
+        })
+        .finally(() => {
+          inFlight = false;
         });
     };
     refresh();
@@ -66,7 +98,7 @@ function ImplementationPlanGrantControlsWithApi({
     const intervalId = isRunning
       ? setInterval(() => {
           if (document.visibilityState === 'visible') refresh();
-        }, 2_000)
+        }, POLL_INTERVAL_MS)
       : undefined;
     const handleVisibilityChange = () => {
       if (isRunning && document.visibilityState === 'visible') refresh();

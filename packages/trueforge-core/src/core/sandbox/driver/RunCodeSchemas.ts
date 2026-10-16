@@ -120,11 +120,19 @@ export const RUN_CODE_STATUS_STATES = [
   'image_unavailable',
   'isolation_refused',
   'unsupported_platform',
+  'slots_unavailable',
 ] as const;
+
+/** Which backend executes code; absent means Docker, as older servers report. */
+export const RUN_CODE_BACKENDS = ['docker', 'slots'] as const;
 
 export const RunCodeStatusSchema = z.object({
   state: z.enum(RUN_CODE_STATUS_STATES).describe('Whether run_code can execute code, or the reason it cannot.'),
   detail: z.string().optional().describe('Technical detail from the sandbox check. Absent when the state says it all.'),
+  backend: z
+    .enum(RUN_CODE_BACKENDS)
+    .optional()
+    .describe('Which backend runs code: docker, or the isolated sandbox slots.'),
 });
 
 export type RunCodeStatus = z.infer<typeof RunCodeStatusSchema>;

@@ -80,6 +80,7 @@ function ChecksValue({ tone, text }: { tone: StatusTone; text: string }) {
 }
 
 function ImageCard({ status, limits }: { status: RunCodeStatus; limits: SandboxLimits | null }) {
+  if (status.backend === 'slots') return null;
   const { checks } = presentRunCodeStatus(status);
   if ((limits === null || limits.image === '') && checks.length === 0) return null;
   return (
@@ -163,7 +164,9 @@ function StatusCard({
   const presentation = presentRunCodeStatus(status);
   const now = useNow();
   const lines = [
-    ...(limits !== null && limits.image !== '' ? [{ label: 'Image', value: limits.image }] : []),
+    ...(limits !== null && limits.image !== '' && status.backend !== 'slots'
+      ? [{ label: 'Image', value: limits.image }]
+      : []),
     ...(presentation.settings === undefined ? [] : [{ label: 'Server settings', value: presentation.settings }]),
     { label: 'Limits set by', value: LIMIT_SETTINGS },
     ...(status.detail === undefined ? [] : [{ label: 'Details', value: status.detail }]),
@@ -213,7 +216,7 @@ function CheckingCard() {
     <Card headingId="sandbox-status-heading" title="Status">
       <div className="mt-2 flex items-center gap-2 text-sm text-text-secondary" role="status" aria-live="polite">
         <Spinner size={16} aria-hidden />
-        Checking Docker, the sandbox image and its signature. This can take a few seconds.
+        Checking the sandbox. This can take a few seconds.
       </div>
     </Card>
   );
@@ -284,7 +287,11 @@ const SandboxSettings = () => {
       <header>
         <h3 className="text-base font-semibold text-text-primary">Sandbox</h3>
         <p className="mt-1 text-sm text-text-secondary">
-          Runs the Python and Node.js code the assistant writes, in an isolated Docker container with no network access.
+          {status === null
+            ? 'Runs the code the assistant writes in an isolated sandbox with no network access.'
+            : status.backend === 'slots'
+              ? 'Runs the Python, Node.js and shell commands the assistant writes, in isolated sandboxes with no network access.'
+              : 'Runs the Python and Node.js code the assistant writes, in an isolated Docker container with no network access.'}
         </p>
       </header>
 

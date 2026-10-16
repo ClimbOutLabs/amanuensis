@@ -8,7 +8,10 @@ import type {
   CreateTurnInput,
   ISessionStore,
 } from '../../../src/agent-session/store/ISessionStore';
-import { decodeSessionEventPageToken } from '../../../src/agent-session/store/SessionEventPageToken';
+import {
+  decodeSessionEventPageToken,
+  encodeSessionEventPageToken,
+} from '../../../src/agent-session/store/SessionEventPageToken';
 import {
   ImplementationPlanGrantLifecycleError,
   PreviousTurnRunningError,
@@ -799,6 +802,8 @@ export function runStoreContractSuite<
           limit: 10,
           page_token: undefined,
           last_turn_id: undefined,
+          types: undefined,
+          after_event_id: undefined,
         }),
       ).rejects.toBeInstanceOf(SessionNotFoundError);
 
@@ -896,6 +901,8 @@ export function runStoreContractSuite<
           limit: 10,
           page_token: undefined,
           last_turn_id: undefined,
+          types: undefined,
+          after_event_id: undefined,
         }),
       ).rejects.toBeInstanceOf(SessionNotFoundError);
     });
@@ -1030,6 +1037,8 @@ export function runStoreContractSuite<
           limit: 10,
           page_token: undefined,
           last_turn_id: undefined,
+          types: undefined,
+          after_event_id: undefined,
         }),
       ).rejects.toBeInstanceOf(SessionNotFoundError);
     });
@@ -3940,6 +3949,8 @@ export function runStoreContractSuite<
         limit: 10,
         page_token: undefined,
         last_turn_id: undefined,
+        types: undefined,
+        after_event_id: undefined,
       });
       expect(data.map(row => row.turn_id)).toEqual(['t2', 't1', 't1']);
       expect(data.map(row => row.event.type)).toEqual([
@@ -3973,6 +3984,8 @@ export function runStoreContractSuite<
         limit: 10,
         page_token: undefined,
         last_turn_id: undefined,
+        types: undefined,
+        after_event_id: undefined,
       });
       expect(data).toEqual([{ turn_id: 't1', event: passthrough }]);
     });
@@ -4007,6 +4020,8 @@ export function runStoreContractSuite<
         limit: 10,
         last_turn_id: undefined,
         page_token: undefined,
+        types: undefined,
+        after_event_id: undefined,
       });
       expect(data.filter(row => row.event.type === EventType.TURN_CREATED).map(row => row.turn_id)).toEqual([
         't2-anchor',
@@ -4019,6 +4034,8 @@ export function runStoreContractSuite<
           limit: 10,
           last_turn_id: missingTurnId,
           page_token: undefined,
+          types: undefined,
+          after_event_id: undefined,
         }),
       ).rejects.toBeInstanceOf(TurnNotFoundError);
     });
@@ -4045,11 +4062,14 @@ export function runStoreContractSuite<
         limit: 1,
         last_turn_id: undefined,
         page_token: undefined,
+        types: undefined,
+        after_event_id: undefined,
       });
       expect(firstPage.data.map(row => row.turn_id)).toEqual(['t2']);
       expect(decodeSessionEventPageToken(mustGet(firstPage.pagination.next_page_token))).toEqual({
         last_turn_id: 't2',
-        offset: 1,
+        turn_id: 't2',
+        event_id: mustGet(firstPage.data[0]).event.id,
       });
 
       await store.createTurn(
@@ -4066,6 +4086,8 @@ export function runStoreContractSuite<
         limit: 10,
         last_turn_id: undefined,
         page_token: firstPage.pagination.next_page_token,
+        types: undefined,
+        after_event_id: undefined,
       });
       expect(secondPage.data.map(row => row.turn_id)).not.toContain('t2-new-active');
       expect(secondPage.data.map(row => row.turn_id)).toContain('t1');
@@ -4108,11 +4130,230 @@ export function runStoreContractSuite<
         limit: chainLength + 10,
         last_turn_id: tip,
         page_token: undefined,
+        types: undefined,
+        after_event_id: undefined,
       });
       // Full chain reachable despite truncated windows, newest-first turn.created rows only.
       expect(data.filter(row => row.event.type === EventType.TURN_CREATED).map(row => row.turn_id)).toEqual(
         [...ids].reverse(),
       );
+    });
+
+    /** t1 and t2 done, t3 running; each turn has turn.created, two model messages, and a passthrough row. */
+    async function seedEventChain(store: Store) {
+      await seedSession(store);
+      const turnIds = ['t1', 't2', 't3'];
+      for (const [index, turnId] of turnIds.entries()) {
+        const previousTurnId = turnIds[index - 1];
+        await store.createTurn(
+          makeCreateTurnInput({
+            sessionId,
+            turnId,
+            ...(previousTurnId === undefined ? {} : { previousTurnId, firstTurnId: 't1' }),
+          }),
+        );
+        await store.appendToEvents({
+          session_id: sessionId,
+          turn_id: turnId,
+          events: [makeTurnCreatedEvent(turnId), makeModelMessageEvent(), makeModelMessageEvent(), customEvent()],
+        });
+        if (turnId !== 't3') {
+          await finishTurn(store, turnId);
+        }
+      }
+    }
+
+    function customEvent(): PersistedTurnEvent {
+      return {
+        type: 'custom.event',
+        ...ContractPassthroughEventSchema.parse({
+          id: newEventId(),
+          created_at: new Date().toISOString(),
+          event: { value: 1 },
+        }),
+      };
+    }
+
+    async function listAllSessionEvents(
+      store: Store,
+      input: {
+        limit: number;
+        types: readonly PersistedTurnEvent['type'][] | undefined;
+        after_event_id: string | undefined;
+      },
+      beforeNextPage?: () => Promise<void>,
+    ) {
+      const rows: { turn_id: string; event_id: string }[] = [];
+      let pageToken: string | undefined;
+      let pages = 0;
+      do {
+        const page = await store.listSessionEvents({
+          session_id: sessionId,
+          limit: input.limit,
+          last_turn_id: undefined,
+          page_token: pageToken,
+          types: input.types,
+          after_event_id: input.after_event_id,
+        });
+        expect(page.data.length).toBeLessThanOrEqual(input.limit);
+        rows.push(...page.data.map(row => ({ turn_id: row.turn_id, event_id: row.event.id })));
+        pageToken = page.pagination.next_page_token;
+        pages += 1;
+        if (pageToken !== undefined) {
+          await beforeNextPage?.();
+        }
+      } while (pageToken !== undefined);
+      return { rows, pages };
+    }
+
+    it('listSessionEvents keeps only the requested event types', async () => {
+      const store = createStore();
+      await seedEventChain(store);
+
+      const { data } = await store.listSessionEvents({
+        session_id: sessionId,
+        limit: 50,
+        last_turn_id: undefined,
+        page_token: undefined,
+        types: [EventType.TURN_DONE, 'custom.event'],
+        after_event_id: undefined,
+      });
+      expect(data.map(row => [row.turn_id, row.event.type])).toEqual([
+        ['t3', 'custom.event'],
+        ['t2', EventType.TURN_DONE],
+        ['t2', 'custom.event'],
+        ['t1', EventType.TURN_DONE],
+        ['t1', 'custom.event'],
+      ]);
+
+      const none = await store.listSessionEvents({
+        session_id: sessionId,
+        limit: 50,
+        last_turn_id: undefined,
+        page_token: undefined,
+        types: [],
+        after_event_id: undefined,
+      });
+      expect(none.data).toEqual([]);
+      expect(none.pagination.next_page_token).toBeUndefined();
+    });
+
+    it('listSessionEvents after_event_id returns only events newer than the cursor, in listing order', async () => {
+      const store = createStore();
+      await seedEventChain(store);
+      const all = await listAllSessionEvents(store, { limit: 100, types: undefined, after_event_id: undefined });
+      const cursor = mustGet(all.rows.find(row => row.turn_id === 't2')).event_id;
+
+      const newer = await listAllSessionEvents(store, { limit: 100, types: undefined, after_event_id: cursor });
+      expect(newer.rows).toEqual(all.rows.filter(row => row.event_id > cursor));
+      expect(newer.rows.length).toBeGreaterThan(0);
+
+      const newest = mustGet(
+        all.rows
+          .map(row => row.event_id)
+          .sort()
+          .at(-1),
+      );
+      const empty = await listAllSessionEvents(store, { limit: 100, types: undefined, after_event_id: newest });
+      expect(empty.rows).toEqual([]);
+    });
+
+    it('listSessionEvents keyset pages have no duplicates or gaps while the running tip appends', async () => {
+      const store = createStore();
+      await seedEventChain(store);
+      const snapshot = await listAllSessionEvents(store, { limit: 100, types: undefined, after_event_id: undefined });
+      expect(snapshot.pages).toBe(1);
+
+      // New rows land at the head of the newest-first order between page requests; an offset
+      // cursor would re-serve shifted rows, a keyset cursor keeps walking toward older ones.
+      const walked = await listAllSessionEvents(
+        store,
+        { limit: 3, types: undefined, after_event_id: undefined },
+        async () => {
+          await store.appendToEvents({ session_id: sessionId, turn_id: 't3', events: [makeModelMessageEvent()] });
+        },
+      );
+      expect(walked.pages).toBeGreaterThan(1);
+      expect(walked.rows).toEqual(snapshot.rows);
+      expect(new Set(walked.rows.map(row => row.event_id)).size).toBe(walked.rows.length);
+    });
+
+    it('listSessionEvents keyset pages compose with type and after_event_id filters', async () => {
+      const store = createStore();
+      await seedEventChain(store);
+      const filter: { types: PersistedTurnEvent['type'][]; after_event_id: undefined } = {
+        types: [EventType.MODEL_MESSAGE, 'custom.event'],
+        after_event_id: undefined,
+      };
+      const expected = await listAllSessionEvents(store, { limit: 100, ...filter });
+      const walked = await listAllSessionEvents(store, { limit: 2, ...filter });
+      expect(walked.pages).toBe(Math.ceil(expected.rows.length / 2));
+      expect(walked.rows).toEqual(expected.rows);
+
+      const cursor = mustGet(expected.rows.at(-3)).event_id;
+      const newerExpected = expected.rows.filter(row => row.event_id > cursor);
+      const newerWalked = await listAllSessionEvents(store, { limit: 1, ...filter, after_event_id: cursor });
+      expect(newerWalked.rows).toEqual(newerExpected);
+    });
+
+    it('listSessionEvents rejects page tokens that do not belong to the anchored chain', async () => {
+      const store = createStore();
+      await seedEventChain(store);
+      const offTheChain = encodeSessionEventPageToken({ last_turn_id: 't3', turn_id: 'not-a-turn', event_id: 'x' });
+      const legacyOffset = Buffer.from(JSON.stringify({ last_turn_id: 't3', offset: 3 }), 'utf8').toString('base64url');
+      for (const pageToken of [offTheChain, legacyOffset]) {
+        await expect(
+          store.listSessionEvents({
+            session_id: sessionId,
+            limit: 10,
+            last_turn_id: undefined,
+            page_token: pageToken,
+            types: undefined,
+            after_event_id: undefined,
+          }),
+        ).rejects.toBeInstanceOf(SessionStoreConflictError);
+      }
+    });
+
+    it("listSessionEvents rejects another session's page token as an unknown turn", async () => {
+      const store = createStore();
+      await seedEventChain(store);
+      const otherSessionId = 's2';
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: otherSessionId,
+        created_by_subject: { subject_id: createdBy, subject_type: 'user', subject_display_name: createdBy },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      });
+      await store.createTurn(makeCreateTurnInput({ sessionId: otherSessionId, turnId: 'other-1' }));
+      await store.appendToEvents({
+        session_id: otherSessionId,
+        turn_id: 'other-1',
+        events: [makeTurnCreatedEvent('other-1'), makeModelMessageEvent()],
+      });
+      const otherPage = await store.listSessionEvents({
+        session_id: otherSessionId,
+        limit: 1,
+        last_turn_id: undefined,
+        page_token: undefined,
+        types: undefined,
+        after_event_id: undefined,
+      });
+
+      await expect(
+        store.listSessionEvents({
+          session_id: sessionId,
+          limit: 10,
+          last_turn_id: undefined,
+          page_token: mustGet(otherPage.pagination.next_page_token),
+          types: undefined,
+          after_event_id: undefined,
+        }),
+      ).rejects.toBeInstanceOf(TurnNotFoundError);
     });
   });
 

@@ -14,6 +14,7 @@ import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import type { Database } from '../../../../src/db/sqlite/types';
 
 const PREVIOUS_MIGRATION = '20261010_000007_mcp_server_first_party';
+const THIS_MIGRATION = '20261011_000001_sentinel_search_without_asking';
 
 async function createMigrator(db: Kysely<Database>): Promise<Migrator> {
   return new Migrator({
@@ -80,7 +81,8 @@ describe('20261011_000001_sentinel_search_without_asking migration', () => {
 
   it('rolls back by dropping the column and keeping the users', async () => {
     const migrator = await createMigrator(db);
-    expect((await migrator.migrateToLatest()).error).toBeUndefined();
+    // Stop at this migration so rolling back one step undoes it, whatever lands after it.
+    expect((await migrator.migrateTo(THIS_MIGRATION)).error).toBeUndefined();
     await sql`
       INSERT INTO sentinel_user_settings
         (tenant_id, created_by, offline_mode, tier2_auto_allow, search_without_asking, created_at, updated_at)

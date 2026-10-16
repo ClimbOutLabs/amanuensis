@@ -17,14 +17,15 @@
 import { estimateTokensForString } from '../src/core/llm/usage';
 import {
   ABILITY_BOUNDARIES_PROMPT,
+  createSourceDiscoveryContract,
   INTERNAL_SYSTEM_PROMPT,
   NO_TASK_NO_TOOLS_PROMPT,
-  SOURCE_DISCOVERY_CONTRACT,
+  PLAIN_SPEECH_PROMPT,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
 } from '../src/core/runtime/contextUtils';
 import {
+  createSandboxExecDescription,
   SANDBOX_APPLY_PATCH_DESCRIPTION,
-  SANDBOX_EXEC_DESCRIPTION,
   SANDBOX_REPLACE_TEXT_DESCRIPTION,
   SANDBOX_RUN_REGISTERED_COMMAND_DESCRIPTION,
   SANDBOX_SUBMIT_IMPLEMENTATION_PLAN_DESCRIPTION,
@@ -42,10 +43,11 @@ interface Row {
 const rows: Row[] = [
   { section: 'system: internal-messages', tokens: tokens(INTERNAL_SYSTEM_PROMPT) },
   { section: 'system: untrusted-tool-output', tokens: tokens(UNTRUSTED_TOOL_OUTPUT_PROMPT) },
-  { section: 'system: source-discovery', tokens: tokens(SOURCE_DISCOVERY_CONTRACT) },
+  { section: 'system: source-discovery', tokens: tokens(createSourceDiscoveryContract({ shellCanFetch: true })) },
   { section: 'system: ability-boundaries', tokens: tokens(ABILITY_BOUNDARIES_PROMPT) },
   { section: 'system: no-task-no-tools', tokens: tokens(NO_TASK_NO_TOOLS_PROMPT) },
-  { section: 'tool: sandbox exec description', tokens: tokens(SANDBOX_EXEC_DESCRIPTION) },
+  { section: 'system: plain-speech', tokens: tokens(PLAIN_SPEECH_PROMPT) },
+  { section: 'tool: sandbox exec description', tokens: tokens(createSandboxExecDescription({ offline: false })) },
   { section: 'tool: apply_patch description', tokens: tokens(SANDBOX_APPLY_PATCH_DESCRIPTION) },
   { section: 'tool: replace_text description', tokens: tokens(SANDBOX_REPLACE_TEXT_DESCRIPTION) },
   { section: 'tool: write_file description', tokens: tokens(SANDBOX_WRITE_FILE_DESCRIPTION) },

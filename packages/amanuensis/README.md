@@ -1,6 +1,7 @@
 # Amanuensis
 
-Agent server and chat UI, started with one command. No clone, no Docker, no database to set up.
+Agent server and chat UI, started with one command. No clone, no database to set up. Login is mandatory, so
+you point it at an OIDC identity provider first (see [Login](#login)).
 
 ```sh
 npx amanuensis
@@ -16,6 +17,23 @@ npx amanuensis --help       Show usage
 ```
 
 Requires Node.js 22.14 or newer.
+
+## Login
+
+Amanuensis always requires sign-in and refuses to start without it. Set these before the first run:
+
+```sh
+export OIDC_ISSUER_URL=https://login.example.com/dex   # http is accepted only for localhost, 127.0.0.1, ::1
+export OIDC_CLIENT_ID=<client id>
+export OIDC_CLIENT_SECRET=<client secret>
+```
+
+Register `<public url>/api/v1/auth/callback` as the redirect URI, where the public URL is
+`http://localhost:8790` unless you set `PUBLIC_BASE_URL` (an origin with no path; use `https` behind a
+reverse proxy). To limit sign-in to one account, also set `OIDC_USER_ROLE_CLAIM=email`,
+`OIDC_ADMIN_ROLE_VALUE=<email>` and `OIDC_ALLOWED_EMAILS=<email>`. Running several instances on one
+hostname? Give each its own `AUTH_COOKIE_SUFFIX`. From a repository checkout, `pnpm dev:login` starts a
+local Dex in Docker and prints these lines. See the authentication docs for details.
 
 ## First run: pick a model provider
 
@@ -42,7 +60,7 @@ that has no environment override.
 
 ## Standalone only
 
-`npx amanuensis` runs in standalone mode: SQLite, no Redis, no Docker. That is local use only and
+`npx amanuensis` runs in standalone mode: SQLite, no Redis. That is local use only and
 is not production-safe. It is a single process with no peering, so it cannot be scaled across
 replicas, and it has no backup or migration story beyond copying the database file.
 
