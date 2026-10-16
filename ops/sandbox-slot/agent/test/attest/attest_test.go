@@ -11,6 +11,12 @@ import (
 
 const goodStatus = "Name:\tagent\nUid:\t65532\t65532\t65532\t65532\nGid:\t65532\t65532\t65532\t65532\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapBnd:\t0000000000000000\nNoNewPrivs:\t1\nSeccomp:\t2\n"
 
+const (
+	routeHeader   = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
+	loopbackRoute = "00000000000000000000000000000001 80 00000000000000000000000000000000 00 00000000000000000000000000000000 00000000 00000002 00000000 80200001 lo\n"
+	fallbackNames = "gre0 gretap0 erspan0 ip_vti0 ip6_vti0 sit0 tunl0 ip6tnl0 ip6gre0"
+)
+
 type world struct {
 	t    *testing.T
 	root string
@@ -20,6 +26,7 @@ func newWorld(t *testing.T) *world {
 	w := &world{t: t, root: t.TempDir()}
 	w.write("proc/self/status", goodStatus)
 	w.write("proc/net/dev", "Inter-|   Receive\n face |bytes\n    lo: 0 0\n")
+	w.write("proc/net/route", routeHeader)
 	// A file, so creating a directory below it fails for root as well, as the read-only real /proc/fs does.
 	w.write("proc/fs", "")
 	w.mountinfo("ro")
@@ -29,6 +36,15 @@ func newWorld(t *testing.T) *world {
 	w.write("cgroup/memory.max", "2147483648\n")
 	w.write("cgroup/pids.max", "512\n")
 	return w
+}
+
+// devices lists the network interfaces /proc/net/dev reports.
+func (w *world) devices(names ...string) {
+	out := "Inter-|   Receive\n face |bytes\n"
+	for _, n := range names {
+		out += "  " + n + ": 0 0\n"
+	}
+	w.write("proc/net/dev", out)
 }
 
 func (w *world) mountinfo(options string) {
@@ -120,6 +136,35 @@ func TestEachMissingGuaranteeFailsClosed(t *testing.T) {
 		{"second interface", attest.CheckNetwork, func(w *world, _ *attest.Collector) {
 			w.write("proc/net/dev", "Inter-|   Receive\n face |bytes\n    lo: 0 0\n  eth0: 1 1\n")
 		}},
+		{"unknown interface that is down and unaddressed", attest.CheckNetwork, func(w *world, c *attest.Collector) {
+			w.devices("lo", "dummy0")
+			c.InterfaceInfo = func(string) (attest.NetIface, error) { return attest.NetIface{}, nil }
+		}},
+		{"a fallback tunnel device that is up", attest.CheckNetwork, func(w *world, c *attest.Collector) {
+			w.devices("lo", "tunl0")
+			c.InterfaceInfo = func(string) (attest.NetIface, error) { return attest.NetIface{Up: true}, nil }
+		}},
+		{"a fallback tunnel device with an address", attest.CheckNetwork, func(w *world, c *attest.Collector) {
+			w.devices("lo", "sit0")
+			c.InterfaceInfo = func(string) (attest.NetIface, error) { return attest.NetIface{Addresses: 1}, nil }
+		}},
+		{"a fallback tunnel device that cannot be read", attest.CheckNetwork, func(w *world, c *attest.Collector) {
+			w.devices("lo", "gre0")
+			c.InterfaceInfo = func(string) (attest.NetIface, error) { return attest.NetIface{}, os.ErrPermission }
+		}},
+		{"an ipv4 route through another interface", attest.CheckNetwork, func(w *world, c *attest.Collector) {
+			w.devices("lo", "gre0")
+			c.InterfaceInfo = func(string) (attest.NetIface, error) { return attest.NetIface{}, nil }
+			w.write("proc/net/route", routeHeader+"gre0\t00000000\t0100000A\t0003\t0\t0\t0\t00000000\t0\t0\t0\n")
+		}},
+		{"an ipv6 route through another interface", attest.CheckNetwork, func(w *world, c *attest.Collector) {
+			w.devices("lo", "ip6gre0")
+			c.InterfaceInfo = func(string) (attest.NetIface, error) { return attest.NetIface{}, nil }
+			w.write("proc/net/ipv6_route", loopbackRoute+"00000000000000000000000000000000 00 00000000000000000000000000000000 00 fe800000000000000000000000000001 00000400 00000001 00000000 00000003 ip6gre0\n")
+		}},
+		{"routes unreadable", attest.CheckNetwork, func(w *world, _ *attest.Collector) {
+			_ = os.Remove(filepath.Join(w.root, "proc/net/route"))
+		}},
 		{"docker socket", attest.CheckNoDockerSocket, func(w *world, _ *attest.Collector) { w.write("docker.sock", "") }},
 		{"memory unlimited", attest.CheckCgroupLimits, func(w *world, _ *attest.Collector) { w.write("cgroup/memory.max", "max\n") }},
 		{"memory differs from the compose limit", attest.CheckCgroupLimits, func(w *world, _ *attest.Collector) { w.write("cgroup/memory.max", "4294967296\n") }},
@@ -157,6 +202,28 @@ func TestEachMissingGuaranteeFailsClosed(t *testing.T) {
 				t.Fatalf("%s should fail, got %+v", tc.check, got)
 			}
 		})
+	}
+}
+
+func TestIdleFallbackTunnelDevicesPass(t *testing.T) {
+	w := newWorld(t)
+	w.devices(append([]string{"lo"}, strings.Fields(fallbackNames)...)...)
+	w.write("proc/net/ipv6_route", loopbackRoute)
+	c := w.collector()
+	c.InterfaceInfo = func(string) (attest.NetIface, error) { return attest.NetIface{}, nil }
+	if got := check(c.Collect(), attest.CheckNetwork); !got.OK {
+		t.Fatalf("down, unaddressed fallback devices with only loopback routes must pass: %+v", got)
+	}
+}
+
+func TestNetworkFailureNamesTheOffendingInterface(t *testing.T) {
+	w := newWorld(t)
+	w.devices("lo", "gre0", "eth0")
+	c := w.collector()
+	c.InterfaceInfo = func(name string) (attest.NetIface, error) { return attest.NetIface{Up: name == "gre0"}, nil }
+	got := check(c.Collect(), attest.CheckNetwork)
+	if got.OK || got.Detail != "interfaces: eth0 gre0 (up)" {
+		t.Fatalf("unexpected result: %+v", got)
 	}
 }
 
