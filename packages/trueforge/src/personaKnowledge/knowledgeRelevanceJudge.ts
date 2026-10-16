@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import { getModelDetails } from '../runtime/sessionResources';
+import { meterHelperLlm, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import type { PersonaKnowledgeHit } from './knowledgeRetrieval';
 
 export const KNOWLEDGE_RELEVANCE_JUDGE_VERSION = 'knowledge-relevance/v1';
@@ -108,6 +109,7 @@ export function createKnowledgeRelevanceJudge(input: {
   tenantId: string;
   modelName: string;
   modelProviderStore: IModelProviderStore;
+  tokenFactoryBudget: TokenFactoryBudget;
   logger: Logger;
 }): KnowledgeRelevanceJudge {
   return async (question, candidates) => {
@@ -127,11 +129,16 @@ export function createKnowledgeRelevanceJudge(input: {
     if (modelProperties.reasoning_efforts?.includes('none') === true) {
       Object.assign(request, { enable_thinking: false, reasoning_effort: 'none' });
     }
-    const llm = new VercelAILLM({
-      providerConfig,
+    const llm = meterHelperLlm({
+      llm: new VercelAILLM({
+        providerConfig,
+        logger: input.logger,
+        signal: AbortSignal.timeout(RELEVANCE_JUDGE_TIMEOUT_MS),
+        streamTimeout,
+      }),
+      providerType: providerConfig.provider.type,
+      budget: input.tokenFactoryBudget,
       logger: input.logger,
-      signal: AbortSignal.timeout(RELEVANCE_JUDGE_TIMEOUT_MS),
-      streamTimeout,
     });
     const result = await llm.createNonStream(request);
     const verdict = parseRelevanceJudgeResponse(assistantContentText(result.output.content ?? null), candidates.length);

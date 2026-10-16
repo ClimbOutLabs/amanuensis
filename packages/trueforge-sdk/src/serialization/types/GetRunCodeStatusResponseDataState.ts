@@ -4,8 +4,8 @@ import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
 
-export const GetRunCodeStatusResponseDataState: core.serialization.Schema<serializers.GetRunCodeStatusResponseDataState.Raw, TrueForge.GetRunCodeStatusResponseDataState> = core.serialization.enum_(["ready", "not_configured", "docker_unavailable", "daemon_unavailable", "image_missing", "signature_unverified", "image_unavailable", "isolation_refused", "unsupported_platform"]);
+export const GetRunCodeStatusResponseDataState: core.serialization.Schema<serializers.GetRunCodeStatusResponseDataState.Raw, TrueForge.GetRunCodeStatusResponseDataState> = core.serialization.enum_(["ready", "not_configured", "docker_unavailable", "daemon_unavailable", "image_missing", "signature_unverified", "image_unavailable", "isolation_refused", "unsupported_platform", "slots_unavailable"]);
 
 export declare namespace GetRunCodeStatusResponseDataState {
-    export type Raw = "ready" | "not_configured" | "docker_unavailable" | "daemon_unavailable" | "image_missing" | "signature_unverified" | "image_unavailable" | "isolation_refused" | "unsupported_platform";
+    export type Raw = "ready" | "not_configured" | "docker_unavailable" | "daemon_unavailable" | "image_missing" | "signature_unverified" | "image_unavailable" | "isolation_refused" | "unsupported_platform" | "slots_unavailable";
 }

@@ -24,7 +24,7 @@ import {
 import type { IMcpToolGrantStore } from '../db/mcpToolGrantStore';
 import type { WithTransaction } from '../db/transaction';
 import { createMcpOAuthClient } from '../mcp/auth/mcpDcr';
-import { mcpOAuthCallbackUrl } from '../mcp/auth/mcpOAuthHelpers';
+import { mcpOAuthRedirectUris } from '../mcp/auth/mcpOAuthHelpers';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
 import { firstPartyAfterSave } from '../mcp/firstParty';
 import {
@@ -496,7 +496,7 @@ export function createSettingsMcpServersRouter<TTransaction>(
         dcrClientToSave = await createMcpOAuthClient({
           mcpServerUrl: incomingManifest.url,
           mcpServerName: incomingManifest.name,
-          redirectUri: mcpOAuthCallbackUrl(),
+          redirectUris: mcpOAuthRedirectUris(),
           clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
         });
       } catch (error) {
@@ -673,7 +673,7 @@ export function createSettingsMcpServersRouter<TTransaction>(
             dcrClientToSave = await createMcpOAuthClient({
               mcpServerUrl: manifest.url,
               mcpServerName: manifest.name,
-              redirectUri: mcpOAuthCallbackUrl(),
+              redirectUris: mcpOAuthRedirectUris(),
               clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
             });
           }

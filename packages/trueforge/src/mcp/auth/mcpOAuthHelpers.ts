@@ -4,7 +4,8 @@ import type {
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { McpConnectionError } from '@truefoundry/trueforge-core/core';
-import { getPublicBaseUrl } from '../../config';
+import { currentListedOrigin } from '../../auth/listedOriginContext';
+import { getAllowedOrigins, getPublicBaseUrl } from '../../config';
 import type { OAuthClientCredentials, OAuthServerMetadata, OAuthToken } from './types';
 
 /** Fixed OAuth callback path for every MCP server. */
@@ -13,8 +14,15 @@ export const MCP_OAUTH_CALLBACK_PATH = '/api/v1/mcp-servers/oauth/callback';
 /** Fallback TTL when an RFC 6749 token response omits `expires_in`. */
 export const DEFAULT_MCP_ACCESS_TOKEN_TTL_SECONDS = 3600;
 
-/** Builds the server-owned MCP OAuth callback URL. */
+/**
+ * Builds the server-owned MCP OAuth callback URL. On an instance opened at several addresses it is the address this
+ * request came to, so the consent page returns to the device that asked; otherwise the public address.
+ */
 export function mcpOAuthCallbackUrl(): string {
+  const origin = currentListedOrigin();
+  if (origin !== undefined) {
+    return `${origin}${MCP_OAUTH_CALLBACK_PATH}`;
+  }
   try {
     const publicBaseUrl = getPublicBaseUrl();
     return `${publicBaseUrl}${MCP_OAUTH_CALLBACK_PATH}`;
@@ -23,6 +31,15 @@ export function mcpOAuthCallbackUrl(): string {
       cause: error,
     });
   }
+}
+
+/** The callback of this request first, then that of every other listed address, for a client registered once. */
+export function mcpOAuthRedirectUris(): string[] {
+  const primary = mcpOAuthCallbackUrl();
+  const others = getAllowedOrigins()
+    .map(origin => `${origin}${MCP_OAUTH_CALLBACK_PATH}`)
+    .filter(uri => uri !== primary);
+  return [primary, ...others];
 }
 
 /** Uses form-body client authentication when a secret is present. */

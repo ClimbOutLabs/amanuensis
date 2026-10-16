@@ -201,7 +201,7 @@ function goodInspectEntry(user = '65532:65532'): Record<string, unknown> {
       ReadonlyRootfs: true,
       CapDrop: ['ALL'],
       CapAdd: [],
-      SecurityOpt: ['no-new-privileges:true', 'seccomp=default'],
+      SecurityOpt: ['no-new-privileges:true', 'seccomp=builtin'],
     },
   };
 }
@@ -251,15 +251,14 @@ describe('DockerDriver.create', () => {
       '--security-opt',
       'no-new-privileges:true',
       '--security-opt',
-      'seccomp=default',
+      'seccomp=builtin',
       '--pids-limit',
       '256',
       '--memory',
       '2048m',
       '--memory-swap',
       '2048m',
-      '--oom-kill-disable',
-      'false',
+      '--oom-kill-disable=false',
       '--cpus',
       '2',
       '--shm-size',
@@ -1345,7 +1344,7 @@ describe('checkContainerIsolation', () => {
 
   test('rejects missing no-new-privileges', () => {
     const entry = goodInspectEntry();
-    (entry['HostConfig'] as Record<string, unknown>)['SecurityOpt'] = ['seccomp=default'];
+    (entry['HostConfig'] as Record<string, unknown>)['SecurityOpt'] = ['seccomp=builtin'];
     const result = checkContainerIsolation({ identity: SANDBOX_IDENTITY, inspectJson: JSON.stringify([entry]) });
     expect(result.ok).toBe(false);
     if (!result.ok) {

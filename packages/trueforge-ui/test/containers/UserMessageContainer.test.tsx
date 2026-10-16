@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { ThreadPrimitive, type ThreadMessageLike } from '@assistant-ui/react';
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { UserMessageContainer } from '@/containers/UserMessageContainer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
@@ -103,5 +103,22 @@ describe('UserMessageContainer', () => {
       isRunning: true,
     });
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+  });
+
+  describe('copy over a plain http address', () => {
+    afterEach(() => {
+      Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+      Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    });
+
+    it('copies the message through the fallback instead of failing when navigator.clipboard is missing', async () => {
+      Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true });
+      Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+      const exec = vi.fn(() => true);
+      Object.defineProperty(document, 'execCommand', { value: exec, configurable: true });
+      renderUserMessage([{ role: 'user', content: 'copy me' }]);
+      fireEvent.click(await screen.findByRole('button', { name: 'Copy' }));
+      expect(exec).toHaveBeenCalledWith('copy');
+    });
   });
 });

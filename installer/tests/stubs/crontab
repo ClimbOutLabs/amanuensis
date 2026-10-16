@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Test double for `crontab`: the table is a file in $STUB_STATE.
+file=${STUB_STATE:?}/crontab
+case "${1:-}" in
+  -l)
+    if [ -f "$file" ]; then cat "$file"; else
+      echo "no crontab for user" >&2
+      exit 1
+    fi
+    ;;
+  -)
+    # Like the real one, the table is replaced only once all of the new one has been read.
+    table=$(cat)
+    printf '%s\n' "$table" >"$file"
+    ;;
+  *) exit 1 ;;
+esac

@@ -26,6 +26,7 @@ import { z } from '@hono/zod-openapi';
 import { createHash, randomBytes } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
+import { lexicalPath, type PathResolution } from './trackedExecutables';
 
 /** Deterministic JSON serialization: object keys sorted recursively. */
 export function stableStringify(value: unknown): string {
@@ -348,9 +349,16 @@ export function verifyApprovalToken(input: {
  * symlinks resolved; empty or unset falls back to the workspace root.
  * Returns null on any resolution failure (fail closed).
  */
-export function normalizeCwd(input: { cwd: string | undefined; workspace_root: string }): string | null {
+export function normalizeCwd(input: {
+  cwd: string | undefined;
+  workspace_root: string;
+  resolution?: PathResolution | undefined;
+}): string | null {
+  const raw = input.cwd === undefined || input.cwd === '' ? input.workspace_root : input.cwd;
+  if (input.resolution === 'remote') {
+    return lexicalPath({ p: raw, cwd: input.workspace_root });
+  }
   try {
-    const raw = input.cwd === undefined || input.cwd === '' ? input.workspace_root : input.cwd;
     const absolute = path.isAbsolute(raw) ? raw : path.resolve(input.workspace_root, raw);
     return realpathSync(absolute);
   } catch {

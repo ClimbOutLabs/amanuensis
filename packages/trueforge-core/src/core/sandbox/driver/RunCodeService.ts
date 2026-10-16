@@ -153,7 +153,7 @@ export class RunCodeService implements RunCodeBackend {
     this.sleepMs = options.sleepMs ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
   }
 
-  get driverKind(): 'docker' | 'firecracker' {
+  get driverKind(): IsolationDriver['kind'] {
     return this.driver.kind;
   }
 
@@ -361,7 +361,10 @@ export class RunCodeService implements RunCodeBackend {
             : 'daemon_unavailable';
       return this.failedResult({
         error_code: code,
-        error: errorTextForCode({ error_code: code, detail: readiness.error }),
+        error:
+          readiness.verbatim === true
+            ? readiness.error
+            : errorTextForCode({ error_code: code, detail: readiness.error }),
         runRoot: '',
         stdout: '',
         stderr: '',
