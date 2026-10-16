@@ -28,18 +28,18 @@ IMAGE=$(sed -n 's/.*"caddy_image": *"\([^"]*\)".*/\1/p' "$INSTALLER/release.json
 [ -n "$IMAGE" ] || fail "release.json has no caddy_image"
 
 mkdir -p "$WORK/tls/trust"
-node "$INSTALLER/lib/pki.mjs" ensure-ca "$WORK/tls/ca" >/dev/null
+node "$INSTALLER/lib/pki.mjs" ensure-ca "$WORK/tls/ca" 127.0.0.1 "$SECOND" localhost >/dev/null
 node "$INSTALLER/lib/pki.mjs" issue "$WORK/tls/ca" "$WORK/tls/leaf/main" 127.0.0.1 "$SECOND" localhost >/dev/null
 cp "$WORK/tls/ca/root.crt" "$WORK/tls/trust/ca.crt"
 printf '<html>trust page</html>\n' >"$WORK/tls/trust/index.html"
 # The same template and placeholders the installer fills in.
-sed "s|@@NAME@@|main|; s|@@DEFAULT_NAME@@|127.0.0.1|; s|@@HTTPS_IN@@|8443|g; s|@@HTTP_IN@@|8081|g; s|@@HTTPS_PORT@@|$HTTPS_PORT|" \
+sed "s|@@NAME@@|main|; s|@@DEFAULT_NAME@@|127.0.0.1|; s|@@HTTPS_IN@@|8443|g; s|@@HTTP_IN@@|8081|g; s|@@HTTPS_PORT@@|$HTTPS_PORT|; s|@@HOSTS@@|127.0.0.1 $SECOND localhost|" \
   "$INSTALLER/templates/tls/Caddyfile.tpl" >"$WORK/Caddyfile"
 chmod -R a+rX "$WORK"
 
 docker run -d --name "$NAME" --user "$(id -u):$(id -g)" \
   -p "127.0.0.1:$HTTPS_PORT:8443" -p "$SECOND:$HTTPS_PORT:8443" -p "127.0.0.1:$HTTP_PORT:8081" -p "$SECOND:$HTTP_PORT:8081" \
-  --tmpfs /data --tmpfs /config -v "$WORK/Caddyfile:/etc/caddy/Caddyfile:ro" -v "$WORK/tls/leaf/main:/certs:ro" \
+  --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges:true --read-only --tmpfs /data --tmpfs /config --tmpfs /tmp -v "$WORK/Caddyfile:/etc/caddy/Caddyfile:ro" -v "$WORK/tls/leaf/main:/certs:ro" \
   -v "$WORK/tls/trust:/srv/trust:ro" "$IMAGE" caddy run --config /etc/caddy/Caddyfile >/dev/null
 docker run -d --name "$NAME-backend" --network "container:$NAME" "$IMAGE" caddy respond --listen :8790 --body backend-ok >/dev/null
 
@@ -60,6 +60,13 @@ redirect=$(curl -sS --max-time 8 -o /dev/null -w '%{http_code} %{redirect_url}' 
 download=$(curl -sS --max-time 8 -o "$WORK/downloaded.crt" -w '%{http_code} %{content_type}' "http://$SECOND:$HTTP_PORT/trust/ca.crt")
 [ "$download" = "200 application/x-x509-ca-cert" ] || fail "the certificate download answered [$download]"
 cmp -s "$WORK/downloaded.crt" "$WORK/tls/ca/root.crt" || fail "the download is not the authority's certificate"
+
+refused=$(curl -sS --max-time 8 -o /dev/null -w '%{http_code}' -H 'Host: other.example' "http://$SECOND:$HTTP_PORT/some/path")
+[ "$refused" = 421 ] || fail "a name the instance does not answer at was answered [$refused]"
+headers=$(curl -sSI --max-time 8 "http://$SECOND:$HTTP_PORT/trust")
+case "$headers" in *"Content-Security-Policy: default-src 'none'"*) ;; *) fail "the trust page has no strict policy" ;; esac
+case "$headers" in *"X-Content-Type-Options: nosniff"*) ;; *) fail "the trust page may be sniffed" ;; esac
+case "$(curl -sSI --max-time 8 --cacert "$WORK/tls/ca/root.crt" "https://$SECOND:$HTTPS_PORT/")" in *"Alt-Svc"*) fail "http/3 is advertised" ;; esac
 
 if curl -sS --max-time 8 -o /dev/null "https://$SECOND:$HTTPS_PORT/" 2>/dev/null; then fail "a client that does not trust the authority was accepted"; fi
 

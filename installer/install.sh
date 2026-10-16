@@ -316,6 +316,8 @@ on_exit() {
 }
 
 main() {
+  # The installer's own checks run the aman command; they must not start a renewal of their own inside this run.
+  export AMAN_NO_TLS_RENEW=1
   parse_args "$@"
   set_paths
   trap on_exit EXIT

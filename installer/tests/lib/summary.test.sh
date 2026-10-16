@@ -9,6 +9,7 @@ set -euo pipefail
 ending() {
   printf '%s\n' "$OUT" | sed -n '/^Checking the result/,$p' |
     sed "s|$SB_INSTALLER|<checkout>/installer|g; s|$AMAN_HOME|<home>|g" |
+    sed -E 's/([0-9A-F]{2}:){31}[0-9A-F]{2}/<fingerprint>/g' |
     awk '/^$/ { held = 1; next } /^Done in / { held = 0; next } { if (held) print ""; held = 0; print }'
 }
 
@@ -40,6 +41,9 @@ Ready. Instance main is running.
   Trust this computer on each device: http://192.168.1.20:8791/trust
   On an iPhone, open it in Safari, install the profile, then turn it on
   in Settings, General, About, Certificate Trust Settings.
+  Before you trust it, check that the fingerprint your device shows is
+  <fingerprint>.
+  If it differs, stop.
   Bookmark spark.local: it keeps working when this computer's address
   changes.
   Open a new terminal window to use the aman command.

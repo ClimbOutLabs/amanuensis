@@ -93,13 +93,37 @@ test_a_group_writable_checkout_is_made_private_once() {
   sandbox_new
   mkdir -p "$REPO/installer"
   chmod -R g+w "$REPO"
-  chmod g+w "$SB"
   install_machine
   assert_flat_contains "$OUT" "private to you, so only you can change what the installer runs"
-  assert_eq "$(find "$REPO" "$REPO/installer" "$SB" -maxdepth 0 -perm -g+w | wc -l | tr -d ' ')" 0 "the folder, its installer and the folder holding it"
+  assert_eq "$(find "$REPO" "$REPO/installer" -maxdepth 0 -perm -g+w | wc -l | tr -d ' ')" 0 "the folder and its installer"
   assert_eq "$(find "$REPO/installer" -perm -g+w | wc -l | tr -d ' ')" 0
   run_install --yes
   assert_not_contains "$OUT" "private to you"
+  sandbox_drop
+}
+
+test_a_folder_above_the_checkout_is_never_changed() {
+  t_begin "a folder above the checkout that others can change is left as it is, and said once, since aman will refuse to run from it"
+  sandbox_new
+  chmod g+w "$SB"
+  install_machine
+  assert_eq "$(find "$SB" -maxdepth 0 -perm -g+w | wc -l | tr -d ' ')" 1 "the installer does not change a folder that is not its own"
+  assert_flat_contains "$ERR" "A folder above the folder Aman was installed from can be changed by other users"
+  assert_flat_contains "$ERR" "Move the folder to one only you can change"
+  sandbox_drop
+}
+
+test_a_link_in_the_installer_is_said_and_left_alone() {
+  t_begin "a link under the installer is not followed when tightening, and is said once"
+  sandbox_new
+  mkdir -p "$REPO/installer"
+  printf 'x\n' >"$SB/elsewhere"
+  chmod 666 "$SB/elsewhere"
+  ln -s "$SB/elsewhere" "$REPO/installer/link"
+  chmod -R g+w "$REPO"
+  install_machine
+  assert_eq "$(stat -c '%a' "$SB/elsewhere" 2>/dev/null || stat -f '%Lp' "$SB/elsewhere")" 666 "what a link points at is not changed"
+  assert_flat_contains "$ERR" "contains links, so Aman will not run it"
   sandbox_drop
 }
 
@@ -177,6 +201,8 @@ test_zsh_gets_its_own_profile
 test_the_plan_names_the_command_row
 test_upgrade_restores_the_command_and_its_files
 test_a_group_writable_checkout_is_made_private_once
+test_a_folder_above_the_checkout_is_never_changed
+test_a_link_in_the_installer_is_said_and_left_alone
 test_the_command_subcommand_puts_the_files_back
 test_a_rerun_with_nothing_to_do_still_checks_run_code
 test_a_busy_port_moves_the_instance

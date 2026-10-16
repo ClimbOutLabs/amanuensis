@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -1391,6 +1392,66 @@ describe('https on the network', () => {
     assert.ok(world.calls().some(line => line.includes('--cacert') && line.includes('https://127.0.0.1:8443/healthz')));
   });
 
+  it('names the fingerprint to compare on a device, and no longer says the daily backup renews it', () => {
+    make();
+    world.tls('main');
+    world.crontab('30 3 * * * /x/aman backup # amanuensis-backup\n');
+    const check = tlsCheck();
+    assert.match(check.detail, /fingerprint, to compare on a device before trusting it: AA:BB:CC/);
+    assert.match(check.detail, /Aman renews it in its last 60 days/);
+    assert.doesNotMatch(check.detail, /daily backup/);
+  });
+
+  it('warns plainly when backups are off, since renewal then waits for an aman command', () => {
+    make();
+    world.tls('main');
+    mkdirSync(path.join(world.home, 'state'), { recursive: true });
+    writeFileSync(path.join(world.home, 'state', 'backups'), 'off\n');
+    const check = tlsCheck();
+    assert.equal(check.state, 'warn');
+    assert.match(
+      check.detail,
+      /Daily backups are off, so the https certificate is renewed only when you run an aman command/,
+    );
+    assert.equal(check.fix, 'Run aman doctor backup --fix');
+  });
+
+  it('warns about an authority from before it had limits, and about one that does not cover a name, with the one fix', () => {
+    make();
+    world.tls('main', { constrained: false });
+    assert.match(tlsCheck().detail, /has no limit on the names it can vouch for/);
+    assert.equal(tlsCheck().fix, 'Run aman doctor tls --fix');
+    make();
+    world.tls('main', { covers: false });
+    assert.match(tlsCheck().detail, /does not cover every name of instance main/);
+  });
+
+  it('renews, quietly, from any aman command once 60 days or fewer remain, and not before', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.tls('main', { endsInSeconds: 61 * 86400 });
+    world.shim(['doctor', '--json']);
+    assert.ok(!world.calls().includes(`install.sh --home ${world.home} tls`));
+    make();
+    const repo2 = world.sandbox();
+    world.installerStub(repo2);
+    world.tls('main', { endsInSeconds: 59 * 86400 });
+    world.shim(['doctor', '--json']);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} tls`));
+    world.shim(['backup']);
+    assert.equal(world.calls().filter(line => line === `install.sh --home ${world.home} tls`).length, 2);
+  });
+
+  it('does not renew from inside an installer run', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.tls('main', { endsInSeconds: 10 * 86400 });
+    world.shim(['doctor', '--json'], { env: { AMAN_NO_TLS_RENEW: '1' } });
+    assert.ok(!world.calls().includes(`install.sh --home ${world.home} tls`));
+  });
+
   it('warns, with the one fix, when the certificate is close to its end', () => {
     make();
     world.tls('main', { leafDays: 20 });
@@ -1546,22 +1607,34 @@ describe('the folder Aman runs its installer from', () => {
     );
   });
 
-  it('is not used when the folder that holds it can be changed by other users, until --fix makes it private', () => {
+  it('is not used when a folder above it can be changed by other users, and --fix never changes that folder', () => {
     checkoutWith(0o755);
     chmodSync(world.root, 0o775);
     const refused = world.shim(['backup']);
     assert.equal(refused.code, 1);
     assert.match(
       refused.stderr.replace(/\s+/g, ' '),
-      /folder that holds the folder Aman was installed from can be changed by other users/,
+      /A folder above the folder Aman was installed from can be changed by other users/,
     );
-    assert.match(
-      world.shim(['doctor', 'checkout']).stdout.replace(/\s+/g, ' '),
-      /Next: Run aman doctor checkout --fix/,
-    );
+    assert.match(refused.stderr.replace(/\s+/g, ' '), /Move the folder to one only you can change/);
+    const shown = world.shim(['doctor', 'checkout']);
+    assert.equal(shown.code, 1);
+    assert.match(shown.stdout.replace(/\s+/g, ' '), /Next: Move the folder to one only you can change/);
     const fixed = world.shim(['doctor', 'checkout', '--fix', '--yes']);
-    assert.equal(fixed.code, 0, fixed.stdout + fixed.stderr);
-    assert.equal(statSync(world.root).mode & 0o022, 0);
+    assert.equal(fixed.code, 1);
+    assert.equal(statSync(world.root).mode & 0o777, 0o775, 'a folder above is not Aman to change');
+  });
+
+  it('looks at every folder above it, with links resolved', () => {
+    const repo = checkoutWith(0o755);
+    const high = path.join(world.root, 'high');
+    mkdirSync(path.join(high, 'low'), { recursive: true });
+    chmodSync(high, 0o775);
+    const moved = path.join(high, 'low', 'checkout');
+    renameSync(repo, moved);
+    writeFileSync(path.join(world.home, 'state', 'source'), `${moved}\n`);
+    assert.equal(world.shim(['backup']).code, 1);
+    chmodSync(high, 0o755);
     assert.equal(world.shim(['backup']).code, 0);
   });
 

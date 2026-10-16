@@ -78,9 +78,18 @@ services:
 @@IF_TLS@@      - ./tls.Caddyfile:/etc/caddy/Caddyfile:ro
 @@IF_TLS@@      - @@TLS_LEAF_DIR@@:/certs:ro
 @@IF_TLS@@      - @@TLS_TRUST_DIR@@:/srv/trust:ro
+@@IF_TLS@@    # It needs no privileges beyond the one its binary is marked with, and writes only to memory.
+@@IF_TLS@@    cap_drop:
+@@IF_TLS@@      - ALL
+@@IF_TLS@@    cap_add:
+@@IF_TLS@@      - NET_BIND_SERVICE
+@@IF_TLS@@    security_opt:
+@@IF_TLS@@      - no-new-privileges:true
+@@IF_TLS@@    read_only: true
 @@IF_TLS@@    tmpfs:
 @@IF_TLS@@      - /data
 @@IF_TLS@@      - /config
+@@IF_TLS@@      - /tmp
 @@IF_TLS@@    depends_on:
 @@IF_TLS@@      app:
 @@IF_TLS@@        condition: service_healthy

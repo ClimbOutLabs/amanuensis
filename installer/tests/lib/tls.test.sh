@@ -375,8 +375,107 @@ test_the_front_end_is_a_listed_download() {
   sandbox_drop
 }
 
+test_the_front_end_is_locked_down() {
+  t_begin "the front end drops every privilege, writes only to memory, advertises no http/3, and refuses other names with 421"
+  sandbox_new
+  lan
+  install_machine
+  local file caddyfile
+  file=$(compose)
+  assert_contains "$file" "- ALL"
+  assert_contains "$file" "- NET_BIND_SERVICE"
+  assert_contains "$file" "no-new-privileges:true"
+  assert_contains "$file" "read_only: true"
+  assert_contains "$file" "- /tmp"
+  caddyfile=$(cat "$AMAN_HOME/instances/main/tls.Caddyfile")
+  assert_contains "$caddyfile" "protocols h1 h2"
+  assert_contains "$caddyfile" "@known host 127.0.0.1 localhost 192.168.1.20 spark spark.local"
+  assert_contains "$caddyfile" 'respond "This address is not one Aman is set up for." 421'
+  assert_contains "$caddyfile" "X-Content-Type-Options nosniff"
+  assert_contains "$caddyfile" "default-src 'none'"
+  assert_contains "$caddyfile" "frame-ancestors 'none'"
+  sandbox_drop
+}
+
+test_the_fingerprint_is_shown_where_trust_is_given() {
+  t_begin "the fingerprint of the authority is in the ending, on the trust page and in the doctor, with the words to compare it"
+  sandbox_new
+  lan
+  install_machine
+  local fingerprint
+  fingerprint=$(cat "$AMAN_HOME/tls/ca/root.fingerprint")
+  assert_contains "$fingerprint" ":"
+  assert_flat_contains "$OUT" "Before you trust it, check that the fingerprint your device shows is $fingerprint. If it differs, stop."
+  local page
+  page=$(cat "$AMAN_HOME/tls/trust/main/index.html")
+  assert_contains "$page" "<code>$fingerprint</code>"
+  assert_contains "$page" "If it does not match, stop and do not trust it."
+  assert_eq "$(pki_info | sed -n 's/.*"root_fingerprint":"\([^"]*\)".*/\1/p')" "$fingerprint"
+  sandbox_drop
+}
+
+test_the_authority_is_limited() {
+  t_begin "the authority may vouch only for private addresses and names, and the names are recorded"
+  sandbox_new
+  lan
+  install_machine
+  local info
+  info=$(pki_info)
+  assert_contains "$info" '"root_constrained":true'
+  assert_contains "$info" '"root_covers_leaf":true'
+  assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"spark"'
+  sandbox_drop
+}
+
+test_a_new_name_makes_the_authority_again_and_says_so() {
+  t_begin "a name the authority does not cover makes a new authority, every instance gets a certificate under it, and the ending says to trust it again"
+  sandbox_new
+  lan
+  install_machine
+  local before
+  before=$(cat "$AMAN_HOME/tls/ca/root.fingerprint")
+  assert_not_contains "$OUT" "made again"
+  run_install instance refresh main --address nas
+  assert_rc 0
+  assert_contains "$(cat "$AMAN_HOME/tls/ca/root.names")" '"nas"'
+  assert_eq "$(cat "$AMAN_HOME/tls/ca/root.fingerprint" | grep -c "$before")" 0 "a new authority"
+  assert_flat_contains "$OUT" "certificate authority was made again"
+  assert_flat_contains "$OUT" "each device must trust it again"
+  assert_contains "$(pki_info)" '"root_covers_leaf":true'
+  assert_contains "$(cat "$AMAN_HOME/tls/trust/main/index.html")" "<code>$(cat "$AMAN_HOME/tls/ca/root.fingerprint")</code>" "the page shows the new fingerprint"
+  assert_eq "$(cmp -s "$AMAN_HOME/tls/ca/root.crt" "$AMAN_HOME/tls/trust/main/ca.crt" && echo same)" same "and offers the new certificate"
+  rm -f "$AMAN_HOME/tls/ca/root.names"
+  run_install tls
+  assert_rc 0
+  assert_flat_contains "$OUT" "Trust this computer on each device"
+  assert_flat_contains "$OUT" "certificate authority was made again"
+  sandbox_drop
+}
+
+test_an_authority_from_before_it_had_limits_is_replaced_once() {
+  t_begin "an authority from an earlier version, with no limits, is replaced on the next re-run with the one-time note, and then kept"
+  sandbox_new
+  lan
+  install_machine
+  rm -f "$AMAN_HOME/tls/ca/root.names"
+  run_install --dry-run
+  assert_flat_contains "$OUT" "Make this computer's certificate authority again"
+  run_install --yes
+  assert_rc 0
+  assert_flat_contains "$OUT" "certificate authority was made again"
+  assert_file "$AMAN_HOME/tls/ca/root.names"
+  run_install instance refresh main
+  assert_not_contains "$OUT" "made again"
+  sandbox_drop
+}
+
 test_a_default_install_is_served_over_https
 test_the_front_end_configuration
+test_the_front_end_is_locked_down
+test_the_fingerprint_is_shown_where_trust_is_given
+test_the_authority_is_limited
+test_a_new_name_makes_the_authority_again_and_says_so
+test_an_authority_from_before_it_had_limits_is_replaced_once
 test_the_authority_and_the_certificate
 test_a_second_instance_shares_the_authority
 test_the_trust_page_and_files

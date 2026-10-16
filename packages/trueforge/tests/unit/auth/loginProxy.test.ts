@@ -332,16 +332,185 @@ describe('login proxy', () => {
         await many.request('http://192.168.1.20:8791/dex/auth/local/login', {
           method: 'POST',
           headers: { host: '192.168.1.20:8791', 'content-type': 'application/x-www-form-urlencoded' },
-          body: 'password=x',
+          body: 'login=a%40b.c&password=x',
         });
       }
       const res = await many.request('http://192.168.1.20:8791/dex/auth/local/login', {
         method: 'POST',
         headers: { host: '192.168.1.20:8791', 'content-type': 'application/x-www-form-urlencoded' },
-        body: 'password=x',
+        body: 'login=a%40b.c&password=x',
       });
       expect(res.status).toBe(429);
     });
+  });
+});
+
+/** What the sign-in service reads for a field, the way Go's FormValue does: the body first, then the query, first value. */
+function goFormValue({ search, body, name }: { search: string; body: string; name: string }): string | undefined {
+  const parse = (text: string): [string, string][] => {
+    const pairs: [string, string][] = [];
+    for (const part of text.split('&')) {
+      if (part === '' || part.includes(';')) {
+        continue;
+      }
+      const [rawKey = '', rawValue = ''] = part.split(/=(.*)/s);
+      try {
+        pairs.push([
+          decodeURIComponent(rawKey.replaceAll('+', ' ')),
+          decodeURIComponent(rawValue.replaceAll('+', ' ')),
+        ]);
+      } catch {
+        // Go skips a pair whose escape is broken.
+      }
+    }
+    return pairs;
+  };
+  const all = [...parse(body), ...parse(search.replace(/^\?/, ''))];
+  return all.find(([key]) => key === name)?.[1];
+}
+
+describe('the account the limiter counts is the account the sign-in service reads', () => {
+  const realFetch = globalThis.fetch;
+  let seen: string[];
+  let sent: { search: string; body: string }[];
+
+  beforeEach(() => {
+    seen = [];
+    sent = [];
+    globalThis.fetch = (input, init) => {
+      const body = init?.body;
+      sent.push({
+        search: new URL(String(input)).search,
+        body: body instanceof ArrayBuffer ? new TextDecoder().decode(body) : '',
+      });
+      return Promise.resolve(new Response('form', { status: 200 }));
+    };
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  class Recording extends LoginAttemptLimiter {
+    override begin(key: string, account = '') {
+      seen.push(account);
+      return super.begin(key, account);
+    }
+  }
+
+  async function post({
+    query = '',
+    body,
+    type = 'application/x-www-form-urlencoded',
+  }: {
+    query?: string;
+    body: string;
+    type?: string;
+  }) {
+    const hono = new Hono();
+    hono.all(
+      '*',
+      createLoginProxy({ issuerUrl: ISSUER, allowedOrigins: ORIGINS, limiter: new Recording(), clientKey: () => 'a' }),
+    );
+    return hono.request(`http://192.168.1.20:8791/dex/auth/local/login${query}`, {
+      method: 'POST',
+      headers: { host: '192.168.1.20:8791', 'content-type': type },
+      body,
+    });
+  }
+
+  it('passes on a plain form, and counts the account the service will read', async () => {
+    const res = await post({ query: '?back=&state=s', body: 'login=Owner%40example.com&password=x' });
+    expect(res.status).toBe(200);
+    expect(seen).toEqual(['Owner@example.com']);
+  });
+
+  it.each([
+    [
+      'a login in the query string, where the service reads it after the body',
+      '?login=owner%40example.com',
+      'password=x',
+    ],
+    ['a password in the query string', '?password=x', 'login=member%40example.com&password=y'],
+    ['the login given twice in the body', '', 'login=member%40example.com&login=owner%40example.com&password=x'],
+    ['the password given twice', '', 'login=member%40example.com&password=x&password=y'],
+    ['no login at all', '', 'password=x'],
+    ['a broken escape the two readers could split differently', '', 'login=owner%4&password=x'],
+    [
+      'a semicolon the two readers could split differently',
+      '',
+      'login=member%40example.com;login=owner%40example.com&password=x',
+    ],
+    ['a semicolon in the query string', '?x=1;login=owner', 'login=member%40example.com&password=x'],
+    ['a key written with escapes', '?lo%67in=owner%40example.com', 'login=member%40example.com&password=x'],
+  ])('refuses %s', async (_label, query, body) => {
+    const res = await post({ query, body });
+    expect(res.status).toBe(400);
+    expect(sent).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
+  it.each(['multipart/form-data; boundary=x', 'application/json', 'text/plain'])(
+    'refuses a form sent as %s',
+    async type => {
+      const res = await post({ body: 'login=member%40example.com&password=x', type });
+      expect(res.status).toBe(415);
+      expect(sent).toEqual([]);
+    },
+  );
+
+  it('refuses a form with no content type', async () => {
+    const hono = new Hono();
+    hono.all('*', createLoginProxy({ issuerUrl: ISSUER, allowedOrigins: ORIGINS }));
+    const res = await hono.request('http://192.168.1.20:8791/dex/auth/local/login', {
+      method: 'POST',
+      headers: { host: '192.168.1.20:8791' },
+      body: 'login=a&password=b',
+    });
+    expect(res.status).toBe(415);
+  });
+
+  it('counts, for every form it passes on, exactly what the service reads, and refuses the rest', async () => {
+    const queries = [
+      '',
+      '?back=&state=s',
+      '?back=%2Fdex&state=a+b',
+      '?login=x',
+      '?x=1&login=y',
+      '?Login=owner',
+      '?login%5B%5D=owner',
+    ];
+    const bodies = [
+      'login=a%40b.c&password=x',
+      'login=a+b&password=x',
+      'password=x&login=a%40b.c',
+      'login=%C3%A9&password=x',
+      'login=&password=x',
+      'login=a&login=b&password=x',
+      'login=a;login=b&password=x',
+      'Login=a&login=b&password=x',
+      'login%5B%5D=a&login=b&password=x',
+      'login=a%2&password=x',
+    ];
+    let passed = 0;
+    for (const query of queries) {
+      for (const body of bodies) {
+        seen = [];
+        sent = [];
+        const res = await post({ query, body });
+        if (res.status === 200) {
+          passed += 1;
+          const reached = sent[0];
+          expect(reached).toBeDefined();
+          expect(seen).toEqual([
+            goFormValue({ search: reached?.search ?? '', body: reached?.body ?? '', name: 'login' }) ?? '',
+          ]);
+        } else {
+          expect([400, 415]).toContain(res.status);
+          expect(sent).toEqual([]);
+        }
+      }
+    }
+    expect(passed).toBeGreaterThan(8);
   });
 });
 
@@ -380,7 +549,8 @@ describe('login proxy in front of a public sign-in address', () => {
   it('reaches the sign-in service on this computer and keeps the browser on the public address', async () => {
     const res = await gateway().request('https://login.example.com/dex/auth/local/login', {
       method: 'POST',
-      headers: { host: 'login.example.com' },
+      headers: { host: 'login.example.com', 'content-type': 'application/x-www-form-urlencoded' },
+      body: 'login=a%40b.c&password=x',
     });
     expect(seen).toEqual(['http://127.0.0.1:5556/dex/auth/local/login']);
     expect(res.headers.get('location')).toBe('https://login.example.com/dex/approval?req=1');
@@ -393,7 +563,12 @@ describe('login proxy in front of a public sign-in address', () => {
       app.fetch(
         new Request('https://login.example.com/dex/auth/local/login', {
           method: 'POST',
-          headers: { host: 'login.example.com', 'x-forwarded-for': forwardedFor },
+          headers: {
+            host: 'login.example.com',
+            'x-forwarded-for': forwardedFor,
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+          body: 'login=a%40b.c&password=x',
         }),
         { incoming: { socket: { remoteAddress } } },
       );

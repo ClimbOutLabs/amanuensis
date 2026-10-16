@@ -10,6 +10,7 @@
   h1 { font-size: 1.5rem; }
   h2 { font-size: 1.125rem; margin-top: 2rem; }
   .download { display: inline-block; margin: 0.25rem 0.5rem 0.25rem 0; padding: 0.625rem 1rem; border-radius: 0.5rem; background: #2a5bd7; color: #fff; text-decoration: none; }
+  code { overflow-wrap: anywhere; }
   .note { padding: 0.75rem 1rem; border-left: 0.25rem solid #c77d00; background: rgba(199, 125, 0, 0.12); }
   ol { padding-left: 1.25rem; }
 </style>
@@ -17,6 +18,7 @@
 <body>
 <h1>Make this device trust your home server</h1>
 <p>You only do this once per device.</p>
+<p class="note">Before you trust it, check that the fingerprint your device shows matches this one: <code>@@FINGERPRINT@@</code>. If it does not match, stop and do not trust it.</p>
 <p>
   <a class="download" href="/trust/aman.mobileconfig">Download for iPhone or iPad</a>
   <a class="download" href="/trust/ca.crt">Download for Android, Mac or Windows</a>

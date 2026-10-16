@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { X509Certificate } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import https from 'node:https';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -167,9 +167,111 @@ describe('the local certificate authority', () => {
     assert.deepEqual(info({ caDir, leafDir }), {
       root_not_after: null,
       root_days_left: null,
+      root_fingerprint: null,
+      root_constrained: false,
+      root_covers_leaf: false,
       leaf_not_after: null,
       leaf_days_left: null,
       leaf_names: [],
     });
+  });
+
+  it(
+    'limits the authority to private addresses and private names, with the limit marked critical',
+    { skip: !hasOpenssl },
+    () => {
+      const { caDir } = fresh();
+      ensureCa({ caDir });
+      const text = spawnSync('openssl', ['x509', '-in', path.join(caDir, 'root.crt'), '-noout', '-text'], {
+        encoding: 'utf8',
+      }).stdout;
+      assert.match(text, /X509v3 Name Constraints: critical/);
+      for (const range of [
+        '10.0.0.0/255.0.0.0',
+        '172.16.0.0/255.240.0.0',
+        '192.168.0.0/255.255.0.0',
+        '100.64.0.0/255.192.0.0',
+        '127.0.0.0/255.0.0.0',
+      ]) {
+        assert.ok(text.includes('IP:' + range), range);
+      }
+      for (const suffix of ['local', 'lan', 'home.arpa', 'ts.net', 'localhost']) {
+        assert.ok(text.includes('DNS:' + suffix), suffix);
+      }
+      assert.doesNotMatch(text, /IP:8\./);
+    },
+  );
+
+  it('will not issue for a public address or name', () => {
+    const { caDir, leafDir } = fresh();
+    ensureCa({ caDir });
+    for (const name of [
+      '8.8.8.8',
+      '172.32.0.1',
+      '100.128.0.1',
+      'example.com',
+      'spark.local.example.com',
+      'evil-local',
+    ]) {
+      assert.throws(() => issueLeaf({ caDir, leafDir, names: ['192.168.1.20', name] }), /may not vouch for/, name);
+    }
+    assert.equal(
+      issueLeaf({ caDir, leafDir, names: ['172.31.255.254', '100.127.0.1', 'a.b.ts.net', 'x.home.arpa'] }).issued,
+      true,
+    );
+  });
+
+  it('is made again, and says so, when a name asked for is not covered, and then keeps that name', () => {
+    const { caDir, leafDir } = fresh();
+    assert.equal(ensureCa({ caDir, names: ['spark.local', '192.168.1.20'] }).rotated, false);
+    const first = readFileSync(path.join(caDir, 'root.crt'), 'utf8');
+    assert.equal(ensureCa({ caDir, names: ['spark.local'] }).created, false);
+    const second = ensureCa({ caDir, names: ['spark', 'spark.local'] });
+    assert.equal(second.created, true);
+    assert.equal(second.rotated, true);
+    assert.notEqual(readFileSync(path.join(caDir, 'root.crt'), 'utf8'), first);
+    assert.equal(issueLeaf({ caDir, leafDir, names: ['spark', 'spark.local', '192.168.1.20'] }).issued, true);
+    assert.equal(ensureCa({ caDir, names: ['spark'] }).created, false);
+    assert.equal(ensureCa({ caDir, names: ['nas', 'spark'] }).rotated, true);
+    assert.equal(ensureCa({ caDir, names: ['spark'] }).created, false, 'a name added once stays permitted');
+  });
+
+  it('replaces an authority from before it had limits, once', () => {
+    const { caDir } = fresh();
+    ensureCa({ caDir });
+    rmSync(path.join(caDir, 'root.names'));
+    const result = ensureCa({ caDir });
+    assert.equal(result.rotated, true);
+    assert.equal(ensureCa({ caDir }).created, false);
+  });
+
+  it('writes the fingerprint of the root where the installer can read it, in the form devices show', () => {
+    const { caDir } = fresh();
+    const result = ensureCa({ caDir });
+    assert.match(result.fingerprint, /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+    assert.equal(readFileSync(path.join(caDir, 'root.fingerprint'), 'utf8').trim(), result.fingerprint);
+    assert.equal(info({ caDir, leafDir: path.join(caDir, 'none') }).root_fingerprint, result.fingerprint);
+    if (hasOpenssl) {
+      const shown = spawnSync(
+        'openssl',
+        ['x509', '-in', path.join(caDir, 'root.crt'), '-noout', '-fingerprint', '-sha256'],
+        { encoding: 'utf8' },
+      ).stdout;
+      assert.equal(shown.trim().split('=')[1], result.fingerprint);
+    }
+  });
+
+  it('issues again when the certificate and the key next to it are not a pair, and notes when it ends', () => {
+    const { caDir, leafDir } = fresh();
+    ensureCa({ caDir });
+    issueLeaf({ caDir, leafDir, names: NAMES });
+    const ends = Number(readFileSync(path.join(leafDir, 'leaf.notafter'), 'utf8'));
+    assert.ok(ends * 1000 - Date.now() > 396 * DAY);
+    const other = path.join(dir, 'other');
+    issueLeaf({ caDir, leafDir: other, names: NAMES });
+    writeFileSync(path.join(leafDir, 'leaf.key'), readFileSync(path.join(other, 'leaf.key')));
+    assert.equal(leafIsCurrent({ caDir, leafDir, names: NAMES }), false);
+    assert.equal(issueLeaf({ caDir, leafDir, names: NAMES }).issued, true);
+    assert.equal(leafIsCurrent({ caDir, leafDir, names: NAMES }), true);
   });
 });

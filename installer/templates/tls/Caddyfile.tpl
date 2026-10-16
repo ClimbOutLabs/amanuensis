@@ -4,6 +4,10 @@
 	auto_https off
 	# Browsers opened by address send no server name; the one certificate lists every address.
 	default_sni @@DEFAULT_NAME@@
+	# No advertised HTTP/3: the front end is only published over TCP.
+	servers {
+		protocols h1 h2
+	}
 }
 
 # Devices open Aman here, over https, with a certificate from this computer's own authority.
@@ -19,6 +23,11 @@
 
 # The plain port sends everything to https, except the page and the files that make a device trust this computer.
 http://:@@HTTP_IN@@ {
+	# What the trust page may do: show itself and link away; nothing is loaded from anywhere else.
+	header /trust* {
+		X-Content-Type-Options nosniff
+		Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+	}
 	handle /trust {
 		root * /srv/trust
 		rewrite * /index.html
@@ -32,7 +41,12 @@ http://:@@HTTP_IN@@ {
 		header @certificate Content-Type application/x-x509-ca-cert
 		file_server
 	}
-	handle {
+	# Only the addresses this instance answers at are sent on; any other name gets a plain refusal.
+	@known host @@HOSTS@@
+	handle @known {
 		redir https://{http.request.host}:@@HTTPS_PORT@@{uri} 308
+	}
+	handle {
+		respond "This address is not one Aman is set up for." 421
 	}
 }
