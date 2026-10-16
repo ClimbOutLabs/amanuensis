@@ -6,12 +6,14 @@ import {
   GoogleFeatureError,
 } from '../../../src/core/google/GoogleConnectService';
 import { GOOGLE_REVOKE_URL, GOOGLE_TOKEN_URL, hashState } from '../../../src/core/google/oauth';
+import { grantedFeatures } from '../../../src/core/google/scopes';
 import type { GoogleSetupInfo } from '../../../src/core/google/setupMode';
 import { capturingLogger, connectedRecord, FakeConnections, FakeGoogle, FakePending, json, OWNER } from './fakes';
 
 const PROFILE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/profile';
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
+const CALENDAR = 'https://www.googleapis.com/auth/calendar.events.readonly';
 const SETUP: GoogleSetupInfo = {
   mode: 'paste',
   client_type: 'desktop',
@@ -282,6 +284,63 @@ describe('GoogleConnectService', () => {
       expect(record.refresh_token).toBe('rt-new');
       expect(record.granted_scopes).toEqual([READ, COMPOSE]);
       expect(google.requests.some(request => request.url.startsWith(GOOGLE_REVOKE_URL))).toBe(false);
+    });
+
+    it('adds Calendar as a second consent: both scopes asked, both stored, the older token never revoked', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ, COMPOSE] }));
+      google.on(GOOGLE_TOKEN_URL, () =>
+        json({ access_token: 'at2', refresh_token: 'rt-new', scope: `${READ} ${COMPOSE} ${CALENDAR}` }),
+      );
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+
+      const { authorization_url } = await service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: null,
+        features: ['calendar_read'],
+      });
+      expect(new URL(authorization_url).searchParams.get('scope')).toBe(`${READ} ${COMPOSE} ${CALENDAR}`);
+      const record = await service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' });
+
+      expect(record.refresh_token).toBe('rt-new');
+      expect(record.granted_scopes).toEqual([READ, COMPOSE, CALENDAR]);
+      expect(google.requests.some(request => request.url.startsWith(GOOGLE_REVOKE_URL))).toBe(false);
+    });
+
+    it('keeps Calendar through a later consent for something else', async () => {
+      const { service, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ, CALENDAR] }));
+      const { authorization_url } = await service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: null,
+        features: ['gmail_compose'],
+      });
+      expect(new URL(authorization_url).searchParams.get('scope')).toBe(`${READ} ${COMPOSE} ${CALENDAR}`);
+    });
+
+    it('records no Calendar when the user unticked it on the consent screen', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord({ granted_scopes: [READ] }));
+      google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at', refresh_token: 'rt', scope: READ }));
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+      const { authorization_url } = await service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: null,
+        features: ['calendar_read'],
+      });
+      const record = await service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' });
+      expect(grantedFeatures(record.granted_scopes)).toEqual(['gmail_read']);
+    });
+
+    it('refuses to ask for Calendar before mail is connected, with a plain message', async () => {
+      const { service, pending } = setup();
+      await expect(
+        service.begin({ owner: OWNER, setup: SETUP, client: CLIENT, features: ['calendar_read'] }),
+      ).rejects.toThrow('Connect Google first, then add Calendar');
+      expect(pending.records.size).toBe(0);
     });
 
     it('refuses to ask for sending alone, with a plain message', async () => {

@@ -163,7 +163,9 @@ export class GoogleConnectService {
     const features = [...input.features, ...grantedFeatures(stored?.granted_scopes ?? [])];
     if (!features.includes('gmail_read')) {
       throw new GoogleFeatureError(
-        'Sending needs permission to read mail too. Tick the read box as well, then connect.',
+        features.includes('gmail_compose')
+          ? 'Sending needs permission to read mail too. Tick the read box as well, then connect.'
+          : 'Calendar is added to a Google connection that already reads mail. Connect Google first, then add Calendar.',
       );
     }
     const scopes = scopesForFeatures(features);

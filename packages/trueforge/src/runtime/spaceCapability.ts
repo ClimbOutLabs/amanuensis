@@ -39,6 +39,7 @@ import {
   SpaceFormatSchema,
   SpaceSchema,
 } from '../schemas/space';
+import { calendarCapability } from './calendarCapability';
 import { gmailCapability, sandboxAttachmentStager } from './gmailCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
@@ -1287,6 +1288,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       return resolved;
     }
     const gmail = await this.#gmail(input);
+    const calendar = await this.#calendar({ input, timeZone: this.clientTimezone });
     return {
       ...resolved,
       extraCapabilities: [
@@ -1294,8 +1296,44 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
         spaceCapability({ ...this.#space, tracing: input.tracing }),
         mapsCapability({ tracing: input.tracing, logger: this.#space.logger }),
         ...(gmail === undefined ? [] : [gmail]),
+        ...(calendar === undefined ? [] : [calendar]),
       ],
     };
+  }
+
+  /** A store that cannot be read costs the chat its calendar tools, never the chat itself. */
+  async #calendar(args: {
+    input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0];
+    timeZone: string | undefined;
+  }) {
+    const { input } = args;
+    const connections = this.#space.googleConnections;
+    if (connections === undefined) {
+      return undefined;
+    }
+    try {
+      return await calendarCapability({
+        fetchImpl: undefined,
+        connections,
+        owner: { tenant_id: input.tenant_id, created_by: input.created_by },
+        tracing: input.tracing,
+        timeZone: args.timeZone,
+        sentinel: createSentinelHostContext({
+          services: input.sentinel_services,
+          tenant_id: input.tenant_id,
+          created_by: input.created_by,
+          conversation_id: input.session_id,
+          workspace_cwd: input.workspace_cwd ?? null,
+          web_search: this.webSearchTurn,
+        }),
+      });
+    } catch (error) {
+      this.#space.logger.warn(
+        'Calendar tools not mounted: the Google login could not be read',
+        extractErrorLogFields(error),
+      );
+      return undefined;
+    }
   }
 
   /** A store that cannot be read costs the chat its mail tools, never the chat itself. */

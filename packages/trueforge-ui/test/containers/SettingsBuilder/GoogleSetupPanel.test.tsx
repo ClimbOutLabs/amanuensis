@@ -63,6 +63,7 @@ function statusOf(overrides: Partial<GoogleConnectionStatus> = {}): GoogleConnec
     features: [
       { feature: 'gmail_read', label: 'Read and search your email', granted: false },
       { feature: 'gmail_compose', label: 'Save drafts and send email you approve', granted: false },
+      { feature: 'calendar_read', label: 'Read events on your calendar', granted: false },
     ],
     hasSavedClient: false,
     available: true,
@@ -79,9 +80,17 @@ function connectedStatus(overrides: Partial<GoogleConnectionStatus> = {}): Googl
     features: [
       { feature: 'gmail_read', label: 'Read and search your email', granted: true },
       { feature: 'gmail_compose', label: 'Save drafts and send email you approve', granted: false },
+      { feature: 'calendar_read', label: 'Read events on your calendar', granted: false },
     ],
     ...overrides,
   });
+}
+
+function withCalendar(status: GoogleConnectionStatus): GoogleConnectionStatus {
+  return {
+    ...status,
+    features: status.features.map(item => (item.feature === 'calendar_read' ? { ...item, granted: true } : item)),
+  };
 }
 
 function makePort(overrides: Partial<GoogleSetupPort> = {}) {
@@ -331,13 +340,42 @@ describe('GoogleSetupPanel', () => {
     expect(await screen.findByText('Reconnect needed')).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Google sign-in expired\. Mail is paused, and other parts of Aman keep working\. Select Reconnect to sign in again\./,
+        /Google sign-in expired\. Mail and calendar are paused, and other parts of Aman keep working\. Select Reconnect to sign in again\./,
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(/open Audience and choose Publish app, then reconnect once\./)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Test connection' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
     await waitFor(() => expect(begin).toHaveBeenCalledWith({ client: null, features: ['gmail_read'] }));
+  });
+
+  it('shows Calendar as not connected, and connects it with a second consent on the saved client', async () => {
+    const { port, begin } = makePort({ getGoogleStatus: async () => connectedStatus() });
+    renderPanel(port);
+    const row = await screen.findByLabelText('Calendar');
+    expect(row).toHaveTextContent('Calendar: not connected');
+    expect(row).toHaveTextContent('cannot add, change or delete');
+    expect(row).toHaveTextContent('turn on the Google Calendar API');
+    expect(screen.queryByText(/Read events on your calendar: /)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Calendar' }));
+    await waitFor(() => expect(begin).toHaveBeenCalledWith({ client: null, features: ['calendar_read'] }));
+  });
+
+  it('shows Calendar as connected, with nothing left to connect', async () => {
+    renderPanel(makePort({ getGoogleStatus: async () => withCalendar(connectedStatus()) }).port);
+    expect(await screen.findByLabelText('Calendar')).toHaveTextContent('Calendar: connected');
+    expect(screen.queryByRole('button', { name: 'Connect Calendar' })).not.toBeInTheDocument();
+  });
+
+  it('keeps Calendar when reconnecting', async () => {
+    const { port, begin } = makePort({
+      getGoogleStatus: async () => withCalendar(connectedStatus({ state: 'needs_reconnect' })),
+    });
+    renderPanel(port);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }));
+    await waitFor(() =>
+      expect(begin).toHaveBeenCalledWith({ client: null, features: ['gmail_read', 'calendar_read'] }),
+    );
   });
 
   it('reports a test result in plain words', async () => {
@@ -358,6 +396,7 @@ describe('GoogleSetupPanel', () => {
     });
     const { onChanged } = renderPanel(port);
     fireEvent.click(await screen.findByRole('button', { name: 'Disconnect' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('turns off both mail and calendar');
     expect(screen.getByRole('alertdialog')).toHaveTextContent('everywhere it is used');
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Emails already sent stay in Gmail.');
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect Google' }));
@@ -582,6 +621,7 @@ describe('GoogleSetupPanel', () => {
       expect(await screen.findByText(OFFLINE)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Test connection' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Allow drafts and sending' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Connect Calendar' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Disconnect' })).toBeEnabled();
     });
 

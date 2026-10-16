@@ -1,9 +1,12 @@
+import { CALENDAR_READ_TOOL_NAMES } from '../../calendar/toolContract';
 import { GMAIL_READ_TOOL_NAMES } from '../../email/gmail/toolContract';
 import { hasReadPrivateData, markPrivateDataRead, type WebSearchTurnState } from '../../permissions/webSearch';
 import { InternalEventType } from '../../runtime/AgentThread.types';
 import { isLLMContextMessage } from '../../runtime/contextUtils';
 import type { AgentCapability } from '../AgentCapability';
 import type { AgentThreadExecutionContext } from '../AgentContextProcessor';
+
+const PRIVATE_READ_TOOL_NAMES = [...GMAIL_READ_TOOL_NAMES, ...CALENDAR_READ_TOOL_NAMES];
 
 export const PRIVATE_DATA_READ_STATE_KEY = 'tfy.private_data_read';
 
@@ -17,7 +20,7 @@ function contextReadPrivateData(context: AgentThreadExecutionContext['context'])
     message =>
       isLLMContextMessage(message) &&
       message.role === 'assistant' &&
-      (message.tool_calls ?? []).some(call => GMAIL_READ_TOOL_NAMES.some(name => call.function.name.endsWith(name))),
+      (message.tool_calls ?? []).some(call => PRIVATE_READ_TOOL_NAMES.some(name => call.function.name.endsWith(name))),
   );
 }
 

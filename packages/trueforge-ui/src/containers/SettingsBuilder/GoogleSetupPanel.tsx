@@ -19,6 +19,7 @@ import { getErrorMessage } from '@/utils/getErrorMessage.js';
 
 const GOOGLE_PROJECT_URL = 'https://console.cloud.google.com/projectcreate';
 const GOOGLE_GMAIL_API_URL = 'https://console.cloud.google.com/apis/library/gmail.googleapis.com';
+const GOOGLE_CALENDAR_API_URL = 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com';
 const GOOGLE_CONSENT_SCREEN_URL = 'https://console.cloud.google.com/apis/credentials/consent';
 const GOOGLE_CREDENTIALS_URL = 'https://console.cloud.google.com/apis/credentials';
 
@@ -84,6 +85,8 @@ function CopyField({ label, value }: { label: string; value: string }) {
   );
 }
 
+const CALENDAR_FEATURE = 'calendar_read' satisfies GoogleFeature;
+
 function grantedFeatures(status: GoogleConnectionStatus): GoogleFeature[] {
   return status.features.filter(item => item.granted).map(item => item.feature);
 }
@@ -95,7 +98,7 @@ function describeTest(result: 'ok' | 'not_connected' | 'needs_reconnect' | 'unre
     case 'not_connected':
       return 'Google is not connected.';
     case 'needs_reconnect':
-      return 'Reconnect needed. Google sign-in expired and mail is paused. Select Reconnect to sign in again.';
+      return 'Reconnect needed. Google sign-in expired and mail and calendar are paused. Select Reconnect to sign in again.';
     case 'unreachable':
       return "Aman couldn't reach Google just now. Try again in a minute.";
   }
@@ -303,9 +306,10 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
             </h3>
             {status.state === 'needs_reconnect' ? (
               <p className="rounded-md border border-warning-bg/40 bg-warning-bg/10 px-3 py-2">
-                Google sign-in expired. Mail is paused, and other parts of Aman keep working. Select Reconnect to sign
-                in again. If this keeps happening about once a week, your Google project is in Testing: either reconnect
-                each week, or in Google Cloud open Audience and choose Publish app, then reconnect once.
+                Google sign-in expired. Mail and calendar are paused, and other parts of Aman keep working. Select
+                Reconnect to sign in again. If this keeps happening about once a week, your Google project is in
+                Testing: either reconnect each week, or in Google Cloud open Audience and choose Publish app, then
+                reconnect once.
               </p>
             ) : (
               <>
@@ -323,12 +327,43 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
               </>
             )}
             <ul className="space-y-1 text-text-secondary">
-              {status.features.map(item => (
-                <li key={item.feature}>
-                  {item.label}: {item.granted ? 'allowed' : 'not allowed'}
-                </li>
-              ))}
+              {status.features
+                .filter(item => item.feature !== CALENDAR_FEATURE)
+                .map(item => (
+                  <li key={item.feature}>
+                    {item.label}: {item.granted ? 'allowed' : 'not allowed'}
+                  </li>
+                ))}
             </ul>
+            {status.state === 'connected' ? (
+              <div aria-label="Calendar" className="space-y-2 rounded-md border border-border bg-primary-bg p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p>
+                    <span className="font-medium">Calendar</span>:{' '}
+                    {grantedFeatures(status).includes(CALENDAR_FEATURE) ? 'connected' : 'not connected'}
+                  </p>
+                  {grantedFeatures(status).includes(CALENDAR_FEATURE) ? null : (
+                    <Button
+                      variant="secondary"
+                      size="small"
+                      type="button"
+                      disabled={busy || offline}
+                      onClick={() => void beginConsent({ useSavedClient: true, features: [CALENDAR_FEATURE] })}
+                    >
+                      Connect Calendar
+                    </Button>
+                  )}
+                </div>
+                <p className="text-text-secondary">
+                  {grantedFeatures(status).includes(CALENDAR_FEATURE)
+                    ? 'Aman can read events on your calendar. It cannot add, change or delete them.'
+                    : 'Lets Aman read events on your calendar, such as a birthday coming up. It cannot add, change or delete them. Before you connect, turn on the Google Calendar API in your Google project and add the calendar read scope to your consent screen.'}
+                </p>
+                {grantedFeatures(status).includes(CALENDAR_FEATURE) ? null : (
+                  <CopyField label="Calendar API link" value={GOOGLE_CALENDAR_API_URL} />
+                )}
+              </div>
+            ) : null}
             {testMessage ? (
               <p role="status" className="text-text-secondary">
                 {testMessage}
@@ -383,8 +418,9 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 className="rounded-md border border-border bg-primary-bg p-3"
               >
                 <p>
-                  This removes Aman&apos;s access to your Google account everywhere it is used and deletes the saved
-                  login. Emails already sent stay in Gmail. You can connect again later.
+                  Disconnecting turns off both mail and calendar. It removes Aman&apos;s access to your Google account
+                  everywhere it is used and deletes the saved login. Emails already sent stay in Gmail. You can connect
+                  again later.
                 </p>
                 <div className="mt-3 flex gap-2">
                   <Button

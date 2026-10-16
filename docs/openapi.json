@@ -3274,7 +3274,8 @@
       "GoogleFeature": {
         "enum": [
           "gmail_read",
-          "gmail_compose"
+          "gmail_compose",
+          "calendar_read"
         ],
         "type": "string"
       },
