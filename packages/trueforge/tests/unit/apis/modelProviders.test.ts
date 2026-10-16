@@ -472,3 +472,40 @@ describe('catalog presets are configurable', () => {
     expect(JSON.stringify(json)).not.toContain(body.auth.api_key);
   });
 });
+
+describe('model token limits', () => {
+  const badModel = {
+    ...model,
+    properties: { context_length: 8000, max_output_tokens: 7600 }, // 7600 + 512 reaches 8000
+  };
+  const badBody = { ...customBody, models: [badModel] };
+
+  it('PUT rejects a model whose max output plus the safety reserve reaches the context length', async () => {
+    const { settingsRouter, modelProviderStore } = await createRouters();
+    const response = await settingsRouter.request('/model-providers', putInit(badBody));
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(await response.json())).toContain(
+      'Max output tokens must be less than the context length (8,000) minus a small reserve.',
+    );
+    expect(await modelProviderStore.listProviders({ tenant_id: 'default' })).toEqual([]);
+  });
+
+  it('an already-stored bad config still loads but cannot be re-saved until fixed', async () => {
+    const { settingsRouter, modelsRouter, modelProviderStore } = await createRouters();
+    await modelProviderStore.upsertProvider({ tenant_id: 'default', name: 'internal', manifest: badBody });
+
+    const list = await settingsRouter.request('/model-providers');
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual({ data: [configured('internal', withRedactedApiKey(badBody))] });
+    const models = await modelsRouter.request('/');
+    expect(models.status).toBe(200);
+
+    expect((await settingsRouter.request('/model-providers', putInit(badBody))).status).toBe(400);
+
+    const fixed = {
+      ...customBody,
+      models: [{ ...model, properties: { context_length: 8000, max_output_tokens: 4096 } }],
+    };
+    expect((await settingsRouter.request('/model-providers', putInit(fixed))).status).toBe(200);
+  });
+});

@@ -55,8 +55,6 @@ describe('useCompactionStatus', () => {
   it('fetches the compaction status for the active session', async () => {
     getLastCompactionStatus.mockResolvedValueOnce({
       createdAt: '2026-09-27T11:30:00Z',
-      tokensBefore: 100000,
-      tokensAfter: 20000,
       outcome: 'applied',
     });
     getLastTurnInputTokens.mockResolvedValueOnce(77200);

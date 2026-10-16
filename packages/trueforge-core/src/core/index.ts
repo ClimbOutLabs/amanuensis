@@ -63,10 +63,7 @@ export type {
 } from './capabilities/AgentContextProcessor';
 
 // Built-in factories
-export {
-  MODEL_OUTPUT_EXCEEDS_CONTEXT_MESSAGE,
-  getModelOutputExceedsContextError,
-} from '../schemas/modelTokenLimits.js';
+export { getModelOutputExceedsContextError } from '../schemas/modelTokenLimits';
 export { ToolOutputScreenDecisionSchema, ToolOutputScreenFailureReasonCodeSchema } from '../schemas/toolOutputScreen';
 export type {
   ToolOutputScreenClassification,

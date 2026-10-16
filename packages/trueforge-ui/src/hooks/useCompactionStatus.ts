@@ -54,7 +54,7 @@ export function useCompactionStatus(): CompactionStatusResult {
   const [liveTokens, setLiveTokens] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // A turn ending can trigger a compaction, so refresh then too — not only
+  // A turn ending can trigger a compaction, so refresh then too, not only
   // when the session changes. Otherwise the status line stays stale until reload.
   const isRunning = useThreadIsRunning();
   const [turnEndCount, setTurnEndCount] = useState(0);

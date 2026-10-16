@@ -1,4 +1,4 @@
-import { VERCEL_AI_PROVIDER_NAMES } from '@truefoundry/trueforge-core/core';
+import { TOKEN_BUDGET_SAFETY_MARGIN, VERCEL_AI_PROVIDER_NAMES } from '@truefoundry/trueforge-core/core';
 import { ModelProviderManifestSchema, modelProviderName } from '../../../src/schemas/modelProvider';
 
 const models = [{ model_id: 'a-model', name: 'a-model', properties: {} }];
@@ -104,7 +104,7 @@ describe('ModelProviderManifestSchema', () => {
 
   // Reserving the whole context window for output leaves no room for input, so
   // every turn fails the token pre-flight guard. The schema rejects it up front.
-  it('rejects max_output_tokens greater than or equal to context_length', () => {
+  it('rejects max_output_tokens within the safety margin of context_length', () => {
     const withProperties = (properties: Record<string, unknown>): boolean => {
       const result = ModelProviderManifestSchema.safeParse({
         auth: { api_key: 'k' },
@@ -115,6 +115,13 @@ describe('ModelProviderManifestSchema', () => {
     };
     expect(withProperties({ context_length: 128000, max_output_tokens: 128000 })).toBe(false);
     expect(withProperties({ context_length: 128000, max_output_tokens: 200000 })).toBe(false);
+    // The runtime guard also holds back a safety margin, so the boundary sits below the context length.
+    expect(withProperties({ context_length: 128000, max_output_tokens: 128000 - TOKEN_BUDGET_SAFETY_MARGIN })).toBe(
+      false,
+    );
+    expect(withProperties({ context_length: 128000, max_output_tokens: 128000 - TOKEN_BUDGET_SAFETY_MARGIN - 1 })).toBe(
+      true,
+    );
     expect(withProperties({ context_length: 128000, max_output_tokens: 4096 })).toBe(true);
     // Either limit alone is fine; the guard only applies to the combination.
     expect(withProperties({ context_length: 128000 })).toBe(true);
@@ -137,7 +144,9 @@ describe('ModelProviderManifestSchema', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       const messages = result.error.issues.map(issue => issue.message);
-      expect(messages).toContain('Max output must be smaller than the context length.');
+      expect(messages).toContain(
+        'Max output tokens must be less than the context length (8,000) minus a small reserve.',
+      );
     }
   });
 });

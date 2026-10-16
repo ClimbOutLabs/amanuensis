@@ -115,7 +115,9 @@ describe('CustomModelProviderForm', () => {
     fillVisible();
     fillLimits('8000', '8000'); // max output covers the whole context window
     fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
-    expect(screen.getByText('Max output must be smaller than the context length.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Max output tokens must be less than the context length (8,000) minus a small reserve.'),
+    ).toBeInTheDocument();
     expect(onAdd).not.toHaveBeenCalled();
   });
 
@@ -124,8 +126,29 @@ describe('CustomModelProviderForm', () => {
     fillVisible();
     fillLimits('8000', '16000');
     fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
-    expect(screen.getByText('Max output must be smaller than the context length.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Max output tokens must be less than the context length (8,000) minus a small reserve.'),
+    ).toBeInTheDocument();
     expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('rejects max output tokens that leave less than the safety reserve', () => {
+    const onAdd = renderForm();
+    fillVisible();
+    fillLimits('8000', '7600'); // 7600 + 512 reaches 8000
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+    expect(
+      screen.getByText('Max output tokens must be less than the context length (8,000) minus a small reserve.'),
+    ).toBeInTheDocument();
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('focuses the max output field that carries the error', async () => {
+    renderForm();
+    fillVisible();
+    fillLimits('8000', '8000');
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+    await waitFor(() => expect(document.activeElement?.id).toBe('custom-provider-model-0-max-output-tokens'));
   });
 
   it('accepts max output tokens below the context length', async () => {

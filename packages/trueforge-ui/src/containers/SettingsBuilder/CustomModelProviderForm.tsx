@@ -236,10 +236,8 @@ const CustomModelProviderForm = ({
     if (incompleteIndex !== -1) {
       updateModel(incompleteIndex, { advancedExpanded: true });
       const target = models[incompleteIndex];
-      const field =
-        target && (modelContextError(target) || modelOutputExceedsContextError(target))
-          ? 'context-length'
-          : 'max-output-tokens';
+      // The output-vs-context error is shown on the max output field, so focus that one.
+      const field = target && modelContextError(target) ? 'context-length' : 'max-output-tokens';
       setTimeout(() => {
         const el = document.getElementById(`custom-provider-model-${incompleteIndex}-${field}`);
         // scrollIntoView is unimplemented in jsdom; guard the method so tests don't throw.
