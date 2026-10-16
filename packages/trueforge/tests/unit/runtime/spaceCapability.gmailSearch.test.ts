@@ -70,7 +70,7 @@ function stubModel(): ILLM {
         };
         return {
           output: { role: 'assistant' as const, content: 'ok' },
-          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
           finish_reason: 'stop' as const,
         };
       })(),
