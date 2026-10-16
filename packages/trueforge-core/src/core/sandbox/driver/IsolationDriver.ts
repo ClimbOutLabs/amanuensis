@@ -50,6 +50,9 @@ export interface SandboxIdentity {
 /** How a driver run ended, before the wrapper maps it onto the error taxonomy. */
 export type DriverTermination = 'completed' | 'timeout' | 'oom' | 'killed' | 'internal';
 
+/** Finer cause behind a failure whose `error_code` is shared with other causes. */
+export type DriverReadinessReason = 'signature_unverified' | 'isolation_refused';
+
 export type DriverReadiness =
   | { ready: true }
   | {
@@ -68,6 +71,7 @@ export type DriverReadiness =
         | 'unsupported_platform';
       /** Human-actionable remediation text, shown to the user. */
       error: string;
+      reason?: DriverReadinessReason | undefined;
     };
 
 export interface DriverRunParams {

@@ -106,14 +106,25 @@ export function MemoryTurnContextProvider({ children }: PropsWithChildren) {
     };
     refreshRef.current = refresh;
 
+    // Skip poll ticks while the tab is hidden (matching SentinelAuditFeed) so a hidden tab
+    // fires no requests; refresh once immediately when the tab becomes visible again.
+    const poll = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+
     refresh();
 
     if (isRunning) {
       wasRunningRef.current = true;
-      const intervalId = setInterval(refresh, POLL_INTERVAL_MS);
+      const intervalId = setInterval(poll, POLL_INTERVAL_MS);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
       return () => {
         cancelled = true;
         clearInterval(intervalId);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
     }
 
@@ -121,12 +132,14 @@ export function MemoryTurnContextProvider({ children }: PropsWithChildren) {
       // The thread just stopped: keep polling for a bounded grace period rather than only once,
       // since `aman.profile.learned` can legitimately still be on its way (see POST_RUN_POLL_MS).
       wasRunningRef.current = false;
-      const intervalId = setInterval(refresh, POLL_INTERVAL_MS);
+      const intervalId = setInterval(poll, POLL_INTERVAL_MS);
       const stopTimeoutId = setTimeout(() => clearInterval(intervalId), POST_RUN_POLL_MS);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
       return () => {
         cancelled = true;
         clearInterval(intervalId);
         clearTimeout(stopTimeoutId);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
     }
 

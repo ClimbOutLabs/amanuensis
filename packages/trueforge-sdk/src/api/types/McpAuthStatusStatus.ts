@@ -2,8 +2,8 @@
 
 /** Current auth state for this MCP server. */
 export const McpAuthStatusStatus = {
-    Authenticated: "authenticated",
-    AuthRequired: "auth_required",
-    NotRequired: "not_required",
-} as const;
-export type McpAuthStatusStatus = (typeof McpAuthStatusStatus)[keyof typeof McpAuthStatusStatus];
+        Authenticated: "authenticated",
+        AuthRequired: "auth_required",
+        NotRequired: "not_required"
+    } as const;
+export type McpAuthStatusStatus = typeof McpAuthStatusStatus[keyof typeof McpAuthStatusStatus];

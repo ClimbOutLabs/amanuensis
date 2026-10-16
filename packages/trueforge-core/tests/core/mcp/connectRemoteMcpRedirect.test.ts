@@ -146,12 +146,70 @@ describe('redirects on a remote MCP connection', () => {
   });
 
   describe('when the connection does not ask to refuse them', () => {
-    it('is left as it was and still follows the redirect', async () => {
+    it.each([301, 302, 303, 307, 308])(
+      'fails closed on an HTTP %i to another origin and never reaches it',
+      async status => {
+        redirectStatus = status;
+
+        const refused = connectRemoteMcp(connectParams());
+
+        await expect(refused).rejects.toBeInstanceOf(McpConnectionError);
+        await expect(refused).rejects.toMatchObject({
+          statusCode: 502,
+          message: `server answered HTTP ${String(status)} with a redirect to ${target.origin}, and this connection does not follow redirects to another origin`,
+        });
+        expect(target.hits).toEqual([]);
+      },
+    );
+
+    it('keeps the secret in the redirect location out of the message', async () => {
       redirectStatus = 307;
 
-      await connectRemoteMcp(connectParams()).catch(() => undefined);
+      const error = await connectRemoteMcp(connectParams()).catch((caught: unknown) => caught);
 
-      expect(target.hits.length).toBeGreaterThan(0);
+      expect(error).toMatchObject({ message: expect.not.stringContaining('hunter2') });
+    });
+
+    it('does not forward its headers to the other origin on a RemoteMCP call', async () => {
+      redirectStatus = 307;
+      const remote = new RemoteMCP({
+        name: 'notes',
+        id: 'notes',
+        url: `${origin.origin}/mcp`,
+        headers: { authorization: 'Bearer connector-secret' },
+        logger: makeSilentLogger(),
+        requestTimeoutMs: 5_000,
+        connectTimeoutMs: 5_000,
+        signal: new AbortController().signal,
+      });
+
+      await expect(remote.listTools()).rejects.toMatchObject({ statusCode: 502 });
+      expect(target.hits).toEqual([]);
+    });
+
+    it('still follows a redirect that stays on the connector origin', async () => {
+      const same = await listen((req, res) => {
+        if (req.url === '/mcp') {
+          res.writeHead(307, { location: '/mcp-moved' });
+          res.end();
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('{}');
+      });
+      try {
+        const error = await connectRemoteMcp({
+          ...connectParams(),
+          url: `${same.origin}/mcp`,
+          knownTransportType: 'streamable-http',
+        }).catch((caught: unknown) => caught);
+
+        expect(same.hits[0]).toBe('POST /mcp');
+        expect(same.hits[1]).toBe('POST /mcp-moved');
+        expect(String(error)).not.toContain('does not follow redirects');
+      } finally {
+        await same.close();
+      }
     });
   });
 });

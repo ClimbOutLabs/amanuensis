@@ -72,7 +72,6 @@ export type {
 export { askUserQuestion } from './capabilities/builtins/AskUserQuestion';
 export {
   CONVERSATION_COMPACTION_TEMPLATE,
-  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
   HOST_COMPACTION_TEMPLATE,
   HOST_SUMMARY_PREFACE,
   contextCompaction,
@@ -276,8 +275,13 @@ export type {
   RunCodeLanguage,
   SandboxIdentity,
 } from './sandbox/driver/IsolationDriver';
-export { RUN_CODE_ERROR_CODES, RunCodeInputSchema, RunCodeResultSchema } from './sandbox/driver/RunCodeSchemas';
-export type { RunCodeErrorCode, RunCodeInput, RunCodeResult } from './sandbox/driver/RunCodeSchemas';
+export {
+  RUN_CODE_ERROR_CODES,
+  RunCodeInputSchema,
+  RunCodeResultSchema,
+  RunCodeStatusSchema,
+} from './sandbox/driver/RunCodeSchemas';
+export type { RunCodeErrorCode, RunCodeInput, RunCodeResult, RunCodeStatus } from './sandbox/driver/RunCodeSchemas';
 export { RunCodeService, validateRunCodeStartupConfig } from './sandbox/driver/RunCodeService';
 export type {
   HarvestedFile,
@@ -285,6 +289,7 @@ export type {
   RunCodeServiceOptions,
   TurnAttachment,
 } from './sandbox/driver/RunCodeService';
+export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
 export { DaytonaSandboxProvider } from './sandbox/provider/DaytonaProvider';
 export type { DaytonaSandboxProviderOptions } from './sandbox/provider/DaytonaProvider';
 export { absolutizeRelativeExecEnv } from './sandbox/provider/execEnv';
@@ -377,12 +382,19 @@ export type {
   ApprovalToken,
   ApprovalTokenRef,
   ApprovalTokenStore,
+  ConnectorBinding,
   MintApprovalTokenInput,
   ShellApprovalBinding,
 } from './permissions/approvalTokens';
 export { recordClassificationAudit } from './permissions/audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './permissions/audit';
-export { canonicalShellForm, classifyHostToolCall, classifyTier, shellBindingFromForm } from './permissions/classifier';
+export {
+  canonicalShellForm,
+  classifyHostToolCall,
+  classifyTier,
+  mapsDestinationHosts,
+  shellBindingFromForm,
+} from './permissions/classifier';
 export type { ClassifyContext, SentinelAction } from './permissions/classifier';
 export {
   DEFAULT_PINNED_PATH,
@@ -394,6 +406,12 @@ export {
 export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './permissions/context';
 export { verifyPreDispatch } from './permissions/dispatch';
 export type { DispatchCheckContext, VerifiableCall } from './permissions/dispatch';
+export {
+  MAPS_TOOL_NAMES,
+  RENDER_MAP_TOOL_NAME,
+  RENDER_ROUTE_TOOL_NAME,
+  isMapsToolName,
+} from './permissions/mapsToolNames';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,
@@ -414,3 +432,5 @@ export type {
   TrackedExecutionBinding,
 } from './permissions/tier';
 export type { ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
+export { createWebSearchTurnState } from './permissions/webSearch';
+export type { WebSearchTurnState } from './permissions/webSearch';

@@ -336,7 +336,7 @@ export function HtmlArtifactPreview({
       </div>
 
       {/* Preview iframe */}
-      <div className="relative min-h-96 bg-white dark:bg-black" style={{ height: previewHeight, overflow: 'auto' }}>
+      <div className="relative min-h-96 bg-card-bg" style={{ height: previewHeight, overflow: 'auto' }}>
         <iframe
           ref={iframeRef}
           srcDoc={srcdoc}

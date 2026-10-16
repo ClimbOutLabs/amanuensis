@@ -2,7 +2,7 @@
 
 /** `oidc-connected` when the process is running with browser OIDC login; `default` for standalone or TrueFoundry token auth. */
 export const MeSessionType = {
-    Default: "default",
-    OidcConnected: "oidc-connected",
-} as const;
-export type MeSessionType = (typeof MeSessionType)[keyof typeof MeSessionType];
+        Default: "default",
+        OidcConnected: "oidc-connected"
+    } as const;
+export type MeSessionType = typeof MeSessionType[keyof typeof MeSessionType];

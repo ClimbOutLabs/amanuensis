@@ -17,11 +17,13 @@ import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
 import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
+import { createMapsRouter } from './apis/maps';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
 import { createMemoryVaultRouter } from './apis/memoryVault';
 import { createModelsRouter } from './apis/models';
 import { createPermissionsRouter } from './apis/permissions';
+import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
@@ -42,6 +44,7 @@ import {
   createAdminAuthMiddleware,
   createApiKeyAuthMiddleware,
   createAuthMiddleware,
+  createUiSessionAuthMiddleware,
   truefoundryAdminMiddleware,
 } from './auth/middleware';
 import type { McpCatalog } from './catalog/McpCatalog';
@@ -422,6 +425,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/settings',
     withAdminAuth(
       createSettingsRouter({
+        mcpCatalog: deps.mcpCatalog,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         tokenStore: deps.tokenStore,
@@ -507,6 +511,19 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       authMiddleware,
     ),
   );
+  // Same-origin tile proxy for embedded maps. Browser session only: bearer
+  // credentials (agents, sandboxes, API clients) are refused.
+  app.route(
+    '/api/maps',
+    withAuth(
+      createMapsRouter({
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
   app.route(
     '/api/v1/personas',
     withAuth(
@@ -514,6 +531,20 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         personaStore: deps.personaStore,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveRequestContext,
+        knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/personas',
+    withAuth(
+      createPersonaKnowledgeRouter({
+        personaStore: deps.personaStore,
+        resolveRequestContext,
+        knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+        modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+        logger: deps.logger,
       }),
       authMiddleware,
     ),

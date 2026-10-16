@@ -5,540 +5,843 @@ import { TrueForge } from "../../src/Client";
 import { mockServerPool } from "../mock-server/MockServerPool";
 
 describe("PersonasClient", () => {
+    
     test("list (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : [ { "aliases" : [ "aliases" ] , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "display_name" : "Zara" , "id" : "id" , "instructions" : "instructions" , "model_name" : "model_name" , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" } ] };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/personas").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const rawResponseBody = {
-            data: [
-                {
-                    aliases: ["aliases"],
-                    created_at: "2024-01-15T09:30:00Z",
-                    created_by: "created_by",
-                    display_name: "Zara",
-                    id: "id",
-                    instructions: "instructions",
-                    model_name: "model_name",
-                    updated_at: "2024-01-15T09:30:00Z",
-                    updated_by: "updated_by",
-                },
-            ],
-        };
-
-        server.mockEndpoint().get("/api/v1/personas").respondWith().statusCode(200).jsonBody(rawResponseBody).build();
-
-        const response = await client.personas.list();
-        expect(response).toEqual({
-            data: [
-                {
-                    aliases: ["aliases"],
-                    createdAt: new Date("2024-01-15T09:30:00.000Z"),
-                    createdBy: "created_by",
-                    displayName: "Zara",
-                    id: "id",
-                    instructions: "instructions",
-                    modelName: "model_name",
-                    updatedAt: new Date("2024-01-15T09:30:00.000Z"),
-                    updatedBy: "updated_by",
-                },
-            ],
-        });
+        
+                        
+                                const response = await client.personas.list();
+                                expect(response).toEqual({
+    data: [{
+            aliases: ["aliases"],
+            createdAt: new Date("2024-01-15T09:30:00.000Z"),
+            createdBy: "created_by",
+            displayName: "Zara",
+            id: "id",
+            instructions: "instructions",
+            modelName: "model_name",
+            updatedAt: new Date("2024-01-15T09:30:00.000Z"),
+            updatedBy: "updated_by"
+        }]
+});
+                              
+                    
     });
-
+          
     test("list (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/personas").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        const rawResponseBody = { error: { message: "message" } };
-
-        server.mockEndpoint().get("/api/v1/personas").respondWith().statusCode(401).jsonBody(rawResponseBody).build();
-
-        await expect(async () => {
-            return await client.personas.list();
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.personas.list()
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("create (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            persona: {
-                aliases: ["aliases"],
-                display_name: "Zara",
-                instructions: "instructions",
-                model_name: "model_name",
-            },
-        };
-        const rawResponseBody = {
-            data: {
-                aliases: ["aliases"],
-                created_at: "2024-01-15T09:30:00Z",
-                created_by: "created_by",
-                display_name: "Zara",
-                id: "id",
-                instructions: "instructions",
-                model_name: "model_name",
-                updated_at: "2024-01-15T09:30:00Z",
-                updated_by: "updated_by",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "persona" : { "aliases" : [ "aliases" ] , "display_name" : "Zara" , "instructions" : "instructions" , "model_name" : "model_name" } };
+        const rawResponseBody = { "data" : { "aliases" : [ "aliases" ] , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "display_name" : "Zara" , "id" : "id" , "instructions" : "instructions" , "model_name" : "model_name" , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/personas")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/personas").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.personas.create({
-            persona: {
-                aliases: ["aliases"],
-                displayName: "Zara",
-                instructions: "instructions",
-                modelName: "model_name",
-            },
-        });
-        expect(response).toEqual({
-            data: {
-                aliases: ["aliases"],
-                createdAt: new Date("2024-01-15T09:30:00.000Z"),
-                createdBy: "created_by",
-                displayName: "Zara",
-                id: "id",
-                instructions: "instructions",
-                modelName: "model_name",
-                updatedAt: new Date("2024-01-15T09:30:00.000Z"),
-                updatedBy: "updated_by",
-            },
-        });
+        
+                        
+                                const response = await client.personas.create({
+    persona: {
+        aliases: ["aliases"],
+        displayName: "Zara",
+        instructions: "instructions",
+        modelName: "model_name"
+    }
+});
+                                expect(response).toEqual({
+    data: {
+        aliases: ["aliases"],
+        createdAt: new Date("2024-01-15T09:30:00.000Z"),
+        createdBy: "created_by",
+        displayName: "Zara",
+        id: "id",
+        instructions: "instructions",
+        modelName: "model_name",
+        updatedAt: new Date("2024-01-15T09:30:00.000Z"),
+        updatedBy: "updated_by"
+    }
+});
+                              
+                    
     });
-
+          
     test("create (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "persona" : { "aliases" : [ "aliases" , "aliases" ] , "display_name" : "x" , "instructions" : "x" , "model_name" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/personas")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(400)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/personas").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personas.create({
-                persona: {
-                    aliases: ["aliases", "aliases"],
-                    displayName: "x",
-                    instructions: "x",
-                    modelName: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        
+            await expect(async () => {
+                return await client.personas.create({
+    persona: {
+        aliases: ["aliases", "aliases"],
+        displayName: "x",
+        instructions: "x",
+        modelName: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-
+          
     test("create (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "persona" : { "aliases" : [ "aliases" , "aliases" ] , "display_name" : "x" , "instructions" : "x" , "model_name" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/personas")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/personas").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personas.create({
-                persona: {
-                    aliases: ["aliases", "aliases"],
-                    displayName: "x",
-                    instructions: "x",
-                    modelName: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.personas.create({
+    persona: {
+        aliases: ["aliases", "aliases"],
+        displayName: "x",
+        instructions: "x",
+        modelName: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("create (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "persona" : { "aliases" : [ "aliases" , "aliases" ] , "display_name" : "x" , "instructions" : "x" , "model_name" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/personas")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(409)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/personas").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(409).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personas.create({
-                persona: {
-                    aliases: ["aliases", "aliases"],
-                    displayName: "x",
-                    instructions: "x",
-                    modelName: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        
+            await expect(async () => {
+                return await client.personas.create({
+    persona: {
+        aliases: ["aliases", "aliases"],
+        displayName: "x",
+        instructions: "x",
+        modelName: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-
+          
     test("create (5)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "persona" : { "aliases" : [ "aliases" , "aliases" ] , "display_name" : "x" , "instructions" : "x" , "model_name" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/personas")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(422)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/personas").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(422).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personas.create({
-                persona: {
-                    aliases: ["aliases", "aliases"],
-                    displayName: "x",
-                    instructions: "x",
-                    modelName: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+        
+            await expect(async () => {
+                return await client.personas.create({
+    persona: {
+        aliases: ["aliases", "aliases"],
+        displayName: "x",
+        instructions: "x",
+        modelName: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
     });
-
+          
     test("update (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            persona: {
-                aliases: ["aliases"],
-                display_name: "Zara",
-                instructions: "instructions",
-                model_name: "model_name",
-            },
-        };
-        const rawResponseBody = {
-            data: {
-                aliases: ["aliases"],
-                created_at: "2024-01-15T09:30:00Z",
-                created_by: "created_by",
-                display_name: "Zara",
-                id: "id",
-                instructions: "instructions",
-                model_name: "model_name",
-                updated_at: "2024-01-15T09:30:00Z",
-                updated_by: "updated_by",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "persona" : { "aliases" : [ "aliases" ] , "display_name" : "Zara" , "instructions" : "instructions" , "model_name" : "model_name" } };
+        const rawResponseBody = { "data" : { "aliases" : [ "aliases" ] , "created_at" : "2024-01-15T09:30:00Z" , "created_by" : "created_by" , "display_name" : "Zara" , "id" : "id" , "instructions" : "instructions" , "model_name" : "model_name" , "updated_at" : "2024-01-15T09:30:00Z" , "updated_by" : "updated_by" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/personas/persona_id")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/personas/persona_id").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.personas.update("persona_id", {
-            persona: {
-                aliases: ["aliases"],
-                displayName: "Zara",
-                instructions: "instructions",
-                modelName: "model_name",
-            },
-        });
-        expect(response).toEqual({
-            data: {
-                aliases: ["aliases"],
-                createdAt: new Date("2024-01-15T09:30:00.000Z"),
-                createdBy: "created_by",
-                displayName: "Zara",
-                id: "id",
-                instructions: "instructions",
-                modelName: "model_name",
-                updatedAt: new Date("2024-01-15T09:30:00.000Z"),
-                updatedBy: "updated_by",
-            },
-        });
+        
+                        
+                                const response = await client.personas.update("persona_id", {
+    persona: {
+        aliases: ["aliases"],
+        displayName: "Zara",
+        instructions: "instructions",
+        modelName: "model_name"
+    }
+});
+                                expect(response).toEqual({
+    data: {
+        aliases: ["aliases"],
+        createdAt: new Date("2024-01-15T09:30:00.000Z"),
+        createdBy: "created_by",
+        displayName: "Zara",
+        id: "id",
+        instructions: "instructions",
+        modelName: "model_name",
+        updatedAt: new Date("2024-01-15T09:30:00.000Z"),
+        updatedBy: "updated_by"
+    }
+});
+                              
+                    
     });
-
+          
     test("update (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "persona" : { "aliases" : [ "aliases" , "aliases" ] , "display_name" : "x" , "instructions" : "x" , "model_name" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/personas/persona_id")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(400)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/personas/persona_id").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personas.update("persona_id", {
-                persona: {
-                    aliases: ["aliases", "aliases"],
-                    displayName: "x",
-                    instructions: "x",
-                    modelName: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        
+            await expect(async () => {
+                return await client.personas.update("persona_id", {
+    persona: {
+        aliases: ["aliases", "aliases"],
+        displayName: "x",
+        instructions: "x",
+        modelName: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-
+          
     test("update (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "persona" : { "aliases" : [ "aliases" , "aliases" ] , "display_name" : "x" , "instructions" : "x" , "model_name" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/personas/persona_id")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/personas/persona_id").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personas.update("persona_id", {
-                persona: {
-                    aliases: ["aliases", "aliases"],
-                    displayName: "x",
-                    instructions: "x",
-                    modelName: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.personas.update("persona_id", {
+    persona: {
+        aliases: ["aliases", "aliases"],
+        displayName: "x",
+        instructions: "x",
+        modelName: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("update (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "persona" : { "aliases" : [ "aliases" , "aliases" ] , "display_name" : "x" , "instructions" : "x" , "model_name" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/personas/persona_id")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(404)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/personas/persona_id").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personas.update("persona_id", {
-                persona: {
-                    aliases: ["aliases", "aliases"],
-                    displayName: "x",
-                    instructions: "x",
-                    modelName: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        
+            await expect(async () => {
+                return await client.personas.update("persona_id", {
+    persona: {
+        aliases: ["aliases", "aliases"],
+        displayName: "x",
+        instructions: "x",
+        modelName: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-
+          
     test("update (5)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "persona" : { "aliases" : [ "aliases" , "aliases" ] , "display_name" : "x" , "instructions" : "x" , "model_name" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/personas/persona_id")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(409)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/personas/persona_id").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(409).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personas.update("persona_id", {
-                persona: {
-                    aliases: ["aliases", "aliases"],
-                    displayName: "x",
-                    instructions: "x",
-                    modelName: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        
+            await expect(async () => {
+                return await client.personas.update("persona_id", {
+    persona: {
+        aliases: ["aliases", "aliases"],
+        displayName: "x",
+        instructions: "x",
+        modelName: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-
+          
     test("update (6)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            persona: { aliases: ["aliases", "aliases"], display_name: "x", instructions: "x", model_name: "x" },
-        };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "persona" : { "aliases" : [ "aliases" , "aliases" ] , "display_name" : "x" , "instructions" : "x" , "model_name" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/personas/persona_id")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(422)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/personas/persona_id").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(422).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personas.update("persona_id", {
-                persona: {
-                    aliases: ["aliases", "aliases"],
-                    displayName: "x",
-                    instructions: "x",
-                    modelName: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
+        
+            await expect(async () => {
+                return await client.personas.update("persona_id", {
+    persona: {
+        aliases: ["aliases", "aliases"],
+        displayName: "x",
+        instructions: "x",
+        modelName: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.UnprocessableEntityError);
     });
-
+          
     test("delete (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {};
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { };
+        
         server
             .mockEndpoint()
-            .delete("/api/v1/personas/persona_id")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .delete("/api/v1/personas/persona_id").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.personas.delete("persona_id");
-        expect(response).toEqual({});
+        
+                        
+                                const response = await client.personas.delete("persona_id");
+                                expect(response).toEqual({});
+                              
+                    
     });
-
+          
     test("delete (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .delete("/api/v1/personas/persona_id")
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .delete("/api/v1/personas/persona_id").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personas.delete("persona_id");
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.personas.delete("persona_id")
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
+          
+    test("delete (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .delete("/api/v1/personas/persona_id").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
 
+        
+            await expect(async () => {
+                return await client.personas.delete("persona_id")
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+          
     test("get_context (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {
-            data: {
-                injected_context: "injected_context",
-                model_name: "model_name",
-                persona_id: "persona_id",
-                persona_name: "persona_name",
-                version: "persona-context/v1",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "injected_context" : "injected_context" , "model_name" : "model_name" , "persona_id" : "persona_id" , "persona_name" : "persona_name" , "version" : "persona-context/v1" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/personas/persona_id/context")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/personas/persona_id/context").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.personas.getContext("persona_id");
-        expect(response).toEqual({
-            data: {
-                injectedContext: "injected_context",
-                modelName: "model_name",
-                personaId: "persona_id",
-                personaName: "persona_name",
-                version: "persona-context/v1",
-            },
-        });
+        
+                        
+                                const response = await client.personas.getContext("persona_id");
+                                expect(response).toEqual({
+    data: {
+        injectedContext: "injected_context",
+        modelName: "model_name",
+        personaId: "persona_id",
+        personaName: "persona_name",
+        version: "persona-context/v1"
+    }
+});
+                              
+                    
     });
-
+          
     test("get_context (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/personas/persona_id/context")
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/personas/persona_id/context").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personas.getContext("persona_id");
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.personas.getContext("persona_id")
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("get_context (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/personas/persona_id/context")
-            .respondWith()
-            .statusCode(404)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/personas/persona_id/context").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.personas.getContext("persona_id");
-        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        
+            await expect(async () => {
+                return await client.personas.getContext("persona_id")
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
+          
+    test("list_knowledge (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : [ { "chunk_count" : 1 , "created_at" : "2024-01-15T09:30:00Z" , "id" : "id" , "source_kind" : "upload" , "source_label" : "source_label" , "source_url" : "source_url" , "status" : "pending" , "status_message" : "status_message" , "title" : "title" , "title_explicit" : true , "updated_at" : "2024-01-15T09:30:00Z" } ] };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/personas/persona_id/knowledge").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
+
+        
+                        
+                                const response = await client.personas.listKnowledge("persona_id");
+                                expect(response).toEqual({
+    data: [{
+            chunkCount: 1,
+            createdAt: new Date("2024-01-15T09:30:00.000Z"),
+            id: "id",
+            sourceKind: "upload",
+            sourceLabel: "source_label",
+            sourceUrl: "source_url",
+            status: "pending",
+            statusMessage: "status_message",
+            title: "title",
+            titleExplicit: true,
+            updatedAt: new Date("2024-01-15T09:30:00.000Z")
+        }]
+});
+                              
+                    
+    });
+          
+    test("list_knowledge (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/personas/persona_id/knowledge").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personas.listKnowledge("persona_id")
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("list_knowledge (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/personas/persona_id/knowledge").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personas.listKnowledge("persona_id")
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+          
+    test("list_knowledge (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/personas/persona_id/knowledge").respondWith()
+            .statusCode(500).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personas.listKnowledge("persona_id")
+            }).rejects.toThrow(TrueForgeTypes.InternalServerError);
+    });
+          
+    test("create_knowledge (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "kind" : "text" , "text" : "text" , "title" : "title" };
+        const rawResponseBody = { "data" : { "chunk_count" : 1 , "created_at" : "2024-01-15T09:30:00Z" , "id" : "id" , "source_kind" : "upload" , "source_label" : "source_label" , "source_url" : "source_url" , "status" : "pending" , "status_message" : "status_message" , "title" : "title" , "title_explicit" : true , "updated_at" : "2024-01-15T09:30:00Z" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/personas/persona_id/knowledge").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
+
+        
+                        
+                                const response = await client.personas.createKnowledge("persona_id", {
+    kind: "text",
+    text: "text",
+    title: "title"
+});
+                                expect(response).toEqual({
+    data: {
+        chunkCount: 1,
+        createdAt: new Date("2024-01-15T09:30:00.000Z"),
+        id: "id",
+        sourceKind: "upload",
+        sourceLabel: "source_label",
+        sourceUrl: "source_url",
+        status: "pending",
+        statusMessage: "status_message",
+        title: "title",
+        titleExplicit: true,
+        updatedAt: new Date("2024-01-15T09:30:00.000Z")
+    }
+});
+                              
+                    
+    });
+          
+    test("create_knowledge (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "kind" : "text" , "text" : "x" , "title" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/personas/persona_id/knowledge").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personas.createKnowledge("persona_id", {
+    kind: "text",
+    text: "x",
+    title: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+          
+    test("create_knowledge (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "kind" : "text" , "text" : "x" , "title" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/personas/persona_id/knowledge").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personas.createKnowledge("persona_id", {
+    kind: "text",
+    text: "x",
+    title: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("create_knowledge (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "kind" : "text" , "text" : "x" , "title" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/personas/persona_id/knowledge").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personas.createKnowledge("persona_id", {
+    kind: "text",
+    text: "x",
+    title: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+          
+    test("create_knowledge (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "kind" : "text" , "text" : "x" , "title" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/personas/persona_id/knowledge").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(500).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personas.createKnowledge("persona_id", {
+    kind: "text",
+    text: "x",
+    title: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.InternalServerError);
+    });
+          
+    test("get_knowledge_embedding_model (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "message" : "message" , "phase" : "idle" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/personas/persona_id/knowledge/embedding-model").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
+
+        
+                        
+                                const response = await client.personas.getKnowledgeEmbeddingModel("persona_id");
+                                expect(response).toEqual({
+    data: {
+        message: "message",
+        phase: "idle"
+    }
+});
+                              
+                    
+    });
+          
+    test("get_knowledge_embedding_model (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/personas/persona_id/knowledge/embedding-model").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personas.getKnowledgeEmbeddingModel("persona_id")
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("get_knowledge_embedding_model (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .get("/api/v1/personas/persona_id/knowledge/embedding-model").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personas.getKnowledgeEmbeddingModel("persona_id")
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+          
+    test("delete_knowledge (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { };
+        
+        server
+            .mockEndpoint()
+            .delete("/api/v1/personas/persona_id/knowledge/document_id").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
+
+        
+                        
+                                const response = await client.personas.deleteKnowledge("persona_id", "document_id");
+                                expect(response).toEqual({});
+                              
+                    
+    });
+          
+    test("delete_knowledge (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .delete("/api/v1/personas/persona_id/knowledge/document_id").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personas.deleteKnowledge("persona_id", "document_id")
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("delete_knowledge (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .delete("/api/v1/personas/persona_id/knowledge/document_id").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personas.deleteKnowledge("persona_id", "document_id")
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+          
+    test("delete_knowledge (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .delete("/api/v1/personas/persona_id/knowledge/document_id").respondWith()
+            .statusCode(500).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.personas.deleteKnowledge("persona_id", "document_id")
+            }).rejects.toThrow(TrueForgeTypes.InternalServerError);
+    });
+          
 });

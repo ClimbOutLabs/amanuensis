@@ -5,370 +5,331 @@ import { TrueForge } from "../../../src/Client";
 import { mockServerPool } from "../../mock-server/MockServerPool";
 
 describe("SkillsClient", () => {
+    
     test("list (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {
-            data: [
-                {
-                    manifest: { description: "description", name: "name", ref: "ref", type: "git", url: "url" },
-                    name: "name",
-                },
-            ],
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : [ { "manifest" : { "description" : "description" , "name" : "name" , "ref" : "ref" , "type" : "git" , "url" : "url" } , "name" : "name" } ] };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/settings/skills")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/settings/skills").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.settings.skills.list();
-        expect(response).toEqual({
-            data: [
-                {
-                    manifest: {
-                        description: "description",
-                        name: "name",
-                        ref: "ref",
-                        type: "git",
-                        url: "url",
-                    },
-                    name: "name",
-                },
-            ],
-        });
+        
+                        
+                                const response = await client.settings.skills.list();
+                                expect(response).toEqual({
+    data: [{
+            manifest: {
+                description: "description",
+                name: "name",
+                ref: "ref",
+                type: "git",
+                url: "url"
+            },
+            name: "name"
+        }]
+});
+                              
+                    
     });
-
+          
     test("list (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/settings/skills")
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/settings/skills").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.skills.list();
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.settings.skills.list()
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("list (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/settings/skills")
-            .respondWith()
-            .statusCode(403)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/settings/skills").respondWith()
+            .statusCode(403).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.skills.list();
-        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+        
+            await expect(async () => {
+                return await client.settings.skills.list()
+            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
-
+          
     test("create (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            manifest: { description: "description", name: "name", ref: "ref", type: "git", url: "url" },
-        };
-        const rawResponseBody = {
-            data: {
-                manifest: {
-                    description: "description",
-                    name: "name",
-                    path: "path",
-                    ref: "ref",
-                    requires: ["requires"],
-                    type: "git",
-                    url: "url",
-                    when_to_use: ["when_to_use"],
-                },
-                name: "name",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "manifest" : { "description" : "description" , "name" : "name" , "ref" : "ref" , "type" : "git" , "url" : "url" } };
+        const rawResponseBody = { "data" : { "manifest" : { "description" : "description" , "name" : "name" , "path" : "path" , "ref" : "ref" , "requires" : [ "requires" ] , "type" : "git" , "url" : "url" , "when_to_use" : [ "when_to_use" ] } , "name" : "name" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/settings/skills")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/settings/skills").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.settings.skills.create({
-            manifest: {
-                description: "description",
-                name: "name",
-                ref: "ref",
-                type: "git",
-                url: "url",
-            },
-        });
-        expect(response).toEqual({
-            data: {
-                manifest: {
-                    description: "description",
-                    name: "name",
-                    path: "path",
-                    ref: "ref",
-                    requires: ["requires"],
-                    type: "git",
-                    url: "url",
-                    whenToUse: ["when_to_use"],
-                },
-                name: "name",
-            },
-        });
+        
+                        
+                                const response = await client.settings.skills.create({
+    manifest: {
+        description: "description",
+        name: "name",
+        ref: "ref",
+        type: "git",
+        url: "url"
+    }
+});
+                                expect(response).toEqual({
+    data: {
+        manifest: {
+            description: "description",
+            name: "name",
+            path: "path",
+            ref: "ref",
+            requires: ["requires"],
+            type: "git",
+            url: "url",
+            whenToUse: ["when_to_use"]
+        },
+        name: "name"
+    }
+});
+                              
+                    
     });
-
+          
     test("create (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { manifest: { description: "x", name: "xy", ref: "x", type: "git", url: "x" } };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "manifest" : { "description" : "x" , "name" : "xy" , "ref" : "x" , "type" : "git" , "url" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/settings/skills")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(400)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/settings/skills").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.skills.create({
-                manifest: {
-                    description: "x",
-                    name: "xy",
-                    ref: "x",
-                    type: "git",
-                    url: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        
+            await expect(async () => {
+                return await client.settings.skills.create({
+    manifest: {
+        description: "x",
+        name: "xy",
+        ref: "x",
+        type: "git",
+        url: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-
+          
     test("create (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { manifest: { description: "x", name: "xy", ref: "x", type: "git", url: "x" } };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "manifest" : { "description" : "x" , "name" : "xy" , "ref" : "x" , "type" : "git" , "url" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/settings/skills")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(409)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/settings/skills").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(409).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.skills.create({
-                manifest: {
-                    description: "x",
-                    name: "xy",
-                    ref: "x",
-                    type: "git",
-                    url: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        
+            await expect(async () => {
+                return await client.settings.skills.create({
+    manifest: {
+        description: "x",
+        name: "xy",
+        ref: "x",
+        type: "git",
+        url: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-
+          
     test("create (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { manifest: { description: "x", name: "xy", ref: "x", type: "git", url: "x" } };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "manifest" : { "description" : "x" , "name" : "xy" , "ref" : "x" , "type" : "git" , "url" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/settings/skills")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(424)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/settings/skills").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(424).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.skills.create({
-                manifest: {
-                    description: "x",
-                    name: "xy",
-                    ref: "x",
-                    type: "git",
-                    url: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
+        
+            await expect(async () => {
+                return await client.settings.skills.create({
+    manifest: {
+        description: "x",
+        name: "xy",
+        ref: "x",
+        type: "git",
+        url: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
     });
-
+          
     test("create_or_update (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {
-            manifest: { description: "description", name: "name", ref: "ref", type: "git", url: "url" },
-        };
-        const rawResponseBody = {
-            data: {
-                manifest: {
-                    description: "description",
-                    name: "name",
-                    path: "path",
-                    ref: "ref",
-                    requires: ["requires"],
-                    type: "git",
-                    url: "url",
-                    when_to_use: ["when_to_use"],
-                },
-                name: "name",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "manifest" : { "description" : "description" , "name" : "name" , "ref" : "ref" , "type" : "git" , "url" : "url" } };
+        const rawResponseBody = { "data" : { "manifest" : { "description" : "description" , "name" : "name" , "path" : "path" , "ref" : "ref" , "requires" : [ "requires" ] , "type" : "git" , "url" : "url" , "when_to_use" : [ "when_to_use" ] } , "name" : "name" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/settings/skills")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/settings/skills").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.settings.skills.createOrUpdate({
-            manifest: {
-                description: "description",
-                name: "name",
-                ref: "ref",
-                type: "git",
-                url: "url",
-            },
-        });
-        expect(response).toEqual({
-            data: {
-                manifest: {
-                    description: "description",
-                    name: "name",
-                    path: "path",
-                    ref: "ref",
-                    requires: ["requires"],
-                    type: "git",
-                    url: "url",
-                    whenToUse: ["when_to_use"],
-                },
-                name: "name",
-            },
-        });
+        
+                        
+                                const response = await client.settings.skills.createOrUpdate({
+    manifest: {
+        description: "description",
+        name: "name",
+        ref: "ref",
+        type: "git",
+        url: "url"
+    }
+});
+                                expect(response).toEqual({
+    data: {
+        manifest: {
+            description: "description",
+            name: "name",
+            path: "path",
+            ref: "ref",
+            requires: ["requires"],
+            type: "git",
+            url: "url",
+            whenToUse: ["when_to_use"]
+        },
+        name: "name"
+    }
+});
+                              
+                    
     });
-
+          
     test("create_or_update (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { manifest: { description: "x", name: "xy", ref: "x", type: "git", url: "x" } };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "manifest" : { "description" : "x" , "name" : "xy" , "ref" : "x" , "type" : "git" , "url" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/settings/skills")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(400)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/settings/skills").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.skills.createOrUpdate({
-                manifest: {
-                    description: "x",
-                    name: "xy",
-                    ref: "x",
-                    type: "git",
-                    url: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        
+            await expect(async () => {
+                return await client.settings.skills.createOrUpdate({
+    manifest: {
+        description: "x",
+        name: "xy",
+        ref: "x",
+        type: "git",
+        url: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-
+          
     test("create_or_update (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { manifest: { description: "x", name: "xy", ref: "x", type: "git", url: "x" } };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "manifest" : { "description" : "x" , "name" : "xy" , "ref" : "x" , "type" : "git" , "url" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .put("/api/v1/settings/skills")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(424)
-            .jsonBody(rawResponseBody)
-            .build();
+            .put("/api/v1/settings/skills").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(424).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.skills.createOrUpdate({
-                manifest: {
-                    description: "x",
-                    name: "xy",
-                    ref: "x",
-                    type: "git",
-                    url: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
+        
+            await expect(async () => {
+                return await client.settings.skills.createOrUpdate({
+    manifest: {
+        description: "x",
+        name: "xy",
+        ref: "x",
+        type: "git",
+        url: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
     });
-
+          
     test("delete (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {};
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { };
+        
         server
             .mockEndpoint()
-            .delete("/api/v1/settings/skills/name")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .delete("/api/v1/settings/skills/name").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.settings.skills.delete("name");
-        expect(response).toEqual({});
+        
+                        
+                                const response = await client.settings.skills.delete("name");
+                                expect(response).toEqual({});
+                              
+                    
     });
-
+          
     test("delete (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .delete("/api/v1/settings/skills/xy")
-            .respondWith()
-            .statusCode(404)
-            .jsonBody(rawResponseBody)
-            .build();
+            .delete("/api/v1/settings/skills/xy").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.settings.skills.delete("xy");
-        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        
+            await expect(async () => {
+                return await client.settings.skills.delete("xy")
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
+          
 });

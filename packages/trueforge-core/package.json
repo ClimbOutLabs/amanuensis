@@ -110,7 +110,7 @@
     "@ai-sdk/provider-utils": "^5.0.32",
     "@daytona/sdk": "^0.211.2",
     "@hono/zod-openapi": "^1.6.1",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@nats-io/nats-core": "3.4.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/core": "^2.11.0",

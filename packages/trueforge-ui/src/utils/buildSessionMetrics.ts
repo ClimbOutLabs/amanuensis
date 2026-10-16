@@ -1,4 +1,4 @@
-import { getSessionEventColor, type SessionEventTimelineSegment } from './sessionEventTimeline.js';
+import { resolveSessionEventColor, type SessionEventTimelineSegment } from './sessionEventTimeline.js';
 import type { SessionTurnView } from './sessionTurnViews.js';
 import { buildTimeBreakdown } from './timeBreakdown.js';
 
@@ -68,8 +68,8 @@ export function buildSessionMetrics({
     const label = `T${turn.turnNumber}`;
     derivedWallTimeMs += turn.durationMs ?? 0;
     if (!turnHasMetrics(turn)) {
-      costPerTurn.push({ label, value: 0, color: getSessionEventColor('tool_call') });
-      contextByTurn.push({ label, value: contextTokens, color: getSessionEventColor('model') });
+      costPerTurn.push({ label, value: 0, color: resolveSessionEventColor('tool_call') });
+      contextByTurn.push({ label, value: contextTokens, color: resolveSessionEventColor('model') });
       continue;
     }
 
@@ -89,8 +89,8 @@ export function buildSessionMetrics({
     totalOutputTokens += outputTokens;
     totalCachedTokens += cachedTokens;
     contextTokens += turnTotalTokens;
-    costPerTurn.push({ label, value: turnCostUsd ?? 0, color: getSessionEventColor('tool_call') });
-    contextByTurn.push({ label, value: contextTokens, color: getSessionEventColor('model') });
+    costPerTurn.push({ label, value: turnCostUsd ?? 0, color: resolveSessionEventColor('tool_call') });
+    contextByTurn.push({ label, value: contextTokens, color: resolveSessionEventColor('model') });
   }
 
   const wallTimeMs = hintHasValues(listMetrics)
@@ -106,7 +106,7 @@ export function buildSessionMetrics({
   const toolCallFrequency = Array.from(toolCallCounts, ([label, value]) => ({
     label,
     value,
-    color: getSessionEventColor('tool_call'),
+    color: resolveSessionEventColor('tool_call'),
   })).sort((left, right) => right.value - left.value);
 
   const totalCostUsd = listMetrics?.totalCostInUsd ?? (hasDerivedCost ? derivedCostUsd : undefined);
@@ -123,9 +123,9 @@ export function buildSessionMetrics({
     timeBreakdown,
     costPerTurn,
     tokenBreakdown: [
-      { label: 'input', value: totalUncachedInputTokens, color: getSessionEventColor('model') },
-      { label: 'output', value: totalOutputTokens, color: getSessionEventColor('user') },
-      { label: 'cached', value: totalCachedTokens, color: getSessionEventColor('sub_agent') },
+      { label: 'input', value: totalUncachedInputTokens, color: resolveSessionEventColor('model') },
+      { label: 'output', value: totalOutputTokens, color: resolveSessionEventColor('user') },
+      { label: 'cached', value: totalCachedTokens, color: resolveSessionEventColor('sub_agent') },
     ],
     contextByTurn,
     toolCallFrequency,

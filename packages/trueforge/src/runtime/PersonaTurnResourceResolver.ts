@@ -219,6 +219,7 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
     return {
       modelClient: chatModel.modelClient,
       modelParams: { ...chatModel.defaultModelParams, ...spec.model.params },
+      modelProperties: chatModel.modelProperties,
     };
   }
 }

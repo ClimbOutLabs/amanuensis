@@ -2,7 +2,7 @@
 
 /** The route the newest user message selected. */
 export const MemoryRecallReflectRoute = {
-    Recall: "recall",
-    Reflect: "reflect",
-} as const;
-export type MemoryRecallReflectRoute = (typeof MemoryRecallReflectRoute)[keyof typeof MemoryRecallReflectRoute];
+        Recall: "recall",
+        Reflect: "reflect"
+    } as const;
+export type MemoryRecallReflectRoute = typeof MemoryRecallReflectRoute[keyof typeof MemoryRecallReflectRoute];

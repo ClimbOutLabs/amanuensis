@@ -17,6 +17,7 @@ When auth is enabled on the server, pass an ID token via the optional `token` cl
 - [Request and Response Types](#request-and-response-types)
 - [Exception Handling](#exception-handling)
 - [Streaming Response](#streaming-response)
+- [File Uploads](#file-uploads)
 - [Binary Response](#binary-response)
 - [Advanced](#advanced)
   - [Subpackage Exports](#subpackage-exports)
@@ -107,6 +108,51 @@ for await (const item of response) {
     console.log(item);
 }
 ```
+
+## File Uploads
+
+You can upload files using the client:
+
+```typescript
+import { createReadStream } from "fs";
+
+await client.voice.transcribe(createReadStream("path/to/file"), ...);
+await client.voice.transcribe(new ReadableStream(), ...);
+await client.voice.transcribe(Buffer.from('binary data'), ...);
+await client.voice.transcribe(new Blob(['binary data'], { type: 'audio/mpeg' }), ...);
+await client.voice.transcribe(new File(['binary data'], 'file.mp3'), ...);
+await client.voice.transcribe(new ArrayBuffer(8), ...);
+await client.voice.transcribe(new Uint8Array([0, 1, 2]), ...);
+```
+The client accepts a variety of types for file upload parameters:
+* Stream types: `fs.ReadStream`, `stream.Readable`, and `ReadableStream`
+* Buffered types: `Buffer`, `Blob`, `File`, `ArrayBuffer`, `ArrayBufferView`, and `Uint8Array`
+
+### Metadata
+
+You can configure metadata when uploading a file:
+```typescript
+const file: Uploadable.WithMetadata = {
+    data: createReadStream("path/to/file"),
+    filename: "my-file",       // optional
+    contentType: "audio/mpeg", // optional
+    contentLength: 1949,       // optional
+};
+```
+
+Alternatively, you can upload a file directly from a file path:
+```typescript
+const file : Uploadable.FromPath = {
+    path: "path/to/file",
+    filename: "my-file",        // optional
+    contentType: "audio/mpeg",  // optional
+    contentLength: 1949,        // optional
+};
+```
+
+The metadata is used to set the `Content-Length`, `Content-Type`, and `Content-Disposition` headers. If not provided, the client will attempt to determine them automatically.
+For example, `fs.ReadStream` has a `path` property which the SDK uses to retrieve the file size from the filesystem without loading it into memory.
+
 
 ## Binary Response
 

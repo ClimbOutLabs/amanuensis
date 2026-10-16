@@ -1,500 +1,320 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { cn } from '@/atoms/lib/cn.js';
+import { Button } from '@/atoms/primitives/Button.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
-import { Button } from '../../atoms/primitives/Button.js';
-import { Tooltip } from '../../atoms/primitives/Tooltip.js';
-import { useOptionalSandboxRuntimeUpgrade } from '../../components/SandboxRuntimeUpgradeContext.js';
-import { Icon } from '../../icons/Icon.js';
-import { useCatalogServer, useServerCapabilities } from '../../server/ServerContext.js';
-import type {
-  SandboxProviderBase,
-  SandboxProviderCatalogEntry,
-  SandboxProviderConfig,
-  SandboxProviderListEntry,
-  SandboxSnapshotSyncStatus,
-} from '../../server/types.js';
-import { getErrorMessage } from '../../utils/getErrorMessage.js';
-import { useToasterOptional } from '../ToasterContainer.js';
-import ConfigureSandboxForm, { type SandboxConfigDraft } from './ConfigureSandboxForm.js';
-import { readSandboxIsolationStatus } from './sandboxIsolationCapability.js';
+import { useOptionalRunCodeStatus, type RunCodeStatus } from '@/components/RunCodeStatusContext.js';
+import { useServerCapabilities } from '@/server/ServerContext.js';
+import { getErrorMessage } from '@/utils/getErrorMessage.js';
 
-const SNAPSHOT_STATUS_POLL_INTERVAL_MS = 10000;
+import {
+  formatCheckedAgo,
+  formatMegabytes,
+  formatSeconds,
+  presentRunCodeStatus,
+  shortImageName,
+  type StatusTone,
+} from './runCodeStatusPresentation.js';
+import { readSandboxLimits, type SandboxLimits } from './sandboxIsolationCapability.js';
 
-type SandboxConfigWithEndpoint = SandboxProviderConfig & { apiUrl?: string };
+const CLOCK_TICK_MS = 30_000;
 
-const configFrom = (config: SandboxConfigWithEndpoint): SandboxConfigWithEndpoint => ({
-  execTimeoutMs: config.execTimeoutMs,
-  autoStopIntervalInMinutes: config.autoStopIntervalInMinutes,
-  autoArchiveIntervalInMinutes: config.autoArchiveIntervalInMinutes,
-  autoDeleteIntervalInMinutes: config.autoDeleteIntervalInMinutes,
-  ...(config.apiUrl ? { apiUrl: config.apiUrl } : {}),
-});
+const TONE_TEXT: Record<StatusTone, string> = {
+  success: 'text-success-bg',
+  warning: 'text-warning-bg',
+  failure: 'text-failure-bg',
+  neutral: 'text-text-primary',
+};
 
-function IsolationRow({
-  label,
-  value,
-  mono = false,
-  breakAll = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  breakAll?: boolean;
-}) {
+const TONE_DOT: Record<StatusTone, string> = {
+  success: 'bg-success-bg',
+  warning: 'bg-warning-bg',
+  failure: 'bg-failure-bg',
+  neutral: 'bg-text-secondary',
+};
+
+function StatusPill({ tone, text }: { tone: StatusTone; text: string }) {
   return (
-    <div className="flex flex-col gap-1 px-4 py-2.5 sm:flex-row sm:items-baseline sm:justify-between">
-      <dt className="text-text-secondary">{label}</dt>
-      <dd className={`text-text-primary ${mono ? 'font-mono text-[0.8125rem]' : ''} ${breakAll ? 'break-all' : ''}`}>
-        {value}
-      </dd>
+    <span
+      className={cn(
+        'flex w-fit items-center gap-1.5 rounded-full border border-border bg-secondary-bg/40 px-2 py-0.5 text-xs font-medium',
+        TONE_TEXT[tone],
+      )}
+      role="status"
+    >
+      <span className={cn('h-1.5 w-1.5 rounded-full', TONE_DOT[tone])} aria-hidden />
+      {text}
+    </span>
+  );
+}
+
+function Card({ headingId, title, children }: { headingId: string; title: string; children: ReactNode }) {
+  return (
+    <section aria-labelledby={headingId} className="rounded-xl border border-border bg-card-bg p-4">
+      <h4 id={headingId} className="text-sm font-medium text-text-primary">
+        {title}
+      </h4>
+      {children}
+    </section>
+  );
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+      <dt className="shrink-0 text-text-secondary">{label}</dt>
+      <dd className="min-w-0 text-text-primary sm:text-right">{children}</dd>
     </div>
   );
 }
 
-const statusPresentation = (status: SandboxSnapshotSyncStatus['status']): { label: string; className: string } => {
-  switch (status) {
-    case 'pending':
-      return {
-        label: 'Syncing image...',
-        className: 'text-warning-bg',
-      };
-    case 'ready':
-      return {
-        label: 'Connected',
-        className: 'text-success-bg',
-      };
-    case 'failed':
-      return {
-        label: 'Sync failed',
-        className: 'text-failure-bg',
-      };
-    default:
-      return {
-        label: status,
-        className: 'text-text-secondary',
-      };
-  }
-};
-
-const SandboxSettings = () => {
-  const { sandboxCatalog } = useCatalogServer();
-  const capabilities = useServerCapabilities();
-  const isolationStatus = readSandboxIsolationStatus(capabilities);
-  const upgradeSandboxRuntime = useOptionalSandboxRuntimeUpgrade();
-  const toaster = useToasterOptional();
-
-  const [providers, setProviders] = useState<SandboxProviderListEntry[]>([]);
-  const [catalog, setCatalog] = useState<SandboxProviderCatalogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const [createEntry, setCreateEntry] = useState<SandboxProviderCatalogEntry | null>(null);
-  const [updateProvider, setUpdateProvider] = useState<SandboxProviderBase | null>(null);
-
-  const refresh = useCallback(
-    async ({ quiet = false }: { quiet?: boolean } = {}) => {
-      if (!sandboxCatalog) return;
-      if (!quiet) setLoading(true);
-      setError(null);
-      try {
-        const [listed, available] = await Promise.all([
-          sandboxCatalog.listSandboxProviders(),
-          sandboxCatalog.getSandboxProviderCatalog(),
-        ]);
-        setProviders(listed);
-        setCatalog(available);
-      } catch (err) {
-        setError(getErrorMessage(err, 'Failed to load sandbox providers'));
-      } finally {
-        if (!quiet) setLoading(false);
-      }
-    },
-    [sandboxCatalog],
+function ChecksValue({ tone, text }: { tone: StatusTone; text: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', TONE_DOT[tone])} aria-hidden />
+      {text}
+    </span>
   );
+}
 
+function ImageCard({ status, limits }: { status: RunCodeStatus; limits: SandboxLimits | null }) {
+  const { checks } = presentRunCodeStatus(status);
+  if ((limits === null || limits.image === '') && checks.length === 0) return null;
+  return (
+    <Card headingId="sandbox-image-heading" title="Image">
+      <dl className="mt-2 divide-y divide-border text-sm">
+        {limits !== null && limits.image !== '' ? <Row label="Version">{shortImageName(limits.image)}</Row> : null}
+        {checks.map(check => (
+          <Row key={check.label} label={check.label}>
+            <ChecksValue tone={check.tone} text={check.text} />
+          </Row>
+        ))}
+      </dl>
+    </Card>
+  );
+}
+
+function LimitsCard({ limits }: { limits: SandboxLimits | null }) {
+  return (
+    <Card headingId="sandbox-limits-heading" title="Limits for each run">
+      {limits === null ? (
+        <p className="mt-2 text-sm text-text-secondary">
+          The server did not report its limits. Check that it is up to date.
+        </p>
+      ) : (
+        <dl className="mt-2 divide-y divide-border text-sm">
+          <Row label="Time">
+            {formatSeconds(limits.defaultTimeoutSeconds)} by default, at most {formatSeconds(limits.maxTimeoutSeconds)}
+          </Row>
+          <Row label="Memory">{formatMegabytes(limits.memoryMb)}</Row>
+          <Row label="Disk space">{formatMegabytes(limits.diskMb)} for files the code writes</Row>
+          <Row label="Network">
+            {limits.networkEgress ? 'On' : 'Off. Code cannot reach the internet or your network.'}
+          </Row>
+        </dl>
+      )}
+    </Card>
+  );
+}
+
+function TechnicalDetails({ lines }: { lines: Array<{ label: string; value: string }> }) {
+  return (
+    <details className="mt-3 text-xs text-text-secondary">
+      <summary className="cursor-pointer select-none">Technical details</summary>
+      <dl className="mt-1.5 space-y-1.5">
+        {lines.map(line => (
+          <div key={line.label}>
+            <dt className="inline">{line.label}: </dt>
+            <dd className="inline whitespace-pre-wrap break-words font-mono">{line.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+function RecheckButton({ checking, onClick }: { checking: boolean; onClick: () => void }) {
+  return (
+    <Button.Secondary size="small" type="button" disabled={checking} onClick={onClick}>
+      {checking ? <Spinner size={14} aria-hidden /> : null}
+      {checking ? 'Checking…' : 'Re-check'}
+    </Button.Secondary>
+  );
+}
+
+const LIMIT_SETTINGS =
+  'SANDBOX_DEFAULT_TIMEOUT_SECONDS, SANDBOX_MAX_TIMEOUT_SECONDS, SANDBOX_MEMORY_MB, SANDBOX_DISK_MB (change only with a restart)';
+
+function StatusCard({
+  status,
+  limits,
+  checkedAt,
+  checking,
+  onRecheck,
+}: {
+  status: RunCodeStatus;
+  limits: SandboxLimits | null;
+  checkedAt: number | null;
+  checking: boolean;
+  onRecheck: () => void;
+}) {
+  const presentation = presentRunCodeStatus(status);
+  const now = useNow();
+  const lines = [
+    ...(limits !== null && limits.image !== '' ? [{ label: 'Image', value: limits.image }] : []),
+    ...(presentation.settings === undefined ? [] : [{ label: 'Server settings', value: presentation.settings }]),
+    { label: 'Limits set by', value: LIMIT_SETTINGS },
+    ...(status.detail === undefined ? [] : [{ label: 'Details', value: status.detail }]),
+  ];
+  return (
+    <Card headingId="sandbox-status-heading" title="Status">
+      <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill tone={presentation.tone} text={presentation.pill} />
+            {checkedAt === null ? null : (
+              <span className="text-xs text-text-secondary">Last checked {formatCheckedAgo({ checkedAt, now })}</span>
+            )}
+          </div>
+          <p className="mt-2 text-sm font-medium text-text-primary">{presentation.headline}</p>
+          <p className="mt-0.5 text-sm text-text-secondary">{presentation.summary}</p>
+        </div>
+        <RecheckButton checking={checking} onClick={onRecheck} />
+      </div>
+      {presentation.fix === undefined ? null : (
+        <div className="mt-3 rounded-lg border border-border bg-secondary-bg/40 p-3 text-sm">
+          <p className="font-medium text-text-primary">What to do</p>
+          <p className="mt-0.5 text-text-secondary">{presentation.fix}</p>
+        </div>
+      )}
+      <TechnicalDetails lines={lines} />
+    </Card>
+  );
+}
+
+/** Wall-clock time that re-renders every half minute so "Last checked" stays honest. */
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const hasPendingProvider = providers.some(entry => entry.snapshotSyncStatus.status === 'pending');
-
-  useEffect(() => {
-    if (!sandboxCatalog || !hasPendingProvider) return;
-    const activeSandboxCatalog = sandboxCatalog;
-
-    let cancelled = false;
-    let timeoutId: number | undefined;
-
-    function schedulePoll() {
-      timeoutId = window.setTimeout(() => {
-        void poll();
-      }, SNAPSHOT_STATUS_POLL_INTERVAL_MS);
-    }
-
-    async function poll() {
-      try {
-        const listed = await activeSandboxCatalog.listSandboxProviders();
-        if (cancelled) return;
-        setProviders(listed);
-        setError(null);
-        if (listed.some(entry => entry.snapshotSyncStatus.status === 'pending')) {
-          schedulePoll();
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setError(getErrorMessage(err, 'Failed to refresh sandbox providers'));
-        schedulePoll();
-      }
-    }
-
-    schedulePoll();
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, CLOCK_TICK_MS);
     return () => {
-      cancelled = true;
-      if (timeoutId !== undefined) {
-        window.clearTimeout(timeoutId);
-      }
+      window.clearInterval(timer);
     };
-  }, [sandboxCatalog, hasPendingProvider]);
+  }, []);
+  return now;
+}
 
-  // Tenant/UI-wide: only one sandbox provider may be configured at a time.
-  const hasConfiguredProvider = providers.length > 0;
-  const availableEntries = useMemo(() => {
-    if (hasConfiguredProvider) return [];
-    const connectedCatalogIds = new Set(providers.map(provider => provider.data.catalogId));
-    return catalog.filter(entry => !connectedCatalogIds.has(entry.id));
-  }, [catalog, providers, hasConfiguredProvider]);
-
-  const formInitialConfig = useMemo(
-    () => (updateProvider ? configFrom(updateProvider) : createEntry ? configFrom(createEntry) : null),
-    [updateProvider, createEntry],
+function CheckingCard() {
+  return (
+    <Card headingId="sandbox-status-heading" title="Status">
+      <div className="mt-2 flex items-center gap-2 text-sm text-text-secondary" role="status" aria-live="polite">
+        <Spinner size={16} aria-hidden />
+        Checking Docker, the sandbox image and its signature. This can take a few seconds.
+      </div>
+    </Card>
   );
+}
 
-  if (!sandboxCatalog) {
-    return <p className="text-sm text-text-secondary">Sandbox provider catalog is not available.</p>;
-  }
+function ErrorCard({ message, checking, onRetry }: { message: string; checking: boolean; onRetry: () => void }) {
+  return (
+    <Card headingId="sandbox-status-heading" title="Status">
+      <div className="mt-2 flex flex-wrap items-start justify-between gap-3" role="alert">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-failure-bg">Could not check the sandbox status</p>
+          <p className="mt-0.5 text-sm text-text-secondary">
+            The status check did not get an answer from the server. Nothing about the sandbox has changed. Try again in
+            a moment.
+          </p>
+        </div>
+        <Button.Secondary size="small" type="button" disabled={checking} onClick={onRetry}>
+          {checking ? 'Trying…' : 'Try again'}
+        </Button.Secondary>
+      </div>
+      <TechnicalDetails lines={[{ label: 'Error', value: message }]} />
+    </Card>
+  );
+}
 
-  const runMutation = async (fn: () => Promise<void>, setMutationError = setError) => {
-    setBusy(true);
+/** Settings > Sandbox: the Docker sandbox that runs code for the assistant, and whether it can run now. */
+const SandboxSettings = () => {
+  const api = useOptionalRunCodeStatus();
+  const limits = readSandboxLimits(useServerCapabilities());
+  const [status, setStatus] = useState<RunCodeStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const [checking, setChecking] = useState(true);
+  // Only the latest check may write state, so a slow earlier answer cannot overwrite a newer one.
+  const latestCheck = useRef(0);
+
+  const check = useCallback(async () => {
+    if (api === null) return;
+    latestCheck.current += 1;
+    const current = latestCheck.current;
+    setChecking(true);
     setError(null);
     try {
-      await fn();
-      await refresh({ quiet: true });
+      const next = await api.getRunCodeStatus();
+      if (current === latestCheck.current) {
+        setStatus(next);
+        setCheckedAt(Date.now());
+      }
     } catch (err) {
-      setMutationError(getErrorMessage(err, 'Request failed'));
-      throw err;
+      if (current === latestCheck.current) {
+        setStatus(null);
+        setError(getErrorMessage(err, 'unknown error'));
+      }
     } finally {
-      setBusy(false);
+      if (current === latestCheck.current) setChecking(false);
     }
-  };
+  }, [api]);
 
-  const handleCreate = async (draft: SandboxConfigDraft) => {
-    if (!createEntry) return;
-    setFormError(null);
-    await runMutation(async () => {
-      const request = {
-        catalogId: createEntry.id,
-        name: createEntry.name,
-        type: createEntry.type,
-        ...configFrom(draft),
-        apiKey: draft.apiKey,
-        apiUrl: draft.apiUrl,
-      } as Parameters<typeof sandboxCatalog.createSandboxProvider>[0] & { apiUrl: string };
-      await sandboxCatalog.createSandboxProvider(request);
-    }, setFormError);
-    setCreateEntry(null);
-    setTimeout(() => {
-      toaster?.showSuccess({ title: `${createEntry.name} configured` });
-    }, 0);
-  };
-
-  const handleUpdate = async (draft: SandboxConfigDraft) => {
-    if (!updateProvider) return;
-    setFormError(null);
-    await runMutation(async () => {
-      const request = {
-        id: updateProvider.id,
-        ...configFrom(draft),
-        ...(draft.apiKey ? { apiKey: draft.apiKey } : {}),
-        apiUrl: draft.apiUrl,
-      } as Parameters<typeof sandboxCatalog.updateSandboxProvider>[0] & { apiUrl: string };
-      await sandboxCatalog.updateSandboxProvider(request);
-    }, setFormError);
-    setUpdateProvider(null);
-    setTimeout(() => {
-      toaster?.showSuccess({ title: `${updateProvider.name} updated` });
-    }, 0);
-  };
-
-  const handleRetry = (provider: SandboxProviderBase) => {
-    void runMutation(async () => {
-      await sandboxCatalog.updateSandboxProvider({
-        id: provider.id,
-        ...configFrom(provider),
-      });
-    }).catch(() => {});
-  };
-
-  const handleUpgrade = () => {
-    const providerId = providers[0]?.data.id;
-    if (upgradeSandboxRuntime == null || providerId == null) return;
-    void runMutation(() => upgradeSandboxRuntime(providerId))
-      .then(() => {
-        toaster?.showSuccess({ title: 'Sandbox runtime upgrade started' });
-      })
-      .catch(() => {});
-  };
-
-  const handleRemove = (provider: SandboxProviderBase) => {
-    const deleteSandboxProvider = sandboxCatalog.deleteSandboxProvider;
-    if (!deleteSandboxProvider) return;
-    void runMutation(async () => {
-      await deleteSandboxProvider({ id: provider.id });
-    }).catch(() => {});
-  };
-
-  const formOpen = createEntry != null || updateProvider != null;
-  const isUpdate = updateProvider != null;
-  const formTitle = updateProvider
-    ? `Update ${updateProvider.name}`
-    : createEntry
-      ? `Configure ${createEntry.name}`
-      : 'Configure sandbox provider';
+  useEffect(() => {
+    void check();
+    return () => {
+      latestCheck.current += 1;
+    };
+  }, [check]);
 
   return (
-    <>
-      <section className="mb-6">
-        <h3 className="text-xl font-semibold tracking-tight text-text-primary">Code execution</h3>
+    <div className="flex h-full min-h-0 flex-col gap-5 overflow-y-auto pb-1">
+      <header>
+        <h3 className="text-base font-semibold text-text-primary">Sandbox</h3>
         <p className="mt-1 text-sm text-text-secondary">
-          The <span className="font-mono">run_code</span> tool runs Python and Node.js in an isolated, offline sandbox.
-          These values come from the server configuration and take a restart to change.
+          Runs the Python and Node.js code the assistant writes, in an isolated Docker container with no network access.
         </p>
-        <div className="mt-3 overflow-hidden rounded-xl border border-border bg-card-bg">
-          {isolationStatus == null ? (
-            <p className="px-4 py-3 text-sm text-text-secondary">Isolation status unavailable.</p>
-          ) : (
-            <dl className="divide-y divide-border text-sm">
-              <IsolationRow label="Isolation driver" value={isolationStatus.isolationDriver} mono />
-              <IsolationRow label="Image" value={isolationStatus.image} mono breakAll />
-              <IsolationRow
-                label="Run timeout"
-                value={`${String(isolationStatus.defaultTimeoutSeconds)}s default · ${String(isolationStatus.maxTimeoutSeconds)}s max`}
-              />
-              <IsolationRow
-                label="Limits"
-                value={`${String(isolationStatus.memoryMb)} MiB memory · ${String(isolationStatus.diskMb)} MiB disk · ${String(isolationStatus.stdoutStderrCapKb)} KiB output cap`}
-              />
-              <IsolationRow label="Image pull bound" value={`${String(isolationStatus.imagePullTimeoutSeconds)}s`} />
-              <IsolationRow label="Network egress" value={isolationStatus.networkEgress ? 'enabled' : 'disabled'} />
-              <IsolationRow
-                label="Image signature check"
-                value={isolationStatus.cosignKeyConfigured ? 'cosign key configured' : 'no cosign key configured'}
-              />
-            </dl>
-          )}
-        </div>
-      </section>
+      </header>
 
-      <h3 className="text-xl font-semibold tracking-tight text-text-primary">Sandbox providers</h3>
-      <p className="mt-1 text-sm text-text-secondary">
-        Choose a provider that runs sandboxes for code, files and shell commands. Only one can be active at a time.
-      </p>
+      {status !== null ? (
+        <>
+          <StatusCard
+            status={status}
+            limits={limits}
+            checkedAt={checkedAt}
+            checking={checking}
+            onRecheck={() => {
+              void check();
+            }}
+          />
+          <ImageCard status={status} limits={limits} />
+        </>
+      ) : error !== null ? (
+        <ErrorCard
+          message={error}
+          checking={checking}
+          onRetry={() => {
+            void check();
+          }}
+        />
+      ) : (
+        <CheckingCard />
+      )}
 
-      {error ? (
-        <p className="mt-3 rounded-md border border-failure-bg/30 bg-failure-bg/10 px-3 py-2 text-sm text-failure-bg">
-          {error}
-        </p>
-      ) : null}
-
-      <div className="mt-4 flex-1 overflow-y-auto">
-        {loading ? (
-          <p className="text-sm text-text-secondary">Loading sandbox providers…</p>
-        ) : (
-          <div className="space-y-6">
-            {providers.length > 0 ? (
-              <section>
-                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  Configured · {providers.length}
-                </h4>
-                {upgradeSandboxRuntime != null ? (
-                  <div className="mb-3 flex flex-col gap-2 rounded-lg border border-border bg-secondary-bg p-3 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-sm text-text-secondary">
-                      Existing running sandboxes are unchanged. New sandboxes use the upgraded image once it is ready.
-                    </p>
-                    <Button variant="secondary" size="small" type="button" disabled={busy} onClick={handleUpgrade}>
-                      Upgrade runtime
-                    </Button>
-                  </div>
-                ) : null}
-                <div className="overflow-hidden rounded-xl border border-border bg-card-bg">
-                  {providers.map(entry => {
-                    const provider = entry.data;
-                    const status = statusPresentation(entry.snapshotSyncStatus.status);
-                    const statusReason = entry.snapshotSyncStatus.statusReason;
-                    const statusIndicator = (
-                      <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${status.className}`}>
-                        {entry.snapshotSyncStatus.status === 'pending' ? (
-                          <Spinner size={16} aria-label="Syncing snapshot image" />
-                        ) : entry.snapshotSyncStatus.status === 'ready' ? (
-                          <span className="size-2 rounded-full bg-success-bg" aria-hidden />
-                        ) : entry.snapshotSyncStatus.status === 'failed' ? (
-                          <Icon name="triangle-exclamation" className="size-4" />
-                        ) : null}
-                        {status.label}
-                      </span>
-                    );
-                    return (
-                      <article
-                        key={provider.id}
-                        className="flex flex-col gap-3 border-b border-border p-3 last:border-b-0 sm:flex-row sm:items-center"
-                      >
-                        <div className="flex min-w-0 flex-1 items-center gap-3">
-                          <span
-                            className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary-bg text-text-primary"
-                            aria-hidden
-                          >
-                            <Icon name="cube" className="size-4.5" />
-                          </span>
-                          <div className="min-w-0">
-                            <h5 className="truncate text-sm font-medium text-text-primary">{provider.name}</h5>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2.5 sm:justify-end">
-                          {statusIndicator}
-                          {statusReason ? (
-                            <Tooltip content={statusReason}>
-                              <button
-                                type="button"
-                                aria-label="Snapshot sync status details"
-                                className="inline-flex text-text-secondary transition-colors hover:text-text-primary"
-                              >
-                                <Icon name="info" className="size-4" />
-                              </button>
-                            </Tooltip>
-                          ) : null}
-                          {entry.snapshotSyncStatus.status === 'failed' ? (
-                            <Button.Ghost
-                              size="small"
-                              type="button"
-                              disabled={busy}
-                              onClick={() => {
-                                handleRetry(provider);
-                              }}
-                            >
-                              Retry
-                            </Button.Ghost>
-                          ) : null}
-                          <Button.Secondary
-                            size="small"
-                            type="button"
-                            disabled={busy}
-                            onClick={() => {
-                              setFormError(null);
-                              setCreateEntry(null);
-                              setUpdateProvider(provider);
-                            }}
-                          >
-                            Update
-                          </Button.Secondary>
-
-                          {sandboxCatalog.deleteSandboxProvider ? (
-                            <Button.Ghost
-                              size="small"
-                              className="text-text-secondary"
-                              type="button"
-                              disabled={busy}
-                              onClick={() => {
-                                handleRemove(provider);
-                              }}
-                            >
-                              Remove
-                            </Button.Ghost>
-                          ) : null}
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              </section>
-            ) : null}
-
-            {!hasConfiguredProvider ? (
-              <section>
-                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  Available · {availableEntries.length}
-                </h4>
-                {availableEntries.length === 0 ? (
-                  <p className="text-sm text-text-secondary">
-                    {catalog.length > 0
-                      ? 'All catalog providers are configured.'
-                      : 'No sandbox providers in the catalog.'}
-                  </p>
-                ) : (
-                  <div className="overflow-hidden rounded-xl border border-border bg-card-bg">
-                    {availableEntries.map(entry => (
-                      <article
-                        key={entry.id}
-                        className="flex flex-col gap-3 border-b border-border p-3 last:border-b-0 sm:flex-row sm:items-center"
-                      >
-                        <div className="flex min-w-0 flex-1 items-center gap-3">
-                          <span
-                            className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary-bg text-text-primary"
-                            aria-hidden
-                          >
-                            <Icon name="cube" className="size-4.5" />
-                          </span>
-                          <div className="min-w-0">
-                            <h5 className="truncate text-sm font-medium text-text-primary">{entry.name}</h5>
-                          </div>
-                        </div>
-
-                        <Button.Secondary
-                          type="button"
-                          disabled={busy}
-                          onClick={() => {
-                            setFormError(null);
-                            setUpdateProvider(null);
-                            setCreateEntry(entry);
-                          }}
-                        >
-                          Configure
-                        </Button.Secondary>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </section>
-            ) : null}
-          </div>
-        )}
-      </div>
-
-      <ConfigureSandboxForm
-        open={formOpen}
-        onOpenChange={open => {
-          if (!open) {
-            setFormError(null);
-            setCreateEntry(null);
-            setUpdateProvider(null);
-          }
-        }}
-        onSave={isUpdate ? handleUpdate : handleCreate}
-        title={formTitle}
-        description={
-          isUpdate
-            ? 'Update this sandbox provider. Leave API key blank to keep the existing key.'
-            : 'Configure this sandbox provider. API key is never stored in the catalog.'
-        }
-        initialConfig={formInitialConfig}
-        requireApiKey={!isUpdate}
-        busy={busy}
-        error={formError}
-      />
-    </>
+      <LimitsCard limits={limits} />
+    </div>
   );
 };
 

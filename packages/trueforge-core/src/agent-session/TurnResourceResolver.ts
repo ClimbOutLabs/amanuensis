@@ -5,9 +5,15 @@ import type { ToolSource } from '../core/mcp/IMCPServer';
 import { RemoteMCP, type RemoteMcpHeaders } from '../core/mcp/RemoteMCP';
 import type { ToolSelectorConfig } from '../core/mcp/ToolSelectorPolicy';
 import { ToolSet } from '../core/mcp/ToolSet';
-import { createSentinelHostContext, type SentinelHostContext, type SentinelServices } from '../core/permissions';
+import {
+  createSentinelHostContext,
+  createWebSearchTurnState,
+  type SentinelHostContext,
+  type SentinelServices,
+} from '../core/permissions';
 import type { AgentDefinition, ConfiguredModelSummary, ModelParams } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
+import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../core/tracing/NoopAgentTracing';
@@ -78,6 +84,10 @@ export class TurnResourceResolver<
   readonly #sources = new Map<string, Promise<ToolSource>>();
   /** MCP servers the host reported as first-party when it resolved their connection this turn. */
   readonly #firstPartyServers = new Set<string>();
+  /** MCP servers the user designated as their search provider, with the host's list of their search tools. */
+  readonly #searchProviderServers = new Map<string, { tools: readonly string[] }>();
+  /** The turn's silent-search state, shared by the root thread and every sub-agent thread. */
+  readonly #webSearch = createWebSearchTurnState();
   readonly #models = new Map<string, Promise<ResolvedModel>>();
   #sandbox?: Sandbox | undefined;
 
@@ -101,9 +111,17 @@ export class TurnResourceResolver<
        * turn. Throw for unknown names. `headers` supports the async resolver form.
        * `first_party` is true only for a connector the host itself vouches for, never one a user,
        * a request or the model described: it lets that server's read-only, explicitly
-       * closed-world tools run without a card.
+       * closed-world tools run without a card. `search_provider` is set only for the connector the
+       * user designated as their search provider, with the host's list of its search tools: such a
+       * tool runs without a card behind the outbound secret guard when the server declares it
+       * read-only or the list names it.
        */
-      mcp: (name: string) => Promise<{ url: string; headers?: RemoteMcpHeaders; first_party?: boolean }>;
+      mcp: (name: string) => Promise<{
+        url: string;
+        headers?: RemoteMcpHeaders;
+        first_party?: boolean;
+        search_provider?: { tools: readonly string[] } | undefined;
+      }>;
       mcpRequestTimeoutMs: number;
       mcpConnectTimeoutMs: number;
       /** One sandbox type per runtime. Omit = no sandbox support. */
@@ -137,6 +155,15 @@ export class TurnResourceResolver<
        * See ITurnResourceResolver.runCodeToolCallTimeoutMs.
        */
       runCodeToolCallTimeoutMs?: number | undefined;
+      /**
+       * Host instance-wide bound in milliseconds on waiting for a model call's
+       * first output. See ITurnResourceResolver.modelFirstResponseTimeoutMs.
+       */
+      modelFirstResponseTimeoutMs?: number | undefined;
+      /**
+       * Per-run host policy over tool calls. See ITurnResourceResolver.toolCallPolicy.
+       */
+      toolCallPolicy?: HostToolCallPolicy | undefined;
       /** Resolved T2 binding, independent of whether this turn enables a sandbox. */
       boundRepository?: BoundRepository | undefined;
       /** IANA timezone name the client sent with this turn. See ITurnResourceResolver.clientTimezone. */
@@ -188,6 +215,14 @@ export class TurnResourceResolver<
 
   get runCodeToolCallTimeoutMs(): number | undefined {
     return this.deps.runCodeToolCallTimeoutMs;
+  }
+
+  get modelFirstResponseTimeoutMs(): number | undefined {
+    return this.deps.modelFirstResponseTimeoutMs;
+  }
+
+  get toolCallPolicy(): HostToolCallPolicy | undefined {
+    return this.deps.toolCallPolicy;
   }
 
   get boundRepository(): BoundRepository | undefined {
@@ -309,15 +344,19 @@ export class TurnResourceResolver<
       created_by,
       conversation_id: session_id,
       workspace_cwd: workspace_cwd ?? null,
+      web_search: this.#webSearch,
     });
     const toolSets = await Promise.all(
       (spec.mcp_servers ?? []).map(async entry => {
         const source = await this.getOrCreateToolSource({
           id: entry.name,
           create: async () => {
-            const { url, headers, first_party } = await this.deps.mcp(entry.name);
+            const { url, headers, first_party, search_provider } = await this.deps.mcp(entry.name);
             if (first_party === true) {
               this.#firstPartyServers.add(entry.name);
+            }
+            if (search_provider !== undefined) {
+              this.#searchProviderServers.set(entry.name, search_provider);
             }
             return new RemoteMCP({
               id: entry.name,
@@ -327,8 +366,8 @@ export class TurnResourceResolver<
               sessionId: previousTurn?.snapshot.mcp_servers?.[entry.name]?.session_id,
               requestTimeoutMs: this.deps.mcpRequestTimeoutMs,
               connectTimeoutMs: this.deps.mcpConnectTimeoutMs,
-              // A vouched-for connector must not hand its trust to wherever it redirects.
-              refuseRedirects: first_party === true,
+              // A vouched-for or designated connector must not hand its trust to wherever it redirects.
+              refuseRedirects: first_party === true || search_provider !== undefined,
               logger: this.deps.logger,
               tracing,
               signal,
@@ -341,6 +380,7 @@ export class TurnResourceResolver<
           preload: entry.preload,
           sentinel,
           firstParty: this.#firstPartyServers.has(entry.name),
+          searchProvider: this.#searchProviderServers.get(entry.name),
         });
       }),
     );
@@ -380,6 +420,7 @@ export class TurnResourceResolver<
       ? await this.getModel(compactionSetting.name).then(resolved => ({
           modelClient: resolved.modelClient,
           modelParams: { ...resolved.defaultModelParams, ...compactionSetting.params },
+          modelProperties: resolved.modelProperties,
         }))
       : undefined;
 

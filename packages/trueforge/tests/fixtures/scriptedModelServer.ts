@@ -7,16 +7,31 @@
  * the advertised tool whose name contains `<tool>`; once its scripted sequence
  * is complete, the turn is closed with plain text. `run:call_tool` reaches a
  * deferred connector's tool: it targets `inert` unless the same message adds
- * `server:<name>`.
+ * `server:<name>`. A `text:<value>` in the same message sets the `text` argument of
+ * a tool that takes one (default `inert`).
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
 export const RUN_DIRECTIVE_PREFIX = 'run:';
 export const SERVER_DIRECTIVE_PREFIX = 'server:';
+export const TEXT_DIRECTIVE_PREFIX = 'text:';
+const DEFAULT_TEXT_ARGUMENT = 'inert';
 const DEFAULT_CALL_TOOL_SERVER = 'inert';
 export const FINAL_TEXT = 'inert connector work is finished.';
 export const VERIFY_THEN_COMMIT_DIRECTIVE = 'verify_then_commit';
 export const COMMIT_ONLY_DIRECTIVE = 'commit_only';
+/** Calls the write tool, then `web_search` for `WEB_SEARCH_QUERY`, then answers. */
+export const WRITE_THEN_SEARCH_DIRECTIVE = 'write_then_search';
+export const WEB_SEARCH_QUERY = 'Lantern Row bakery';
+/** Calls the unannotated connector tool three times in one model message, then answers. */
+export const THREE_AT_ONCE_DIRECTIVE = 'three_at_once';
+export const THREE_AT_ONCE_TEXTS = ['first', 'second', 'third'] as const;
+/**
+ * A question carrying this marker makes the knowledge relevance judge keep no
+ * passage, so a library lookup for it is a near-miss.
+ */
+export const JUDGE_REJECT_MARKER = 'judge_reject';
+const RELEVANCE_JUDGE_TAG = '<knowledge-relevance-judge';
 
 export interface ScriptedModelServer {
   /** Value for a `custom` model provider `base_url`. */
@@ -150,11 +165,31 @@ function readRequestBody(req: IncomingMessage): Promise<unknown> {
  * `inert` connector — the only way to reach a non-preloaded server's tool without
  * simulating the full list_tools/get_tool_info discovery round trip.
  */
-function argumentsJsonForTool({ name, callToolServer }: { name: string; callToolServer: string }): string {
+function argumentsJsonForTool({
+  name,
+  callToolServer,
+  text,
+}: {
+  name: string;
+  callToolServer: string;
+  text: string;
+}): string {
   if (name === 'call_tool') {
     return JSON.stringify({ mcp_server: callToolServer, tool_name: 'ask_memory', input: { question: 'inert' } });
   }
-  return name.includes('ask_memory') ? '{"question":"inert"}' : '{"text":"inert"}';
+  return name.includes('ask_memory') ? '{"question":"inert"}' : JSON.stringify({ text });
+}
+
+/** The `text:<value>` of the latest user message that names one, else the default. */
+function textArgument(messages: ChatMessage[]): string {
+  let text = DEFAULT_TEXT_ARGUMENT;
+  for (const message of messages) {
+    if (message.role === 'user') {
+      text =
+        new RegExp(`${TEXT_DIRECTIVE_PREFIX}(\\S+)`).exec(messageText(message.content))?.[1] ?? DEFAULT_TEXT_ARGUMENT;
+    }
+  }
+  return text;
 }
 
 /** The connector the latest `run:` directive's `call_tool` targets: its `server:<name>`, else `inert`. */
@@ -213,21 +248,24 @@ function chunkEnvelope(choice: Record<string, unknown>, usage?: typeof USAGE): R
   };
 }
 
-function toolCallChunks({
-  name,
-  callId,
-  argumentsJson,
-}: {
+interface ScriptedToolCall {
   name: string;
   callId: string;
   argumentsJson: string;
-}): Record<string, unknown>[] {
+}
+
+function toolCallChunks(toolCalls: ScriptedToolCall[]): Record<string, unknown>[] {
   return [
     chunkEnvelope({ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }),
     chunkEnvelope({
       index: 0,
       delta: {
-        tool_calls: [{ index: 0, id: callId, type: 'function', function: { name, arguments: argumentsJson } }],
+        tool_calls: toolCalls.map(({ name, callId, argumentsJson }, index) => ({
+          index,
+          id: callId,
+          type: 'function',
+          function: { name, arguments: argumentsJson },
+        })),
       },
       finish_reason: null,
     }),
@@ -242,13 +280,7 @@ function textChunks(text: string): Record<string, unknown>[] {
   ];
 }
 
-function completionBody({
-  text,
-  toolCall,
-}: {
-  text: string | null;
-  toolCall: { name: string; callId: string; argumentsJson: string } | null;
-}) {
+function completionBody({ text, toolCalls }: { text: string | null; toolCalls: ScriptedToolCall[] }) {
   return {
     id: 'scripted-completion',
     object: 'chat.completion',
@@ -260,19 +292,17 @@ function completionBody({
         message: {
           role: 'assistant',
           content: text,
-          ...(toolCall
+          ...(toolCalls.length > 0
             ? {
-                tool_calls: [
-                  {
-                    id: toolCall.callId,
-                    type: 'function',
-                    function: { name: toolCall.name, arguments: toolCall.argumentsJson },
-                  },
-                ],
+                tool_calls: toolCalls.map(call => ({
+                  id: call.callId,
+                  type: 'function',
+                  function: { name: call.name, arguments: call.argumentsJson },
+                })),
               }
             : {}),
         },
-        finish_reason: toolCall ? 'tool_calls' : 'stop',
+        finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
       },
     ],
     usage: USAGE,
@@ -308,6 +338,11 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       requestedTool = { match: 'exec', argumentsJson: sandboxArgumentsJson(purpose) };
     } else if (progress.directive === COMMIT_ONLY_DIRECTIVE && progress.toolResults === 0) {
       requestedTool = { match: 'exec', argumentsJson: sandboxArgumentsJson('commit') };
+    } else if (progress.directive === WRITE_THEN_SEARCH_DIRECTIVE && progress.toolResults < 2) {
+      requestedTool =
+        progress.toolResults === 0
+          ? { match: 'inert_write', argumentsJson: '{"text":"inert"}' }
+          : { match: 'web_search', argumentsJson: JSON.stringify({ query: WEB_SEARCH_QUERY }) };
     } else if (pending !== undefined) {
       requestedTool = { match: pending, argumentsJson: '' };
     }
@@ -315,22 +350,44 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       requestedTool === undefined
         ? undefined
         : resolveToolName({ directive: requestedTool.match, tools: parsed.tools });
-    let toolCall: { name: string; callId: string; argumentsJson: string } | null = null;
-    if (toolName !== undefined) {
+    const toolCalls: ScriptedToolCall[] = [];
+    const threeAtOnceName =
+      progress.directive === THREE_AT_ONCE_DIRECTIVE && progress.toolResults === 0
+        ? resolveToolName({ directive: 'inert_unannotated', tools: parsed.tools })
+        : undefined;
+    if (threeAtOnceName !== undefined) {
+      for (const text of THREE_AT_ONCE_TEXTS) {
+        callCounter += 1;
+        toolCalls.push({
+          name: threeAtOnceName,
+          callId: `call_${String(callCounter)}`,
+          argumentsJson: JSON.stringify({ text }),
+        });
+      }
+    } else if (toolName !== undefined) {
       callCounter += 1;
-      toolCall = {
+      toolCalls.push({
         name: toolName,
         callId: `call_${String(callCounter)}`,
         argumentsJson:
           requestedTool?.argumentsJson === '' || requestedTool?.argumentsJson === undefined
-            ? argumentsJsonForTool({ name: toolName, callToolServer: callToolServer(parsed.messages) })
+            ? argumentsJsonForTool({
+                name: toolName,
+                callToolServer: callToolServer(parsed.messages),
+                text: textArgument(parsed.messages),
+              })
             : requestedTool.argumentsJson,
-      };
+      });
     }
+
+    const rejectingJudge =
+      parsed.messages.some(message => messageText(message.content).includes(RELEVANCE_JUDGE_TAG)) &&
+      parsed.messages.some(message => messageText(message.content).includes(JUDGE_REJECT_MARKER));
+    const replyText = rejectingJudge ? '{"helpful":[]}' : FINAL_TEXT;
 
     if (!parsed.stream) {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(completionBody({ text: toolCall ? null : FINAL_TEXT, toolCall })));
+      res.end(JSON.stringify(completionBody({ text: toolCalls.length > 0 ? null : replyText, toolCalls })));
       return;
     }
 
@@ -339,7 +396,7 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     });
-    const chunks = toolCall ? toolCallChunks(toolCall) : textChunks(FINAL_TEXT);
+    const chunks = toolCalls.length > 0 ? toolCallChunks(toolCalls) : textChunks(replyText);
     for (const chunk of chunks) {
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }

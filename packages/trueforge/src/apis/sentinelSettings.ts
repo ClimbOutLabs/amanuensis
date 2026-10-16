@@ -28,6 +28,7 @@ export function createSentinelSettingsRouter(deps: SentinelSettingsRouterDeps) {
       created_by: requestContext.subject.id,
       offline_mode: body.offline_mode,
       tier2_auto_allow: body.tier2_auto_allow,
+      search_without_asking: body.search_without_asking,
     });
     return c.json({ data: settings }, 200);
   };

@@ -1,3 +1,4 @@
+import { serialization } from '@truefoundry/trueforge-sdk';
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
@@ -161,6 +162,19 @@ describe('createHarnessChatServer', () => {
       name: 'echo',
       preload: false,
     });
+  });
+
+  it('round-trips the task-state budget through the SDK as the snake_case wire field', () => {
+    const taskState = { toolCallBudget: 12, budgetedTools: ['web_search', 'tavily*'] };
+
+    const wire = serialization.AgentSpec.jsonOrThrow(
+      toHarnessAgentSpec({ model: { name: 'test/model' }, config: { taskState } }),
+    );
+    assert.deepEqual(wire.config?.task_state, { tool_call_budget: 12, budgeted_tools: ['web_search', 'tavily*'] });
+    assert.equal('taskState' in (wire.config ?? {}), false);
+
+    const ui = toUiAgentSpec(serialization.AgentSpec.parseOrThrow(wire));
+    assert.deepEqual(ui.config?.taskState, taskState);
   });
 
   it('reports pages under the ListResult pagination contract', async () => {

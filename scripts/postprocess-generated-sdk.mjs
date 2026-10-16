@@ -15,14 +15,14 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const indexPath = resolve(repositoryRoot, 'packages/trueforge-sdk/src/index.ts');
 const referencePath = resolve(repositoryRoot, 'packages/trueforge-sdk/reference.md');
 
-const fernIndex = [
+// Fern's export order is not stable across releases, so match by line set.
+const fernIndexLines = [
   'export * as TrueForge from "./api/index.js";',
   'export type { BaseClientOptions, BaseRequestOptions } from "./BaseClient.js";',
   'export { TrueForgeError, TrueForgeTimeoutError } from "./errors/index.js";',
   'export * from "./exports.js";',
   'export * as serialization from "./serialization/index.js";',
-  '',
-].join('\n');
+];
 
 const stableIndex = [
   'export * as TrueForgeApi from "./api/index.js";',
@@ -39,10 +39,15 @@ function normalizeNewlines(value) {
   return value.replaceAll('\r\n', '\n');
 }
 
+function isFernIndex(value) {
+  const lines = value.split('\n').filter(line => line !== '');
+  return lines.length === fernIndexLines.length && fernIndexLines.every(line => lines.includes(line));
+}
+
 const current = normalizeNewlines(await readFile(indexPath, 'utf8'));
 if (current === stableIndex) {
   console.log('Generated SDK public index already has the stable TrueForge exports.');
-} else if (current === fernIndex) {
+} else if (isFernIndex(current)) {
   await writeFile(indexPath, stableIndex, 'utf8');
   console.log('Restored stable TrueForge client, API namespace, and event-helper exports.');
 } else {

@@ -131,7 +131,9 @@ const CompactionSettingsSchema = z
     trigger: InputTokensCompactionTriggerSchema.optional(),
   })
   .strict()
-  .describe('Uses 80% of the model context length when the explicit trigger is omitted, or 50000 tokens if unknown.')
+  .describe(
+    'Without an explicit trigger, compaction starts at 80% of the model context length, lowered so input plus the configured max output tokens fit (never below 4000), or at 50000 tokens when the context length is unknown.',
+  )
   .openapi('CompactionConfig');
 
 const LargeToolResponseSettingsSchema = z.object({

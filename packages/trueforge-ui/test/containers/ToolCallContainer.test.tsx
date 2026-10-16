@@ -8,6 +8,9 @@ import type { SandboxToolCallCardProps } from '@/atoms/SandboxToolCallCard.js';
 import type { SubAgentCardProps } from '@/atoms/SubAgentCard.js';
 import type { ToolCallCardProps } from '@/atoms/ToolCallCard.js';
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
+import { SentinelApiProvider } from '@/sentinel/SentinelApiContext.js';
+import { SentinelStateProvider } from '@/sentinel/SentinelStateProvider.js';
+import type { SentinelApi, SentinelApprovalInfo } from '@/sentinel/types.js';
 import { SlotsProvider, type SlotOverrides } from '@/theme/SlotsProvider.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
@@ -112,6 +115,35 @@ describe('ToolCallContainer', () => {
     const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
     expect(blocks[0]).toHaveAttribute('data-content', expect.stringContaining('"tz"'));
     expect(blocks[1]).toHaveAttribute('data-content', '2026-07-01T00:00:00Z');
+  });
+
+  it('shows a Searched chip for a search the host ran without asking, from the host-set artifact only', () => {
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: 'search-1',
+        toolName: 'call_tool',
+        args: {},
+        argsText: JSON.stringify({ mcp_server: 'finder', tool_name: 'lookup', input: { query: 'tallest building' } }),
+        artifact: { silentSearchQuery: 'tallest building in Lisbon' },
+        result: 'ok',
+      },
+    ]);
+    expect(screen.getByTestId('searched-chip')).toHaveTextContent('Searched: tallest building in Lisbon');
+  });
+
+  it('shows no chip when the host did not mark the call, even if the model put a query in the arguments', () => {
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: 'search-2',
+        toolName: 'lookup',
+        args: { query: 'forged', silentSearchQuery: 'forged' },
+        argsText: JSON.stringify({ query: 'forged', silentSearchQuery: 'forged' }),
+        result: 'ok',
+      },
+    ]);
+    expect(screen.queryByTestId('searched-chip')).not.toBeInTheDocument();
   });
 
   it('renders an error result once expanded', () => {
@@ -787,5 +819,125 @@ describe('ToolCallContainer', () => {
     const [call] = ToolCallCard.mock.calls;
     if (!call) throw new Error('Expected ToolCallCard to render');
     expect(call[0].mcpServerName).toBeUndefined();
+  });
+
+  describe('a chat that moved past the turn that asked', () => {
+    function pendingCall(id: string): Exclude<ThreadMessageLike['content'], string>[number] {
+      return {
+        type: 'tool-call',
+        toolCallId: id,
+        toolName: 'web_search',
+        args: {},
+        interrupt: { type: 'human', payload: {} },
+        approval: {
+          id,
+          approved: undefined,
+          options: [
+            { id: 'allow-once', kind: 'allow-once' as const },
+            { id: 'deny', kind: 'reject-once' as const, confirm: {} },
+          ],
+        },
+      };
+    }
+
+    function renderChat(messages: ThreadMessageLike[]) {
+      return render(
+        <RuntimeHarness messages={messages}>
+          <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+        </RuntimeHarness>,
+      );
+    }
+
+    it('shows an older pending card as expired, with no buttons', () => {
+      renderChat([
+        { role: 'assistant', content: [pendingCall('old')], status: { type: 'requires-action', reason: 'tool-calls' } },
+        { role: 'user', content: 'next question' },
+        { role: 'assistant', content: 'an answer' },
+      ]);
+
+      expect(screen.getByText('This request expired.')).toBeInTheDocument();
+      expect(screen.queryByRole('radio', { name: 'Allow once' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('radio', { name: 'Deny' })).not.toBeInTheDocument();
+    });
+
+    it('still lets the newest pending card be answered', () => {
+      renderChat([
+        { role: 'assistant', content: [pendingCall('old')], status: { type: 'requires-action', reason: 'tool-calls' } },
+        { role: 'user', content: 'next question' },
+        { role: 'assistant', content: [pendingCall('now')], status: { type: 'requires-action', reason: 'tool-calls' } },
+      ]);
+
+      expect(screen.getAllByText('This request expired.')).toHaveLength(1);
+      expect(screen.getAllByRole('radio', { name: 'Allow once' })).toHaveLength(1);
+    });
+
+    it('expires the older connector card read back from saved history, and keeps the newest one answerable', async () => {
+      const outboundCard = (host: string): SentinelApprovalInfo['card'] => ({
+        plain_what: 'Send a message through a connector.',
+        plain_why: null,
+        cannot_be_undone: null,
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: null,
+        outbound_text: 'text: hello',
+        destination_host: host,
+        outbound_truncated: false,
+      });
+      const approval = (toolCallId: string, host: string): SentinelApprovalInfo => ({
+        toolCallId,
+        tier: 3,
+        card: outboundCard(host),
+        eventId: null,
+        threadId: null,
+      });
+      const api: SentinelApi = {
+        listAuditEntries: vi.fn(async () => []),
+        getUserSettings: vi.fn(async () => ({
+          offline_mode: false,
+          tier2_auto_allow: [],
+          search_without_asking: true,
+        })),
+        updateUserSettings: vi.fn(async () => ({
+          offline_mode: false,
+          tier2_auto_allow: [],
+          search_without_asking: true,
+        })),
+        listSentinelSessionContext: vi.fn(async () => ({
+          approvals: [approval('old', 'old.example.com'), approval('now', 'now.example.com')],
+        })),
+      };
+      render(
+        <RuntimeHarness
+          threadId="local-1"
+          remoteId="session-1"
+          messages={[
+            {
+              role: 'assistant',
+              content: [pendingCall('old')],
+              status: { type: 'requires-action', reason: 'tool-calls' },
+            },
+            { role: 'user', content: 'next question' },
+            {
+              role: 'assistant',
+              content: [pendingCall('now')],
+              status: { type: 'requires-action', reason: 'tool-calls' },
+            },
+          ]}
+        >
+          <SentinelApiProvider api={api}>
+            <SentinelStateProvider>
+              <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+            </SentinelStateProvider>
+          </SentinelApiProvider>
+        </RuntimeHarness>,
+      );
+
+      expect(await screen.findByText('now.example.com')).toBeInTheDocument();
+      expect(screen.queryByText('old.example.com')).not.toBeInTheDocument();
+      expect(screen.getAllByText('Sends to')).toHaveLength(1);
+      expect(screen.getAllByText('This request expired.')).toHaveLength(1);
+    });
   });
 });

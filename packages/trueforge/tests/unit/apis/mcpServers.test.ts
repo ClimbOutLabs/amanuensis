@@ -42,8 +42,8 @@ const putBodyWithDcr = {
 };
 
 const HEADER_TOKEN = 'Bearer test-token';
-/** Wire form of HEADER_TOKEN for length ≥ 10: first 3 + SECRET_REDACTION + last 3. */
-const HEADER_TOKEN_REDACTED = 'Bea-***REDACTED***-ken';
+/** Wire form of HEADER_TOKEN: the fixed mask, with no prefix or suffix of the secret. */
+const HEADER_TOKEN_REDACTED = '***REDACTED***';
 
 const putBodyWithHeaderAuth = {
   type: 'remote' as const,
@@ -156,6 +156,7 @@ describe('mcp-servers routers', () => {
     withTransaction = callback => db.transaction().execute(callback);
     logger = winston.createLogger({ silent: true });
     settingsRouter = createSettingsMcpServersRouter({
+      mcpCatalog: McpCatalog.load(),
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
       toolGrantStore,
@@ -634,7 +635,7 @@ describe('mcp-servers routers', () => {
   it('PUT with a different redacted header value still keeps the stored secret', async () => {
     await settingsRouter.request('/', putInit(wrapManifest(putBodyWithHeaderAuth)));
 
-    // Any value containing ***REDACTED*** is treated as keep, not only the exact GET mask.
+    // Any value containing ***REDACTED*** is treated as keep, so masks from older GETs still round-trip.
     const keep = {
       ...putBodyWithHeaderAuth,
       url: 'https://mcp.example.com/v3/mcp',
@@ -670,7 +671,7 @@ describe('mcp-servers routers', () => {
     await settingsRouter.request('/', putInit(wrapManifest(putBodyWithHeaderAuth)));
 
     const rotatedToken = 'Bearer rotated-token';
-    const rotatedTokenRedacted = 'Bea-***REDACTED***-ken';
+    const rotatedTokenRedacted = '***REDACTED***';
     const rotated = {
       ...putBodyWithHeaderAuth,
       auth: {
@@ -1201,6 +1202,150 @@ describe('mcp-servers routers', () => {
 
     const missing = await mcpServersRouter.request('/missing/authorize', { method: 'DELETE' });
     expect(missing.status).toBe(404);
+  });
+
+  describe('search provider single-flag enforcement', () => {
+    function searchManifest(name: string, extra: Record<string, unknown> = {}) {
+      return {
+        type: 'remote' as const,
+        name,
+        url: `https://${name}.example.com/mcp`,
+        description: `Search connector "${name}".`,
+        ...extra,
+      };
+    }
+
+    it('PUT creates the first search provider and keeps the flag on the wire', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(searchManifest('search-primary', { search_provider: true }))),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: { name: 'search-primary', manifest: { search_provider: true } },
+      });
+    });
+
+    it('POST create rejects a second search provider with 409 naming the existing one', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        postInit(wrapManifest(searchManifest('search-secondary', { search_provider: true }))),
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: { message: 'search provider already set on search-primary; disable it first' },
+      });
+      expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'search-secondary' })).toBeUndefined();
+    });
+
+    it('PUT rejects flagging a second, already-existing server with 409 and leaves it unflagged', async () => {
+      const created = await settingsRouter.request('/', putInit(wrapManifest(searchManifest('search-secondary'))));
+      expect(created.status).toBe(200);
+
+      const response = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(searchManifest('search-secondary', { search_provider: true }))),
+      );
+      expect(response.status).toBe(409);
+      const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'search-secondary' });
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.search_provider : undefined).toBeUndefined();
+    });
+
+    it('PUT re-saving the holder is not a conflict with itself, and designation moves in two steps', async () => {
+      const resave = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(searchManifest('search-primary', { search_provider: true, description: 'Renamed.' }))),
+      );
+      expect(resave.status).toBe(200);
+
+      const disable = await settingsRouter.request('/', putInit(wrapManifest(searchManifest('search-primary'))));
+      expect(disable.status).toBe(200);
+      const enable = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(searchManifest('search-secondary', { search_provider: true }))),
+      );
+      expect(enable.status).toBe(200);
+      expect(await enable.json()).toMatchObject({
+        data: { name: 'search-secondary', manifest: { search_provider: true } },
+      });
+    });
+  });
+
+  describe('search tools of the search provider come from the shipped catalog', () => {
+    const PARALLEL_URL = 'https://search.parallel.ai/mcp';
+
+    function providerManifest(extra: Record<string, unknown>) {
+      return {
+        type: 'remote' as const,
+        name: 'catalog-search',
+        url: PARALLEL_URL,
+        description: 'A connector the user designates as the search provider.',
+        ...extra,
+      };
+    }
+
+    async function save(manifest: Record<string, unknown>) {
+      const response = await settingsRouter.request('/', putInit(wrapManifest(manifest)));
+      expect(response.status).toBe(200);
+      const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'catalog-search' });
+      return stored?.manifest.type === 'remote' ? stored.manifest : undefined;
+    }
+
+    beforeAll(async () => {
+      // Another test of this file may still hold the single role.
+      for (const holder of await mcpServerStore.listServers({ tenant_id: TENANT_ID, names: undefined })) {
+        if (holder.manifest.type === 'remote' && holder.manifest.search_provider === true) {
+          await mcpServerStore.upsertServer({
+            tenant_id: TENANT_ID,
+            name: holder.name,
+            manifest: { ...holder.manifest, search_provider: undefined },
+            first_party: false,
+          });
+        }
+      }
+    });
+
+    it('fills the list for a connector at a known provider’s address once it is designated', async () => {
+      const stored = await save(providerManifest({ search_provider: true }));
+      expect(stored?.search_tools).toEqual(['web_search', 'web_fetch']);
+      const read = await settingsRouter.request('/catalog-search');
+      expect(await read.json()).toMatchObject({ data: { manifest: { search_tools: ['web_search', 'web_fetch'] } } });
+    });
+
+    it('replaces a list the request carried, so a client cannot widen what runs without asking', async () => {
+      const stored = await save(providerManifest({ search_provider: true, search_tools: ['delete_everything'] }));
+      expect(stored?.search_tools).toEqual(['web_search', 'web_fetch']);
+    });
+
+    it('gives a designated connector at an unknown address no list, whatever the request carried', async () => {
+      const stored = await save(
+        providerManifest({
+          url: 'https://api.githubcopilot.com/mcp/',
+          search_provider: true,
+          search_tools: ['create_issue', 'delete_file'],
+        }),
+      );
+      expect(stored?.search_provider).toBe(true);
+      expect(stored?.search_tools).toBeUndefined();
+    });
+
+    it('drops the list when the role is turned off or the address moves off the preset', async () => {
+      await save(providerManifest({ search_provider: true }));
+      const roleOff = await save(providerManifest({ search_tools: ['web_search'] }));
+      expect(roleOff?.search_provider).toBeUndefined();
+      expect(roleOff?.search_tools).toBeUndefined();
+
+      await save(providerManifest({ search_provider: true }));
+      const moved = await save(providerManifest({ search_provider: true, url: 'https://other.example.com/mcp' }));
+      expect(moved?.search_tools).toBeUndefined();
+    });
+
+    it('matches the address the way the catalog does, so a key in the query string still counts', async () => {
+      const stored = await save(
+        providerManifest({ search_provider: true, url: 'https://mcp.tavily.com/mcp/?tavilyApiKey=synthetic' }),
+      );
+      expect(stored?.search_tools).toEqual(['tavily_search', 'tavily_extract']);
+    });
   });
 
   describe('memory provider single-flag enforcement', () => {

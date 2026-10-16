@@ -71,6 +71,50 @@ describe('extractSentinelFromEvent', () => {
     expect(first?.card.amount).toBe('$250');
     expect(first?.card.why_asked_again).toBeNull();
     expect(first?.card.parsed_command).toBeNull();
+    expect(first?.card.outbound_text).toBeNull();
+    expect(first?.card.destination_host).toBeNull();
+  });
+
+  it('parses outbound_text and destination_host from the card', () => {
+    const event = {
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          tool_call_id: 'call-9',
+          tier: 3,
+          tier3_card: {
+            plain_what: 'Run web_search',
+            outbound_text: 'query: my secret query',
+            destination_host: 'mcp.exa.ai',
+          },
+        },
+      ],
+    };
+    const approvals = extractSentinelFromEvent(event);
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]?.card.outbound_text).toBe('query: my secret query');
+    expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
+  });
+
+  it('reads outboundText and destinationHost from a camel-cased card', () => {
+    const approvals = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      toolCalls: [
+        {
+          id: 'call-11',
+          tier: 3,
+          tier3Card: {
+            plainWhat: 'Search the web',
+            outboundText: 'query: tides',
+            destinationHost: 'mcp.exa.ai',
+            outboundTruncated: true,
+          },
+        },
+      ],
+    });
+    expect(approvals[0]?.card.outbound_text).toBe('query: tides');
+    expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
+    expect(approvals[0]?.card.outbound_truncated).toBe(true);
   });
 
   it('parses an approval event after the SDK deserializes it', () => {
@@ -86,7 +130,19 @@ describe('extractSentinelFromEvent', () => {
             id: 'call-9',
             source_event_id: 'evt-0',
             tier: 3,
-            tier3_card: { plain_what: 'Run code in the sandbox', plain_why: null, cannot_be_undone: 'Runs once.' },
+            tier3_card: {
+              plain_what: 'Run code in the sandbox',
+              plain_why: null,
+              cannot_be_undone: 'Runs once.',
+              destination: null,
+              recipient: null,
+              amount: null,
+              parsed_command: null,
+              why_asked_again: null,
+              outbound_text: 'query: tides',
+              destination_host: 'mcp.exa.ai',
+              outbound_truncated: true,
+            },
           },
         ],
       },
@@ -98,6 +154,9 @@ describe('extractSentinelFromEvent', () => {
     expect(approvals[0]?.tier).toBe(3);
     expect(approvals[0]?.card.plain_what).toBe('Run code in the sandbox');
     expect(approvals[0]?.card.cannot_be_undone).toBe('Runs once.');
+    expect(approvals[0]?.card.outbound_text).toBe('query: tides');
+    expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
+    expect(approvals[0]?.card.outbound_truncated).toBe(true);
   });
 
   it('reads a camel-cased card from a regenerated SDK shape', () => {
@@ -288,8 +347,8 @@ describe('parseAuditEntries', () => {
 });
 
 describe('parseUserSettings', () => {
-  it('defaults to offline off and nothing relaxed', () => {
-    const defaults = { offline_mode: false, tier2_auto_allow: [] };
+  it('defaults to offline off, nothing relaxed and searches running without asking', () => {
+    const defaults = { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
     expect(parseUserSettings(null)).toEqual(defaults);
     expect(parseUserSettings({})).toEqual(defaults);
     expect(parseUserSettings({ data: null })).toEqual(defaults);
@@ -303,13 +362,19 @@ describe('parseUserSettings', () => {
       parseUserSettings({
         data: { offline_mode: true, tier2_auto_allow: ['shell', 'file_write', 'nope', 'file_write'] },
       }),
-    ).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'] });
+    ).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'], search_without_asking: true });
+  });
+
+  it('reads the search setting, and falls back to running without asking when it is not a boolean', () => {
+    expect(parseUserSettings({ data: { search_without_asking: false } }).search_without_asking).toBe(false);
+    expect(parseUserSettings({ data: { search_without_asking: 'no' } }).search_without_asking).toBe(true);
   });
 
   it('does not read a bare settings object', () => {
     expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['file_write'] })).toEqual({
       offline_mode: false,
       tier2_auto_allow: [],
+      search_without_asking: true,
     });
   });
 });

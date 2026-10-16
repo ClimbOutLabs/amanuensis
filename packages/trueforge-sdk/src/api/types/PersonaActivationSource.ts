@@ -2,9 +2,9 @@
 
 /** How the persona was decided: `invocation` (explicitly invoked in the message), `sticky` (carried forward in this chat), `explicit` (chosen in the UI), `default` (returned to the default assistant). */
 export const PersonaActivationSource = {
-    Invocation: "invocation",
-    Sticky: "sticky",
-    Explicit: "explicit",
-    Default: "default",
-} as const;
-export type PersonaActivationSource = (typeof PersonaActivationSource)[keyof typeof PersonaActivationSource];
+        Invocation: "invocation",
+        Sticky: "sticky",
+        Explicit: "explicit",
+        Default: "default"
+    } as const;
+export type PersonaActivationSource = typeof PersonaActivationSource[keyof typeof PersonaActivationSource];
