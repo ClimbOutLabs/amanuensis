@@ -84,6 +84,9 @@ export const MapsHostsSchema = z
   .object({
     geocoder: z.string(),
     router: z.string(),
+    walking: z.string(),
+    cycling: z.string(),
+    transit: z.string(),
     tile: z.string(),
   })
   .describe('Configured maps upstream URLs for the approval card destination.');

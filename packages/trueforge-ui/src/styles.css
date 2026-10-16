@@ -1246,6 +1246,17 @@
   color: var(--text-secondary);
 }
 
+.maps-card-steps {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.maps-card-steps li + li {
+  margin-top: 0.25rem;
+}
+
 .maps-card-attribution {
   margin: 0.5rem 0 0;
   font-size: 0.75rem;

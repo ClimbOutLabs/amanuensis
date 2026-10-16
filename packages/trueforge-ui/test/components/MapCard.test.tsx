@@ -305,6 +305,74 @@ describe('MapCard', () => {
     expect(screen.getByText('Search: Nominatim')).toBeInTheDocument();
   });
 
+  describe('travel modes', () => {
+    const routeData: MapCardData = {
+      ...placeData,
+      kind: 'route',
+      pins: [],
+      from_name: 'Rua da Emenda 45',
+      to_name: 'R. de Sao Bernardo 92',
+      from_lat: 38.7106,
+      from_lng: -9.1426,
+      to_lat: 38.7142,
+      to_lng: -9.1597,
+      distance_km: 1.9,
+      duration_min: 23.7,
+      route_geometry: '_p~iF~ps|U',
+    };
+
+    it('shows the mode, distance and time for a walk', () => {
+      renderCard({ data: { ...routeData, mode: 'walking' }, state: 'ready' });
+      expect(screen.getByText('Walking · 1.9 km · about 24 min')).toBeInTheDocument();
+      expect(screen.getByText('Routing: OSRM')).toBeInTheDocument();
+      expect(screen.queryByRole('list', { name: 'Steps' })).not.toBeInTheDocument();
+    });
+
+    it('shows a route with no mode as driving', () => {
+      renderCard({ data: routeData, state: 'ready' });
+      expect(screen.getByText('Driving · 1.9 km · about 24 min')).toBeInTheDocument();
+    });
+
+    it('lists the transit steps in plain words and credits the timetables', () => {
+      renderCard({
+        data: {
+          ...routeData,
+          mode: 'transit',
+          duration_min: 18,
+          departs: '09:02',
+          arrives: '09:20',
+          steps: [
+            { kind: 'walk', duration_min: 4, to_name: 'Calhariz (Bica)' },
+            {
+              kind: 'ride',
+              vehicle: 'tram',
+              line_name: '28E',
+              headsign: 'Campo Ourique',
+              from_name: 'Calhariz (Bica)',
+              to_name: 'Estrela',
+              departs: '09:06',
+              arrives: '09:16',
+              stops_count: 6,
+            },
+            { kind: 'walk', duration_min: 3, to_name: null },
+          ],
+        },
+        state: 'ready',
+      });
+      expect(
+        screen.getByText('Public transport · 1.9 km · about 18 min · leaves 09:02, arrives 09:20'),
+      ).toBeInTheDocument();
+      const items = screen.getAllByRole('listitem').map(item => item.textContent);
+      expect(items).toEqual([
+        'Walk 4 min to Calhariz (Bica)',
+        'Tram 28E toward Campo Ourique, 6 stops, leaves 09:06',
+        'Walk 3 min',
+      ]);
+      expect(screen.getByText('Timetables: Transitous')).toBeInTheDocument();
+      expect(screen.queryByText('Routing: OSRM')).not.toBeInTheDocument();
+    });
+  });
+
   it('names the routing provider on route cards', () => {
     renderCard({
       data: { ...placeData, kind: 'route', from_name: 'Madrid', to_name: 'Barcelona' },

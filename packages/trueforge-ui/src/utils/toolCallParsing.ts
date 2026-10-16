@@ -1,4 +1,8 @@
 import type { ToolApprovalOption as AuiToolApprovalOption, ToolCallMessagePartProps } from '@assistant-ui/react';
+import {
+  DEFAULT_MAPS_TRAVEL_MODE,
+  MapsRouteResultSchema,
+} from '@truefoundry/trueforge-core/core/permissions/mapsRouteSchemas';
 import { parse as parsePartialJson } from 'partial-json';
 
 import type { ToolCallStatus } from '../atoms/ToolCallCard.js';
@@ -588,20 +592,6 @@ export interface ParsedMapsResult {
   blockedMessage?: string;
 }
 
-interface MapsEndpoint {
-  name: string;
-  lat: number;
-  lng: number;
-}
-
-function parseMapsEndpoint(value: unknown): MapsEndpoint | undefined {
-  if (!isUnknownRecord(value)) return undefined;
-  const { resolved_name: name, lat, lng } = value;
-  return typeof name === 'string' && typeof lat === 'number' && typeof lng === 'number'
-    ? { name, lat, lng }
-    : undefined;
-}
-
 /**
  * The visible payload of a maps tool result: the `tool.response.v2` envelope's `result` when the
  * host wrapped it (always, on the real wire), else the parsed JSON itself.
@@ -624,6 +614,20 @@ function unwrapMapsPayload(resultString: string): unknown {
   }
 }
 
+/** Plain failure text for a route no service could find, by the mode that was asked for. */
+function noRouteMessage(mode: unknown): string {
+  switch (mode) {
+    case 'transit':
+      return 'No public transport route was found between the two places. Walking may still work.';
+    case 'walking':
+      return 'No walking route was found between the two places.';
+    case 'cycling':
+      return 'No cycling route was found between the two places.';
+    default:
+      return 'No driving route was found between the two places.';
+  }
+}
+
 /**
  * Parse a render_map / render_route tool result into map card data.
  * Error results map to blocked/unavailable states; no card renders raw errors.
@@ -642,7 +646,10 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
       return { state: 'unavailable', data: null, blockedMessage: 'The place could not be found.' };
     }
     if (code === 'no_route') {
-      return { state: 'unavailable', data: null, blockedMessage: 'No driving route was found between the two places.' };
+      return { state: 'unavailable', data: null, blockedMessage: noRouteMessage(body.mode) };
+    }
+    if (code === 'invalid_time') {
+      return { state: 'unavailable', data: null, blockedMessage: 'The time for the trip could not be understood.' };
     }
     if (code === 'rate_limited') {
       return {
@@ -658,11 +665,12 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
   }
   const attribution = typeof body.attribution === 'string' ? body.attribution : '© OpenStreetMap contributors';
   if (toolName === 'render_route') {
-    const from = parseMapsEndpoint(body.from);
-    const to = parseMapsEndpoint(body.to);
-    if (from === undefined || to === undefined) {
+    // Results saved before travel modes existed carry no mode and were driving routes.
+    const route = MapsRouteResultSchema.safeParse({ mode: DEFAULT_MAPS_TRAVEL_MODE, ...body });
+    if (!route.success) {
       return { state: 'unavailable', data: null };
     }
+    const { from, to } = route.data;
     return {
       state: 'ready',
       data: {
@@ -670,19 +678,23 @@ export function parseMapsResult(resultString: string | undefined, toolName: stri
         lat: (from.lat + to.lat) / 2,
         lng: (from.lng + to.lng) / 2,
         zoom: 6,
-        resolved_name: `${from.name} to ${to.name}`,
+        resolved_name: `${from.resolved_name} to ${to.resolved_name}`,
         address: null,
         pins: [],
-        from_name: from.name,
-        to_name: to.name,
+        from_name: from.resolved_name,
+        to_name: to.resolved_name,
         from_lat: from.lat,
         from_lng: from.lng,
         to_lat: to.lat,
         to_lng: to.lng,
-        distance_km: typeof body.distance_km === 'number' ? body.distance_km : undefined,
-        duration_min: typeof body.duration_min === 'number' ? body.duration_min : undefined,
-        route_geometry: typeof body.route_geometry === 'string' ? body.route_geometry : undefined,
-        attribution,
+        distance_km: route.data.distance_km,
+        duration_min: route.data.duration_min,
+        route_geometry: route.data.route_geometry,
+        mode: route.data.mode,
+        ...(route.data.mode === 'transit'
+          ? { departs: route.data.departs, arrives: route.data.arrives, steps: route.data.steps }
+          : {}),
+        attribution: route.data.attribution,
       },
     };
   }

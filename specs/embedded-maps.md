@@ -19,7 +19,7 @@ Every call asks (Tier 3). Geocoding sends place names, routing sends both endpoi
 The card uses the existing Tier3Card fields:
 
 - plain_what, render_map: Send "<place_name>" to <geocoder host> to find it, then load map tiles for that area from <tile host>. With poi: Send "<place_name>" and "<poi>" to <geocoder host> to find <poi> near it, then load map tiles for that area from <tile host>.
-- plain_what, render_route: Send "<from_place>" and "<to_place>" to <geocoder host>, ask <router host> for a driving route between them, then load map tiles for that area from <tile host>.
+- plain_what, render_route: Send "<from_place>" and "<to_place>" to <geocoder host>, ask <service host> for a <walking, cycling, driving or public transport> route between them, then load map tiles for that area from <tile host>. The service host is the one for the call's mode; a call with no mode is a driving route.
 - destination_host: the configured hosts, comma separated, read from server config and never from params, so it is always verifiable. destination: null.
 - outbound_text: the exact arguments of the call, one "name: value" line each, rendered by the same function as every other outbound card. The approval is rendered by the shared approval card; there is no maps-specific card component.
 - Approval binding: the approval token is bound to a connector binding of server id "maps" and the same host string, rebuilt from server config at dispatch, so an approval stops working once any maps upstream points elsewhere.
@@ -164,6 +164,10 @@ What never leaves: the user's own location (never collected), memory, calendar d
 - Routing between two named places, driving profile, with distance and duration.
 - Same-origin tile proxy, configurable endpoints, rate limiting, in-memory caches, attribution.
 - Offline mode wiring through the network-requirements registry.
+
+## Travel modes
+
+`render_route` takes `mode`: `walking`, `cycling`, `driving` (the default) or `transit`. Walking and cycling use OSRM-compatible servers with foot and bike profiles (`MAPS_WALKING_ROUTER_URL`, `MAPS_CYCLING_ROUTER_URL`, default the FOSSGIS servers at routing.openstreetmap.de). Transit uses a MOTIS-compatible planner (`MAPS_TRANSIT_URL`, default the Transitous instance at api.transitous.org, API version included in the URL) and takes optional `depart_at` or `arrive_by`, a local time read in the user's timezone. The destination host string on the approval card and in the approval binding now lists every configured maps host, so an approval given before these services existed stops matching and asks again. Only the geocoded coordinates (origin rounded to about 100 m) go to the route services, as before. Transitous asks for an identifying User-Agent with contact details and is for free and open-source use; the FOSSGIS servers log requests and ask that heavy use be agreed first. Results are discriminated on `mode`; transit adds `departs`, `arrives`, `transfers` and `steps` (walk and ride steps with local clock times).
 
 ## Out of scope
 

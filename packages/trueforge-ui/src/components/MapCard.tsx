@@ -3,6 +3,10 @@
 import type { FitBoundsOptions, Map as LeafletMap, TileLayer } from 'leaflet';
 import { useEffect, useRef, useState } from 'react';
 
+import type { MapsTransitStep, MapsTravelMode } from '@truefoundry/trueforge-core/core/permissions/mapsRouteSchemas';
+
+import { describeDuration, describeTransitStep } from '../utils/mapsTransitSteps.js';
+
 export interface MapPin {
   name: string;
   lat: number;
@@ -28,8 +32,21 @@ export interface MapCardData {
   distance_km?: number;
   duration_min?: number;
   route_geometry?: string;
+  /** Route card only; a card without a mode is a driving route. */
+  mode?: MapsTravelMode;
+  /** Transit route card only: local clock times and the steps in order. */
+  departs?: string;
+  arrives?: string;
+  steps?: MapsTransitStep[];
   attribution: string;
 }
+
+const MODE_LABELS: Record<MapsTravelMode, string> = {
+  walking: 'Walking',
+  cycling: 'Cycling',
+  driving: 'Driving',
+  transit: 'Public transport',
+};
 
 export type MapCardState = 'ready' | 'blocked' | 'unavailable';
 
@@ -327,12 +344,19 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
               {data.kind === 'route' ? `${data.from_name ?? ''} → ${data.to_name ?? ''}` : data.resolved_name}
             </p>
             {mapSubtitle(data) !== null && <p className="maps-card-subtitle">{mapSubtitle(data)}</p>}
+            {data.steps !== undefined && data.steps.length > 0 && (
+              <ol className="maps-card-steps" aria-label="Steps">
+                {data.steps.map((step, index) => (
+                  <li key={`${String(index)}-${step.kind}`}>{describeTransitStep(step)}</li>
+                ))}
+              </ol>
+            )}
             <p className="maps-card-attribution">
               <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
                 {data.attribution}
               </a>
               <span aria-hidden="true"> · </span>
-              {data.kind === 'route' ? 'Routing: OSRM' : 'Search: Nominatim'}
+              {providerCredit(data)}
             </p>
           </div>
         </>
@@ -341,14 +365,33 @@ export function MapCard({ data, state, blockedMessage }: MapCardProps) {
   );
 }
 
+/** Who answered: the timetable service for public transport, the router for other routes, else the geocoder. */
+function providerCredit(data: MapCardData): string {
+  if (data.kind !== 'route') {
+    return 'Search: Nominatim';
+  }
+  return data.mode === 'transit' ? 'Timetables: Transitous' : 'Routing: OSRM';
+}
+
+/** Mode, distance and time in one line, e.g. "Walking · 1.9 km · about 24 min". */
+function routeSummary(data: MapCardData): string {
+  const parts = [MODE_LABELS[data.mode ?? 'driving']];
+  if (data.distance_km !== undefined) {
+    parts.push(`${String(data.distance_km)} km`);
+  }
+  if (data.duration_min !== undefined) {
+    parts.push(`about ${describeDuration(data.duration_min)}`);
+  }
+  if (data.departs !== undefined && data.arrives !== undefined) {
+    parts.push(`leaves ${data.departs}, arrives ${data.arrives}`);
+  }
+  return parts.join(' · ');
+}
+
 /** Accessible summary for the map region. */
 function mapSummary(data: MapCardData): string {
   if (data.kind === 'route') {
-    return (
-      `${data.from_name ?? ''} to ${data.to_name ?? ''}` +
-      (data.distance_km !== undefined ? `, ${String(data.distance_km)} km` : '') +
-      (data.duration_min !== undefined ? `, about ${String(data.duration_min)} min` : '')
-    );
+    return `${data.from_name ?? ''} to ${data.to_name ?? ''}, ${routeSummary(data)}`;
   }
   return data.address ?? data.resolved_name;
 }
@@ -359,7 +402,7 @@ function mapSummary(data: MapCardData): string {
  */
 function mapSubtitle(data: MapCardData): string | null {
   if (data.kind === 'route') {
-    return mapSummary(data);
+    return routeSummary(data);
   }
   if (data.address === null || data.address === data.resolved_name) {
     return null;
