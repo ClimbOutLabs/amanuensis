@@ -7,6 +7,7 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import winston from 'winston';
 import { createScheduleExecutionRouter, createSchedulesRouter } from '../../../src/apis/schedules';
+import { startTurnInProcess } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authorizer';
 import type { RequestContext } from '../../../src/auth/identity';
 import { ScheduleAgentNotFoundError, startScheduleRun } from '../../../src/controller/scheduleDispatch';
@@ -37,7 +38,13 @@ jest.mock('../../../src/controller/scheduleDispatch', () => {
   };
 });
 
+jest.mock('../../../src/apis/turns', () => {
+  const actual = jest.requireActual<typeof import('../../../src/apis/turns')>('../../../src/apis/turns');
+  return { ...actual, startTurnInProcess: jest.fn() };
+});
+
 const mockedStartScheduleRun = startScheduleRun as jest.MockedFunction<typeof startScheduleRun>;
+const mockedStartTurnInProcess = jest.mocked(startTurnInProcess);
 
 const ALICE: RequestContext = {
   tenant_id: 'default',
@@ -440,20 +447,17 @@ describe('create schedule run', () => {
 });
 
 describe('internal schedule execution', () => {
-  it('executes the persisted run id', async () => {
+  async function seedRun() {
     mockedStartScheduleRun.mockReset();
     mockedStartScheduleRun.mockResolvedValue(undefined);
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     const agentStore = new SqliteAgentStore(db);
     const scheduleStore = new SqliteScheduleStore(db);
+    const alice = { subject_id: 'alice', subject_type: 'user' as const, subject_display_name: 'alice' };
     const agent = await agentStore.createAgent({
       tenant_id: 'default',
-      created_by_subject: {
-        subject_id: 'alice',
-        subject_type: 'user',
-        subject_display_name: 'alice',
-      },
+      created_by_subject: alice,
       name: 'reporter',
       description: 'reporter description',
       manifest: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' }),
@@ -465,11 +469,7 @@ describe('internal schedule execution', () => {
       agent_name: agent.name,
       name: 'daily-report',
       manifest: { task: 'Say hi', cron: '0 13 * * *', timezone: 'UTC', status: 'active' },
-      created_by_subject: {
-        subject_id: 'alice',
-        subject_type: 'user',
-        subject_display_name: 'alice',
-      },
+      created_by_subject: alice,
       runFrom: new Date(),
     });
     const run = await scheduleStore.createRun({
@@ -478,25 +478,55 @@ describe('internal schedule execution', () => {
       name: 'manual-test',
       scheduled_for: new Date(),
       status: 'triggered',
-      created_by_subject: {
-        subject_id: 'alice',
-        subject_type: 'user',
-        subject_display_name: 'alice',
-      },
+      created_by_subject: alice,
       triggered_at: new Date(),
     });
     const app = createScheduleExecutionRouter(stubTurnExecutionDeps(agentStore, scheduleStore, db));
+    const execute = (scheduleRunId: string) =>
+      app.request('/runs/execute', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ schedule_run_id: scheduleRunId }),
+      });
+    return { agent, run, execute };
+  }
 
-    const response = await app.request('/runs/execute', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ schedule_run_id: run.id }),
-    });
+  it('executes the persisted run id', async () => {
+    const { run, execute } = await seedRun();
+
+    const response = await execute(run.id);
 
     expect(response.status).toBe(204);
     expect(mockedStartScheduleRun).toHaveBeenCalledWith(
       expect.objectContaining({ item: expect.objectContaining({ run: expect.objectContaining({ id: run.id }) }) }),
     );
+  });
+
+  it('starts the run unattended, so it holds what would ask instead of stopping at a card', async () => {
+    const { agent, run, execute } = await seedRun();
+    const session = await new Sessions<SessionCustom, TurnCustom>({
+      sessionStore: new InMemorySessionStore<SessionCustom, TurnCustom>(),
+    }).create({
+      tenant_id: 'default',
+      session_id: 'run-session',
+      created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+      agent: { type: 'reference', id: agent.id, name: agent.name },
+      external_id: run.id,
+      source: null,
+    });
+    mockedStartScheduleRun.mockResolvedValue({
+      session,
+      input: [{ type: 'user.message', content: 'Say hi' }],
+      previous_turn_id: 'none',
+      userRef: 'alice',
+      agent,
+    });
+    mockedStartTurnInProcess.mockReset();
+
+    const response = await execute(run.id);
+
+    expect(response.status).toBe(204);
+    expect(mockedStartTurnInProcess).toHaveBeenCalledWith(expect.objectContaining({ unattended: true }));
   });
 
   it('maps an unknown run to 404', async () => {

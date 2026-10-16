@@ -10,7 +10,7 @@ The card is not the real protection anyway. The risk in a search is the query te
 
 ## Solution
 
-Let the user designate one connector as their search provider. Its search tool then runs without asking, in interactive chats and scheduled runs, behind a deterministic host-side outbound secret guard. When the guard trips, the call does not run silently: an interactive chat shows the normal approval card with the exact query, and a scheduled run denies the call, records it in the audit log, and continues.
+Let the user designate one connector as their search provider. Its search tool then runs without asking, in interactive chats and scheduled runs, behind a deterministic host-side outbound secret guard. When the guard trips, the call does not run silently: an interactive chat shows the normal approval card with the exact query, and a scheduled run holds the call for its owner, records the hold in the audit log, and continues.
 
 Parallel's free keyless hosted MCP (`search.parallel.ai/mcp`) is the default search provider and ships as a catalog preset. Any other connector can hold the role instead.
 
@@ -33,9 +33,9 @@ Everything is enforced by the server (classifier, tool executor, host state). No
 
 The guard is tuned so ordinary queries with numbers, dates, and names pass.
 
-**Guard trip behavior depends on who is watching.** In an interactive chat the call asks, and the approval card shows the exact query. In a scheduled run the call is denied before it runs, an audit row records the denial and the rule that fired (never the query text), and the run continues.
+**Guard trip behavior depends on who is watching.** In an interactive chat the call asks, and the approval card shows the exact query. In a scheduled run the call is held before it runs and listed under "Needs your OK" with the exact query; an audit row records the hold, and the run continues. The owner's later answer runs the stored call once or drops it.
 
-**Loop breaker.** After 20 silent searches in one turn, the next one asks (or is denied in a scheduled run). The count lives in host state for the turn. An approval resumes the conversation as a new turn with a fresh count, which is accepted: each resume needs a person to approve a call, and the guard still reads every query.
+**Loop breaker.** After 20 silent searches in one turn, the next one asks (or is held for the owner in a scheduled run). The count lives in host state for the turn. An approval resumes the conversation as a new turn with a fresh count, which is accepted: each resume needs a person to approve a call, and the guard still reads every query.
 
 **Links.** A URL fetch through the designated provider is silent only when the URL exactly matches one returned by a search result in this turn. The host keeps that set from the provider's results. Any model-composed or modified URL asks. The same rule means a search query that carries a URL also asks.
 
@@ -53,7 +53,7 @@ The guard is tuned so ordinary queries with numbers, dates, and names pass.
 - The Parallel keyless catalog preset marked as the search provider, and a `search_tools` list on the Parallel, Tavily and Exa presets naming their real search tools
 - Per-user "Searches: Run without asking / Ask" setting (default Run without asking), in the Sentinel settings API, store, and settings UI
 - The outbound secret guard module in core, with a host-supplied secret source
-- Classifier path for the designated provider, the per-turn host state (silent count, search-result URL set), and scheduled-run denial with an audit row
+- Classifier path for the designated provider, the per-turn host state (silent count, search-result URL set), and scheduled-run holding with an audit row
 - The "Searched: <query>" chip and the audit row for silent searches
 
 ## Privacy
@@ -70,7 +70,7 @@ The guard is tuned so ordinary queries with numbers, dates, and names pass.
 - All tests use synthetic data: fake keys, fake tokens, and test card numbers built for the test. No real credentials or user data.
 - Each guard rule, including the false positives that must pass (ordinary queries with numbers, dates, names, version strings, and file paths).
 - Silent search for the designated provider only; a non-designated search tool still asks, and so does every unannotated or write tool of a write-capable connector designated as the provider.
-- A scheduled run denies on a guard trip, writes the audit row, and the run continues.
+- A scheduled run holds on a guard trip, writes the audit row, and the run continues.
 - The loop breaker at 20, interactive and scheduled.
 - Exact-URL fetch is silent while a modified URL asks.
 - The audit row and the chip.

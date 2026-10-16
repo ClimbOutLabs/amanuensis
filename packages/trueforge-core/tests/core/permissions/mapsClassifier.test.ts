@@ -151,9 +151,9 @@ describe('maps classifier branch', () => {
     expect(await verdict(hosts)).toBeUndefined();
   });
 
-  it('sets cannot_be_undone and null recipient/amount/parsed_command', async () => {
+  it('leaves cannot_be_undone, recipient, amount and parsed_command null', async () => {
     const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx());
-    expect(decision.card?.cannot_be_undone).toBe('Once the place names leave this machine they cannot be taken back.');
+    expect(decision.card?.cannot_be_undone).toBeNull();
     expect(decision.card?.recipient).toBeNull();
     expect(decision.card?.amount).toBeNull();
     expect(decision.card?.parsed_command).toBeNull();

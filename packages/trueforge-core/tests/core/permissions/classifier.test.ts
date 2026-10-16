@@ -14,6 +14,7 @@ import {
   createSentinelHostContext,
   defaultSentinelServices,
   forUnattendedRun,
+  withoutRelaxations,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
@@ -169,6 +170,24 @@ describe('classifyTier Tier 2 asks by default', () => {
       const decision = await classifyTier(
         action('write_file', { path: join(dir, 'notes.md'), content: 'x' }),
         makeCtx({ services: unattended, workspace_cwd: dir }),
+      );
+      expect(decision.tier).toBe(2);
+      expect(decision.approval_token_id).not.toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an attended turn in a scheduled chat still asks for a file write', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      const attended = withoutRelaxations(
+        relaxing(defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), ['file_write']),
+      );
+      expect(attended.unattended).toBe(false);
+      const decision = await classifyTier(
+        action('write_file', { path: join(dir, 'notes.md'), content: 'x' }),
+        makeCtx({ services: attended, workspace_cwd: dir }),
       );
       expect(decision.tier).toBe(2);
       expect(decision.approval_token_id).not.toBeNull();

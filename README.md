@@ -219,7 +219,7 @@ Useful targeted commands include `pnpm test:trueforge-core`, `pnpm test:trueforg
 
 - [Introduction and architecture](docs/introduction.mdx)
 - [Quickstart and initial configuration](docs/quickstart.mdx)
-- [Models and model roles](docs/model-roles.mdx)
+- [Models, roles and personas](docs/model-roles.mdx)
 - [MCP connectors](docs/mcp-servers.mdx)
 - [Memory design](ops/memory/DESIGN.md) and [operations runbook](ops/memory/RUNBOOK.md)
 - [Upstream synchronization runbook](docs/UPSTREAM_SYNC.md) and [divergence policy](DIVERGENCE.md)

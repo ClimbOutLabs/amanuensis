@@ -322,7 +322,7 @@ export class ToolSet implements IToolSet {
     const { info: tool_info, classification } = await this.buildToolCallInfo(params, tool);
     if (tool_info.pre_dispatch_failure !== undefined) {
       // The turn loop refuses these before it gets here; a caller that skips that step still cannot
-      // run a call the host auto-denied, such as a search the outbound guard held in a scheduled run.
+      // run a call the host auto-denied.
       return toolResultResponse({
         text: JSON.stringify({ error: tool_info.pre_dispatch_failure.message }),
         isError: true,
@@ -461,6 +461,7 @@ export class ToolSet implements IToolSet {
       info: {
         ...info,
         ...stamp,
+        ...(this.searchProvider ? { search_provider_call: true as const } : {}),
         // An explicit require-approval selector adds a gate on top of any tier, including a
         // standing grant, but never to a call that is auto-denied without a card.
         is_approval_required:

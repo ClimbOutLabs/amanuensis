@@ -39,6 +39,7 @@ export function AssistantTextContainer() {
   downloadRef.current = { downloadSandboxFile, toaster };
   const partState = useAuiState(s => s.part as MessagePartState & (TextMessagePart | ReasoningMessagePart));
   const messageParts = useAuiState(s => s.message.parts);
+  const messageId = useAuiState(s => s.message.id);
 
   // Citation sources for model-emitted markers like 【14†excerpts】: the same message's
   // web_search / web_fetch results carry the ID→title mapping the model cited against.
@@ -60,6 +61,13 @@ export function AssistantTextContainer() {
   // animating an ever-growing queue. We intentionally do not re-enable useSmooth for this part:
   // its private cursor still points at the old prefix and could visibly rewind the message.
   const pacedModeRef = useRef(false);
+  // A reused component instance must not carry the previous message's paced-mode latch:
+  // reset it when the message changes so stale text never renders in the new bubble.
+  const lastMessageIdRef = useRef(messageId);
+  if (lastMessageIdRef.current !== messageId) {
+    lastMessageIdRef.current = messageId;
+    pacedModeRef.current = false;
+  }
   const smoothedPart = useSmooth(
     partState,
     pacedModeRef.current
@@ -82,6 +90,7 @@ export function AssistantTextContainer() {
   const pacedText = useThrottledMarkdownText(partState.text, {
     enabled: usePacedMode,
     isComplete: networkComplete,
+    resetKey: messageId,
   });
 
   const text = usePacedMode ? pacedText : smoothedPart.text;
