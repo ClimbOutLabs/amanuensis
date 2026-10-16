@@ -86,7 +86,7 @@ export const SentinelSettings: FC = () => {
           <p className="text-sm font-medium text-text-primary">Web searches</p>
           <p className="mt-1 text-sm text-text-secondary">
             {searchWithoutAsking
-              ? 'Run without asking. Searches through the connector you set as your search provider run on their own and show a Searched chip. A query that looks like it holds a secret still asks first.'
+              ? 'Run without asking. Searches through the connector you set as your search provider run on their own and show a Searched chip.'
               : 'Ask. Every web search shows an approval card with the exact query before it runs.'}
           </p>
           {searchError !== null && (
