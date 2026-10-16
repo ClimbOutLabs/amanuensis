@@ -36,7 +36,10 @@ export const ModelPropertiesSchema = z
     // A model that reserves its whole context window for output leaves no room
     // for input, so every turn fails the token pre-flight guard. Reject the
     // combination at the boundary instead of failing silently at runtime.
-    const message = getModelOutputExceedsContextError(properties);
+    const message = getModelOutputExceedsContextError({
+      context_length: properties.context_length,
+      max_output_tokens: properties.max_output_tokens,
+    });
     if (message != null) {
       ctx.addIssue({
         code: 'custom',

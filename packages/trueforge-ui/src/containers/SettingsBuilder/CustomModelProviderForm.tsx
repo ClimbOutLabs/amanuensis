@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 
-import { getModelOutputExceedsContextError } from '@truefoundry/trueforge-core/core';
+import { getModelOutputExceedsContextError } from '@truefoundry/trueforge-core/schemas/modelTokenLimits';
 import { cn } from '../../atoms/lib/cn.js';
 import { Button } from '../../atoms/primitives/Button.js';
 import { CenteredModal } from '../../atoms/primitives/CenteredModal.js';
