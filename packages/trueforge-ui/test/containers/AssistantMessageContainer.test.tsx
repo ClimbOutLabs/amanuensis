@@ -199,7 +199,7 @@ describe('AssistantMessageContainer', () => {
 
     expect(screen.getByText(/Waiting for approval/)).toBeInTheDocument();
     expect(screen.getByRole('radiogroup', { name: 'Approval options for write_notes' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Allow once' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.queryByText(/queue|position|ahead/i)).not.toBeInTheDocument();
   });
 
@@ -314,9 +314,9 @@ describe('AssistantMessageContainer', () => {
     const internals = getAgentInternals();
     expect(within(internals).queryByTestId('assistant-message-agent-internals-toggle')).not.toBeInTheDocument();
     const card = within(internals);
-    expect(card.getByRole('radio', { name: 'Allow once' })).toBeVisible();
+    expect(card.getByRole('radio', { name: 'Approve' })).toBeVisible();
     expect(card.getByRole('radio', { name: 'Deny' })).toBeVisible();
-    fireEvent.click(card.getByRole('radio', { name: 'Allow once' }));
+    fireEvent.click(card.getByRole('radio', { name: 'Approve' }));
     expect(onRespondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true }),
     );
