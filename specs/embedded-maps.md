@@ -23,7 +23,7 @@ The card uses the existing Tier3Card fields:
 - destination_host: the configured hosts, comma separated, read from server config and never from params, so it is always verifiable. destination: null.
 - outbound_text: the exact arguments of the call, one "name: value" line each, rendered by the same function as every other outbound card. The approval is rendered by the shared approval card; there is no maps-specific card component.
 - Approval binding: the approval token is bound to a connector binding of server id "maps" and the same host string, rebuilt from server config at dispatch, so an approval stops working once any maps upstream points elsewhere.
-- cannot_be_undone: Once the place names leave this machine they cannot be taken back.
+- cannot_be_undone: null.
 - plain_why: agent intent, as for every other tool. recipient, amount, parsed_command: null.
 
 Place strings on the card come from the canonical params, are quoted with escapes so a crafted name cannot read as part of the sentence, are cut to 128 characters with an ellipsis (the card is built before the schema runs), and render as text, never as markup. A value that is not text shows as "(not text)". The approval covers the initial map and the user's own panning and zooming of that card, which fetch more tiles through the proxy.
