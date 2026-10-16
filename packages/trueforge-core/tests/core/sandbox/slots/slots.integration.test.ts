@@ -2,6 +2,7 @@
  * Live tests against real slot agents. Set AMAN_SLOTS_TEST_DIR to a directory holding one control
  * directory per slot (`<dir>/1/agent.sock`, ...), for example after `pnpm sandbox:slots`. Without it every
  * test returns early, so the suite stays green on machines without slots.
+ * `pnpm test:slots-live` runs the attachment cases against an installed instance's slots, with no setup.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
