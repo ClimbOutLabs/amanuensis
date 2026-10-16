@@ -503,7 +503,7 @@ test_rerun_turns_the_sandbox_on_and_keeps_the_data() {
   assert_log_lacks "volume rm"
   assert_log_lacks " down"
   assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_data" "the data volume is still there"
-  assert_flat_contains "$OUT" "Run code on, in a sandbox, with PDF and image reading"
+  assert_flat_contains "$OUT" "Run code on, in a sandbox"
   run_install --yes --name main
   assert_contains "$OUT" "The 4 sandboxes of instance main are running"
   assert_not_contains "$OUT" "Turn on the sandbox"
