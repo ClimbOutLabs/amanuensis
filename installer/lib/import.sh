@@ -11,26 +11,24 @@ check_import_options() {
   fi
 }
 
-# import_run NAME FILE OWNER IMAGE: the file's folder is mounted read-only; the instance's own settings reach the CLI
-# through its .env, so it reads the same database and memory paths the app does.
+# import_run NAME FILE OWNER IMAGE: the file is streamed in and held on a private tmpfs, because the app user inside the
+# image cannot read a 0600 file of the host user; the instance's own settings reach the CLI through its .env, so it
+# reads the same database and memory paths the app does.
 import_run() {
-  local name=$1 file=$2 owner=$3 image=$4 dir base was_running=0 rc=0
-  dir=$(cd -P -- "$(dirname -- "$file")" && pwd) || die "cannot resolve the folder of $file"
+  local name=$1 file=$2 owner=$3 image=$4 base was_running=0 rc=0
   base=$(basename -- "$file")
-  case "$dir" in
-    *,*) die "the folder of the export cannot contain a comma: $dir" ;;
-  esac
   if [ "$(instance_state "$name")" != stopped ]; then was_running=1; fi
   if [ "$was_running" = 1 ]; then
     say "Stopping the app of instance $name for the import"
     dc "$name" stop app >/dev/null || die "could not stop the app of instance $name; nothing was imported"
   fi
   say "Importing $base into instance $name for $owner"
-  D run --rm --network none \
+  D run --rm -i --network none \
     --env-file "$(instance_dir "$name")/.env" -e NODE_ENV=production \
     -v "aman_${name}_data:/data" \
-    --mount "type=bind,source=$dir,target=/import,readonly" \
-    "$image" aman import-data --in "/import/$base" --user "$owner" || rc=$?
+    --tmpfs /import:rw,mode=0700,uid=10001,gid=10001,size=1200m \
+    "$image" sh -c "cat >/import/export.zip && exec aman import-data --in /import/export.zip --user \"\$1\"" import "$owner" \
+    <"$file" || rc=$?
   if [ "$was_running" = 1 ]; then
     say "Starting the app of instance $name again"
     dc "$name" up -d --wait --wait-timeout 240 >/dev/null ||

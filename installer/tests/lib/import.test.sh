@@ -34,11 +34,11 @@ test_import_stops_the_app_runs_the_cli_and_starts_it_again() {
   assert_eq "$(import_count)" 1
   local run
   run=$(import_runs)
-  assert_contains "$run" "--rm --network none"
+  assert_contains "$run" "--rm -i --network none"
   assert_contains "$run" "-v aman_main_data:/data"
-  assert_contains "$run" "source=$EXPORT_DIR,target=/import,readonly"
+  assert_contains "$run" "--tmpfs /import:rw,mode=0700,uid=10001,gid=10001"
   assert_contains "$run" "--env-file $AMAN_HOME/instances/main/.env"
-  assert_contains "$run" "aman import-data --in /import/aman-export.zip --user $OWNER"
+  assert_contains "$run" "aman import-data --in /import/export.zip --user \"\$1\" import $OWNER"
   local stop_line run_line up_line
   stop_line=$(grep -n 'compose .* stop app' "$STUB_LOG" | head -n 1 | cut -d: -f1)
   run_line=$(grep -n 'aman import-data' "$STUB_LOG" | head -n 1 | cut -d: -f1)
