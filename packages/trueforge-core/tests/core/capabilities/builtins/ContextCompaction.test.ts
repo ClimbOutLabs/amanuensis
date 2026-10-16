@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from 'winston';
 import { z } from 'zod';
 import type { AgentThreadExecutionContext } from '../../../../src/core/capabilities/AgentContextProcessor';
 import {
@@ -2262,7 +2263,6 @@ describe('compaction reliability journey (spec 002)', () => {
   });
 });
 
-
 describe('compaction pre-LLM decision log', () => {
   const VALID_SUMMARY = `<summary>
 ## user_goal
@@ -2279,10 +2279,14 @@ Test the compaction log.
 Run the test.
 </summary>`;
 
-  function makeInfoLogger(): { logger: any; info: jest.Mock } {
-    const info = jest.fn();
-    const logger: any = { info, child: () => logger };
-    return { logger, info };
+  // The capability logs through a child logger, so spy on the child it receives.
+  function makeSpiedLogger() {
+    const logger = createLogger({ silent: true, transports: [] });
+    const child = logger.child({});
+    const info = jest.spyOn(child, 'info');
+    const debug = jest.spyOn(child, 'debug');
+    jest.spyOn(logger, 'child').mockReturnValue(child);
+    return { logger, info, debug };
   }
 
   function makeModelWithSummary(): ReturnType<typeof makeMockILLM> {
@@ -2295,7 +2299,15 @@ Run the test.
     });
   }
 
-  function makeCapabilityWithLogger(model: ReturnType<typeof makeMockILLM>, logger: any, threshold: number) {
+  function makeCapabilityWithLogger({
+    model,
+    logger,
+    threshold,
+  }: {
+    model: ReturnType<typeof makeMockILLM>;
+    logger: Logger;
+    threshold: number;
+  }) {
     return contextCompaction({
       logger,
       definition: { modelId: undefined, configuredModels: undefined, modelClient: model },
@@ -2303,7 +2315,15 @@ Run the test.
     });
   }
 
-  function makeExecutionWithUsage(promptTokens: number, completionTokens: number, forceCompaction?: boolean): AgentThreadExecutionContext {
+  function makeExecutionWithUsage({
+    promptTokens,
+    completionTokens,
+    forceCompaction,
+  }: {
+    promptTokens: number;
+    completionTokens: number;
+    forceCompaction?: boolean;
+  }): AgentThreadExecutionContext {
     return {
       threadId: 'main',
       signal: undefined,
@@ -2313,7 +2333,10 @@ Run the test.
     };
   }
 
-  async function runPreLLM(capability: ReturnType<typeof contextCompaction>, execution: AgentThreadExecutionContext): Promise<void> {
+  async function runPreLLM(
+    capability: ReturnType<typeof contextCompaction>,
+    execution: AgentThreadExecutionContext,
+  ): Promise<void> {
     const processor = capability.preLLMProcessors?.[0];
     if (!processor) {
       throw new Error('expected a preLLMProcessor');
@@ -2323,25 +2346,25 @@ Run the test.
     }
   }
 
-  it('emits exactly one info log containing "compaction" on an under-threshold turn', async () => {
-    const { logger, info } = makeInfoLogger();
-    const capability = makeCapabilityWithLogger(makeMockILLM({}), logger, 93000);
+  it('logs the decision at debug, not info, on an under-threshold turn', async () => {
+    const { logger, info, debug } = makeSpiedLogger();
+    const capability = makeCapabilityWithLogger({ model: makeMockILLM({}), logger, threshold: 93000 });
 
-    await runPreLLM(capability, makeExecutionWithUsage(100, 50));
+    await runPreLLM(capability, makeExecutionWithUsage({ promptTokens: 100, completionTokens: 50 }));
 
-    expect(info).toHaveBeenCalledTimes(1);
-    const message = String(info.mock.calls[0][0]);
-    expect(message).toContain('compaction');
+    expect(info).not.toHaveBeenCalled();
+    expect(debug).toHaveBeenCalledTimes(1);
+    expect(String(debug.mock.calls[0]?.[0])).toContain('compaction');
   });
 
   it('logs values matching the decision inputs', async () => {
-    const { logger, info } = makeInfoLogger();
-    const capability = makeCapabilityWithLogger(makeMockILLM({}), logger, 93000);
+    const { logger, debug } = makeSpiedLogger();
+    const capability = makeCapabilityWithLogger({ model: makeMockILLM({}), logger, threshold: 93000 });
 
-    await runPreLLM(capability, makeExecutionWithUsage(100, 50));
+    await runPreLLM(capability, makeExecutionWithUsage({ promptTokens: 100, completionTokens: 50 }));
 
-    expect(info).toHaveBeenCalledTimes(1);
-    const message = String(info.mock.calls[0][0]);
+    expect(debug).toHaveBeenCalledTimes(1);
+    const message = String(debug.mock.calls[0]?.[0]);
     // contextTokens = 100 + 50 = 150
     expect(message).toContain('contextTokens=150');
     expect(message).toContain('thresholdTokens=93000');
@@ -2350,27 +2373,32 @@ Run the test.
     expect(message).toMatch(/promptTokens=\d+/);
   });
 
-  it('logs forceCompaction=true and overThreshold=true when forceCompaction is set', async () => {
-    const { logger, info } = makeInfoLogger();
-    const capability = makeCapabilityWithLogger(makeModelWithSummary(), logger, 93000);
+  it('logs forceCompaction=true and overThreshold=true at info when forceCompaction is set', async () => {
+    const { logger, info, debug } = makeSpiedLogger();
+    const capability = makeCapabilityWithLogger({ model: makeModelWithSummary(), logger, threshold: 93000 });
 
-    await runPreLLM(capability, makeExecutionWithUsage(100, 50, true));
+    await runPreLLM(
+      capability,
+      makeExecutionWithUsage({ promptTokens: 100, completionTokens: 50, forceCompaction: true }),
+    );
 
+    expect(debug).not.toHaveBeenCalled();
     expect(info).toHaveBeenCalledTimes(1);
-    const message = String(info.mock.calls[0][0]);
+    const message = String(info.mock.calls[0]?.[0]);
     expect(message).toContain('forceCompaction=true');
     expect(message).toContain('overThreshold=true');
   });
 
-  it('logs overThreshold=true on an over-threshold turn', async () => {
-    const { logger, info } = makeInfoLogger();
-    const capability = makeCapabilityWithLogger(makeModelWithSummary(), logger, 1000);
+  it('logs overThreshold=true at info on an over-threshold turn', async () => {
+    const { logger, info, debug } = makeSpiedLogger();
+    const capability = makeCapabilityWithLogger({ model: makeModelWithSummary(), logger, threshold: 1000 });
 
     // 600 + 500 = 1100 context tokens, plus promptTokens, exceeds the 1000 threshold
-    await runPreLLM(capability, makeExecutionWithUsage(600, 500));
+    await runPreLLM(capability, makeExecutionWithUsage({ promptTokens: 600, completionTokens: 500 }));
 
+    expect(debug).not.toHaveBeenCalled();
     expect(info).toHaveBeenCalledTimes(1);
-    const message = String(info.mock.calls[0][0]);
+    const message = String(info.mock.calls[0]?.[0]);
     expect(message).toContain('contextTokens=1100');
     expect(message).toContain('overThreshold=true');
   });
