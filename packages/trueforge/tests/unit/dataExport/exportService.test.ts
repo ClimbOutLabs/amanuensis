@@ -21,6 +21,7 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { vaultFilesystemNamespace } from '../../../src/runtime/memory/markdownMemoryFiles';
 import type { MemoryClient, MemoryVaultEntry } from '../../../src/runtime/memory/memoryClient';
+import { McpServerManifestSchema } from '../../../src/schemas/mcpServer';
 import { readZipEntries, zipEntryText } from '../../fixtures/zipReader';
 
 const TENANT_ID = 'default';
@@ -168,6 +169,47 @@ describe('runDataExport memory backends', () => {
     } finally {
       await close();
       await rm(scratch, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('runDataExport connector auth markers', () => {
+  it('keeps only the dcr marker so an import can show the connector needs credentials', async () => {
+    const { deps, close } = await makeDeps({ kind: 'markdown', markdownDir: join(tmpdir(), 'tfy-export-unused') });
+    try {
+      const seed = async (name: string, auth: Record<string, unknown>): Promise<void> => {
+        await deps.mcpServerStore.createServer({
+          tenant_id: TENANT_ID,
+          name,
+          first_party: false,
+          manifest: McpServerManifestSchema.parse({
+            type: 'remote',
+            name,
+            description: 'Test connector.',
+            url: `https://${name}.example.com/mcp`,
+            auth,
+          }),
+        });
+      };
+      await seed('dcr-one', { type: 'dcr' });
+      await seed('header-one', { type: 'header', headers: { Authorization: 'Bearer sk-hidden' } });
+      await seed('oauth-one', { type: 'oauth_client', client_id: 'client-1', client_secret: 'secret-1' });
+
+      const sink = new CollectingWritable();
+      await runDataExport(deps, exportRequest(), sink);
+      const entries = readZipEntries(sink.buffer());
+      const connectors = JSON.parse(zipEntryText(entries, 'connectors.json')) as {
+        name: string;
+        manifest: { auth?: unknown };
+      }[];
+      const byName = new Map(connectors.map(connector => [connector.name, connector.manifest]));
+      expect(byName.get('dcr-one')?.auth).toEqual({ type: 'dcr' });
+      expect(byName.get('header-one')).not.toHaveProperty('auth');
+      expect(byName.get('oauth-one')).not.toHaveProperty('auth');
+      expect(zipEntryText(entries, 'connectors.json')).not.toContain('sk-hidden');
+      expect(zipEntryText(entries, 'connectors.json')).not.toContain('secret-1');
+    } finally {
+      await close();
     }
   });
 });

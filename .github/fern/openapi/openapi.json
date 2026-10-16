@@ -3253,6 +3253,82 @@
         ],
         "type": "object"
       },
+      "ImportDataResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ImportDataResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ImportDataResult": {
+        "properties": {
+          "chats": {
+            "description": "Chats imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "connectors": {
+            "description": "Connectors imported, without credentials.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "connectors_skipped": {
+            "description": "Connectors skipped because a connector with the same name already exists.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "folders": {
+            "description": "Chat folders imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "memories": {
+            "description": "Memories imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "personas": {
+            "description": "Personas imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schedules": {
+            "description": "Schedules imported; all arrive switched off.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schedules_off": {
+            "description": "True when schedules were imported; imported schedules are always off until turned on.",
+            "type": "boolean"
+          },
+          "spaces": {
+            "description": "Spaces imported.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "summary": {
+            "description": "Plain-words summary of what was imported and what was not.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chats",
+          "memories",
+          "personas",
+          "spaces",
+          "schedules",
+          "folders",
+          "connectors",
+          "connectors_skipped",
+          "schedules_off",
+          "summary"
+        ],
+        "type": "object"
+      },
       "ImportMemoryVaultRequest": {
         "properties": {
           "entries": {
@@ -12779,6 +12855,81 @@
           "data"
         ],
         "x-fern-sdk-method-name": "export_data"
+      }
+    },
+    "/api/v1/data/import": {
+      "post": {
+        "description": "Imports an export archive into an empty instance. Everything in the archive is checked before anything is written; imported records belong to the signed-in user, ids are kept, and schedules arrive switched off.",
+        "requestBody": {
+          "content": {
+            "application/zip": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDataResponse"
+                }
+              }
+            },
+            "description": "The import finished; the summary says what arrived and what did not."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The file is not a valid export, or was made by a newer version."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "This instance already has data; imports only run into an empty instance."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The file is larger than the import limit."
+          }
+        },
+        "summary": "Import my data",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "data"
+        ],
+        "x-fern-sdk-method-name": "import_data"
       }
     },
     "/api/v1/mcp-servers": {

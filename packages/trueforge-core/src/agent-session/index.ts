@@ -23,6 +23,7 @@ export type { TerminalTurnState, Turn, TurnInputItem, TurnMetrics, TurnState } f
 
 export {
   SessionAgentInlineSchema,
+  SessionAgentSchema,
   SessionMetadataSchema,
   SessionMetricsSchema,
   SessionSchema,

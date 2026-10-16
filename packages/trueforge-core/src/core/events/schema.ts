@@ -458,7 +458,7 @@ export const ThreadDoneEventSchema = BaseThreadDoneEventSchema.extend({
   state: ThreadStateSchema,
 }).openapi('ThreadDoneEvent');
 
-const ContextMessageSchema = z.union([
+export const ContextMessageSchema = z.union([
   LLMUserMessageSchema,
   LLMSystemMessageSchema,
   InternalEnrichedAssistantMessageSchema,

@@ -847,6 +847,12 @@ export interface SharedServerConfiguration {
    */
   DATA_EXPORT_MAX_BYTES: number;
   /**
+   * Max total bytes of a data import archive, compressed and uncompressed.
+   * An upload past the cap is refused before anything is read or written.
+   * Env: `DATA_IMPORT_MAX_BYTES`. Default 1 GiB.
+   */
+  DATA_IMPORT_MAX_BYTES: number;
+  /**
    * Instance-wide context size in tokens that triggers compaction, used whenever an agent spec
    * does not set `config.context_management.compaction.trigger` itself; an explicit spec value
    * always wins. Unset leaves the threshold to the model's context length (80% of it, lowered so
@@ -1507,6 +1513,11 @@ const shared: SharedServerConfiguration = {
   DATA_EXPORT_MAX_BYTES: parsePositiveInt({
     envKey: 'DATA_EXPORT_MAX_BYTES',
     raw: getEnv('DATA_EXPORT_MAX_BYTES'),
+    defaultValue: 1024 * 1024 * 1024,
+  }),
+  DATA_IMPORT_MAX_BYTES: parsePositiveInt({
+    envKey: 'DATA_IMPORT_MAX_BYTES',
+    raw: getEnv('DATA_IMPORT_MAX_BYTES'),
     defaultValue: 1024 * 1024 * 1024,
   }),
   CONTEXT_COMPACTION_THRESHOLD_TOKENS: parseOptionalPositiveInt({

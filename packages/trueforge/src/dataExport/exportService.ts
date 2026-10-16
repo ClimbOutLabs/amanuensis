@@ -311,12 +311,22 @@ export async function runDataExport<TTransaction>(
   );
   await writeJsonArrayEntry(zip, 'schedules.json', schedules, secrets);
 
-  // connectors.json: connector entries with no auth fields at all.
+  // connectors.json: connector entries with no credentials. A dcr auth marker
+  // (no secret material) is kept so an import can show the connector as
+  // needing sign-in; header and oauth_client auth blocks are removed whole.
   async function* connectorEntries(): AsyncIterable<unknown> {
     const servers = await deps.mcpServerStore.listServers({ tenant_id: tenantId, names: undefined });
     for (const server of servers) {
       const manifest = { ...server.manifest };
-      delete manifest.auth;
+      if (manifest.auth?.type === 'dcr') {
+        // The dcr auth block carries no secret material (it is only a type
+        // marker), so it ships: an imported connector then reads as needing
+        // sign-in instead of looking ready to use. Header and oauth_client
+        // blocks hold secrets and are removed whole.
+        manifest.auth = { type: 'dcr' };
+      } else {
+        delete manifest.auth;
+      }
       yield {
         id: server.id,
         name: server.name,
@@ -383,7 +393,8 @@ function readPersonaKnowledge<TTransaction>(
   }
 }
 
-function sanitizeZipPath(rawPath: string): string {
+/** Zip-entry-safe form of a stored path: drops empty, `.` and `..` segments. Shared with data import, which recomputes the same entry names to find uploaded files. */
+export function sanitizeZipPath(rawPath: string): string {
   const segments = rawPath.split('/').filter(segment => segment.length > 0 && segment !== '.' && segment !== '..');
   return segments.length > 0 ? segments.join('/') : 'file';
 }
