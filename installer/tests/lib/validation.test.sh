@@ -5,7 +5,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
 in_lib() {
-  PATH=$SB_BIN "$SB_BIN/bash" -c "set -euo pipefail; AMAN_HOME='$AMAN_HOME'; INSTANCES_DIR='$AMAN_HOME/instances'; . '$INSTALLER_DIR/lib/common.sh'; . '$INSTALLER_DIR/lib/templates.sh'; . '$INSTALLER_DIR/lib/instance.sh'; $1"
+  PATH=$SB_BIN "$SB_BIN/bash" -c "set -euo pipefail; AMAN_HOME='$AMAN_HOME'; INSTANCES_DIR='$AMAN_HOME/instances'; . '$INSTALLER_DIR/lib/common.sh'; . '$INSTALLER_DIR/lib/templates.sh'; . '$INSTALLER_DIR/lib/tls.sh'; . '$INSTALLER_DIR/lib/instance.sh'; $1"
 }
 
 tree_of() { (cd "$AMAN_HOME" && find . ! -path './state/lock*' ! -name install.log | sort); }

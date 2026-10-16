@@ -23,7 +23,7 @@ import {
   type VerifiedWorkspaceCommitResult,
 } from '../provider/Provider';
 import { SlotClient, type SlotCallError, type SlotCallResult } from './SlotClient';
-import { attestationProblem, SLOT_FIX_COMMAND } from './SlotDriver';
+import { attestationProblem, SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE } from './SlotDriver';
 import { GitBridge, type BridgeGuest } from './git/gitBridge';
 import {
   SLOT_AGENT_TIMEOUT_MARGIN_MS,
@@ -84,9 +84,6 @@ export function chatCapacity(input: {
 const STORAGE_FULL_MESSAGE =
   'The sandbox storage is almost full, so nothing was run. Free some disk space on this machine, then try again.';
 
-/** What a person sees when no slot answers. */
-const NOT_RESPONDING_MESSAGE = `The sandbox is not responding, so this file could not be read. Run \`${SLOT_FIX_COMMAND}\`.`;
-
 function describeAgentError(error: SlotCallError): string {
   if (error.kind === 'agent' && error.code === 'isolation_refused') {
     return `The sandbox could not prove its safety limits, so nothing was run (${error.message}). Run \`${SLOT_FIX_COMMAND}\`, then try again.`;
@@ -95,7 +92,7 @@ function describeAgentError(error: SlotCallError): string {
     return STORAGE_FULL_MESSAGE;
   }
   if (error.kind === 'unreachable') {
-    return NOT_RESPONDING_MESSAGE;
+    return SLOT_NOT_READY_MESSAGE;
   }
   return `The sandbox failed: ${error.message}`;
 }
@@ -108,6 +105,7 @@ export class SlotSandboxProvider implements SandboxProvider {
   readonly type = 'slots';
   /** The slots are offline, so sandbox code cannot reach connectors through a bridge. */
   readonly supportsCodeMode = false;
+  readonly network = 'none';
   /** The workspace exists only inside the slot; the slot agent walks every path with O_NOFOLLOW. */
   readonly filesystem: 'host' | 'remote' = 'remote';
 
@@ -274,6 +272,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       'SANDBOX RULES:',
       '- Every command starts in a fresh, offline sandbox. Files under /workspace persist between commands; processes do not, so a background process ends when its command returns.',
       '- Python 3, Node.js with TypeScript, bash, git and gcc/g++/make are installed. Packages cannot be downloaded.',
+      '- No network from code or the shell, by design. If a task needs the internet, say it cannot be done here and do not try another tool.',
     ].join('\n');
   }
 
@@ -463,15 +462,8 @@ export class SlotSandboxProvider implements SandboxProvider {
         reason: `The sandbox is full: every slot already holds as many chats as its disk fits (${full.join('; ')}). Delete old chats, then try again.`,
       };
     }
-    // Slots that did not answer need no detail; slots that answered but failed a safety check do.
-    const detail = problems.filter(problem => !problem.endsWith('is not reachable'));
-    return {
-      ok: false,
-      reason:
-        detail.length === 0
-          ? NOT_RESPONDING_MESSAGE
-          : `The sandbox is not available: ${detail.join('; ')}. Run \`${SLOT_FIX_COMMAND}\`.`,
-    };
+    this.logger.warn('no sandbox slot is usable', { problems });
+    return { ok: false, reason: SLOT_NOT_READY_MESSAGE };
   }
 
   private toExecResult(input: { response: SlotExecResponse; timeoutMs: number }): ExecResult {

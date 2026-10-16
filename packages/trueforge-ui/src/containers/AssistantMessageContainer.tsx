@@ -24,6 +24,7 @@ import { AssistantTextContainer } from './AssistantTextContainer.js';
 import { useDocumentIngestionStatusLine } from './DocumentIngestionStatusProvider.js';
 import { useMemoryTurnContext, useMemoryTurnContextStatus } from './MemoryTurnContextProvider.js';
 import { MessageImageContainer } from './MessageImageContainer.js';
+import { NeedsYourOkContainer } from './NeedsYourOkContainer.js';
 import { ReasoningContainer } from './ReasoningContainer.js';
 import { RunCodeSetupNoticesContainer } from './RunCodeSetupNoticesContainer.js';
 import { ToolCallContainer } from './ToolCallContainer.js';
@@ -306,6 +307,7 @@ export function AssistantMessageContainer() {
             }
           }}
         </MessagePrimitive.GroupedParts>
+        <NeedsYourOkContainer parts={parts} />
       </AssistantMessageBubble>
     </MessagePrimitive.Root>
   );

@@ -59,10 +59,26 @@ export const NO_TASK_NO_TOOLS_PROMPT = dedent`
 When the user's message states no concrete task, such as a greeting, an announcement of intent ("ready to...", "let's...", "I want to work on something"), or small talk, reply in text and ask what they want done. Do not call any tool, do not open or use a sandbox, and never pick a tool by guessing at what the user might mean. Wait for the user to name a concrete task before acting.
 `;
 
-/** Host-owned source contract; it guides evidence gathering without routing requests. */
-export const SOURCE_DISCOVERY_CONTRACT = dedent`
-For current or external facts, require adequate source contents supplied by the user or returned by a permitted retrieval or discovery capability before making the claim. Retrieval capabilities include search, browsing, lookup, and fetch tools, and the sandbox exec tool when it retrieves an already identified source through an advertised network client such as curl, subject to its normal permission gate. No retrieval capability discovers or validates a guessed URL, and the sandbox does not discover or validate a guessed URL either. A URL alone is not evidence, whether supplied, remembered, or guessed: knowing where a source lives never substitutes for reading it. When adequate source contents have not been supplied or retrieved, do not make the claim. Either retrieve them first through a permitted capability, or, when no permitted capability can obtain them, say so plainly and abstain from claiming the fact. Treat returned sources as evidence and state uncertainty when they are incomplete or conflicting. Never invent, guess, or present a fabricated URL as an authoritative source. This is not a ban on URLs or ordinary coding commands. When a question asks what is newest, latest, or best right now, put the current year from the date given above into the search query and prefer sources dated in the last few months. When the question names a period or is about the past, search that period instead. Never type a year remembered from training data as if it were the present.
+/**
+ * Users are not technical, and a model left to itself narrates its tooling and sometimes writes a tool's
+ * output before it exists. Host-owned so an edited persona cannot remove it.
+ */
+export const PLAIN_SPEECH_PROMPT = dedent`
+Speak to the user in plain words. Never name tools, sandboxes, shells, networks, DNS, libraries or internal ids. Say what you did or could not do in everyday terms. Do not write the result of a tool call before the result arrives; then quote it exactly. Never state a number or output that did not come from a tool result. Report a tool's error as it is: never say an action is waiting for approval unless the result says so.
 `;
+
+/**
+ * Host-owned source contract; it guides evidence gathering without routing requests. The shell is named as a
+ * retrieval route only when the sandbox can reach a network.
+ */
+export function createSourceDiscoveryContract({ shellCanFetch }: { shellCanFetch: boolean }): string {
+  const shellFetchClause = shellCanFetch
+    ? ', and the sandbox exec tool when it retrieves an already identified source through an advertised network client such as curl, subject to its normal permission gate'
+    : '';
+  return dedent`
+For current or external facts, require adequate source contents supplied by the user or returned by a permitted retrieval or discovery capability before making the claim. Retrieval capabilities include search, browsing, lookup, and fetch tools${shellFetchClause}. No retrieval capability discovers or validates a guessed URL, and the sandbox does not discover or validate a guessed URL either. A URL alone is not evidence, whether supplied, remembered, or guessed: knowing where a source lives never substitutes for reading it. When adequate source contents have not been supplied or retrieved, do not make the claim. Either retrieve them first through a permitted capability, or, when no permitted capability can obtain them, say so plainly and abstain from claiming the fact. Treat returned sources as evidence and state uncertainty when they are incomplete or conflicting. Never invent, guess, or present a fabricated URL as an authoritative source. This is not a ban on URLs or ordinary coding commands. When a question asks what is newest, latest, or best right now, put the current year from the date given above into the search query and prefer sources dated in the last few months. When the question names a period or is about the past, search that period instead. Never type a year remembered from training data as if it were the present.
+`;
+}
 
 /**
  * Small, conservative signal that a message is asking about what is current,
@@ -392,6 +408,27 @@ export function scanApprovalDecisions(context: ContextMessage[]): Map<string, Ap
     }
   }
   return decisions;
+}
+
+/** Every call an unattended run held for the owner, in the order it was made. A repeat in one batch is not one. */
+export function findHeldToolCalls(context: readonly ContextMessage[]): InternalEnrichedToolCall[] {
+  const held: InternalEnrichedToolCall[] = [];
+  for (const msg of context) {
+    if (isLLMContextMessage(msg) && msg.role === 'assistant') {
+      held.push(
+        ...(msg.tool_calls ?? []).filter(
+          call => call.tool_info.held_for_owner !== undefined && call.tool_info.held_for_owner.duplicate !== true,
+        ),
+      );
+    }
+  }
+  return held;
+}
+
+/** Held calls the owner has not answered yet. */
+export function findUndecidedHeldToolCalls(context: ContextMessage[]): InternalEnrichedToolCall[] {
+  const decisions = scanApprovalDecisions(context);
+  return findHeldToolCalls(context).filter(call => !decisions.has(call.id));
 }
 
 export function makeUnknownToolInfo(toolName: string): InternalToolCallInfo {

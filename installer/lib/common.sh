@@ -257,6 +257,11 @@ valid_port() {
   [ "$((10#$1))" -ge 1024 ] && [ "$((10#$1))" -le 65535 ]
 }
 
+# The state folder goes into shell profiles and scheduled jobs, so it must be an absolute path of plain characters.
+valid_home_path() {
+  matches_whole "$1" '^/[A-Za-z0-9._/+@:=,-]*$' && case "$1" in *..* | *//*) return 1 ;; esac
+}
+
 is_loopback_origin() {
   matches_whole "$1" '^http://(127\.0\.0\.1|\[::1\]|localhost)(:[0-9]+)?$'
 }

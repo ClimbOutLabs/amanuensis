@@ -17,6 +17,7 @@ pins_validate() {
   [ "$(json_get "$PINS_FILE" schema)" = 1 ] || die "unsupported release manifest schema in $PINS_FILE"
   dex=$(json_get "$PINS_FILE" dex_image)
   valid_digest_ref "$dex" || die "dex_image in $PINS_FILE must be pinned by sha256 digest"
+  valid_digest_ref "$(json_get "$PINS_FILE" caddy_image)" || die "caddy_image in $PINS_FILE must be pinned by sha256 digest"
   node_pins_validate
 }
 

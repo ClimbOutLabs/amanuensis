@@ -113,6 +113,15 @@ import {
   toDispatchSentinelContext,
 } from '../permissions';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
+import { recordHeldActionAudit } from '../permissions/audit';
+import {
+  checkHeldReplay,
+  HELD_DENIED_NOTE,
+  HELD_REASON_CODE,
+  HeldActionRefusedError,
+  holdApprovalCalls,
+  type NotSavedReason,
+} from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
@@ -146,10 +155,13 @@ import {
 import {
   ABILITY_BOUNDARIES_PROMPT,
   assistantMessageContentToStringForSubAgent,
+  createSourceDiscoveryContract,
   EMPTY_ANSWER_NUDGE_MESSAGE,
   emptyInspectionNudgeMessage,
   estimateTokensForContextMessages,
   failedBatchNudgeMessage,
+  findHeldToolCalls,
+  findUndecidedHeldToolCalls,
   GROUNDING_NUDGE_MESSAGE,
   hasCalledRetrievalTool,
   hasRetrievalTool,
@@ -169,9 +181,9 @@ import {
   makeUnknownToolInfo,
   NO_TASK_NO_TOOLS_PROMPT,
   noProgressNudgeMessage,
+  PLAIN_SPEECH_PROMPT,
   policyBlockedNudgeMessage,
   scanApprovalDecisions,
-  SOURCE_DISCOVERY_CONTRACT,
   toEnrichedToolCall,
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
@@ -832,18 +844,27 @@ function validateToolMessage(
 function validateApprovalMessage({
   message,
   pendingApprovals,
+  heldActions,
   index,
   toolGrantsAvailable,
 }: {
   message: UserToolApprovalMessage;
   pendingApprovals: ReadonlyMap<string, InternalEnrichedToolCall>;
+  /** Calls an unattended run held for the owner and nobody has answered yet. */
+  heldActions: ReadonlyMap<string, InternalEnrichedToolCall>;
   index: number;
   toolGrantsAvailable: boolean;
 }): void {
-  const pending = pendingApprovals.get(message.tool_call_id);
+  const held = heldActions.get(message.tool_call_id);
+  const pending = pendingApprovals.get(message.tool_call_id) ?? held;
   if (pending === undefined) {
     throw new InvalidAgentSendInputError(
       `messages[${String(index)}] no pending approval for tool_call_id '${message.tool_call_id}'`,
+    );
+  }
+  if (held !== undefined && message.approval.status === 'allow' && message.approval.scope === 'chat') {
+    throw new InvalidAgentSendInputError(
+      `messages[${String(index)}] chat-scoped approval is not available for a saved action '${message.tool_call_id}'`,
     );
   }
   if (
@@ -942,6 +963,16 @@ function validateInputMessageTypesGivenContext(input: {
   );
   const pendingApprovalIds = new Set(pendingApprovalCalls.keys());
   const pendingClientSideIds = new Set(getPendingClientSideToolCalls(input.context).map(tc => tc.id));
+  const heldActions = new Map(findUndecidedHeldToolCalls(input.context).map(call => [call.id, call] as const));
+  const heldAnswerCount = input.messages.filter(
+    m => isApprovalDecisionMessage(m) && heldActions.has(m.tool_call_id),
+  ).length;
+  if (heldAnswerCount > 0 && heldAnswerCount !== input.messages.length) {
+    throw new InvalidAgentSendInputError('Answer saved actions on their own, not together with anything else.');
+  }
+  if (heldAnswerCount > 0 && openToolCallIds.size > 0) {
+    throw new InvalidAgentSendInputError('Finish the open approval or question first, then answer saved actions.');
+  }
 
   for (let i = 0; i < input.messages.length; i++) {
     const m = input.messages[i];
@@ -952,11 +983,13 @@ function validateInputMessageTypesGivenContext(input: {
       validateApprovalMessage({
         message: m,
         pendingApprovals: pendingApprovalCalls,
+        heldActions,
         index: i,
         toolGrantsAvailable: input.toolGrantsAvailable,
       });
       pendingApprovalCalls.delete(m.tool_call_id);
       pendingApprovalIds.delete(m.tool_call_id);
+      heldActions.delete(m.tool_call_id);
     } else if (isInputUserMessage(m)) {
       validateUserMessage(m, blockingOpenToolCallIds, i);
     } else if (isClientSideToolResponseMessage(m) || isLLMToolMessage(m)) {
@@ -1384,6 +1417,14 @@ export class AgentThread {
   private deferredTool?: DeferredTool | undefined;
   private convertedTools: ConvertToolsResult | undefined;
   private pendingSandboxCreatedEvents: SandboxCreatedEvent[] = [];
+  // Messages send() added for held-action decisions. They reach the stream at the start of execute(),
+  // because events produced while a turn is being prepared are not persisted.
+  private pendingHeldReplayEvents: ModelMessageEvent[] = [];
+  private heldReplayOutput: ModelMessageEvent | undefined;
+  // Calls an unattended turn could not save for the owner, so the app can say so. Lives for one turn.
+  private readonly notSavedCalls = new Map<string, NotSavedReason>();
+  // Set when send() ran init() early to re-check held actions; execute() reports it with its own init.
+  private earlyInit: { initializationInfo: MCPServerInitInfo[]; authRequirementInfo: MCPAuthRequired[] } | undefined;
   // Staged documents awaiting extraction in the turn loop. Set by send() when processAgentUserInput
   // returns stagedDocuments, so extraction yields progress events live over the turn stream instead
   // of batching them after the fact. Extracted text is appended to contextMessages in a pre-model
@@ -1436,6 +1477,7 @@ export class AgentThread {
   private readonly preLLMProcessorsTimeoutMs: number;
   private readonly sandboxRefreshTimeoutMs: number;
   private readonly sentinel?: SentinelHostContext | undefined;
+  private readonly stopAfterToolResponse: boolean;
   private implementationPlanGrants: ReadonlySet<string> = new Set();
   // One user request may span several execute() calls while approvals are
   // resolved. Keep orchestration limits across those continuations; reset only
@@ -1485,6 +1527,7 @@ export class AgentThread {
     this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
     this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
     this.sentinel = input.sentinel;
+    this.stopAfterToolResponse = input.stopAfterToolResponse === true;
     this.toolCallMemo = createToolCallMemoState(input.toolCallMemo);
     this.toolCallMemo.clarificationAnswered = requestHasAnsweredClarification(this.context);
     // A fresh AgentThread is built per turn AND per approval/tool-response
@@ -1599,9 +1642,13 @@ export class AgentThread {
     const capabilities = builder.beginSection('agent-capabilities');
     capabilities.addSection('internal-messages', INTERNAL_SYSTEM_PROMPT);
     capabilities.addSection('untrusted-tool-output', UNTRUSTED_TOOL_OUTPUT_PROMPT);
-    capabilities.addSection('source-discovery', SOURCE_DISCOVERY_CONTRACT);
+    capabilities.addSection(
+      'source-discovery',
+      createSourceDiscoveryContract({ shellCanFetch: this.sandbox?.hasNetwork() ?? true }),
+    );
     capabilities.addSection('ability-boundaries', ABILITY_BOUNDARIES_PROMPT);
     capabilities.addSection('no-task-no-tools', NO_TASK_NO_TOOLS_PROMPT);
+    capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
 
     if (this.sandbox) {
       this.sandbox.buildInstruction(capabilities);
@@ -1696,11 +1743,18 @@ export class AgentThread {
             implementationPlanGrants: this.implementationPlanGrants,
           }).map(call => [call.id, call]),
         );
+        const heldById = new Map(findUndecidedHeldToolCalls(this.context).map(call => [call.id, call] as const));
+        // Checked before anything is recorded, so a refused action leaves the chat untouched.
+        const heldReplay = await this.prepareHeldReplay({
+          approvals: approvals.filter(approval => heldById.has(approval.tool_call_id)),
+          heldById,
+          signal,
+        });
         for (const approval of approvals) {
           if (approval.approval.status !== 'allow') {
             continue;
           }
-          const pending = pendingById.get(approval.tool_call_id);
+          const pending = pendingById.get(approval.tool_call_id) ?? heldById.get(approval.tool_call_id);
           if (pending === undefined) {
             continue;
           }
@@ -1764,7 +1818,7 @@ export class AgentThread {
         const nudgeFlush = this.flushPendingHostNotesIfBatchClosed(closingMessages);
 
         yield* this.appendToContext({
-          context: [...closingMessages, ...nudgeFlush.nudgeMessages],
+          context: [...closingMessages, ...nudgeFlush.nudgeMessages, ...heldReplay.context],
           output: clientToolResults.map(result => result.event),
           currentContextUsage: undefined,
           usage: undefined,
@@ -1772,6 +1826,8 @@ export class AgentThread {
             ? {}
             : { toolCallMemo: nudgeFlush.toolCallMemoAfterFlush }),
         });
+        this.pendingHeldReplayEvents = heldReplay.events;
+        this.heldReplayOutput = heldReplay.events.at(-1);
         if (nudgeFlush.toolCallMemoAfterFlush !== undefined) {
           this.toolCallMemo = nudgeFlush.toolCallMemoAfterFlush;
         }
@@ -1804,6 +1860,138 @@ export class AgentThread {
     if (this.contextBusy) {
       throw new Error(`context is busy for thread ${this.threadId}`);
     }
+  }
+
+  private async auditHeld(input: {
+    info: InternalToolCallInfo;
+    outcome: 'logged' | 'approved' | 'denied';
+    note: string;
+  }): Promise<void> {
+    if (this.sentinel === undefined) {
+      return;
+    }
+    await recordHeldActionAudit({
+      services: this.sentinel.services,
+      identity: {
+        tenant_id: this.sentinel.tenant_id,
+        created_by: this.sentinel.created_by,
+        conversation_id: this.sentinel.conversation_id,
+      },
+      ...input,
+    });
+  }
+
+  /**
+   * Turns the owner's answers on held actions into context. An allowed action becomes a fresh call
+   * with the exact stored arguments, classified again and re-stamped with its hold-time token, so
+   * it runs through the ordinary dispatch checks. A refusal throws and leaves the chat untouched.
+   */
+  private async prepareHeldReplay(input: {
+    approvals: readonly UserToolApprovalMessage[];
+    heldById: ReadonlyMap<string, InternalEnrichedToolCall>;
+    signal: AbortSignal | undefined;
+  }): Promise<{ context: ContextMessage[]; events: ModelMessageEvent[] }> {
+    if (input.approvals.length === 0) {
+      return { context: [], events: [] };
+    }
+    const allowedCalls = input.approvals.flatMap(approval => {
+      const held = input.heldById.get(approval.tool_call_id);
+      return approval.approval.status === 'allow' && held !== undefined ? [held] : [];
+    });
+    for (const approval of input.approvals) {
+      const denied = approval.approval.status === 'deny' ? input.heldById.get(approval.tool_call_id) : undefined;
+      if (denied !== undefined) {
+        await this.auditHeld({ info: denied.tool_info, outcome: 'denied', note: 'Turned down by the owner' });
+      }
+    }
+    if (allowedCalls.length === 0) {
+      const note: InternalEnrichedAssistantMessage = { role: 'assistant', content: HELD_DENIED_NOTE };
+      return {
+        context: [note],
+        events: [
+          buildModelMessageEvent({
+            assistantMessage: note,
+            threadId: this.threadId,
+            finishReason: 'stop',
+            usage: undefined,
+            id: newEventId(),
+          }),
+        ],
+      };
+    }
+    const sentinel = this.sentinel;
+    if (sentinel === undefined) {
+      throw new InvalidAgentSendInputError('Saved actions cannot be run in this chat.');
+    }
+    // The tool list is needed to classify the call again; the report of that setup is kept for execute().
+    if (this.convertedTools === undefined) {
+      this.earlyInit = await this.initTools();
+    }
+    if (this.earlyInit !== undefined && this.earlyInit.authRequirementInfo.length > 0) {
+      throw new HeldActionRefusedError('sign_in');
+    }
+    const { toolMapping } = this.getConvertedTools();
+    if (allowedCalls.some(call => !toolMapping.has(call.function.name))) {
+      throw new HeldActionRefusedError('tool_gone');
+    }
+    const rawCopy: RawAssistantMessage = {
+      role: 'assistant',
+      content: null,
+      tool_calls: allowedCalls.map(({ tool_info, id, ...rawCall }) => {
+        void tool_info;
+        void id;
+        return { ...rawCall, id: `call_${newEventId()}` };
+      }),
+    };
+    const freshCopy = await enrichAssistantMessage({
+      assistantMessage: rawCopy,
+      toolMapping,
+      resolveUnderlyingTool: true,
+      sentinel,
+      toolCallPolicy: this.toolCallPolicy,
+      logger: this.logger,
+    });
+    const scope = { tenant_id: sentinel.tenant_id, created_by: sentinel.created_by };
+    const copyCalls: InternalEnrichedToolCall[] = [];
+    for (const [index, fresh] of (freshCopy.tool_calls ?? []).entries()) {
+      const held = allowedCalls[index];
+      if (held === undefined) {
+        throw new Error('Unreachable: a replayed call has no held original');
+      }
+      const check = await checkHeldReplay({
+        held: held.tool_info,
+        fresh: fresh.tool_info,
+        tokens: sentinel.services.token_store,
+        scope,
+      });
+      if (!check.ok) {
+        await this.auditHeld({ info: held.tool_info, outcome: 'denied', note: `Not run, ${check.reason}` });
+        throw new HeldActionRefusedError(check.reason);
+      }
+      if (check.approval_token_id === null) {
+        // No token to redeem, so no dispatch row will follow: record the approval here.
+        await this.auditHeld({ info: held.tool_info, outcome: 'approved', note: 'Approved by the owner' });
+      }
+      copyCalls.push({ ...fresh, tool_info: { ...fresh.tool_info, approval_token_id: check.approval_token_id } });
+    }
+    const copy: InternalEnrichedAssistantMessage = { ...freshCopy, tool_calls: copyCalls };
+    const decisions: AgentApprovalDecisionMessage[] = copyCalls.map(call => ({
+      type: EventType.USER_TOOL_APPROVAL,
+      tool_call_id: call.id,
+      approval: { status: 'allow', scope: 'once' },
+    }));
+    return {
+      context: [copy, ...decisions],
+      events: [
+        buildModelMessageEvent({
+          assistantMessage: copy,
+          threadId: this.threadId,
+          finishReason: 'tool_calls',
+          usage: undefined,
+          id: newEventId(),
+        }),
+      ],
+    };
   }
 
   /**
@@ -2343,6 +2531,11 @@ export class AgentThread {
     initializationInfo: MCPServerInitInfo[];
     authRequirementInfo: MCPAuthRequired[];
   }> {
+    if (this.earlyInit !== undefined) {
+      const reported = this.earlyInit;
+      this.earlyInit = undefined;
+      return reported;
+    }
     if (this.convertedTools) {
       return { initializationInfo: [], authRequirementInfo: [] };
     }
@@ -2938,7 +3131,7 @@ export class AgentThread {
       usage: result.value.usage,
       toolMapping,
     });
-    const assistantMessage: InternalEnrichedAssistantMessage = await enrichAssistantMessage({
+    const enrichedMessage: InternalEnrichedAssistantMessage = await enrichAssistantMessage({
       assistantMessage: result.value.output,
       toolMapping,
       // During context persistence, we have the complete message and hence the tool arguments are available.
@@ -2948,6 +3141,24 @@ export class AgentThread {
       toolCallPolicy: this.toolCallPolicy,
       logger: this.logger,
     });
+    // Nobody is there to approve in an unattended turn: calls that would ask are held for the owner.
+    let assistantMessage = enrichedMessage;
+    if (this.sentinel?.services.unattended === true) {
+      const held = holdApprovalCalls({
+        message: enrichedMessage,
+        alreadyHeld: findHeldToolCalls(this.context).length,
+        isSubAgent: this.parent !== undefined,
+      });
+      assistantMessage = held.message;
+      for (const { id, reason } of held.refused) {
+        this.notSavedCalls.set(id, reason);
+      }
+      for (const call of assistantMessage.tool_calls ?? []) {
+        if (call.tool_info.held_for_owner !== undefined && call.tool_info.held_for_owner.duplicate !== true) {
+          await this.auditHeld({ info: call.tool_info, outcome: 'logged', note: 'Held for the owner' });
+        }
+      }
+    }
     const finishReason = result.value.finish_reason;
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the
     // fixed host note on the second attempt, once that nudge already fired this turn and the
@@ -3180,6 +3391,7 @@ export class AgentThread {
     unavailableToolsSeen: Set<string>,
     toolCallMemo: ToolCallMemoState,
     signal: AbortSignal | undefined,
+    modelMessageEventId: string,
   ): AsyncGenerator<AgentThreadEvent, StepOutcome, unknown> {
     const assistantMessage = lastAssistantInContext(this.context);
     if (!assistantMessage) {
@@ -3801,6 +4013,41 @@ export class AgentThread {
       toolCallMemo: nextToolCallMemo,
       taskState: nextTaskState,
     });
+    // The app lists held actions from this event. It never pauses the turn: nobody is there to answer.
+    const heldRefs = toolCallResults.flatMap((result): ToolApprovalRequiredEvent['tool_calls'] => {
+      const call = openCalls.find(candidate => candidate.id === result.message.tool_call_id);
+      if (call === undefined) {
+        return [];
+      }
+      const notSaved = this.notSavedCalls.get(call.id);
+      if (notSaved !== undefined) {
+        return [
+          { id: call.id, source_event_id: modelMessageEventId, ...approvalCardFields(call), not_saved: notSaved },
+        ];
+      }
+      const held = call.tool_info.held_for_owner;
+      return held !== undefined && held.duplicate !== true && result.remediation?.reason_code === HELD_REASON_CODE
+        ? [
+            {
+              id: call.id,
+              source_event_id: modelMessageEventId,
+              ...approvalCardFields(call),
+              held: true as const,
+              can_always_allow: allowsToolGrant(call.tool_info),
+              expires_at: held.expires_at,
+            },
+          ]
+        : [];
+    });
+    if (heldRefs.length > 0) {
+      yield {
+        type: EventType.TOOL_APPROVAL_REQUIRED,
+        id: newEventId(),
+        created_at: new Date().toISOString(),
+        thread_id: this.threadId,
+        tool_calls: heldRefs,
+      } satisfies ToolApprovalRequiredEvent;
+    }
     for (const [index, result] of toolCallResults.entries()) {
       const candidate = result.verificationReceiptCandidate;
       const durableResult = canonicalToolResults[index]?.event;
@@ -3949,6 +4196,22 @@ export class AgentThread {
     return 'continue';
   }
 
+  /** Ends a turn that only answered held actions: the tool result, or the denial note, is the answer. */
+  private *finishWithoutModelCall(): Generator<AgentThreadEvent, void, unknown> {
+    if (this.heldReplayOutput === undefined) {
+      throw new Error('stop_after_tool_response needs a decision on a held action');
+    }
+    yield {
+      type: InternalEventType.AGENT_DONE,
+      status: 'done',
+      thread_id: this.threadId,
+      title: this.title,
+      output: this.heldReplayOutput,
+      parent: this.parent,
+      send_to_parent: undefined,
+    };
+  }
+
   private *stepUserInputRequired(modelMessageEventId: string): Generator<AgentThreadEvent, StepOutcome, unknown> {
     const pendingClientSideToolCalls = getPendingClientSideToolCalls(this.context);
     if (pendingClientSideToolCalls.length > 0) {
@@ -4040,6 +4303,11 @@ export class AgentThread {
         return;
       }
 
+      for (const event of this.pendingHeldReplayEvents) {
+        yield event;
+      }
+      this.pendingHeldReplayEvents = [];
+
       const iterationLimit = this.definition.iterationLimit ?? DEFAULT_ITERATION_LIMIT;
       // Starts empty; set only after stepLLMCall in this execute(). That is intentional:
       // user-input-required is only reachable here right after an LLM step that produced
@@ -4090,6 +4358,10 @@ export class AgentThread {
           case 'llm-call-required': {
             // Cancel only before network/side-effecting steps (LLM call, tool execution), never before 'user-input-required', so the required event is always emitted once the assistant message is committed.
             if (signal?.aborted) {
+              return;
+            }
+            if (this.stopAfterToolResponse) {
+              yield* this.finishWithoutModelCall();
               return;
             }
             if (this.metrics.iterations >= iterationLimit) {
@@ -4151,7 +4423,13 @@ export class AgentThread {
             if (signal?.aborted) {
               return;
             }
-            outcome = yield* this.stepToolResponse(toolMapping, unavailableToolsSeen, this.toolCallMemo, signal);
+            outcome = yield* this.stepToolResponse(
+              toolMapping,
+              unavailableToolsSeen,
+              this.toolCallMemo,
+              signal,
+              currentModelMessageEventId,
+            );
             break;
           }
           case 'user-input-required': {

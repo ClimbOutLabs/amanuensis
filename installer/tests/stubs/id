@@ -2,5 +2,6 @@
 case "$1" in
   -un) echo "$STUB_USER" ;;
   -u) echo 1000 ;;
+  -g) echo 1000 ;;
   *) echo "uid=1000($STUB_USER)" ;;
 esac
