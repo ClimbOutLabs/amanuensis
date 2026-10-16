@@ -329,34 +329,34 @@ call ui_newline
 call ui_prompt_head "Model server address (optional)"
 call ui_newline
 -- color
-  \e[1m›\e[0m Instance name (a-z, 0-9, hyphen; starts with a letter) \e[2m[main]\e[0m 
-  \e[1m›\e[0m Model server address (optional) 
+  \e[1m›\e[0m Instance name (a-z, 0-9, hyphen; starts with a letter) \e[2m[main]\e[0m: 
+  \e[1m›\e[0m Model server address (optional): 
 -- nocolor
-  › Instance name (a-z, 0-9, hyphen; starts with a letter) [main] 
-  › Model server address (optional) 
+  › Instance name (a-z, 0-9, hyphen; starts with a letter) [main]: 
+  › Model server address (optional): 
 -- plain
-  › Instance name (a-z, 0-9, hyphen; starts with a letter) [main] 
-  › Model server address (optional) 
+  › Instance name (a-z, 0-9, hyphen; starts with a letter) [main]: 
+  › Model server address (optional): 
 -- ascii
-  > Instance name (a-z, 0-9, hyphen; starts with a letter) [main] 
-  > Model server address (optional) 
+  > Instance name (a-z, 0-9, hyphen; starts with a letter) [main]: 
+  > Model server address (optional): 
 
 == confirm-with-yes-flag
 set assume_yes 1
 call ui_confirm "Go ahead?" y
 call ui_confirm "Create the slot disks?" n
 -- color
-  \e[1m›\e[0m Go ahead? [Y/n] yes (--yes)
-  \e[1m›\e[0m Create the slot disks? [y/N] no (--yes)
+  \e[1m›\e[0m Go ahead? [Y/n]: yes (--yes)
+  \e[1m›\e[0m Create the slot disks? [y/N]: no (--yes)
 -- nocolor
-  › Go ahead? [Y/n] yes (--yes)
-  › Create the slot disks? [y/N] no (--yes)
+  › Go ahead? [Y/n]: yes (--yes)
+  › Create the slot disks? [y/N]: no (--yes)
 -- plain
-  › Go ahead? [Y/n] yes (--yes)
-  › Create the slot disks? [y/N] no (--yes)
+  › Go ahead? [Y/n]: yes (--yes)
+  › Create the slot disks? [y/N]: no (--yes)
 -- ascii
-  > Go ahead? [Y/n] yes (--yes)
-  > Create the slot disks? [y/N] no (--yes)
+  > Go ahead? [Y/n]: yes (--yes)
+  > Create the slot disks? [y/N]: no (--yes)
 
 == check-rows
 call ui_check_row ok "Open" "http://127.0.0.1:8791"

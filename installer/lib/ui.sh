@@ -290,7 +290,7 @@ ui_prompt_head() { # label [default]
   local UI_FD=2 line
   line="  $(_ui_s 1 "$S_PROMPT") $1"
   if [ -n "${2:-}" ]; then line="$line $(_ui_s 2 "[$2]")"; fi
-  printf '%s ' "$line" >&2
+  printf '%s: ' "$line" >&2
 }
 
 # ui_prompt VAR label default [hint]: one line from stdin; Enter keeps the default. Returns 1 at the end of the input.

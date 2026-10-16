@@ -17,7 +17,7 @@ test_default_install_schedules_a_daily_backup() {
   assert_eq "$(cron_table | grep -c 'amanuensis-backup')" 1
   assert_log_lacks "sudo "
   assert_flat_contains "$OUT" "Backups daily, keeps the last 7"
-  assert_flat_contains "$OUT$ERR" "Back up automatically every day? [Y/n] yes (--yes)"
+  assert_flat_contains "$OUT$ERR" "Back up automatically every day? [Y/n]: yes (--yes)"
   sandbox_drop
 }
 
