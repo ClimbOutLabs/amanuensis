@@ -22,7 +22,7 @@ call ui_phase "Plain header"
     Next: aman doctor disk --fix
   \e[31m✗\e[0m Docker Compose is missing
     Next: aman doctor docker --fix
-    \e[2mDetails:\e[0m \e[2m--verbose\e[0m
+    \e[2mDetails:\e[0m \e[2mrun again with --verbose to see them\e[0m
   · \e[2mRun code and attachments: not in this version\e[0m
   \e[2mEnter keeps the value in brackets.\e[0m
 
