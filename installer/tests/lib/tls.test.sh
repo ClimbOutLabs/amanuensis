@@ -207,6 +207,9 @@ test_the_flag_is_checked() {
   run_install --dry-run --yes --email owner@example.invalid --tls local --local-only
   assert_rc 2
   assert_flat_contains "$ERR" "--local-only keeps Aman on this computer"
+  run_install --dry-run --yes --email owner@example.invalid --tls off --local-only
+  assert_rc 0
+  assert_eq "$ERR" "" "--tls off with --local-only is accepted without a word"
   run_install --dry-run --yes --email owner@example.invalid --tls off --public-url https://aman.example.invalid --login-url https://login.example.invalid
   assert_rc 2
   assert_flat_contains "$ERR" "use --tls caddy"

@@ -359,7 +359,8 @@ instance_collect_tls() {
     '') return 0 ;;
     local | off)
       [ -z "$I_PUBLIC_URL" ] || usage_die "--tls $I_TLS is for an instance opened on your network; with --public-url use --tls caddy."
-      [ "$OPT_LOCAL_ONLY" != 1 ] || usage_die "--local-only keeps Aman on this computer, where plain http is fine; --tls does not apply."
+      # --tls off asks for what --local-only already gives, so the two are not in conflict.
+      [ "$OPT_LOCAL_ONLY" != 1 ] || [ "$I_TLS" = off ] || usage_die "--local-only keeps Aman on this computer, where plain http is fine; --tls does not apply."
       return 0
       ;;
     caddy) ;;
@@ -396,7 +397,9 @@ instance_derive() {
     # The sign-in service is only ever reached on this computer: other devices go through the app.
     I_PUBLIC_URL="http://127.0.0.1:$I_PORT"
     I_LOGIN_URL="http://127.0.0.1:$I_LOGIN_PORT"
-    if [ "$OPT_LOCAL_ONLY" != 1 ]; then
+    if [ "$OPT_LOCAL_ONLY" = 1 ]; then
+      I_TLS=
+    else
       I_TLS=${I_TLS:-local}
       # shellcheck disable=SC2086 # OPT_ADDRESSES is a list of checked hosts
       I_ORIGINS=$(network_origin_list "$I_PORT" '' $OPT_ADDRESSES)
