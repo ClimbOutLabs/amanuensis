@@ -151,7 +151,7 @@ export function AssistantMessageContainer() {
 
   const parts = useAuiState(s => s.message.parts);
 
-  const { runs, hasFinal } = computeAgentStepsSplit(parts, isMessageRunning);
+  const { runs, hasFinal } = computeAgentStepsSplit(parts);
 
   // Progressive disclosure inputs: errors and approvals surface with an amber
   // dot and auto-expand while the turn is running; a clean completed run with no tools, no
@@ -279,16 +279,8 @@ export function AssistantMessageContainer() {
             switch (part.type) {
               case 'group-reasoning':
                 return isMessageRunning ? <ReasoningContainer group={part} /> : null;
-              case 'text': {
-                const index = parts.findIndex(p => p === part);
-                // Folded narration reads muted; text outside every run is answer text.
-                if (runIndexOfPart(index) === -1) return <AssistantTextContainer />;
-                return (
-                  <div className="mb-2 text-xs text-text-secondary [&_.markdown-body]:text-inherit">
-                    <AssistantTextContainer />
-                  </div>
-                );
-              }
+              case 'text':
+                return <AssistantTextContainer />;
               case 'reasoning':
                 return isMessageRunning ? <AssistantLeafPartContainer part={part} /> : null;
               case 'tool-call':
