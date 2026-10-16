@@ -1,3 +1,9 @@
+import {
+  SANDBOX_DISABLED_HEADLINE,
+  SANDBOX_DISABLED_SUMMARY,
+  sandboxDisabledFix,
+} from '@truefoundry/trueforge-core/core/sandbox/driver/sandboxDisabledText';
+
 import type { RunCodeStatus } from '@/components/RunCodeStatusContext.js';
 
 export type StatusTone = 'success' | 'warning' | 'failure' | 'neutral';
@@ -48,6 +54,15 @@ function presentSlotsStatus(status: RunCodeStatus): RunCodeStatusPresentation {
         headline: 'Code execution is on',
         summary:
           'The assistant can run Python, Node.js and shell commands. Each command starts in a fresh, isolated sandbox with no network access.',
+        checks: [],
+      };
+    case 'disabled':
+      return {
+        tone: 'neutral',
+        pill: 'Off',
+        headline: SANDBOX_DISABLED_HEADLINE,
+        summary: SANDBOX_DISABLED_SUMMARY,
+        fix: sandboxDisabledFix({ instance: status.instance }),
         checks: [],
       };
     case 'isolation_refused':
@@ -158,6 +173,7 @@ export function presentRunCodeStatus(status: RunCodeStatus): RunCodeStatusPresen
         fix: 'Update Docker and check that its security features are not disabled, then re-check.',
         checks: [DOWNLOADED, VERIFIED],
       };
+    case 'disabled':
     case 'slots_unavailable':
       return presentSlotsStatus(status);
     case 'unsupported_platform':

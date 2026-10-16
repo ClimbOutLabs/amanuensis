@@ -10,7 +10,7 @@ describe("RunCodeClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : { "backend" : "docker" , "detail" : "detail" , "state" : "ready" } };
+        const rawResponseBody = { "data" : { "backend" : "docker" , "detail" : "detail" , "instance" : "instance" , "state" : "ready" } };
         
         server
             .mockEndpoint()
@@ -25,6 +25,7 @@ describe("RunCodeClient", () => {
     data: {
         backend: "docker",
         detail: "detail",
+        instance: "instance",
         state: "ready"
     }
 });

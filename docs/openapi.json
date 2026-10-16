@@ -2738,11 +2738,16 @@
                 "description": "Technical detail from the sandbox check. Absent when the state says it all.",
                 "type": "string"
               },
+              "instance": {
+                "description": "Installer instance name, present for the disabled state when the server knows it.",
+                "type": "string"
+              },
               "state": {
                 "description": "Whether run_code can execute code, or the reason it cannot.",
                 "enum": [
                   "ready",
                   "not_configured",
+                  "disabled",
                   "docker_unavailable",
                   "daemon_unavailable",
                   "image_missing",

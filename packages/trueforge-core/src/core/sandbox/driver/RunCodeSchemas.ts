@@ -113,6 +113,7 @@ export type RunCodeSetupFailure = z.infer<typeof RunCodeSetupFailureSchema>;
 export const RUN_CODE_STATUS_STATES = [
   'ready',
   'not_configured',
+  'disabled',
   'docker_unavailable',
   'daemon_unavailable',
   'image_missing',
@@ -133,6 +134,10 @@ export const RunCodeStatusSchema = z.object({
     .enum(RUN_CODE_BACKENDS)
     .optional()
     .describe('Which backend runs code: docker, or the isolated sandbox slots.'),
+  instance: z
+    .string()
+    .optional()
+    .describe('Installer instance name, present for the disabled state when the server knows it.'),
 });
 
 export type RunCodeStatus = z.infer<typeof RunCodeStatusSchema>;
