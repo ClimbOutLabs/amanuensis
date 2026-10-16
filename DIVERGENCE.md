@@ -130,15 +130,15 @@ the `google_connection` and `google_oauth_pending` tables with both stores, and 
 
 Shared files carrying Google wiring:
 
-| Path                                                                         | What we added                                                                                                                     |
-| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| packages/trueforge/src/app.ts, main.ts, scripts/write-openapi.ts             | `googleConnectionStore` dependency and the `/api/v1/user/settings/google` mount                                                   |
-| packages/trueforge/src/db/{sqlite,postgres}/types.ts, postgres/schema.ts     | The two Google tables                                                                                                             |
-| packages/trueforge/src/runtime/outboundSecrets.ts                            | The user's Google client secret and refresh token join the outbound secret guard                                                  |
-| packages/trueforge-ui/...ConnectorSettings.tsx, catalogs/connectorCatalog.ts | A Google row and panel; the port is spread onto the connector catalog                                                             |
-| packages/trueforge-core/src/core/permissions/{classifier,webSearch}.ts       | `classifyGmailTool` (silent sensitive reads, keyed by the host's `gmail` server name) and the `mcp_search_after_private_read` ask |
-| packages/trueforge-core/src/agent-session/TurnResourceResolver.ts            | `webSearchTurn` is protected so a subclass's tool sets share the turn's search state                                              |
-| packages/trueforge/src/runtime/spaceCapability.ts, apis/{turns,schedules}.ts | The Gmail capability is mounted for a root thread; the Google store is threaded to it                                             |
+| Path                                                                         | What we added                                                                                                                                                                            |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| packages/trueforge/src/app.ts, main.ts, scripts/write-openapi.ts             | `googleConnectionStore` dependency and the `/api/v1/user/settings/google` mount                                                                                                          |
+| packages/trueforge/src/db/{sqlite,postgres}/types.ts, postgres/schema.ts     | The two Google tables                                                                                                                                                                    |
+| packages/trueforge/src/runtime/outboundSecrets.ts                            | The user's Google client secret and refresh token join the outbound secret guard                                                                                                         |
+| packages/trueforge-ui/...ConnectorSettings.tsx, catalogs/connectorCatalog.ts | A Google row and panel; the port is spread onto the connector catalog                                                                                                                    |
+| packages/trueforge-core/src/core/permissions/{classifier,webSearch}.ts       | `classifyGmailTool` (silent sensitive reads, always-asking drafts and sends, a scheduled run denied), the `unattended_run` auto-deny reason, and the `mcp_search_after_private_read` ask |
+| packages/trueforge-core/src/agent-session/TurnResourceResolver.ts            | `webSearchTurn` is protected so a subclass's tool sets share the turn's search state                                                                                                     |
+| packages/trueforge/src/runtime/spaceCapability.ts, apis/{turns,schedules}.ts | The Gmail capability is mounted for a root thread; the Google store is threaded to it                                                                                                    |
 
 The UI maps its Google port onto the generated SDK's `settings.google` routes (`catalogs/googleSetup.ts`).
 
