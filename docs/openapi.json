@@ -3134,14 +3134,7 @@
             "type": "string"
           },
           "client_type": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/GoogleClientType"
-              },
-              {
-                "description": "The type read from the downloaded client file; omitted when the id and secret were typed in."
-              }
-            ]
+            "$ref": "#/components/schemas/GoogleClientType"
           }
         },
         "required": [
@@ -3176,7 +3169,7 @@
         "type": "object"
       },
       "GoogleClientType": {
-        "description": "The kind of Google client this install needs.",
+        "description": "The type read from the downloaded client file; omitted when the id and secret were typed in.",
         "enum": [
           "desktop",
           "web"
@@ -3191,6 +3184,10 @@
               "string",
               "null"
             ]
+          },
+          "available": {
+            "description": "False on a demo instance, where Google cannot be connected.",
+            "type": "boolean"
           },
           "features": {
             "items": {
@@ -3220,6 +3217,7 @@
           "account_email",
           "features",
           "has_saved_client",
+          "available",
           "setup"
         ],
         "type": "object"
@@ -3308,7 +3306,12 @@
       "GoogleSetupInfo": {
         "properties": {
           "client_type": {
-            "$ref": "#/components/schemas/GoogleClientType"
+            "description": "The kind of Google client this install needs.",
+            "enum": [
+              "desktop",
+              "web"
+            ],
+            "type": "string"
           },
           "mode": {
             "description": "web: this install has a public https address and a Web client returns to it. loopback: the browser is on this machine. paste: the user pastes the address Google sends the browser to.",
@@ -9117,6 +9120,9 @@
               "null"
             ]
           },
+          "email": {
+            "$ref": "#/components/schemas/Tier3Email"
+          },
           "outbound_text": {
             "description": "Exact arguments sent to a connector, one \"name: value\" line each. Long values are cut with a marker.",
             "type": [
@@ -9175,6 +9181,86 @@
           "outbound_truncated"
         ],
         "type": "object"
+      },
+      "Tier3Email": {
+        "description": "The message an email action sends or saves, shown in full.",
+        "properties": {
+          "action": {
+            "description": "What happens to the message: sent, saved as a draft, or a saved draft changed.",
+            "enum": [
+              "send",
+              "save",
+              "change"
+            ],
+            "type": "string"
+          },
+          "bcc": {
+            "description": "Hidden copy recipients.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "body": {
+            "description": "The whole message text, exactly as it will be sent.",
+            "type": "string"
+          },
+          "cc": {
+            "description": "Copied recipients.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "replaces": {
+            "description": "The saved draft a change replaces, or null.",
+            "properties": {
+              "subject": {
+                "description": "Subject of the draft being replaced.",
+                "type": "string"
+              },
+              "to": {
+                "description": "Recipients of the draft being replaced.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "subject",
+              "to"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "subject": {
+            "description": "Subject line.",
+            "type": "string"
+          },
+          "to": {
+            "description": "Recipients.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "to",
+          "cc",
+          "bcc",
+          "subject",
+          "body",
+          "replaces"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
       },
       "Timezone": {
         "default": "UTC",

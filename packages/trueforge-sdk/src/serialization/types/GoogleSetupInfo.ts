@@ -3,18 +3,18 @@
 import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
-import { GoogleClientType } from "./GoogleClientType.js";
+import { GoogleSetupInfoClientType } from "./GoogleSetupInfoClientType.js";
 import { GoogleSetupInfoMode } from "./GoogleSetupInfoMode.js";
 
 export const GoogleSetupInfo: core.serialization.ObjectSchema<serializers.GoogleSetupInfo.Raw, TrueForge.GoogleSetupInfo> = core.serialization.object({
-        "clientType": core.serialization.property("client_type", GoogleClientType),
+        "clientType": core.serialization.property("client_type", GoogleSetupInfoClientType),
         "mode": GoogleSetupInfoMode,
         "redirectUri": core.serialization.property("redirect_uri", core.serialization.string())
     });
 
 export declare namespace GoogleSetupInfo {
     export interface Raw {
-        client_type: GoogleClientType.Raw;
+        client_type: GoogleSetupInfoClientType.Raw;
         mode: GoogleSetupInfoMode.Raw;
         redirect_uri: string;
     }

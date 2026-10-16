@@ -3,18 +3,18 @@
 import * as TrueForge from "../../../../../../api/index.js";
 import * as core from "../../../../../../core/index.js";
 import * as serializers from "../../../../../index.js";
-import { BeginGoogleConsentRequestClientClientType } from "./BeginGoogleConsentRequestClientClientType.js";
+import { GoogleClientType } from "../../../../../types/GoogleClientType.js";
 
 export const BeginGoogleConsentRequestClient: core.serialization.ObjectSchema<serializers.settings.BeginGoogleConsentRequestClient.Raw, TrueForge.settings.BeginGoogleConsentRequestClient> = core.serialization.object({
         "clientId": core.serialization.property("client_id", core.serialization.string()),
         "clientSecret": core.serialization.property("client_secret", core.serialization.string()),
-        "clientType": core.serialization.property("client_type", BeginGoogleConsentRequestClientClientType.optional())
+        "clientType": core.serialization.property("client_type", GoogleClientType.optional())
     });
 
 export declare namespace BeginGoogleConsentRequestClient {
     export interface Raw {
         client_id: string;
         client_secret: string;
-        client_type?: BeginGoogleConsentRequestClientClientType.Raw | null;
+        client_type?: GoogleClientType.Raw | null;
     }
 }

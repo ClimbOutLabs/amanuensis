@@ -3,7 +3,8 @@
 import * as TrueForge from "../index.js";
 
 export interface GoogleSetupInfo {
-    clientType: TrueForge.GoogleClientType;
+    /** The kind of Google client this install needs. */
+    clientType: TrueForge.GoogleSetupInfoClientType;
     /** web: this install has a public https address and a Web client returns to it. loopback: the browser is on this machine. paste: the user pastes the address Google sends the browser to. */
     mode: TrueForge.GoogleSetupInfoMode;
     /** The exact redirect URI to register (Web client) or that the consent returns to. */

@@ -3,18 +3,18 @@
 import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
-import { GoogleClientCredentialsClientType } from "./GoogleClientCredentialsClientType.js";
+import { GoogleClientType } from "./GoogleClientType.js";
 
 export const GoogleClientCredentials: core.serialization.ObjectSchema<serializers.GoogleClientCredentials.Raw, TrueForge.GoogleClientCredentials> = core.serialization.object({
         "clientId": core.serialization.property("client_id", core.serialization.string()),
         "clientSecret": core.serialization.property("client_secret", core.serialization.string()),
-        "clientType": core.serialization.property("client_type", GoogleClientCredentialsClientType.optional())
+        "clientType": core.serialization.property("client_type", GoogleClientType.optional())
     });
 
 export declare namespace GoogleClientCredentials {
     export interface Raw {
         client_id: string;
         client_secret: string;
-        client_type?: GoogleClientCredentialsClientType.Raw | null;
+        client_type?: GoogleClientType.Raw | null;
     }
 }

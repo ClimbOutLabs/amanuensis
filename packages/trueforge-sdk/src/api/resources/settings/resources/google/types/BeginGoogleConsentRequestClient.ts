@@ -10,6 +10,5 @@ export interface BeginGoogleConsentRequestClient {
     clientId: string;
     /** The user's own Google OAuth client secret. */
     clientSecret: string;
-    /** The type read from the downloaded client file; omitted when the id and secret were typed in. */
-    clientType?: TrueForge.settings.BeginGoogleConsentRequestClientClientType;
+    clientType?: TrueForge.GoogleClientType;
 }

@@ -5,6 +5,8 @@ import * as TrueForge from "../index.js";
 export interface GoogleConnectionStatus {
     /** The connected Google address; null when not connected or unknown. */
     accountEmail: string | null;
+    /** False on a demo instance, where Google cannot be connected. */
+    available: boolean;
     features: TrueForge.GoogleFeatureStatus[];
     /** Whether a Google client is already saved, so adding a feature needs no retyping. */
     hasSavedClient: boolean;

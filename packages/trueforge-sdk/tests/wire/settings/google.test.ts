@@ -186,7 +186,7 @@ describe("GoogleClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         const rawRequestBody = { "address" : "address" };
-        const rawResponseBody = { "data" : { "account_email" : "account_email" , "features" : [ { "feature" : "gmail_read" , "granted" : true , "label" : "label" } ] , "has_saved_client" : true , "setup" : { "client_type" : "desktop" , "mode" : "web" , "redirect_uri" : "redirect_uri" } , "state" : "not_connected" } };
+        const rawResponseBody = { "data" : { "account_email" : "account_email" , "available" : true , "features" : [ { "feature" : "gmail_read" , "granted" : true , "label" : "label" } ] , "has_saved_client" : true , "setup" : { "client_type" : "desktop" , "mode" : "web" , "redirect_uri" : "redirect_uri" } , "state" : "not_connected" } };
         
         server
             .mockEndpoint()
@@ -203,6 +203,7 @@ describe("GoogleClient", () => {
                                 expect(response).toEqual({
     data: {
         accountEmail: "account_email",
+        available: true,
         features: [{
                 feature: "gmail_read",
                 granted: true,
@@ -267,7 +268,7 @@ describe("GoogleClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : { "account_email" : "account_email" , "features" : [ { "feature" : "gmail_read" , "granted" : true , "label" : "label" } ] , "has_saved_client" : true , "setup" : { "client_type" : "desktop" , "mode" : "web" , "redirect_uri" : "redirect_uri" } , "state" : "not_connected" } };
+        const rawResponseBody = { "data" : { "account_email" : "account_email" , "available" : true , "features" : [ { "feature" : "gmail_read" , "granted" : true , "label" : "label" } ] , "has_saved_client" : true , "setup" : { "client_type" : "desktop" , "mode" : "web" , "redirect_uri" : "redirect_uri" } , "state" : "not_connected" } };
         
         server
             .mockEndpoint()
@@ -281,6 +282,7 @@ describe("GoogleClient", () => {
                                 expect(response).toEqual({
     data: {
         accountEmail: "account_email",
+        available: true,
         features: [{
                 feature: "gmail_read",
                 granted: true,
