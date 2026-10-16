@@ -83,7 +83,7 @@ beforeAll(async () => {
     { timeout: 30_000 },
   );
   warmUp.unmount();
-});
+}, 40_000);
 
 afterEach(() => {
   window.history.replaceState(null, '', '/');
