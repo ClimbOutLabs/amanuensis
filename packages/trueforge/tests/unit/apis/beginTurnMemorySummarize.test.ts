@@ -40,6 +40,7 @@ import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemory
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../../../src/runtime/memorySummarizeSettings';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 /** Delegates to a real store while recording every `getSetting` call. */
 class CountingGlobalSettingsStore implements IGlobalSettingsStore {
@@ -134,6 +135,7 @@ describe('beginTurnExecution turn-summarization wiring', () => {
         deps: {
           mcpCatalog: McpCatalog.load(),
           globalSettingsStore: store,
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
           turnDrains: new TurnDrainRegistry(),

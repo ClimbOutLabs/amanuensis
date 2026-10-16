@@ -9,6 +9,7 @@ import {
   getSubAgentDescription,
   getTurnInputSummary,
   getTurnInputType,
+  listsOnlyHeldActions,
   parentToolCallId,
   parseTimestamp,
   readString,
@@ -68,7 +69,7 @@ export function buildSessionTimelineSegments(turns: SessionTurnView[]): SessionE
         const responses = toolResponsesByTurnId.get(turn.turnId) ?? new Map();
         responses.set(toolCallId, event);
         toolResponsesByTurnId.set(turn.turnId, responses);
-      } else if (event.type === 'tool.approval_required') {
+      } else if (event.type === 'tool.approval_required' && !listsOnlyHeldActions(event)) {
         const ids = approvalRequiredIdsByTurnId.get(turn.turnId) ?? new Set<string>();
         for (const toolCall of toolCallsOf(event)) {
           if (typeof toolCall.id === 'string') ids.add(toolCall.id);
@@ -304,6 +305,7 @@ function appendEventSegments({
     case 'mcp.auth_required':
     case 'mcp.initialize':
     case 'sandbox.created':
+      if (listsOnlyHeldActions(event)) return;
       // These are point-in-time state transitions, so start and end are equal
       // and Chart.js renders them with the configured minimum marker width.
       segments.push({

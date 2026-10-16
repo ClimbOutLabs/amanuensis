@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 
+import { copyText } from '@/utils/copyText.js';
 import { Icon } from '../icons/Icon.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
@@ -65,7 +66,7 @@ export function CodeEditor({
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(value).then(() => {
+    void copyText(value).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });

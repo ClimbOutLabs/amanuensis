@@ -29,6 +29,7 @@ import { buildRunCodeHarvestSink } from '../../../src/runtime/artifacts/persistR
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 /** Parsed rather than built literally, so config defaults match what the create route stores. */
 function agentSpec(): AgentSpec {
@@ -52,6 +53,7 @@ async function buildApp(options?: { sandboxProvider?: SandboxProvider | undefine
     createTurnsRouter({
       mcpCatalog: McpCatalog.load(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
+      tokenFactoryBudget: uncappedTokenFactoryBudget,
       sessions,
       sessionStore,
       activeTurns: new ActiveTurnRegistry(),

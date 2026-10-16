@@ -255,7 +255,9 @@ Use \`previous_turn_id\` to chain to the session's last turn (defaults to \`auto
         '`stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), ' +
         '`previous_turn_running` (the prior turn is still executing), ' +
         '`turn_already_exists` (that turn id is taken), or ' +
-        '`approval_conflict` (a resubmitted decision contradicts the one already recorded).',
+        '`approval_conflict` (a resubmitted decision contradicts the one already recorded), or ' +
+        '`held_action_expired`, `held_action_changed`, `held_action_not_allowed`, `held_action_tool_gone` or ' +
+        '`held_action_sign_in` (a held action cannot run now; nothing was done).',
     },
     412: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
@@ -272,6 +274,12 @@ Use \`previous_turn_id\` to chain to the session's last turn (defaults to \`auto
         '(named agent, model, MCP server, skill, or sandbox provider), sandbox is required but ' +
         'unavailable (e.g. file uploads), or the turn input conflicts with current state ' +
         '(e.g. unresolved tool calls or approvals, tool name collision).',
+    },
+    429: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description:
+        "Today's Token Factory token budget is used up (`error.code` is `token_factory_daily_cap_reached`). " +
+        'It resets at midnight UTC.',
     },
   },
 });

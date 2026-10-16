@@ -24,6 +24,7 @@ export {
   defaultSentinelServices,
   forUnattendedRun,
   toDispatchSentinelContext,
+  withoutRelaxations,
 } from './context';
 export type { SentinelCallIdentity, SentinelHostContext, SentinelServices } from './context';
 export { verifyPreDispatch } from './dispatch';

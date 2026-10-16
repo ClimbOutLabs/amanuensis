@@ -408,6 +408,10 @@ export interface ListSessionEventsInput {
   limit: number;
   page_token: string | undefined;
   last_turn_id: string | undefined;
+  /** Event `type` values to keep; `undefined` keeps every type and an empty list keeps none. */
+  types: readonly PersistedTurnEvent['type'][] | undefined;
+  /** Exclusive lower bound on `event.id`, so a caller can fetch only events newer than one it has seen. */
+  after_event_id: string | undefined;
 }
 
 /**
@@ -665,9 +669,12 @@ export interface ISessionStore<
    * that is not store semantics). Ordering: newest turn first, then monotonic
    * `event.id` descending within each turn. `last_turn_id` anchors the window
    * to that turn plus its ancestors; when omitted, the session's current
-   * `last_turn_id` selects the active branch. Continuation page tokens encode
-   * that anchor and take precedence over `last_turn_id`, so later session
-   * activity cannot move an in-progress pagination walk to another branch.
+   * `last_turn_id` selects the active branch. Continuation page tokens are
+   * keyset cursors that encode that anchor and take precedence over
+   * `last_turn_id`, so later session activity cannot move an in-progress
+   * pagination walk to another branch, nor repeat or skip rows on it.
+   * `types` and `after_event_id` filter every page and are not encoded in the
+   * token, so callers resend them with each continuation.
    * `ancestor_ids` may include only the previous N ancestors and need not reach
    * the root — implementations must spill through older turns' own
    * `ancestor_ids` when needed. Sibling branches from forks are excluded.

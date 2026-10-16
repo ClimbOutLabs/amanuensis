@@ -10,12 +10,12 @@ import {
   StaleApprovalContinuationError,
   TurnAlreadyExistsError,
 } from '@truefoundry/trueforge-core/agent-session';
-import { AgentHarnessError } from '@truefoundry/trueforge-core/core';
+import { AgentHarnessError, HeldActionRefusedError } from '@truefoundry/trueforge-core/core';
 import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { createTurnsRouter } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer } from '../../../src/auth/authorizer';
-import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { STANDALONE_REQUEST_CONTEXT, type RequestContext } from '../../../src/auth/identity';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
@@ -36,6 +36,7 @@ import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-st
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 const SESSION_ID = 's1';
 const TIP_TURN_ID = 'turn-tip';
@@ -62,6 +63,25 @@ const TOOL_CALL_MESSAGE = {
       },
     },
   ],
+};
+
+/** A call a scheduled run held for the owner: closed with a "held" result, never dispatched. */
+const HELD_CALL_MESSAGE = {
+  ...TOOL_CALL_MESSAGE,
+  tool_calls: TOOL_CALL_MESSAGE.tool_calls.map(call => ({
+    ...call,
+    tool_info: {
+      ...call.tool_info,
+      is_approval_required: false,
+      tier: 3 as const,
+      held_for_owner: { expires_at: new Date(Date.now() + 60_000).toISOString() },
+    },
+  })),
+};
+const HELD_RESULT_MESSAGE = {
+  role: 'tool' as const,
+  tool_call_id: TOOL_CALL_ID,
+  content: JSON.stringify({ held: 'waiting for the owner' }),
 };
 
 type ContextAppend = CreateTurnInput['new_context_appends'][number];
@@ -134,7 +154,10 @@ function turnInput({
  * `pausedFirstTurn` seeds the real sequence: turn one asks for the approval, and turn two, created by
  * the user's answer, records the decision. Otherwise the single tip turn carries both.
  */
-async function buildApp(recordedApproval: RecordedApproval, options: { pausedFirstTurn?: boolean } = {}) {
+async function buildApp(
+  recordedApproval: RecordedApproval | undefined,
+  options: { pausedFirstTurn?: boolean; heldAction?: boolean; requester?: RequestContext } = {},
+) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const sessionStore = new SqliteSessionStore(db);
@@ -156,7 +179,24 @@ async function buildApp(recordedApproval: RecordedApproval, options: { pausedFir
       }),
     },
   });
-  if (options.pausedFirstTurn === true) {
+  if (options.heldAction === true) {
+    // The scheduled run ended with the call held; the answer, if any, was recorded on the tip.
+    await sessionStore.createTurn(
+      turnInput({
+        turnId: TIP_TURN_ID,
+        previousTurnId: null,
+        appends: [
+          contextAppend([
+            HELD_CALL_MESSAGE,
+            HELD_RESULT_MESSAGE,
+            ...(recordedApproval === undefined ? [] : [decisionMessage(recordedApproval)]),
+          ]),
+        ],
+      }),
+    );
+  } else if (recordedApproval === undefined) {
+    throw new Error('a recorded approval is required unless the call is held');
+  } else if (options.pausedFirstTurn === true) {
     await sessionStore.createTurn(
       turnInput({ turnId: FIRST_TURN_ID, previousTurnId: null, appends: [contextAppend([TOOL_CALL_MESSAGE])] }),
     );
@@ -181,6 +221,7 @@ async function buildApp(recordedApproval: RecordedApproval, options: { pausedFir
     createTurnsRouter({
       mcpCatalog: McpCatalog.load(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
+      tokenFactoryBudget: uncappedTokenFactoryBudget,
       sessions,
       sessionStore,
       activeTurns: new ActiveTurnRegistry(),
@@ -199,7 +240,7 @@ async function buildApp(recordedApproval: RecordedApproval, options: { pausedFir
       eventSubscriptions: new EventSubscriptionRegistry(undefined),
       resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
       logger: createLogger({ silent: true }),
-      resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+      resolveRequestContext: () => options.requester ?? STANDALONE_REQUEST_CONTEXT,
       authorizer: new TrueForgeAuthorizer(),
     }),
   );
@@ -390,5 +431,103 @@ describe('POST /{session_id}/turns approval conflicts', () => {
     const response = await postTurn(app, [{ type: EventType.USER_MESSAGE, content: 'hello' }]);
 
     expect(response.status).toBe(422);
+  });
+});
+
+describe('POST /{session_id}/turns answering an action a scheduled run held', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  /** createTurn is stubbed to stop the request after it was handed its options. */
+  function captureCreateTurnOptions() {
+    return jest
+      .spyOn(SessionHandle.prototype, 'createTurn')
+      .mockRejectedValue(new PreviousTurnRunningError(TIP_TURN_ID));
+  }
+
+  it('ends the turn after the tool step, so approving runs just that call and asks the model nothing', async () => {
+    const app = await buildApp(undefined, { heldAction: true });
+    const createTurn = captureCreateTurnOptions();
+
+    await postTurn(app, approvalInput({ status: 'allow' }));
+
+    expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: true }));
+  });
+
+  it('does not end the turn early for an approval that is not about a held action', async () => {
+    const app = await buildApp({ status: 'allow' }, { pausedFirstTurn: true });
+    const createTurn = captureCreateTurnOptions();
+
+    await postTurn(app, approvalInput({ status: 'allow' }), FIRST_TURN_ID);
+
+    expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: false }));
+  });
+
+  it('does not end the turn early once the held action was answered, so a repeat is only replayed', async () => {
+    const app = await buildApp({ status: 'allow' }, { heldAction: true });
+    const createTurn = captureCreateTurnOptions();
+
+    await postTurn(app, approvalInput({ status: 'allow' }));
+
+    expect(createTurn).toHaveBeenCalledWith(expect.objectContaining({ stop_after_tool_response: false }));
+  });
+
+  it('replays the recorded turn for a second approval instead of running the call again', async () => {
+    const app = await buildApp({ status: 'allow' }, { heldAction: true });
+    jest
+      .spyOn(SessionHandle.prototype, 'createTurn')
+      .mockRejectedValue(
+        new AgentHarnessError('invalid_send_input', `thread main: no pending approval for '${TOOL_CALL_ID}'`),
+      );
+
+    const response = await postTurn(app, approvalInput({ status: 'allow' }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: { id: TIP_TURN_ID } });
+  });
+
+  it('refuses a deny that contradicts an approval already recorded', async () => {
+    const app = await buildApp({ status: 'allow' }, { heldAction: true });
+    jest
+      .spyOn(SessionHandle.prototype, 'createTurn')
+      .mockRejectedValue(
+        new AgentHarnessError('invalid_send_input', `thread main: no pending approval for '${TOOL_CALL_ID}'`),
+      );
+
+    const response = await postTurn(app, approvalInput({ status: 'deny', reason: 'changed my mind' }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: 'approval_conflict' } });
+  });
+
+  it('refuses anyone but the chat owner, before reading the held call', async () => {
+    const someoneElse: RequestContext = {
+      ...STANDALONE_REQUEST_CONTEXT,
+      subject: { id: 'someone-else', type: 'user', display_name: 'someone-else' },
+    };
+    const app = await buildApp(undefined, { heldAction: true, requester: someoneElse });
+    const createTurn = captureCreateTurnOptions();
+
+    const response = await postTurn(app, approvalInput({ status: 'allow' }));
+
+    expect(response.status).toBe(403);
+    expect(createTurn).not.toHaveBeenCalled();
+  });
+
+  it('answers an action that cannot run now with a conflict whose code says why', async () => {
+    const app = await buildApp(undefined, { heldAction: true });
+    jest.spyOn(SessionHandle.prototype, 'createTurn').mockRejectedValue(new HeldActionRefusedError('expired'));
+
+    const response = await postTurn(app, approvalInput({ status: 'allow' }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        message: 'Expired, nothing was done. Ask again in chat.',
+        type: 'conflict',
+        code: 'held_action_expired',
+      },
+    });
   });
 });

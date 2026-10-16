@@ -38,6 +38,7 @@ import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 /** Standalone caller identity, spelled out as a plain string where a store expects one. */
 const TEST_CREATED_BY = STANDALONE_REQUEST_CONTEXT.subject.id;
@@ -134,6 +135,7 @@ describe('turns', () => {
         createTurnsRouter({
           mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -220,6 +222,7 @@ describe('turns', () => {
         createTurnsRouter({
           mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions: new Sessions({ sessionStore }),
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -402,6 +405,7 @@ describe('turns', () => {
               workspace_cwd: 'C:\\work\\bound-demo',
               agent: { type: 'inline', spec: agentSpec },
             },
+            answersOnlyHeldActions: () => Promise.resolve(false),
             createTurn: () =>
               Promise.resolve({
                 id: 'turn-non-stream',
@@ -437,6 +441,7 @@ describe('turns', () => {
         createTurnsRouter({
           mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -571,6 +576,7 @@ describe('turns', () => {
         createTurnsRouter({
           mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -665,6 +671,7 @@ describe('turns', () => {
               workspace_cwd: null,
               agent: { type: 'inline', spec: agentSpec },
             },
+            answersOnlyHeldActions: () => Promise.resolve(false),
             createTurn: () =>
               Promise.resolve({
                 id: 'turn-gone',
@@ -682,6 +689,7 @@ describe('turns', () => {
         createTurnsRouter({
           mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -773,6 +781,7 @@ describe('turns', () => {
         createTurnsRouter({
           mcpCatalog: McpCatalog.load(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),

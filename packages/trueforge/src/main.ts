@@ -28,6 +28,7 @@ let getConfiguredSecretValues: typeof import('./config').getConfiguredSecretValu
 let assertNetworkAuthRequirement: typeof import('./config').assertNetworkAuthRequirement;
 let getPublicUiBasePath: typeof import('./config').getPublicUiBasePath;
 let TrueForgeAuthMode: typeof import('./config').TrueForgeAuthMode;
+let isPlaceholderTrueForgeApiKey: typeof import('./config').isPlaceholderTrueForgeApiKey;
 
 try {
   ({
@@ -39,6 +40,7 @@ try {
     assertNetworkAuthRequirement,
     getPublicUiBasePath,
     TrueForgeAuthMode,
+    isPlaceholderTrueForgeApiKey,
   } = await import('./config'));
 } catch (error) {
   console.error(
@@ -65,7 +67,7 @@ import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
 import { resolveRequestContext, type RequestContext } from './auth/identity';
-import { initOidc } from './auth/oidc';
+import { startOidcDiscovery } from './auth/oidc';
 import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
 import { SandboxCatalog } from './catalog/SandboxCatalog';
@@ -93,6 +95,7 @@ import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { ISpaceStore } from './db/spaceStore';
 import type { Database as SqliteDatabase } from './db/sqlite/types';
+import type { ITokenFactoryUsageStore } from './db/tokenFactoryUsageStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import { mountFrontend } from './frontend';
@@ -106,6 +109,8 @@ import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { createSentinelServices } from './runtime/sentinelServices';
+import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
+import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
@@ -158,6 +163,8 @@ interface ServerPersistence<TTransaction> {
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Not tenant-scoped: one counter row per UTC day for this instance. */
+  tokenFactoryUsageStore: ITokenFactoryUsageStore<TTransaction>;
   mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
@@ -305,7 +312,7 @@ async function createStandalonePersistence(options: {
   logger: Logger;
 }): Promise<ServerPersistence<Transaction<SqliteDatabase>>> {
   const { sqlitePath, logger } = options;
-  await mkdir(path.dirname(sqlitePath), { recursive: true });
+  await mkdir(path.dirname(sqlitePath), { recursive: true, mode: 0o700 });
   const [{ createSqliteDb }, { migrateSqliteToLatest }, sqliteStores] = await Promise.all([
     import('./db/sqlite/client'),
     import('./db/migrateSqlite'),
@@ -325,6 +332,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/repository-store/SqliteRepositoryStore'),
       import('./db/sqlite/turn-artifact-store/SqliteTurnArtifactStore'),
       import('./db/sqlite/global-settings-store/SqliteGlobalSettingsStore'),
+      import('./db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore'),
       import('./db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore'),
       import('./db/sqlite/approval-token-store/SqliteApprovalTokenStore'),
       import('./db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore'),
@@ -346,6 +354,7 @@ async function createStandalonePersistence(options: {
     { SqliteRepositoryStore },
     { SqliteTurnArtifactStore },
     { SqliteGlobalSettingsStore },
+    { SqliteTokenFactoryUsageStore },
     { SqliteSentinelSettingsStore },
     { SqliteApprovalTokenStore },
     { SqliteMcpToolGrantStore },
@@ -382,6 +391,7 @@ async function createStandalonePersistence(options: {
     scheduleStore: new SqliteScheduleStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
+    tokenFactoryUsageStore: new SqliteTokenFactoryUsageStore(db),
     mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
@@ -434,6 +444,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/repository-store/PostgresRepositoryStore'),
       import('./db/postgres/turn-artifact-store/PostgresTurnArtifactStore'),
       import('./db/postgres/global-settings-store/PostgresGlobalSettingsStore'),
+      import('./db/postgres/token-factory-usage-store/PostgresTokenFactoryUsageStore'),
       import('./db/postgres/sentinel-settings-store/PostgresSentinelSettingsStore'),
       import('./db/postgres/approval-token-store/PostgresApprovalTokenStore'),
       import('./db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore'),
@@ -455,6 +466,7 @@ async function createDistributedPersistence(options: {
     { PostgresRepositoryStore },
     { PostgresTurnArtifactStore },
     { PostgresGlobalSettingsStore },
+    { PostgresTokenFactoryUsageStore },
     { PostgresSentinelSettingsStore },
     { PostgresApprovalTokenStore },
     { PostgresMcpToolGrantStore },
@@ -468,6 +480,9 @@ async function createDistributedPersistence(options: {
   });
   await migrateToLatest(db);
   logger.info('Distributed mode: postgres');
+  if (isPlaceholderTrueForgeApiKey(configuration.TRUEFORGE_API_KEY)) {
+    logger.warn('TRUEFORGE_API_KEY is a well-known placeholder; set a real key before any shared deployment');
+  }
   logger.info(`Executor id: ${executorId}`);
   const serviceFoundryClient = createServiceFoundryServerClient(logger);
   const tokenStore = new PostgresOAuthTokenStore(db);
@@ -539,6 +554,7 @@ async function createDistributedPersistence(options: {
     scheduleStore: new PostgresScheduleStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
+    tokenFactoryUsageStore: new PostgresTokenFactoryUsageStore(db),
     mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
@@ -576,6 +592,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     repositoryStore,
     turnArtifactStore,
     globalSettingsStore,
+    tokenFactoryUsageStore,
     mcpToolGrantStore,
     sentinelAuditStore,
     sentinelSettingsStore,
@@ -584,6 +601,33 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     redis,
     serviceFoundryClient,
   } = persistence;
+
+  // The env-managed Token Factory provider and default model are written before the first request,
+  // so no Settings step is needed. TrueFoundry mode lists providers from TrueFoundry instead.
+  if (!isTrueFoundryModeEnabled(configuration)) {
+    const outcome = await ensureEnvManagedTokenFactoryProvider({
+      store: modelProviderStore,
+      tenant_id: TENANT_ID,
+      settings: {
+        apiKey: configuration.NEBIUS_API_KEY,
+        baseUrl: configuration.TOKEN_FACTORY_BASE_URL,
+        model: configuration.TOKEN_FACTORY_MODEL,
+        cheaperModel: configuration.TOKEN_FACTORY_CHEAPER_MODEL,
+      },
+      logger,
+    });
+    if (outcome !== 'skipped') {
+      await seedEnvManagedDefaultChatModel({
+        globalSettingsStore,
+        model: configuration.TOKEN_FACTORY_MODEL,
+        logger,
+      });
+    }
+  }
+  const tokenFactoryBudget = createTokenFactoryBudget({
+    store: tokenFactoryUsageStore,
+    cap: configuration.TOKEN_FACTORY_DAILY_TOKEN_CAP,
+  });
 
   if (redis === undefined) {
     const recoveredCommandExecutions = await sessionStore.recoverRunningCommandExecutions({
@@ -624,18 +668,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   } else {
     logger.warn('Auth is disabled; browser login is off');
   }
-  const oidcClient = await initOidc(oidc);
+  const oidcDiscovery = oidc ? startOidcDiscovery({ oidc, logger }) : undefined;
 
   let authenticator;
   let authorizer: Authorizer;
   const mode = getTrueForgeAuthMode(configuration);
-  // Fail closed before the authenticator is built: a non-loopback standalone
-  // listener would serve the admin API to the network with no login.
-  assertNetworkAuthRequirement({
-    authMode: mode,
-    host: configuration.HOST,
-    requireAuth: configuration.REQUIRE_AUTH,
-  });
   if (mode === TrueForgeAuthMode.TrueFoundry) {
     if (serviceFoundryClient === undefined) {
       throw new Error('TrueFoundry mode requires TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL');
@@ -704,6 +741,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     repositoryStore,
     turnArtifactStore,
     globalSettingsStore,
+    tokenFactoryBudget,
     sessionStore,
     sessionMetricsStore,
     sentinelAuditStore,
@@ -715,7 +753,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     requestReplyRouter,
     eventSubscriptions,
     logger,
-    oidcClient,
+    oidcDiscovery,
     authenticator,
     authorizer,
   });
@@ -724,6 +762,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     activeTurns,
     app,
     controller,
+    oidcDiscovery,
     destroyDb,
     redis,
     requestReplyRouter,
@@ -738,6 +777,15 @@ try {
     level: configuration.LOG_LEVEL,
     standalone: configuration.STANDALONE,
     version: PACKAGE_VERSION,
+  });
+
+  // Fail closed before anything is created: standalone never starts without login.
+  // Any CLI subcommand is dispatched in cli.ts before this module is imported, so it never reaches this check.
+  assertNetworkAuthRequirement({
+    authMode: getTrueForgeAuthMode(configuration),
+    standalone: configuration.STANDALONE,
+    host: configuration.HOST,
+    requireAuth: configuration.REQUIRE_AUTH,
   });
 
   // Fail fast on unwritable data directories: the persona knowledge library and
@@ -757,7 +805,11 @@ try {
 
   if (configuration.STANDALONE) {
     printStandaloneStartupBanner({ version: PACKAGE_VERSION, color: shouldColorize() });
-    await prepareCodeModeSocketParent({ path: configuration.CODE_MODE_SOCKET_PARENT, logger });
+    await prepareCodeModeSocketParent({
+      path: configuration.CODE_MODE_SOCKET_PARENT,
+      logger,
+      port: configuration.PORT,
+    });
     await ensureLocalSandboxRootParent(configuration.LOCAL_SANDBOX_ROOT_PARENT);
     const { LocalSandboxProvider } = await import('./sandbox/local/provider/LocalSandboxProvider');
     const support = await LocalSandboxProvider.isSupported({
@@ -785,6 +837,7 @@ try {
     activeTurns,
     app,
     controller,
+    oidcDiscovery,
     destroyDb,
     redis,
     requestReplyRouter,
@@ -1028,6 +1081,7 @@ try {
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       clearInterval(commandExecutionRecoveryTimer);
       clearInterval(artifactRetentionTimer);
+      oidcDiscovery?.stop();
       // Stop serving peer requests (waits for in-flight replies), then close
       // the clients this process owns: the subscriber duplicate and the primary.
       await requestReplyExecutor?.drain();

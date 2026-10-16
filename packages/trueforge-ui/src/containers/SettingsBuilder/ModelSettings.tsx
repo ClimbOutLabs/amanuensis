@@ -14,7 +14,10 @@ import CustomModelProviderForm, {
 } from '@/containers/SettingsBuilder/CustomModelProviderForm.js';
 import { useToasterOptional } from '@/containers/ToasterContainer.js';
 import { Icon } from '@/icons/Icon.js';
-import type { UiStreamTimeout } from '@/plugins/trueforge-agent-server-adapter/catalogs/modelProviderCatalog.js';
+import {
+  isEnvManagedProvider,
+  type UiStreamTimeout,
+} from '@/plugins/trueforge-agent-server-adapter/catalogs/modelProviderCatalog.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
 import type { ModelEntry, ModelProviderBase, ModelProviderCatalogEntry } from '@/server/types.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
@@ -323,7 +326,11 @@ const ModelSettings = () => {
                   {matchingConfigured.map(provider => {
                     const catalogModels = catalogModelsByType.get(provider.type) ?? [];
                     const configuredIds = new Set(provider.models.map(model => model.id));
-                    const availableModels = catalogModels.filter(model => !configuredIds.has(model.id));
+                    // The server rewrites an environment-managed provider on every start, so edits would not stick.
+                    const envManaged = isEnvManagedProvider(provider);
+                    const availableModels = envManaged
+                      ? []
+                      : catalogModels.filter(model => !configuredIds.has(model.id));
                     const logoSrc = modelProviderIconMap[provider.name];
 
                     return (
@@ -348,30 +355,36 @@ const ModelSettings = () => {
                               <span className="h-1.5 w-1.5 rounded-full bg-success-bg"></span>
                               Connected
                             </span>
-                            <Button.Secondary
-                              size="small"
-                              className="text-[0.8125rem]"
-                              type="button"
-                              aria-label={`Edit ${provider.name}`}
-                              title={`Edit ${provider.name}`}
-                              disabled={busy}
-                              onClick={() => {
-                                if (provider.type === 'custom') {
-                                  closeKeyEditor();
-                                  setFormError(null);
-                                  setCustomProviderToEdit(provider);
-                                  setCustomProviderOpen(true);
-                                } else {
-                                  setKeyError(null);
-                                  setEditingCatalogType(null);
-                                  setEditingProviderId(provider.id);
-                                }
-                              }}
-                            >
-                              <Icon name="pencil" className="size-3.5" />
-                              Edit
-                            </Button.Secondary>
-                            {modelCatalog.deleteModelProvider ? (
+                            {envManaged ? (
+                              <span className="rounded-full border border-border bg-secondary-bg/40 px-2 py-0.5 text-xs font-medium text-text-secondary">
+                                Managed by server environment
+                              </span>
+                            ) : (
+                              <Button.Secondary
+                                size="small"
+                                className="text-[0.8125rem]"
+                                type="button"
+                                aria-label={`Edit ${provider.name}`}
+                                title={`Edit ${provider.name}`}
+                                disabled={busy}
+                                onClick={() => {
+                                  if (provider.type === 'custom') {
+                                    closeKeyEditor();
+                                    setFormError(null);
+                                    setCustomProviderToEdit(provider);
+                                    setCustomProviderOpen(true);
+                                  } else {
+                                    setKeyError(null);
+                                    setEditingCatalogType(null);
+                                    setEditingProviderId(provider.id);
+                                  }
+                                }}
+                              >
+                                <Icon name="pencil" className="size-3.5" />
+                                Edit
+                              </Button.Secondary>
+                            )}
+                            {modelCatalog.deleteModelProvider && !envManaged ? (
                               <Button.Secondary
                                 size="small"
                                 className="transition-colors hover:bg-failure-bg/10 hover:text-failure-bg"
@@ -394,24 +407,26 @@ const ModelSettings = () => {
                               className="flex min-h-10 items-center gap-3 border-b border-border px-3 py-2 text-sm text-text-primary last:border-b-0"
                             >
                               <span className="min-w-0 flex-1 truncate">{model.name}</span>
-                              <button
-                                type="button"
-                                aria-label={`Remove ${model.name}`}
-                                disabled={busy}
-                                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-ghost-button-hover hover:text-ghost-button-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring disabled:opacity-50"
-                                onClick={() => {
-                                  if (provider.models.length === 1) {
-                                    setLastModelPendingDelete({ provider, model });
-                                    return;
-                                  }
-                                  handleUpdateModels(
-                                    provider,
-                                    provider.models.filter(item => item.id !== model.id),
-                                  );
-                                }}
-                              >
-                                <Icon name="trash" className="size-3.5" />
-                              </button>
+                              {envManaged ? null : (
+                                <button
+                                  type="button"
+                                  aria-label={`Remove ${model.name}`}
+                                  disabled={busy}
+                                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-ghost-button-hover hover:text-ghost-button-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring disabled:opacity-50"
+                                  onClick={() => {
+                                    if (provider.models.length === 1) {
+                                      setLastModelPendingDelete({ provider, model });
+                                      return;
+                                    }
+                                    handleUpdateModels(
+                                      provider,
+                                      provider.models.filter(item => item.id !== model.id),
+                                    );
+                                  }}
+                                >
+                                  <Icon name="trash" className="size-3.5" />
+                                </button>
+                              )}
                             </div>
                           ))}
 

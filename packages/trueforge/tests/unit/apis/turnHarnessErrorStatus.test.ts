@@ -26,6 +26,7 @@ import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-st
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response> {
   const db = createSqliteDb(':memory:');
@@ -68,6 +69,7 @@ async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response
           repository_id: null,
           workspace_cwd: null,
         },
+        answersOnlyHeldActions: () => Promise.resolve(false),
         createTurn: () => Promise.reject(error),
         classifyApprovalResubmission: () => Promise.resolve({ outcome: 'unrecorded' }),
       }),
@@ -80,6 +82,7 @@ async function postTurnRejectingWith(error: AgentHarnessError): Promise<Response
     createTurnsRouter({
       mcpCatalog: McpCatalog.load(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
+      tokenFactoryBudget: uncappedTokenFactoryBudget,
       sessions,
       sessionStore,
       activeTurns: new ActiveTurnRegistry(),

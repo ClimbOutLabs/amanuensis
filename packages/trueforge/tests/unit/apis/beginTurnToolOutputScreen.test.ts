@@ -39,6 +39,7 @@ import { toolOutputScreenCapability, type ToolOutputScreenConfig } from '../../.
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../../../src/runtime/toolOutputScreenSettings';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 /**
  * `SpaceTurnResourceResolver` constructor args per `beginTurnExecution` call. The
@@ -165,6 +166,7 @@ describe('beginTurnExecution tool-output screen wiring', () => {
       deps: {
         mcpCatalog: McpCatalog.load(),
         globalSettingsStore: store,
+        tokenFactoryBudget: uncappedTokenFactoryBudget,
         sessionStore,
         activeTurns: new ActiveTurnRegistry(),
         turnDrains: new TurnDrainRegistry(),
