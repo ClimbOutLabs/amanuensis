@@ -20,6 +20,8 @@ export function createSentinelServices(stores: {
   toolGrants: ToolGrantStore;
   /** Exact secret values the server holds, for the outbound secret guard. */
   outboundSecrets: SentinelServices['outboundSecrets'];
+  /** The only addresses mail may go to on a demo instance; null when this is not a demo. */
+  demoSendAllowlist: SentinelServices['demoSendAllowlist'];
 }): SentinelServices {
   return {
     ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
@@ -27,6 +29,7 @@ export function createSentinelServices(stores: {
     token_store: stores.approvalTokens,
     tool_grants: stores.toolGrants,
     outboundSecrets: stores.outboundSecrets,
+    demoSendAllowlist: stores.demoSendAllowlist,
     ...sentinelSettingsServices(stores.settings),
   };
 }

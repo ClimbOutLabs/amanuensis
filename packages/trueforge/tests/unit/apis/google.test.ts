@@ -176,37 +176,47 @@ describe('Google connection API', () => {
     expect(JSON.parse(text).data.setup.mode).toBe('paste');
   });
 
-  it('is unavailable on a demo instance', async () => {
-    const original = configuration.DEMO_MODE;
-    configuration.DEMO_MODE = true;
-    try {
-      expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.available).toBe(false);
-    } finally {
+  describe('on a demo instance', () => {
+    let original: boolean;
+    beforeEach(() => {
+      original = configuration.DEMO_MODE;
+      configuration.DEMO_MODE = true;
+    });
+    afterEach(() => {
       configuration.DEMO_MODE = original;
-    }
-    expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.available).toBe(true);
-  });
+    });
 
-  it('refuses every route but the status on a demo instance', async () => {
-    const original = configuration.DEMO_MODE;
-    configuration.DEMO_MODE = true;
-    try {
-      const routes: { method: string; path: string }[] = [
+    it('lets the owner connect Google before the demo opens', async () => {
+      expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.available).toBe(true);
+      const { status, text } = await connect();
+      expect(status).toBe(200);
+      expect(JSON.parse(text).data).toMatchObject({ state: 'connected', account_email: 'ada@example.com' });
+    });
+
+    it('locks the connection once made: no reconnecting and no disconnecting', async () => {
+      await connect();
+      const locked: { method: string; path: string }[] = [
         { method: 'POST', path: '/oauth/check-client' },
         { method: 'POST', path: '/oauth/begin' },
-        { method: 'GET', path: '/oauth/callback?code=a&state=b' },
         { method: 'POST', path: '/oauth/complete' },
-        { method: 'POST', path: '/test' },
         { method: 'POST', path: '/disconnect' },
       ];
-      for (const { method, path } of routes) {
-        const response = await call({ method, path, body: method === 'POST' ? {} : undefined });
+      for (const { method, path } of locked) {
+        const response = await call({ method, path, body: {} });
         expect({ path, status: response.status }).toEqual({ path, status: 403 });
+        expect(response.text).toContain("This demo's Google account is already set up and cannot be changed.");
       }
-      expect((await call({ method: 'GET', path: '/status' })).status).toBe(200);
-    } finally {
-      configuration.DEMO_MODE = original;
-    }
+      expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.state).toBe('connected');
+    });
+
+    it('never lets a demo visitor disconnect, even when the account is not yet connected', async () => {
+      expect((await call({ method: 'POST', path: '/disconnect' })).status).toBe(403);
+    });
+
+    it('still lets the connection be tested', async () => {
+      await connect();
+      expect((await call({ method: 'POST', path: '/test' })).status).toBe(200);
+    });
   });
 
   describe('a request that did not come from the Aman page', () => {

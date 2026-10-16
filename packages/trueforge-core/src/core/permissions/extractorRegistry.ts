@@ -166,6 +166,11 @@ function nestedRecipientValues(value: unknown, depth = 0): string[] {
   );
 }
 
+/** Every recipient a connector call names, at any depth, as the generic send guard compares them. */
+export function recipientAddresses(params: Record<string, unknown>): string[] {
+  return [...new Set(nestedRecipientValues(params))];
+}
+
 function stringValues(params: Record<string, unknown>, keys: string[]): string[] {
   const out: string[] = [];
   for (const key of keys) {

@@ -8,6 +8,7 @@ import {
   isLoopbackHost,
   isPrivateNetworkHost,
   parseAllowedOrigins,
+  parseDemoSendAllowlist,
   parseLoginUpstreamUrl,
   parsePublicBaseUrl,
   parseTokenFactoryMode,
@@ -500,4 +501,22 @@ describe('parseTrustedProxyAddresses', () => {
       expect(() => parseTrustedProxyAddresses(value)).toThrow(/TRUSTED_PROXY_ADDRESSES/);
     },
   );
+});
+
+describe('parseDemoSendAllowlist', () => {
+  it('is empty when unset or blank, which allows no send', () => {
+    expect(parseDemoSendAllowlist(undefined)).toEqual([]);
+    expect(parseDemoSendAllowlist('  , ')).toEqual([]);
+  });
+
+  it('lower-cases, trims and drops repeats', () => {
+    expect(parseDemoSendAllowlist(' Maya@Demo.Example, friend@demo.example ,maya@demo.example')).toEqual([
+      'maya@demo.example',
+      'friend@demo.example',
+    ]);
+  });
+
+  it.each(['maya', '*@demo.example', 'Maya <maya@demo.example>', 'a@b'])('refuses %s at load', value => {
+    expect(() => parseDemoSendAllowlist(value)).toThrow(/DEMO_SEND_ALLOWLIST/);
+  });
 });

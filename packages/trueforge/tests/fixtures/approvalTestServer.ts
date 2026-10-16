@@ -112,6 +112,7 @@ function buildApp(input: {
   const googleConnectionStore = new SqliteGoogleConnectionStore(db);
   // Same composition as main.ts, so approval tokens are durable and shared across turns.
   const sentinelServices = createSentinelServices({
+    demoSendAllowlist: null,
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),

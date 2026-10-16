@@ -10,6 +10,7 @@ import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalTo
 import { stampSentinelDecision } from '../../mcp/ToolSet';
 import { classifyHostToolCall } from '../../permissions/classifier';
 import type { SentinelHostContext } from '../../permissions/context';
+import { DEMO_SEND_REFUSAL, recipientsAllowed } from '../../permissions/sendAllowlist';
 import { assertAttachmentBatch } from '../../runtime/attachmentStaging';
 import { SandboxFileUploadError, type SandboxInfo } from '../../sandbox/Sandbox';
 import type { AgentTracing } from '../../tracing/AgentTracing';
@@ -609,6 +610,15 @@ export class GmailToolSet extends LocalToolMCP {
         return errorResult(
           'The draft changed after you reviewed it, so nothing was sent. Ask to send it again to review the new text.',
         );
+      }
+      // Checked again against the draft as it is now, in case it changed since the card was offered.
+      if (
+        !recipientsAllowed({
+          allowlist: this.#options.sentinel.services.demoSendAllowlist,
+          recipients: [...assessed.draft.to, ...assessed.draft.cc, ...assessed.draft.bcc],
+        })
+      ) {
+        return errorResult(DEMO_SEND_REFUSAL);
       }
       const sent = await this.#options.api.sendDraft(input.draft_id);
       return jsonResult({

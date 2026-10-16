@@ -3219,7 +3219,7 @@
             ]
           },
           "available": {
-            "description": "False on a demo instance, where Google cannot be connected.",
+            "description": "Whether Google can be used on this instance.",
             "type": "boolean"
           },
           "features": {

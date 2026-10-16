@@ -60,7 +60,7 @@ function statusBody(input: { record: GoogleConnectionRecord | null; setup: Googl
       granted: granted.includes(feature),
     })),
     has_saved_client: record !== null,
-    available: !configuration.DEMO_MODE,
+    available: true,
     setup: input.setup,
   };
 }
@@ -119,13 +119,7 @@ function requireJsonOrSameOrigin(): MiddlewareHandler {
   };
 }
 
-/** A demo instance never connects Google; only the status read, which says so, is answered. */
-const refuseOnDemo: MiddlewareHandler = async (c, next) => {
-  if (configuration.DEMO_MODE) {
-    return c.json({ error: { message: 'Google cannot be connected on a demo instance.', type: 'unavailable' } }, 403);
-  }
-  return next();
-};
+const DEMO_LOCKED_MESSAGE = "This demo's Google account is already set up and cannot be changed.";
 
 function toClientInput(body: {
   client_id: string;
@@ -240,11 +234,27 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
     return c.json({ data: { revocation_confirmed: outcome === 'revoked' } }, 200);
   };
 
+  /**
+   * On a demo instance the owner connects the account once before the demo opens; after that nobody can
+   * reconnect or disconnect it. Registered first so it guards the routes below.
+   */
+  const lockConnectionOnDemo: MiddlewareHandler = async (c, next) => {
+    if (configuration.DEMO_MODE && (await deps.googleConnectionStore.get(ownerOf(c))) !== null) {
+      return c.json({ error: { message: DEMO_LOCKED_MESSAGE, type: 'unavailable' } }, 403);
+    }
+    return next();
+  };
+  const refuseDisconnectOnDemo: MiddlewareHandler = async (c, next) => {
+    if (configuration.DEMO_MODE) {
+      return c.json({ error: { message: DEMO_LOCKED_MESSAGE, type: 'unavailable' } }, 403);
+    }
+    return next();
+  };
+
   const router = new OpenAPIHono();
-  // Registered first so they guard the routes below; the status read stays open to say Google is unavailable.
-  router.use('/oauth/*', refuseOnDemo);
-  router.use('/test', refuseOnDemo, requireJsonOrSameOrigin());
-  router.use('/disconnect', refuseOnDemo, requireJsonOrSameOrigin());
+  router.use('/oauth/*', lockConnectionOnDemo);
+  router.use('/test', requireJsonOrSameOrigin());
+  router.use('/disconnect', refuseDisconnectOnDemo, requireJsonOrSameOrigin());
   router.openapi(getGoogleConnectionStatusRoute, statusHandler);
   router.openapi(checkGoogleClientRoute, checkHandler);
   router.openapi(beginGoogleConsentRoute, beginHandler);

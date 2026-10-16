@@ -40,6 +40,16 @@ If Google no longer accepts the saved sign-in, the panel says Reconnect needed a
 
 Select Disconnect, then confirm. Aman asks Google to revoke its access and deletes the saved sign-in. If Google doesn't confirm, Aman still removes the connection and tells you; you can also remove access in your Google account settings. Emails already sent stay in Gmail.
 
+## Demo instances
+
+On a demo instance (`DEMO_MODE=true`), Google works and Aman can read mail and save drafts, but it can only send to addresses you list in `DEMO_SEND_ALLOWLIST`. Set it in the instance's `.env` as comma-separated addresses, for example `DEMO_SEND_ALLOWLIST=maya@example.com,friend@example.com`, then restart. Capital letters and extra spaces do not matter.
+
+- The list covers To, Cc and Bcc. If any recipient is not on it, the send is refused before an approval card appears, and again at the moment of sending.
+- Left empty or unset, a demo sends nothing at all.
+- An entry that is not a plain email address stops Aman from starting.
+- Connect the demo's Google account once, before visitors arrive. After that nobody can reconnect or disconnect it from the panel.
+- Outside demo mode the list is ignored.
+
 ## What to know
 
 - Email content is treated as untrusted. Text inside a message cannot change what Aman does or skip an approval.

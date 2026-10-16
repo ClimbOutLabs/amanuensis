@@ -42,6 +42,7 @@ import {
 import {
   escapeDisplayText,
   extractCardFields,
+  recipientAddresses,
   renderOutboundArguments,
   type ExtractionResult,
 } from './extractorRegistry';
@@ -54,6 +55,7 @@ import {
   type OutboundStrings,
 } from './outboundGuard';
 import { isRunnerWorkflow } from './runner';
+import { DEMO_SEND_REFUSAL, recipientsAllowed } from './sendAllowlist';
 import {
   hashArgv,
   matchAllowlist,
@@ -1406,6 +1408,10 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
   };
 }
 
+function demoSendRefusal(): TierDecision {
+  return autoDenyDecision({ reason: 'outbound_guard', reason_detail: DEMO_SEND_REFUSAL, sensitive_read: false });
+}
+
 /**
  * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
  * path. Reads are silent but flagged as sensitive, and a session that read mail can no longer search silently.
@@ -1435,6 +1441,17 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
       reason_detail: 'Scheduled runs can read your email but never draft or send it.',
       sensitive_read: false,
     });
+  }
+  const draft = action.mail_draft;
+  if (
+    action.tool_name === SEND_DRAFT_TOOL_NAME &&
+    draft !== undefined &&
+    !recipientsAllowed({
+      allowlist: ctx.services.demoSendAllowlist,
+      recipients: [...draft.to, ...draft.cc, ...draft.bcc],
+    })
+  ) {
+    return demoSendRefusal();
   }
   const card = gmailWriteCard({ action, agent_intent: ctx.agent_intent });
   if (card === null) {
@@ -1492,6 +1509,17 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       reason_detail: 'External-service action with no verifiable destination; never carded.',
       sensitive_read: false,
     });
+  }
+
+  // A demo instance mails only its own addresses, so a connector send to anyone else never reaches a card.
+  if (
+    extraction.external_service &&
+    !recipientsAllowed({
+      allowlist: ctx.services.demoSendAllowlist,
+      recipients: recipientAddresses(action.canonical_params),
+    })
+  ) {
+    return demoSendRefusal();
   }
 
   // The user's designated search provider runs without asking behind the outbound secret guard.

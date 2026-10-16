@@ -29,6 +29,7 @@ const action: SentinelAction = {
 /** The server's Sentinel composition over one SQLite file, as main.ts builds it. */
 function composeOver(db: ReturnType<typeof createSqliteDb>): SentinelServices {
   return createSentinelServices({
+    demoSendAllowlist: null,
     audit: new SentinelAuditStore(db),
     settings: new SqliteSentinelSettingsStore(db),
     approvalTokens: new SqliteApprovalTokenStore(db),
@@ -62,6 +63,7 @@ describe('createSentinelServices', () => {
     const toolGrants = new SqliteMcpToolGrantStore(db);
     try {
       const services = createSentinelServices({
+        demoSendAllowlist: ['maya@demo.example'],
         audit: new SentinelAuditStore(db),
         settings: new SqliteSentinelSettingsStore(db),
         approvalTokens,
@@ -70,6 +72,7 @@ describe('createSentinelServices', () => {
       });
       expect(services.token_store).toBe(approvalTokens);
       expect(services.tool_grants).toBe(toolGrants);
+      expect(services.demoSendAllowlist).toEqual(['maya@demo.example']);
     } finally {
       await db.destroy();
     }
