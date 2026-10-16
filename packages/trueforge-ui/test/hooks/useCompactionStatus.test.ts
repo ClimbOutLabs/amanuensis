@@ -36,10 +36,11 @@ describe('useCompactionStatus', () => {
   const getLastCompactionStatus = vi.fn(async (): Promise<LastCompactionStatus | null> => null);
   const getLastTurnInputTokens = vi.fn(async (): Promise<number | null> => null);
   // hasSessionResync checks for these methods via Reflect; a plain object with
-  // all four methods passes.
+  // all five methods passes.
   const server: HarnessChatServerExtensions = {
     peekSessionTip: vi.fn(async () => null),
     dismissPendingApprovals: vi.fn(async () => ({ dismissed: 0, alreadyResolved: true })),
+    answerHeldAction: vi.fn<HarnessChatServerExtensions['answerHeldAction']>(async () => 'done'),
     getLastCompactionStatus,
     getLastTurnInputTokens,
   };
