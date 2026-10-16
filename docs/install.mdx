@@ -232,6 +232,17 @@ installer/install.sh upgrade           # back up, rebuild, restart, health-check
 
 Upgrade refuses to start unless doctor shows no failures, unless you pass `--force`. It backs up every instance first, rebuilds the images, restarts each stack, and checks health. If the upgrade fails after the restart begins, it restores the backup and the previous images, then tells you what it did.
 
+### Exporting one person's data
+
+To move a person's chats, agents, personas, spaces, schedules, connectors (without credentials), settings and memory to another instance, export them from the old one. The command reads the database and memory files directly, so it needs no sign-in and works on an instance that was never installed with the installer. Run it inside the app image, with the same environment and data volumes as the running app:
+
+```bash
+aman export-data --list-users                          # who owns sessions, and how many
+aman export-data --user <id> --out /backup/alice.zip   # one person's archive
+```
+
+An instance with no sign-in keeps everything under one user id, `trueforge-default`, which `--list-users` always shows. The archive is written whole or not at all and is never overwritten; any failure prints one line and exits non-zero. Each export (and each failed attempt) adds a row to the audit log with the actor `cli`. `--include-uploads` adds uploaded file bytes, `--no-instance-data` leaves out the shared memory vaults and instance settings, and `--migrate` first updates an older database to this version's schema (back it up first, since it changes the database). Secrets are removed before anything is written, and the archive holds one person's data only, so treat it as private anyway.
+
 ## What is off in this version
 
 Running code (`run_code`, Python and shell in a gVisor sandbox with no network) is on after a normal install. Settings → Sandbox shows it as ready, and new chats have the sandbox enabled. Email attachment extraction and skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` has run code off too.
