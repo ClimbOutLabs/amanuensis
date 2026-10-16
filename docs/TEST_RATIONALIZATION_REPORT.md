@@ -91,7 +91,7 @@ Priority future journeys are:
 
 1. Start a chat, send a message, observe streaming, cancel, and recover after a
    refresh.
-2. Approve once, approve for this chat, deny with a reason, and verify the visible
+2. Approve, approve for this chat, deny with a reason, and verify the visible
    terminal receipt.
 3. Open sessions on desktop and mobile, change settings/theme, and return to the
    active chat without obstruction or focus loss.

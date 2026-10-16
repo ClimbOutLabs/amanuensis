@@ -445,7 +445,7 @@ passed once its `pretest` build ran. Fixed at the root rather than per test:
   failure. Fixed the mock payload's field names; no source change needed.
 - **`ToolCallContainer` and `DraftCompositeSelector` (stale test expectations).**
   `ToolCallContainer.test.tsx`'s two "shows the approval bar" tests still queried
-  `getByRole('button', { name: 'Allow' })`; the approval bar is a `radiogroup` of `Allow once` /
+  `getByRole('button', { name: 'Allow' })`; the approval bar is a `radiogroup` of `Approve` /
   `Deny` radios elsewhere in the same file, so aligned these two the same way.
   `DraftCompositeSelector.test.tsx` inherited an upstream assertion that the Capabilities tab is
   hidden for an invalid model; upstream's `AttachTab` union has no `'capabilities'` variant at all

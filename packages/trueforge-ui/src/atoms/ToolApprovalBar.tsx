@@ -3,6 +3,7 @@
 import { useEffect, useId, useState } from 'react';
 
 import { Icon } from '../icons/Icon.js';
+import { APPROVAL_CHOICES } from '../sentinel/approvalChoices.js';
 import { StepIconBox } from './agent-chat/StepIconBox.js';
 import { cn } from './lib/cn.js';
 import { Button } from './primitives/Button.js';
@@ -11,6 +12,8 @@ import { CenteredModal } from './primitives/CenteredModal.js';
 export type ApprovalOption = {
   id: string;
   label: string;
+  /** Plain-words help shown as a tooltip. */
+  hint?: string;
   variant?: 'primary' | 'secondary' | 'destructive';
   requiresReason?: boolean;
   grants?: readonly string[];
@@ -45,10 +48,10 @@ export type ToolApprovalBarProps = {
   className?: string;
 };
 
-const DEFAULT_APPROVE_OPTIONS: ApprovalOption[] = [{ id: 'approve', label: 'Approve', variant: 'primary' }];
+const DEFAULT_APPROVE_OPTIONS: ApprovalOption[] = [{ id: 'approve', ...APPROVAL_CHOICES.approve, variant: 'primary' }];
 
 const DEFAULT_DENY_OPTIONS: ApprovalOption[] = [
-  { id: 'deny', label: 'Deny', variant: 'secondary', requiresReason: true },
+  { id: 'deny', ...APPROVAL_CHOICES.deny, variant: 'secondary', requiresReason: true },
 ];
 
 export function ToolApprovalBar({
@@ -166,6 +169,7 @@ export function ToolApprovalBar({
                 {approveOptions.map(option => (
                   <label
                     key={option.id}
+                    title={option.hint}
                     className={cn(
                       'flex w-fit items-start gap-x-2 overflow-visible',
                       interactionsLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
@@ -188,6 +192,7 @@ export function ToolApprovalBar({
                 {denyOptions.map(option => (
                   <label
                     key={option.id}
+                    title={option.hint}
                     className={cn(
                       'flex w-fit items-start gap-x-2 overflow-visible',
                       interactionsLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
