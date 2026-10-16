@@ -55,6 +55,20 @@ export function toolCallsOf(event: TimelineEvent): Record<string, unknown>[] {
   return Array.isArray(toolCalls) ? toolCalls.filter(isRecord) : [];
 }
 
+/**
+ * An approval event that only lists actions a scheduled run held or could not save. Nothing waited
+ * for an answer, so the chat is not blocked and the timeline draws no "Approval required" marker.
+ */
+export function listsOnlyHeldActions(event: unknown): boolean {
+  const timelineEvent = asTimelineEvent(event);
+  if (timelineEvent?.type !== 'tool.approval_required') return false;
+  const calls = toolCallsOf(timelineEvent);
+  return (
+    calls.length > 0 &&
+    calls.every(call => call.held === true || call.not_saved !== undefined || call.notSaved !== undefined)
+  );
+}
+
 export function parentToolCallId(event: TimelineEvent): string | undefined {
   const parent = isRecord(event.parent) ? event.parent : undefined;
   return parent == null ? undefined : readString(parent, 'toolCallId', 'tool_call_id');

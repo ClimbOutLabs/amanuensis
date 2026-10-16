@@ -13,12 +13,11 @@ import {
 import {
   ISOLATION_REFUSED_MARKER,
   OUTPUT_EXCEEDED_MARKER,
-  runCodeProgramPath,
+  runCodeArgv,
   type DriverReadiness,
   type DriverRunParams,
   type DriverRunResult,
   type IsolationDriver,
-  type RunCodeLanguage,
   type SandboxIdentity,
 } from './IsolationDriver.js';
 import {
@@ -395,6 +394,9 @@ function checkPinnedImage(input: {
   return { ok: true, imageId };
 }
 
+/** The docker CLI reads any other seccomp value as a profile file path, so the daemon default must be named `builtin`. */
+const SECCOMP_BUILTIN_OPT = 'seccomp=builtin';
+
 /**
  * Verify a created container actually carries the mandatory isolation flags,
  * including the uid:gid it was created to run as.
@@ -454,8 +456,8 @@ export function checkContainerIsolation(input: {
   if (!opts.includes('no-new-privileges:true')) {
     return { ok: false, reason: 'container is missing no-new-privileges' };
   }
-  if (!opts.some(o => o === 'seccomp=default' || o.startsWith('seccomp='))) {
-    return { ok: false, reason: 'container is missing an explicit seccomp profile' };
+  if (!opts.includes(SECCOMP_BUILTIN_OPT)) {
+    return { ok: false, reason: 'container is missing the built-in seccomp profile' };
   }
   return { ok: true };
 }
@@ -892,13 +894,6 @@ export class DockerDriver implements IsolationDriver {
     }
   }
 
-  private interpreterArgv(language: RunCodeLanguage): string[] {
-    // The wrapper stages the program into ingress (read-only) under a
-    // reserved name; the driver executes it from there — no argv size limits.
-    const program = runCodeProgramPath(language);
-    return language === 'python' ? ['python3', program] : ['node', program];
-  }
-
   /**
    * The non-negotiable hardened create flags (plan §2.5), encoded here, not
    * in config. Curated env only — the host process env never passes through.
@@ -922,15 +917,15 @@ export class DockerDriver implements IsolationDriver {
       '--security-opt',
       'no-new-privileges:true',
       '--security-opt',
-      'seccomp=default',
+      SECCOMP_BUILTIN_OPT,
       '--pids-limit',
       '256',
       '--memory',
       `${String(params.memoryMb)}m`,
       '--memory-swap',
       `${String(params.memoryMb)}m`,
-      '--oom-kill-disable',
-      'false',
+      // A boolean flag: a separate `false` would be read as the image name.
+      '--oom-kill-disable=false',
       '--cpus',
       '2',
       '--shm-size',
@@ -953,7 +948,7 @@ export class DockerDriver implements IsolationDriver {
       '/scratch',
       ...envArgs,
       this.image,
-      ...this.interpreterArgv(params.language),
+      ...runCodeArgv(params.language),
     ];
     const result = await this.runner.run(this.dockerBinary, args, {
       timeoutMs: this.createTimeoutMs,
