@@ -628,7 +628,7 @@ const MAX_SESSION_TITLE_LENGTH = 50;
 const titleSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 /**
- * Caps a title at {@link MAX_SESSION_TITLE_LENGTH} UTF-16 units without splitting a
+ * Caps a title at MAX_SESSION_TITLE_LENGTH UTF-16 units without splitting a
  * grapheme cluster: clusters that would cross the cap (emoji with skin tones or
  * ZWJ sequences, which read as one unit but span several) are dropped whole.
  */

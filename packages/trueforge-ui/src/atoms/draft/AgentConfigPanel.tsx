@@ -423,18 +423,18 @@ export function AgentConfigPanel({
             onClick={() => setModelSettingsMenuOpen(open => !open)}
             className="mt-2 flex w-full cursor-pointer flex-col text-left disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <dl className="text-text-secondary flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs">
+            <span className="text-text-secondary flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs">
               {modelParams.length ? (
                 modelParams.map(entry => (
-                  <div key={entry.label} className="flex gap-1">
-                    <dt>{entry.label}:</dt>
-                    <dd className="text-text-primary font-medium">{entry.value}</dd>
-                  </div>
+                  <span key={entry.label} className="flex gap-1">
+                    <span>{entry.label}:</span>
+                    <span className="text-text-primary font-medium">{entry.value}</span>
+                  </span>
                 ))
               ) : (
-                <div>model settings: defaults</div>
+                <span>model settings: defaults</span>
               )}
-            </dl>
+            </span>
           </button>
         </Section>
 
