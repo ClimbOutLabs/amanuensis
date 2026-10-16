@@ -263,6 +263,57 @@ describe('answerHeldAction', () => {
     ]);
   });
 
+  function streamOf(...events: object[]) {
+    return vi.fn(async () => {
+      async function* run() {
+        for (const event of events) yield event;
+      }
+      return run();
+    });
+  }
+
+  function toolResponse(toolCallId: string, disposition: string) {
+    return { type: 'tool.response.v2', toolCallId, disposition };
+  }
+
+  it.each([
+    ['executed_ok', 'done'],
+    ['executed_nonzero', 'failed'],
+    ['outcome_unknown', 'unclear'],
+    ['never_ran', 'not_run'],
+    ['policy_blocked', 'not_run'],
+    ['denied', 'not_run'],
+  ] as const)('reports %s on the held call as %s', async (disposition, outcome) => {
+    const { extensions } = createFakeClient({
+      createTurnStream: streamOf(
+        toolResponse('other_call', 'executed_nonzero'),
+        toolResponse('call_held', disposition),
+      ),
+    });
+    assert.equal(
+      await extensions.answerHeldAction({
+        sessionId: 'ses_1',
+        threadId: 'main',
+        toolCallId: 'call_held',
+        answer: 'approve',
+      }),
+      outcome,
+    );
+  });
+
+  it('says it is unclear when the answer turn never reports on the held call', async () => {
+    const { extensions } = createFakeClient({ createTurnStream: streamOf(toolResponse('other_call', 'executed_ok')) });
+    assert.equal(
+      await extensions.answerHeldAction({
+        sessionId: 'ses_1',
+        threadId: 'main',
+        toolCallId: 'call_held',
+        answer: 'approve',
+      }),
+      'unclear',
+    );
+  });
+
   it('lets a refusal reach the caller', async () => {
     const refusal = new Error('Expired, nothing was done. Ask again in chat.');
     const { extensions } = createFakeClient({ createTurnStream: vi.fn().mockRejectedValue(refusal) });

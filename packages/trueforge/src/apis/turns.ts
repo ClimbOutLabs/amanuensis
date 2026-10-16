@@ -20,6 +20,7 @@ import {
   AgentHarnessError,
   existingSandboxIdForProvider,
   extractErrorLogFields,
+  HeldActionRefusedError,
   isAgentInputUserMessage,
   isFileContentPart,
   McpConnectionError,
@@ -29,6 +30,7 @@ import {
   SandboxNotAvailableError,
   VercelAILLM,
   type BoundRepository,
+  type HeldRefusalReason,
 } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -166,7 +168,10 @@ export const TurnConflictCode = {
   APPROVAL_CONFLICT: 'approval_conflict',
 } as const;
 
-export type TurnConflictCode = (typeof TurnConflictCode)[keyof typeof TurnConflictCode];
+/** An answer to a held action that cannot run now; `error.code` says why, e.g. `held_action_expired`. */
+export type HeldActionConflictCode = `held_action_${HeldRefusalReason}`;
+
+export type TurnConflictCode = (typeof TurnConflictCode)[keyof typeof TurnConflictCode] | HeldActionConflictCode;
 
 /** The conflict code for a store rejection, or null when the store raised one we do not name. */
 export function turnConflictCodeFor(error: SessionStoreConflictError): TurnConflictCode | null {
@@ -1860,6 +1865,19 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           case 'invalid_file_input':
             return c.json({ error: { message: error.message } }, 400);
           case 'invalid_send_input': {
+            // A held action that cannot run is a conflict with what is stored, and says why by code.
+            if (error instanceof HeldActionRefusedError) {
+              return c.json(
+                {
+                  error: {
+                    message: error.message,
+                    type: 'conflict',
+                    code: `held_action_${error.reason}` satisfies HeldActionConflictCode,
+                  },
+                },
+                409,
+              );
+            }
             // A decision the session already recorded is a resubmission, not a bad request:
             // the tool has run (or been denied) once and must not run again. Answer from
             // stored state; only a genuinely unrecorded decision keeps the 422.

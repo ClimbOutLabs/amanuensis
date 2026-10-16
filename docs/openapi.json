@@ -410,6 +410,14 @@
             "description": "Tool call id awaiting action.",
             "type": "string"
           },
+          "not_saved": {
+            "description": "Set when a scheduled run could not save this action for the owner, and why. It will not run.",
+            "enum": [
+              "too_many",
+              "helper_agent"
+            ],
+            "type": "string"
+          },
           "source_event_id": {
             "description": "Event id of the model.message that requested the tool call.",
             "type": "string"
@@ -17689,7 +17697,7 @@
                 }
               }
             },
-            "description": "The turn conflicts with the session as stored. `error.code` says which: `stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), `previous_turn_running` (the prior turn is still executing), `turn_already_exists` (that turn id is taken), or `approval_conflict` (a resubmitted decision contradicts the one already recorded)."
+            "description": "The turn conflicts with the session as stored. `error.code` says which: `stale_approval_continuation` (the approval was answered against a turn that is no longer the tip), `previous_turn_running` (the prior turn is still executing), `turn_already_exists` (that turn id is taken), or `approval_conflict` (a resubmitted decision contradicts the one already recorded), or `held_action_expired`, `held_action_changed`, `held_action_not_allowed`, `held_action_tool_gone` or `held_action_sign_in` (a held action cannot run now; nothing was done)."
           },
           "412": {
             "content": {

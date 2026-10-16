@@ -4,6 +4,8 @@
  */
 
 // Runtime
+export { HeldActionRefusedError } from './permissions/heldActions';
+export type { HeldRefusalReason } from './permissions/heldActions';
 export {
   AbnormalHandoffCauseSchema,
   mechanicalAbnormalHandoff,

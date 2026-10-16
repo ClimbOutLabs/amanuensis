@@ -61,11 +61,22 @@ function heldCall(id: string): Exclude<ThreadMessageLike['content'], string>[num
 }
 
 function renderBrief(
-  input: { status?: 'running' | 'complete'; alwaysAllowOffered?: boolean; expiresAt?: string } = {},
+  input: {
+    status?: 'running' | 'complete';
+    alwaysAllowOffered?: boolean;
+    expiresAt?: string;
+    notSaved?: number;
+    heldCards?: boolean;
+  } = {},
 ) {
   const message: ThreadMessageLike = {
     role: 'assistant',
-    content: [{ type: 'text', text: 'Here is your brief.' }, heldCall('call-held'), heldCall('call-plain')],
+    content: [
+      { type: 'text', text: 'Here is your brief.' },
+      heldCall('call-held'),
+      heldCall('call-plain'),
+      ...Array.from({ length: input.notSaved ?? 0 }, (_, index) => heldCall(`call-dropped-${index}`)),
+    ],
     status: input.status === 'running' ? { type: 'running' } : { type: 'complete', reason: 'stop' },
   };
   render(
@@ -82,8 +93,20 @@ function renderBrief(
       card: card(),
       eventId: 'evt-1',
       threadId: 'main',
-      held: { alwaysAllowOffered: input.alwaysAllowOffered ?? false, expiresAt: input.expiresAt ?? null },
+      ...(input.heldCards === false
+        ? { notSaved: 'too_many' as const }
+        : { held: { alwaysAllowOffered: input.alwaysAllowOffered ?? false, expiresAt: input.expiresAt ?? null } }),
     });
+    for (let index = 0; index < (input.notSaved ?? 0); index += 1) {
+      publishSentinelEvent({
+        toolCallId: `call-dropped-${index}`,
+        tier: 3,
+        card: card({ plain_what: 'Dropped' }),
+        eventId: 'evt-2',
+        threadId: 'main',
+        notSaved: 'too_many',
+      });
+    }
     publishSentinelEvent({
       toolCallId: 'call-plain',
       tier: 3,
@@ -115,12 +138,12 @@ describe('NeedsYourOkContainer', () => {
     expect(screen.queryByRole('heading', { name: 'Needs your OK' })).not.toBeInTheDocument();
   });
 
-  it('approves exactly the held call once, then reloads the chat to show the result', async () => {
-    answerHeldAction.mockResolvedValue(undefined);
+  it('approves exactly the held call once, shows what came of it, then reloads the chat', async () => {
+    answerHeldAction.mockResolvedValue('done');
     renderBrief();
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => {
-      expect(screen.getByText('Approved.')).toBeInTheDocument();
+      expect(screen.getByText('Approved and done.')).toBeInTheDocument();
     });
     expect(answerHeldAction).toHaveBeenCalledWith({
       sessionId: 'session-1',
@@ -129,6 +152,20 @@ describe('NeedsYourOkContainer', () => {
       answer: 'approve',
     });
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['failed', 'Approved, but it failed. The details are in the chat.'],
+    ['unclear', 'Approved, but it is not clear whether it finished. Check the chat.'],
+    ['not_run', 'Approved, but it did not run, so nothing was done. Ask again in chat.'],
+  ] as const)('does not call an approved action done when it %s', async (outcome, text) => {
+    answerHeldAction.mockResolvedValue(outcome);
+    renderBrief();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => {
+      expect(screen.getByText(text)).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Approved and done.')).not.toBeInTheDocument();
   });
 
   it('sends Always allow only where the server offered it', async () => {
@@ -150,20 +187,46 @@ describe('NeedsYourOkContainer', () => {
     expect(answerHeldAction).toHaveBeenCalledWith(expect.objectContaining({ answer: 'deny' }));
   });
 
-  it('shows the server refusal for an expired action in plain words and offers no retry', async () => {
-    const refusal = Object.assign(new Error('Unprocessable'), {
-      statusCode: 422,
-      body: { error: { message: 'Expired, nothing was done. Ask again in chat.' } },
-    });
-    answerHeldAction.mockRejectedValue(refusal);
+  function refusal(statusCode: number, code: string, message = 'raw validation text from the server') {
+    return Object.assign(new Error(message), { statusCode, body: { error: { code, message } } });
+  }
+
+  it.each([
+    [409, 'held_action_expired', 'Expired, nothing was done. Ask again in chat.'],
+    [409, 'held_action_changed', 'This no longer matches what was held, so nothing was done. Ask again in chat.'],
+    [409, 'held_action_not_allowed', 'This is not allowed any more, so nothing was done. Ask again in chat.'],
+    [409, 'held_action_tool_gone', 'This tool is not available any more, so nothing was done. Ask again in chat.'],
+    [
+      409,
+      'held_action_sign_in',
+      'The connector needs you to sign in again first, so nothing was done. Sign in, then try again.',
+    ],
+    [422, 'invalid_request', 'This saved action is no longer available. Ask again in chat.'],
+  ])(
+    'maps a %s %s refusal to plain words, offers no retry, and never shows the raw text',
+    async (status, code, text) => {
+      answerHeldAction.mockRejectedValue(refusal(status, code));
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      renderBrief();
+      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+      await waitFor(() => {
+        expect(screen.getByText(text)).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/raw validation text/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+      expect(reload).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the buttons when the chat is only busy', async () => {
+    answerHeldAction.mockRejectedValue(refusal(409, 'previous_turn_running'));
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     renderBrief();
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => {
-      expect(screen.getByText('Expired, nothing was done. Ask again in chat.')).toBeInTheDocument();
+      expect(screen.getByText('This chat is still busy. Try again in a moment.')).toBeInTheDocument();
     });
-    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
-    expect(reload).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
   });
 
   it('keeps the buttons and says so when the answer did not go through', async () => {
@@ -181,5 +244,25 @@ describe('NeedsYourOkContainer', () => {
     renderBrief({ expiresAt: '2020-01-01T00:00:00.000Z' });
     expect(screen.getByText('Expired, nothing was done. Ask again in chat.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+  });
+
+  it('says how many actions were not saved, below the cards', () => {
+    renderBrief({ notSaved: 3 });
+    expect(
+      screen.getByText(
+        "3 more actions weren't saved because too many were waiting. Ask again in chat if you need them.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+  });
+
+  it('says so on its own, without the held-for-you intro, when nothing could be saved', () => {
+    renderBrief({ notSaved: 1, heldCards: false });
+    expect(
+      screen.getByText(
+        "2 more actions weren't saved because too many were waiting. Ask again in chat if you need them.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Needs your OK' })).not.toBeInTheDocument();
   });
 });

@@ -1122,6 +1122,27 @@ export async function executeToolCalls({
 
     // A held call is never dispatched here; it runs later only if the owner approves it. Repeating an
     // identical held call counts toward the repeated-denial guard so a loop cannot pile up holds.
+    if (toolCall.tool_info.held_for_owner?.duplicate === true) {
+      // The same call is already held in this batch: nothing more to save, and nothing to count.
+      return {
+        toolCall,
+        toolInfo,
+        response: toolResultResponse({ text: HELD_RESULT_TEXT }),
+        failure: false,
+        completedAt: new Date().toISOString(),
+        memoized: false,
+        repeatCount: 1,
+        blockedPrivateFallback: false,
+        repeatedSideEffect: false,
+        disposition: 'never_ran',
+        remediation: {
+          reason_code: HELD_REASON_CODE,
+          message: 'Already saved for the owner to approve later. Continue without it.',
+          suggested_action: 'contact_user',
+        },
+        admissionProvenance: { source: 'internal' },
+      };
+    }
     if (toolCall.tool_info.held_for_owner !== undefined) {
       const heldIdentity = `${approvalGrantKey(toolCall.tool_info)}|held|${createHash('sha256')
         .update(toolCall.function.arguments, 'utf8')

@@ -10,6 +10,8 @@
  */
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
+import type { HeldActionOutcome } from '../../sentinel/heldActionErrors.js';
+
 /** One tool call still waiting for a human decision on the session tip turn. */
 export interface PendingApprovalInfo {
   /** Tool call id awaiting the decision. */
@@ -61,13 +63,14 @@ export interface HarnessChatServerExtensions {
   /**
    * Answer an action a scheduled run held for the owner. Approving runs just that call, once;
    * the server refuses it when the hold ran out or no longer matches what the owner was shown.
+   * Resolves with what became of the call, read from the answer's own turn.
    */
   answerHeldAction(request: {
     sessionId: string;
     threadId: string;
     toolCallId: string;
     answer: HeldActionDecision;
-  }): Promise<void>;
+  }): Promise<HeldActionOutcome>;
   /**
    * Read the most recent context compaction event for a session.
    * Returns `null` when no compaction has run yet.
@@ -123,6 +126,21 @@ function isNoPendingApprovalError(error: unknown): boolean {
   if (error == null) return false;
   const message = error instanceof Error ? error.message : String(error);
   return /no pending approval/i.test(message);
+}
+
+function outcomeOfDisposition(disposition: TrueForgeApi.ToolResponseEventV2['disposition']): HeldActionOutcome {
+  switch (disposition) {
+    case 'executed_ok':
+      return 'done';
+    case 'executed_nonzero':
+      return 'failed';
+    case 'outcome_unknown':
+      return 'unclear';
+    case 'denied':
+    case 'policy_blocked':
+    case 'never_ran':
+      return 'not_run';
+  }
 }
 
 export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'>): HarnessChatServerExtensions {
@@ -202,7 +220,7 @@ export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'
     threadId: string;
     toolCallId: string;
     answer: HeldActionDecision;
-  }): Promise<void> {
+  }): Promise<HeldActionOutcome> {
     const approval: TrueForgeApi.ApprovalDecision =
       answer === 'deny'
         ? { status: 'deny' }
@@ -212,9 +230,13 @@ export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'
       previousTurnId: 'auto',
     });
     // Drain the stream so a failure while the call runs reaches the caller instead of passing silently.
-    for await (const _event of stream) {
-      // Consumed for completion only.
+    let outcome: HeldActionOutcome = 'unclear';
+    for await (const event of stream) {
+      if (event.type === 'tool.response.v2' && event.toolCallId === toolCallId) {
+        outcome = outcomeOfDisposition(event.disposition);
+      }
     }
+    return outcome;
   }
 
   async function getLastCompactionStatus({ sessionId }: { sessionId: string }): Promise<LastCompactionStatus | null> {

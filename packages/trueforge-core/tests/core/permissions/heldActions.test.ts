@@ -1,13 +1,6 @@
 import type { InternalEnrichedAssistantMessage, InternalToolCallInfo } from '../../../src/core/llm/LLMTypes';
 import { InMemoryApprovalTokenStore } from '../../../src/core/permissions/approvalTokens';
-import {
-  checkHeldReplay,
-  HELD_ACTION_CAP,
-  HELD_CHANGED_MESSAGE,
-  HELD_EXPIRED_MESSAGE,
-  HELD_NOT_ALLOWED_MESSAGE,
-  holdApprovalCalls,
-} from '../../../src/core/permissions/heldActions';
+import { checkHeldReplay, HELD_ACTION_CAP, holdApprovalCalls } from '../../../src/core/permissions/heldActions';
 import type { Tier3Card } from '../../../src/core/permissions/tier';
 
 const SCOPE = { tenant_id: 't1', created_by: 'u1' };
@@ -31,7 +24,7 @@ function message(infos: InternalToolCallInfo[]): InternalEnrichedAssistantMessag
     tool_calls: infos.map((tool_info, index) => ({
       id: `call-${String(index)}`,
       type: 'function' as const,
-      function: { name: 'send_note', arguments: '{}' },
+      function: { name: 'send_note', arguments: JSON.stringify({ tool: tool_info.original_tool_name }) },
       tool_info,
     })),
   };
@@ -56,10 +49,15 @@ function card(overrides: Partial<Tier3Card> = {}): Tier3Card {
 
 describe('holdApprovalCalls', () => {
   it('holds a call that would ask and stops it asking', () => {
-    const held = holdApprovalCalls({ message: message([info()]), alreadyHeld: 0, isSubAgent: false });
+    const { message: held, refused } = holdApprovalCalls({
+      message: message([info()]),
+      alreadyHeld: 0,
+      isSubAgent: false,
+    });
     const [call] = held.tool_calls ?? [];
     expect(call?.tool_info.is_approval_required).toBe(false);
     expect(Date.parse(call?.tool_info.held_for_owner?.expires_at ?? '')).toBeGreaterThan(Date.now());
+    expect(refused).toEqual([]);
   });
 
   it('leaves calls that do not ask, are client-side, create threads, or were already refused', () => {
@@ -69,23 +67,39 @@ describe('holdApprovalCalls', () => {
       info({ is_thread_creation: true }),
       info({ is_approval_required: false, pre_dispatch_failure: { kind: 'policy_blocked', message: 'Auto-denied.' } }),
     ]);
-    expect(holdApprovalCalls({ message: original, alreadyHeld: 0, isSubAgent: false })).toBe(original);
+    expect(holdApprovalCalls({ message: original, alreadyHeld: 0, isSubAgent: false }).message).toBe(original);
   });
 
-  it('refuses what it cannot hold past the cap, counting what the chat already holds', () => {
-    const asks = Array.from({ length: 3 }, () => info());
-    const result = holdApprovalCalls({ message: message(asks), alreadyHeld: HELD_ACTION_CAP - 1, isSubAgent: false });
-    const infos = (result.tool_calls ?? []).map(call => call.tool_info);
+  it('refuses what it cannot hold past the cap, counting what the chat already holds, and says so', () => {
+    const asks = Array.from({ length: 3 }, (_, index) => info({ original_tool_name: `tool_${String(index)}` }));
+    const calls = message(asks);
+    const result = holdApprovalCalls({ message: calls, alreadyHeld: HELD_ACTION_CAP - 1, isSubAgent: false });
+    const infos = (result.message.tool_calls ?? []).map(call => call.tool_info);
     expect(infos.filter(candidate => candidate.held_for_owner !== undefined)).toHaveLength(1);
     expect(infos.filter(candidate => candidate.pre_dispatch_failure?.kind === 'policy_blocked')).toHaveLength(2);
     expect(infos[1]?.pre_dispatch_failure?.message).toContain('Too many actions are already waiting');
+    expect(result.refused.map(entry => entry.reason)).toEqual(['too_many', 'too_many']);
   });
 
   it('refuses a helper agent call because the main chat cannot replay it', () => {
     const result = holdApprovalCalls({ message: message([info()]), alreadyHeld: 0, isSubAgent: true });
-    const [call] = result.tool_calls ?? [];
+    const [call] = result.message.tool_calls ?? [];
     expect(call?.tool_info.held_for_owner).toBeUndefined();
     expect(call?.tool_info.pre_dispatch_failure?.message).toContain('helper agent');
+    expect(result.refused).toEqual([{ id: 'call-0', reason: 'helper_agent' }]);
+  });
+
+  it('holds one of two identical calls in a batch and marks the repeat, which uses no room under the cap', () => {
+    const result = holdApprovalCalls({
+      message: message([info(), info()]),
+      alreadyHeld: HELD_ACTION_CAP - 1,
+      isSubAgent: false,
+    });
+    const [first, second] = (result.message.tool_calls ?? []).map(call => call.tool_info);
+    expect(first?.held_for_owner?.duplicate).toBeUndefined();
+    expect(second?.held_for_owner?.duplicate).toBe(true);
+    expect(second?.pre_dispatch_failure).toBeUndefined();
+    expect(result.refused).toEqual([]);
   });
 });
 
@@ -131,7 +145,7 @@ describe('checkHeldReplay', () => {
     const fresh = info({ approval_token_id: freshToken.token_id, tier3_card: card() });
     await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
       ok: false,
-      message: HELD_EXPIRED_MESSAGE,
+      reason: 'expired',
     });
   });
 
@@ -141,7 +155,7 @@ describe('checkHeldReplay', () => {
     const fresh = info({ approval_token_id: freshToken.token_id, tier3_card: card() });
     await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
       ok: false,
-      message: HELD_EXPIRED_MESSAGE,
+      reason: 'expired',
     });
   });
 
@@ -153,7 +167,7 @@ describe('checkHeldReplay', () => {
     });
     await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
       ok: false,
-      message: HELD_NOT_ALLOWED_MESSAGE,
+      reason: 'not_allowed',
     });
   });
 
@@ -168,7 +182,7 @@ describe('checkHeldReplay', () => {
     const fresh = info({ approval_token_id: other.token_id, tier3_card: card() });
     await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
       ok: false,
-      message: HELD_CHANGED_MESSAGE,
+      reason: 'changed',
     });
   });
 
@@ -182,7 +196,7 @@ describe('checkHeldReplay', () => {
     const fresh = info({ approval_token_id: freshToken.token_id, tier3_card: card({ [field]: value }) });
     await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
       ok: false,
-      message: HELD_CHANGED_MESSAGE,
+      reason: 'changed',
     });
   });
 

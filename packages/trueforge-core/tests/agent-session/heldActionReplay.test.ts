@@ -11,7 +11,12 @@ import { getEmptyUsage } from '../../src/core/llm/LLMTypes';
 import type { ToolSource } from '../../src/core/mcp/IMCPServer';
 import { toolResultResponse } from '../../src/core/mcp/IMCPServer';
 import { ToolSet } from '../../src/core/mcp/ToolSet';
-import { createSentinelHostContext } from '../../src/core/permissions';
+import {
+  createSentinelHostContext,
+  defaultSentinelServices,
+  type SentinelServices,
+  type Tier2ActionKind,
+} from '../../src/core/permissions';
 import { makeAgentSpec, makeMockILLM, makeTestResolver, mintTestTurnId } from './testHelpers';
 
 const SEND_ARGS = JSON.stringify({ to: 'ana@example.com', body: 'Lunch at noon?' });
@@ -57,6 +62,12 @@ async function* textStream(
 }
 
 async function setup() {
+  // Every turn's services as the resolver receives them; the owner has relaxed file writes.
+  const seenServices: SentinelServices[] = [];
+  const relaxed: SentinelServices = {
+    ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>(['file_write'])),
+  };
   const callTool = jest.fn(() => Promise.resolve(toolResultResponse({ text: 'sent' })));
   const source: ToolSource = {
     name: 'mail',
@@ -98,6 +109,7 @@ async function setup() {
     resolveSandbox: input => base.resolveSandbox(input),
     resolveAgentDefinition: async input => {
       const resolved = await base.resolveAgentDefinition(input);
+      if (input.sentinel_services !== undefined) seenServices.push(input.sentinel_services);
       const toolSet = new ToolSet({
         source,
         selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: undefined },
@@ -127,7 +139,7 @@ async function setup() {
     },
     close: () => base.close(),
   };
-  const sessions = new Sessions({ sessionStore: new InMemorySessionStore() });
+  const sessions = new Sessions({ sessionStore: new InMemorySessionStore(), sentinelServices: relaxed });
   const session = await sessions.create({
     tenant_id: 't',
     session_id: 'brief',
@@ -156,7 +168,7 @@ async function setup() {
   const approval = (status: 'allow' | 'deny') => [
     { type: EventType.USER_TOOL_APPROVAL, thread_id: 'main', tool_call_id: 'call-send', approval: { status } },
   ];
-  return { session, run, approval, callTool, create };
+  return { session, run, approval, callTool, create, seenServices };
 }
 
 describe('a scheduled run that held an action', () => {
@@ -175,7 +187,7 @@ describe('a scheduled run that held an action', () => {
     expect(replay.state.status).toBe('done');
     expect(callTool).toHaveBeenCalledTimes(1);
     expect(callTool).toHaveBeenCalledWith(
-      { name: 'send_note', arguments: JSON.parse(SEND_ARGS) as unknown },
+      { name: 'send_note', arguments: JSON.parse(SEND_ARGS) },
       expect.objectContaining({ status: 'allow' }),
       expect.anything(),
     );
@@ -222,5 +234,19 @@ describe('a scheduled run that held an action', () => {
       required_actions: [{ type: EventType.TOOL_APPROVAL_REQUIRED }],
     });
     expect(callTool).not.toHaveBeenCalled();
+  });
+
+  it('never gives a scheduled chat the owner relaxations, on the run or on a turn the owner types', async () => {
+    const { run, seenServices } = await setup();
+    await run([{ type: EventType.USER_MESSAGE, content: 'Morning brief' }], { unattended: true });
+    await run([{ type: EventType.USER_MESSAGE, content: 'Now write the file' }]);
+
+    const identity = { tenant_id: 't', created_by: OWNER.subject_id };
+    const unattendedServices = seenServices.at(0);
+    const attendedServices = seenServices.at(-1);
+    expect(unattendedServices?.unattended).toBe(true);
+    expect(attendedServices?.unattended).toBe(false);
+    expect((await unattendedServices?.tier2AutoAllow(identity))?.size).toBe(0);
+    expect((await attendedServices?.tier2AutoAllow(identity))?.size).toBe(0);
   });
 });

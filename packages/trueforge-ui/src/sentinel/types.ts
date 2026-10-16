@@ -90,7 +90,12 @@ export type SentinelApprovalInfo = {
   threadId: string | null;
   /** Present only for an action a scheduled run held; such a card never pauses the chat. */
   held?: HeldActionInfo | undefined;
+  /** Present only for an action a scheduled run could not save for the owner, and why. */
+  notSaved?: NotSavedReason | undefined;
 };
+
+/** Why a scheduled run could not save an action that needed the owner's OK. */
+export type NotSavedReason = 'too_many' | 'helper_agent';
 
 /** A recorded answer to an approval request. */
 export type ApprovalAnswer = 'approved' | 'denied';
@@ -233,6 +238,11 @@ function parseHeldInfo(ref: Record<string, unknown>): HeldActionInfo | undefined
   };
 }
 
+function parseNotSaved(ref: Record<string, unknown>): NotSavedReason | undefined {
+  const value = ref.not_saved ?? ref.notSaved;
+  return value === 'too_many' || value === 'helper_agent' ? value : undefined;
+}
+
 function parseApprovalInfo(
   ref: Record<string, unknown>,
   origin: { eventId: string | null; threadId: string | null },
@@ -242,7 +252,15 @@ function parseApprovalInfo(
   const toolCallId = toolCallIdFrom(ref);
   if (tier === undefined || card === undefined || toolCallId === undefined) return undefined;
   const held = parseHeldInfo(ref);
-  return { toolCallId, tier, card, ...origin, ...(held === undefined ? {} : { held }) };
+  const notSaved = parseNotSaved(ref);
+  return {
+    toolCallId,
+    tier,
+    card,
+    ...origin,
+    ...(held === undefined ? {} : { held }),
+    ...(notSaved === undefined ? {} : { notSaved }),
+  };
 }
 
 export const APPROVAL_REQUIRED_EVENT_TYPE = 'tool.approval_required';

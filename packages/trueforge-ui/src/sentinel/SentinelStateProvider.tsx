@@ -14,6 +14,8 @@ export type SentinelState = {
   approvalFor: (toolCallId: string) => SentinelApprovalInfo | undefined;
   /** The card for an action a scheduled run held for the owner, if this tool call is one. */
   heldFor: (toolCallId: string) => SentinelApprovalInfo | undefined;
+  /** Whether a scheduled run had to drop this tool call because it could not save it for the owner. */
+  wasNotSaved: (toolCallId: string) => boolean;
   /** The owner's answer to this tool call, if one is recorded or was just given. */
   answerFor: (toolCallId: string) => ApprovalAnswer | undefined;
   /** Remembers an answer given in this tab until a reload reads it back from the server. */
@@ -74,6 +76,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
         const info = approvals.get(toolInvocationRawId(toolCallId));
         return info?.held === undefined ? undefined : info;
       },
+      wasNotSaved: toolCallId => approvals.get(toolInvocationRawId(toolCallId))?.notSaved !== undefined,
       answerFor: toolCallId => answers.get(toolInvocationRawId(toolCallId)),
       recordAnswer: (toolCallId, answer) =>
         setAnswers(previous => new Map(previous).set(toolInvocationRawId(toolCallId), answer)),

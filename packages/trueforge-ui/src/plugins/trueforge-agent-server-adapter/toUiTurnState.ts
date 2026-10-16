@@ -1,5 +1,6 @@
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type { SessionEventItem, TurnDoneMetrics, TurnState, TurnStreamingEvent } from '../../server/types.js';
+import { listsOnlyHeldActions } from '../../utils/sessionTimelineEvents.js';
 
 /** SDK token fields are optional; the UI contract requires numbers. Keep cost for session tiles. */
 export function toUiTurnDoneMetrics(metrics: TrueForgeApi.TurnMetrics): TurnDoneMetrics & { totalCostInUsd?: number } {
@@ -62,20 +63,12 @@ const INCOMPATIBLE_EVENT_TYPES: readonly string[] = [
 ];
 
 /**
- * An approval event that only lists actions a scheduled run held for the owner. The Sentinel tap
- * renders those as their own block; passed to the vendor runtime they would read as approvals the
- * chat is waiting on and block the composer.
- */
-function listsOnlyHeldActions(event: TrueForgeApi.SessionEvent | TrueForgeApi.TurnStreamingEvent): boolean {
-  return event.type === 'tool.approval_required' && event.toolCalls.every(call => call.held === true);
-}
-
-/**
  * Type guard for the vendor-typed event unions. The vendor types omit `aman.skill.used`
  * (host skill-telemetry) even though it arrives at runtime, so a direct `event.type ===`
  * comparison fails type-checking. This runtime check with a type predicate narrows soundly
- * without assertion escapes. Callers only drop what it rejects, so the held-action approval
- * lists it also rejects are dropped the same way.
+ * without assertion escapes. Callers only drop what it rejects. Approval lists that only name held
+ * actions are rejected too: the Sentinel tap renders them as their own block, and passed to the
+ * vendor runtime they would read as approvals the chat is waiting on and block the composer.
  */
 export function isCompatibleSessionEvent(
   event: TrueForgeApi.SessionEvent,

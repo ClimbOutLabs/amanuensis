@@ -4,14 +4,21 @@ import type { FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
+import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
 import type { SentinelApprovalCard } from './types.js';
 
 export type HeldActionStatus =
   | { kind: 'waiting' }
   | { kind: 'working' }
-  | { kind: 'approved' }
+  /** Approved in this tab, with what became of the action. */
+  | { kind: 'approved'; outcome: HeldActionOutcome }
+  /** Approved in an earlier visit; only the chat itself shows what came of it. */
+  | { kind: 'approved_earlier' }
   | { kind: 'denied' }
   | { kind: 'expired' }
+  /** Cannot run any more; asking again will not help. */
+  | { kind: 'refused'; message: string }
+  /** The answer did not go through; the buttons stay. */
   | { kind: 'failed'; message: string };
 
 export type HeldActionCardProps = {
@@ -21,14 +28,10 @@ export type HeldActionCardProps = {
   alwaysAllowOffered: boolean;
   /** Lets a person who cannot manage this chat read the card without answering it. */
   disabled?: boolean;
-  /** A host-written line saying where the action came from; the card shows it first when present. */
-  provenance?: string | null | undefined;
   onApprove: () => void;
   onAlwaysAllow: () => void;
   onDeny: () => void;
 };
-
-export const HELD_EXPIRED_TEXT = 'Expired, nothing was done. Ask again in chat.';
 
 function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
@@ -46,10 +49,18 @@ function StatusLine({ status }: { status: Exclude<HeldActionStatus, { kind: 'wai
     case 'approved':
       return (
         <p className="flex items-center gap-2 text-sm font-medium text-text-primary">
-          <Icon name="circle-check" className="shrink-0 text-success-bg" aria-hidden="true" />
-          Approved.
+          <Icon
+            name={status.outcome === 'done' ? 'circle-check' : 'info'}
+            className={`shrink-0 ${status.outcome === 'done' ? 'text-success-bg' : 'text-text-secondary'}`}
+            aria-hidden="true"
+          />
+          {APPROVED_OUTCOME_TEXT[status.outcome]}
         </p>
       );
+    case 'approved_earlier':
+      return <p className="text-sm font-medium text-text-primary">Approved. See the result in the chat.</p>;
+    case 'refused':
+      return <p className="text-sm text-text-secondary">{status.message}</p>;
     case 'denied':
       return (
         <p className="flex items-center gap-2 text-sm font-medium text-text-primary">
@@ -78,7 +89,6 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   status,
   alwaysAllowOffered,
   disabled = false,
-  provenance,
   onApprove,
   onAlwaysAllow,
   onDeny,
@@ -94,12 +104,12 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   return (
     <li className="list-none rounded-lg border border-border bg-primary-bg" data-role="held-action">
       <div className="space-y-3 px-4 py-3">
-        {provenance != null && provenance !== '' && (
-          <p className="text-xs text-text-secondary" data-role="held-action-provenance">
-            {provenance}
+        <p className="text-sm font-medium text-text-primary">{card.plain_what}</p>
+        {card.why_asked_again !== null && (
+          <p className="text-sm text-text-secondary" data-role="held-action-why-held">
+            {card.why_asked_again}
           </p>
         )}
-        <p className="text-sm font-medium text-text-primary">{card.plain_what}</p>
 
         {hasDetails && (
           <dl className="space-y-1.5 rounded border border-border bg-secondary-bg px-3 py-2">
@@ -136,7 +146,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
 
         {card.plain_why !== null && (
           <p className="text-sm text-text-secondary" data-role="held-action-reason">
-            Aman&apos;s reason: {card.plain_why}
+            Agent says: {card.plain_why}
           </p>
         )}
 

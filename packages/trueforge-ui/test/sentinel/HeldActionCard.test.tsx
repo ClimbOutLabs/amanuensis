@@ -2,7 +2,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { HELD_EXPIRED_TEXT, HeldActionCard, type HeldActionCardProps } from '@/sentinel/HeldActionCard.js';
+import { HeldActionCard, type HeldActionCardProps } from '@/sentinel/HeldActionCard.js';
+import { HELD_EXPIRED_TEXT } from '@/sentinel/heldActionErrors.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
 
 function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCard {
@@ -45,9 +46,9 @@ describe('HeldActionCard', () => {
     expect(text.indexOf('ana@example.com')).toBeGreaterThan(-1);
     expect(text.indexOf('Exactly what will be sent')).toBeGreaterThan(text.indexOf('ana@example.com'));
     expect(screen.getByText(/Lunch at noon\?/)).toBeInTheDocument();
-    const reason = screen.getByText("Aman's reason: It was on the Monday list.");
-    expect(text.indexOf("Aman's reason")).toBeGreaterThan(text.indexOf('Exactly what will be sent'));
-    expect(text.indexOf("Aman's reason")).toBeGreaterThan(text.indexOf("can't be unsent"));
+    const reason = screen.getByText('Agent says: It was on the Monday list.');
+    expect(text.indexOf('Agent says')).toBeGreaterThan(text.indexOf('Exactly what will be sent'));
+    expect(text.indexOf('Agent says')).toBeGreaterThan(text.indexOf("can't be unsent"));
     expect(reason).toBeInTheDocument();
   });
 
@@ -56,24 +57,9 @@ describe('HeldActionCard', () => {
     expect(screen.getByText('Part of this is not shown in full. Check it before you approve.')).toBeInTheDocument();
   });
 
-  it('shows the host line first when there is one, and nothing when there is not', () => {
-    const first = render(
-      <ul>
-        <HeldActionCard
-          card={card()}
-          status={{ kind: 'waiting' }}
-          alwaysAllowOffered={false}
-          provenance="From the 7am brief, which read your email"
-          onApprove={vi.fn()}
-          onAlwaysAllow={vi.fn()}
-          onDeny={vi.fn()}
-        />
-      </ul>,
-    );
-    expect(screen.getByText('From the 7am brief, which read your email')).toBeInTheDocument();
-    first.unmount();
-    renderCard();
-    expect(document.querySelector('[data-role="held-action-provenance"]')).toBeNull();
+  it('says why the action was held when the server gave a reason', () => {
+    renderCard({}, { why_asked_again: 'You have not allowed email to this address before.' });
+    expect(screen.getByText('You have not allowed email to this address before.')).toBeInTheDocument();
   });
 
   it('offers Approve and Deny, and never a chat-wide or permanent refusal', () => {
@@ -94,7 +80,24 @@ describe('HeldActionCard', () => {
   });
 
   it.each([
-    [{ kind: 'approved' as const }, 'Approved.'],
+    [{ kind: 'approved' as const, outcome: 'done' as const }, 'Approved and done.'],
+    [
+      { kind: 'approved' as const, outcome: 'failed' as const },
+      'Approved, but it failed. The details are in the chat.',
+    ],
+    [
+      { kind: 'approved' as const, outcome: 'unclear' as const },
+      'Approved, but it is not clear whether it finished. Check the chat.',
+    ],
+    [
+      { kind: 'approved' as const, outcome: 'not_run' as const },
+      'Approved, but it did not run, so nothing was done. Ask again in chat.',
+    ],
+    [{ kind: 'approved_earlier' as const }, 'Approved. See the result in the chat.'],
+    [
+      { kind: 'refused' as const, message: 'This is not allowed any more, so nothing was done. Ask again in chat.' },
+      /not allowed any more/,
+    ],
     [{ kind: 'denied' as const }, 'Denied. Nothing was done.'],
     [{ kind: 'expired' as const }, HELD_EXPIRED_TEXT],
     [{ kind: 'working' as const }, 'Working on it...'],

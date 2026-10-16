@@ -10,7 +10,7 @@ import {
   StaleApprovalContinuationError,
   TurnAlreadyExistsError,
 } from '@truefoundry/trueforge-core/agent-session';
-import { AgentHarnessError } from '@truefoundry/trueforge-core/core';
+import { AgentHarnessError, HeldActionRefusedError } from '@truefoundry/trueforge-core/core';
 import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
 import { createTurnsRouter } from '../../../src/apis/turns';
@@ -511,15 +511,19 @@ describe('POST /{session_id}/turns answering an action a scheduled run held', ()
     expect(createTurn).not.toHaveBeenCalled();
   });
 
-  it('passes the refusal for an expired hold on as a plain 422', async () => {
+  it('answers an action that cannot run now with a conflict whose code says why', async () => {
     const app = await buildApp(undefined, { heldAction: true });
-    jest
-      .spyOn(SessionHandle.prototype, 'createTurn')
-      .mockRejectedValue(new AgentHarnessError('invalid_send_input', 'Expired, nothing was done. Ask again in chat.'));
+    jest.spyOn(SessionHandle.prototype, 'createTurn').mockRejectedValue(new HeldActionRefusedError('expired'));
 
     const response = await postTurn(app, approvalInput({ status: 'allow' }));
 
-    expect(response.status).toBe(422);
-    expect(await response.json()).toEqual({ error: { message: 'Expired, nothing was done. Ask again in chat.' } });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        message: 'Expired, nothing was done. Ask again in chat.',
+        type: 'conflict',
+        code: 'held_action_expired',
+      },
+    });
   });
 });

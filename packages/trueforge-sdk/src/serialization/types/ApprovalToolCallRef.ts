@@ -3,6 +3,7 @@
 import * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
+import { ApprovalToolCallRefNotSaved } from "./ApprovalToolCallRefNotSaved.js";
 import { Tier3Card } from "./Tier3Card.js";
 
 export const ApprovalToolCallRef: core.serialization.ObjectSchema<serializers.ApprovalToolCallRef.Raw, TrueForge.ApprovalToolCallRef> = core.serialization.object({
@@ -10,6 +11,7 @@ export const ApprovalToolCallRef: core.serialization.ObjectSchema<serializers.Ap
         "expiresAt": core.serialization.property("expires_at", core.serialization.string().optional()),
         "held": core.serialization.booleanLiteral(true).optional(),
         "id": core.serialization.string(),
+        "notSaved": core.serialization.property("not_saved", ApprovalToolCallRefNotSaved.optional()),
         "sourceEventId": core.serialization.property("source_event_id", core.serialization.string()),
         "tier": core.serialization.number().optional(),
         "tier3Card": core.serialization.property("tier3_card", Tier3Card.optionalNullable())
@@ -21,6 +23,7 @@ export declare namespace ApprovalToolCallRef {
         expires_at?: string | null;
         held?: true | null;
         id: string;
+        not_saved?: ApprovalToolCallRefNotSaved.Raw | null;
         source_event_id: string;
         tier?: number | null;
         tier3_card?: (Tier3Card.Raw | null | undefined) | null;

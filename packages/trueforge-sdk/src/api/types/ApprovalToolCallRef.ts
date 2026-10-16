@@ -11,6 +11,8 @@ export interface ApprovalToolCallRef {
     held?: true;
     /** Tool call id awaiting action. */
     id: string;
+    /** Set when a scheduled run could not save this action for the owner, and why. It will not run. */
+    notSaved?: TrueForge.ApprovalToolCallRefNotSaved;
     /** Event id of the model.message that requested the tool call. */
     sourceEventId: string;
     /** Permission tier of the call; absent when the call was not classified. */

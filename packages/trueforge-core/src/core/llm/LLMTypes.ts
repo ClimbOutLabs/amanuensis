@@ -156,9 +156,15 @@ export const InternalToolCallInfoSchema = z.object({
     .optional()
     .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
   held_for_owner: z
-    .object({ expires_at: z.string() })
+    .object({ expires_at: z.string(), duplicate: z.literal(true).optional() })
     .optional()
-    .describe('Set when an unattended run held this call for the owner instead of asking. Never model-authored.'),
+    .describe(
+      'Set when an unattended run held this call for the owner instead of asking; duplicate marks a repeat of a call already held in the same batch. Never model-authored.',
+    ),
+  search_provider_call: z
+    .literal(true)
+    .optional()
+    .describe('Set on every call to the connector the user designated as search provider. Never model-authored.'),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
     .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),

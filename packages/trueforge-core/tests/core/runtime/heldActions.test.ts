@@ -15,6 +15,7 @@ import {
   forUnattendedRun,
   type SentinelServices,
 } from '../../../src/core/permissions';
+import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { AgentThreadConstructorInput } from '../../../src/core/runtime/AgentThread.types';
 import { AgentThreadOrchestrator } from '../../../src/core/runtime/AgentThreadOrchestrator';
@@ -57,7 +58,9 @@ async function* toolCallsStream(
   };
 }
 
-function makeSource(callTool: jest.Mock): ToolSource {
+type CallToolMock = jest.Mock<ReturnType<ToolSource['callTool']>, Parameters<ToolSource['callTool']>>;
+
+function makeSource(callTool: CallToolMock): ToolSource {
   const schema = { type: 'object' as const, properties: {} };
   return {
     name: 'mail',
@@ -85,7 +88,7 @@ function makeSource(callTool: jest.Mock): ToolSource {
         },
         wasInitialized: undefined,
       }),
-    callTool: (params, decision) => callTool(params, decision) as ReturnType<ToolSource['callTool']>,
+    callTool,
     toolCallInfo: params =>
       Promise.resolve({
         type: 'mcp',
@@ -98,7 +101,8 @@ function makeSource(callTool: jest.Mock): ToolSource {
 
 interface Harness {
   base: SentinelServices;
-  callTool: jest.Mock;
+  callTool: CallToolMock;
+  audit: AuditRecordInput[];
   llmCreate: jest.Mock;
   build: (input: {
     unattended: boolean;
@@ -112,11 +116,20 @@ function makeHarness(
   script: (() => ReturnType<typeof textReplyStream>)[],
   options: { searchProviderAsks?: boolean } = {},
 ): Harness {
+  const audit: AuditRecordInput[] = [];
   const base: SentinelServices = {
     ...defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+    audit: {
+      record: input => {
+        audit.push(input);
+        return Promise.resolve();
+      },
+    },
     searchWithoutAsking: () => Promise.resolve(options.searchProviderAsks !== true),
   };
-  const callTool = jest.fn(() => Promise.resolve(toolResultResponse({ text: 'sent' })));
+  const callTool: CallToolMock = jest.fn<ReturnType<ToolSource['callTool']>, Parameters<ToolSource['callTool']>>(() =>
+    Promise.resolve(toolResultResponse({ text: 'sent' })),
+  );
   const llmCreate = jest.fn();
   for (const step of script) {
     llmCreate.mockImplementationOnce(step);
@@ -124,6 +137,7 @@ function makeHarness(
   llmCreate.mockImplementation(() => textReplyStream('All done.'));
   return {
     base,
+    audit,
     callTool,
     llmCreate,
     build: input => {
@@ -223,6 +237,9 @@ describe('an unattended run', () => {
     expect(brief.result.root_agent_error).toBeUndefined();
     expect(brief.result.output).toMatchObject({ content: 'All done.' });
     expect(brief.events.map(event => event.type)).not.toContain(EventType.TOOL_EXECUTION_STARTED);
+    expect(h.audit).toEqual([
+      expect.objectContaining({ outcome: 'logged', description: expect.stringContaining('Held for the owner') }),
+    ]);
 
     const listed = brief.events.find(event => event.type === EventType.TOOL_APPROVAL_REQUIRED);
     expect(listed).toMatchObject({
@@ -281,11 +298,37 @@ describe('an unattended run', () => {
     const { brief } = await runBrief(h);
 
     const listed = brief.events.flatMap(event =>
-      event.type === EventType.TOOL_APPROVAL_REQUIRED ? event.tool_calls.map(call => call.id) : [],
+      event.type === EventType.TOOL_APPROVAL_REQUIRED
+        ? event.tool_calls.filter(call => call.held === true).map(call => call.id)
+        : [],
     );
     expect(listed).toHaveLength(20);
+    const notSaved = brief.events.flatMap(event =>
+      event.type === EventType.TOOL_APPROVAL_REQUIRED
+        ? event.tool_calls.filter(call => call.not_saved === 'too_many').map(call => call.id)
+        : [],
+    );
+    expect(notSaved).toEqual(['call-20', 'call-21']);
     expect(JSON.stringify(h.llmCreate.mock.calls[1]?.[0])).toContain('Too many actions are already waiting');
     expect(h.callTool).not.toHaveBeenCalled();
+  });
+
+  it('holds one of two identical calls and treats the repeat as a no-op that neither fails nor stops the run', async () => {
+    const h = makeHarness([() => toolCallsStream([sendNoteCall, { ...sendNoteCall, id: 'call-send-again' }])]);
+    const { thread, brief } = await runBrief(h);
+
+    const listed = brief.events.flatMap(event =>
+      event.type === EventType.TOOL_APPROVAL_REQUIRED ? event.tool_calls.map(call => call.id) : [],
+    );
+    expect(listed).toEqual(['call-send']);
+    expect(brief.result.root_agent_error).toBeUndefined();
+    expect(brief.result.output).toMatchObject({ content: 'All done.' });
+    expect(h.audit).toHaveLength(1);
+    // The repeat is not something the owner can answer.
+    const replay = h.build({ unattended: false, context: heldContext(thread), stopAfterToolResponse: true });
+    await expect(
+      runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-send-again')] }),
+    ).rejects.toBeInstanceOf(InvalidAgentSendInputError);
   });
 
   it('holds the same call in an attended chat as a pause, so an owner follow-up asks as usual', async () => {
@@ -322,8 +365,9 @@ describe('approving a held action later', () => {
     expect(await h.base.token_store.peek({ ...OWNER, token_id: heldToken ?? '' })).toBeUndefined();
     expect(h.callTool).toHaveBeenCalledTimes(1);
     expect(h.callTool).toHaveBeenCalledWith(
-      { name: 'send_note', arguments: JSON.parse(SEND_ARGS) as unknown },
+      { name: 'send_note', arguments: JSON.parse(SEND_ARGS) },
       expect.objectContaining({ status: 'allow' }),
+      expect.anything(),
     );
     expect(h.llmCreate.mock.calls.length).toBe(modelCallsBefore);
     expect(turn.result.root_agent_error).toBeUndefined();
@@ -365,6 +409,7 @@ describe('approving a held action later', () => {
     expect(h.callTool).not.toHaveBeenCalled();
     expect(h.llmCreate.mock.calls.length).toBe(modelCallsBefore);
     expect(turn.result.output).toMatchObject({ content: 'Denied. Nothing was done.' });
+    expect(h.audit.at(-1)).toMatchObject({ outcome: 'denied', description: expect.stringContaining('Turned down') });
   });
 
   it('refuses an expired hold and leaves the chat as it was', async () => {
@@ -386,10 +431,14 @@ describe('approving a held action later', () => {
     );
 
     const replay = h.build({ unattended: false, context: stale, stopAfterToolResponse: true });
-    await expect(runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-send')] })).rejects.toThrow(
-      'Expired, nothing was done. Ask again in chat.',
-    );
+    await expect(
+      runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-send')] }),
+    ).rejects.toMatchObject({
+      name: 'HeldActionRefusedError',
+      reason: 'expired',
+    });
     expect(h.callTool).not.toHaveBeenCalled();
+    expect(h.audit.at(-1)).toMatchObject({ outcome: 'denied', description: expect.stringContaining('expired') });
   });
 
   it('refuses when the hold-time token was already used', async () => {
@@ -405,9 +454,11 @@ describe('approving a held action later', () => {
     await h.base.token_store.redeem({ ...OWNER, token_id: tokenId });
 
     const replay = h.build({ unattended: false, context, stopAfterToolResponse: true });
-    await expect(runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-send')] })).rejects.toThrow(
-      'Expired, nothing was done.',
-    );
+    await expect(
+      runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-send')] }),
+    ).rejects.toMatchObject({
+      reason: 'expired',
+    });
     expect(h.callTool).not.toHaveBeenCalled();
   });
 
@@ -433,9 +484,11 @@ describe('approving a held action later', () => {
     );
 
     const replay = h.build({ unattended: false, context: changed, stopAfterToolResponse: true });
-    await expect(runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-send')] })).rejects.toThrow(
-      'This no longer matches what was held',
-    );
+    await expect(
+      runTurn({ orchestrator: replay.orchestrator, sendBatch: [approve('call-send')] }),
+    ).rejects.toMatchObject({
+      reason: 'changed',
+    });
     expect(h.callTool).not.toHaveBeenCalled();
   });
 
@@ -453,6 +506,8 @@ describe('approving a held action later', () => {
 
     expect(await h.base.tool_grants.hasToolGrant(grantKey)).toBe(true);
     expect(h.callTool).toHaveBeenCalledTimes(1);
+    // The grant made the call silent, so no dispatch row follows: the approval is recorded at the answer.
+    expect(h.audit.at(-1)).toMatchObject({ outcome: 'approved' });
   });
 
   it('does not offer a chat-wide approval on a held action', async () => {

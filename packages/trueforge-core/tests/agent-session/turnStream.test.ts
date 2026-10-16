@@ -2011,10 +2011,10 @@ describe('TurnResourceResolver caches', () => {
 
     it.each([
       { source: scheduleSource, unattended: true, relaxed: [] },
-      { source: scheduleSource, unattended: undefined, relaxed: ['file_write'] },
+      { source: scheduleSource, unattended: undefined, relaxed: [] },
       { source: null, unattended: undefined, relaxed: ['file_write'] },
     ])(
-      'applies relaxations only to a turn that is not unattended (source: $source, unattended: $unattended)',
+      'applies relaxations only outside scheduled chats (source: $source, unattended: $unattended)',
       async ({ source, relaxed, unattended }) => {
         const { received, runTurn } = await setup(source);
         await runTurn({ unattended, previous_turn_id: 'none' });
@@ -2033,6 +2033,10 @@ describe('TurnResourceResolver caches', () => {
       expect(received[0]?.services.token_store).toBe(sentinelServices.token_store);
       expect(received[1]?.services.token_store).toBe(sentinelServices.token_store);
       expect(received[0]?.services.tool_grants).toBe(sentinelServices.tool_grants);
+      // The owner typing still gets no relaxations: the chat's context holds what the run read.
+      expect([
+        ...((await received[1]?.services.tier2AutoAllow({ tenant_id: 't', created_by: 'user-1' })) ?? []),
+      ]).toEqual([]);
     });
   });
 });

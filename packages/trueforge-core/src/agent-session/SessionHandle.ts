@@ -15,6 +15,7 @@ import {
   DEFAULT_PINNED_PATH,
   defaultSentinelServices,
   forUnattendedRun,
+  withoutRelaxations,
   type SentinelHostContext,
   type SentinelServices,
 } from '../core/permissions';
@@ -305,11 +306,11 @@ export class SessionHandle<
     /** Durable owner written on registered-command leases (replica id in distributed mode). */
     command_execution_owner_id?: string | undefined;
     /**
-     * No person watches this turn (a scheduled run): relaxations never apply and a call that would
-     * ask is held for the owner. A follow-up turn in the same chat is attended unless it sets this too.
+     * No person watches this turn (a scheduled run): a call that would ask is held for the owner.
+     * A follow-up turn in the same chat asks as usual, but never gets the owner's relaxations.
      */
     unattended?: boolean | undefined;
-    /** End the turn after its tool step without calling the model; see {@link answersOnlyHeldActions}. */
+    /** End the turn after its tool step without calling the model. */
     stop_after_tool_response?: boolean | undefined;
   }): Promise<TurnHandle<TTurnCustom>> {
     const previousTurnId = resolvePreviousTurnId(input.previous_turn_id, this.session.last_turn_id);
@@ -319,8 +320,14 @@ export class SessionHandle<
     const previous = previousTurnId ? await this.getTurnRecord(previousTurnId) : undefined;
 
     const custom = typeof input.custom === 'function' ? input.custom(previous?.custom ?? undefined) : input.custom;
+    // A scheduled chat never gets the owner's relaxations, even on turns they type: its context still
+    // holds what the run read. Only holding what would ask stays with the unattended turn itself.
     const sentinelServices =
-      input.unattended === true ? forUnattendedRun(this.sentinelServices) : this.sentinelServices;
+      input.unattended === true
+        ? forUnattendedRun(this.sentinelServices)
+        : this.session.source?.type === 'schedule'
+          ? withoutRelaxations(this.sentinelServices)
+          : this.sentinelServices;
 
     // Dispose-on-early-failure: any resource acquired below (sandbox handle,
     // MCP connections) is owned by createTurn() until the TurnHandle is returned; from then

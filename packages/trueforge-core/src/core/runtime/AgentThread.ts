@@ -113,13 +113,14 @@ import {
   toDispatchSentinelContext,
 } from '../permissions';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
+import { recordHeldActionAudit } from '../permissions/audit';
 import {
   checkHeldReplay,
   HELD_DENIED_NOTE,
   HELD_REASON_CODE,
-  HELD_SIGN_IN_MESSAGE,
-  HELD_TOOL_GONE_MESSAGE,
+  HeldActionRefusedError,
   holdApprovalCalls,
+  type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
@@ -1417,6 +1418,8 @@ export class AgentThread {
   // because events produced while a turn is being prepared are not persisted.
   private pendingHeldReplayEvents: ModelMessageEvent[] = [];
   private heldReplayOutput: ModelMessageEvent | undefined;
+  // Calls an unattended turn could not save for the owner, so the app can say so. Lives for one turn.
+  private readonly notSavedCalls = new Map<string, NotSavedReason>();
   // Set when send() ran init() early to re-check held actions; execute() reports it with its own init.
   private earlyInit: { initializationInfo: MCPServerInitInfo[]; authRequirementInfo: MCPAuthRequired[] } | undefined;
   // Staged documents awaiting extraction in the turn loop. Set by send() when processAgentUserInput
@@ -1851,6 +1854,25 @@ export class AgentThread {
     }
   }
 
+  private async auditHeld(input: {
+    info: InternalToolCallInfo;
+    outcome: 'logged' | 'approved' | 'denied';
+    note: string;
+  }): Promise<void> {
+    if (this.sentinel === undefined) {
+      return;
+    }
+    await recordHeldActionAudit({
+      services: this.sentinel.services,
+      identity: {
+        tenant_id: this.sentinel.tenant_id,
+        created_by: this.sentinel.created_by,
+        conversation_id: this.sentinel.conversation_id,
+      },
+      ...input,
+    });
+  }
+
   /**
    * Turns the owner's answers on held actions into context. An allowed action becomes a fresh call
    * with the exact stored arguments, classified again and re-stamped with its hold-time token, so
@@ -1868,6 +1890,12 @@ export class AgentThread {
       const held = input.heldById.get(approval.tool_call_id);
       return approval.approval.status === 'allow' && held !== undefined ? [held] : [];
     });
+    for (const approval of input.approvals) {
+      const denied = approval.approval.status === 'deny' ? input.heldById.get(approval.tool_call_id) : undefined;
+      if (denied !== undefined) {
+        await this.auditHeld({ info: denied.tool_info, outcome: 'denied', note: 'Turned down by the owner' });
+      }
+    }
     if (allowedCalls.length === 0) {
       const note: InternalEnrichedAssistantMessage = { role: 'assistant', content: HELD_DENIED_NOTE };
       return {
@@ -1892,11 +1920,11 @@ export class AgentThread {
       this.earlyInit = await this.initTools();
     }
     if (this.earlyInit !== undefined && this.earlyInit.authRequirementInfo.length > 0) {
-      throw new InvalidAgentSendInputError(HELD_SIGN_IN_MESSAGE);
+      throw new HeldActionRefusedError('sign_in');
     }
     const { toolMapping } = this.getConvertedTools();
     if (allowedCalls.some(call => !toolMapping.has(call.function.name))) {
-      throw new InvalidAgentSendInputError(HELD_TOOL_GONE_MESSAGE);
+      throw new HeldActionRefusedError('tool_gone');
     }
     const rawCopy: RawAssistantMessage = {
       role: 'assistant',
@@ -1929,7 +1957,12 @@ export class AgentThread {
         scope,
       });
       if (!check.ok) {
-        throw new InvalidAgentSendInputError(check.message);
+        await this.auditHeld({ info: held.tool_info, outcome: 'denied', note: `Not run, ${check.reason}` });
+        throw new HeldActionRefusedError(check.reason);
+      }
+      if (check.approval_token_id === null) {
+        // No token to redeem, so no dispatch row will follow: record the approval here.
+        await this.auditHeld({ info: held.tool_info, outcome: 'approved', note: 'Approved by the owner' });
       }
       copyCalls.push({ ...fresh, tool_info: { ...fresh.tool_info, approval_token_id: check.approval_token_id } });
     }
@@ -3077,14 +3110,23 @@ export class AgentThread {
       logger: this.logger,
     });
     // Nobody is there to approve in an unattended turn: calls that would ask are held for the owner.
-    const assistantMessage =
-      this.sentinel?.services.unattended === true
-        ? holdApprovalCalls({
-            message: enrichedMessage,
-            alreadyHeld: findHeldToolCalls(this.context).length,
-            isSubAgent: this.parent !== undefined,
-          })
-        : enrichedMessage;
+    let assistantMessage = enrichedMessage;
+    if (this.sentinel?.services.unattended === true) {
+      const held = holdApprovalCalls({
+        message: enrichedMessage,
+        alreadyHeld: findHeldToolCalls(this.context).length,
+        isSubAgent: this.parent !== undefined,
+      });
+      assistantMessage = held.message;
+      for (const { id, reason } of held.refused) {
+        this.notSavedCalls.set(id, reason);
+      }
+      for (const call of assistantMessage.tool_calls ?? []) {
+        if (call.tool_info.held_for_owner !== undefined && call.tool_info.held_for_owner.duplicate !== true) {
+          await this.auditHeld({ info: call.tool_info, outcome: 'logged', note: 'Held for the owner' });
+        }
+      }
+    }
     const finishReason = result.value.finish_reason;
     // The empty-answer nudge (below) gets first say over a genuinely empty stop: only apply the
     // fixed host note on the second attempt, once that nudge already fired this turn and the
@@ -3940,9 +3982,19 @@ export class AgentThread {
       taskState: nextTaskState,
     });
     // The app lists held actions from this event. It never pauses the turn: nobody is there to answer.
-    const heldRefs = toolCallResults.flatMap(result => {
+    const heldRefs = toolCallResults.flatMap((result): ToolApprovalRequiredEvent['tool_calls'] => {
       const call = openCalls.find(candidate => candidate.id === result.message.tool_call_id);
-      return call !== undefined && result.remediation?.reason_code === HELD_REASON_CODE
+      if (call === undefined) {
+        return [];
+      }
+      const notSaved = this.notSavedCalls.get(call.id);
+      if (notSaved !== undefined) {
+        return [
+          { id: call.id, source_event_id: modelMessageEventId, ...approvalCardFields(call), not_saved: notSaved },
+        ];
+      }
+      const held = call.tool_info.held_for_owner;
+      return held !== undefined && held.duplicate !== true && result.remediation?.reason_code === HELD_REASON_CODE
         ? [
             {
               id: call.id,
@@ -3950,9 +4002,7 @@ export class AgentThread {
               ...approvalCardFields(call),
               held: true as const,
               can_always_allow: allowsToolGrant(call.tool_info),
-              ...(call.tool_info.held_for_owner === undefined
-                ? {}
-                : { expires_at: call.tool_info.held_for_owner.expires_at }),
+              expires_at: held.expires_at,
             },
           ]
         : [];

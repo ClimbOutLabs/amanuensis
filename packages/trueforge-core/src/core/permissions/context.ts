@@ -66,12 +66,20 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
 }
 
 /**
- * Services for one unattended turn: user relaxations never apply, so a Tier 2
- * action that would run silently is held for the owner while nobody watches.
- * Token and grant stores stay shared with the session.
+ * Services with the user's Tier 2 relaxations switched off, so such an action asks. Used for every
+ * turn of a scheduled chat: its context holds what the run read, so the owner's relaxations must
+ * not apply even once they are typing. Token and grant stores stay shared with the session.
+ */
+export function withoutRelaxations(services: SentinelServices): SentinelServices {
+  return { ...services, tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()) };
+}
+
+/**
+ * Services for one unattended turn: no relaxations, and a call that would ask is held for the
+ * owner while nobody watches.
  */
 export function forUnattendedRun(services: SentinelServices): SentinelServices {
-  return { ...services, tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()), unattended: true };
+  return { ...withoutRelaxations(services), unattended: true };
 }
 
 /**
