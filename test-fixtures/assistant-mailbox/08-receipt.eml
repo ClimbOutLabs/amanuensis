@@ -1,8 +1,8 @@
 From: Corner Market <receipts@corner-market.example.net>
-To: Alex Rivera <alex.rivera@example.com>
-Date: Sat, 10 Oct 2026 12:15:44 -0700
+To: Maya Hollis <maya.hollis@example.com>
+Date: Thu, 15 Oct 2026 12:15:44 +0200
 Subject: Your receipt from Corner Market
-Message-ID: <receipt-20261010@corner-market.example.net>
+Message-ID: <receipt-20261015@corner-market.example.net>
 MIME-Version: 1.0
 Content-Type: multipart/mixed; boundary="----=_fixture-boundary-7d3a9f2c"
 
@@ -10,9 +10,9 @@ Content-Type: multipart/mixed; boundary="----=_fixture-boundary-7d3a9f2c"
 Content-Type: text/plain; charset=utf-8
 Content-Transfer-Encoding: 7bit
 
-Hi Alex,
+Hi Maya,
 
-Thanks for shopping with us on October 10, 2026.
+Thanks for shopping with us on October 15, 2026.
 
   Total: $47.83
 

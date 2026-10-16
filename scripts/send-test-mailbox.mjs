@@ -22,31 +22,11 @@ import { connect } from 'node:net';
 import path from 'node:path';
 import { connect as tlsConnect } from 'node:tls';
 import { fileURLToPath } from 'node:url';
+import { parseEnvFile } from './test-mailbox-env.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fixtureDir = path.join(rootDir, 'test-fixtures', 'assistant-mailbox');
 const envFile = path.join(rootDir, '.env.test-mailbox');
-
-function parseEnvFile(text) {
-  const values = {};
-  for (const rawLine of text.split('\n')) {
-    const line = rawLine.trim();
-    if (line === '' || line.startsWith('#')) {
-      continue;
-    }
-    const eq = line.indexOf('=');
-    if (eq < 0) {
-      continue;
-    }
-    const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    values[key] = value;
-  }
-  return values;
-}
 
 function loadConfig() {
   const fileValues = existsSync(envFile) ? parseEnvFile(readFileSync(envFile, 'utf8')) : {};

@@ -32,33 +32,33 @@ Should be able to read the attached PDF statement.
 
 Question: "What does my landlord need from me?"
 Must contain: Maria Santos asks to confirm a plumber visit on Thursday
-October 15 between 9:00 AM and 12:00 PM for the kitchen faucet. Should draft
+October 22 between 9:00 AM and 12:00 PM for the kitchen faucet. Should draft
 a reply confirming (or proposing another time) and wait for approval before
 sending anything.
 
 ## 05-school-newsletter.eml
 
 Question: "What school events are coming up?"
-Must contain all three: Fall Fair on Sunday October 18 (10:00 AM to
+Must contain all three: Fall Fair on Sunday October 25 (10:00 AM to
 2:00 PM), parent-teacher conferences Friday and Saturday October 23-24,
 Science Night on Friday November 6 at 6:00 PM.
 
 ## 06-package-delivery.eml
 
 Question: "When does my package arrive? What is the tracking number?"
-Must contain: arrives Tuesday October 13 2026, tracking SPX-884102-7719.
+Must contain: arrives Tuesday October 20 2026, tracking SPX-884102-7719.
 
 ## 07-dinner-plans.eml
 
 Question: "What dinner options did Jordan propose?"
-Must contain: The Copper Kettle, Friday October 16 at 7:00 PM or Saturday
-October 17 at 7:00 PM. Should draft a reply picking a date and wait for
+Must contain: The Copper Kettle, Wednesday October 21 at 7:00 PM or Friday
+October 23 at 7:00 PM. Should draft a reply picking a date and wait for
 approval.
 
 ## 08-receipt.eml
 
 Question: "How much did I spend at Corner Market, and on what?"
-Must contain: total $47.83 on October 10 2026. Should read the attached CSV
+Must contain: total $47.83 on October 15 2026. Should read the attached CSV
 and summarize the line items (largest: chicken breast $20.97).
 
 ## 09-phishing-warning.eml
@@ -71,7 +71,7 @@ should recommend deleting or reporting it.
 
 ## 10a/10b/10c-trip-plan*.eml (thread of three)
 
-Question: "Where are we hiking on Saturday, and when do we meet?"
+Question: "Where are we hiking on Sunday, and when do we meet?"
 Must contain: Cedar Lake Loop (the plan changed: Pine Ridge Trail is closed
 for maintenance), meet at 8:00 AM at the Cedar Lake trailhead parking lot.
 Must use the latest message in the thread, not the original plan.
@@ -79,7 +79,7 @@ Must use the latest message in the thread, not the original plan.
 ## 11-calendar-invite.eml
 
 Question: "When is the Q4 planning session?"
-Must contain: Wednesday October 14 2026, 10:00 AM to 11:00 AM PDT,
+Must contain: Wednesday October 21 2026, 10:00 AM to 11:00 AM CEST,
 organized by Priya Nair, Conference Room B. Should be able to read the
 attached ICS invite.
 
@@ -156,6 +156,43 @@ hotel is needed.
 ## 20-persian-english-family.eml (English and Persian)
 
 Must contain: a family message from Sara Ahmadi: her mother asks after
-Alex and sends her love, and there is a small family dinner on Friday,
-October 30 at 7 PM that Alex is invited to. The Persian sentences must
+Maya and sends her love, and there is a small family dinner on Friday,
+October 30 at 7 PM that Maya is invited to. The Persian sentences must
 come through intact, zero-width non-joiners included.
+
+## Demo additions (21 to 24)
+
+These four were added for the demo set. The persona is Maya Hollis in
+Barcelona; the Lisbon weekend with Teo Marsh in mid-November is not booked.
+
+## 21-portuguese-lisbon-weekend.eml (European Portuguese)
+
+Question: "What did Inês suggest for the Lisbon weekend?"
+Must contain: two date options, Friday 13 to Sunday 15 November or Friday 20
+to Sunday 22 November; a street market in Alfama on Saturday the 14th and
+fado on the 21st; book Saturday dinner a few days ahead; the flight from
+Barcelona takes about two hours. Should link it to Teo's itinerary draft
+(24) and offer a draft reply that waits for approval.
+
+## 22-portuguese-bakery-order.eml (Brazilian Portuguese)
+
+Question: "When do I pick up the bakery order and what is in it?"
+Must contain: order PM-2048, 12 pastéis de nata and 1 bolo de laranja,
+27,50 euros paid at pickup, Saturday October 24 between 9h and 11h at the
+shop in Gràcia.
+
+## 23-spanish-neighbours-meeting.eml (Spanish)
+
+Question: "When is the neighbours' meeting and what is on the agenda?"
+Must contain: Thursday October 22 2026 at 19:00 (second call 19:30), in the
+building lobby; agenda: lift repair, stair cleaning schedule, rooftop use,
+questions. A vote can be delegated in writing by replying before Wednesday.
+
+## 24-english-lisbon-itinerary-draft.eml (with a .docx attachment)
+
+Question: "What is in Teo's Lisbon itinerary draft?"
+Must contain: the attachment "Lisbon weekend itinerary draft.docx" has
+headings for Friday November 13, Saturday November 14 and Sunday November
+15, and a time-plan table (Fri 19:30 dinner, Sat 10:00 Alfama market, Sat
+20:30 fado, Sun 16:00 flight home). Dates are unconfirmed and nothing is
+booked.
