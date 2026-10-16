@@ -13,11 +13,6 @@ valid_ipv4() {
   done
 }
 
-# Tailscale is here when its command is or its interface exists. Only then is 100.64.0.0/10 a private range.
-tailscale_present() {
-  command -v tailscale >/dev/null 2>&1 || [ -e "${AMAN_SYS_NET:-/sys/class/net}/tailscale0" ]
-}
-
 # Runs a command for at most N seconds, so a wedged helper cannot stall the install or the doctor.
 run_bounded() { # seconds command...
   local secs=$1 pid watcher rc=0
@@ -39,8 +34,8 @@ run_bounded() { # seconds command...
   return "$rc"
 }
 
-# Loopback, RFC 1918, link-local, and 100.64.0.0/10 when Tailscale is on this computer (otherwise that range is
-# carrier-grade NAT from an internet provider, which is not a private network).
+# Loopback, RFC 1918, link-local, and 100.64.0.0/10 only where it is Tailscale's own address on this computer
+# (otherwise that range is carrier-grade NAT from an internet provider, which is not a private network).
 private_ipv4() {
   local a b
   valid_ipv4 "$1" || return 1
@@ -50,7 +45,16 @@ private_ipv4() {
   [ "$a" = 192 ] && [ "$b" = 168 ] && return 0
   [ "$a" = 169 ] && [ "$b" = 254 ] && return 0
   [ "$a" = 172 ] && [ "$b" -ge 16 ] && [ "$b" -le 31 ] && return 0
-  [ "$a" = 100 ] && [ "$b" -ge 64 ] && [ "$b" -le 127 ] && tailscale_present && return 0
+  [ "$a" = 100 ] && [ "$b" -ge 64 ] && [ "$b" -le 127 ] && network_tailscale_address "$1" && return 0
+  return 1
+}
+
+# A label made only of numbers or hex (0x7f, 1e3) is read as part of an address by some systems, so it is not a name.
+has_numeric_label() {
+  local label
+  for label in ${1//./ }; do
+    if [[ $label =~ ^(0x[0-9a-f]*|[0-9]+(e[0-9]+)?)$ ]]; then return 0; fi
+  done
   return 1
 }
 
@@ -62,6 +66,7 @@ private_host() {
     private_ipv4 "$host"
     return
   fi
+  if has_numeric_label "$host"; then return 1; fi
   case "$host" in
     *.local | *.ts.net) return 0 ;;
     *.*) return 1 ;;
@@ -69,34 +74,76 @@ private_host() {
   esac
 }
 
-# Every IPv4 address this computer has on a network, one per line, each once. Loopback and container bridges mean
-# nothing to another device, so they are left out; Tailscale's address is added when its command is there.
-network_ipv4_addresses() {
-  local out='' line seen=' '
+# Every IPv4 address of this computer with the interface that carries it, as "interface address" lines.
+network_interface_addresses() {
+  local out=''
   case "$(uname -s)" in
     Darwin)
-      out=$(ifconfig 2>/dev/null | awk '/^[a-z]/ { iface = $1 } /^[ \t]+inet / && iface !~ /^(lo|bridge|vmnet|docker)/ { print $2 }' || true)
-      ;;
-    *)
-      if command -v ip >/dev/null 2>&1; then
-        out=$(ip -4 -o addr show scope global 2>/dev/null | awk '$2 !~ /^(docker|br-|veth|virbr|cni|flannel|cali)/ { sub(/\/.*/, "", $4); print $4 }' || true)
-      fi
-      if [ -z "$out" ] && command -v hostname >/dev/null 2>&1; then
-        out=$(hostname -I 2>/dev/null | tr ' ' '\n' || true)
-      fi
+      ifconfig 2>/dev/null | awk '/^[a-z]/ { iface = $1; sub(/:$/, "", iface) } /^[ \t]+inet / { print iface, $2 }' || true
+      return 0
       ;;
   esac
-  if command -v tailscale >/dev/null 2>&1; then
-    out="$out"$'\n'$(run_bounded 3 tailscale ip -4 2>/dev/null | head -n 1 || true)
+  if command -v ip >/dev/null 2>&1; then
+    out=$(ip -4 -o addr show scope global 2>/dev/null | awk '{ sub(/\/.*/, "", $4); print $2, $4 }' || true)
   fi
-  while IFS= read -r line; do
+  if [ -z "$out" ] && command -v hostname >/dev/null 2>&1; then
+    out=$(hostname -I 2>/dev/null | tr ' ' '\n' | awk 'NF { print "unknown", $1 }' || true)
+  fi
+  printf '%s\n' "$out"
+}
+
+# This computer's address on Tailscale as its own command reports it (empty when it is not running).
+network_tailscale_ip() {
+  command -v tailscale >/dev/null 2>&1 || return 0
+  run_bounded 3 tailscale ip -4 2>/dev/null | head -n 1 || true
+}
+
+# True for Tailscale's own address here: on its tailscale0 interface, or on a macOS utun that its command names.
+network_tailscale_address() { # address
+  local iface addr
+  while read -r iface addr; do
+    [ "$addr" = "$1" ] || continue
+    case "$iface" in
+      tailscale0) return 0 ;;
+      utun*) [ "$1" = "$(network_tailscale_ip)" ] && return 0 ;;
+    esac
+  done < <(network_interface_addresses)
+  return 1
+}
+
+# Interfaces whose addresses other devices cannot use: loopback, container, virtual-machine and other VPN links.
+# Tailscale's own link is the one exception among them.
+network_interface_skipped() { # interface address
+  case "$1" in
+    tailscale0) return 1 ;;
+    utun*) [ "$2" != "$(network_tailscale_ip)" ] ;;
+    lo* | docker* | br-* | veth* | virbr* | cni* | flannel* | cali* | tun* | tap* | wg* | lxdbr* | lxcbr* | vboxnet* | podman* | vmnet* | bridge* | zt* | tailscale*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The addresses left out, as "interface address" lines, so a person can see why one is missing.
+network_skipped_addresses() {
+  local iface addr
+  while read -r iface addr; do
+    [ -n "$addr" ] || continue
+    if valid_ipv4 "$addr" && network_interface_skipped "$iface" "$addr"; then printf '%s %s\n' "$iface" "$addr"; fi
+  done < <(network_interface_addresses)
+}
+
+# Every IPv4 address this computer has on a network other devices can reach, one per line, each once.
+network_ipv4_addresses() {
+  local iface line seen=' '
+  while read -r iface line; do
+    [ -n "$line" ] || continue
     case "$line" in 127.* | 169.254.*) continue ;; esac
+    network_interface_skipped "$iface" "$line" && continue
     case "$seen" in *" $line "*) continue ;; esac
     if valid_ipv4 "$line"; then
       seen="$seen$line "
       printf '%s\n' "$line"
     fi
-  done <<<"$out"
+  done < <(network_interface_addresses)
 }
 
 # This computer's short name, lowercase, when it is a usable host name.
@@ -149,7 +196,7 @@ address_problem() {
   host=$(lowercase "$1")
   if [ -z "$host" ]; then
     echo "An address is needed. Example: --address 192.168.1.20 or --address spark.local"
-  elif ! valid_ipv4 "$host" && ! { [[ $host =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] && [[ $host != *..* ]] && [[ ! $host =~ ^[0-9.]+$ ]]; }; then
+  elif ! valid_ipv4 "$host" && ! { [[ $host =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] && [[ $host != *..* ]] && [[ ! $host =~ ^[0-9.]+$ ]] && ! has_numeric_label "$host"; }; then
     echo "$1 is not an address or a name. Examples: 192.168.1.20, spark.local"
   elif ! private_host "$host"; then
     echo "$1 is a public address, and signing in over plain http across the internet is not safe. For access from the internet set up HTTPS with --tls caddy (with --public-url and --login-url)."

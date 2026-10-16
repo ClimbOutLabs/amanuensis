@@ -272,7 +272,10 @@ export function createWorld({ instances = ['main'] } = {}) {
         `name=${name}\napp_port=8791\npublic_url=http://127.0.0.1:8791\norigins=${origins}\nextra_hosts=${extraHosts}\n`,
       );
       const lines = addresses
-        .map((address, index) => `${index + 1}: eth0    inet ${address}/24 scope global eth0`)
+        .map((entry, index) => {
+          const [iface, address] = entry.includes(':') ? entry.split(':') : ['eth0', entry];
+          return `${index + 1}: ${iface}    inet ${address}/24 scope global ${iface}`;
+        })
         .join('\\n');
       world.install('ip', `#!/usr/bin/env bash\nprintf '${lines}\\n'\n`);
     },

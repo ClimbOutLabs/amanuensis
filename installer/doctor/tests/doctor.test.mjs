@@ -1296,14 +1296,23 @@ describe('network address check', () => {
     assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
   });
 
-  it('does not offer a carrier-grade address unless Tailscale is on this computer', () => {
+  it('does not offer a carrier-grade address unless it is on the Tailscale link', () => {
     make();
-    world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', '100.101.102.103'] });
-    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
     world.install('tailscale', '#!/usr/bin/env bash\nexit 1\n');
+    world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', 'eth1:100.101.102.103'] });
+    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
+    world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', 'tailscale0:100.101.102.103'] });
     const check = find(world.json().doc.instances.main, 'network');
     assert.equal(check.state, 'warn');
     assert.match(check.detail, /100\.101\.102\.103/);
+  });
+
+  it('does not offer an address on a container or VPN link', () => {
+    make();
+    world.network('main', {
+      addresses: ['127.0.0.1', '192.168.1.20', 'docker0:172.17.0.1', 'wg0:10.7.0.2', 'tun0:10.8.0.2'],
+    });
+    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
   });
 
   it('--fix refreshes the instance through the installer, after a yes', () => {

@@ -177,7 +177,7 @@ dl_add() {
 }
 
 print_network_destinations() {
-  local line fid hosts all=
+  local line fid hosts all='' skipped iface addr
   while IFS='|' read -r fid _ _ hosts; do
     case "$fid" in '' | '#'*) continue ;; esac
     all="$all $hosts"
@@ -187,6 +187,14 @@ print_network_destinations() {
     say "  $line"
   done
   say "Nothing is scanned and nothing is reported to the project."
+  skipped=$(network_skipped_addresses)
+  if [ -n "$skipped" ]; then
+    say ""
+    say "Addresses of this computer that Aman does not open at, because other devices cannot reach them (virtual or VPN networks):"
+    while read -r iface addr; do
+      say "  $addr ($iface)"
+    done <<<"$skipped"
+  fi
 }
 
 # One plan row per entry: a status word and a sentence, the detail dim underneath.

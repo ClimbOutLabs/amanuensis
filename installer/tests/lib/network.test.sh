@@ -16,7 +16,7 @@ in_lib() {
 
 # A computer on a home network with Tailscale: a LAN address, a Tailscale address, its name and its MagicDNS name.
 fixture_full_machine() {
-  fixture_network 192.168.1.20 100.101.102.103
+  fixture_network 192.168.1.20 tailscale0:100.101.102.103
   fixture_hostname spark
   fixture_tailscale 100.101.102.103 spark.example.ts.net
 }
@@ -196,9 +196,15 @@ test_private_and_public_hosts_match_the_shared_list() {
     if in_lib "private_host '$host'"; then t_fail "public host accepted: $host"; else t_pass; fi
   done < <(each_host public cgnat)
   fixture_tailscale 100.101.102.103 spark.example.ts.net
+  fixture_network
   while read -r host; do
-    if in_lib "private_host '$host'"; then t_pass; else t_fail "100.64.0.0/10 refused with Tailscale present: $host"; fi
+    STUB_ADDRS="tailscale0:$host"
+    if in_lib "private_host '$host'"; then t_pass; else t_fail "100.64.0.0/10 refused on the Tailscale link: $host"; fi
+    STUB_ADDRS="eth0:$host"
+    if in_lib "private_host '$host'"; then t_fail "100.64.0.0/10 accepted on another link even though Tailscale is here: $host"; else t_pass; fi
   done < <(each_host cgnat)
+  STUB_ADDRS=''
+  fixture_network
   while read -r host; do
     if in_lib "private_host '$host'"; then t_fail "public host accepted with Tailscale present: $host"; else t_pass; fi
   done < <(each_host public)
@@ -233,7 +239,7 @@ test_carrier_grade_nat_is_public_without_tailscale() {
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "100.64.5.5"
   sandbox_drop
   sandbox_new
-  fixture_network 192.168.1.20 100.64.5.5
+  fixture_network 192.168.1.20 tailscale0:100.64.5.5
   fixture_tailscale 100.64.5.5 spark.example.ts.net
   install_machine
   assert_contains "$(env_value main ALLOWED_ORIGINS)" "http://100.64.5.5:8791"
@@ -268,7 +274,7 @@ test_a_wedged_tailscale_cannot_stall_the_install() {
 test_tailscale_names_and_addresses() {
   t_begin "only this computer's own MagicDNS name is used, and an address that ip and tailscale both report is listed once"
   sandbox_new
-  fixture_network 192.168.1.20 100.101.102.103
+  fixture_network 192.168.1.20 tailscale0:100.101.102.103
   fixture_hostname spark
   fixture_tailscale 100.101.102.103 spark.example.ts.net
   assert_eq "$(in_lib 'network_tailscale_name')" "spark.example.ts.net"
@@ -472,6 +478,55 @@ test_a_hosted_instance_is_never_opened_on_the_network() {
   sandbox_drop
 }
 
+test_virtual_and_vpn_links_are_never_opened_on() {
+  t_begin "addresses on container, virtual-machine and other VPN links are neither bound nor listed, and --print-network names them"
+  sandbox_new
+  fixture_network eth0:192.168.1.20 docker0:172.17.0.1 virbr0:192.168.122.1 tun0:10.8.0.2 wg0:10.7.0.2 lxdbr0:10.10.10.1 \
+    vboxnet0:192.168.56.1 podman0:10.88.0.1 vmnet8:172.16.5.1 utun3:10.20.0.2 br-abc:172.20.0.1
+  install_machine
+  assert_eq "$(env_value main ALLOWED_ORIGINS | tr ',' '\n' | grep -E '^http://[0-9.]+:' | grep -vc '127.0.0.1')" 1 "only the real network"
+  assert_contains "$(env_value main ALLOWED_ORIGINS)" "http://192.168.1.20:8791"
+  local compose
+  compose=$(cat "$AMAN_HOME/instances/main/compose.yaml")
+  assert_eq "$(printf '%s\n' "$compose" | grep -c ":8790'")" 2 "127.0.0.1 and the one real address"
+  run_install --print-network
+  assert_rc 0
+  local link
+  for link in docker0 virbr0 tun0 wg0 lxdbr0 vboxnet0 podman0 vmnet8 utun3 br-abc; do
+    assert_flat_contains "$OUT" "($link)"
+  done
+  assert_not_contains "$OUT" "(eth0)"
+  sandbox_drop
+}
+
+test_tailscale_is_used_only_on_its_own_link() {
+  t_begin "a 100.64.0.0/10 address counts as private only on tailscale0, or on a utun that tailscale itself names"
+  sandbox_new
+  fixture_network eth0:192.168.1.20 eth1:100.64.7.7 utun4:100.101.102.103 utun5:100.99.99.99
+  fixture_tailscale 100.101.102.103 spark.example.ts.net
+  assert_eq "$(in_lib 'network_ipv4_addresses' | tr '\n' ' ')" "192.168.1.20 100.64.7.7 100.101.102.103 "
+  assert_eq "$(in_lib 'network_default_hosts' | grep -c '^100\.')" 1 "only Tailscale's own address is a private host"
+  assert_contains "$(in_lib 'network_default_hosts')" "100.101.102.103"
+  assert_not_contains "$(in_lib 'network_default_hosts')" "100.64.7.7"
+  assert_not_contains "$(in_lib 'network_default_hosts')" "100.99.99.99"
+  assert_contains "$(in_lib 'network_public_addresses')" "100.64.7.7" "provider NAT on a normal link is public"
+  sandbox_drop
+}
+
+test_numeric_looking_names_are_not_names() {
+  t_begin "a name made of numbers or hex (0x7f, 1e3) is not an address or a name, and is not taken for a private one"
+  sandbox_new
+  local bad
+  for bad in 0x7f 1e3 0x7f.local 1e3.local 0xc0a80114 3232235796 192.168.1 spark.0x7f.local; do
+    if in_lib "private_host '$bad'"; then t_fail "taken for private: $bad"; else t_pass; fi
+    assert_contains "$(in_lib "address_problem '$bad'")" "$bad" "$bad is refused with words"
+  done
+  for bad in spark spark.local spark.example.ts.net my-nas3 nas1.local; do
+    if in_lib "private_host '$bad'"; then t_pass; else t_fail "refused: $bad"; fi
+  done
+  sandbox_drop
+}
+
 test_default_install_answers_at_every_address
 test_sign_in_is_registered_for_every_address
 test_a_machine_with_only_loopback_still_works
@@ -486,6 +541,9 @@ test_leading_zeros_are_not_an_address
 test_carrier_grade_nat_is_public_without_tailscale
 test_a_name_only_address_is_not_published_on
 test_a_wedged_tailscale_cannot_stall_the_install
+test_virtual_and_vpn_links_are_never_opened_on
+test_tailscale_is_used_only_on_its_own_link
+test_numeric_looking_names_are_not_names
 test_tailscale_names_and_addresses
 test_an_existing_instance_opens_on_the_network_on_a_plain_rerun
 test_local_only_on_a_rerun_puts_an_instance_back
