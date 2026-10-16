@@ -517,7 +517,7 @@
         "node": ">=22"
     },
     "sideEffects": false,
-    "license": "MIT",
+    "license": "MPL-2.0",
     "author": "TrueForge",
     "repository": {
         "type": "git",
