@@ -34,7 +34,7 @@ Ready. Instance main is running.
               http://localhost:8791
   + Sign in   owner@example.invalid
   > Model     not set: add one in Settings > Models
-  + Run code  on, in a sandbox
+  + Run code  on, in a sandbox, with PDF and image reading
   + Data      saved in Docker
   + Backups   daily, keeps the last 7
   Trust this computer on each device: http://192.168.1.20:8791/trust
