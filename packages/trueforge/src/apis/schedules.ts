@@ -60,6 +60,7 @@ import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { minIntervalSeconds, nextTriggerAfter } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { resolveSandboxProvider } from '../runtime/sessionResources';
+import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import {
   InvalidCronError,
@@ -102,6 +103,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   sandboxProviderResolver?: typeof resolveSandboxProvider | undefined;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Scheduled runs on Token Factory count against the same daily cap as chat turns. */
+  tokenFactoryBudget: TokenFactoryBudget;
 }
 
 export interface SchedulesRouterDeps<TTransaction> extends ScheduleTurnExecutionDeps<TTransaction> {
@@ -135,6 +138,8 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     input: prepared.input,
     previous_turn_id: prepared.previous_turn_id,
     userRef: prepared.userRef,
+    // Nobody watches a scheduled run, so it holds what would ask instead of stopping at a card.
+    unattended: true,
     deps: {
       activeTurns: deps.activeTurns,
       turnDrains: deps.turnDrains,
@@ -151,6 +156,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       turnArtifactStore: deps.turnArtifactStore,
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,
+      tokenFactoryBudget: deps.tokenFactoryBudget,
       logger: deps.logger,
     },
   });

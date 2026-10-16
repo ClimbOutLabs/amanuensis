@@ -17,6 +17,7 @@ packages/trueforge/src/catalog/skillCatalog.gen.ts
 packages/trueforge/src/catalog/sandboxCatalog.gen.ts
 packages/trueforge/src/sandbox/local/sandboxScripts.gen.ts
 data/
+.dev-login/
 # Helm subchart deps are fetched via `helm dependency build` (pinned by the
 # committed Chart.lock); the downloaded .tgz/dirs are not committed.
 charts/*/charts/
@@ -90,3 +91,8 @@ packages/trueforge-core/LICENSE
 packages/trueforge-core/NOTICE
 packages/trueforge-sdk/LICENSE
 packages/trueforge-sdk/NOTICE
+
+# Toolchain archives that `pnpm sandbox:slots --add` downloads for the sandbox image, and which packs are chosen.
+ops/sandbox-slot/packs/archives/*
+!ops/sandbox-slot/packs/archives/.gitkeep
+ops/sandbox-slot/packs/selected.json

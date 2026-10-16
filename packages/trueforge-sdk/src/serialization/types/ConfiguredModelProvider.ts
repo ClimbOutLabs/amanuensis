@@ -7,12 +7,14 @@ import { ModelProviderManifest } from "./ModelProviderManifest.js";
 import { ResourceName } from "./ResourceName.js";
 
 export const ConfiguredModelProvider: core.serialization.ObjectSchema<serializers.ConfiguredModelProvider.Raw, TrueForge.ConfiguredModelProvider> = core.serialization.object({
+        "envManaged": core.serialization.property("env_managed", core.serialization.boolean().optional()),
         "manifest": ModelProviderManifest,
         "name": ResourceName
     });
 
 export declare namespace ConfiguredModelProvider {
     export interface Raw {
+        env_managed?: boolean | null;
         manifest: ModelProviderManifest.Raw;
         name: ResourceName.Raw;
     }

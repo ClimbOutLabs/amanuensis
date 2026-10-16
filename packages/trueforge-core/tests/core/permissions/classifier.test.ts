@@ -14,6 +14,7 @@ import {
   createSentinelHostContext,
   defaultSentinelServices,
   forUnattendedRun,
+  withoutRelaxations,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
@@ -169,6 +170,24 @@ describe('classifyTier Tier 2 asks by default', () => {
       const decision = await classifyTier(
         action('write_file', { path: join(dir, 'notes.md'), content: 'x' }),
         makeCtx({ services: unattended, workspace_cwd: dir }),
+      );
+      expect(decision.tier).toBe(2);
+      expect(decision.approval_token_id).not.toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an attended turn in a scheduled chat still asks for a file write', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
+    try {
+      const attended = withoutRelaxations(
+        relaxing(defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), ['file_write']),
+      );
+      expect(attended.unattended).toBe(false);
+      const decision = await classifyTier(
+        action('write_file', { path: join(dir, 'notes.md'), content: 'x' }),
+        makeCtx({ services: attended, workspace_cwd: dir }),
       );
       expect(decision.tier).toBe(2);
       expect(decision.approval_token_id).not.toBeNull();
@@ -354,6 +373,25 @@ describe('classifyTier read-only shell commands are Tier 1', () => {
     } finally {
       cleanup();
     }
+  });
+});
+
+describe('classifyTier exec reaching the internet', () => {
+  const internetNote = 'This command tries to reach the internet.';
+
+  test('the card says so in plain words when the host flagged the command as open-world', async () => {
+    const flagged: SentinelAction = {
+      ...action('exec', { command: 'curl https://example.com' }),
+      mcp_hints: { open_world_hint: true },
+    };
+    const decision = await classifyTier(flagged, makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.card?.plain_what).toContain(internetNote);
+  });
+
+  test('an unflagged command keeps its card wording', async () => {
+    const decision = await classifyTier(action('exec', { command: 'curl https://example.com' }), makeCtx());
+    expect(decision.card?.plain_what).not.toContain(internetNote);
   });
 });
 

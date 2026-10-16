@@ -177,6 +177,95 @@ describe('AssistantTextContainer', () => {
     });
   });
 
+  describe('paced mode across messages', () => {
+    const base = Array.from({ length: 200 }, (_, i) => `Paragraph line ${i} with some filler text.`).join('\n');
+
+    function setup() {
+      const commits: string[] = [];
+      let setMessages!: (messages: ThreadMessageLike[]) => void;
+
+      function TrackingMarkdown({ content }: MarkdownProps) {
+        commits.push(content);
+        return <div data-testid="paced-markdown">{content.length}</div>;
+      }
+
+      function Case() {
+        const [messages, setMessagesState] = useState<ThreadMessageLike[]>([
+          { id: 'a', role: 'assistant', content: [{ type: 'text', text: base }] },
+        ]);
+        setMessages = setMessagesState;
+        return (
+          <RuntimeHarness messages={messages} isRunning>
+            <SlotsProvider overrides={{ Markdown: TrackingMarkdown }}>
+              <ThreadPrimitive.Messages>{() => <AssistantMessageContainer />}</ThreadPrimitive.Messages>
+            </SlotsProvider>
+          </RuntimeHarness>
+        );
+      }
+
+      render(<Case />);
+      // The initial running dump exceeds the smooth backlog, so the part latches into paced mode.
+      expect(commits[commits.length - 1]).toBe(base);
+      return { commits, setMessages };
+    }
+
+    async function withFakeTimers(run: () => Promise<void>) {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+      try {
+        await run();
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+
+    it('restarts the reveal for a regenerated message at the same position with a new id', async () => {
+      await withFakeTimers(async () => {
+        const { commits, setMessages } = setup();
+        const before = commits.length;
+
+        await act(async () => {
+          setMessages([{ id: 'b', role: 'assistant', content: [{ type: 'text', text: 'fresh reply' }] }]);
+          await Promise.resolve();
+        });
+
+        // The latch is released, so the new message re-enters the typewriter instead of
+        // jumping straight to a paced snapshot, and never shows text from the old message.
+        const after = commits.slice(before);
+        expect(after[0]).not.toBe('fresh reply');
+        expect(after.some(content => content.length > 0 && base.startsWith(content))).toBe(false);
+
+        await act(async () => {
+          vi.advanceTimersByTime(LARGE_MARKDOWN_THROTTLE_MS * 4);
+          await Promise.resolve();
+        });
+        expect(commits[commits.length - 1]).toBe('fresh reply');
+      });
+    });
+
+    it('keeps the anti-rewind guard when the same id is re-delivered shorter, and continues when longer', async () => {
+      await withFakeTimers(async () => {
+        const { commits, setMessages } = setup();
+        const before = commits.length;
+
+        await act(async () => {
+          setMessages([{ id: 'a', role: 'assistant', content: [{ type: 'text', text: base.slice(0, 1000) }] }]);
+          vi.advanceTimersByTime(LARGE_MARKDOWN_THROTTLE_MS * 4);
+          await Promise.resolve();
+        });
+        expect(commits.slice(before).some(content => content.length < base.length)).toBe(false);
+        expect(commits[commits.length - 1]).toBe(base);
+
+        const longer = `${base}\ncontinued`;
+        await act(async () => {
+          setMessages([{ id: 'a', role: 'assistant', content: [{ type: 'text', text: longer }] }]);
+          vi.advanceTimersByTime(LARGE_MARKDOWN_THROTTLE_MS * 4);
+          await Promise.resolve();
+        });
+        expect(commits[commits.length - 1]).toBe(longer);
+      });
+    });
+  });
+
   it('downloads an artifact through the turn that produced the message', async () => {
     const downloadSandboxFile = vi.fn(async () => new Blob(['hello harness']));
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});

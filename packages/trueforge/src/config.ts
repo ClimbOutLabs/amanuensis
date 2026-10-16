@@ -11,7 +11,8 @@
  * - `false`: Postgres + Redis (defaults to local trueforge credentials /
  *   `redis://localhost:6379`).
  */
-import { existsSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, realpathSync } from 'node:fs';
 import { isIP } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,7 +20,12 @@ import { fileURLToPath } from 'node:url';
 
 import envPaths from 'env-paths';
 
-import { TOKEN_FACTORY_DEFAULT_BASE_URL, validateRunCodeStartupConfig } from '@truefoundry/trueforge-core/core';
+import {
+  GIT_NETWORK_ENV_NAMES,
+  pickGitNetworkEnv,
+  TOKEN_FACTORY_DEFAULT_BASE_URL,
+  validateRunCodeStartupConfig,
+} from '@truefoundry/trueforge-core/core';
 import {
   MEMORY_PROVIDER_MAX_TIMEOUT_MS,
   MEMORY_SETTINGS_LIMITS,
@@ -29,6 +35,8 @@ import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
+import { DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL, DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
+import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 
 const DEFAULT_PORT = 8790;
 /** Loopback default; container images set HOST=0.0.0.0 so probes and Service traffic reach the process. */
@@ -54,11 +62,39 @@ const DEFAULT_POSTGRES_DB = 'trueforge';
 const DEFAULT_POSTGRES_HOST = 'localhost';
 const DEFAULT_POSTGRES_PORT = 5432;
 const DEFAULT_REDIS_URL = 'redis://localhost:6379';
+/** Generate a fresh random standalone scheduler key (32 random bytes, hex). */
+export function generateStandaloneSchedulerKey(): string {
+  return randomBytes(32).toString('hex');
+}
+
+/** Hosted-mode fallback, also the Helm chart default; refused in standalone. */
+const HOSTED_DEFAULT_API_KEY = 'placeholder-value-please-generate-your-own';
+const PLACEHOLDER_API_KEYS: ReadonlySet<string> = new Set(['dev-only-placeholder', HOSTED_DEFAULT_API_KEY]);
+
+export function isPlaceholderTrueForgeApiKey(key: string): boolean {
+  return PLACEHOLDER_API_KEYS.has(key);
+}
+
 /**
- * Fixed local service credential when `STANDALONE=true` and `TRUEFORGE_API_KEY` is unset.
- * Local testing only — not for distributed deployments.
+ * Resolve the scheduler service credential. A non-empty `TRUEFORGE_API_KEY` always wins.
+ * Standalone: placeholders are refused; unset generates a fresh random 32-byte key at process
+ * start so instances never share a guessable key.
+ * Distributed: unset falls back to the well-known placeholder (the Helm chart's default), so
+ * the Compose stack starts without setup. Callers warn when the result is a placeholder.
  */
-export const STANDALONE_TRUEFORGE_API_KEY = process.env['TRUEFORGE_API_KEY'] ?? 'dev-only-placeholder';
+export function resolveTrueForgeApiKey({ standalone }: { standalone: boolean }): string {
+  const fromEnv = getEnv('TRUEFORGE_API_KEY');
+  if (fromEnv !== undefined && fromEnv !== '') {
+    if (standalone && isPlaceholderTrueForgeApiKey(fromEnv)) {
+      throw new Error(
+        'Environment variable TRUEFORGE_API_KEY is set to a placeholder value. ' +
+          'Generate a real key, or unset it so standalone generates a random key at startup.',
+      );
+    }
+    return fromEnv;
+  }
+  return standalone ? generateStandaloneSchedulerKey() : HOSTED_DEFAULT_API_KEY;
+}
 
 /**
  * `BUILD_REF` when nothing stamped the build: host development, and image builds
@@ -283,6 +319,23 @@ function parseIsolationDriver(options: {
   throw new Error(`${options.envKey} must be one of docker, firecracker; got ${JSON.stringify(options.raw)}`);
 }
 
+/** Where `run_code` and the shell tools execute: Docker containers, or the gVisor sandbox slots. */
+export type SandboxBackend = 'docker' | 'slots';
+
+function parseSandboxBackend(options: { envKey: string; raw: string | undefined }): SandboxBackend {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return 'docker';
+  }
+  const value = options.raw.trim().toLowerCase();
+  if (value === 'docker' || value === 'slots') {
+    return value;
+  }
+  throw new Error(`${options.envKey} must be one of docker, slots; got ${JSON.stringify(options.raw)}`);
+}
+
+/** Most slot services the compose files define. */
+export const SANDBOX_MAX_SLOTS = 4;
+
 /** Which long-term memory backend Aman uses. */
 export type MemoryBackend = 'markdown' | 'hindsight';
 
@@ -328,8 +381,11 @@ export function parseTokenFactoryMode(options: {
   throw new Error(`${options.envKey} must be one of off, fallback, force; got ${JSON.stringify(options.raw)}`);
 }
 
-/** Default Token Factory model used when `TOKEN_FACTORY_MODEL` is unset. */
-export const DEFAULT_TOKEN_FACTORY_MODEL = 'nvidia/nemotron-3-super-120b-a12b';
+/** Treats an unset or blank env value as absent; used where blank is the way to switch a default off. */
+function blankToUndefined(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim();
+  return trimmed === undefined || trimmed === '' ? undefined : trimmed;
+}
 
 function parseBoolean(options: { envKey: string; raw: string | undefined; defaultValue: boolean }): boolean {
   const { envKey, raw, defaultValue } = options;
@@ -349,8 +405,9 @@ function parseBoolean(options: { envKey: string; raw: string | undefined; defaul
 /**
  * Empty stays empty. Otherwise parse as a URL, store without a trailing slash
  * (callers join with `/`), and reject query/hash or `.` / `..` path segments.
+ * Standalone passes `allowPath: false`: auth cookies are scoped to `/`, so a path prefix is unsupported.
  */
-function parsePublicBaseUrl(raw: string | undefined): string {
+export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath: boolean }): string {
   if (raw === undefined || raw.trim() === '') {
     return '';
   }
@@ -367,8 +424,104 @@ function parsePublicBaseUrl(raw: string | undefined): string {
   if (segments.some(part => part === '.' || part === '..')) {
     throw new Error('PUBLIC_BASE_URL path must not contain "." or ".." segments');
   }
+  if (segments.length > 0 && !options.allowPath) {
+    throw new Error('PUBLIC_BASE_URL must be an origin with no path when STANDALONE=true');
+  }
   const path = segments.length === 0 ? '' : `/${segments.join('/')}`;
   return `${parsed.origin}${path}`;
+}
+
+/** The addresses of proxies believed about visitor addresses: plain IP addresses only, so a name cannot widen it. */
+export function parseTrustedProxyAddresses(raw: string | undefined): string[] {
+  const addresses: string[] = [];
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim();
+    if (text === '') {
+      continue;
+    }
+    if (isIP(text) === 0) {
+      throw new Error(`TRUSTED_PROXY_ADDRESSES has an entry that is not an IP address: ${text}`);
+    }
+    addresses.push(text);
+  }
+  return addresses;
+}
+
+/** The loopback address of the sign-in service, or empty. */
+export function parseLoginUpstreamUrl(raw: string | undefined): string {
+  const text = (raw ?? '').trim();
+  if (text === '') {
+    return '';
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(text);
+  } catch (error) {
+    throw new Error('LOGIN_UPSTREAM_URL must be a valid URL', { cause: error });
+  }
+  if (parsed.protocol !== 'http:' || !isLoopbackHost(parsed.hostname) || parsed.pathname.replace(/\/$/, '') === '') {
+    throw new Error(
+      'LOGIN_UPSTREAM_URL must be an http address on this computer with a path, like http://127.0.0.1:5556/dex',
+    );
+  }
+  return `${parsed.origin}${parsed.pathname.replace(/\/$/, '')}`;
+}
+
+/** True for a host written like an address but not as four plain decimal parts, which URL parsing would quietly rewrite. */
+function writesAddressInAnotherBase(text: string): boolean {
+  const host = /^[a-z][a-z0-9+.-]*:\/\/([^/?#:]*)/i.exec(text)?.[1] ?? '';
+  const parts = host.split('.');
+  if (!parts.every(part => /^(0x[0-9a-f]*|[0-9]+)$/i.test(part))) {
+    return false;
+  }
+  return !(parts.length === 4 && parts.every(part => /^(0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255));
+}
+
+/**
+ * The addresses the app may be opened at, as origins. Sign-in returns to the one the request came to, so the list is
+ * what keeps a request from steering it elsewhere. Plain http is only for this computer and private networks.
+ */
+export function parseAllowedOrigins(raw: string | undefined): string[] {
+  const origins: string[] = [];
+  for (const entry of (raw ?? '').split(',')) {
+    const text = entry.trim();
+    if (text === '') {
+      continue;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(text);
+    } catch (error) {
+      throw new Error(`ALLOWED_ORIGINS has an entry that is not a valid origin: ${text}`, { cause: error });
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`ALLOWED_ORIGINS entries must be http or https origins: ${text}`);
+    }
+    if (
+      parsed.pathname !== '/' ||
+      parsed.search !== '' ||
+      parsed.hash !== '' ||
+      parsed.username !== '' ||
+      parsed.password !== '' ||
+      /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(text)
+    ) {
+      throw new Error(`ALLOWED_ORIGINS entries must be bare origins with no path, query or login: ${text}`);
+    }
+    if (writesAddressInAnotherBase(text)) {
+      throw new Error(
+        `ALLOWED_ORIGINS has an address written in octal, hex or as one number: ${text}. Write it as four decimal parts.`,
+      );
+    }
+    if (parsed.protocol === 'http:' && !isPrivateNetworkHost(parsed.hostname)) {
+      throw new Error(
+        `ALLOWED_ORIGINS has a public address over plain http (${text}). Sign-in over the internet needs https: set up HTTPS with Caddy (--tls caddy).`,
+      );
+    }
+    if (!origins.includes(parsed.origin)) {
+      origins.push(parsed.origin);
+    }
+  }
+  return origins;
 }
 
 /**
@@ -488,7 +641,7 @@ function resolveOptionalPathEnv(envKey: string): string | undefined {
 
 /**
  * Absolute SQLite file path for standalone mode.
- * Env: `SQLITE_PATH` (optional). Default: `{env-paths data}/db/db.sqlite`.
+ * Env: `SQLITE_PATH` (optional). Default: `{app data dir}/db/db.sqlite`.
  */
 function resolveSqlitePath(appDataDir: string): string {
   const override = getEnv('SQLITE_PATH');
@@ -498,14 +651,33 @@ function resolveSqlitePath(appDataDir: string): string {
   return path.join(appDataDir, 'db', 'db.sqlite');
 }
 
-/** Parent for local sandbox roots. Same env-paths data dir as SQLite (`{suffix:''}`). */
+/** Parent for local sandbox roots. Same app data dir as SQLite. */
 function resolveLocalSandboxRootParent(appDataDir: string): string {
   return path.join(appDataDir, 'sandboxes');
 }
 
-/** Short tmp parent for Code Mode UDS socks (≤65 bytes after realpath). */
-function resolveCodeModeSocketParent(): string {
-  return path.join(os.tmpdir(), 'tf_cms');
+/**
+ * Per-port tmp parent for Code Mode UDS socks, so multiple standalone instances
+ * on one machine neither share nor wipe each other's sockets.
+ * Fails clearly when the realpath would exceed the 65-byte socket budget.
+ */
+export function resolveCodeModeSocketParent({
+  port,
+  realpathFn = realpathSync,
+}: {
+  port: number;
+  realpathFn?: (path: string) => string;
+}): string {
+  const parent = path.join(os.tmpdir(), `tf_cms_${String(port)}`);
+  const realParent = path.join(realpathFn(os.tmpdir()), `tf_cms_${String(port)}`);
+  const bytes = Buffer.byteLength(realParent, 'utf8');
+  if (bytes > MAX_CODE_MODE_SOCKET_PARENT_BYTES) {
+    throw new Error(
+      `Code Mode socket parent path too long after realpath (${String(bytes)} bytes, max ${String(MAX_CODE_MODE_SOCKET_PARENT_BYTES)}): ${realParent}. ` +
+        'Set TMPDIR to a shorter path.',
+    );
+  }
+  return parent;
 }
 
 /** Redis peering URL for distributed mode. Env: `REDIS_URL`. */
@@ -575,6 +747,32 @@ function buildPostgresConnectionString(parts: {
   return connectionString;
 }
 
+/** An http issuer is accepted only on a loopback host; anything else must be https. */
+export function assertOidcIssuerTransportAllowed(issuerUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(issuerUrl);
+  } catch (error) {
+    throw new Error('OIDC_ISSUER_URL must be a valid URL', { cause: error });
+  }
+  if (parsed.protocol === 'https:') {
+    return;
+  }
+  if (parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname)) {
+    return;
+  }
+  throw new Error('OIDC_ISSUER_URL must use https, except http on a loopback host (localhost, 127.0.0.1, ::1)');
+}
+
+/** Cookie-name-safe suffix appended to every auth cookie name so instances on one hostname stay apart. */
+function parseAuthCookieSuffix(raw: string | undefined): string {
+  const value = raw?.trim() ?? '';
+  if (!/^[A-Za-z0-9_-]{0,32}$/.test(value)) {
+    throw new Error('AUTH_COOKIE_SUFFIX must be at most 32 letters, digits, "_" or "-"');
+  }
+  return value;
+}
+
 function resolveOIDCConfig(): OIDCConfig | undefined {
   const issuerUrl = getEnv('OIDC_ISSUER_URL');
   const clientId = getEnv('OIDC_CLIENT_ID');
@@ -584,11 +782,18 @@ function resolveOIDCConfig(): OIDCConfig | undefined {
     return undefined;
   }
   if (!issuerUrl || !clientId || !clientSecret) {
+    const missing = [
+      ['OIDC_ISSUER_URL', issuerUrl],
+      ['OIDC_CLIENT_ID', clientId],
+      ['OIDC_CLIENT_SECRET', clientSecret],
+    ]
+      .filter(([, value]) => !value)
+      .map(([name]) => name);
     throw new Error(
-      'OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET must all be set together, or all left unset ' +
-        '(unset = fixed local admin identity, no IdP).',
+      `OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET must all be set together, or all left unset. Missing: ${missing.join(', ')}.`,
     );
   }
+  assertOidcIssuerTransportAllowed(issuerUrl);
   return {
     OIDC_ISSUER_URL: issuerUrl,
     OIDC_CLIENT_ID: clientId,
@@ -672,12 +877,22 @@ export interface SharedServerConfiguration {
   /** HTTP bind address. Env: `HOST`. Default `localhost`; production images use `0.0.0.0`. */
   HOST: string;
   /**
-   * Refuse startup when the server would listen on a non-loopback address without
-   * authentication (standalone mode grants every request the admin role). Env:
-   * `REQUIRE_AUTH`. Default `true`; set `false` to explicitly accept the risk, e.g.
-   * for the local-dev compose stack behind a loopback-published port.
+   * Distributed mode only: refuse startup when the server would listen on a non-loopback address
+   * without authentication. Env: `REQUIRE_AUTH`. Default `true`; set `false` to explicitly accept
+   * the risk, e.g. for the local-dev compose stack behind a loopback-published port.
+   * Standalone always requires OIDC and ignores this.
    */
   REQUIRE_AUTH: boolean;
+  /**
+   * OIDC configuration for server authentication, in both modes. Undefined means browser login
+   * is disabled, which standalone refuses at startup.
+   */
+  OIDC: OIDCConfig | undefined;
+  /**
+   * Suffix appended to every auth cookie name so instances sharing a hostname (cookies ignore
+   * ports) do not read each other's sessions. Env: `AUTH_COOKIE_SUFFIX`. Default empty.
+   */
+  AUTH_COOKIE_SUFFIX: string;
   /** Peering identity embedded in the turn ids this process mints; `local` in standalone mode. */
   EXECUTOR_ID: string;
   /**
@@ -763,6 +978,20 @@ export interface SharedServerConfiguration {
    */
   SANDBOX_ISOLATION_DRIVER: SandboxIsolationDriver;
   /**
+   * Where sandboxed code runs. Env: `SANDBOX_BACKEND`. Default 'docker'; 'slots' sends run_code and the
+   * shell and file tools to the gVisor sandbox slots, and then ignores SANDBOX_IMAGE and the cosign key.
+   */
+  SANDBOX_BACKEND: SandboxBackend;
+  /** Number of slot agents to use, 1 to 4. Env: `SANDBOX_SLOTS`. Default 4. */
+  SANDBOX_SLOTS: number;
+  /**
+   * Directory holding one control directory per slot (`<dir>/<n>/agent.sock`). Env: `SANDBOX_SLOTS_DIR`.
+   * Required when SANDBOX_BACKEND=slots.
+   */
+  SANDBOX_SLOTS_DIR: string;
+  /** Disk quota of one chat's sandbox workspace on a slot, MiB. Env: `SANDBOX_SESSION_DISK_MB`. Default 2048. */
+  SANDBOX_SESSION_DISK_MB: number;
+  /**
    * Expected sandbox image as `<tag>@sha256:<64 hex chars>`. Never a bare
    * tag: the digest pin is enforced before any pull. Env: `SANDBOX_IMAGE`.
    * Blank (the default) leaves run_code dormant — existing standalone installs
@@ -773,16 +1002,27 @@ export interface SharedServerConfiguration {
   /**
    * Parent directory for per-run run_code isolation dirs
    * (`<dir>/sandbox-runs/<runId>/{ingress,scratch,egress}`).
-   * Derived: `{env-paths data}/sandbox-runs` (both topologies — the Docker
+   * Derived: `{app data dir}/sandbox-runs` (both topologies: the Docker
    * driver is host-local even in distributed mode).
    */
   SANDBOX_RUNS_DIR: string;
   /**
    * Directory where the Docker driver remembers its last successful image
    * signature verification, so readiness works offline.
-   * Derived: `{env-paths data}/sandbox-state`.
+   * Derived: `{app data dir}/sandbox-state`.
    */
   SANDBOX_STATE_DIR: string;
+  /**
+   * Scratch directory for the server's own git work on behalf of sandbox slots (clone, fetch, push). Every
+   * operation uses a fresh subdirectory and removes it. Derived: `{app data dir}/git-bridge`.
+   */
+  SANDBOX_GIT_BRIDGE_DIR: string;
+  /**
+   * Proxy and certificate settings the server's own git (for sandbox slots) may use, copied from the process
+   * environment: HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE, SSL_CERT_DIR, GIT_SSL_CAINFO, GIT_SSL_CAPATH and
+   * CURL_CA_BUNDLE. Nothing else of the environment reaches git.
+   */
+  SANDBOX_GIT_NETWORK_ENV: Readonly<Record<string, string>>;
   /**
    * Default per-run timeout for run_code, seconds. Env: `SANDBOX_DEFAULT_TIMEOUT_SECONDS`. Default 60.
    */
@@ -911,10 +1151,29 @@ export interface SharedServerConfiguration {
   /**
    * Public application URL (origin plus optional pathname). Used as the origin of
    * MCP OAuth and OIDC callbacks; the pathname is the UI/API public prefix when
-   * a reverse proxy strips it. Optional at boot; MCP OAuth and OIDC callback
-   * construction fail if empty outside standalone development. Env: `PUBLIC_BASE_URL`.
+   * a reverse proxy strips it. Standalone requires an origin with no path and defaults to
+   * `http://localhost:$PORT` when unset; elsewhere MCP OAuth and OIDC callback construction
+   * fail if empty. Env: `PUBLIC_BASE_URL`.
    */
   PUBLIC_BASE_URL: string;
+  /**
+   * Addresses the app may be opened at, as comma-separated origins. Set for an instance opened on the local network:
+   * sign-in then returns to the origin of the request (if listed) and the app serves the sign-in service under
+   * `/dex` itself. Empty keeps the single `PUBLIC_BASE_URL` origin. Env: `ALLOWED_ORIGINS`.
+   */
+  ALLOWED_ORIGINS: string[];
+  /**
+   * Where the sign-in service listens on this computer (loopback http, with the issuer's path), for an instance whose
+   * issuer is a public https address: the app then passes sign-in pages under that address through itself and limits
+   * password guessing. Empty leaves the issuer's address to answer for itself. Env: `LOGIN_UPSTREAM_URL`.
+   */
+  LOGIN_UPSTREAM_URL: string;
+  /**
+   * Addresses of a reverse proxy in front of the app, besides this computer's own, whose X-Forwarded-For says which
+   * visitor a request came from (so password guessing is limited per visitor, not per proxy). Comma separated IP
+   * addresses. Env: `TRUSTED_PROXY_ADDRESSES`.
+   */
+  TRUSTED_PROXY_ADDRESSES: string[];
   /**
    * Max tokens requested from the memory provider's recall endpoint.
    * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 2048.
@@ -1139,7 +1398,9 @@ export interface SharedServerConfiguration {
   MEMORY_SUMMARIZE: boolean;
   /**
    * Nebius Token Factory API key. Populated from the Secure Vault into the deployment
-   * environment; never committed or logged. Env: `NEBIUS_API_KEY`. Unset by default.
+   * environment; never committed or logged. With a key set, startup also writes a read-only
+   * `tokenfactory` provider and makes its default model the chat default.
+   * Env: `NEBIUS_API_KEY`. Unset by default.
    */
   NEBIUS_API_KEY: string | undefined;
   /**
@@ -1147,6 +1408,12 @@ export interface SharedServerConfiguration {
    * Env: `TOKEN_FACTORY_MODEL`. Default `nvidia/nemotron-3-super-120b-a12b`.
    */
   TOKEN_FACTORY_MODEL: string;
+  /**
+   * Optional cheaper Token Factory model registered next to the default on the env-managed
+   * provider. Set it to an empty string to register only the default model.
+   * Env: `TOKEN_FACTORY_CHEAPER_MODEL`. Default `openai/gpt-oss-120b`.
+   */
+  TOKEN_FACTORY_CHEAPER_MODEL: string | undefined;
   /**
    * Token Factory base URL.
    * Env: `TOKEN_FACTORY_BASE_URL`. Default `https://api.tokenfactory.nebius.com/v1`.
@@ -1156,10 +1423,24 @@ export interface SharedServerConfiguration {
    * How turns may route to Nebius Token Factory. `off` (the default) disables Token
    * Factory routing entirely. `fallback` uses the configured local provider first and
    * fails over to Token Factory when it is unavailable. `force` uses Token Factory
-   * first with the local provider as fallback, for testing and demo paths.
+   * first with the local provider as fallback, for testing and demo paths; it sends
+   * prompts to the cloud first, so it is not local-first. Routing is a no-op when the
+   * chat model already is on Token Factory.
    * Env: `TOKEN_FACTORY_MODE`. Default `off`.
    */
   TOKEN_FACTORY_MODE: TokenFactoryMode;
+  /**
+   * Daily Token Factory token budget per instance, counted per UTC day from provider-reported
+   * usage. Once reached, new turns on Token Factory are refused until the next UTC day.
+   * Env: `TOKEN_FACTORY_DAILY_TOKEN_CAP`. Unset means no cap.
+   */
+  TOKEN_FACTORY_DAILY_TOKEN_CAP: number | undefined;
+  /**
+   * Marks this instance as a demo. Only `aman demo-seed` reads it: the seed refuses to run
+   * unless it is true, so it can never touch a real instance.
+   * Env: `DEMO_MODE`. Default false.
+   */
+  DEMO_MODE: boolean;
   /**
    * Meaning-based recall for the markdown backend. When true, the server downloads
    * a small embedding model once (~120 MB, in the background) and uses it to find
@@ -1226,8 +1507,8 @@ export interface SharedServerConfiguration {
   SERVER_URL: string;
   /**
    * Service credential for controller calls.
-   * Env: `TRUEFORGE_API_KEY`. Required and non-empty when `STANDALONE=false`.
-   * Standalone defaults to {@link STANDALONE_TRUEFORGE_API_KEY} (local testing only).
+   * Env: `TRUEFORGE_API_KEY`. When `STANDALONE=false` and unset, falls back to a well-known placeholder.
+   * Standalone refuses placeholders and generates a fresh random key at process start when unset (local only).
    */
   TRUEFORGE_API_KEY: string;
   /**
@@ -1256,11 +1537,11 @@ export type StandaloneServerConfiguration = SharedServerConfiguration & {
   SQLITE_PATH: string;
   /**
    * Parent directory for local sandbox roots (ULID children).
-   * Derived: `{env-paths data}/sandboxes`.
+   * Derived: `{app data dir}/sandboxes`.
    */
   LOCAL_SANDBOX_ROOT_PARENT: string;
   /**
-   * Parent directory for Code Mode UDS sockets (`tf_cms` under os.tmpdir()).
+   * Parent directory for Code Mode UDS sockets (`tf_cms_<port>` under os.tmpdir()).
    * Caller prepares/removes this directory; must stay ≤65 bytes after realpath.
    */
   CODE_MODE_SOCKET_PARENT: string;
@@ -1292,11 +1573,6 @@ export type DistributedServerConfiguration = SharedServerConfiguration & {
   POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: number;
   /** Peering URL shared by all replicas. Env: `REDIS_URL`. Default `redis://localhost:6379`. */
   REDIS_URL: string;
-  /**
-   * OIDC configuration for server authentication.
-   * Undefined means browser login is disabled.
-   */
-  OIDC: OIDCConfig | undefined;
   /**
    * When set, models/MCP/agents are backed by the TrueFoundry ServiceFoundry server with the
    * caller's token. Unset = local Postgres stores. Mutually exclusive with OIDC.
@@ -1371,8 +1647,22 @@ const standalone = parseBoolean({
   defaultValue: true,
 });
 
-const appDataDirSuffix = getEnv('APP_DATA_DIR_SUFFIX', { defaultValue: '' }) ?? '';
-const appDataDir = envPaths(ENV_PATHS_APP_NAME, { suffix: appDataDirSuffix }).data;
+/**
+ * Root for SQLite, sandbox roots, sandbox state and the git bridge.
+ * Env: `APP_DATA_DIR` (optional absolute path). Default: the env-paths data dir, which sits under the
+ * home directory. Images that run as a user with no home set this to a path on the data volume.
+ */
+export function resolveAppDataDir({ override, suffix }: { override: string | undefined; suffix: string }): string {
+  if (override !== undefined && override.trim() !== '') {
+    return path.resolve(override);
+  }
+  return envPaths(ENV_PATHS_APP_NAME, { suffix }).data;
+}
+
+const appDataDir = resolveAppDataDir({
+  override: getEnv('APP_DATA_DIR'),
+  suffix: getEnv('APP_DATA_DIR_SUFFIX', { defaultValue: '' }) ?? '',
+});
 
 const port = parsePort(getEnv('PORT'));
 const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;
@@ -1386,6 +1676,8 @@ const shared: SharedServerConfiguration = {
   PORT: port,
   HOST: host,
   REQUIRE_AUTH: parseBoolean({ envKey: 'REQUIRE_AUTH', raw: getEnv('REQUIRE_AUTH'), defaultValue: true }),
+  OIDC: resolveOIDCConfig(),
+  AUTH_COOKIE_SUFFIX: parseAuthCookieSuffix(getEnv('AUTH_COOKIE_SUFFIX')),
   EXECUTOR_ID: standalone ? LOCAL_EXECUTOR_ID : randomAlphanumeric(6),
   MODEL_CATALOG_PATH: resolveOptionalPathEnv('MODEL_CATALOG_PATH'),
   MCP_CATALOG_PATH: resolveOptionalPathEnv('MCP_CATALOG_PATH'),
@@ -1441,9 +1733,25 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('SANDBOX_ISOLATION_DRIVER'),
     defaultValue: 'docker',
   }),
+  SANDBOX_BACKEND: parseSandboxBackend({ envKey: 'SANDBOX_BACKEND', raw: getEnv('SANDBOX_BACKEND') }),
+  SANDBOX_SLOTS: parsePositiveInt({
+    envKey: 'SANDBOX_SLOTS',
+    raw: getEnv('SANDBOX_SLOTS'),
+    defaultValue: SANDBOX_MAX_SLOTS,
+  }),
+  SANDBOX_SLOTS_DIR: getEnv('SANDBOX_SLOTS_DIR', { defaultValue: '' }) ?? '',
+  SANDBOX_SESSION_DISK_MB: parsePositiveInt({
+    envKey: 'SANDBOX_SESSION_DISK_MB',
+    raw: getEnv('SANDBOX_SESSION_DISK_MB'),
+    defaultValue: 2048,
+  }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
   SANDBOX_STATE_DIR: path.join(appDataDir, 'sandbox-state'),
+  SANDBOX_GIT_BRIDGE_DIR: path.join(appDataDir, 'git-bridge'),
+  SANDBOX_GIT_NETWORK_ENV: pickGitNetworkEnv(
+    Object.fromEntries(GIT_NETWORK_ENV_NAMES.map(name => [name, getEnv(name)])),
+  ),
   SANDBOX_DEFAULT_TIMEOUT_SECONDS: parsePositiveInt({
     envKey: 'SANDBOX_DEFAULT_TIMEOUT_SECONDS',
     raw: getEnv('SANDBOX_DEFAULT_TIMEOUT_SECONDS'),
@@ -1719,6 +2027,9 @@ const shared: SharedServerConfiguration = {
   NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
   TOKEN_FACTORY_MODEL:
     getEnv('TOKEN_FACTORY_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_MODEL }) ?? DEFAULT_TOKEN_FACTORY_MODEL,
+  TOKEN_FACTORY_CHEAPER_MODEL: blankToUndefined(
+    getEnv('TOKEN_FACTORY_CHEAPER_MODEL', { defaultValue: DEFAULT_TOKEN_FACTORY_CHEAPER_MODEL }),
+  ),
   TOKEN_FACTORY_BASE_URL:
     getEnv('TOKEN_FACTORY_BASE_URL', { defaultValue: TOKEN_FACTORY_DEFAULT_BASE_URL }) ??
     TOKEN_FACTORY_DEFAULT_BASE_URL,
@@ -1727,6 +2038,11 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('TOKEN_FACTORY_MODE'),
     defaultValue: 'off',
   }),
+  TOKEN_FACTORY_DAILY_TOKEN_CAP: parseOptionalPositiveInt({
+    envKey: 'TOKEN_FACTORY_DAILY_TOKEN_CAP',
+    raw: getEnv('TOKEN_FACTORY_DAILY_TOKEN_CAP'),
+  }),
+  DEMO_MODE: parseBoolean({ envKey: 'DEMO_MODE', raw: getEnv('DEMO_MODE'), defaultValue: false }),
   MEMORY_EMBEDDINGS_ENABLED: parseBoolean({
     envKey: 'MEMORY_EMBEDDINGS_ENABLED',
     raw: getEnv('MEMORY_EMBEDDINGS_ENABLED'),
@@ -1760,12 +2076,13 @@ const shared: SharedServerConfiguration = {
     defaultValue: 3_600_000,
   }),
   DOCUMENT_OCR_LANGUAGES: getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: 'eng hin mar' }) ?? 'eng hin mar',
-  PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' })),
+  PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),
+  ALLOWED_ORIGINS: parseAllowedOrigins(getEnv('ALLOWED_ORIGINS', { defaultValue: '' })),
+  LOGIN_UPSTREAM_URL: parseLoginUpstreamUrl(getEnv('LOGIN_UPSTREAM_URL', { defaultValue: '' })),
+  TRUSTED_PROXY_ADDRESSES: parseTrustedProxyAddresses(getEnv('TRUSTED_PROXY_ADDRESSES', { defaultValue: '' })),
   SERVER_URL:
     getEnv('SERVER_URL', { defaultValue: `http://localhost:${String(port)}` }) ?? `http://localhost:${String(port)}`,
-  TRUEFORGE_API_KEY: standalone
-    ? (getEnv('TRUEFORGE_API_KEY', { defaultValue: STANDALONE_TRUEFORGE_API_KEY }) ?? STANDALONE_TRUEFORGE_API_KEY)
-    : (getEnv('TRUEFORGE_API_KEY', { required: true }) ?? ''),
+  TRUEFORGE_API_KEY: resolveTrueForgeApiKey({ standalone }),
   TRUEFORGE_MTLS_ENABLED: parseBoolean({
     envKey: 'TRUEFORGE_MTLS_ENABLED',
     raw: getEnv('TRUEFORGE_MTLS_ENABLED'),
@@ -1780,7 +2097,7 @@ const configuration: ServerConfiguration = standalone
       STANDALONE: true,
       SQLITE_PATH: resolveSqlitePath(appDataDir),
       LOCAL_SANDBOX_ROOT_PARENT: resolveLocalSandboxRootParent(appDataDir),
-      CODE_MODE_SOCKET_PARENT: resolveCodeModeSocketParent(),
+      CODE_MODE_SOCKET_PARENT: resolveCodeModeSocketParent({ port }),
     }
   : {
       ...shared,
@@ -1802,7 +2119,6 @@ const configuration: ServerConfiguration = standalone
         defaultValue: 60_000,
       }),
       REDIS_URL: resolveRedisUrl(),
-      OIDC: resolveOIDCConfig(),
       TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL: getEnv('TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL', { required: false }),
       TRUEFOUNDRY_API_KEY: getEnv('TRUEFOUNDRY_API_KEY', { required: false }),
       TRUEFOUNDRY_SERVICEFOUNDRY_HTTP_TIMEOUT_MS: parsePositiveInt({
@@ -1848,13 +2164,13 @@ function urlPassword(raw: string): string | undefined {
 /** The settings that carry secrets: what {@link getConfiguredSecretValues} reads, so a test can supply just these. */
 export type ConfiguredSecretSettings = Pick<
   SharedServerConfiguration,
-  'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN'
+  'TRUEFORGE_API_KEY' | 'NEBIUS_API_KEY' | 'MEMORY_SCREEN_AUTH_TOKEN' | 'OIDC'
 > &
   (
     | { STANDALONE: true }
     | ({ STANDALONE: false } & Pick<
         DistributedServerConfiguration,
-        'OIDC' | 'TRUEFOUNDRY_API_KEY' | 'TRUEFOUNDRY_SANDBOX_API_KEY' | 'DATABASE_URL' | 'REDIS_URL'
+        'TRUEFOUNDRY_API_KEY' | 'TRUEFOUNDRY_SANDBOX_API_KEY' | 'DATABASE_URL' | 'REDIS_URL'
       >)
   );
 
@@ -1868,10 +2184,10 @@ export function getConfiguredSecretValues(config: ConfiguredSecretSettings = con
     config.TRUEFORGE_API_KEY,
     config.NEBIUS_API_KEY,
     config.MEMORY_SCREEN_AUTH_TOKEN,
+    config.OIDC?.OIDC_CLIENT_SECRET,
   ];
   if (!config.STANDALONE) {
     candidates.push(
-      config.OIDC?.OIDC_CLIENT_SECRET,
       config.TRUEFOUNDRY_API_KEY,
       config.TRUEFOUNDRY_SANDBOX_API_KEY,
       config.DATABASE_URL,
@@ -1883,10 +2199,8 @@ export function getConfiguredSecretValues(config: ConfiguredSecretSettings = con
   return candidates.filter((value): value is string => value !== undefined && value !== '');
 }
 
-export function isOidcConfigured(
-  value: ServerConfiguration,
-): value is DistributedServerConfiguration & { OIDC: OIDCConfig } {
-  return !value.STANDALONE && value.OIDC !== undefined;
+export function isOidcConfigured(value: ServerConfiguration): value is ServerConfiguration & { OIDC: OIDCConfig } {
+  return value.OIDC !== undefined;
 }
 
 /**
@@ -2026,7 +2340,9 @@ function isIpv4MappedIpv6Loopback(addr: string): boolean {
  * Handles IPv6 zone IDs (e.g., ::1%eth0) by stripping them before validation.
  */
 export function isLoopbackHost(host: string): boolean {
-  const trimmed = host.trim().toLowerCase();
+  const lowered = host.trim().toLowerCase();
+  // URL hostnames and Host headers spell IPv6 literals as [::1].
+  const trimmed = lowered.startsWith('[') && lowered.endsWith(']') ? lowered.slice(1, -1) : lowered;
 
   if (trimmed === 'localhost') {
     return true;
@@ -2046,31 +2362,83 @@ export function isLoopbackHost(host: string): boolean {
   return false;
 }
 
+/** A private IPv4 address: RFC 1918, link-local, or the 100.64.0.0/10 range Tailscale uses. Loopback is not included. */
+function isPrivateIpv4(addr: string): boolean {
+  const octets = addr.split('.').map(part => Number.parseInt(part, 10));
+  const [a, b] = octets;
+  if (octets.length !== 4 || octets.some(octet => Number.isNaN(octet) || octet < 0 || octet > 255)) {
+    return false;
+  }
+  if (a === 10) {
+    return true;
+  }
+  if (a === 192 && b === 168) {
+    return true;
+  }
+  if (a === 169 && b === 254) {
+    return true;
+  }
+  if (a === 172 && b !== undefined && b >= 16 && b <= 31) {
+    return true;
+  }
+  return a === 100 && b !== undefined && b >= 64 && b <= 127;
+}
+
+/**
+ * Whether `host` is this computer or sits on a private network: loopback, a private IPv4 address, a `.local` or
+ * `.ts.net` name, or a single-label name. An allowed origin may use plain http only for these; a public one needs https.
+ */
+export function isPrivateNetworkHost(host: string): boolean {
+  if (isLoopbackHost(host)) {
+    return true;
+  }
+  const lowered = host.trim().toLowerCase();
+  const bare = lowered.startsWith('[') && lowered.endsWith(']') ? lowered.slice(1, -1) : lowered;
+  const ipVersion = isIP(bare);
+  if (ipVersion === 4) {
+    return isPrivateIpv4(bare);
+  }
+  if (ipVersion === 6 || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(bare)) {
+    return false;
+  }
+  return !bare.includes('.') || bare.endsWith('.local') || bare.endsWith('.ts.net');
+}
+
 export interface NetworkAuthRequirement {
   authMode: TrueForgeAuthMode;
+  /** True for `STANDALONE=true`, which never starts without login. */
+  standalone: boolean;
   host: string;
   requireAuth: boolean;
 }
 
 /**
- * Refuse an unauthenticated network listener. In standalone mode the
- * authenticator grants every request the admin role, so a non-loopback bind
- * without OIDC or TrueFoundry would expose settings endpoints (model provider
- * keys, MCP secrets) to anyone who can reach the port. Throws with remediation
- * steps; main.ts calls this before listening.
+ * Refuse to start without login. A standalone server needs complete OIDC config whatever the
+ * bind address (any local process could otherwise act as admin). Distributed mode keeps the
+ * older rule: an unauthenticated non-loopback listener would expose settings endpoints (model
+ * provider keys, MCP secrets), unless `REQUIRE_AUTH=false`. Throws with remediation steps;
+ * main.ts calls this before anything is created.
  */
 export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement): void {
-  if (!requirement.requireAuth) {
+  if (requirement.authMode !== TrueForgeAuthMode.Standalone) {
     return;
   }
-  if (requirement.authMode !== TrueForgeAuthMode.Standalone) {
+  if (requirement.standalone) {
+    throw new Error(
+      'Refusing to start without login: standalone mode requires OIDC. ' +
+        'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET (REQUIRE_AUTH=false no longer opts out). ' +
+        'For local development run `pnpm dev:login` and add the lines it prints to packages/trueforge/.env; ' +
+        'see docs/authentication/overview.mdx.',
+    );
+  }
+  if (!requirement.requireAuth) {
     return;
   }
   if (isLoopbackHost(requirement.host)) {
     return;
   }
   throw new Error(
-    `Refusing to listen on ${requirement.host} without authentication: in standalone mode every request has the admin role, ` +
+    `Refusing to listen on ${requirement.host} without authentication: without OIDC every request has the admin role, ` +
       'so settings endpoints (model provider keys, MCP secrets) would be reachable by anyone on the network. ' +
       'Configure OIDC (OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET), bind HOST=localhost for local-only use, ' +
       'or set REQUIRE_AUTH=false to explicitly accept this risk.',
@@ -2133,7 +2501,15 @@ if (isTrueFoundryModeEnabled(configuration)) {
 // for existing standalone installs) leaves run_code dormant — Docker is
 // required only when run_code executes (plan §2.8), not at boot — while a
 // configured image gets the full fail-closed validation.
-const runCodeConfigured = configuration.SANDBOX_IMAGE.trim() !== '';
+const runCodeConfigured = configuration.SANDBOX_BACKEND === 'docker' && configuration.SANDBOX_IMAGE.trim() !== '';
+if (configuration.SANDBOX_BACKEND === 'slots') {
+  if (configuration.SANDBOX_SLOTS_DIR.trim() === '') {
+    throw new Error('SANDBOX_SLOTS_DIR is required when SANDBOX_BACKEND=slots: it holds the slot control directories.');
+  }
+  if (configuration.SANDBOX_SLOTS > SANDBOX_MAX_SLOTS) {
+    throw new Error(`SANDBOX_SLOTS must be at most ${String(SANDBOX_MAX_SLOTS)}.`);
+  }
+}
 validateRunCodeStartupConfig({
   networkEgress: configuration.SANDBOX_NETWORK_EGRESS,
   isolationDriver: configuration.SANDBOX_ISOLATION_DRIVER,
@@ -2166,14 +2542,15 @@ if (!configuration.STANDALONE && configuration.TRUEFORGE_API_KEY.trim() === '') 
   throw new Error('TRUEFORGE_API_KEY must not be empty when STANDALONE=false.');
 }
 
+/** The settings the public URL helpers read. */
+export type PublicUrlConfig = Pick<ServerConfiguration, 'STANDALONE' | 'PORT' | 'PUBLIC_BASE_URL'>;
+
 /**
  * Effective public application URL. Empty `PUBLIC_BASE_URL` stays empty
  * (callers that need a callback origin throw).
  */
-function effectivePublicBaseUrl(config: ServerConfiguration): string {
-  // Standalone production is one process on $PORT. Ignore a leftover Vite
-  // PUBLIC_BASE_URL (e.g. http://localhost:3000) from the shared .env.
-  if (config.STANDALONE && config.NODE_ENV !== 'development') {
+function effectivePublicBaseUrl(config: PublicUrlConfig): string {
+  if (config.STANDALONE && config.PUBLIC_BASE_URL === '') {
     return `http://localhost:${String(config.PORT)}`;
   }
   return config.PUBLIC_BASE_URL;
@@ -2181,15 +2558,25 @@ function effectivePublicBaseUrl(config: ServerConfiguration): string {
 
 /**
  * Public origin for OAuth callbacks.
- * Standalone (non-development) → `http://localhost:$PORT`; otherwise `PUBLIC_BASE_URL`
- * (required in development and distributed; throws if empty).
+ * `PUBLIC_BASE_URL` when set; standalone defaults to `http://localhost:$PORT`
+ * (distributed throws if empty).
  */
-export function getPublicBaseUrl(config: ServerConfiguration = configuration): string {
+export function getPublicBaseUrl(config: PublicUrlConfig = configuration): string {
   const publicBaseUrl = effectivePublicBaseUrl(config);
   if (publicBaseUrl === '') {
     throw new Error('PUBLIC_BASE_URL is required for OIDC callbacks but was empty');
   }
   return publicBaseUrl;
+}
+
+/** The origins the app may be opened at; empty unless `ALLOWED_ORIGINS` is set. */
+export function getAllowedOrigins(config: Pick<ServerConfiguration, 'ALLOWED_ORIGINS'> = configuration): string[] {
+  return config.ALLOWED_ORIGINS;
+}
+
+/** Suffix appended to every auth cookie name; empty unless `AUTH_COOKIE_SUFFIX` is set. */
+export function getAuthCookieSuffix(config: ServerConfiguration = configuration): string {
+  return config.AUTH_COOKIE_SUFFIX;
 }
 
 /**
@@ -2203,8 +2590,8 @@ export function getRunCodeToolCallTimeoutMs(config: ServerConfiguration = config
   return (config.SANDBOX_IMAGE_PULL_TIMEOUT_SECONDS + config.SANDBOX_MAX_TIMEOUT_SECONDS) * 1000 + 60_000;
 }
 
-/** `/` or `/custom/proxy/path/` — trailing slash for asset URLs and the boot script. Empty / standalone non-dev → `/`. */
-export function getPublicUiBasePath(config: ServerConfiguration = configuration): string {
+/** `/` or `/custom/proxy/path/` — trailing slash for asset URLs and the boot script. Empty → `/`. */
+export function getPublicUiBasePath(config: PublicUrlConfig = configuration): string {
   const publicBaseUrl = effectivePublicBaseUrl(config);
   if (publicBaseUrl === '') {
     return '/';

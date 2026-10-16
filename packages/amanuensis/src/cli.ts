@@ -25,7 +25,10 @@ function printUsage(): void {
   npx amanuensis --port <n>
 
 Amanuensis v${PACKAGE_VERSION}. Start the agent server and chat UI.
-Runs in standalone mode (SQLite, no Redis, no Docker), local use only, not production-safe.
+Runs in standalone mode (SQLite, no Redis), local use only, not production-safe.
+Login is required: set OIDC_ISSUER_URL, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET (an http issuer
+is accepted only on localhost). From a repository checkout, "pnpm dev:login" starts a local
+Dex and prints them. Optional: PUBLIC_BASE_URL (origin, no path), AUTH_COOKIE_SUFFIX.
 Set STANDALONE=false with Postgres and Redis for multi-replica peering.
 
 Options:

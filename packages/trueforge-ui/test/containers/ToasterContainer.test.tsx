@@ -150,6 +150,53 @@ describe('ToasterProvider', () => {
     expect(screen.queryByText(/01m4/)).toBeNull();
   });
 
+  it('tells the user the daily demo budget is used up, not that the request failed', async () => {
+    const capError = Object.assign(new Error('Status code: 429'), {
+      statusCode: 429,
+      body: {
+        error: {
+          message: "Today's Token Factory token budget is used up. It resets at midnight UTC.",
+          type: 'rate_limit',
+          code: 'token_factory_daily_cap_reached',
+        },
+      },
+    });
+
+    render(
+      <SlotsProvider>
+        <ToasterProvider>
+          <Trigger errors={[capError]} />
+        </ToasterProvider>
+      </SlotsProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'boom' }));
+
+    expect(await screen.findByText('Demo budget used up')).toBeInTheDocument();
+    expect(screen.getByText("Today's demo budget is used up. It resets at midnight UTC.")).toBeInTheDocument();
+    expect(screen.queryByText(/Request failed/)).toBeNull();
+  });
+
+  it('keeps showing the server message for other rate limits', async () => {
+    const rateLimited = Object.assign(new Error('Status code: 429'), {
+      statusCode: 429,
+      body: { error: { message: 'Slow down', type: 'rate_limit', code: 'something_else' } },
+    });
+
+    render(
+      <SlotsProvider>
+        <ToasterProvider>
+          <Trigger errors={[rateLimited]} />
+        </ToasterProvider>
+      </SlotsProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'boom' }));
+
+    expect(await screen.findByText('Request failed (429)')).toBeInTheDocument();
+    expect(screen.getByText('Slow down')).toBeInTheDocument();
+  });
+
   it('keeps only the five most recent errors visible', async () => {
     const errors = Array.from({ length: 6 }, (_, index) => new Error(`error-${index + 1}`));
 

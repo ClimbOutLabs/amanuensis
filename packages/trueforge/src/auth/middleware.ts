@@ -1,6 +1,7 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { jwtVerify } from 'jose';
+import { timingSafeEqual } from 'node:crypto';
 
 import configuration from '../config';
 import type { Authenticator } from './authenticator';
@@ -45,11 +46,25 @@ export function createAdminAuthMiddleware(authenticator: Authenticator): Middlew
   };
 }
 
+/** Constant-time API key comparison; different lengths reject without throwing. */
+export function apiKeysEqual(
+  provided: string,
+  expected: string,
+  timingSafeEqualFn: typeof timingSafeEqual = timingSafeEqual,
+): boolean {
+  const providedBytes = Buffer.from(provided, 'utf8');
+  const expectedBytes = Buffer.from(expected, 'utf8');
+  if (providedBytes.length !== expectedBytes.length) {
+    return false;
+  }
+  return timingSafeEqualFn(providedBytes, expectedBytes);
+}
+
 /** Bearer API-key gate for service-only routes. */
 export function createApiKeyAuthMiddleware(apiKey: string): MiddlewareHandler {
   return async (c, next) => {
     const token = readBearerToken(c);
-    if (token === undefined || token !== apiKey) {
+    if (token === undefined || !apiKeysEqual(token, apiKey)) {
       throw new HTTPException(401, { message: 'Invalid service credential' });
     }
     return next();

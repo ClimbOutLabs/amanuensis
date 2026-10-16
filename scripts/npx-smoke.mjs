@@ -6,6 +6,8 @@ import { execPath, platform } from 'node:process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
+import { standinOidcEnv, startStandinOidc } from './standin-oidc.mjs';
+
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win32 = platform === 'win32';
 const shell = win32 ? { shell: true } : {};
@@ -15,6 +17,8 @@ const origin = `http://${host}:${String(port)}`;
 const packDir = await mkdtemp(path.join(tmpdir(), 'trueforge-pack-'));
 const consumerDir = await mkdtemp(path.join(tmpdir(), 'trueforge-npx-'));
 let child;
+// Standalone refuses to start without login; a stand-in provider on loopback satisfies it without Docker.
+const oidc = await startStandinOidc();
 
 try {
   for (const filter of ['@truefoundry/trueforge-core', '@truefoundry/trueforge-sdk', '@truefoundry/trueforge']) {
@@ -37,6 +41,7 @@ try {
         ...process.env,
         HOST: host,
         STANDALONE: 'true',
+        ...standinOidcEnv(oidc.issuer),
         SQLITE_PATH: path.join(consumerDir, 'db.sqlite'),
         NODE_ENV: 'production',
       },
@@ -84,6 +89,7 @@ try {
       // already gone
     }
   }
+  await oidc.close();
   await rm(packDir, { recursive: true, force: true });
   await rm(consumerDir, { recursive: true, force: true });
 }
