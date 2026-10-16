@@ -309,7 +309,7 @@ const ConnectorDetails = ({
         {grantedTools.length > 0 ? (
           <section className="mt-6" aria-labelledby="connector-grants-heading">
             <h5 id="connector-grants-heading" className="text-[0.8125rem] font-semibold text-text-primary">
-              Runs without asking <span className="font-normal text-text-secondary">· {grantedTools.length}</span>
+              Always allowed <span className="font-normal text-text-secondary">· {grantedTools.length}</span>
             </h5>
             <p className="mb-2 text-xs text-text-secondary">
               These tools run without asking. Risky calls can still ask first.

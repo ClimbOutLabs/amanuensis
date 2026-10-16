@@ -8,9 +8,9 @@ import type { ThemePreset } from '@/theme/types.js';
 /** Display metadata for each theme preset. */
 const PRESET_META: Record<ThemePreset, { label: string; description: string }> = {
   trueforge: { label: 'Paper', description: 'Warm paper, charcoal ink, brass accents' },
-  claude: { label: 'Cream', description: 'Warm cream, serif type, orange actions' },
-  chatgpt: { label: 'Contrast', description: 'Stark surfaces, high-contrast controls' },
-  gemini: { label: 'Slate', description: 'Material surfaces, blue accents' },
+  claude: { label: 'Clay', description: 'Warm cream, serif type, orange actions' },
+  chatgpt: { label: 'Mint', description: 'Stark surfaces, high-contrast controls' },
+  gemini: { label: 'Denim', description: 'Material surfaces, blue accents' },
   midnight: { label: 'Midnight', description: 'Deep blue-grays, navy accents' },
   forest: { label: 'Forest', description: 'Calm greens, natural tones' },
   sunset: { label: 'Sunset', description: 'Warm oranges, terracotta' },
