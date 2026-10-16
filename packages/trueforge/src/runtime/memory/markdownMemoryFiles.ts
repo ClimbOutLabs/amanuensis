@@ -7,6 +7,7 @@
  * backfill both read through here so the text the indexer embeds is byte-identical
  * to the text recall returns — a mismatch would re-embed every entry on each pass.
  */
+import { createHash } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -16,9 +17,12 @@ import {
 } from '../../utils/dataDir';
 import type { RetainItem } from './hindsightClient';
 
+/** Longest namespace directory name; longer names are cut. */
+const NAMESPACE_MAX_LENGTH = 64;
+
 /** Filesystem-safe namespace; path traversal collapses to underscores. */
 export function sanitizeNamespace(namespace: string): string {
-  const safe = namespace.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+  const safe = namespace.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, NAMESPACE_MAX_LENGTH);
   return safe.length > 0 ? safe : 'default';
 }
 
@@ -184,13 +188,47 @@ export interface VaultTombstone {
   timestamp: string;
 }
 
-/** Tenant-scoped filesystem namespace for a vault wire namespace. */
+/** Suffix `_<8 hex>` that marks a persona vault name made unique by a hash. */
+const VAULT_HASH_SUFFIX = /_[0-9a-f]{8}$/;
+
+/**
+ * Directory segment of a persona vault. A name that survives sanitizing and fits keeps
+ * its plain segment. Any other name (unsafe characters, truncation, or a plain name that
+ * already looks like a hashed one) gets a short hash of the original wire name, so two
+ * distinct names never share a directory and therefore never share facts. The hash is
+ * 32 bits, ample for the handful of personas one tenant has. A tenant id that leaves no
+ * room for the hash inside the directory length cap cannot be disambiguated.
+ */
+function personaVaultSegment(options: { tenantPrefix: string; wire: string }): string {
+  const { tenantPrefix, wire } = options;
+  const name = wire.slice(VAULT_PERSONA_PREFIX.length);
+  const segment = sanitizeNamespace(wire);
+  if (
+    sanitizeNamespace(name) === name &&
+    !VAULT_HASH_SUFFIX.test(name) &&
+    tenantPrefix.length + segment.length <= NAMESPACE_MAX_LENGTH
+  ) {
+    return segment;
+  }
+  const hash = createHash('sha256').update(wire, 'utf8').digest('hex').slice(0, 8);
+  const room = Math.max(NAMESPACE_MAX_LENGTH - tenantPrefix.length - hash.length - 1, 0);
+  return `${segment.slice(0, room)}_${hash}`;
+}
+
+/**
+ * Tenant-scoped filesystem namespace for a vault wire namespace. Persona vaults get
+ * collision-free segments; topic vaults keep their sanitized names so existing data stays put.
+ */
 export function vaultFilesystemNamespace(tenantNamespace: string, wireNamespace: string | undefined): string {
   const wire = (wireNamespace ?? '').trim();
   if (wire === '' || wire === VAULT_DEFAULT_NAMESPACE) {
     return tenantNamespace;
   }
-  return `${tenantNamespace}__${sanitizeNamespace(wire)}`;
+  const tenantPrefix = `${tenantNamespace}__`;
+  if (personaForVaultNamespace(wire) === null) {
+    return `${tenantPrefix}${sanitizeNamespace(wire)}`;
+  }
+  return `${tenantPrefix}${personaVaultSegment({ tenantPrefix, wire })}`;
 }
 
 /** Owning persona for `persona:<name>` wire namespaces, else null. */
@@ -203,6 +241,11 @@ export function personaForVaultNamespace(wireNamespace: string | undefined): str
   return name === '' ? null : name;
 }
 
+/** Wire namespace of a persona's vault (`persona:<name>`). */
+export function personaVaultNamespace(personaName: string): string {
+  return `${VAULT_PERSONA_PREFIX}${personaName}`;
+}
+
 /** Owning persona derived from a filesystem namespace, else null. Best effort: sanitized. */
 export function personaForVaultFilesystemNamespace(
   tenantNamespace: string,
@@ -212,7 +255,7 @@ export function personaForVaultFilesystemNamespace(
   if (!filesystemNamespace.startsWith(prefix)) {
     return null;
   }
-  const name = filesystemNamespace.slice(prefix.length);
+  const name = filesystemNamespace.slice(prefix.length).replace(VAULT_HASH_SUFFIX, '');
   return name === '' ? null : name;
 }
 
@@ -480,4 +523,53 @@ export async function writeVaultSharing(options: {
     }
     throw error;
   }
+}
+
+/** The vault a memory client belongs to. No scope means the shared vault only. */
+export interface VaultScope {
+  /** Display name of the active persona; selects its `persona:<name>` vault. */
+  personaName: string;
+  /** Persona id; sharing grants may be keyed by either the id or the name. */
+  personaId: string;
+}
+
+/** The one vault a scope writes into: its persona vault, else the shared vault. */
+export function vaultWriteNamespace(options: { tenantNamespace: string; scope: VaultScope | undefined }): string {
+  if (options.scope === undefined) {
+    return options.tenantNamespace;
+  }
+  return vaultFilesystemNamespace(options.tenantNamespace, personaVaultNamespace(options.scope.personaName));
+}
+
+/**
+ * Every vault a scope may recall from, in priority order: its own persona vault,
+ * the shared vault, then vaults the sharing config grants to it. Without a scope
+ * only the shared vault is readable. Grants are read-only and never add a write target.
+ */
+export async function vaultReadNamespaces(options: {
+  baseDir: string;
+  tenantNamespace: string;
+  scope: VaultScope | undefined;
+}): Promise<string[]> {
+  const { baseDir, tenantNamespace, scope } = options;
+  const namespaces = [vaultWriteNamespace({ tenantNamespace, scope }), tenantNamespace];
+  if (scope !== undefined) {
+    const { shares } = await readVaultSharing({ baseDir, tenantNamespace });
+    for (const key of [scope.personaName, scope.personaId]) {
+      // Own-property check: a persona named like an Object.prototype member must not match.
+      const granted = Object.hasOwn(shares, key) ? shares[key] : undefined;
+      for (const wireNamespace of granted ?? []) {
+        namespaces.push(vaultFilesystemNamespace(tenantNamespace, wireNamespace));
+      }
+    }
+  }
+  const seen = new Set<string>();
+  return namespaces.filter(namespace => {
+    const directory = sanitizeNamespace(namespace);
+    if (seen.has(directory)) {
+      return false;
+    }
+    seen.add(directory);
+    return true;
+  });
 }

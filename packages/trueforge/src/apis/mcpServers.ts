@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import { safeReturnTo } from '../auth/safeReturnTo';
+import type { McpCatalog } from '../catalog/McpCatalog';
 import configuration from '../config';
 import {
   McpServerNameConflictError,
@@ -20,20 +21,24 @@ import {
   type IMcpServerWithAuthStore,
   type McpServerRecord,
 } from '../db/mcpServerStore';
+import type { IMcpToolGrantStore } from '../db/mcpToolGrantStore';
 import type { WithTransaction } from '../db/transaction';
 import { createMcpOAuthClient } from '../mcp/auth/mcpDcr';
 import { mcpOAuthCallbackUrl } from '../mcp/auth/mcpOAuthHelpers';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
+import { firstPartyAfterSave } from '../mcp/firstParty';
 import {
   authorizeMcpServerRoute,
   createMcpServerRoute,
   deleteAuthorizationMcpServerRoute,
   deleteMcpServerRoute,
+  deleteMcpToolGrantRoute,
   getAvailableMcpServerRoute,
   getMcpServerRoute,
   listAvailableMcpServersRoute,
   listMcpServersRoute,
   listMcpServerToolsRoute,
+  listMcpToolGrantsRoute,
   memoryCheckMcpServerRoute,
   putMcpServerRoute,
 } from '../routes/mcpServerRoutes';
@@ -48,12 +53,13 @@ import type {
   UpdateMcpServerRequest,
 } from '../schemas/mcpServer';
 import type { MemoryProviderCheckResult } from '../schemas/memoryProvider';
-import { MissingStoredSecretError, resolveStoredSecretValue, toRedactedSecretValue } from '../utils/secretRedaction';
+import { MissingStoredSecretError, resolveStoredSecretValue, SECRET_REDACTION } from '../utils/secretRedaction';
 import { isSecretReference } from '../utils/secretReferences';
 
 export interface McpServersRouterDeps<TTransaction> {
   resolveMcpServerStore: (c: Context) => IMcpServerWithAuthStore<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
+  toolGrantStore: IMcpToolGrantStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
@@ -80,7 +86,7 @@ function redactMcpServerManifest(manifest: McpServerManifest): McpServerManifest
   if (manifest.auth?.type === 'header') {
     const headers: Record<string, string> = {};
     for (const [name, value] of Object.entries(manifest.auth.headers)) {
-      headers[name] = isSecretReference(value) ? value : toRedactedSecretValue(value);
+      headers[name] = isSecretReference(value) ? value : SECRET_REDACTION;
     }
     return {
       ...manifest,
@@ -90,7 +96,7 @@ function redactMcpServerManifest(manifest: McpServerManifest): McpServerManifest
   if (manifest.auth?.type === 'oauth_client') {
     const clientSecret = isSecretReference(manifest.auth.client_secret)
       ? manifest.auth.client_secret
-      : toRedactedSecretValue(manifest.auth.client_secret);
+      : SECRET_REDACTION;
     return {
       ...manifest,
       auth: {
@@ -104,25 +110,30 @@ function redactMcpServerManifest(manifest: McpServerManifest): McpServerManifest
   return manifest;
 }
 
+/** Connector roles of which exactly one configured server may hold the flag. */
+type SingleHolderRole = 'memory_provider' | 'search_provider';
+
 /**
- * Only one configured server may hold `manifest.memory_provider === true` (the host recalls
- * from and retains to exactly one connector). `excludeName` skips the row being written itself,
- * so re-saving the server that already holds the flag is not treated as a conflict with itself.
- * Returns the first other flagged server found, or undefined when there is none.
+ * Only one configured server may hold each single-holder role: the host recalls from and retains to
+ * exactly one memory connector, and routes the user's silent searches through exactly one search
+ * connector. `excludeName` skips the row being written itself, so re-saving the server that already
+ * holds the flag is not treated as a conflict with itself. Returns the first other flagged server
+ * found, or undefined when there is none.
  */
-async function findOtherMemoryProviderServer({
+async function findOtherRoleHolder({
   mcpServerStore,
   tenant_id,
   excludeName,
+  role,
 }: {
   mcpServerStore: IMcpServerStore;
   tenant_id: string;
   excludeName: string;
+  role: SingleHolderRole;
 }): Promise<McpServerRecord | undefined> {
   const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
   return servers.find(
-    server =>
-      server.name !== excludeName && server.manifest.type === 'remote' && server.manifest.memory_provider === true,
+    server => server.name !== excludeName && server.manifest.type === 'remote' && server.manifest[role] === true,
   );
 }
 
@@ -350,7 +361,27 @@ async function resolveAvailableMcpServer<TTransaction>(params: {
 }
 
 /** Admin/settings MCP CRUD (mounted at /api/v1/settings/mcp-servers). */
-export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<TTransaction>) {
+/**
+ * `search_tools` is the shipped catalog's say alone: whatever the request carried is replaced, so a
+ * client cannot widen what runs without asking. Only the web search provider carries the list.
+ */
+function withCatalogSearchTools({
+  manifest,
+  mcpCatalog,
+}: {
+  manifest: McpServerManifest;
+  mcpCatalog: McpCatalog;
+}): McpServerManifest {
+  if (manifest.type !== 'remote') {
+    return manifest;
+  }
+  const tools = manifest.search_provider === true ? mcpCatalog.searchToolsForUrl(manifest.url) : [];
+  return { ...manifest, search_tools: tools.length > 0 ? [...tools] : undefined };
+}
+
+export function createSettingsMcpServersRouter<TTransaction>(
+  deps: McpServersRouterDeps<TTransaction> & { mcpCatalog: McpCatalog },
+) {
   /**
    * The message to reject a memory-provider write with, or undefined when the check passed.
    * Callers run this only for a manifest that sets the flag: a connector that is not the memory
@@ -436,13 +467,25 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
     const incomingManifest = body.manifest;
 
     if (incomingManifest.type === 'remote' && incomingManifest.memory_provider === true) {
-      const conflict = await findOtherMemoryProviderServer({
+      const conflict = await findOtherRoleHolder({
         mcpServerStore: deps.resolveMcpServerStore(c),
         tenant_id: requestContext.tenant_id,
         excludeName: incomingManifest.name,
+        role: 'memory_provider',
       });
       if (conflict !== undefined) {
         return c.json({ error: { message: `memory provider already set on ${conflict.name}; disable it first` } }, 409);
+      }
+    }
+    if (incomingManifest.type === 'remote' && incomingManifest.search_provider === true) {
+      const conflict = await findOtherRoleHolder({
+        mcpServerStore: deps.resolveMcpServerStore(c),
+        tenant_id: requestContext.tenant_id,
+        excludeName: incomingManifest.name,
+        role: 'search_provider',
+      });
+      if (conflict !== undefined) {
+        return c.json({ error: { message: `search provider already set on ${conflict.name}; disable it first` } }, 409);
       }
     }
 
@@ -468,9 +511,12 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
 
     let manifest: McpServerManifest;
     try {
-      manifest = resolveMcpServerManifestForWrite({
-        incoming: incomingManifest,
-        existing: undefined,
+      manifest = withCatalogSearchTools({
+        manifest: resolveMcpServerManifestForWrite({
+          incoming: incomingManifest,
+          existing: undefined,
+        }),
+        mcpCatalog: deps.mcpCatalog,
       });
     } catch (error) {
       if (error instanceof MissingStoredSecretError) {
@@ -481,6 +527,7 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
 
     // After secret resolution, so the check dials with the credential the row will actually
     // carry, and before the write, so a provider memory cannot reach is never committed.
+    let memoryProviderChecked = false;
     if (manifest.type === 'remote' && manifest.memory_provider === true) {
       // No stored row on create: a name clash is a 409 below, so nothing of an existing row can
       // be inherited by this write, and a DCR manifest has no token yet to check with.
@@ -494,6 +541,7 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
       if (rejection !== undefined) {
         return c.json({ error: { message: rejection } }, 422);
       }
+      memoryProviderChecked = true;
     }
 
     try {
@@ -503,6 +551,11 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
             tenant_id: requestContext.tenant_id,
             name: manifest.name,
             manifest,
+            first_party: firstPartyAfterSave({
+              manifest,
+              memoryProviderChecked,
+              origins: configuration.FIRST_PARTY_MCP_ORIGINS,
+            }),
           },
           transaction,
         );
@@ -537,13 +590,25 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
     const incomingManifest = body.manifest;
 
     if (incomingManifest.type === 'remote' && incomingManifest.memory_provider === true) {
-      const conflict = await findOtherMemoryProviderServer({
+      const conflict = await findOtherRoleHolder({
         mcpServerStore: deps.resolveMcpServerStore(c),
         tenant_id: requestContext.tenant_id,
         excludeName: incomingManifest.name,
+        role: 'memory_provider',
       });
       if (conflict !== undefined) {
         return c.json({ error: { message: `memory provider already set on ${conflict.name}; disable it first` } }, 409);
+      }
+    }
+    if (incomingManifest.type === 'remote' && incomingManifest.search_provider === true) {
+      const conflict = await findOtherRoleHolder({
+        mcpServerStore: deps.resolveMcpServerStore(c),
+        tenant_id: requestContext.tenant_id,
+        excludeName: incomingManifest.name,
+        role: 'search_provider',
+      });
+      if (conflict !== undefined) {
+        return c.json({ error: { message: `search provider already set on ${conflict.name}; disable it first` } }, 409);
       }
     }
 
@@ -581,9 +646,12 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
         const existing = await deps
           .resolveMcpServerStore(c)
           .getServerForUpdate({ tenant_id: requestContext.tenant_id, name: incomingManifest.name }, transaction);
-        const manifest = resolveMcpServerManifestForWrite({
-          incoming: incomingManifest,
-          existing: existing?.manifest,
+        const manifest = withCatalogSearchTools({
+          manifest: resolveMcpServerManifestForWrite({
+            incoming: incomingManifest,
+            existing: existing?.manifest,
+          }),
+          mcpCatalog: deps.mcpCatalog,
         });
         // A concurrent update between the unlocked check above and this lock could otherwise
         // commit a URL and credential pair the provider never answered for.
@@ -616,6 +684,12 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
             tenant_id: requestContext.tenant_id,
             name: manifest.name,
             manifest,
+            // The digest check above proves this exact URL and credential passed the provider check.
+            first_party: firstPartyAfterSave({
+              manifest,
+              memoryProviderChecked: probedDigest !== undefined,
+              origins: configuration.FIRST_PARTY_MCP_ORIGINS,
+            }),
           },
           transaction,
         );
@@ -627,6 +701,13 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
           // URL is the OAuth resource/audience — drop every user's tokens and in-flight authorizes.
           await deps.tokenStore.deleteTokensForServer({ id: saved.id }, transaction);
           await deps.tokenStore.deletePendingAuthorizationsForServer({ id: saved.id }, transaction);
+        }
+        if (existing !== undefined && existing.manifest.url !== manifest.url) {
+          // A new URL is a different server: Always allow was granted to the old one's tools.
+          await deps.toolGrantStore.revokeServerToolGrants(
+            { tenant_id: requestContext.tenant_id, mcp_server_name: manifest.name },
+            transaction,
+          );
         }
         return saved;
       });
@@ -667,15 +748,19 @@ export function createSettingsMcpServersRouter<TTransaction>(deps: McpServersRou
     if (!record) {
       return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);
     }
-    // The connector row is shared, so deletion purges EVERY user's tokens and in-flight
-    // authorizations, not just the caller's, in one transaction with the row itself. The
-    // schema declares ON DELETE CASCADE, but SQLite only honors that with the foreign_keys
-    // pragma enabled; explicit cleanup is the house pattern (see the URL-change purge in
-    // putHandler). A session whose agent spec still names this server hits the existing
+    // The connector row is shared, so deletion purges EVERY user's tokens, in-flight
+    // authorizations, and Always allow grants, not just the caller's, in one transaction with
+    // the row itself. The schema declares ON DELETE CASCADE, but SQLite only honors that with
+    // the foreign_keys pragma enabled; explicit cleanup is the house pattern (see the URL-change
+    // purge in putHandler). A session whose agent spec still names this server hits the existing
     // 422 unregistered-server error on next use; that is intended.
     await deps.withTransaction(async transaction => {
       await deps.tokenStore.deleteTokensForServer({ id: record.id }, transaction);
       await deps.tokenStore.deletePendingAuthorizationsForServer({ id: record.id }, transaction);
+      await deps.toolGrantStore.revokeServerToolGrants(
+        { tenant_id: requestContext.tenant_id, mcp_server_name: name },
+        transaction,
+      );
       await deps.resolveMcpServerStore(c).deleteServer({ tenant_id: requestContext.tenant_id, name }, transaction);
     });
     return c.json({}, 200);
@@ -761,6 +846,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       headers: connection.headers,
       requestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       connectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      refuseRedirects: connection.first_party,
       logger: deps.logger,
       signal: c.req.raw.signal,
     });
@@ -846,6 +932,37 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
     }
   };
 
+  const listToolGrantsHandler: RouteHandler<typeof listMcpToolGrantsRoute> = async c => {
+    const { name } = c.req.valid('param');
+    const requestContext = deps.resolveRequestContext(c);
+    const record = await deps.resolveMcpServerStore(c).getServer({ tenant_id: requestContext.tenant_id, name });
+    if (!record) {
+      return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);
+    }
+    const data = await deps.toolGrantStore.listToolGrants({
+      tenant_id: requestContext.tenant_id,
+      created_by: requestContext.subject.id,
+      mcp_server_name: name,
+    });
+    return c.json({ data }, 200);
+  };
+
+  const deleteToolGrantHandler: RouteHandler<typeof deleteMcpToolGrantRoute> = async c => {
+    const { name, tool_name } = c.req.valid('param');
+    const requestContext = deps.resolveRequestContext(c);
+    const record = await deps.resolveMcpServerStore(c).getServer({ tenant_id: requestContext.tenant_id, name });
+    if (!record) {
+      return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);
+    }
+    await deps.toolGrantStore.revokeToolGrant({
+      tenant_id: requestContext.tenant_id,
+      created_by: requestContext.subject.id,
+      mcp_server_name: name,
+      tool_name,
+    });
+    return c.json({}, 200);
+  };
+
   const getAvailableHandler: RouteHandler<typeof getAvailableMcpServerRoute> = async c => {
     const { name } = c.req.valid('param');
     const requestContext = deps.resolveRequestContext(c);
@@ -904,6 +1021,8 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
     return c.json({ data }, 200);
   });
   router.openapi(listMcpServerToolsRoute, listToolsHandler);
+  router.openapi(listMcpToolGrantsRoute, listToolGrantsHandler);
+  router.openapi(deleteMcpToolGrantRoute, deleteToolGrantHandler);
   router.openapi(authorizeMcpServerRoute, authorizeHandler);
   router.openapi(memoryCheckMcpServerRoute, memoryCheckHandler);
   router.openapi(deleteAuthorizationMcpServerRoute, deleteAuthorizationHandler);

@@ -10,7 +10,6 @@ import {
   type ImplementationPlanGrant,
   type ImplementationPlanGrantApi,
 } from '../components/ImplementationPlanGrantContext.js';
-import { useDocumentVisible } from '../hooks/useDocumentVisible.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
 
 const POLL_INTERVAL_MS = 2_000;
@@ -54,7 +53,6 @@ function ImplementationPlanGrantControlsWithApi({
   });
 
   const { listImplementationPlanGrants, revokeImplementationPlanGrant } = api;
-  const isVisible = useDocumentVisible();
 
   useEffect(() => {
     requestVersionRef.current += 1;
@@ -63,9 +61,8 @@ function ImplementationPlanGrantControlsWithApi({
     setRevokingGrantId(null);
   }, [sessionId]);
 
-  // A hidden page neither loads nor polls; showing it again reloads at once.
   useEffect(() => {
-    if (sessionId == null || !isVisible) {
+    if (sessionId == null) {
       return;
     }
 
@@ -96,12 +93,23 @@ function ImplementationPlanGrantControlsWithApi({
         });
     };
     refresh();
-    const intervalId = isRunning ? setInterval(refresh, POLL_INTERVAL_MS) : undefined;
+    // Skip poll ticks while the tab is hidden (matching SentinelAuditFeed) so a hidden tab
+    // fires no requests; refresh once immediately when the tab becomes visible again.
+    const intervalId = isRunning
+      ? setInterval(() => {
+          if (document.visibilityState === 'visible') refresh();
+        }, POLL_INTERVAL_MS)
+      : undefined;
+    const handleVisibilityChange = () => {
+      if (isRunning && document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (intervalId !== undefined) clearInterval(intervalId);
     };
-  }, [isRunning, isVisible, listImplementationPlanGrants, sessionId]);
+  }, [isRunning, listImplementationPlanGrants, sessionId]);
 
   const revoke = useCallback(
     (grant: ImplementationPlanGrant) => {

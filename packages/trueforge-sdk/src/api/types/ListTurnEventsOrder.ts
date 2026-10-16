@@ -2,7 +2,7 @@
 
 /** Sort events by insertion order. Defaults to "asc". */
 export const ListTurnEventsOrder = {
-    Asc: "asc",
-    Desc: "desc",
-} as const;
-export type ListTurnEventsOrder = (typeof ListTurnEventsOrder)[keyof typeof ListTurnEventsOrder];
+        Asc: "asc",
+        Desc: "desc"
+    } as const;
+export type ListTurnEventsOrder = typeof ListTurnEventsOrder[keyof typeof ListTurnEventsOrder];

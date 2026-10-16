@@ -2,8 +2,7 @@
 
 /** Why a memory-recall event’s token budget was what it was; present only on `aman.memory.recall`. */
 export const BugReportTraceEventBudgetReason = {
-    Normal: "normal",
-    PostCompaction: "post_compaction",
-} as const;
-export type BugReportTraceEventBudgetReason =
-    (typeof BugReportTraceEventBudgetReason)[keyof typeof BugReportTraceEventBudgetReason];
+        Normal: "normal",
+        PostCompaction: "post_compaction"
+    } as const;
+export type BugReportTraceEventBudgetReason = typeof BugReportTraceEventBudgetReason[keyof typeof BugReportTraceEventBudgetReason];

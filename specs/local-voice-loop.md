@@ -2,6 +2,8 @@
 
 **Status:** implemented
 
+**Scope note:** v1 ships local speech-to-text input only: a tap-to-record mic button in the chat composer, transcribed by the local `aman-stt` sidecar. Text-to-speech playback, hands-free mode, the push-to-talk hotkey, and the clipboard bridge are future work; the sections below describe the full target.
+
 ## Problem
 
 Aman is text-only. A personal AI assistant on the user's own hardware should support voice: push-to-talk for quick queries, hands-free conversation mode, and local speech synthesis so no audio ever leaves the device.

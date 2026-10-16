@@ -15,7 +15,6 @@ import {
 
 import { useAuiState } from '../assistant-ui.js';
 import { useOptionalMemoryRecall, type MemoryTurnContext } from '../components/MemoryRecallContext.js';
-import { useDocumentVisible } from '../hooks/useDocumentVisible.js';
 
 /** How often `MemoryTurnContextProvider` asks for memory context newer than what it already has. */
 const POLL_INTERVAL_MS = 2_000;
@@ -178,14 +177,12 @@ export function MemoryTurnContextProvider({ children }: PropsWithChildren) {
   const sessionId = useAuiState(state => state.threadListItem.remoteId);
   const latestTurnId = useAuiState(state => latestAssistantTurnId(state.thread.messages));
   const isRunning = useThreadIsRunning();
-  const isVisible = useDocumentVisible();
   const [store] = useState(() => new MemoryTurnContextStore());
   const refreshRef = useRef<(scope: RefreshScope) => void>(() => {});
   const [inGracePeriod, setInGracePeriod] = useState(false);
   // Only a running→stopped transition earns the grace period; a session that opens already idle
   // (e.g. a completed session loaded fresh) needs just the one initial load.
   const wasRunningRef = useRef(false);
-  const isVisibleRef = useRef(isVisible);
   const latestTurnHasProfile = useSyncExternalStore(
     store.subscribe,
     () => latestTurnId !== undefined && store.getTurn(latestTurnId)?.profile !== undefined,
@@ -258,26 +255,33 @@ export function MemoryTurnContextProvider({ children }: PropsWithChildren) {
     const timeoutId = setTimeout(() => {
       setInGracePeriod(false);
       // One last full read picks up a profile saved behind the cursor; a hidden page does it on show.
-      if (isVisibleRef.current) refreshRef.current('all');
+      if (document.visibilityState === 'visible') refreshRef.current('all');
     }, POST_RUN_POLL_MS);
     return () => clearTimeout(timeoutId);
   }, [inGracePeriod]);
 
   const shouldPoll =
-    api != null && sessionId != null && isVisible && (isRunning || (inGracePeriod && !latestTurnHasProfile));
+    api != null && sessionId != null && (isRunning || (inGracePeriod && !latestTurnHasProfile));
 
+  // Skip poll ticks while the tab is hidden (matching SentinelAuditFeed) so a hidden tab
+  // fires no requests.
   useEffect(() => {
     if (!shouldPoll) return;
-    const intervalId = setInterval(() => refreshRef.current('newer'), POLL_INTERVAL_MS);
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === 'visible') refreshRef.current('newer');
+    }, POLL_INTERVAL_MS);
     return () => clearInterval(intervalId);
   }, [shouldPoll]);
 
   // Showing the page again catches up at once with a full read: a hidden tab skips polls and may
   // have outlived the grace period that would have picked up a late profile write.
   useEffect(() => {
-    if (isVisible && !isVisibleRef.current) refreshRef.current('all');
-    isVisibleRef.current = isVisible;
-  }, [isVisible]);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshRef.current('all');
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   // The read that failed may have been a full one, so a retry re-reads everything.
   const retry = useCallback(() => refreshRef.current('all'), []);

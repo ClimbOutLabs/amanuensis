@@ -35,8 +35,8 @@ export interface LastCompactionStatus {
   tokensBefore: number;
   /** Estimated context tokens after the compaction attempt. */
   tokensAfter: number;
-  /** Whether the compaction applied, or was skipped as invalid or blocked. */
-  outcome: 'applied' | 'skipped_invalid' | 'skipped_blocked';
+  /** Whether the compaction applied, was skipped, or fell back to truncation. */
+  outcome: TrueForgeApi.ContextCompactionEventOutcome;
 }
 
 /** Host-facing methods beyond the vendor `AgentChatServer` contract. */
@@ -111,9 +111,18 @@ function isNoPendingApprovalError(error: unknown): boolean {
 }
 
 export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'>): HarnessChatServerExtensions {
+  // `listTurns` is oldest-first, so its first row is the session's first turn, not its tip. The
+  // session event feed is newest-first on the active branch, which names the real tip turn.
+  async function readTipTurn({ sessionId }: { sessionId: string }): Promise<TrueForgeApi.Turn | null> {
+    const page = await client.sessions.listEvents(sessionId, { limit: 1 });
+    const newest = page.data[0];
+    if (newest == null) return null;
+    const response = await client.sessions.getTurn(sessionId, newest.turnId);
+    return response.data;
+  }
+
   async function peekSessionTip({ sessionId }: { sessionId: string }): Promise<SessionTipInfo | null> {
-    const page = await client.sessions.listTurns(sessionId, { limit: 1 });
-    const tip = page.data[0];
+    const tip = await readTipTurn({ sessionId });
     if (tip == null) return null;
     const pendingApprovals: PendingApprovalInfo[] = [];
     const state = tip.state;
@@ -194,8 +203,7 @@ export function createSessionResyncExtensions(client: Pick<TrueForge, 'sessions'
   }
 
   async function getLastTurnInputTokens({ sessionId }: { sessionId: string }): Promise<number | null> {
-    const page = await client.sessions.listTurns(sessionId, { limit: 1 });
-    const tip = page.data[0];
+    const tip = await readTipTurn({ sessionId });
     if (tip == null) return null;
     const state: unknown = tip.state;
     if (typeof state !== 'object' || state === null) return null;

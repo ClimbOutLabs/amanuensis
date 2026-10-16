@@ -2,7 +2,7 @@
 
 /** Session mode a context-compaction event ran in; present only on `agent.context.compaction`. */
 export const BugReportTraceEventMode = {
-    Coding: "coding",
-    Conversation: "conversation",
-} as const;
-export type BugReportTraceEventMode = (typeof BugReportTraceEventMode)[keyof typeof BugReportTraceEventMode];
+        Coding: "coding",
+        Conversation: "conversation"
+    } as const;
+export type BugReportTraceEventMode = typeof BugReportTraceEventMode[keyof typeof BugReportTraceEventMode];

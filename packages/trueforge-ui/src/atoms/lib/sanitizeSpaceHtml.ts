@@ -1,18 +1,22 @@
 /**
  * Allow-list sanitiser for an html-format space body before it is handed to the sandboxed iframe
  * in `SpacesView`. The model authors the page; nothing here trusts it. Strips everything capable
- * of executing script or reaching off-page. The only off-page fetch left standing on purpose is
- * `<img src>` when it is an `https:` URL or a `data:` URI — anything else drops the image entirely
- * rather than leaving a broken reference to strip later.
+ * of executing script or reaching off-page. No off-page fetch is left standing on purpose:
+ * only a `data:` URI survives on `<img src>` and on media `src`/`href` attributes
+ * (`<video>`, `<audio>`, `<source>`, `<svg><use>`); anything else drops the attribute
+ * entirely rather than leaving a broken reference to strip later.
  *
  * Everything else that could reach off-page is removed:
  *   - `<script>`, `<link>`, `<iframe>`, `<object>`, `<embed>`, `<meta>`, `<base>`.
  *   - `on*` event-handler attributes, and `javascript:` URLs in `href`/`src`/`action`/`formaction`.
+ *   - `srcset` on any element (including `<source>` inside `<picture>`), which can
+ *     carry remote image candidates even when `src` is a `data:` URI.
+ *   - `<image href>` inside `<svg>`, `<video poster>`, `<input type=image src>`,
+ *     and the `background` attribute on table cells, all of which can trigger
+ *     an off-page fetch.
  *   - every CSS `url(...)` whose target is not a `data:` URI, in both `<style>` blocks and inline
- *     `style` attributes — this covers `background`/`background-image`, `cursor`,
- *     `list-style-image`, `border-image`, `mask`, `content`, and any other property, not just
- *     `@import` (an `@import` target is external by construction and is dropped outright; a plain
- *     `url(data:...)` is left alone so the base stylesheet and inline images keep working).
+ *     `style` attributes; CSS `image-set(...)` is dropped outright because every
+ *     branch can carry a remote URL.
  *   - CSS `expression(...)` and `-moz-binding` declarations.
  * `<style>` elements and inline `style` attributes are otherwise kept as written.
  *
@@ -48,7 +52,7 @@ function isJavascriptUrl(value: string): boolean {
 }
 
 function isAllowedImageSrc(value: string): boolean {
-  return /^https:\/\//i.test(value) || /^data:/i.test(value);
+  return /^data:/i.test(value);
 }
 
 /**
@@ -59,11 +63,14 @@ function isAllowedImageSrc(value: string): boolean {
  *   - every remaining `url(...)` is neutralised unless its target is a `data:` URI, covering
  *     `background`, `background-image`, `cursor`, `list-style-image`, `border-image`, `mask`,
  *     `content`, and any other property that can carry a `url()` — not just `@import`.
+ *   - `image-set(...)` is dropped outright: every branch can carry a remote URL, and
+ *     allowlisting per-branch `data:` URIs is not worth the parsing risk.
  *   - `expression(...)` (legacy IE script-in-CSS) and `-moz-binding` (legacy Gecko XBL, which can
  *     load an external binding document) are stripped too.
  */
 function scrubCss(css: string): string {
   let result = css.replace(/@import\b[^;]*;?/gi, '');
+  result = result.replace(/image-set\s*\([^)]*\)/gi, 'none');
   result = result.replace(/url\(\s*(['"]?)([^'")]*)\1\s*\)/gi, (match, _quote: string, target: string) =>
     /^data:/i.test(target.trim()) ? match : 'none',
   );
@@ -114,6 +121,43 @@ function sanitiseElement(element: Element): void {
       element.remove();
       return;
     }
+    // srcset can carry remote candidates even when src is a data: URI.
+    element.removeAttribute('srcset');
+  }
+
+  // <source srcset> inside <picture> is another remote-image vector.
+  if (tag === 'source') {
+    element.removeAttribute('srcset');
+    element.removeAttribute('src');
+  }
+
+  // <image href> inside <svg> can trigger an off-page fetch.
+  if (tag === 'image') {
+    element.removeAttribute('href');
+    const href = element.getAttribute('xlink:href');
+    if (href !== null) {
+      element.removeAttribute('xlink:href');
+    }
+  }
+
+  // <video> and <audio> src can trigger an off-page fetch for media.
+  if (tag === 'video' || tag === 'audio') {
+    const src = element.getAttribute('src');
+    if (src !== null && !isAllowedImageSrc(src)) {
+      element.removeAttribute('src');
+    }
+  }
+
+  // <use href> inside <svg> can reference a remote document.
+  if (tag === 'use') {
+    const href = element.getAttribute('href');
+    if (href !== null && !isAllowedImageSrc(href)) {
+      element.removeAttribute('href');
+    }
+    const xlinkHref = element.getAttribute('xlink:href');
+    if (xlinkHref !== null && !isAllowedImageSrc(xlinkHref)) {
+      element.removeAttribute('xlink:href');
+    }
   }
 
   if (tag === 'style') {
@@ -138,9 +182,30 @@ function sanitiseElement(element: Element): void {
       element.removeAttribute(attr.name);
       continue;
     }
+    // srcset on any element (img, source, etc.) can carry remote URLs.
+    if (name === 'srcset') {
+      element.removeAttribute(attr.name);
+      continue;
+    }
+    // <video poster> triggers an off-page fetch for the poster image.
+    if (name === 'poster') {
+      element.removeAttribute(attr.name);
+      continue;
+    }
+    // The background attribute on table cells (and other elements) fetches a remote image.
+    if (name === 'background') {
+      element.removeAttribute(attr.name);
+      continue;
+    }
     if (name === 'style') {
       element.setAttribute('style', scrubCss(attr.value));
     }
+  }
+
+  // <input type=image> uses src as a remote image button; strip the src so it
+  // cannot fetch, but keep the element itself.
+  if (tag === 'input' && element.getAttribute('type')?.toLowerCase() === 'image') {
+    element.removeAttribute('src');
   }
 
   // Snapshot before recursing: sanitising a child can remove it (e.g. a nested <script>) or,

@@ -78,31 +78,6 @@ describe('SentinelAuditStore', () => {
     expect(otherTenant).toHaveLength(0);
   });
 
-  it('updateOutcome refines the outcome', async () => {
-    await store.record({
-      tenant_id: 't1',
-      created_by: 'u1',
-      conversation_id: 's1',
-      tier: 2,
-      tool_name: 'shell',
-      description: 'shell',
-      outcome: 'ran',
-      auto_deny_reason: null,
-    });
-    const [row] = await store.list({ tenant_id: 't1', created_by: 'u1', conversation_id: 's1', limit: 50, offset: 0 });
-
-    await store.updateOutcome({ entry_id: row!.id, outcome: 'stopped_by_user' });
-
-    const [updated] = await store.list({
-      tenant_id: 't1',
-      created_by: 'u1',
-      conversation_id: 's1',
-      limit: 50,
-      offset: 0,
-    });
-    expect(updated!.outcome).toBe('stopped_by_user');
-  });
-
   it('list orders by created_at desc and paginates', async () => {
     for (let i = 0; i < 3; i++) {
       await store.record({

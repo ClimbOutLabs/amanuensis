@@ -2,13 +2,13 @@
 
 /** ok: reflection injected. empty: reflect returned no text. withheld: the recall screen kept it out. dropped: the token budget kept it out. skipped: route was recall. disabled: layer off. timeout/error: reflect failed; the turn proceeded with the other layers. */
 export const MemoryRecallReflectOutcome = {
-    Ok: "ok",
-    Empty: "empty",
-    Withheld: "withheld",
-    Dropped: "dropped",
-    Skipped: "skipped",
-    Disabled: "disabled",
-    Timeout: "timeout",
-    Error: "error",
-} as const;
-export type MemoryRecallReflectOutcome = (typeof MemoryRecallReflectOutcome)[keyof typeof MemoryRecallReflectOutcome];
+        Ok: "ok",
+        Empty: "empty",
+        Withheld: "withheld",
+        Dropped: "dropped",
+        Skipped: "skipped",
+        Disabled: "disabled",
+        Timeout: "timeout",
+        Error: "error"
+    } as const;
+export type MemoryRecallReflectOutcome = typeof MemoryRecallReflectOutcome[keyof typeof MemoryRecallReflectOutcome];

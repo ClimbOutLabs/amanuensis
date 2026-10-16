@@ -14,6 +14,7 @@ import {
   createSentinelHostContext,
   DEFAULT_PINNED_PATH,
   defaultSentinelServices,
+  forUnattendedRun,
   type SentinelHostContext,
   type SentinelServices,
 } from '../core/permissions';
@@ -222,7 +223,9 @@ export class SessionHandle<
   }) {
     this.store = options.store;
     this.session = options.session;
-    this.sentinelServices = options.sentinelServices ?? defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH });
+    const services = options.sentinelServices ?? defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH });
+    // Nobody watches a scheduled run, so relaxations never apply: Tier 2 parks for approval.
+    this.sentinelServices = options.session.source?.type === 'schedule' ? forUnattendedRun(services) : services;
   }
 
   get session_id(): string {
@@ -330,6 +333,7 @@ export class SessionHandle<
         turn_id: input.turn_id,
         signal: input.signal,
         tracing,
+        sentinel: this.createSentinelContext(),
       });
 
       const definitionsByThreadId = await this.resolveAgentDefinitions({
@@ -828,6 +832,8 @@ export class SessionHandle<
       toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
       toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
       runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
+      modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
+      toolCallPolicy: input.resolver.toolCallPolicy,
       sentinel: this.createSentinelContext(),
     });
   }
@@ -918,6 +924,8 @@ export class SessionHandle<
         toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
         toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
+        modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
+        toolCallPolicy: input.resolver.toolCallPolicy,
         sentinel: this.createSentinelContext(),
       });
     };

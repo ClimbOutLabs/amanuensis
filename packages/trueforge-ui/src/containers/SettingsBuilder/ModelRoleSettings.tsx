@@ -22,7 +22,7 @@ const ModelRoleSettings = () => {
 
   return (
     <>
-      <h3 className="text-xl font-semibold tracking-tight text-text-primary">Model roles</h3>
+      <h3 className="text-xl font-semibold tracking-tight text-text-primary">Roles and Personas</h3>
       <p className="mt-1 text-sm text-text-secondary">
         Choose which model does which job. Connections and model inventory live under Models.
       </p>

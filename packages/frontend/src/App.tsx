@@ -10,6 +10,7 @@ import {
   MemoryRecallProvider,
   PersonalizationProvider,
   PersonaProvider,
+  RunCodeStatusProvider,
   SentinelApiProvider,
   SentinelAuditFeed,
   ThemeProvider,
@@ -49,7 +50,8 @@ import { createMemoryRecallApi } from './memoryRecallApi';
 import { createPersonaApi } from './personaApi';
 import { createPersonalizationApi } from './personalizationApi';
 import { API_BASE_URL, apiPath, uiRouterBasename } from './publicPath';
-import { createSentinelApi } from './sentinelApi';
+import { createRunCodeStatusApi } from './runCodeStatusApi';
+import { createSentinelApi, readAllSessionEvents } from './sentinelApi';
 import { isSetupComplete, mergeSetupRead, SETUP_REFRESH_MS, type SetupSnapshot } from './setupStatus';
 import { createSpaceStore } from './spaceStore';
 import { createVoiceInputApi } from './voiceInputApi';
@@ -75,9 +77,6 @@ const AMAN_AVATAR_MOTION_SOURCES: AmanAvatarMotionSources = {
   writing: apiPath('/aman-avatar/writing.mp4'),
   error: apiPath('/aman-avatar/error.mp4'),
   poster: apiPath('/aman-avatar/poster.jpg'),
-};
-const upgradeSandboxRuntime = async (providerId: string) => {
-  await bootClient.settings.sandboxProviders.upgradeImage(providerId);
 };
 
 const AMAN_THEME: ThemeConfig = {
@@ -157,7 +156,6 @@ const AmanChatSurface = memo(function AmanChatSurface({
         server={SERVER_CONFIG}
         chatFolders={chatFolders}
         spaces={spaces}
-        upgradeSandboxRuntime={upgradeSandboxRuntime}
         theme={AMAN_THEME}
         layout="sidebar"
         withRouter
@@ -400,6 +398,7 @@ export function App() {
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
   const implementationPlanGrantApi = useMemo(() => createImplementationPlanGrantApi(authAwareFetch), []);
   const bugReportApi = useMemo(() => createBugReportApi(authAwareFetch), []);
+  const runCodeStatusApi = useMemo(() => createRunCodeStatusApi(authAwareFetch), []);
   const voiceInputApi = useMemo(() => createVoiceInputApi(authAwareFetch), []);
   const memoryRecallApi = useMemo(() => createMemoryRecallApi(bootClient), []);
   // Raw persisted session events for Sentinel's durable read (approval cards and Tier 2
@@ -409,22 +408,11 @@ export function App() {
     () =>
       createSentinelApi({
         fetcher: authAwareFetch,
-        listSessionEvents: async (sessionId: string): Promise<unknown[]> => {
-          const events: unknown[] = [];
-          let pageToken: string | undefined;
-          do {
-            const page = await bootClient.sessions.listEvents(sessionId, {
-              // The server's maximum page size; anything larger is rejected with a 400.
-              limit: 100,
-              ...(pageToken === undefined ? {} : { pageToken }),
-            });
-            for (const item of page.data) {
-              events.push(item.event);
-            }
-            pageToken = page.response.pagination.nextPageToken;
-          } while (pageToken !== undefined);
-          return events;
-        },
+        listSessionEvents: sessionId =>
+          readAllSessionEvents(async input => {
+            const page = await bootClient.sessions.listEvents(sessionId, input);
+            return { data: page.data, nextPageToken: page.response.pagination.nextPageToken };
+          }),
       }),
     [],
   );
@@ -480,30 +468,32 @@ export function App() {
             <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
               <BugReportProvider api={bugReportApi}>
                 <VoiceInputProvider api={voiceInputApi}>
-                  <MemoryRecallProvider api={memoryRecallApi}>
-                    <PersonaProvider api={personaApi}>
-                      <AmanSetupProvider
-                        value={{
-                          modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                          memoryBank: setup === null ? boot.memoryBank : setup.memoryBank,
-                          settingsHref: '/settings',
-                        }}
-                      >
-                        <ComposerDraftScopeProvider scope={draftScope}>
-                          <AmanShell
-                            defaultAgentSpec={boot.defaultAgentSpec}
-                            openSettings={boot.openSettings}
-                            displayName={session.displayName}
-                            overrides={overrides}
-                            modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
-                            memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
-                            version={boot.build?.version}
-                            buildRef={boot.build?.ref}
-                          />
-                        </ComposerDraftScopeProvider>
-                      </AmanSetupProvider>
-                    </PersonaProvider>
-                  </MemoryRecallProvider>
+                  <RunCodeStatusProvider api={runCodeStatusApi}>
+                    <MemoryRecallProvider api={memoryRecallApi}>
+                      <PersonaProvider api={personaApi}>
+                        <AmanSetupProvider
+                          value={{
+                            modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                            memoryBank: setup === null ? boot.memoryBank : setup.memoryBank,
+                            settingsHref: '/settings',
+                          }}
+                        >
+                          <ComposerDraftScopeProvider scope={draftScope}>
+                            <AmanShell
+                              defaultAgentSpec={boot.defaultAgentSpec}
+                              openSettings={boot.openSettings}
+                              displayName={session.displayName}
+                              overrides={overrides}
+                              modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
+                              memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
+                              version={boot.build?.version}
+                              buildRef={boot.build?.ref}
+                            />
+                          </ComposerDraftScopeProvider>
+                        </AmanSetupProvider>
+                      </PersonaProvider>
+                    </MemoryRecallProvider>
+                  </RunCodeStatusProvider>
                 </VoiceInputProvider>
               </BugReportProvider>
             </ImplementationPlanGrantProvider>

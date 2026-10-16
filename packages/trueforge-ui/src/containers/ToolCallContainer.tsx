@@ -3,24 +3,28 @@
 import {
   MessagePartPrimitive,
   MessagePrimitive,
+  useAui,
   useAuiState,
   useToolCallElapsed,
+  type ThreadMessage,
   type ToolApprovalResponse,
   type ToolCallMessagePartComponent,
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
-import { useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
+import { useTrueFoundryApprovals, useTrueFoundryRespondToToolApproval } from '@truefoundry/assistant-ui-runtime';
+import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { useCallback, useState } from 'react';
 
+import { MapCard } from '../components/MapCard.js';
+import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
 import { useOptionalSentinelState } from '../sentinel/SentinelStateProvider.js';
-import { Tier2Indicator } from '../sentinel/Tier2Indicator.js';
-import { Tier3ApprovalCard } from '../sentinel/Tier3ApprovalCard.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import {
   ASK_USER_TOOL_NAME,
   MCP_META_TOOLS,
   SANDBOX_TOOL_NAMES,
   SUB_AGENT_TOOL_NAME,
+  allowOnceOptionId,
   buildApprovalOptions,
   buildOutcomeText,
   formatDuration,
@@ -32,6 +36,7 @@ import {
   hasPendingToolApproval,
   mcpDisplayName,
   parseAskUserQuestionArgs,
+  parseMapsResult,
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
@@ -53,9 +58,10 @@ function NestedReasoningContainer() {
   return isRunning ? <ReasoningCard content="" isStreaming headingText="Thinking…" /> : null;
 }
 
-function hostObservedTargetSummary(artifact: unknown): string | undefined {
+/** A host-set text fact on the tool-call part (the model cannot forge these), or undefined. */
+function artifactText(artifact: unknown, name: 'hostObservedTargetSummary' | 'silentSearchQuery'): string | undefined {
   if (artifact === null || typeof artifact !== 'object' || Array.isArray(artifact)) return undefined;
-  const value = Object.entries(artifact).find(([key]) => key === 'hostObservedTargetSummary')?.[1];
+  const value = Object.entries(artifact).find(([key]) => key === name)?.[1];
   return typeof value === 'string' ? value : undefined;
 }
 
@@ -79,9 +85,33 @@ function NestedSubAgentAssistantMessage() {
   );
 }
 
+/** Single-use allow ids the server declared, by approval id, including sub-agent threads. */
+function collectAllowOnceIds(messages: readonly ThreadMessage[], into: Map<string, string>): void {
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    for (const part of message.content) {
+      if (part.type !== 'tool-call') continue;
+      const allowOnceId = allowOnceOptionId(part.approval?.options);
+      if (part.approval != null && allowOnceId !== undefined) into.set(part.approval.id, allowOnceId);
+      if (part.messages != null) collectAllowOnceIds(part.messages, into);
+    }
+  }
+}
+
+function ExpiredApprovalNote() {
+  return (
+    <p data-role="approval-expired" className="text-text-secondary px-3 py-2 text-sm">
+      This request expired.
+    </p>
+  );
+}
+
 function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
   const isNestedReadonly = useNestedApprovalBridge();
   const respondToNestedApproval = useTrueFoundryRespondToToolApproval();
+  const { pending: pendingApprovals, respond: respondToApproval } = useTrueFoundryApprovals();
+  const sentinel = useOptionalSentinelState();
+  const aui = useAui();
 
   const respond = (response: ToolApprovalResponse) => {
     if (part.approval == null) return;
@@ -98,6 +128,9 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
       optionId = response.optionId;
     }
     if (approved === undefined) return;
+    // A plain allow is still a single-use allow: name the declared option instead of leaving
+    // the scope to a default.
+    if (approved && optionId === undefined) optionId = allowOnceOptionId(part.approval.options);
 
     const normalizedResponse = {
       approvalId: part.approval.id,
@@ -131,23 +164,59 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     return respond({ optionId, reason });
   };
 
-  // A Tier 3 approval whose server-built plain-language card arrived on the
+  // An approval whose server-built plain-language card arrived on the
   // `tool.approval_required` event replaces the generic approval card. The branch keys
   // on the explicit numeric `tier` the server sent; without it the generic card
   // renders as before. Approve/Deny reuse the same option plumbing, so grants and
   // confirmations behave identically.
-  const sentinel = useOptionalSentinelState();
   const approvalInfo = sentinel?.approvalFor(part.toolCallId);
-  if (approvalInfo?.tier === 3) {
+  if (approvalInfo?.tier === 2 || approvalInfo?.tier === 3) {
     const options = buildApprovalOptions(part.approval?.options);
-    const allowOption = options.find(option => option.isAllow);
+    // Approve is always a single-use allow: a declared chat-scoped grant can sort first,
+    // and taking the first allow option would silently approve every later equivalent call.
+    const allowOnceId = allowOnceOptionId(part.approval?.options) ?? '__allow';
     const denyOption = options.find(option => !option.isAllow);
+    // Only Tier 2 calls batch, and only those asked by this same approval event on this
+    // same thread: a sub-agent's calls never ride along with the parent's. Each call still
+    // gets its own allow and redeems its own single-use token. A Tier 3 call is never listed
+    // here, so "Approve all" cannot reach it.
+    const thisPending = pendingApprovals.find(pending => pending.approvalId === approvalInfo.toolCallId);
+    const tier2Batch =
+      approvalInfo.tier === 2 && thisPending !== undefined && approvalInfo.eventId !== null
+        ? pendingApprovals.filter(pending => {
+            const info = sentinel?.approvalFor(pending.approvalId);
+            return (
+              info?.tier === 2 &&
+              info.eventId === approvalInfo.eventId &&
+              info.threadId === approvalInfo.threadId &&
+              pending.threadId === thisPending.threadId
+            );
+          })
+        : [];
+    const approveAll =
+      tier2Batch.length > 1
+        ? () => {
+            const declaredAllowOnce = new Map<string, string>();
+            collectAllowOnceIds(aui.thread().getState().messages, declaredAllowOnce);
+            for (const pending of tier2Batch) {
+              const optionId = declaredAllowOnce.get(pending.approvalId);
+              respondToApproval({
+                approvalId: pending.approvalId,
+                approved: true,
+                ...(optionId === undefined ? {} : { optionId }),
+              });
+            }
+          }
+        : undefined;
     return (
-      <Tier3ApprovalCard
+      <PermissionApprovalCard
         toolName={part.toolName}
         card={approvalInfo.card}
-        onApprove={() => onSelectOption(allowOption?.id ?? '__allow')}
+        tier={approvalInfo.tier}
+        onApprove={() => onSelectOption(allowOnceId)}
         onDeny={() => onSelectOption(denyOption?.id ?? '__deny')}
+        onApproveAll={approveAll}
+        batchSize={approveAll === undefined ? undefined : tier2Batch.length}
         disabled={isNestedReadonly}
       />
     );
@@ -157,11 +226,35 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
     <ToolApprovalContainer
       toolName={part.toolName}
       argsText={part.argsText}
-      hostObservedTargetSummary={hostObservedTargetSummary(part.artifact)}
+      hostObservedTargetSummary={artifactText(part.artifact, 'hostObservedTargetSummary')}
       options={buildApprovalOptions(part.approval?.options)}
       onSelectOption={onSelectOption}
     />
   );
+}
+
+/**
+ * The user-facing result of a maps tool call, rendered inline in the conversation. Shows a quiet
+ * loading state while the call runs and the map card once the result is in.
+ */
+function MapsResult({ part }: { part: ToolCallMessagePartProps }) {
+  const resultString =
+    part.result === undefined
+      ? undefined
+      : typeof part.result === 'string'
+        ? part.result
+        : JSON.stringify(part.result, null, 2);
+  const mapsResult = parseMapsResult(resultString, part.toolName);
+  if (part.status?.type === 'running' && mapsResult.data === null) {
+    return (
+      <div className="maps-card" data-testid="map-card-loading">
+        <div className="maps-card-loading" role="status" aria-label="Loading map">
+          <span aria-hidden="true" className="maps-card-loading-spinner" />
+        </div>
+      </div>
+    );
+  }
+  return <MapCard data={mapsResult.data} state={mapsResult.state} blockedMessage={mapsResult.blockedMessage} />;
 }
 
 function RequestResponseSlots({
@@ -188,7 +281,7 @@ function RequestResponseSlots({
   };
 }
 
-const ToolCallContainerInner: ToolCallMessagePartComponent = part => {
+export const ToolCallContainer: ToolCallMessagePartComponent = part => {
   const ToolCallCard = useSlot('ToolCallCard');
   const SubAgentCard = useSlot('SubAgentCard');
   const AskUserPrompt = useSlot('AskUserPrompt');
@@ -199,6 +292,7 @@ const ToolCallContainerInner: ToolCallMessagePartComponent = part => {
   const approvalPart = approval === part.approval ? part : { ...part, approval };
   const isSubAgent = part.toolName === SUB_AGENT_TOOL_NAME;
   const isSandbox = SANDBOX_TOOL_NAMES.has(part.toolName);
+  const isMaps = isMapsToolName(part.toolName);
   const [expanded, setExpanded] = useState(isRequiresAction);
   const [prevRequiresAction, setPrevRequiresAction] = useState(isRequiresAction);
   if (isRequiresAction !== prevRequiresAction) {
@@ -206,7 +300,15 @@ const ToolCallContainerInner: ToolCallMessagePartComponent = part => {
     if (isRequiresAction) setExpanded(true);
   }
 
-  const showApproval = hasPendingToolApproval(approval);
+  // Only the newest message can still be answered: the server refuses a decision once the chat
+  // has moved past the turn that asked, so an older pending card is shown as expired instead.
+  // Sub-agent messages live inside their parent's message and follow it.
+  const isNestedMessage = useNestedApprovalBridge();
+  const isNewestMessage = useAuiState(s => s.message.isLast);
+  const hasPendingApproval = hasPendingToolApproval(approval);
+  const approvalExpired = hasPendingApproval && !isNestedMessage && !isNewestMessage;
+  const showApproval = hasPendingApproval && !approvalExpired;
+  const expiredNote = approvalExpired ? <ExpiredApprovalNote /> : undefined;
 
   const durationText = elapsedMs === undefined ? undefined : formatDuration(elapsedMs);
   const disposition = parseToolResultDisposition(part.result);
@@ -303,9 +405,18 @@ const ToolCallContainerInner: ToolCallMessagePartComponent = part => {
         argsJson={argsJson}
         resultText={resultText}
         resultJson={resultJson}
-        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
         approvalId={showApproval ? approval?.id : undefined}
       />
+    );
+  }
+
+  if (isMaps) {
+    return (
+      <div data-slot="tool-call-card" data-variant="map" className="w-full">
+        {showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
+        {!hasPendingApproval && <MapsResult part={part} />}
+      </div>
     );
   }
 
@@ -332,7 +443,7 @@ const ToolCallContainerInner: ToolCallMessagePartComponent = part => {
           showResponseLine={status !== 'running' && !!resultDisplay.data}
           mcpServerName={mcpServer}
           {...slots}
-          approvalSlot={showApproval ? <ToolApprovalSlot part={part} /> : undefined}
+          approvalSlot={showApproval ? <ToolApprovalSlot part={part} /> : expiredNote}
           approvalId={showApproval ? part.approval?.id : undefined}
         />
       );
@@ -356,8 +467,9 @@ const ToolCallContainerInner: ToolCallMessagePartComponent = part => {
         status={status}
         showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
         mcpServerName={mcpServer}
+        searchedQuery={artifactText(part.artifact, 'silentSearchQuery')}
         {...slots}
-        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+        approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
         approvalId={showApproval ? approval?.id : undefined}
       />
     );
@@ -380,34 +492,10 @@ const ToolCallContainerInner: ToolCallMessagePartComponent = part => {
       outcomeText={outcomeText}
       status={status}
       showResponseLine={status !== 'running' && resultDisplay.data !== undefined}
+      searchedQuery={artifactText(part.artifact, 'silentSearchQuery')}
       {...slots}
-      approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : undefined}
+      approvalSlot={showApproval ? <ToolApprovalSlot part={approvalPart} /> : expiredNote}
       approvalId={showApproval ? approval?.id : undefined}
     />
   );
 };
-
-/**
- * Subtle non-blocking Tier 2 notice rendered under the tool card when the server
- * reported one for this tool call. Renders nothing without a notice, so every
- * existing card layout is untouched.
- */
-function SentinelNoticeSlot({ toolCallId }: { toolCallId: string }) {
-  const sentinel = useOptionalSentinelState();
-  const notice = sentinel?.noticeFor(toolCallId);
-  if (sentinel === null || notice === undefined) return null;
-  return (
-    <Tier2Indicator
-      notice={notice}
-      onUndo={() => sentinel.undoNotice(toolCallId)}
-      onStop={() => sentinel.stopNotice(toolCallId)}
-    />
-  );
-}
-
-export const ToolCallContainer: ToolCallMessagePartComponent = part => (
-  <>
-    <ToolCallContainerInner {...part} />
-    <SentinelNoticeSlot toolCallId={part.toolCallId} />
-  </>
-);

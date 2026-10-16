@@ -2,10 +2,9 @@
 
 /** Extraction lifecycle phase this event reports for the file. */
 export const DocumentIngestionEventPhase = {
-    Started: "started",
-    Finished: "finished",
-    Failed: "failed",
-    Cancelled: "cancelled",
-} as const;
-export type DocumentIngestionEventPhase =
-    (typeof DocumentIngestionEventPhase)[keyof typeof DocumentIngestionEventPhase];
+        Started: "started",
+        Finished: "finished",
+        Failed: "failed",
+        Cancelled: "cancelled"
+    } as const;
+export type DocumentIngestionEventPhase = typeof DocumentIngestionEventPhase[keyof typeof DocumentIngestionEventPhase];

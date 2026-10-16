@@ -15,13 +15,11 @@ import { useMemo, type ComponentType } from 'react';
 import { Line } from 'react-chartjs-2';
 
 import { useThemeMode } from '../../theme/SlotsProvider.js';
+import { readChartThemeColors, readThemeToken } from '../../utils/chartThemeColors.js';
 import { formatCostUsd, formatDurationMs } from '../../utils/sessionDisplayFormat.js';
 import type { AgentMetricChartProps } from './types.js';
 
 ChartJS.register(CategoryScale, LinearScale, LineElement, PointElement, Legend, Tooltip);
-
-const LIGHT_COLORS = ['#6366F1', '#2563eb', '#0EA5E9'];
-const DARK_COLORS = ['#6366F1', '#60a5fa', '#38BDF8'];
 const numberFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
 const timestampFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
@@ -43,9 +41,10 @@ function formatTimestamp(timestamp: string): string {
 
 export function AgentMetricChart({ graph, definition, error, colorIndex = 0 }: AgentMetricChartProps) {
   const mode = useThemeMode();
-  const colors = mode === 'dark' ? DARK_COLORS : LIGHT_COLORS;
-  const axisColor = mode === 'dark' ? '#71717a' : '#a1a1aa';
-  const gridColor = mode === 'dark' ? '#27272a' : '#e4e4e7';
+  // Series colors come from the theme (--chart-1 …); the default preset covers tests and pre-theme renders.
+  const colors = readChartThemeColors({ mode });
+  const axisColor = readThemeToken({ token: 'textSecondary', mode });
+  const gridColor = readThemeToken({ token: 'border', mode });
   const labels = useMemo(
     () =>
       graph == null

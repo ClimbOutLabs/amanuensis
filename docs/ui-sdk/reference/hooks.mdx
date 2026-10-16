@@ -74,5 +74,7 @@ Types: `DraftAgentConfig`, `NamedAgentConfig`, `TrueFoundryAgentConfig`,
 computeAgentStepsSplit(parts: AgentStepPart[], isRunning: boolean): AgentStepsSplitResult;
 ```
 
-Splits message parts into the steps shown inline versus those collapsed into the steps card.
-Both `AgentStepPart` and `AgentStepsSplitResult` are exported.
+Finds the runs of parts that fold into agent internals: tool calls, reasoning, and short narration.
+Substantive text stays in the main flow, in order. The result lists the folded `runs` (with per-run
+tool and reasoning counts) and whether the trailing answer is confirmed. `AgentStepPart`,
+`AgentStepsRun`, and `AgentStepsSplitResult` are exported.

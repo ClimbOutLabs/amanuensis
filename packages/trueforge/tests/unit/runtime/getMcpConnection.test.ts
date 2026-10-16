@@ -1,4 +1,5 @@
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import configuration from '../../../src/config';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import type { IMcpServerWithAuthStore } from '../../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
@@ -78,6 +79,7 @@ describe('getMcpConnection', () => {
           description: 'OAuth MCP server.',
           auth: { type: 'dcr' },
         },
+        first_party: false,
       });
 
       const connection = await getMcpConnection({
@@ -126,6 +128,7 @@ describe('getMcpConnection', () => {
         description: 'Tokened MCP server.',
         auth: { type: 'dcr' },
       },
+      first_party: false,
     });
     await tokenStore.saveToken({
       id: record.id,
@@ -163,6 +166,7 @@ describe('getMcpConnection', () => {
         url: 'https://mcp.open.example/mcp',
         description: 'Open MCP server.',
       },
+      first_party: false,
     });
 
     const connection = await getMcpConnection({
@@ -191,6 +195,7 @@ describe('getMcpConnection', () => {
         description: 'Header MCP server.',
         auth: { type: 'header', headers: { Authorization: 'Bearer static-token' } },
       },
+      first_party: false,
     });
 
     const connection = await getMcpConnection({
@@ -221,6 +226,7 @@ describe('getMcpConnection', () => {
           description: 'TrueFoundry-managed MCP.',
           auth: { type: 'dcr' as const },
         },
+        first_party: false,
         created_at: '2026-01-15T12:00:00.000Z',
         updated_at: '2026-01-16T12:00:00.000Z',
       };
@@ -246,6 +252,203 @@ describe('getMcpConnection', () => {
           servers: [{ id: 'tfy-mcp', name: 'tfy-mcp', auth_url: 'https://consent.example/authorize' }],
         },
       });
+    });
+  });
+
+  describe('search_provider role', () => {
+    async function connectionFor(name: string) {
+      const connection = await getMcpConnection({
+        tenant_id: 'default',
+        name,
+        store: mcpServerStore,
+        userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
+      });
+      if (connection === undefined) {
+        throw new Error(`expected a connection for ${name}`);
+      }
+      return connection;
+    }
+
+    it('reports the role, with its search tools, only for the connector the user designated, plain or OAuth', async () => {
+      const base = { type: 'remote' as const, description: 'Search.' };
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'finder-mcp',
+        manifest: {
+          ...base,
+          name: 'finder-mcp',
+          url: 'https://finder.example/mcp',
+          search_provider: true,
+          search_tools: ['find_pages'],
+        },
+        first_party: false,
+      });
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'finder-oauth-mcp',
+        manifest: {
+          ...base,
+          name: 'finder-oauth-mcp',
+          url: 'https://finder-oauth.example/mcp',
+          auth: { type: 'dcr' },
+          search_provider: true,
+        },
+        first_party: false,
+      });
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'other-search-mcp',
+        manifest: {
+          ...base,
+          name: 'other-search-mcp',
+          url: 'https://other-search.example/mcp',
+          // Not designated: a leftover list means nothing without the role.
+          search_tools: ['find_pages'],
+        },
+        first_party: false,
+      });
+
+      expect((await connectionFor('finder-mcp')).search_provider).toEqual({ tools: ['find_pages'] });
+      expect((await connectionFor('finder-oauth-mcp')).search_provider).toEqual({ tools: [] });
+      expect((await connectionFor('other-search-mcp')).search_provider).toBeUndefined();
+    });
+  });
+
+  describe('first_party marker', () => {
+    const LISTED_ORIGIN = 'https://hindsight.example.com';
+    const MEMORY_URL = `${LISTED_ORIGIN}/mcp/aman`;
+    const originalOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+
+    beforeEach(() => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = [LISTED_ORIGIN];
+    });
+
+    afterAll(() => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = originalOrigins;
+    });
+
+    beforeAll(async () => {
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'plain-mcp',
+        manifest: {
+          type: 'remote',
+          name: 'plain-mcp',
+          url: 'https://mcp.plain.example/mcp',
+          description: 'Plain MCP.',
+        },
+        first_party: false,
+      });
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'plain-oauth-mcp',
+        manifest: {
+          type: 'remote',
+          name: 'plain-oauth-mcp',
+          url: 'https://mcp.plain-oauth.example/mcp',
+          description: 'Plain MCP behind OAuth.',
+          auth: { type: 'dcr' },
+        },
+        first_party: false,
+      });
+    });
+
+    async function connectionFor(name: string) {
+      const connection = await getMcpConnection({
+        tenant_id: 'default',
+        name,
+        store: mcpServerStore,
+        userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
+      });
+      if (connection === undefined) {
+        throw new Error(`expected a connection for ${name}`);
+      }
+      return connection;
+    }
+
+    it('reports the stored marker while the operator lists the origin, so the turn resolver can tell a first-party connector from the rest', async () => {
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'memory-mcp',
+        manifest: {
+          type: 'remote',
+          name: 'memory-mcp',
+          url: MEMORY_URL,
+          description: 'Memory provider.',
+          memory_provider: true,
+        },
+        first_party: true,
+      });
+
+      expect((await connectionFor('memory-mcp')).first_party).toBe(true);
+      expect((await connectionFor('plain-mcp')).first_party).toBe(false);
+    });
+
+    it('reports the marker for a connector that authenticates with OAuth too', async () => {
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'memory-oauth-mcp',
+        manifest: {
+          type: 'remote',
+          name: 'memory-oauth-mcp',
+          url: MEMORY_URL,
+          description: 'Memory provider behind OAuth.',
+          auth: { type: 'dcr' },
+          memory_provider: true,
+        },
+        first_party: true,
+      });
+
+      expect((await connectionFor('memory-oauth-mcp')).first_party).toBe(true);
+      expect((await connectionFor('plain-oauth-mcp')).first_party).toBe(false);
+    });
+
+    it('stops reporting the marker once the operator no longer lists the origin, without any save', async () => {
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'memory-unlisted',
+        manifest: {
+          type: 'remote',
+          name: 'memory-unlisted',
+          url: MEMORY_URL,
+          description: 'Memory provider.',
+          memory_provider: true,
+        },
+        first_party: true,
+      });
+      expect((await connectionFor('memory-unlisted')).first_party).toBe(true);
+
+      configuration.FIRST_PARTY_MCP_ORIGINS = [];
+      expect((await connectionFor('memory-unlisted')).first_party).toBe(false);
+
+      configuration.FIRST_PARTY_MCP_ORIGINS = ['https://another.example.com'];
+      expect((await connectionFor('memory-unlisted')).first_party).toBe(false);
+
+      configuration.FIRST_PARTY_MCP_ORIGINS = [LISTED_ORIGIN];
+      expect((await connectionFor('memory-unlisted')).first_party).toBe(true);
+    });
+
+    it('does not report a stored marker for a URL on an origin other than the listed one', async () => {
+      await mcpServerStore.upsertServer({
+        tenant_id: 'default',
+        name: 'memory-elsewhere',
+        manifest: {
+          type: 'remote',
+          name: 'memory-elsewhere',
+          url: 'https://attacker.example.net/mcp/aman',
+          description: 'Memory provider.',
+          memory_provider: true,
+        },
+        first_party: true,
+      });
+
+      expect((await connectionFor('memory-elsewhere')).first_party).toBe(false);
+    });
+
+    it('never reports a marker the store did not set, however the operator lists the origin', async () => {
+      configuration.FIRST_PARTY_MCP_ORIGINS = ['https://mcp.plain.example', LISTED_ORIGIN];
+
+      expect((await connectionFor('plain-mcp')).first_party).toBe(false);
     });
   });
 

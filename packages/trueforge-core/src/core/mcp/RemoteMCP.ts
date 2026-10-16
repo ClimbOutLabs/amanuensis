@@ -3,6 +3,7 @@ import type { Logger } from 'winston';
 import { McpConnectionError } from '../errors';
 import type { MCPServerInitInfo } from '../events/schema';
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
+import { hostFromUrl } from '../permissions/extractorRegistry';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { NOOP_AGENT_TRACING } from '../tracing/NoopAgentTracing';
 import {
@@ -59,12 +60,14 @@ export class RemoteMCP implements ToolSource {
   readonly description?: string | undefined;
 
   private readonly url: string;
+  readonly serverHost: string | undefined;
   private readonly headers: RemoteMcpHeaders;
   private readonly signal: AbortSignal;
   private readonly logger: Logger;
   private readonly tracing: AgentTracing;
   private readonly requestTimeoutMs: number;
   private readonly connectTimeoutMs: number;
+  private readonly refuseRedirects: boolean;
   // Redacted display url for trace spans (derived from url; unused when tracing is a no-op).
   private readonly traceUrl: string;
 
@@ -93,17 +96,21 @@ export class RemoteMCP implements ToolSource {
     requestTimeoutMs: number;
     connectTimeoutMs: number;
     signal: AbortSignal;
+    /** Answer a redirect with an error instead of following it; see `connectRemoteMcp`. */
+    refuseRedirects?: boolean | undefined;
   }) {
     this.name = params.name;
     this.id = params.id;
     this.description = params.description;
     this.url = params.url;
+    this.serverHost = hostFromUrl(params.url) ?? undefined;
     this.headers = params.headers;
     this.signal = params.signal;
     this.sessionId = params.sessionId;
     this.resolvedTransportType = params.transportType;
     this.requestTimeoutMs = params.requestTimeoutMs;
     this.connectTimeoutMs = params.connectTimeoutMs;
+    this.refuseRedirects = params.refuseRedirects === true;
     this.logger = params.logger;
     this.tracing = params.tracing ?? NOOP_AGENT_TRACING;
     this.traceUrl = redactUrlForTrace(params.url);
@@ -283,6 +290,7 @@ export class RemoteMCP implements ToolSource {
               requestTimeoutMs: this.requestTimeoutMs,
               connectTimeoutMs: this.connectTimeoutMs,
               signal: this.signal,
+              refuseRedirects: this.refuseRedirects,
               onClose: () => {
                 this.isConnected = false;
               },

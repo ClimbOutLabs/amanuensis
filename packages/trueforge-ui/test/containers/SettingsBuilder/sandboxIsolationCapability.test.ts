@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 
-import { readSandboxIsolationStatus } from '@/containers/SettingsBuilder/sandboxIsolationCapability.js';
+import { readSandboxLimits } from '@/containers/SettingsBuilder/sandboxIsolationCapability.js';
 
 const wireShape = {
   sandbox_isolation: {
@@ -18,61 +18,45 @@ const wireShape = {
   },
 };
 
-describe('readSandboxIsolationStatus', () => {
+describe('readSandboxLimits', () => {
   it('reads the snake_case wire shape', () => {
-    expect(readSandboxIsolationStatus(wireShape)).toEqual({
-      isolationDriver: 'docker',
+    expect(readSandboxLimits(wireShape)).toEqual({
       image: wireShape.sandbox_isolation.image,
       defaultTimeoutSeconds: 60,
       maxTimeoutSeconds: 600,
       memoryMb: 2048,
       diskMb: 1024,
-      stdoutStderrCapKb: 256,
-      imagePullTimeoutSeconds: 600,
       networkEgress: false,
-      cosignKeyConfigured: true,
     });
   });
 
   it('reads the SDK-normalized camelCase shape', () => {
     expect(
-      readSandboxIsolationStatus({
+      readSandboxLimits({
         sandboxIsolation: {
-          isolationDriver: 'firecracker',
           image: 'img@sha256:' + 'b'.repeat(64),
           defaultTimeoutSeconds: 30,
           maxTimeoutSeconds: 300,
           memoryMb: 1024,
           diskMb: 512,
-          stdoutStderrCapKb: 128,
-          imagePullTimeoutSeconds: 120,
           networkEgress: false,
-          cosignKeyConfigured: false,
         },
       }),
-    ).toMatchObject({ isolationDriver: 'firecracker', cosignKeyConfigured: false });
+    ).toMatchObject({ defaultTimeoutSeconds: 30, memoryMb: 1024, diskMb: 512 });
+  });
+
+  it('accepts an empty image, which is how a server without a sandbox image reports itself', () => {
+    expect(readSandboxLimits({ sandbox_isolation: { ...wireShape.sandbox_isolation, image: '' } })).toMatchObject({
+      image: '',
+      memoryMb: 2048,
+    });
   });
 
   it('returns null when the capability is missing or malformed', () => {
-    expect(readSandboxIsolationStatus(null)).toBeNull();
-    expect(readSandboxIsolationStatus({})).toBeNull();
-    expect(readSandboxIsolationStatus({ sandboxIsolation: { isolationDriver: 'docker' } })).toBeNull();
-    expect(
-      readSandboxIsolationStatus({
-        sandboxIsolation: { ...wireShape.sandbox_isolation, isolation_driver: 'daytona' },
-      }),
-    ).toBeNull();
-    expect(
-      readSandboxIsolationStatus({
-        sandboxIsolation: { ...wireShape.sandbox_isolation, memory_mb: -1 },
-      }),
-    ).toBeNull();
-  });
-
-  it('never exposes the cosign key path, only its presence', () => {
-    const status = readSandboxIsolationStatus(wireShape);
-    expect(status).not.toBeNull();
-    expect(JSON.stringify(status)).not.toContain('cosign_public_key');
-    expect(JSON.stringify(status)).not.toContain('.pub');
+    expect(readSandboxLimits(null)).toBeNull();
+    expect(readSandboxLimits({})).toBeNull();
+    expect(readSandboxLimits({ sandboxIsolation: { image: 'img' } })).toBeNull();
+    expect(readSandboxLimits({ sandboxIsolation: { ...wireShape.sandbox_isolation, memory_mb: -1 } })).toBeNull();
+    expect(readSandboxLimits({ sandboxIsolation: { ...wireShape.sandbox_isolation, image: 3 } })).toBeNull();
   });
 });
