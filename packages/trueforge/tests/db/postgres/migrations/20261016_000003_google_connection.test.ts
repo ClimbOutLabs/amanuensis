@@ -1,6 +1,6 @@
 import { sql } from 'kysely';
 
-import { down, up } from '../../../../src/db/postgres/migrations/20261016_000003_google_connection';
+import { migrateTo, migrateToLatest } from '../../../../src/db/migratePostgres';
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../testDatabase';
 
 const describePg = process.env['PG_STORE_TESTS_ENABLED'] === '1' ? describe : describe.skip;
@@ -37,12 +37,12 @@ describePg('Postgres Google connection migration', () => {
       throw new Error('Postgres test environment not initialized');
     }
     expect(await googleTables()).toEqual([]);
-    await up(env.db);
+    await migrateToLatest(env.db);
     expect(await googleTables()).toEqual(['google_connection', 'google_oauth_pending']);
-    await down(env.db);
+    await migrateTo(env.db, PREVIOUS_MIGRATION);
     expect(await googleTables()).toEqual([]);
-    await up(env.db);
+    await migrateToLatest(env.db);
     expect(await googleTables()).toEqual(['google_connection', 'google_oauth_pending']);
-    await down(env.db);
+    await migrateTo(env.db, PREVIOUS_MIGRATION);
   });
 });
