@@ -4,7 +4,7 @@ import { allowsChatApproval, allowsToolGrant } from '../../../../src/core/mcp/ap
 import { verifyPreDispatch } from '../../../../src/core/permissions/dispatch';
 import { classifyUnstampedToolCall } from '../../../../src/core/runtime/AgentThread';
 import { message, plainDraft } from './fixtures';
-import { build, json, route, text, type Route } from './harness';
+import { build, json, route, sentDraft, text, type Route } from './harness';
 
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
 
@@ -78,8 +78,7 @@ describe('draft_email', () => {
       thread_id: 't7',
     });
     expect(google.urls).toContain('POST /gmail/v1/users/me/drafts');
-    const raw = (google.bodies[0] as { message: { raw: string } }).message.raw;
-    expect(Buffer.from(raw, 'base64url').toString()).toContain('To: grace@example.com');
+    expect(sentDraft(google.bodies[0]).mime).toContain('To: grace@example.com');
   });
 
   describe('replying', () => {
@@ -106,9 +105,8 @@ describe('draft_email', () => {
         name: 'draft_email',
         arguments: { to: ['grace@example.com'], subject: 'anything the model chose', body: 'ok', in_reply_to: 'orig' },
       });
-      const sent = google.bodies[0] as { message: { raw: string; threadId: string } };
-      const mime = Buffer.from(sent.message.raw, 'base64url').toString();
-      expect(sent.message.threadId).toBe('t5');
+      const { mime, threadId } = sentDraft(google.bodies[0]);
+      expect(threadId).toBe('t5');
       expect(mime).toContain('Subject: Re: Lease renewal');
       expect(mime).toContain('In-Reply-To: <orig@mail.example.com>');
       expect(mime).toContain('References: <first@mail.example.com> <second@mail.example.com> <orig@mail.example.com>');
@@ -124,8 +122,7 @@ describe('draft_email', () => {
         name: 'draft_email',
         arguments: { to: ['grace@example.com'], subject: 'x', body: 'ok', in_reply_to: 'orig' },
       });
-      const sent = google.bodies[0] as { message: { raw: string } };
-      expect(Buffer.from(sent.message.raw, 'base64url').toString()).toContain('Subject: Re: Lease renewal\r\n');
+      expect(sentDraft(google.bodies[0]).mime).toContain('Subject: Re: Lease renewal\r\n');
     });
 
     it('shows the derived subject on the card the user approves', async () => {
@@ -214,9 +211,9 @@ describe('update_draft', () => {
       name: 'update_draft',
       arguments: { draft_id: 'd1', to: ['grace@example.com'], subject: 'Re: Lease renewal', body: 'Friday instead.' },
     });
-    const put = google.bodies.at(-1) as { message: { raw: string; threadId: string } };
-    expect(put.message.threadId).toBe('t9');
-    expect(Buffer.from(put.message.raw, 'base64url').toString()).toContain('In-Reply-To: <orig@mail.example.com>');
+    const put = sentDraft(google.bodies.at(-1));
+    expect(put.threadId).toBe('t9');
+    expect(put.mime).toContain('In-Reply-To: <orig@mail.example.com>');
   });
 
   it('refuses to change a draft that has an attachment or an HTML version rather than silently dropping them', async () => {

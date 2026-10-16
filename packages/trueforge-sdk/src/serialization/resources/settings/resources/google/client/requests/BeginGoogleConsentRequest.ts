@@ -3,17 +3,17 @@
 import * as TrueForge from "../../../../../../../api/index.js";
 import * as core from "../../../../../../../core/index.js";
 import * as serializers from "../../../../../../index.js";
+import { GoogleClientCredentials } from "../../../../../../types/GoogleClientCredentials.js";
 import { GoogleFeature } from "../../../../../../types/GoogleFeature.js";
-import { BeginGoogleConsentRequestClient } from "../../types/BeginGoogleConsentRequestClient.js";
 
 export const BeginGoogleConsentRequest: core.serialization.Schema<serializers.settings.BeginGoogleConsentRequest.Raw, TrueForge.settings.BeginGoogleConsentRequest> = core.serialization.object({
-        "client": BeginGoogleConsentRequestClient.optional(),
+        "client": GoogleClientCredentials.optional(),
         "features": core.serialization.list(GoogleFeature)
     });
 
 export declare namespace BeginGoogleConsentRequest {
     export interface Raw {
-        client?: BeginGoogleConsentRequestClient.Raw | null;
+        client?: GoogleClientCredentials.Raw | null;
         features: GoogleFeature.Raw[];
     }
 }

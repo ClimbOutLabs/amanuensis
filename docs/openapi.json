@@ -609,14 +609,7 @@
       "BeginGoogleConsentRequest": {
         "properties": {
           "client": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/GoogleClientCredentials"
-              },
-              {
-                "description": "The user’s client. Omit it to reuse the saved client, to add a feature or reconnect."
-              }
-            ]
+            "$ref": "#/components/schemas/GoogleClientCredentials"
           },
           "features": {
             "description": "Features to ask for. Features already granted are kept.",
@@ -3169,7 +3162,6 @@
         "type": "object"
       },
       "GoogleClientType": {
-        "description": "The type read from the downloaded client file; omitted when the id and secret were typed in.",
         "enum": [
           "desktop",
           "web"

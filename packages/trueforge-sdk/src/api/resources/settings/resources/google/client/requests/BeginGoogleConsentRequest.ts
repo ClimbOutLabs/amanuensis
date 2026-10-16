@@ -9,8 +9,7 @@ import * as TrueForge from "../../../../../../index.js";
  *     }
  */
 export interface BeginGoogleConsentRequest {
-    /** The user’s client. Omit it to reuse the saved client, to add a feature or reconnect. */
-    client?: TrueForge.settings.BeginGoogleConsentRequestClient;
+    client?: TrueForge.GoogleClientCredentials;
     /** Features to ask for. Features already granted are kept. */
     features: TrueForge.GoogleFeature[];
 }

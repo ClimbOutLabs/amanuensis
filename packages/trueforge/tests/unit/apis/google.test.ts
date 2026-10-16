@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { createLogger } from 'winston';
+import { z } from 'zod';
 import { createGoogleRouter } from '../../../src/apis/google';
 import type { Authenticator } from '../../../src/auth/authenticator';
 import type { RequestContext } from '../../../src/auth/identity';
@@ -15,6 +16,7 @@ const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
 const LAN = 'http://192.168.1.20:8791';
 const BASE = '/api/v1/user/settings/google';
+const BeginResponse = z.object({ data: z.object({ authorization_url: z.string() }) });
 
 function user(id: string): RequestContext {
   return { tenant_id: 't1', subject: { id, type: 'user', display_name: id }, roles: [], user_credential: null };
@@ -86,7 +88,7 @@ describe('Google connection API', () => {
       as,
       body: { client: { client_id: ID, client_secret: SECRET, client_type: 'desktop' }, features: ['gmail_read'] },
     });
-    const url = new URL((JSON.parse(begin.text) as { data: { authorization_url: string } }).data.authorization_url);
+    const url = new URL(BeginResponse.parse(JSON.parse(begin.text)).data.authorization_url);
     return call({
       method: 'POST',
       path: '/oauth/complete',

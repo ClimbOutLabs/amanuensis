@@ -41,9 +41,7 @@ export const GoogleClientCredentialsSchema = z
   .object({
     client_id: z.string().min(1).describe("The user's own Google OAuth client id."),
     client_secret: z.string().min(1).describe("The user's own Google OAuth client secret."),
-    client_type: GoogleClientTypeSchema.optional().describe(
-      'The type read from the downloaded client file; omitted when the id and secret were typed in.',
-    ),
+    client_type: GoogleClientTypeSchema.optional(),
   })
   .openapi('GoogleClientCredentials');
 
@@ -76,9 +74,7 @@ export const CheckGoogleClientResponseSchema = z
 
 export const BeginGoogleConsentRequestSchema = z
   .object({
-    client: GoogleClientCredentialsSchema.optional().describe(
-      'The user’s client. Omit it to reuse the saved client, to add a feature or reconnect.',
-    ),
+    client: GoogleClientCredentialsSchema.optional(),
     features: z.array(GoogleFeatureSchema).min(1).describe('Features to ask for. Features already granted are kept.'),
   })
   .openapi('BeginGoogleConsentRequest');

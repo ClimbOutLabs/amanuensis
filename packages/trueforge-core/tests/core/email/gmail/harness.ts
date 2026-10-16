@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { DraftReviewLedger } from '../../../../src/core/email/gmail/draftReview';
 import { GmailApi } from '../../../../src/core/email/gmail/gmailApi';
 import { GmailToolSet, type AttachmentStager } from '../../../../src/core/email/gmail/GmailToolSet';
@@ -147,3 +148,11 @@ export const googleError = (input: { status: number; reason: string; message?: s
     errors: [{ message: input.message ?? 'Request failed.', domain: 'usageLimits', reason: input.reason }],
   },
 });
+
+const DraftRequestSchema = z.object({ message: z.object({ raw: z.string(), threadId: z.string().optional() }) });
+
+/** The draft Aman asked Gmail to store: its decoded MIME text and thread. */
+export function sentDraft(body: unknown): { mime: string; threadId: string | undefined } {
+  const request = DraftRequestSchema.parse(body);
+  return { mime: Buffer.from(request.message.raw, 'base64url').toString(), threadId: request.message.threadId };
+}
