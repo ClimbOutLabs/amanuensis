@@ -62,7 +62,7 @@ export type SentinelAuditFeedProps = {
  * Live permissions audit feed for the right rail. Polls the host's audit-log API for
  * the active session: Tier 1 sensitive reads (`logged`), Tier 2 and Tier 3 decisions
  * (`approved`, `denied`), relaxed Tier 2 executions (`ran`) and auto-denials
- * (`auto_denied` with the reason). Each Tier 2 action kind gets a "run without asking"
+ * (`auto_denied` with the reason). Each Tier 2 action kind gets an "Always allow"
  * toggle beside it, wired to the user settings API.
  */
 export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => {

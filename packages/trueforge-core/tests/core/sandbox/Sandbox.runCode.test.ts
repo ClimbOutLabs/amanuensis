@@ -4,9 +4,9 @@ import type { RunCodeResult } from '../../../src/core/sandbox/driver/RunCodeSche
 import type { RunCodeBackend, RunCodeCallOptions } from '../../../src/core/sandbox/driver/RunCodeService';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
 import {
+  createSandboxRunCodeDescription,
   Sandbox,
   SANDBOX_EXEC_TOOL_NAME,
-  SANDBOX_RUN_CODE_DESCRIPTION,
   SANDBOX_RUN_CODE_TOOL_NAME,
 } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
@@ -148,7 +148,9 @@ function okRunCodeResult(): RunCodeResult {
 
 describe('Sandbox run_code tool', () => {
   it('words the failure guidance in plain punctuation, with no em dashes', () => {
-    const guidance = SANDBOX_RUN_CODE_DESCRIPTION.split('\n').find(line => line.startsWith('If run_code fails'));
+    const guidance = createSandboxRunCodeDescription({ offline: false })
+      .split('\n')
+      .find(line => line.startsWith('If run_code fails'));
     expect(guidance).toBeDefined();
     expect(guidance).not.toContain('\u2014');
   });

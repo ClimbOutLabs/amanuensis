@@ -57,6 +57,7 @@ import type { MemoryClient } from './memory/memoryClient';
 import { AMAN_MEMORY_NAMESPACE } from './memory/memoryRetain';
 import { uuidv5 } from './memory/uuidv5';
 import { getModelDetails } from './sessionResources';
+import { meterHelperLlm, type TokenFactoryBudget } from './tokenFactoryBudget';
 
 export { ProfileLearnedEventSchema } from '../schemas/profileLearningEvents';
 export type { ProfileLearnedEvent } from '../schemas/profileLearningEvents';
@@ -339,6 +340,7 @@ export interface ProfileLearningDrainMember {
   personalizationStore: IPersonalizationStore;
   eventStore: ICompletedTurnEventStore;
   modelProviderStore: IModelProviderStore;
+  tokenFactoryBudget: TokenFactoryBudget;
   memoryClient: MemoryClient | undefined;
   tenantId: string;
   createdBy: string;
@@ -466,11 +468,16 @@ async function distillProfile(params: SubmitProfileLearningParams): Promise<void
         name,
         store: params.modelProviderStore,
       });
-      return new VercelAILLM({
-        providerConfig,
+      return meterHelperLlm({
+        llm: new VercelAILLM({
+          providerConfig,
+          logger: params.logger,
+          signal: AbortSignal.timeout(DISTILLATION_TIMEOUT_MS),
+          streamTimeout,
+        }),
+        providerType: providerConfig.provider.type,
+        budget: params.tokenFactoryBudget,
         logger: params.logger,
-        signal: AbortSignal.timeout(DISTILLATION_TIMEOUT_MS),
-        streamTimeout,
       });
     });
 

@@ -1,6 +1,7 @@
 import type { TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import { CancellationReason, EventType } from '@truefoundry/trueforge-core/agent-session';
 import type { ILLM } from '@truefoundry/trueforge-core/core';
+import type { Server } from 'node:http';
 import winston from 'winston';
 import { drainTurnEvents } from '../../../src/apis/turns';
 import type { AppendPassthroughEventsInput, ICompletedTurnEventStore } from '../../../src/db/completedTurnEvents';
@@ -9,6 +10,7 @@ import type { IPersonalizationStore } from '../../../src/db/personalizationStore
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
+import { SqliteTokenFactoryUsageStore } from '../../../src/db/sqlite/token-factory-usage-store/SqliteTokenFactoryUsageStore';
 import type { PersonalizationProfile, PersonalizationProfileContent } from '../../../src/personalization/profile';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { HindsightClient, type RetainOutcome } from '../../../src/runtime/memory/hindsightClient';
@@ -26,8 +28,12 @@ import {
   type ProfileLearningDrainMember,
   type ProfileLearningPassConfig,
 } from '../../../src/runtime/profileLearning';
+import { createTokenFactoryBudget } from '../../../src/runtime/tokenFactoryBudget';
+import { ensureEnvManagedTokenFactoryProvider } from '../../../src/runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
+import { startModelEndpointStub } from '../../fixtures/modelEndpointStub';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 function makeLogger() {
   return winston.createLogger({ silent: true });
@@ -346,6 +352,7 @@ describe('submitProfileLearning', () => {
       personalizationStore,
       eventStore,
       modelProviderStore: new SqliteModelProviderStore(db),
+      tokenFactoryBudget: uncappedTokenFactoryBudget,
       memoryClient,
       tenantId: 'default',
       createdBy: 'user-a',
@@ -545,6 +552,96 @@ describe('submitProfileLearning', () => {
       await harness.personalizationStore.getProfile({ tenant_id: 'default', created_by: 'user-a' }),
     ).toBeUndefined();
     await harness.db.destroy();
+  });
+
+  describe('on Token Factory', () => {
+    const NOW = new Date('2026-10-15T09:00:00.000Z');
+    const TODAY = '2026-10-15';
+    const CAP = 1000;
+    const servers: Server[] = [];
+
+    afterEach(() => {
+      for (const server of servers.splice(0)) {
+        server.close();
+      }
+    });
+
+    async function tokenFactoryHarness(providerType: 'tokenfactory' | 'custom') {
+      const harness = await makeHarness();
+      const stub = await startModelEndpointStub({
+        usage: { prompt_tokens: 400, completion_tokens: 60 },
+        content: '{"learned_profile": "# Learned on a stub"}',
+      });
+      servers.push(stub.server);
+      const modelProviderStore = new SqliteModelProviderStore(harness.db);
+      if (providerType === 'tokenfactory') {
+        await ensureEnvManagedTokenFactoryProvider({
+          store: modelProviderStore,
+          tenant_id: 'default',
+          settings: {
+            apiKey: 'sk-nebius',
+            baseUrl: stub.baseUrl,
+            model: 'nvidia/nemotron-3-super-120b-a12b',
+            cheaperModel: undefined,
+          },
+          logger: makeLogger(),
+        });
+      } else {
+        await modelProviderStore.upsertProvider({
+          tenant_id: 'default',
+          name: 'local-vllm',
+          manifest: {
+            type: 'custom',
+            name: 'local-vllm',
+            base_url: stub.baseUrl,
+            models: [{ model_id: 'local-model', name: 'local-model', properties: {} }],
+          },
+        });
+      }
+      const usageStore = new SqliteTokenFactoryUsageStore(harness.db);
+      const submit = () =>
+        submitProfileLearning({
+          ...harness.member,
+          resolveLlm: undefined,
+          modelProviderStore,
+          tokenFactoryBudget: createTokenFactoryBudget({ store: usageStore, cap: CAP, now: () => NOW }),
+          turnModelFqn:
+            providerType === 'tokenfactory' ? 'tokenfactory/nemotron-3-super-120b-a12b' : 'local-vllm/local-model',
+          ...turnFields(),
+        });
+      return { harness, submit, usageStore };
+    }
+
+    it('counts the tokens the distillation call reports', async () => {
+      const { harness, submit, usageStore } = await tokenFactoryHarness('tokenfactory');
+
+      await submit();
+
+      expect((await usageStore.getUsage({ usage_date: TODAY }))?.used_tokens).toBe(460);
+      expect(harness.eventStore.appends).toHaveLength(1);
+      await harness.db.destroy();
+    });
+
+    it('skips the pass, without a call, once the cap is reached', async () => {
+      const { harness, submit, usageStore } = await tokenFactoryHarness('tokenfactory');
+      await usageStore.addUsage({ usage_date: TODAY, tokens: CAP });
+
+      await submit();
+
+      expect((await usageStore.getUsage({ usage_date: TODAY }))?.used_tokens).toBe(CAP);
+      expect(harness.eventStore.appends).toHaveLength(0);
+      await harness.db.destroy();
+    });
+
+    it('counts nothing on another provider', async () => {
+      const { harness, submit, usageStore } = await tokenFactoryHarness('custom');
+
+      await submit();
+
+      expect(await usageStore.getUsage({ usage_date: TODAY })).toBeUndefined();
+      expect(harness.eventStore.appends).toHaveLength(1);
+      await harness.db.destroy();
+    });
   });
 
   it('prefers the configured pass model over the turn model', async () => {
@@ -900,6 +997,7 @@ describe('drainTurnEvents profile learning trigger', () => {
       personalizationStore,
       eventStore: new RecordingEventStore(),
       modelProviderStore: new SqliteModelProviderStore(db),
+      tokenFactoryBudget: uncappedTokenFactoryBudget,
       memoryClient: undefined,
       tenantId: 'default',
       createdBy: 'user-a',

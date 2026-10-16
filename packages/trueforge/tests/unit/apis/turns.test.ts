@@ -12,7 +12,7 @@ import { EventType, type AgentInputUserMessage } from '@truefoundry/trueforge-co
 import type { Kysely } from 'kysely';
 import { createLogger } from 'winston';
 import { TENANT_ID } from '../../../src/apis/sessions';
-import { createTurnsRouter, extractUserMessageText, turnStreamId } from '../../../src/apis/turns';
+import { createTurnsRouter, deriveSessionTitle, extractUserMessageText, turnStreamId } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
@@ -37,6 +37,7 @@ import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 /** Standalone caller identity, spelled out as a plain string where a store expects one. */
 const TEST_CREATED_BY = STANDALONE_REQUEST_CONTEXT.subject.id;
@@ -102,6 +103,55 @@ describe('turns', () => {
     expect(turnStreamId('ten', 'sess', 'turn1')).toBe('tfg:agent:turn:ten:sess:turn1:stream');
   });
 
+  describe('deriveSessionTitle', () => {
+    function userMessage(content: string): TurnInputItem[] {
+      return [{ type: 'user.message', content }];
+    }
+
+    it('caps long titles at 50 characters', () => {
+      expect(deriveSessionTitle(userMessage('x'.repeat(200)))).toBe('x'.repeat(50));
+    });
+
+    it('returns short titles unchanged', () => {
+      expect(deriveSessionTitle(userMessage('hello world'))).toBe('hello world');
+    });
+
+    it('returns undefined when no usable text is present', () => {
+      expect(deriveSessionTitle(undefined)).toBeUndefined();
+      expect(deriveSessionTitle([])).toBeUndefined();
+      expect(deriveSessionTitle(userMessage('   '))).toBeUndefined();
+    });
+
+    it('keeps an emoji pair fully inside the cap', () => {
+      const text = `${'b'.repeat(48)}😀`;
+      expect(deriveSessionTitle(userMessage(text))).toBe(text);
+    });
+
+    it('backs off when the cap would split a surrogate pair', () => {
+      const title = deriveSessionTitle(userMessage(`${'a'.repeat(49)}😀 and more`));
+      expect(title).toBe('a'.repeat(49));
+    });
+
+    it('drops a skin-tone cluster that would cross the cap instead of keeping its base', () => {
+      const title = deriveSessionTitle(userMessage(`${'x'.repeat(48)}👋🏽 and more`));
+      expect(title).toBe('x'.repeat(48));
+    });
+
+    it('keeps a skin-tone cluster that fits exactly inside the cap', () => {
+      const text = `${'y'.repeat(46)}👋🏽`;
+      expect(deriveSessionTitle(userMessage(text))).toBe(text);
+    });
+
+    it('drops a ZWJ sequence that would cross the cap', () => {
+      const title = deriveSessionTitle(userMessage(`${'z'.repeat(44)}👨‍👩‍👧‍👦 and more`));
+      expect(title).toBe('z'.repeat(44));
+    });
+
+    it('returns undefined when a single cluster exceeds the cap', () => {
+      expect(deriveSessionTitle(userMessage(`e${'\u0301'.repeat(60)}`))).toBeUndefined();
+    });
+  });
+
   describe('turn ownership', () => {
     it('returns 403 for all turn routes when the caller is not the session creator', async () => {
       const db = createSqliteDb(':memory:');
@@ -132,6 +182,7 @@ describe('turns', () => {
         '/',
         createTurnsRouter({
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -217,6 +268,7 @@ describe('turns', () => {
         '/',
         createTurnsRouter({
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions: new Sessions({ sessionStore }),
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -399,6 +451,7 @@ describe('turns', () => {
               workspace_cwd: 'C:\\work\\bound-demo',
               agent: { type: 'inline', spec: agentSpec },
             },
+            answersOnlyHeldActions: () => Promise.resolve(false),
             createTurn: () =>
               Promise.resolve({
                 id: 'turn-non-stream',
@@ -433,6 +486,7 @@ describe('turns', () => {
         '/',
         createTurnsRouter({
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -566,6 +620,7 @@ describe('turns', () => {
         '/',
         createTurnsRouter({
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -660,6 +715,7 @@ describe('turns', () => {
               workspace_cwd: null,
               agent: { type: 'inline', spec: agentSpec },
             },
+            answersOnlyHeldActions: () => Promise.resolve(false),
             createTurn: () =>
               Promise.resolve({
                 id: 'turn-gone',
@@ -676,6 +732,7 @@ describe('turns', () => {
         '/',
         createTurnsRouter({
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
@@ -766,6 +823,7 @@ describe('turns', () => {
         '/',
         createTurnsRouter({
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
           sessions,
           sessionStore,
           activeTurns: new ActiveTurnRegistry(),
