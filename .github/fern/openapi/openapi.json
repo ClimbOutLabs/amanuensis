@@ -12723,6 +12723,64 @@
         "x-fern-sdk-method-name": "list"
       }
     },
+    "/api/v1/data/export": {
+      "get": {
+        "description": "Streams a zip archive of everything the signed-in user owns here: chats, sessions, personas, spaces, schedules, connectors without credentials, settings, and memory. Stored secrets are removed before writing.",
+        "parameters": [
+          {
+            "description": "When true, uploaded file bytes are included under files/. Defaults to false.",
+            "in": "query",
+            "name": "include_uploads",
+            "required": false,
+            "schema": {
+              "description": "When true, uploaded file bytes are included under files/. Defaults to false.",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The export archive (zip)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The signed-in user may not export data."
+          }
+        },
+        "summary": "Export my data",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "data"
+        ],
+        "x-fern-sdk-method-name": "export_data"
+      }
+    },
     "/api/v1/mcp-servers": {
       "get": {
         "description": "Configured MCP servers as a slim name/url list for the composer.",

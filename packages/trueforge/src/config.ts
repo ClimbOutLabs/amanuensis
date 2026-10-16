@@ -841,6 +841,12 @@ export interface SharedServerConfiguration {
    */
   MAX_REQUEST_BODY_BYTES: number;
   /**
+   * Max total bytes of a data export archive. The export aborts (and the download fails) rather
+   * than shipping a truncated archive when the cap is exceeded. Env: `DATA_EXPORT_MAX_BYTES`.
+   * Default 1 GiB.
+   */
+  DATA_EXPORT_MAX_BYTES: number;
+  /**
    * Instance-wide context size in tokens that triggers compaction, used whenever an agent spec
    * does not set `config.context_management.compaction.trigger` itself; an explicit spec value
    * always wins. Unset leaves the threshold to the model's context length (80% of it, lowered so
@@ -1497,6 +1503,11 @@ const shared: SharedServerConfiguration = {
     envKey: 'MAX_REQUEST_BODY_BYTES',
     raw: getEnv('MAX_REQUEST_BODY_BYTES'),
     defaultValue: DEFAULT_MAX_REQUEST_BODY_BYTES,
+  }),
+  DATA_EXPORT_MAX_BYTES: parsePositiveInt({
+    envKey: 'DATA_EXPORT_MAX_BYTES',
+    raw: getEnv('DATA_EXPORT_MAX_BYTES'),
+    defaultValue: 1024 * 1024 * 1024,
   }),
   CONTEXT_COMPACTION_THRESHOLD_TOKENS: parseOptionalPositiveInt({
     envKey: 'CONTEXT_COMPACTION_THRESHOLD_TOKENS',

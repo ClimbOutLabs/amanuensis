@@ -58,6 +58,10 @@ class CountingGlobalSettingsStore implements IGlobalSettingsStore {
   async deleteSetting(input: GetGlobalSettingInput): Promise<void> {
     return this.inner.deleteSetting(input);
   }
+
+  async listSettings(): Promise<GlobalSettingRecord[]> {
+    return this.inner.listSettings();
+  }
 }
 
 describe('beginTurnExecution turn-summarization wiring', () => {

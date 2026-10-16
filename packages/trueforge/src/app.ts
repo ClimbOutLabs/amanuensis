@@ -17,6 +17,7 @@ import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
 import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
+import { createDataExportRouter } from './apis/dataExport';
 import { createMapsRouter } from './apis/maps';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
@@ -416,6 +417,29 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createMemoryVaultRouter({
         resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/data',
+    withAuth(
+      createDataExportRouter({
+        sessionStore: deps.sessionStore,
+        personaStore: deps.personaStore,
+        personalizationStore: deps.personalizationStore,
+        spaceStore: deps.spaceStore,
+        scheduleStore: deps.scheduleStore,
+        globalSettingsStore: deps.globalSettingsStore,
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        sentinelAuditStore: deps.sentinelAuditStore,
+        turnArtifactStore: deps.turnArtifactStore,
+        tokenStore: deps.tokenStore,
+        resolveMcpServerStore: deps.resolveMcpServerStore,
+        resolveModelProviderStore: deps.resolveModelProviderStore,
+        resolveAgentStore: deps.resolveAgentStore,
+        authorizer: deps.authorizer,
         logger: deps.logger,
       }),
       authMiddleware,
