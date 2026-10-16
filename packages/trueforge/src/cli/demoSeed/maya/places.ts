@@ -31,3 +31,6 @@ export const VISA_CLINIC: DemoClinic = {
 };
 
 export const CAMERA_SHOP = { name: 'Objectiva Foto', orderNumber: 'OF-2026-10482' };
+
+/** Maya's short-term rental, where trips start unless she says otherwise. Streets are real so maps resolve it. */
+export const HOME = { address: 'Rua da Emenda 45, 1200-169 Lisboa', area: 'Chiado' };

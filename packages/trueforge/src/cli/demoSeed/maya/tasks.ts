@@ -31,9 +31,9 @@ const MAYA_TASKS: readonly MayaTask[] = [
     title: 'Find English-speaking GP',
     state: 'in_progress',
     doneOffset: null,
-    dueOffset: 4,
-    notes: () =>
-      `${GP_CLINIC.name} is the first choice (English-speaking GPs, 2-3 day wait). Booking needs her preferred days and a phone number.`,
+    dueOffset: 3,
+    notes: days =>
+      `GP appointment ${days.weekday(3)} ${days.monthDay(3)}, 09:30 at ${GP_CLINIC.name} with Dra. Helena Rocha (confirmation email in the inbox). Mention the penicillin allergy.`,
   },
   {
     title: 'Complete visa medical',

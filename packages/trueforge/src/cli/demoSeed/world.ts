@@ -5,7 +5,7 @@ import { dayLabels, isoDay, type CalendarDay, type DayLabels } from './calendar'
 import { photographyGuide, relocationGuide } from './maya/knowledge';
 import { mayaMemoryNotes } from './maya/memories';
 import { junePersona, PDF_GUIDANCE, theoPersona, WORKSPACE_GUIDANCE } from './maya/personas';
-import { BACKUP_CLINIC, GP_CLINIC, VISA_CLINIC } from './maya/places';
+import { BACKUP_CLINIC, GP_CLINIC, HOME, VISA_CLINIC } from './maya/places';
 import { tasksSpaceBody } from './maya/tasks';
 import type { DemoBriefing, DemoNote, DemoSpace, DemoWorld } from './model';
 import { encodePolyline, type LatLng } from './polyline';
@@ -26,21 +26,20 @@ export const DEFAULT_DEMO_USER = 'judge@example.com';
 /** Maya lives in Lisbon, so "today" is Lisbon's today unless the caller names a day. */
 export const DEFAULT_DEMO_TIME_ZONE = 'Europe/Lisbon';
 
-/** The walk from Campo de Ourique to the GP clinic, the pre-baked chat's route. */
-const START_PLACE = 'Rua Ferreira Borges 31, Campo de Ourique, Lisboa';
-const FROM_POINT: LatLng = { lat: 38.7165, lng: -9.1665 };
+/** The walk from Maya's rental to the GP clinic, the pre-baked chat's route. */
+const FROM_POINT: LatLng = { lat: 38.7105, lng: -9.1445 };
 const TO_POINT: LatLng = { lat: 38.714655, lng: -9.153937 };
 const ROUTE_WAYPOINTS: readonly LatLng[] = [
   FROM_POINT,
-  { lat: 38.716, lng: -9.164 },
-  { lat: 38.715, lng: -9.1608 },
-  { lat: 38.7149, lng: -9.1575 },
+  { lat: 38.711, lng: -9.1475 },
+  { lat: 38.7125, lng: -9.1505 },
+  { lat: 38.7138, lng: -9.1525 },
   TO_POINT,
 ];
-const ROUTE_DISTANCE_KM = 1.3;
+const ROUTE_DISTANCE_KM = 1.6;
 /** The route tool reports a road route, so the brief gives the walking time itself. */
-const ROUTE_DURATION_MIN = 4;
-const WALK_MINUTES = 15;
+const ROUTE_DURATION_MIN = 5;
+const WALK_MINUTES = 22;
 
 export interface DemoWorldInput {
   /** "Today" in the user's zone: every date in the world is an offset from this day. */
@@ -77,12 +76,12 @@ function buildNotes(days: DayLabels): DemoNote[] {
 
 function buildBriefing(): DemoBriefing {
   return {
-    title: 'From Campo de Ourique to the GP',
-    userText: `How far is it from Campo de Ourique to ${GP_CLINIC.name}? I would like to walk.`,
+    title: 'From home to the GP',
+    userText: `How far is it from home to ${GP_CLINIC.name}? I would like to walk.`,
     routeIntro: 'Let me map the walk to the clinic.',
-    routeArguments: { from_place: START_PLACE, to_place: GP_CLINIC.address },
+    routeArguments: { from_place: HOME.address, to_place: GP_CLINIC.address },
     routeResult: {
-      from: { resolved_name: 'Rua Ferreira Borges 31, Campo de Ourique, Lisbon, Portugal', ...FROM_POINT },
+      from: { resolved_name: `${HOME.address}, Portugal`, ...FROM_POINT },
       to: { resolved_name: `${GP_CLINIC.address}, Portugal`, ...TO_POINT },
       distance_km: ROUTE_DISTANCE_KM,
       duration_min: ROUTE_DURATION_MIN,
@@ -90,10 +89,10 @@ function buildBriefing(): DemoBriefing {
       attribution: '© OpenStreetMap contributors',
     },
     finalText: [
-      `${GP_CLINIC.name} is about ${String(ROUTE_DISTANCE_KM)} km from Campo de Ourique, roughly a ${String(WALK_MINUTES)}-minute walk, and the way is mostly flat, which suits your asthma.`,
+      `${GP_CLINIC.name} is about ${String(ROUTE_DISTANCE_KM)} km from your place in ${HOME.area}, roughly a ${String(WALK_MINUTES)}-minute walk with some uphill, so take it slowly given your asthma.`,
       '',
-      `- It is open ${GP_CLINIC.hours}, so you can stop in and ask about a first appointment.`,
-      '- When you book, offer two or three afternoons and a phone number, and mention your penicillin allergy.',
+      `- It is open ${GP_CLINIC.hours}.`,
+      '- Your first appointment is already booked. Mention your penicillin allergy when you arrive.',
     ].join('\n'),
   };
 }
@@ -139,6 +138,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       task: [
         'Good morning. Read my calendar for today and my inbox.',
         'Summarise what needs my attention: what is on today, what I need to prepare, and which emails are waiting on me.',
+        `Flag upcoming appointments and what to bring. Work out travel from my place, ${HOME.address}, unless I say otherwise.`,
         'Draft a reply for anything that needs one, but do not send anything. Leave every send for me to approve under Needs your OK.',
       ].join(' '),
       cron: '30 7 * * *',

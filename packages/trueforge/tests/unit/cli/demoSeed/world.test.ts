@@ -39,7 +39,7 @@ describe('buildDemoWorld dates', () => {
   it('dates the tasks from the seed day', () => {
     const body = tasksBody(worldOn(MONDAY));
 
-    expect(body).toContain('- [ ] Find English-speaking GP (in progress) - due Friday, October 30');
+    expect(body).toContain('- [ ] Find English-speaking GP (in progress) - due Thursday, October 29');
     expect(body).toContain('- [x] Get NIF (tax number) - done Sunday, October 18');
     expect(noteBody(worldOn(MONDAY), 'newcomers')).toContain('Thursday, Nov 5 at Café do Cais');
   });
@@ -76,6 +76,8 @@ describe('buildDemoWorld content', () => {
     expect(scheduleManifest.task).toContain('Draft a reply');
     expect(scheduleManifest.task).toContain('do not send anything');
     expect(scheduleManifest.task).toContain('Needs your OK');
+    expect(scheduleManifest.task).toContain('Flag upcoming appointments and what to bring');
+    expect(scheduleManifest.task).toContain('Rua da Emenda 45, 1200-169 Lisboa');
   });
 
   it('seeds the two personas with a knowledge vault each', () => {
@@ -135,15 +137,24 @@ describe('buildDemoWorld content', () => {
     }
   });
 
-  it('pre-bakes a walk from Campo de Ourique to the GP', () => {
+  it('books the GP in the tasks and starts trips from the rental', () => {
+    const world = worldOn(MONDAY);
+
+    expect(tasksBody(world)).toContain(
+      'GP appointment Thursday Oct 29, 09:30 at Brightwater Family Clinic with Dra. Helena Rocha',
+    );
+    expect(noteBody(world, 'short-term-rental')).toContain('Rua da Emenda 45, 1200-169 Lisboa, in Chiado');
+  });
+
+  it('pre-bakes a walk from the rental to the GP', () => {
     const { briefing } = worldOn(MONDAY);
 
     expect(briefing.routeArguments).toEqual({
-      from_place: 'Rua Ferreira Borges 31, Campo de Ourique, Lisboa',
+      from_place: 'Rua da Emenda 45, 1200-169 Lisboa',
       to_place: 'R. de São Bernardo 92, Lisboa',
     });
     expect(briefing.routeResult.route_geometry.length).toBeGreaterThan(10);
-    expect(briefing.finalText).toContain('15-minute walk');
+    expect(briefing.finalText).toContain('22-minute walk');
     expect(briefing.finalText).toContain('penicillin');
   });
 });

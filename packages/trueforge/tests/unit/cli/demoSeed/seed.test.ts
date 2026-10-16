@@ -108,7 +108,7 @@ describe('demo seed against the real stores', () => {
     expect(schedules[0]?.manifest).toMatchObject({ cron: '30 7 * * *', timezone: 'Europe/Lisbon' });
 
     const [session] = await sessionsOf(stores, USER_ID);
-    expect(session?.title).toBe('From Campo de Ourique to the GP');
+    expect(session?.title).toBe('From home to the GP');
     expect(session?.metadata).toMatchObject({ [DEMO_MARKER]: 'true', demo_seed_day: '2026-10-26' });
     const handle = await new Sessions({ sessionStore: stores.sessionStore }).get({
       tenant_id: TENANT_ID,
