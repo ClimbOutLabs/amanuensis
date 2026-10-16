@@ -2,7 +2,7 @@ import type { MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 
 import { isLoopbackHost } from '../config';
-import { ADDRESS_NOT_LISTED_MESSAGE, canonicalPort, findAllowedOrigin, parseHostHeader } from './allowedOrigins';
+import { ADDRESS_NOT_LISTED_MESSAGE, findAllowedOrigin, hostMatchesUrl, parseHostHeader } from './allowedOrigins';
 import { readBearerToken } from './token';
 
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -31,10 +31,8 @@ export function createRequestGuardMiddleware(options: {
 }): MiddlewareHandler {
   const allowedOrigins = options.allowedOrigins ?? [];
   const publicUrl = new URL(options.publicBaseUrl);
-  const publicHost = { hostname: publicUrl.hostname, port: canonicalPort(publicUrl.port) };
-  const instancePort = canonicalPort(String(options.port));
   const publicIsLoopback = isLoopbackHost(publicUrl.hostname);
-  const loopbackPorts = new Set([instancePort, ...(publicIsLoopback ? [publicHost.port] : [])]);
+  const instanceUrl = new URL(`http://localhost:${String(options.port)}`);
   const allowedOriginSet = new Set([
     publicUrl.origin,
     ...allowedOrigins,
@@ -57,8 +55,11 @@ export function createRequestGuardMiddleware(options: {
       const host = parseHostHeader(rawHost);
       const allowed =
         host !== undefined &&
-        ((host.hostname === publicHost.hostname && host.port === publicHost.port) ||
-          (isLoopbackHost(host.hostname) && loopbackPorts.has(host.port)) ||
+        (hostMatchesUrl({ host, url: publicUrl }) ||
+          (isLoopbackHost(host.hostname) &&
+            (hostMatchesUrl({ host: { ...host, hostname: instanceUrl.hostname }, url: instanceUrl }) ||
+              (publicIsLoopback &&
+                hostMatchesUrl({ host: { ...host, hostname: publicUrl.hostname }, url: publicUrl })))) ||
           findAllowedOrigin({ hostHeader: rawHost, allowedOrigins }) !== undefined);
       if (!allowed) {
         if (allowedOrigins.length > 0) {

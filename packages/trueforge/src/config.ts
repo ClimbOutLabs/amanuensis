@@ -431,6 +431,16 @@ export function parsePublicBaseUrl(raw: string | undefined, options: { allowPath
   return `${parsed.origin}${path}`;
 }
 
+/** True for a host written like an address but not as four plain decimal parts, which URL parsing would quietly rewrite. */
+function writesAddressInAnotherBase(text: string): boolean {
+  const host = /^[a-z][a-z0-9+.-]*:\/\/([^/?#:]*)/i.exec(text)?.[1] ?? '';
+  const parts = host.split('.');
+  if (!parts.every(part => /^(0x[0-9a-f]*|[0-9]+)$/i.test(part))) {
+    return false;
+  }
+  return !(parts.length === 4 && parts.every(part => /^(0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255));
+}
+
 /**
  * The addresses the app may be opened at, as origins. Sign-in returns to the one the request came to, so the list is
  * what keeps a request from steering it elsewhere. Plain http is only for this computer and private networks.
@@ -451,8 +461,20 @@ export function parseAllowedOrigins(raw: string | undefined): string[] {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       throw new Error(`ALLOWED_ORIGINS entries must be http or https origins: ${text}`);
     }
-    if (parsed.pathname !== '/' || parsed.search !== '' || parsed.hash !== '' || parsed.username !== '') {
+    if (
+      parsed.pathname !== '/' ||
+      parsed.search !== '' ||
+      parsed.hash !== '' ||
+      parsed.username !== '' ||
+      parsed.password !== '' ||
+      /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(text)
+    ) {
       throw new Error(`ALLOWED_ORIGINS entries must be bare origins with no path, query or login: ${text}`);
+    }
+    if (writesAddressInAnotherBase(text)) {
+      throw new Error(
+        `ALLOWED_ORIGINS has an address written in octal, hex or as one number: ${text}. Write it as four decimal parts.`,
+      );
     }
     if (parsed.protocol === 'http:' && !isPrivateNetworkHost(parsed.hostname)) {
       throw new Error(

@@ -262,3 +262,22 @@ describe('request guard: instance opened on several addresses', () => {
     expect(await status({ app: remote, headers: { host: '127.0.0.1:18791' } })).toBe(421);
   });
 });
+
+describe('request guard: ports belong to their scheme', () => {
+  const secure = { port: 8790, publicBaseUrl: 'http://127.0.0.1:8790', allowedOrigins: ['https://aman.example.com'] };
+  const plain = { port: 8790, publicBaseUrl: 'http://127.0.0.1:8790', allowedOrigins: ['http://192.168.1.20:80'] };
+
+  it('takes :443 only for an https address and :80 only for an http one', async () => {
+    expect(await status({ app: appFor(secure), headers: { host: 'aman.example.com' } })).toBe(200);
+    expect(await status({ app: appFor(secure), headers: { host: 'aman.example.com:443' } })).toBe(200);
+    expect(await status({ app: appFor(secure), headers: { host: 'aman.example.com:80' } })).toBe(421);
+    expect(await status({ app: appFor(plain), headers: { host: '192.168.1.20:80' } })).toBe(200);
+    expect(await status({ app: appFor(plain), headers: { host: '192.168.1.20' } })).toBe(200);
+    expect(await status({ app: appFor(plain), headers: { host: '192.168.1.20:443' } })).toBe(421);
+  });
+
+  it('does not let a leading zero in a port name another port', async () => {
+    expect(await status({ app: appFor(LOCAL), headers: { host: 'localhost:08790' } })).toBe(200);
+    expect(await status({ app: appFor(LOCAL), headers: { host: 'localhost:08791' } })).toBe(421);
+  });
+});

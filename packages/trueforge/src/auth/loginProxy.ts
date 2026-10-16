@@ -5,18 +5,22 @@ import { ADDRESS_NOT_LISTED_MESSAGE, requestAllowedOrigin } from './allowedOrigi
 import { LoginAttemptLimiter } from './loginRateLimit';
 
 const FORWARDED_REQUEST_HEADERS = ['accept', 'accept-language', 'content-type', 'user-agent'];
-const RETURNED_RESPONSE_HEADERS = ['content-type', 'cache-control', 'content-language'];
+const RETURNED_RESPONSE_HEADERS = ['content-type', 'content-language'];
 const METHODS_WITH_BODY = new Set(['POST']);
 const UPSTREAM_TIMEOUT_MS = 15_000;
 
 /** Only what a browser needs to sign in: never the token, userinfo, key, discovery or device endpoints. */
 const BROWSER_PATHS = [/^\/auth(\/.+)?$/, /^\/approval$/, /^\/callback$/, /^\/static\/.+$/, /^\/theme\/.+$/];
 const PASSWORD_POST_PATH = /^\/auth\/[^/]+\/login$/;
+/** Each of these makes the sign-in service store a new sign-in request. */
+const PAGE_START_PATH = /^\/auth(\/[^/]+)?$/;
 
 const SECURITY_HEADERS: Record<string, string> = {
   'content-security-policy': "default-src 'self'; frame-ancestors 'none'",
   'x-frame-options': 'DENY',
   'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+  'cache-control': 'no-store',
 };
 
 /** The sign-in service can be passed through only when it sits on this computer and has a path of its own. */
@@ -59,6 +63,16 @@ export function createLoginProxy({
   const issuer = new URL(issuerUrl);
   const prefix = issuer.pathname.replace(/\/$/, '');
 
+  const tooMany = (retryAfterSeconds: number): Response =>
+    new Response(`Too many sign-in attempts. Wait ${String(retryAfterSeconds)} seconds and try again.`, {
+      status: 429,
+      headers: {
+        'content-type': 'text/plain; charset=UTF-8',
+        'retry-after': String(retryAfterSeconds),
+        ...SECURITY_HEADERS,
+      },
+    });
+
   return async (c: Context): Promise<Response> => {
     const method = c.req.method;
     if (method !== 'GET' && method !== 'HEAD' && method !== 'POST') {
@@ -77,18 +91,16 @@ export function createLoginProxy({
       return c.text('Not found', 404);
     }
     const guessing = method === 'POST' && PASSWORD_POST_PATH.test(sub);
-    const key = guessing ? clientKey(c) : '';
-    if (guessing) {
-      const check = limiter.check(key);
-      if (!check.allowed) {
-        return c.text(
-          `Too many sign-in attempts. Wait ${String(check.retryAfterSeconds)} seconds and try again.`,
-          429,
-          {
-            'retry-after': String(check.retryAfterSeconds),
-          },
-        );
+    const key = guessing || (method === 'GET' && PAGE_START_PATH.test(sub)) ? clientKey(c) : '';
+    if (key !== '' && !guessing) {
+      const page = limiter.allowPageStart(key);
+      if (!page.allowed) {
+        return tooMany(page.retryAfterSeconds);
       }
+    }
+    const permit = guessing ? limiter.begin(key) : undefined;
+    if (permit !== undefined && !permit.allowed) {
+      return tooMany(permit.retryAfterSeconds);
     }
     const headers = new Headers();
     for (const name of FORWARDED_REQUEST_HEADERS) {
@@ -107,16 +119,11 @@ export function createLoginProxy({
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       });
     } catch {
+      permit?.finish('abandon');
       return c.text('The sign-in service did not answer.', 502);
     }
-    if (guessing) {
-      // A redirect means the password was accepted; the form shown again means it was not.
-      if (response.status >= 300 && response.status < 400) {
-        limiter.recordSuccess(key);
-      } else {
-        limiter.recordFailure(key);
-      }
-    }
+    // A redirect means the password was accepted; the form shown again means it was not.
+    permit?.finish(response.status >= 300 && response.status < 400 ? 'success' : 'failure');
     const out = new Headers(SECURITY_HEADERS);
     for (const name of RETURNED_RESPONSE_HEADERS) {
       const value = response.headers.get(name);

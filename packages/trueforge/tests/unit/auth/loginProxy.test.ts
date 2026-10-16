@@ -171,6 +171,13 @@ describe('login proxy', () => {
     expect(res.headers.get('content-security-policy')).toBe("default-src 'self'; frame-ancestors 'none'");
     expect(res.headers.get('x-frame-options')).toBe('DENY');
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('forbids caching and referrers even when the sign-in service allows them', async () => {
+    answer = () => new Response('x', { headers: { 'cache-control': 'public, max-age=3600' } });
+    expect((await get('/dex/static/main.css')).headers.get('cache-control')).toBe('no-store');
   });
 
   it.each([
@@ -247,6 +254,45 @@ describe('login proxy', () => {
       }
       expect((await login()).status).toBe(429);
       expect((await get('/dex/auth/local/login?back=&state=s')).status).toBe(200);
+    });
+
+    it('lets no more password attempts reach the sign-in service than the limit when many arrive at once', async () => {
+      globalThis.fetch = (input, init) => {
+        calls.push({
+          url: String(input),
+          method: init?.method ?? 'GET',
+          redirect: init?.redirect,
+          headers: new Headers(init?.headers),
+          body: undefined,
+        });
+        return new Promise(resolve => {
+          setTimeout(() => {
+            resolve(new Response('<html>login</html>', { status: 200 }));
+          }, 20);
+        });
+      };
+      const responses = await Promise.all(Array.from({ length: 60 }, () => login()));
+      expect(calls).toHaveLength(5);
+      expect(responses.filter(res => res.status === 429)).toHaveLength(55);
+    });
+
+    it('does not count a sign-in service that did not answer as a failed password', async () => {
+      globalThis.fetch = () => Promise.reject(new Error('ECONNREFUSED'));
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        expect((await login()).status).toBe(502);
+      }
+    });
+
+    it('limits how often one address can start a sign-in, which stores a request in the sign-in service', async () => {
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        expect((await get('/dex/auth?client_id=x&state=s')).status).toBe(200);
+      }
+      const res = await get('/dex/auth?client_id=x&state=s');
+      expect(res.status).toBe(429);
+      expect(res.headers.get('retry-after')).toBe('60');
+      expect((await get('/dex/static/main.css')).status).toBe(200);
+      clock += 60_000;
+      expect((await get('/dex/auth/local?client_id=x')).status).toBe(200);
     });
 
     it('makes everyone wait when many addresses fail together', async () => {

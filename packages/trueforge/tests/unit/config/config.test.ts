@@ -443,4 +443,30 @@ describe('parseAllowedOrigins', () => {
   ])('refuses %s', entry => {
     expect(() => parseAllowedOrigins(entry)).toThrow(/ALLOWED_ORIGINS/);
   });
+
+  it.each(['http://:pw@192.168.1.20:8791', 'http://:@192.168.1.20:8791', 'http://user:pw@192.168.1.20:8791'])(
+    'refuses a login of any kind (%s)',
+    entry => {
+      expect(() => parseAllowedOrigins(entry)).toThrow(/no path, query or login/);
+    },
+  );
+
+  it.each([
+    'http://0x7f.1:8791',
+    'http://0xc0a80114:8791',
+    'http://0300.0250.01.020:8791',
+    'http://3232235796:8791',
+    'http://192.168.01.20:8791',
+    'http://010.1.1.1:8791',
+    'http://192.168.1:8791',
+  ])('refuses an address written in octal, hex or as one number (%s) instead of rewriting it', entry => {
+    expect(() => parseAllowedOrigins(entry)).toThrow(/octal, hex or as one number|public address/);
+  });
+
+  it('keeps an address written as four plain decimal parts', () => {
+    expect(parseAllowedOrigins('http://192.168.1.20:8791,http://10.0.0.1')).toEqual([
+      'http://192.168.1.20:8791',
+      'http://10.0.0.1',
+    ]);
+  });
 });
