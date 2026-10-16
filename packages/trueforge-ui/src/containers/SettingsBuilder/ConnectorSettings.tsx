@@ -705,7 +705,7 @@ const ConnectorSettings = () => {
               Find a connector in <span className="font-medium text-text-primary">Available</span> below and choose
               Connect. Most need an API key or token from that service.
             </li>
-            <li>Choose it in the composer so Aman can use its tools in that chat.</li>
+            <li>Choose it in the message box so Aman can use its tools in that chat.</li>
             <li>
               Use <span className="font-medium text-text-primary">Test connection</span> to see which tools the
               connector offers.
