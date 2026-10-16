@@ -13,6 +13,7 @@
  */
 import { realpathSync } from 'fs';
 import path from 'path';
+import { GMAIL_SERVER_ID, isGmailReadToolName } from '../email/gmail/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   actionIdFor,
@@ -56,6 +57,7 @@ import {
 } from './shellAllowlist';
 import {
   autoDenyDecision,
+  failClosedDecision,
   tier1Decision,
   tier2Decision,
   tier3Decision,
@@ -1184,6 +1186,9 @@ async function classifySearchProviderTool(input: {
   if (!verdict.ok) {
     return held('mcp_search_guard', describeOutboundRule(verdict.rule));
   }
+  if (ctx.web_search.privateDataRead) {
+    return held('mcp_search_after_private_read', 'this turn read your email, and a search could carry it out');
+  }
   if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
     return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
   }
@@ -1196,6 +1201,29 @@ async function classifySearchProviderTool(input: {
     sensitive_read: false,
     silent_search_query: queryText,
   });
+}
+
+/**
+ * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
+ * path. Reads are silent but flagged as sensitive, and a turn that read mail can no longer search silently.
+ */
+async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+    return autoDenyDecision({
+      reason: 'offline_mode',
+      reason_detail: 'Gmail needs network access, which is disabled while offline.',
+      sensitive_read: false,
+    });
+  }
+  if (isGmailReadToolName(action.tool_name)) {
+    ctx.web_search.privateDataRead = true;
+    return tier1Decision({
+      reason: 'gmail_read',
+      reason_detail: `Read your email with \`${action.tool_name}\`.`,
+      sensitive_read: true,
+    });
+  }
+  return failClosedDecision({ reason_detail: `Unknown Gmail tool \`${action.tool_name}\`.` });
 }
 
 async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
@@ -1453,6 +1481,10 @@ export function approvalCardForGatedCall(input: { action: SentinelAction; agent_
  */
 export async function classifyTier(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const name = action.tool_name;
+
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GMAIL_SERVER_ID) {
+    return classifyGmailTool(action, ctx);
+  }
 
   // Only the verified system exec tool gets the allowlist path. An MCP tool
   // named 'exec' must not be downgraded to Tier 2; it falls through to the

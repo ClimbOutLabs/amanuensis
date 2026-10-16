@@ -19,6 +19,7 @@ export const SEARCH_ASK_REASONS = [
   'mcp_search_guard',
   'mcp_search_limit',
   'mcp_search_unreturned_url',
+  'mcp_search_after_private_read',
 ] as const;
 export type SearchAskReason = (typeof SEARCH_ASK_REASONS)[number];
 
@@ -33,12 +34,20 @@ export interface WebSearchTurnState {
   resultUrls: Set<string>;
   /** Tail of the text those searches sent, so a secret split across two searches is seen whole. */
   sentText: string;
+  /** True once the turn read private data (mail), after which a search asks instead of running silently. */
+  privateDataRead: boolean;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
 }
 
 export function createWebSearchTurnState(): WebSearchTurnState {
-  return { silentSearches: 0, resultUrls: new Set(), sentText: '', admission: Promise.resolve() };
+  return {
+    silentSearches: 0,
+    resultUrls: new Set(),
+    sentText: '',
+    privateDataRead: false,
+    admission: Promise.resolve(),
+  };
 }
 
 /**
