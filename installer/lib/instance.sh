@@ -164,15 +164,72 @@ instance_state() {
   fi
 }
 
+# The ports an instance publishes, each with the flag that chooses it (none for the https port, which is always picked).
+instance_port_flags() { # name
+  printf '%s=--port %s=--login-port %s=' "$(reg_get "$1" app_port)" "$(reg_get "$1" login_port)" "$(reg_get "$1" tls_port)"
+}
+
+# Moves a local instance to another port and rewrites everything that names the old one: its record, its settings, its
+# compose file, its sign-in settings and, with https, the front end's. The data and the secrets are not touched.
+instance_move_port() { # name app|login|tls new_port
+  local name=$1 kind=$2 new=$3 env app login origins
+  env="$(instance_dir "$name")/.env"
+  reg_set "$name" "${kind}_port" "$new"
+  app=$(reg_get "$name" app_port)
+  login=$(reg_get "$name" login_port)
+  reg_set "$name" public_url "http://127.0.0.1:$app"
+  reg_set "$name" login_url "http://127.0.0.1:$login"
+  env_managed_set "$env" PUBLIC_BASE_URL "http://127.0.0.1:$app"
+  env_managed_set "$env" OIDC_ISSUER_URL "http://127.0.0.1:$login/dex"
+  if [ -n "$(reg_get "$name" origins)" ]; then
+    # shellcheck disable=SC2046 # the extras are checked hosts without spaces
+    origins=$(network_origin_list "$app" "$(reg_get "$name" tls_port)" $(reg_get "$name" extra_hosts))
+    reg_set "$name" origins "$origins"
+    env_managed_set "$env" ALLOWED_ORIGINS "$origins"
+  fi
+  instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+  log_event "instance $name port $kind moved to $new"
+}
+
+# After a failed start: when Docker could not bind a port the installer picked itself, picks the next free one and moves
+# the instance there. Returns 1 for a port the person chose with a flag, for an instance behind their own proxy (which
+# points at its ports), and for any other failure.
+instance_retry_busy_port() { # name
+  local name=$1 bind port kind new
+  [ -n "${REL_APP_TAG:-}" ] || return 1
+  is_loopback_origin "$(reg_get "$name" public_url)" || return 1
+  bind=$(container_failed_bind_stdin <"$STEP_LOG")
+  [ -n "$bind" ] || return 1
+  port=${bind#* }
+  grep -Eqi 'port is already allocated|address already in use' "$STEP_LOG" || return 1
+  case "$port" in
+    "$(reg_get "$name" app_port)") kind=app ;;
+    "$(reg_get "$name" login_port)") kind=login ;;
+    "$(reg_get "$name" tls_port)") kind=tls ;;
+    *) return 1 ;;
+  esac
+  if [ "$kind" != tls ] && [ "$(reg_get "$name" "${kind}_port_chosen")" = 1 ]; then return 1; fi
+  new=$(pick_port $((port + 1)) "$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port) $port") || return 1
+  ui_step_abort
+  instance_move_port "$name" "$kind" "$new"
+  ui_line "Port $port was busy, so Aman uses $new."
+}
+
 instance_up() {
-  local name=$1 rc=0 recreate=()
+  local name=$1 rc tries=0 recreate=()
   if [ "${2:-}" = recreate ]; then recreate=(--force-recreate); fi
-  step_begin "start-$name" "Starting instance $name and waiting for it to be healthy"
-  dc "$name" up -d ${recreate[@]+"${recreate[@]}"} --wait --wait-timeout 240 >"$STEP_LOG" 2>&1 || rc=$?
-  if [ "$rc" != 0 ]; then
+  while :; do
+    rc=0
+    step_begin "start-$name" "Starting instance $name and waiting for it to be healthy"
+    dc "$name" up -d ${recreate[@]+"${recreate[@]}"} --wait --wait-timeout 240 >"$STEP_LOG" 2>&1 || rc=$?
+    if [ "$rc" = 0 ]; then break; fi
+    if [ "$tries" -lt 3 ] && instance_retry_busy_port "$name"; then
+      tries=$((tries + 1))
+      continue
+    fi
     instance_unhealthy "$name"
     return 1
-  fi
+  done
   if machine_running; then
     stt_attach "$name" || true
   fi
@@ -213,11 +270,13 @@ instance_unhealthy() {
       D logs --tail 200 "$id" 2>&1 || true
     done
   } >"$log" 2>&1
+  AMAN_DIAG_PORTS="$(reg_get "$name" app_port) $(reg_get "$name" login_port) $(reg_get "$name" tls_port)"
   cause=$(container_failure_cause "$log")
   if [ -n "$cause" ] && [ "$(container_failure_kind "$log")" = bug ]; then
     UI_FD=2 ui_step_end fail "Instance $name did not start. $cause" "Update Aman and run install.sh again. If it fails the same way, share the saved log below."
   elif [ -n "$cause" ]; then
-    UI_FD=2 ui_step_end fail "Instance $name did not start. $cause" "Fix that, then run install.sh again."
+    fix=$(container_failure_port_fix "$log" "$(instance_port_flags "$name")")
+    UI_FD=2 ui_step_end fail "Instance $name did not start. $cause" "${fix:-Fix that, then run install.sh again.}"
   else
     UI_FD=2 ui_step_end fail "Instance $name did not become healthy, and the cause is not one the installer knows. This looks like a bug in Aman." "Run install.sh again; if it fails the same way, share the log below."
   fi
@@ -557,7 +616,8 @@ instance_create() {
   reg_write "$I_NAME" "name=$I_NAME" "app_port=$I_PORT" "login_port=$I_LOGIN_PORT" "public_url=$I_PUBLIC_URL" \
     "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
     "healthy=0" "origins=$I_ORIGINS" "extra_hosts=$OPT_ADDRESSES" "sandbox=$I_SANDBOX" "tls=$I_TLS" "tls_port=$I_TLS_PORT" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
-    "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
+    "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created" \
+    "app_port_chosen=$([ -n "${OPT_PORT:-}" ] && echo 1 || echo 0)" "login_port_chosen=$([ -n "${OPT_LOGIN_PORT:-}" ] && echo 1 || echo 0)"
   INSTANCE_PENDING=
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then

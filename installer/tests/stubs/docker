@@ -392,6 +392,19 @@ case "$cmd" in
           echo "external volume \"$missing\" not found" >&2
           exit 1
         fi
+        if [ "$proj" != aman-machine ]; then
+          # A host port that some program holds, as Docker words it for a port the compose file publishes.
+          for busy in ${STUB_UP_BUSY_PORTS:-}; do
+            if grep -q "'[0-9.]*:$busy:" "$file"; then
+              echo "Error response from daemon: driver failed programming external connectivity on endpoint ${proj}-loopback-1 (abc): Bind for 127.0.0.1:$busy failed: port is already allocated" >&2
+              exit 1
+            fi
+          done
+          if [ -n "${STUB_UP_FORWARD_FAIL:-}" ]; then
+            echo "Error response from daemon: driver failed programming external connectivity on endpoint ${proj}-loopback-1: failed to bind host port 127.0.0.1:55009/tcp: address already in use" >&2
+            exit 1
+          fi
+        fi
         if [ -n "${STUB_UP_FAIL_LOG:-}" ] && [ "$proj" != aman-machine ]; then
           mkdir -p "$S/failed"
           : >"$S/failed/$proj"

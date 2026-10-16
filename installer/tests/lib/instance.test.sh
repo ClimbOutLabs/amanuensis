@@ -72,6 +72,87 @@ test_explicit_busy_port_is_refused() {
   sandbox_drop
 }
 
+reg_value() { sed -n "s/^$2=//p" "$AMAN_HOME/state/instances/$1.conf" | head -n 1; }
+
+test_a_port_that_turns_out_busy_moves_to_the_next_free_one() {
+  t_begin "a port the installer picked that Docker cannot bind is replaced by the next free one, everywhere it was written, with one line"
+  sandbox_new
+  STUB_UP_BUSY_PORTS="8791"
+  install_machine
+  assert_rc 0
+  assert_flat_contains "$OUT" "Port 8791 was busy, so Aman uses 8792."
+  assert_eq "$(env_value main PUBLIC_BASE_URL)" "http://127.0.0.1:8792"
+  assert_eq "$(env_value main OIDC_ISSUER_URL)" "http://127.0.0.1:5556/dex"
+  assert_eq "$(reg_value main app_port)" 8792
+  assert_eq "$(reg_value main public_url)" "http://127.0.0.1:8792"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '127.0.0.1:8792:8790'"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "8791"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "- http://127.0.0.1:8792/api/v1/auth/callback"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "8791"
+  sandbox_drop
+  sandbox_new
+  fixture_network 192.168.1.20
+  STUB_UP_BUSY_PORTS="8443"
+  install_machine
+  assert_rc 0
+  assert_flat_contains "$OUT" "Port 8443 was busy, so Aman uses 8444."
+  assert_eq "$(reg_value main tls_port)" 8444
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '192.168.1.20:8444:"
+  assert_contains "$(env_value main ALLOWED_ORIGINS)" "https://192.168.1.20:8444"
+  assert_not_contains "$(env_value main ALLOWED_ORIGINS)" "8443"
+  sandbox_drop
+}
+
+test_the_port_is_moved_at_most_three_times() {
+  t_begin "after three moves a port that is still busy stops the install, naming the port, what holds it and a free one to choose"
+  sandbox_new
+  printf '#!/usr/bin/env bash\nprintf "p4242\\ncnode\\n"\n' >"$SB_BIN/lsof"
+  chmod 755 "$SB_BIN/lsof"
+  STUB_UP_BUSY_PORTS="8791 8792 8793 8794"
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email owner@example.invalid
+  clear_input
+  assert_rc 1
+  assert_eq "$(printf '%s\n' "$OUT$ERR" | grep -c 'was busy, so Aman uses')" 3
+  assert_flat_contains "$ERR" "Port 8794 on 127.0.0.1 is already in use on this computer (held by node (process 4242))."
+  assert_flat_contains "$ERR" "run install.sh again with --port 8795"
+  sandbox_drop
+}
+
+test_a_port_given_with_a_flag_is_never_moved() {
+  t_begin "a port chosen with --port or --login-port that Docker cannot bind stops the install with the flag to use instead"
+  sandbox_new
+  STUB_UP_BUSY_PORTS="8791"
+  INSTALL_EXTRA=(--port 8791)
+  install_machine || true
+  assert_eq "$RC" 1
+  assert_not_contains "$OUT$ERR" "was busy"
+  assert_flat_contains "$ERR" "Port 8791 on 127.0.0.1 is already in use on this computer."
+  assert_flat_contains "$ERR" "run install.sh again with --port 8792."
+  sandbox_drop
+  sandbox_new
+  STUB_UP_BUSY_PORTS="5556"
+  INSTALL_EXTRA=(--login-port 5556)
+  install_machine || true
+  assert_eq "$RC" 1
+  assert_flat_contains "$ERR" "run install.sh again with --login-port 5557."
+  sandbox_drop
+}
+
+test_docker_forwarding_failure_is_not_called_a_busy_port() {
+  t_begin "Docker failing to bind a port of its own, which nothing holds, says it could not open Aman on the network addresses and offers --local-only"
+  sandbox_new
+  STUB_UP_FORWARD_FAIL=1
+  install_machine || true
+  assert_eq "$RC" 1
+  assert_flat_contains "$ERR" "Docker could not open Aman on this computer's network addresses, and nothing else on this computer is using the port."
+  assert_flat_contains "$ERR" "Run install.sh again with --local-only"
+  assert_not_contains "$ERR" "already in use"
+  assert_not_contains "$OUT$ERR" "was busy"
+  sandbox_drop
+}
+
 test_add_existing_is_idempotent() {
   t_begin "adding an existing instance changes nothing and asks nothing"
   sandbox_new
@@ -545,6 +626,10 @@ test_list_without_docker
 test_dry_run_only_where_it_means_something
 test_skips_ports_in_use
 test_explicit_busy_port_is_refused
+test_a_port_that_turns_out_busy_moves_to_the_next_free_one
+test_the_port_is_moved_at_most_three_times
+test_a_port_given_with_a_flag_is_never_moved
+test_docker_forwarding_failure_is_not_called_a_busy_port
 test_add_existing_is_idempotent
 test_list
 test_remove_keeps_volumes
