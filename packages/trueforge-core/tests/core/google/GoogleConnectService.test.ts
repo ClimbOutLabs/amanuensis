@@ -276,23 +276,23 @@ describe('GoogleConnectService', () => {
       await connections.save(connectedRecord());
       google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at' }));
       google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
-      expect(await service.test(OWNER)).toEqual({ ok: true, account_email: 'ada@example.com' });
+      expect(await service.test(OWNER)).toEqual({ result: 'ok', account_email: 'ada@example.com' });
     });
 
     it('flips the login to needs-reconnect when Google says invalid_grant', async () => {
       const { service, google, connections } = setup();
       await connections.save(connectedRecord());
       google.on(GOOGLE_TOKEN_URL, () => json({ error: 'invalid_grant' }, 400));
-      expect(await service.test(OWNER)).toEqual({ ok: false, reason: 'needs_reconnect' });
+      expect(await service.test(OWNER)).toEqual({ result: 'needs_reconnect', account_email: null });
       expect((await connections.get(OWNER))?.status).toBe('needs_reconnect');
     });
 
     it('reports a missing login and an unreachable Google separately', async () => {
       const { service, google, connections } = setup();
-      expect(await service.test(OWNER)).toEqual({ ok: false, reason: 'not_connected' });
+      expect(await service.test(OWNER)).toEqual({ result: 'not_connected', account_email: null });
       await connections.save(connectedRecord());
       google.on(GOOGLE_TOKEN_URL, () => new Response('', { status: 503 }));
-      expect(await service.test(OWNER)).toEqual({ ok: false, reason: 'unreachable' });
+      expect(await service.test(OWNER)).toEqual({ result: 'unreachable', account_email: null });
       expect((await connections.get(OWNER))?.status).toBe('connected');
     });
   });

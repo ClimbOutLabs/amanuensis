@@ -9,7 +9,6 @@ import {
 describe('publicHttpsBase', () => {
   it.each([
     ['https://aman.example.org', 'https://aman.example.org'],
-    ['https://box.tailnet-name.ts.net/', 'https://box.tailnet-name.ts.net'],
     ['https://aman.example.org/app/', 'https://aman.example.org/app'],
   ])('accepts %s', (input, expected) => {
     expect(publicHttpsBase(input)).toBe(expected);
@@ -27,6 +26,8 @@ describe('publicHttpsBase', () => {
     'https://nas.lan',
     'https://aman.internal',
     'https://aman.home.arpa',
+    'https://box.tailnet-name.ts.net',
+    'https://ts.net',
   ])('refuses %s', input => {
     expect(publicHttpsBase(input)).toBeNull();
   });
@@ -35,12 +36,33 @@ describe('publicHttpsBase', () => {
 describe('resolveGoogleSetup', () => {
   it('uses a Web client and the exact public callback when the install has a public https address', () => {
     expect(
-      resolveGoogleSetup({ public_base_url: 'https://aman.example.org/', request_url: 'http://192.168.1.5:8791/x' }),
+      resolveGoogleSetup({
+        public_base_url: 'https://aman.example.org/',
+        request_url: 'https://aman.example.org/api/v1/x',
+      }),
     ).toEqual({
       mode: 'web',
       client_type: 'web',
       redirect_uri: `https://aman.example.org${GOOGLE_CALLBACK_PATH}`,
     });
+  });
+
+  it('does not use the public address for a browser that reached Aman some other way, since its session would not follow', () => {
+    expect(
+      resolveGoogleSetup({ public_base_url: 'https://aman.example.org', request_url: 'http://192.168.1.5:8791/x' }),
+    ).toEqual({ mode: 'paste', client_type: 'desktop', redirect_uri: PASTE_REDIRECT_URI });
+    expect(
+      resolveGoogleSetup({ public_base_url: 'https://aman.example.org', request_url: 'http://localhost:8791/x' }),
+    ).toMatchObject({ mode: 'loopback' });
+  });
+
+  it('asks for a pasted address when the public address is a Tailscale name', () => {
+    expect(
+      resolveGoogleSetup({
+        public_base_url: 'https://box.tailnet-name.ts.net',
+        request_url: 'https://box.tailnet-name.ts.net/x',
+      }),
+    ).toEqual({ mode: 'paste', client_type: 'desktop', redirect_uri: PASTE_REDIRECT_URI });
   });
 
   it('returns straight to this server when the browser is on this machine', () => {

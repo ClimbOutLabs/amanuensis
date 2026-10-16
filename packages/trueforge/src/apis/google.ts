@@ -35,9 +35,16 @@ export interface GoogleRouterDeps {
 
 const RESULT_PAGE_STYLE = 'font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem';
 
-function resultPage(message: string): string {
-  return `<!doctype html><meta charset="utf-8"><title>Google</title><body style="${RESULT_PAGE_STYLE}"><p>${message}</p>`;
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
+function resultPage(lines: string[]): string {
+  const body = lines.map(line => `<p>${escapeHtml(line)}</p>`).join('');
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Google</title><body style="${RESULT_PAGE_STYLE}">${body}`;
+}
+
+const START_AGAIN = 'Go back to Aman and start again.';
 
 function statusBody(input: { record: GoogleConnectionRecord | null; setup: GoogleSetupInfo }) {
   const { record } = input;
@@ -51,8 +58,25 @@ function statusBody(input: { record: GoogleConnectionRecord | null; setup: Googl
       granted: granted.includes(feature),
     })),
     has_saved_client: record !== null,
+    available: !configuration.DEMO_MODE,
     setup: input.setup,
   };
+}
+
+/** The address the browser used, which a proxy in front of Aman may have rewritten. */
+function browserUrlOf(c: Parameters<ResolveRequestContext>[0]): string {
+  const url = new URL(c.req.url);
+  const host = c.req.header('x-forwarded-host')?.split(',')[0]?.trim();
+  if (host === undefined || host === '') {
+    return url.toString();
+  }
+  const forwardedProto = c.req.header('x-forwarded-proto')?.split(',')[0]?.trim();
+  const proto = forwardedProto === 'https' || forwardedProto === 'http' ? forwardedProto : url.protocol.slice(0, -1);
+  try {
+    return new URL(`${url.pathname}${url.search}`, `${proto}://${host}`).toString();
+  } catch {
+    return url.toString();
+  }
 }
 
 function toClientInput(body: {
@@ -79,12 +103,12 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
     const requestContext = deps.resolveRequestContext(c);
     return { tenant_id: requestContext.tenant_id, created_by: requestContext.subject.id };
   };
-  const setupFor = (requestUrl: string) =>
-    resolveGoogleSetup({ public_base_url: configuration.PUBLIC_BASE_URL, request_url: requestUrl });
+  const setupFor = (c: Parameters<ResolveRequestContext>[0]) =>
+    resolveGoogleSetup({ public_base_url: configuration.PUBLIC_BASE_URL, request_url: browserUrlOf(c) });
 
   const statusHandler: RouteHandler<typeof getGoogleConnectionStatusRoute> = async c => {
     const record = await deps.googleConnectionStore.get(ownerOf(c));
-    return c.json({ data: statusBody({ record, setup: setupFor(c.req.url) }) }, 200);
+    return c.json({ data: statusBody({ record, setup: setupFor(c) }) }, 200);
   };
 
   const checkHandler: RouteHandler<typeof checkGoogleClientRoute> = async c => {
@@ -92,14 +116,14 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
     const problems = await service.checkClient({
       client: toClientInput(body.client),
       registered_redirect_uris: body.registered_redirect_uris,
-      setup: setupFor(c.req.url),
+      setup: setupFor(c),
     });
     return c.json({ data: { ok: problems.length === 0, problems } }, 200);
   };
 
   const beginHandler: RouteHandler<typeof beginGoogleConsentRoute> = async c => {
     const body = c.req.valid('json');
-    const setup = setupFor(c.req.url);
+    const setup = setupFor(c);
     try {
       const { authorization_url } = await service.begin({
         owner: ownerOf(c),
@@ -119,21 +143,18 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
   const callbackHandler: RouteHandler<typeof googleConsentCallbackRoute> = async c => {
     const { code, state, error } = c.req.valid('query');
     if (error !== undefined) {
-      return c.html(
-        resultPage('Google was not connected because access was not granted. You can close this window.'),
-        400,
-      );
+      return c.html(resultPage(['Access was not granted, so Google was not connected.', START_AGAIN]), 400);
     }
     if (code === undefined || state === undefined) {
-      return c.html(resultPage('The response from Google was incomplete. Close this window and try again.'), 400);
+      return c.html(resultPage(['The response from Google was incomplete.', START_AGAIN]), 400);
     }
     try {
       await service.complete({ owner: ownerOf(c), state, code });
-      return c.html(resultPage('Google is connected. You can close this window and return to Aman.'), 200);
+      return c.html(resultPage(['Google is connected. You can close this window and go back to Aman.']), 200);
     } catch (caught) {
       if (caught instanceof GoogleConsentError) {
         deps.logger.warn('Google consent callback refused', extractErrorLogFields(caught));
-        return c.html(resultPage(`Google was not connected. ${caught.message}`), 400);
+        return c.html(resultPage([caught.message, START_AGAIN]), 400);
       }
       throw caught;
     }
@@ -148,7 +169,7 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
     const owner = ownerOf(c);
     try {
       const record = await service.complete({ owner, state: parsed.state, code: parsed.code });
-      return c.json({ data: statusBody({ record, setup: setupFor(c.req.url) }) }, 200);
+      return c.json({ data: statusBody({ record, setup: setupFor(c) }) }, 200);
     } catch (caught) {
       if (caught instanceof GoogleConsentError) {
         deps.logger.warn('Google consent completion refused', extractErrorLogFields(caught));
@@ -159,15 +180,7 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
   };
 
   const testHandler: RouteHandler<typeof testGoogleConnectionRoute> = async c => {
-    const outcome = await service.test(ownerOf(c));
-    return c.json(
-      {
-        data: outcome.ok
-          ? { result: 'ok' as const, account_email: outcome.account_email }
-          : { result: outcome.reason, account_email: null },
-      },
-      200,
-    );
+    return c.json({ data: await service.test(ownerOf(c)) }, 200);
   };
 
   const disconnectHandler: RouteHandler<typeof disconnectGoogleRoute> = async c => {

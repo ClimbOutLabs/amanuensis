@@ -916,6 +916,11 @@ export interface SharedServerConfiguration {
    */
   PUBLIC_BASE_URL: string;
   /**
+   * Marks this instance as a demo: the Google connection is hidden and no mail tools mount, so a demo
+   * can never reach a real mailbox. Env: `DEMO_MODE`. Default false.
+   */
+  DEMO_MODE: boolean;
+  /**
    * Max tokens requested from the memory provider's recall endpoint.
    * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 2048.
    */
@@ -1761,6 +1766,7 @@ const shared: SharedServerConfiguration = {
   }),
   DOCUMENT_OCR_LANGUAGES: getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: 'eng hin mar' }) ?? 'eng hin mar',
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' })),
+  DEMO_MODE: parseBoolean({ envKey: 'DEMO_MODE', raw: getEnv('DEMO_MODE'), defaultValue: false }),
   SERVER_URL:
     getEnv('SERVER_URL', { defaultValue: `http://localhost:${String(port)}` }) ?? `http://localhost:${String(port)}`,
   TRUEFORGE_API_KEY: standalone

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { generateOAuthState } from '../util/oauthState';
 import { checkClientWithGoogle } from './checkClient';
 import { clientProblems, type ClientProblem, type ClientType } from './clientJson';
@@ -49,8 +50,13 @@ export class GoogleConsentError extends Error {
   }
 }
 
-export type GoogleTestResult =
-  { ok: true; account_email: string } | { ok: false; reason: 'not_connected' | 'needs_reconnect' | 'unreachable' };
+export const GOOGLE_TEST_OUTCOMES = ['ok', 'not_connected', 'needs_reconnect', 'unreachable'] as const;
+
+export const GoogleTestResultSchema = z.object({
+  result: z.enum(GOOGLE_TEST_OUTCOMES),
+  account_email: z.string().nullable().describe('The connected address when the test passed.'),
+});
+export type GoogleTestResult = z.infer<typeof GoogleTestResultSchema>;
 
 export type GoogleDisconnectResult = 'disconnected' | 'revoke_failed';
 
@@ -169,12 +175,12 @@ export class GoogleConnectService {
     if (pending === null) {
       throw new GoogleConsentError(
         (await this.#pending.hasPending(input.owner))
-          ? 'That response does not belong to the connection in progress. Use the address from the page Google just opened, or start again.'
-          : 'There is no connection in progress. Start again.',
+          ? 'That response does not belong to the connection in progress. Use the address from the page Google just opened.'
+          : 'There is no connection in progress.',
       );
     }
     if (this.#now().getTime() - Date.parse(pending.created_at) > PENDING_TTL_MS) {
-      throw new GoogleConsentError('That connection attempt took too long. Start again.');
+      throw new GoogleConsentError('That connection attempt took too long.');
     }
     let tokens: Awaited<ReturnType<typeof exchangeCodeForTokens>>;
     try {
@@ -186,7 +192,7 @@ export class GoogleConnectService {
         fetchImpl: this.#fetchImpl,
       });
     } catch (error) {
-      throw new GoogleConsentError('Google did not accept the code. Start again.', { cause: error });
+      throw new GoogleConsentError('Google did not accept the code.', { cause: error });
     }
     let accountEmail: string;
     try {
@@ -221,7 +227,7 @@ export class GoogleConnectService {
   async test(owner: GoogleOwner): Promise<GoogleTestResult> {
     const record = await this.#connections.get(owner);
     if (record === null) {
-      return { ok: false, reason: 'not_connected' };
+      return { result: 'not_connected', account_email: null };
     }
     const tokens = new GoogleAccessTokens({
       now: undefined,
@@ -235,12 +241,12 @@ export class GoogleConnectService {
       if (accountEmail !== record.account_email) {
         await this.#connections.save({ ...record, account_email: accountEmail, updated_at: this.#now().toISOString() });
       }
-      return { ok: true, account_email: accountEmail };
+      return { result: 'ok', account_email: accountEmail };
     } catch (error) {
       if (error instanceof GoogleReconnectRequiredError) {
-        return { ok: false, reason: 'needs_reconnect' };
+        return { result: 'needs_reconnect', account_email: null };
       }
-      return { ok: false, reason: 'unreachable' };
+      return { result: 'unreachable', account_email: null };
     }
   }
 

@@ -2,12 +2,14 @@
  * How Google sends the user back to Aman, which decides what kind of client the user creates. Google only
  * accepts a public https address (or a loopback address, for a Desktop app) as the place to return to, and
  * the default install is reached by any LAN, Tailscale or host name, so three modes exist:
- *  - web: this install has a public https address. The user makes a Web client with that exact callback.
+ *  - web: this install has a public https address and the browser is on it. The user makes a Web client with
+ *    that exact callback; a browser anywhere else would arrive at that address without its session.
  *  - loopback: the browser is on this machine. A Desktop client returns straight to this server.
  *  - paste: the browser is elsewhere. A Desktop client returns to an address that cannot load, and the user
  *    pastes that address back so the code and state can be read from it.
  */
-import type { ClientType } from './clientJson.js';
+import { z } from 'zod';
+import { CLIENT_TYPES } from './clientJson.js';
 
 export const GOOGLE_CALLBACK_PATH = '/api/v1/user/settings/google/oauth/callback';
 
@@ -17,11 +19,19 @@ export const PASTE_REDIRECT_URI = 'http://127.0.0.1:53682/callback';
 export const GOOGLE_SETUP_MODES = ['web', 'loopback', 'paste'] as const;
 export type GoogleSetupMode = (typeof GOOGLE_SETUP_MODES)[number];
 
-export interface GoogleSetupInfo {
-  mode: GoogleSetupMode;
-  client_type: ClientType;
-  redirect_uri: string;
-}
+export const GoogleSetupInfoSchema = z.object({
+  mode: z
+    .enum(GOOGLE_SETUP_MODES)
+    .describe(
+      'web: this install has a public https address and a Web client returns to it. loopback: the browser is on this machine. paste: the user pastes the address Google sends the browser to.',
+    ),
+  client_type: z.enum(CLIENT_TYPES).describe('The kind of Google client this install needs.'),
+  redirect_uri: z.string().describe('The exact redirect URI to register (Web client) or that the consent returns to.'),
+});
+export type GoogleSetupInfo = z.infer<typeof GoogleSetupInfoSchema>;
+
+/** Names Google treats as private even though they look public: a Tailscale name is only reachable on its tailnet. */
+const PRIVATE_DOMAINS = ['ts.net'];
 
 const PRIVATE_NAME_SUFFIXES = [
   'local',
@@ -54,6 +64,9 @@ export function publicHttpsBase(baseUrl: string): string | null {
   } catch {
     return null;
   }
+  if (PRIVATE_DOMAINS.some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`))) {
+    return null;
+  }
   const labels = url.hostname.split('.');
   const suffix = labels[labels.length - 1] ?? '';
   const isPublicName =
@@ -73,10 +86,10 @@ function isLoopbackHostname(hostname: string): boolean {
 
 export function resolveGoogleSetup(input: { public_base_url: string; request_url: string }): GoogleSetupInfo {
   const publicBase = publicHttpsBase(input.public_base_url);
-  if (publicBase !== null) {
+  const request = new URL(input.request_url);
+  if (publicBase !== null && new URL(publicBase).origin === request.origin) {
     return { mode: 'web', client_type: 'web', redirect_uri: `${publicBase}${GOOGLE_CALLBACK_PATH}` };
   }
-  const request = new URL(input.request_url);
   if (isLoopbackHostname(request.hostname)) {
     return { mode: 'loopback', client_type: 'desktop', redirect_uri: `${request.origin}${GOOGLE_CALLBACK_PATH}` };
   }

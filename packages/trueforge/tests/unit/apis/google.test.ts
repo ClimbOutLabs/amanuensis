@@ -1,10 +1,13 @@
 import { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import { createLogger } from 'winston';
 import { createGoogleRouter } from '../../../src/apis/google';
+import type { Authenticator } from '../../../src/auth/authenticator';
 import type { RequestContext } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
+import { startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 
 const ID = '123456789-abcdefghij.apps.googleusercontent.com';
 const SECRET = 'GOCSPX-abcdefghijklmnop';
@@ -21,10 +24,26 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
+/** Identifies the caller by `x-test-user`; a request without it is unauthenticated. */
+const headerAuthenticator: Authenticator = {
+  authenticate: c => {
+    const user = c.req.header('x-test-user');
+    if (user === undefined) {
+      return Promise.reject(new HTTPException(401, { message: 'Authentication required' }));
+    }
+    return Promise.resolve(authedUser(user));
+  },
+};
+
+function authedUser(id: string): RequestContext {
+  return { tenant_id: 'default', subject: { id, type: 'user', display_name: id }, roles: [], user_credential: null };
+}
+
 describe('Google connection API', () => {
   let env: SqliteTestDatabase;
   let app: Hono;
   let granted = `${READ}`;
+  let revoked = false;
   const calls: string[] = [];
   const originalBase = configuration.PUBLIC_BASE_URL;
 
@@ -33,6 +52,9 @@ describe('Google connection API', () => {
     calls.push(`${init?.method ?? 'GET'} ${url.split('?')[0] ?? url}`);
     if (url.startsWith('https://oauth2.googleapis.com/token')) {
       const body = new URLSearchParams(typeof init?.body === 'string' ? init.body : '');
+      if (revoked && body.get('grant_type') === 'refresh_token') {
+        return Promise.resolve(jsonResponse({ error: 'invalid_grant' }, 400));
+      }
       return Promise.resolve(
         body.get('grant_type') === 'authorization_code'
           ? jsonResponse({ access_token: 'at', refresh_token: 'rt-secret', scope: granted })
@@ -76,6 +98,7 @@ describe('Google connection API', () => {
   beforeEach(async () => {
     env = await createSqliteTestDatabase();
     granted = READ;
+    revoked = false;
     calls.length = 0;
     configuration.PUBLIC_BASE_URL = '';
     const router = createGoogleRouter({
@@ -106,12 +129,43 @@ describe('Google connection API', () => {
 
   it('asks for a Web client with the exact public callback when the install has a public https address', async () => {
     configuration.PUBLIC_BASE_URL = 'https://aman.example.org';
-    const { text } = await call({ method: 'GET', path: '/status' });
+    const { text } = await call({ method: 'GET', path: '/status', origin: 'https://aman.example.org' });
     expect(JSON.parse(text).data.setup).toEqual({
       mode: 'web',
       client_type: 'web',
       redirect_uri: 'https://aman.example.org/api/v1/user/settings/google/oauth/callback',
     });
+  });
+
+  it('treats a proxy that forwards the public host as the public address', async () => {
+    configuration.PUBLIC_BASE_URL = 'https://aman.example.org';
+    const response = await app.request(`http://aman:8791${BASE}/status`, {
+      headers: { 'x-test-user': 'ada', 'x-forwarded-host': 'aman.example.org', 'x-forwarded-proto': 'https' },
+    });
+    expect(JSON.parse(await response.text()).data.setup.mode).toBe('web');
+  });
+
+  it('falls back to a pasted address for a browser on the LAN even when a public address is set', async () => {
+    configuration.PUBLIC_BASE_URL = 'https://aman.example.org';
+    const { text } = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(text).data.setup.mode).toBe('paste');
+  });
+
+  it('uses a pasted address when the public address is a Tailscale name', async () => {
+    configuration.PUBLIC_BASE_URL = 'https://box.tailnet-name.ts.net';
+    const { text } = await call({ method: 'GET', path: '/status', origin: 'https://box.tailnet-name.ts.net' });
+    expect(JSON.parse(text).data.setup.mode).toBe('paste');
+  });
+
+  it('is unavailable on a demo instance', async () => {
+    const original = configuration.DEMO_MODE;
+    configuration.DEMO_MODE = true;
+    try {
+      expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.available).toBe(false);
+    } finally {
+      configuration.DEMO_MODE = original;
+    }
+    expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.available).toBe(true);
   });
 
   it('connects through the pasted address, names the account, and never returns a secret', async () => {
@@ -155,18 +209,46 @@ describe('Google connection API', () => {
     expect(calls.some(entry => entry.includes('/revoke'))).toBe(false);
   });
 
-  it('refuses a pasted address whose state is not the one in flight', async () => {
-    await call({
+  it('refuses a pasted address whose state is not the one in flight, and the real attempt still finishes', async () => {
+    const begin = await call({
       method: 'POST',
       path: '/oauth/begin',
       body: { client: { client_id: ID, client_secret: SECRET, client_type: 'desktop' }, features: ['gmail_read'] },
     });
-    const done = await call({
+    const state = new URL(JSON.parse(begin.text).data.authorization_url).searchParams.get('state') ?? '';
+    const forged = await call({
       method: 'POST',
       path: '/oauth/complete',
       body: { address: 'http://127.0.0.1:53682/callback?state=forged&code=abc' },
     });
+    expect(forged.status).toBe(400);
+    expect(JSON.parse(forged.text).error.message).toContain('does not belong to the connection in progress');
+    const real = await call({
+      method: 'POST',
+      path: '/oauth/complete',
+      body: { address: `http://127.0.0.1:53682/callback?state=${state}&code=abc` },
+    });
+    expect(real.status).toBe(200);
+  });
+
+  it("refuses another user's state", async () => {
+    const begin = await call({
+      method: 'POST',
+      path: '/oauth/begin',
+      as: 'grace',
+      body: { client: { client_id: ID, client_secret: SECRET, client_type: 'desktop' }, features: ['gmail_read'] },
+    });
+    const state = new URL(JSON.parse(begin.text).data.authorization_url).searchParams.get('state') ?? '';
+    const done = await call({
+      method: 'POST',
+      path: '/oauth/complete',
+      as: 'ada',
+      body: { address: `http://127.0.0.1:53682/callback?state=${state}&code=abc` },
+    });
     expect(done.status).toBe(400);
+    expect(JSON.parse((await call({ method: 'GET', path: '/status', as: 'ada' })).text).data.state).toBe(
+      'not_connected',
+    );
   });
 
   it('refuses a bare code with a message about the whole address', async () => {
@@ -203,6 +285,77 @@ describe('Google connection API', () => {
     expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.state).toBe('connected');
   });
 
+  describe('the browser callback', () => {
+    const origin = 'http://localhost:8791';
+    const callback = (query: string, as = 'ada') =>
+      app.request(`${origin}${BASE}/oauth/callback?${query}`, { headers: { 'x-test-user': as } });
+
+    async function begin(as = 'ada') {
+      const started = await call({
+        origin,
+        method: 'POST',
+        path: '/oauth/begin',
+        as,
+        body: { client: { client_id: ID, client_secret: SECRET, client_type: 'desktop' }, features: ['gmail_read'] },
+      });
+      return new URL(JSON.parse(started.text).data.authorization_url).searchParams.get('state') ?? '';
+    }
+
+    it('says access was not granted when the user declined, with one next step', async () => {
+      const response = await callback('error=access_denied');
+      expect(response.status).toBe(400);
+      const page = await response.text();
+      expect(page).toContain('Access was not granted, so Google was not connected.');
+      expect(page).toContain('Go back to Aman and start again.');
+      expect(page).not.toContain('access_denied');
+    });
+
+    it('refuses a forged state without spending the real attempt', async () => {
+      const state = await begin();
+      const forged = await callback('code=abc&state=forged');
+      expect(forged.status).toBe(400);
+      expect(await forged.text()).toContain('Go back to Aman and start again.');
+      expect((await callback(`code=abc&state=${state}`)).status).toBe(200);
+    });
+
+    it('refuses a state that another user started', async () => {
+      const state = await begin('grace');
+      const response = await callback(`code=abc&state=${state}`, 'ada');
+      expect(response.status).toBe(400);
+      expect(JSON.parse((await call({ method: 'GET', path: '/status', as: 'ada' })).text).data.state).toBe(
+        'not_connected',
+      );
+    });
+
+    it('refuses a response with no code, in plain words', async () => {
+      const response = await callback('state=abc');
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain('The response from Google was incomplete.');
+    });
+  });
+
+  it('checks a client and reports a problem in plain words, storing nothing', async () => {
+    const bad = await call({
+      method: 'POST',
+      path: '/oauth/check-client',
+      body: { client: { client_id: 'nope', client_secret: SECRET }, registered_redirect_uris: [] },
+    });
+    expect(bad.status).toBe(200);
+    expect(JSON.parse(bad.text).data).toMatchObject({
+      ok: false,
+      problems: [{ code: 'invalid_client_id' }],
+    });
+    expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.has_saved_client).toBe(false);
+  });
+
+  it('says a stored login needs reconnecting when Google no longer accepts it', async () => {
+    await connect();
+    revoked = true;
+    const test = await call({ method: 'POST', path: '/test' });
+    expect(JSON.parse(test.text).data).toEqual({ result: 'needs_reconnect', account_email: null });
+    expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.state).toBe('needs_reconnect');
+  });
+
   it('tests the connection and disconnects, revoking at Google first', async () => {
     await connect();
     const test = await call({ method: 'POST', path: '/test' });
@@ -211,5 +364,39 @@ describe('Google connection API', () => {
     expect(JSON.parse(gone.text).data).toEqual({ disconnected: true });
     expect(calls.filter(entry => entry.includes('/revoke'))).toHaveLength(1);
     expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.state).toBe('not_connected');
+  });
+});
+
+describe('Google connection API authentication', () => {
+  let server: ApprovalTestServer;
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer({ authenticator: headerAuthenticator });
+  }, 60_000);
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  it.each([
+    ['GET', '/status'],
+    ['POST', '/oauth/check-client'],
+    ['POST', '/oauth/begin'],
+    ['GET', '/oauth/callback?code=a&state=b'],
+    ['POST', '/oauth/complete'],
+    ['POST', '/test'],
+    ['POST', '/disconnect'],
+  ])('answers 401 to an unauthenticated %s %s', async (method, path) => {
+    const response = await server.request(`${BASE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      ...(method === 'POST' ? { body: '{}' } : {}),
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it('serves the status to a signed-in caller', async () => {
+    const response = await server.request(`${BASE}/status`, { headers: { 'x-test-user': 'ada' } });
+    expect(response.status).toBe(200);
   });
 });

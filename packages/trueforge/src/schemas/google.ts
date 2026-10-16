@@ -1,25 +1,14 @@
 /** Wire shapes for the Google connection under `/api/v1/user/settings/google`. Secrets are accepted, never returned. */
 import { z } from '@hono/zod-openapi';
 import { CLIENT_PROBLEM_CODES, CLIENT_TYPES } from '@truefoundry/trueforge-core/core/google/clientJson';
+import { GoogleTestResultSchema } from '@truefoundry/trueforge-core/core/google/GoogleConnectService';
 import { GOOGLE_FEATURES } from '@truefoundry/trueforge-core/core/google/scopes';
-import { GOOGLE_SETUP_MODES } from '@truefoundry/trueforge-core/core/google/setupMode';
+import { GoogleSetupInfoSchema as CoreGoogleSetupInfoSchema } from '@truefoundry/trueforge-core/core/google/setupMode';
 
 export const GoogleClientTypeSchema = z.enum(CLIENT_TYPES).openapi('GoogleClientType');
 export const GoogleFeatureSchema = z.enum(GOOGLE_FEATURES).openapi('GoogleFeature');
 
-export const GoogleSetupInfoSchema = z
-  .object({
-    mode: z
-      .enum(GOOGLE_SETUP_MODES)
-      .describe(
-        'web: this install has a public https address and a Web client returns to it. loopback: the browser is on this machine. paste: the user pastes the address Google sends the browser to.',
-      ),
-    client_type: GoogleClientTypeSchema.describe('The kind of Google client this install needs.'),
-    redirect_uri: z
-      .string()
-      .describe('The exact redirect URI to register (Web client) or that the consent returns to.'),
-  })
-  .openapi('GoogleSetupInfo');
+export const GoogleSetupInfoSchema = CoreGoogleSetupInfoSchema.openapi('GoogleSetupInfo');
 
 export const GoogleFeatureStatusSchema = z
   .object({
@@ -39,6 +28,7 @@ export const GoogleConnectionStatusSchema = z
     has_saved_client: z
       .boolean()
       .describe('Whether a Google client is already saved, so adding a feature needs no retyping.'),
+    available: z.boolean().describe('False on a demo instance, where Google cannot be connected.'),
     setup: GoogleSetupInfoSchema,
   })
   .openapi('GoogleConnectionStatus');
@@ -121,12 +111,7 @@ export const CompleteGoogleConsentRequestSchema = z
   })
   .openapi('CompleteGoogleConsentRequest');
 
-export const TestGoogleConnectionResultSchema = z
-  .object({
-    result: z.enum(['ok', 'not_connected', 'needs_reconnect', 'unreachable']),
-    account_email: z.string().nullable().describe('The connected address when the test passed.'),
-  })
-  .openapi('TestGoogleConnectionResult');
+export const TestGoogleConnectionResultSchema = GoogleTestResultSchema.openapi('TestGoogleConnectionResult');
 
 export const TestGoogleConnectionResponseSchema = z
   .object({ data: TestGoogleConnectionResultSchema })
