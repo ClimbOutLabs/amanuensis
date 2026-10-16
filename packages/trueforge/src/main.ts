@@ -107,6 +107,7 @@ import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { seedDefaultSearchProvider } from './runtime/defaultSearchProvider';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -624,6 +625,21 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       });
     }
   }
+  const mcpCatalog = McpCatalog.load();
+  // Offered once so the first search needs no setup; a failure must not keep the server from starting.
+  if (!isTrueFoundryModeEnabled(configuration)) {
+    try {
+      await seedDefaultSearchProvider({
+        globalSettingsStore,
+        mcpServerStore: mcpOAuthStore,
+        catalog: mcpCatalog,
+        tenant_id: TENANT_ID,
+        logger,
+      });
+    } catch (error) {
+      logger.warn('Default web search connector could not be added', extractErrorLogFields(error));
+    }
+  }
   const tokenFactoryBudget = createTokenFactoryBudget({
     store: tokenFactoryUsageStore,
     cap: configuration.TOKEN_FACTORY_DAILY_TOKEN_CAP,
@@ -719,7 +735,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const resolveSkillStore = (c: Context) => persistence.resolveSkillStore(resolveRequestContext(c));
   const app = createServerApp({
     modelCatalog: ModelCatalog.load(),
-    mcpCatalog: McpCatalog.load(),
+    mcpCatalog,
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     resolveModelProviderStore,

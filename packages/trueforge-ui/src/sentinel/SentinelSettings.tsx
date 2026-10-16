@@ -89,6 +89,9 @@ export const SentinelSettings: FC = () => {
               ? 'Run without asking. Searches through the connector you set as your search provider run on their own and show a Searched chip.'
               : 'Ask. Every web search shows an approval card with the exact query before it runs.'}
           </p>
+          <p className="mt-1 text-sm text-text-secondary">
+            {"The search service sees the search words and this computer's internet address."}
+          </p>
           {searchError !== null && (
             <p className="mt-2 text-xs text-failure-bg" role="alert">
               {searchError}
