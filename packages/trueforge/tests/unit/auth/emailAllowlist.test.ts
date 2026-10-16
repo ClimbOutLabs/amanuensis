@@ -74,12 +74,15 @@ describe('assertEmailAllowed', () => {
     expect(() => assertEmailAllowed({ email: 'a@company.com', email_verified: false }, config())).not.toThrow();
   });
 
-  it('refuses email_verified false when verified email is required, even with no allowlist', () => {
+  it('refuses email_verified that is not true when verified email is required, even with no allowlist', () => {
     const required = config({ OIDC_REQUIRE_VERIFIED_EMAIL: true });
     expect(() => assertEmailAllowed({ email: 'a@company.com', email_verified: false }, required)).toThrow(
       EmailNotAllowedError,
     );
     expect(() => assertEmailAllowed({ email: 'a@company.com', email_verified: true }, required)).not.toThrow();
-    expect(() => assertEmailAllowed({ email: 'a@company.com' }, required)).not.toThrow();
+    expect(() => assertEmailAllowed({ email: 'a@company.com' }, required)).toThrow(EmailNotAllowedError);
+    expect(() => assertEmailAllowed({ email: 'a@company.com', email_verified: 'false' }, required)).toThrow(
+      EmailNotAllowedError,
+    );
   });
 });

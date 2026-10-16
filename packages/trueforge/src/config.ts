@@ -855,7 +855,7 @@ export interface OIDCConfig {
    * standalone requires exactly one address.
    */
   OIDC_ALLOWED_EMAILS: string[];
-  /** Turn away tokens whose `email_verified` claim is false. On for standalone, where the email is the only identity check. */
+  /** Turn away tokens whose `email_verified` claim is not `true`. On for standalone, where the email is the only identity check. */
   OIDC_REQUIRE_VERIFIED_EMAIL: boolean;
 }
 
@@ -2450,7 +2450,7 @@ export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement
   );
 }
 
-/** Same shape the installer accepts for the owner's email. */
+/** Mirrors `valid_email` in installer/lib/common.sh, the canonical owner of this pattern. */
 const OWNER_EMAIL_SHAPE = /^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
 
 interface SingleOwnerSignIn {

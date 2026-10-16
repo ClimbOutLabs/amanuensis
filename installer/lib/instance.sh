@@ -318,7 +318,7 @@ instance_collect() {
   I_TLS=${OPT_TLS:-}
   I_SANDBOX=slots
   if [ "$OPT_NO_SANDBOX" = 1 ]; then I_SANDBOX=off; fi
-  ask_valid I_NAME "Instance name (a-z, 0-9, hyphen; starts with a letter)" "$name_default" "Each person or team gets one instance. Example: main" name_problem
+  ask_valid I_NAME "Instance name (a-z, 0-9, hyphen; starts with a letter)" "$name_default" "Each person gets a new instance. Example: main" name_problem
   if [ "$DRY_RUN" = 1 ] && [ -z "$I_EMAIL" ]; then
     I_EMAIL="owner@example.invalid"
   fi

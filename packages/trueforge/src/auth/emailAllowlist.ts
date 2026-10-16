@@ -42,10 +42,10 @@ export function emailMatchesAllowlist(email: string, patterns: string[]): boolea
 /**
  * When {@link OIDCConfig.OIDC_ALLOWED_EMAILS} is non-empty, requires a non-empty
  * ID-token `email` claim that matches at least one entry. No-op when unrestricted.
- * With `OIDC_REQUIRE_VERIFIED_EMAIL` (standalone), a token with `email_verified: false` is refused.
+ * With `OIDC_REQUIRE_VERIFIED_EMAIL` (standalone), a token whose `email_verified` is not boolean `true` is refused.
  */
 export function assertEmailAllowed(claims: Record<string, unknown>, config: OIDCConfig): void {
-  if (config.OIDC_REQUIRE_VERIFIED_EMAIL && claims['email_verified'] === false) {
+  if (config.OIDC_REQUIRE_VERIFIED_EMAIL && claims['email_verified'] !== true) {
     throw new EmailNotAllowedError();
   }
   if (config.OIDC_ALLOWED_EMAILS.length === 0) {
