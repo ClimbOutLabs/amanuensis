@@ -147,6 +147,21 @@ describe('Google connection API', () => {
     expect(JSON.parse(await response.text()).data.setup.mode).toBe('web');
   });
 
+  it('ignores a forwarded host that is not the public address, and any forwarded host with no public address', async () => {
+    configuration.PUBLIC_BASE_URL = 'https://aman.example.org';
+    for (const forwarded of ['evil.example.net', 'aman.example.org.evil.example.net', 'aman.example.org:8443']) {
+      const response = await app.request(`http://aman:8791${BASE}/status`, {
+        headers: { 'x-test-user': 'ada', 'x-forwarded-host': forwarded, 'x-forwarded-proto': 'https' },
+      });
+      expect(JSON.parse(await response.text()).data.setup.mode).toBe('paste');
+    }
+    configuration.PUBLIC_BASE_URL = '';
+    const none = await app.request(`http://aman:8791${BASE}/status`, {
+      headers: { 'x-test-user': 'ada', 'x-forwarded-host': 'aman.example.org', 'x-forwarded-proto': 'https' },
+    });
+    expect(JSON.parse(await none.text()).data.setup.mode).toBe('paste');
+  });
+
   it('falls back to a pasted address for a browser on the LAN even when a public address is set', async () => {
     configuration.PUBLIC_BASE_URL = 'https://aman.example.org';
     const { text } = await call({ method: 'GET', path: '/status' });
