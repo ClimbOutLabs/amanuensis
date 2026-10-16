@@ -78,8 +78,8 @@ Ready. Instance main is running.
   + Run code  on, in a sandbox
   + Data      saved in Docker
   + Backups   daily, keeps the last 7
-  Sign-in on your home network is not encrypted. Use the Tailscale
-  address to keep it private.
+  Sign-in on your home network is not encrypted. Leave out --tls off to
+  use https.
   Bookmark spark.local: it keeps working when this computer's address
   changes.
   Open a new terminal window to use the aman command.

@@ -157,9 +157,9 @@ Options
   --demo                mark the instance as a demo (DEMO_MODE=true) and seed its synthetic demo world once it is healthy
   --demo-user ADDRESS   the user the demo world is seeded for (default: the owner)
   --reset               with instance demo-seed, remove the synthetic demo records instead of seeding
-  --local-only          open Aman only at 127.0.0.1 on this computer (by default it answers at every address this computer has on a private network, and at its names)
+  --local-only          open Aman only on this computer, at 127.0.0.1. By default it also opens at this computer's home-network addresses and names, so phones and other computers at home can use it (on a Mac, with Docker Desktop and in WSL2 it always opens on this computer only)
   --backups daily|off   back up every day (default) or not, without asking
-  --address HOST        also answer at this name or private address; repeat for more (for example --address spark.local)
+  --address HOST        also open Aman at this name or home-network address (not a public one, and not 100.64.x.x); repeat for more (for example --address spark.local)
   --public-url URL      https address of Aman behind your own reverse proxy; the ports then stay on 127.0.0.1
   --login-url URL       https address for the sign-in service behind the same proxy
   --port N              port on this computer for the app

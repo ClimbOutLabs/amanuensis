@@ -408,6 +408,7 @@ instance_derive() {
         # shellcheck disable=SC2086
         I_ORIGINS=$(network_origin_list "$I_PORT" "$I_TLS_PORT" $OPT_ADDRESSES)
       fi
+      vm_reach_notice
       I_PUBLIC_ADDRESSES=$(network_public_addresses | tr '\n' ' ')
     fi
   fi
@@ -424,6 +425,33 @@ issuer_check() {
 
 # ---- addresses of an existing instance ----------------------------------------------------------
 
+# Said once per run where Docker cannot publish on the home-network address (see network_publishes_on_loopback_only).
+VM_NOTICE_SHOWN=0
+vm_reach_notice() {
+  [ "$VM_NOTICE_SHOWN" = 0 ] || return 0
+  [ "$OPT_LOCAL_ONLY" != 1 ] || return 0
+  network_publishes_on_loopback_only || return 0
+  VM_NOTICE_SHOWN=1
+  if [ "$(uname -s)" = Darwin ]; then
+    ui_line "On this Mac, Aman opens only on this computer. To reach it from your phone, see \"Opening Aman from another device (Mac and Windows)\" in docs/install.mdx."
+  else
+    ui_line "Docker here cannot open Aman on your home network, so Aman opens only on this computer. To reach it from your phone, see \"Opening Aman from another device (Mac and Windows)\" in docs/install.mdx."
+  fi
+}
+
+# True when a recorded origin list has a host the installer no longer opens an instance at: an address in
+# 100.64.0.0/10 or a .ts.net name, or, where Docker publishes on 127.0.0.1 alone, any address of the network.
+origins_have_dropped_hosts() { # comma list
+  local origin host
+  while IFS= read -r origin; do
+    host=$(origin_host "$origin")
+    if shared_address_space "$host"; then return 0; fi
+    case "$host" in *.ts.net) return 0 ;; esac
+    if ! is_loopback_host_name "$host" && network_publishes_on_loopback_only; then return 0; fi
+  done < <(printf '%s\n' "$1" | tr ',' '\n')
+  return 1
+}
+
 # An instance from before addresses were listed has no `origins` record at all. A plain re-run opens it on the network
 # like a new one; --local-only keeps it (or puts it back) on this computer only.
 instance_address_change() { # name; prints open, close or nothing
@@ -434,18 +462,34 @@ instance_address_change() { # name; prints open, close or nothing
     if [ -n "$(reg_get "$name" origins)" ] || [ "$recorded" = 0 ]; then printf 'close'; fi
   elif [ "$recorded" = 0 ]; then
     printf 'open'
-  elif [ -n "$(reg_get "$name" origins)" ] && [ "$(tls_target "$name")" != "$(reg_get "$name" tls)" ]; then
+  elif [ -n "$(reg_get "$name" origins)" ] && { [ "$(tls_target "$name")" != "$(reg_get "$name" tls)" ] || origins_have_dropped_hosts "$(reg_get "$name" origins)"; }; then
     printf 'refresh'
   fi
+}
+
+# The given hosts without those the installer no longer opens an instance at (100.64.0.0/10 addresses, .ts.net names).
+drop_unsupported_hosts() {
+  local host
+  for host in "$@"; do
+    if shared_address_space "$host"; then continue; fi
+    case "$host" in *.ts.net) continue ;; esac
+    printf '%s ' "$host"
+  done
 }
 
 # Writes the list of addresses of an instance into its record and its settings: read again from this computer, plus
 # the names given with --address (kept from the first install unless new ones are given). Renders and restarts nothing.
 instance_apply_addresses() { # name open|close|refresh
-  local name=$1 mode=$2 origins='' extras env tls='' tls_port='' app_port
+  local name=$1 mode=$2 origins='' extras env tls='' tls_port='' app_port dropped=0
   env="$(instance_dir "$name")/.env"
   app_port=$(reg_get "$name" app_port)
   extras=${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)}
+  if [ -z "$OPT_ADDRESSES" ] && origins_have_dropped_hosts "$(reg_get "$name" origins)"; then
+    # shellcheck disable=SC2086 # the extras are checked hosts without spaces
+    extras=$(drop_unsupported_hosts $extras)
+    extras=${extras% }
+    dropped=1
+  fi
   if [ "$mode" != close ]; then
     tls=$(tls_target "$name")
     # shellcheck disable=SC2086 # the extras are checked hosts without spaces
@@ -461,12 +505,16 @@ instance_apply_addresses() { # name open|close|refresh
   else
     extras=
   fi
+  if [ "$mode" != close ]; then vm_reach_notice; fi
   reg_set "$name" tls "$tls"
   reg_set "$name" tls_port "$tls_port"
   reg_set "$name" origins "$origins"
   reg_set "$name" extra_hosts "$extras"
   env_managed_set "$env" ALLOWED_ORIGINS "$origins"
   log_event "instance $name addresses $mode"
+  if [ "$dropped" = 1 ] && [ -n "$origins" ]; then
+    say "Instance $name now opens on this computer and your home network."
+  fi
 }
 
 # ---- create / list / remove -------------------------------------------------------------------
@@ -549,7 +597,6 @@ origin_kind() { # origin
   host=$(origin_host "$1")
   case "$host" in
     127.0.0.1 | localhost) echo loopback ;;
-    *.ts.net) echo tailscale ;;
     *.local) echo local ;;
     *) if valid_ipv4 "$host"; then echo address; else echo name; fi ;;
   esac
@@ -559,7 +606,7 @@ origin_kind() { # origin
 # ones that only work on this computer.
 origins_display_order() { # comma list
   local kind origin
-  for kind in address tailscale local name loopback; do
+  for kind in address local name loopback; do
     while IFS= read -r origin; do
       if [ "$(origin_kind "$origin")" = "$kind" ]; then printf '%s\n' "$origin"; fi
     done < <(printf '%s\n' "$1" | tr ',' '\n')
@@ -577,7 +624,7 @@ print_instance_summary() {
     if [ "$first" = 1 ]; then ui_check_row ok "Open" "$origin"; else ui_check_more "$origin"; fi
     first=0
     case "$(origin_kind "$origin")" in
-      tailscale | local) if [ -z "$bookmark" ]; then bookmark=$(origin_host "$origin"); fi ;;
+      local) if [ -z "$bookmark" ]; then bookmark=$(origin_host "$origin"); fi ;;
     esac
   done < <(origins_display_order "${origins:-$url}")
   ui_check_row ok "Sign in" "$(reg_get "$name" owner_email)"
@@ -600,11 +647,11 @@ print_instance_summary() {
   fi
   if edge_wanted "$name"; then
     edge_print_firewall_hint
-  elif [ -n "$origins" ]; then
+  elif origins_reach_the_network "$origins"; then
     if tls_active "$name"; then
       print_trust_lines "$name"
     else
-      ui_line "Sign-in on your home network is not encrypted. Use the Tailscale address to keep it private."
+      ui_line "Sign-in on your home network is not encrypted. Leave out --tls off to use https."
     fi
     if [ -n "$bookmark" ]; then ui_line "Bookmark $bookmark: it keeps working when this computer's address changes."; fi
   elif ! is_loopback_origin "$url"; then

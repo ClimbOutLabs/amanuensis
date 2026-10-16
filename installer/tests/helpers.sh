@@ -29,7 +29,7 @@ sandbox_new() {
   done
   for t in "$TESTS_DIR"/stubs/*; do
     case "$(basename "$t")" in
-      aman-doctor | caddy | systemctl | ip | hostname | tailscale | launchctl) ;;
+      aman-doctor | caddy | systemctl | ip | hostname | launchctl) ;;
       *) cp "$t" "$SB_BIN/" ;;
     esac
   done
@@ -46,7 +46,7 @@ sandbox_new() {
   fixture_node_runtime
   unset STUB_DOCKER_DENIED STUB_DOCKER_DOWN STUB_ROOTLESS STUB_PODMAN STUB_BUILD_FAIL STUB_BUILD_OOM STUB_DOCKER_MEM_BYTES STUB_UP_FAIL_UNLESS_TAG \
     STUB_DOCKER_ROOT STUB_DOCKER_ROOT_KB AMAN_PASSWORD STUB_BUSY_PORTS STUB_BACKUP_FAIL STUB_VOLUME_RM_FAIL STUB_ENGINE_VERSION STUB_COMPOSE_VERSION STUB_DOCTOR_EXIT STUB_VIA_SG STUB_VIA_SUDO \
-    STUB_CURL_FAIL STUB_CURL_CORRUPT STUB_SUDO_SH_FAIL STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_UP_FAIL_LOG STUB_ADDRS STUB_HOSTNAME STUB_TS_IP STUB_TS_NAME STUB_TS_HANG STUB_NODE_VERSION STUB_PKI_FAIL STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC STUB_DEMO_FAIL || true
+    STUB_CURL_FAIL STUB_CURL_CORRUPT STUB_SUDO_SH_FAIL STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_UP_FAIL_LOG STUB_ADDRS STUB_HOSTNAME STUB_NODE_VERSION STUB_PKI_FAIL STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC STUB_DEMO_FAIL || true
   STUB_DF_KB=50000000
   INSTALL_EXTRA=()
   RUN_ENV_EXTRA=()
@@ -86,14 +86,14 @@ NODE
   done
 }
 
-# Replaces the system uname with one that reports the given kernel name and machine, for platform selection.
+# Replaces the system uname with one that reports the given kernel name, machine and optionally release, for platform selection.
 fixture_uname() {
   rm -f "$SB_BIN/uname"
   cat >"$SB_BIN/uname" <<UNAME
 #!/usr/bin/env bash
 case "\${1:-}" in
   -m) echo $2 ;;
-  -r) echo 6.8.0-generic ;;
+  -r) echo ${3:-6.8.0-generic} ;;
   *) echo $1 ;;
 esac
 UNAME
@@ -115,13 +115,6 @@ fixture_network() {
 fixture_hostname() {
   cp "$TESTS_DIR/stubs/hostname" "$SB_BIN/hostname"
   STUB_HOSTNAME=$1
-}
-
-# Tailscale is running here with this address and MagicDNS name.
-fixture_tailscale() {
-  cp "$TESTS_DIR/stubs/tailscale" "$SB_BIN/tailscale"
-  STUB_TS_IP=$1
-  STUB_TS_NAME=$2
 }
 
 # systemctl only logs; "cat" fails so the installer treats the Caddy unit as absent unless a test needs it.
@@ -196,7 +189,7 @@ build_run_env() {
     STUB_ENGINE_VERSION="${STUB_ENGINE_VERSION:-}" ${STUB_COMPOSE_VERSION+STUB_COMPOSE_VERSION="$STUB_COMPOSE_VERSION"}
     STUB_CURL_FAIL="${STUB_CURL_FAIL:-}" STUB_CURL_CORRUPT="${STUB_CURL_CORRUPT:-}" STUB_SUDO_SH_FAIL="${STUB_SUDO_SH_FAIL:-}"
     STUB_APPARMOR="${STUB_APPARMOR:-}" STUB_CGROUP="${STUB_CGROUP:-}" STUB_DOCKER_OS="${STUB_DOCKER_OS:-}" STUB_NO_BUNDLE="${STUB_NO_BUNDLE:-}"
-    STUB_UP_FAIL_LOG="${STUB_UP_FAIL_LOG:-}" STUB_ADDRS="${STUB_ADDRS:-}" STUB_HOSTNAME="${STUB_HOSTNAME:-}" STUB_TS_IP="${STUB_TS_IP:-}" STUB_TS_NAME="${STUB_TS_NAME:-}" STUB_TS_HANG="${STUB_TS_HANG:-}" STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}" STUB_DEMO_FAIL="${STUB_DEMO_FAIL:-}"
+    STUB_UP_FAIL_LOG="${STUB_UP_FAIL_LOG:-}" STUB_ADDRS="${STUB_ADDRS:-}" STUB_HOSTNAME="${STUB_HOSTNAME:-}" STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}" STUB_DEMO_FAIL="${STUB_DEMO_FAIL:-}"
     STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" STUB_DOCKER_ROOT="${STUB_DOCKER_ROOT:-}" STUB_DOCKER_ROOT_KB="${STUB_DOCKER_ROOT_KB:-}"
     STUB_UI_SH="$INSTALLER_DIR/lib/ui.sh" STUB_REAL_NODE="$STUB_REAL_NODE" STUB_PKI_FAIL="${STUB_PKI_FAIL:-}"
     AMAN_CADDY_ETC="$SB/etc-caddy" AMAN_SYS_NET="$SB/sysnet" AMAN_EDGE_WAIT_TRIES=1 ${RUN_ENV_EXTRA[@]+"${RUN_ENV_EXTRA[@]}"}

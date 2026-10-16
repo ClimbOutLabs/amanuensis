@@ -971,7 +971,7 @@ check_instance() {
 }
 
 # An instance opened on the network lists the addresses it answers at; a new address of this computer (another
-# network, a changed DHCP lease, Tailscale coming up) is not on the list until the instance is refreshed, and sign-in
+# network or a changed DHCP lease) is not on the list until the instance is refreshed, and sign-in
 # is refused there. Nothing is recorded for an instance that is open on this computer only.
 check_instance_network() {
   local name=$1 origins port host missing='' count expected tls_port=''

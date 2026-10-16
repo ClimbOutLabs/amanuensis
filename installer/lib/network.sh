@@ -34,8 +34,7 @@ run_bounded() { # seconds command...
   return "$rc"
 }
 
-# Loopback, RFC 1918, link-local, and 100.64.0.0/10 only where it is Tailscale's own address on this computer
-# (otherwise that range is carrier-grade NAT from an internet provider, which is not a private network).
+# Loopback, RFC 1918 and link-local. 100.64.0.0/10 is not a home network: internet providers and VPNs use it.
 private_ipv4() {
   local a b
   valid_ipv4 "$1" || return 1
@@ -45,8 +44,15 @@ private_ipv4() {
   [ "$a" = 192 ] && [ "$b" = 168 ] && return 0
   [ "$a" = 169 ] && [ "$b" = 254 ] && return 0
   [ "$a" = 172 ] && [ "$b" -ge 16 ] && [ "$b" -le 31 ] && return 0
-  [ "$a" = 100 ] && [ "$b" -ge 64 ] && [ "$b" -le 127 ] && network_tailscale_address "$1" && return 0
   return 1
+}
+
+# 100.64.0.0/10, shared by internet providers and VPNs; never a home-network address.
+shared_address_space() {
+  local a b
+  valid_ipv4 "$1" || return 1
+  IFS=. read -r a b _ <<<"$1"
+  [ "$a" = 100 ] && [ "$b" -ge 64 ] && [ "$b" -le 127 ]
 }
 
 # A label made only of numbers or hex (0x7f, 1e3) is read as part of an address by some systems, so it is not a name.
@@ -58,7 +64,7 @@ has_numeric_label() {
   return 1
 }
 
-# A private address, or a name that only resolves on a private network: .local, .ts.net, or a single label.
+# A private address, or a name that only resolves on a private network: .local or a single label.
 private_host() {
   local host LC_ALL=C
   host=$(lowercase "$1")
@@ -68,7 +74,7 @@ private_host() {
   fi
   if has_numeric_label "$host"; then return 1; fi
   case "$host" in
-    *.local | *.ts.net) return 0 ;;
+    *.local) return 0 ;;
     *.*) return 1 ;;
     *) [[ $host =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] ;;
   esac
@@ -92,32 +98,12 @@ network_interface_addresses() {
   printf '%s\n' "$out"
 }
 
-# This computer's address on Tailscale as its own command reports it (empty when it is not running).
-network_tailscale_ip() {
-  command -v tailscale >/dev/null 2>&1 || return 0
-  run_bounded 3 tailscale ip -4 2>/dev/null | head -n 1 || true
-}
-
-# True for Tailscale's own address here: on its tailscale0 interface, or on a macOS utun that its command names.
-network_tailscale_address() { # address
-  local iface addr
-  while read -r iface addr; do
-    [ "$addr" = "$1" ] || continue
-    case "$iface" in
-      tailscale0) return 0 ;;
-      utun*) [ "$1" = "$(network_tailscale_ip)" ] && return 0 ;;
-    esac
-  done < <(network_interface_addresses)
-  return 1
-}
-
-# Interfaces whose addresses other devices cannot use: loopback, container, virtual-machine and other VPN links.
-# Tailscale's own link is the one exception among them.
+# Interfaces whose addresses other devices cannot use: loopback, container, virtual-machine and VPN links.
 network_interface_skipped() { # interface address
+  # 100.64.0.0/10 belongs to providers and VPNs, so an address in it is left out on any link.
+  if shared_address_space "$2"; then return 0; fi
   case "$1" in
-    tailscale0) return 1 ;;
-    utun*) [ "$2" != "$(network_tailscale_ip)" ] ;;
-    lo* | docker* | br-* | veth* | virbr* | cni* | flannel* | cali* | tun* | tap* | wg* | lxdbr* | lxcbr* | vboxnet* | podman* | vmnet* | bridge* | zt* | tailscale*) return 0 ;;
+    lo* | utun* | docker* | br-* | veth* | virbr* | cni* | flannel* | cali* | tun* | tap* | wg* | lxdbr* | lxcbr* | vboxnet* | podman* | vmnet* | bridge* | zt*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -156,30 +142,39 @@ network_hostname() {
   if [[ $name =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then printf '%s' "$name"; fi
 }
 
-# This computer's own MagicDNS name when Tailscale is running (for example spark.example.ts.net): the DNSName of
-# "Self", never one of the other machines on the tailnet.
-network_tailscale_name() {
-  local name='' LC_ALL=C
-  if command -v tailscale >/dev/null 2>&1; then
-    name=$(run_bounded 3 tailscale status --json 2>/dev/null | awk '/"Self"/ { in_self = 1 } in_self && /"DNSName"/ { print; exit }' |
-      sed -n 's/.*"DNSName": *"\([^"]*\)".*/\1/p' || true)
-  fi
-  name=$(lowercase "${name%.}")
-  if [[ $name =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] && private_host "$name"; then printf '%s' "$name"; fi
-}
-
-# The hosts an instance answers at by default, one per line: this computer's own names, its private addresses and its
-# names on the network.
+# The hosts an instance answers at by default, one per line: this computer's own names, its home-network (private)
+# addresses and its names on that network. Where Docker cannot publish on a specific address only the first two
+# (127.0.0.1 and localhost) are kept.
 network_default_hosts() {
   local ip name
   printf '%s\n' 127.0.0.1 localhost
+  if network_publishes_on_loopback_only; then return 0; fi
   for ip in $(network_ipv4_addresses); do
     if private_ipv4 "$ip"; then printf '%s\n' "$ip"; fi
   done
   name=$(network_hostname)
   if [ -n "$name" ]; then printf '%s\n%s.local\n' "$name" "$name"; fi
-  name=$(network_tailscale_name)
-  if [ -n "$name" ]; then printf '%s\n' "$name"; fi
+}
+
+# True where Docker runs in a virtual machine (every Mac, Docker Desktop, and WSL2 on Windows). There its port
+# forwarding fails when one container publishes on several specific host addresses, and the addresses seen from inside
+# WSL2 are the virtual machine's own, not the PC's home-network ones; a wildcard would open Aman on public Wi-Fi. So
+# Aman is published on 127.0.0.1 alone, which Windows forwards to its own localhost. Looked up once.
+NETWORK_LOOPBACK_ONLY=
+network_publishes_on_loopback_only() {
+  local os
+  if [ -z "$NETWORK_LOOPBACK_ONLY" ]; then
+    NETWORK_LOOPBACK_ONLY=0
+    if [ "$(uname -s)" = Darwin ]; then
+      NETWORK_LOOPBACK_ONLY=1
+    elif case "$(uname -r)" in *[Mm]icrosoft* | *WSL* | *wsl*) true ;; *) false ;; esac; then
+      NETWORK_LOOPBACK_ONLY=1
+    elif command -v docker >/dev/null 2>&1; then
+      os=$(run_bounded 8 docker info --format '{{.OperatingSystem}}' 2>/dev/null || true)
+      case "$os" in *[Dd]ocker\ [Dd]esktop*) NETWORK_LOOPBACK_ONLY=1 ;; esac
+    fi
+  fi
+  [ "$NETWORK_LOOPBACK_ONLY" = 1 ]
 }
 
 # Addresses of this computer that are public: plain http is never used at them and the app is never published there.
@@ -198,6 +193,8 @@ address_problem() {
     echo "An address is needed. Example: --address 192.168.1.20 or --address spark.local"
   elif ! valid_ipv4 "$host" && ! { [[ $host =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] && [[ $host != *..* ]] && [[ ! $host =~ ^[0-9.]+$ ]] && ! has_numeric_label "$host"; }; then
     echo "$1 is not an address or a name. Examples: 192.168.1.20, spark.local"
+  elif shared_address_space "$host"; then
+    echo "$1 is in 100.64.0.0/10, which internet providers and VPNs use, not your home network. Use an address of this computer on your home network, such as 192.168.1.20, or a name ending in .local."
   elif ! private_host "$host"; then
     echo "$1 is a public address, and signing in over plain http across the internet is not safe. For access from the internet set up HTTPS with --tls caddy (with --public-url and --login-url)."
   fi
@@ -219,6 +216,7 @@ network_origin_list() { # app_port tls_port(empty for plain http) extra_host...
   shift 2
   for host in $(network_default_hosts) "$@"; do
     host=$(lowercase "$host")
+    if ! is_loopback_host_name "$host" && network_publishes_on_loopback_only; then continue; fi
     if [ -n "$tls_port" ] && ! is_loopback_host_name "$host"; then origin="https://$host:$tls_port"; else origin="http://$host:$port"; fi
     case ",$list," in *",$origin,"*) continue ;; esac
     list=${list:+$list,}$origin
@@ -230,6 +228,7 @@ network_origin_list() { # app_port tls_port(empty for plain http) extra_host...
 origins_reach_the_network() {
   local origin
   while IFS= read -r origin; do
+    [ -n "$origin" ] || continue
     if ! is_loopback_host_name "$(origin_host "$origin")"; then return 0; fi
   done < <(printf '%s\n' "$1" | tr ',' '\n')
   return 1
@@ -240,8 +239,9 @@ origins_reach_the_network() {
 # to another machine (an --address that only names where this one can be reached).
 network_bind_addresses() { # origin list
   local origin host mine seen=' 127.0.0.1 '
-  mine=" $(network_ipv4_addresses | tr '\n' ' ')"
   printf '%s\n' 127.0.0.1
+  if network_publishes_on_loopback_only; then return 0; fi
+  mine=" $(network_ipv4_addresses | tr '\n' ' ')"
   while IFS= read -r origin; do
     host=$(origin_host "$origin")
     case "$seen" in *" $host "*) continue ;; esac

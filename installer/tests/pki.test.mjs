@@ -190,12 +190,11 @@ describe('the local certificate authority', () => {
         '10.0.0.0/255.0.0.0',
         '172.16.0.0/255.240.0.0',
         '192.168.0.0/255.255.0.0',
-        '100.64.0.0/255.192.0.0',
         '127.0.0.0/255.0.0.0',
       ]) {
         assert.ok(text.includes('IP:' + range), range);
       }
-      for (const suffix of ['local', 'lan', 'home.arpa', 'ts.net', 'localhost']) {
+      for (const suffix of ['local', 'lan', 'home.arpa', 'localhost']) {
         assert.ok(text.includes('DNS:' + suffix), suffix);
       }
       assert.doesNotMatch(text, /IP:8\./);
@@ -209,16 +208,15 @@ describe('the local certificate authority', () => {
       '8.8.8.8',
       '172.32.0.1',
       '100.128.0.1',
+      '100.64.0.1',
+      'spark.example.ts.net',
       'example.com',
       'spark.local.example.com',
       'evil-local',
     ]) {
       assert.throws(() => issueLeaf({ caDir, leafDir, names: ['192.168.1.20', name] }), /may not vouch for/, name);
     }
-    assert.equal(
-      issueLeaf({ caDir, leafDir, names: ['172.31.255.254', '100.127.0.1', 'a.b.ts.net', 'x.home.arpa'] }).issued,
-      true,
-    );
+    assert.equal(issueLeaf({ caDir, leafDir, names: ['172.31.255.254', '10.1.2.3', 'x.home.arpa'] }).issued, true);
   });
 
   it('is made again, and says so, when a name asked for is not covered, and then keeps that name', () => {

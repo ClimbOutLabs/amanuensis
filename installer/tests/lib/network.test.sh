@@ -16,18 +16,17 @@ reg_value() { sed -n "s/^$2=//p" "$AMAN_HOME/state/instances/$1.conf" | head -n 
 
 # Runs a snippet with the installer libraries loaded and only the sandbox tools on PATH.
 in_lib() {
-  STUB_ADDRS="${STUB_ADDRS:-}" STUB_HOSTNAME="${STUB_HOSTNAME:-}" STUB_TS_IP="${STUB_TS_IP:-}" STUB_TS_NAME="${STUB_TS_NAME:-}" STUB_TS_HANG="${STUB_TS_HANG:-}" \
+  STUB_ADDRS="${STUB_ADDRS:-}" STUB_HOSTNAME="${STUB_HOSTNAME:-}" STUB_DOCKER_OS="${STUB_DOCKER_OS:-}" STUB_STATE="${STUB_STATE:-}" STUB_LOG="${STUB_LOG:-}" \
     AMAN_SYS_NET="$SB/sysnet" PATH=$SB_BIN "$SB_BIN/bash" -c "set -euo pipefail; AMAN_HOME='$AMAN_HOME'; . '$INSTALLER_DIR/lib/ui.sh'; . '$INSTALLER_DIR/lib/shared.sh'; . '$INSTALLER_DIR/lib/common.sh'; . '$INSTALLER_DIR/lib/network.sh'; . '$INSTALLER_DIR/lib/tls.sh'; . '$INSTALLER_DIR/lib/instance.sh'; $1"
 }
 
-# A computer on a home network with Tailscale: a LAN address, a Tailscale address, its name and its MagicDNS name.
+# A computer on a home network: a LAN address and a name.
 fixture_full_machine() {
-  fixture_network 192.168.1.20 tailscale0:100.101.102.103
+  fixture_network 192.168.1.20
   fixture_hostname spark
-  fixture_tailscale 100.101.102.103 spark.example.ts.net
 }
 
-ALL_ORIGINS="http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791,http://spark:8791,http://spark.local:8791,http://spark.example.ts.net:8791"
+ALL_ORIGINS="http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://spark:8791,http://spark.local:8791"
 
 test_default_install_answers_at_every_address() {
   t_begin "the app is published on 127.0.0.1 and each private address of this computer, never on a wildcard, and answers at each name"
@@ -39,11 +38,10 @@ test_default_install_answers_at_every_address() {
   compose=$(cat "$AMAN_HOME/instances/main/compose.yaml")
   assert_contains "$compose" "- '127.0.0.1:8791:8790'"
   assert_contains "$compose" "- '192.168.1.20:8791:8790'"
-  assert_contains "$compose" "- '100.101.102.103:8791:8790'"
   assert_not_contains "$compose" "- '8791:8790'" "no wildcard publish"
   assert_not_contains "$compose" "0.0.0.0"
   assert_not_contains "$compose" "[::]"
-  assert_eq "$(printf '%s\n' "$compose" | grep -c ":8790'")" 3 "one publish per address, none for the names"
+  assert_eq "$(printf '%s\n' "$compose" | grep -c ":8790'")" 2 "one publish per address, none for the names"
   assert_contains "$compose" "- '127.0.0.1:5556:5556'"
   assert_eq "$(env_value main ALLOWED_ORIGINS)" "$ALL_ORIGINS"
   assert_eq "$(env_value main PUBLIC_BASE_URL)" "http://127.0.0.1:8791"
@@ -64,7 +62,7 @@ test_sign_in_is_registered_for_every_address() {
   for origin in ${ALL_ORIGINS//,/ }; do
     assert_contains "$dex" "- $origin/api/v1/auth/callback"
   done
-  assert_eq "$(printf '%s\n' "$dex" | grep -c 'api/v1/auth/callback')" 7 "no other return address"
+  assert_eq "$(printf '%s\n' "$dex" | grep -c 'api/v1/auth/callback')" 5 "no other return address"
   sandbox_drop
 }
 
@@ -192,7 +190,7 @@ each_host() { # class... ; prints the hosts of those classes
 }
 
 test_private_and_public_hosts_match_the_shared_list() {
-  t_begin "private, carrier-grade and public hosts are told apart as in the list the app's tests read too"
+  t_begin "private, 100.64.0.0/10 and public hosts are told apart as in the list the app's tests read too"
   sandbox_new_plain
   local host
   while read -r host; do
@@ -201,19 +199,6 @@ test_private_and_public_hosts_match_the_shared_list() {
   while read -r host; do
     if in_lib "private_host '$host'"; then t_fail "public host accepted: $host"; else t_pass; fi
   done < <(each_host public cgnat)
-  fixture_tailscale 100.101.102.103 spark.example.ts.net
-  fixture_network
-  while read -r host; do
-    STUB_ADDRS="tailscale0:$host"
-    if in_lib "private_host '$host'"; then t_pass; else t_fail "100.64.0.0/10 refused on the Tailscale link: $host"; fi
-    STUB_ADDRS="eth0:$host"
-    if in_lib "private_host '$host'"; then t_fail "100.64.0.0/10 accepted on another link even though Tailscale is here: $host"; else t_pass; fi
-  done < <(each_host cgnat)
-  STUB_ADDRS=''
-  fixture_network
-  while read -r host; do
-    if in_lib "private_host '$host'"; then t_fail "public host accepted with Tailscale present: $host"; else t_pass; fi
-  done < <(each_host public)
   sandbox_drop
 }
 
@@ -233,23 +218,23 @@ test_leading_zeros_are_not_an_address() {
   sandbox_drop
 }
 
-test_carrier_grade_nat_is_public_without_tailscale() {
-  t_begin "100.64.0.0/10 is left out and called public without Tailscale (provider NAT), and used with it"
+test_shared_address_space_is_not_a_home_network() {
+  t_begin "100.64.0.0/10 is neither listed nor published on, on any link, and --address refuses it in plain words"
   sandbox_new_plain
-  fixture_network 192.168.1.20 100.64.5.5
-  run_install --dry-run --email owner@example.invalid --tls off
-  assert_flat_contains "$OUT" "100.64.5.5"
-  assert_flat_contains "$OUT" "--tls caddy"
+  fixture_network eth0:192.168.1.20 eth1:100.64.5.5 tailscale0:100.101.102.103
   install_machine
   assert_eq "$(env_value main ALLOWED_ORIGINS)" "http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791"
-  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "100.64.5.5"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "100."
+  run_install --print-network
+  assert_flat_contains "$OUT" "100.64.5.5 (eth1)"
+  assert_flat_contains "$OUT" "100.101.102.103 (tailscale0)"
   sandbox_drop
   sandbox_new_plain
-  fixture_network 192.168.1.20 tailscale0:100.64.5.5
-  fixture_tailscale 100.64.5.5 spark.example.ts.net
-  install_machine
-  assert_contains "$(env_value main ALLOWED_ORIGINS)" "http://100.64.5.5:8791"
-  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '100.64.5.5:8791:8790'"
+  run_install --dry-run --yes --email owner@example.invalid --address 100.101.102.103
+  assert_rc 2
+  assert_flat_contains "$ERR" "100.64.0.0/10, which internet providers and VPNs use, not your home network"
+  run_install --dry-run --yes --email owner@example.invalid --address spark.example.ts.net
+  assert_rc 2
   sandbox_drop
 }
 
@@ -265,38 +250,14 @@ test_a_name_only_address_is_not_published_on() {
   sandbox_drop
 }
 
-test_a_wedged_tailscale_cannot_stall_the_install() {
-  t_begin "tailscale is asked with a time limit, so a hung tailscaled costs a few seconds and the install still finishes"
-  sandbox_new_plain
-  fixture_network 192.168.1.20
-  fixture_tailscale 100.101.102.103 spark.example.ts.net
-  STUB_TS_HANG=1
-  local start=$SECONDS
-  assert_eq "$(in_lib 'network_default_hosts' | tr '\n' ' ')" "127.0.0.1 localhost 192.168.1.20 "
-  if [ $((SECONDS - start)) -lt 15 ]; then t_pass; else t_fail "took $((SECONDS - start)) seconds"; fi
-  sandbox_drop
-}
-
-test_tailscale_names_and_addresses() {
-  t_begin "only this computer's own MagicDNS name is used, and an address that ip and tailscale both report is listed once"
-  sandbox_new_plain
-  fixture_network 192.168.1.20 tailscale0:100.101.102.103
-  fixture_hostname spark
-  fixture_tailscale 100.101.102.103 spark.example.ts.net
-  assert_eq "$(in_lib 'network_tailscale_name')" "spark.example.ts.net"
-  assert_eq "$(in_lib 'network_ipv4_addresses' | grep -c '100.101.102.103')" 1
-  assert_not_contains "$(in_lib 'network_default_hosts')" "other.example.ts.net" "a peer's name is never taken"
-  sandbox_drop
-}
-
 test_summary_lists_the_addresses_and_the_plain_warning() {
   t_begin "the summary lists each address under Open and says sign-in is not encrypted on a home network"
   sandbox_new_plain
   fixture_full_machine
   install_machine
-  assert_flat_contains "$OUT" "Open http://192.168.1.20:8791 http://100.101.102.103:8791 http://spark.example.ts.net:8791 http://spark.local:8791 http://spark:8791 http://127.0.0.1:8791 http://localhost:8791"
-  assert_flat_contains "$OUT" "Sign-in on your home network is not encrypted. Use the Tailscale address to keep it private."
-  assert_flat_contains "$OUT" "Bookmark spark.example.ts.net: it keeps working when this computer's address changes."
+  assert_flat_contains "$OUT" "Open http://192.168.1.20:8791 http://spark.local:8791 http://spark:8791 http://127.0.0.1:8791 http://localhost:8791"
+  assert_flat_contains "$OUT" "Sign-in on your home network is not encrypted. Leave out --tls off to use https."
+  assert_flat_contains "$OUT" "Bookmark spark.local: it keeps working when this computer's address changes."
   sandbox_drop
   sandbox_new_plain
   INSTALL_EXTRA=(--local-only)
@@ -328,7 +289,7 @@ test_the_plan_names_the_addresses() {
   fixture_full_machine
   run_install --dry-run --email owner@example.invalid --tls off
   assert_rc 0
-  assert_flat_contains "$OUT" "It opens on port 8791 at: 127.0.0.1, localhost, 192.168.1.20, 100.101.102.103, spark, spark.local, spark.example.ts.net."
+  assert_flat_contains "$OUT" "It opens on port 8791 at: 127.0.0.1, localhost, 192.168.1.20, spark, spark.local."
   assert_flat_contains "$OUT" "the port is open to your network"
   sandbox_drop
 }
@@ -505,17 +466,83 @@ test_virtual_and_vpn_links_are_never_opened_on() {
   sandbox_drop
 }
 
-test_tailscale_is_used_only_on_its_own_link() {
-  t_begin "a 100.64.0.0/10 address counts as private only on tailscale0, or on a utun that tailscale itself names"
+test_docker_in_a_virtual_machine_publishes_on_127_0_0_1_only() {
+  t_begin "on a Mac, Docker Desktop and WSL2 every port is published once on 127.0.0.1, never on an address of the network or a wildcard, and one line says so"
+  local where
+  for where in docker-desktop mac wsl; do
+    sandbox_new_plain
+    fixture_full_machine
+    case "$where" in
+      docker-desktop) STUB_DOCKER_OS="Docker Desktop" ;;
+      mac) fixture_uname Darwin arm64 ;;
+      wsl) fixture_uname Linux x86_64 5.15.90.1-microsoft-standard-WSL2 ;;
+    esac
+    INSTALL_EXTRA=(--address nas.local)
+    install_machine
+    assert_rc 0
+    local compose
+    compose=$(cat "$AMAN_HOME/instances/main/compose.yaml")
+    assert_contains "$compose" "- '127.0.0.1:8791:8790'" "$where"
+    assert_contains "$compose" "- '127.0.0.1:5556:5556'" "$where"
+    assert_not_contains "$compose" "192.168.1.20" "$where"
+    assert_not_contains "$compose" "0.0.0.0" "$where"
+    assert_not_contains "$compose" "- '8791:8790'" "$where"
+    assert_eq "$(printf '%s\n' "$compose" | grep -cE "^ +- '[^']*:[0-9]+:[0-9]+'")" 2 "each host port once ($where)"
+    assert_eq "$(env_value main ALLOWED_ORIGINS)" "http://127.0.0.1:8791,http://localhost:8791" "$where"
+    assert_eq "$(reg_value main tls_port)" "" "no https front end without an address to serve ($where)"
+    assert_flat_contains "$OUT" "opens only on this computer. To reach it from your phone, see \"Opening Aman from another device (Mac and Windows)\" in docs/install.mdx"
+    assert_not_contains "$OUT" "Sign-in on your home network is not encrypted" "$where"
+    sandbox_drop
+  done
+}
+
+test_a_linux_host_keeps_the_home_network_addresses() {
+  t_begin "on Linux with a native Docker the app is still published on 127.0.0.1 and each home-network address, and no line says otherwise"
   sandbox_new_plain
-  fixture_network eth0:192.168.1.20 eth1:100.64.7.7 utun4:100.101.102.103 utun5:100.99.99.99
-  fixture_tailscale 100.101.102.103 spark.example.ts.net
-  assert_eq "$(in_lib 'network_ipv4_addresses' | tr '\n' ' ')" "192.168.1.20 100.64.7.7 100.101.102.103 "
-  assert_eq "$(in_lib 'network_default_hosts' | grep -c '^100\.')" 1 "only Tailscale's own address is a private host"
-  assert_contains "$(in_lib 'network_default_hosts')" "100.101.102.103"
-  assert_not_contains "$(in_lib 'network_default_hosts')" "100.64.7.7"
-  assert_not_contains "$(in_lib 'network_default_hosts')" "100.99.99.99"
-  assert_contains "$(in_lib 'network_public_addresses')" "100.64.7.7" "provider NAT on a normal link is public"
+  fixture_full_machine
+  STUB_DOCKER_OS="Ubuntu 24.04"
+  install_machine
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '192.168.1.20:8791:8790'"
+  assert_not_contains "$OUT" "opens only on this computer"
+  sandbox_drop
+}
+
+test_an_instance_on_a_virtual_machine_host_is_brought_back_to_127_0_0_1() {
+  t_begin "an instance that was opened on the network before is published on 127.0.0.1 alone on the next run, with its data kept"
+  sandbox_new_plain
+  fixture_full_machine
+  install_machine
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '192.168.1.20:8791:8790'"
+  STUB_DOCKER_OS="Docker Desktop"
+  : >"$STUB_LOG"
+  run_install --yes --tls off
+  assert_rc 0
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "192.168.1.20"
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "http://127.0.0.1:8791,http://localhost:8791"
+  assert_flat_contains "$OUT" "opens only on this computer"
+  assert_not_contains "$(cat "$STUB_LOG")" "volume rm" "no data was removed"
+  sandbox_drop
+}
+
+test_an_instance_that_was_opened_on_tailscale_drops_it() {
+  t_begin "an instance with a 100.64.0.0/10 address or a .ts.net name loses them on the next run and says it opens on this computer and the home network"
+  sandbox_new_plain
+  fixture_full_machine
+  install_machine
+  local conf="$AMAN_HOME/state/instances/main.conf" ts="http://100.101.102.103:8791,http://spark.example.ts.net:8791"
+  sed -i "s|^origins=.*|origins=$(reg_value main origins),$ts|; s|^extra_hosts=.*|extra_hosts=nas.local spark.example.ts.net 100.101.102.103|" "$conf"
+  run_install --yes --tls off
+  assert_rc 0
+  assert_flat_contains "$OUT" "Instance main now opens on this computer and your home network."
+  assert_not_contains "$(reg_value main origins)" "100.101.102.103"
+  assert_not_contains "$(reg_value main origins)" "ts.net"
+  assert_eq "$(reg_value main extra_hosts)" "nas.local"
+  assert_contains "$(env_value main ALLOWED_ORIGINS)" "http://nas.local:8791"
+  assert_contains "$(env_value main ALLOWED_ORIGINS)" "http://192.168.1.20:8791"
+  assert_not_contains "$(env_value main ALLOWED_ORIGINS)" "100.101.102.103"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "ts.net"
+  run_install --yes --tls off
+  assert_flat_contains "$OUT" "Nothing to do."
   sandbox_drop
 }
 
@@ -527,7 +554,7 @@ test_numeric_looking_names_are_not_names() {
     if in_lib "private_host '$bad'"; then t_fail "taken for private: $bad"; else t_pass; fi
     assert_contains "$(in_lib "address_problem '$bad'")" "$bad" "$bad is refused with words"
   done
-  for bad in spark spark.local spark.example.ts.net my-nas3 nas1.local; do
+  for bad in spark spark.local my-nas3 nas1.local; do
     if in_lib "private_host '$bad'"; then t_pass; else t_fail "refused: $bad"; fi
   done
   sandbox_drop
@@ -544,13 +571,14 @@ test_public_url_is_unchanged
 test_issuer_must_be_loopback_or_https
 test_private_and_public_hosts_match_the_shared_list
 test_leading_zeros_are_not_an_address
-test_carrier_grade_nat_is_public_without_tailscale
+test_shared_address_space_is_not_a_home_network
 test_a_name_only_address_is_not_published_on
-test_a_wedged_tailscale_cannot_stall_the_install
 test_virtual_and_vpn_links_are_never_opened_on
-test_tailscale_is_used_only_on_its_own_link
 test_numeric_looking_names_are_not_names
-test_tailscale_names_and_addresses
+test_docker_in_a_virtual_machine_publishes_on_127_0_0_1_only
+test_a_linux_host_keeps_the_home_network_addresses
+test_an_instance_on_a_virtual_machine_host_is_brought_back_to_127_0_0_1
+test_an_instance_that_was_opened_on_tailscale_drops_it
 test_an_existing_instance_opens_on_the_network_on_a_plain_rerun
 test_local_only_on_a_rerun_puts_an_instance_back
 test_a_legacy_instance_stays_local_with_local_only

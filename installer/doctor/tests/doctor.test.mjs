@@ -1298,15 +1298,12 @@ describe('network address check', () => {
     assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
   });
 
-  it('does not offer a carrier-grade address unless it is on the Tailscale link', () => {
+  it('does not offer a carrier-grade address on any link', () => {
     make();
-    world.install('tailscale', '#!/usr/bin/env bash\nexit 1\n');
-    world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', 'eth1:100.101.102.103'] });
+    world.network('main', {
+      addresses: ['127.0.0.1', '192.168.1.20', 'eth1:100.101.102.103', 'tailscale0:100.64.0.7'],
+    });
     assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
-    world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', 'tailscale0:100.101.102.103'] });
-    const check = find(world.json().doc.instances.main, 'network');
-    assert.equal(check.state, 'warn');
-    assert.match(check.detail, /100\.101\.102\.103/);
   });
 
   it('does not offer an address on a container or VPN link', () => {
