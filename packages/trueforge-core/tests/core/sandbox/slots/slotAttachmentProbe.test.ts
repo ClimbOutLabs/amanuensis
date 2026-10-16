@@ -58,6 +58,7 @@ describe('probeSlotAttachments', () => {
       expect(command).toContain(`command -v ${tool}`);
     }
     expect(command).toContain('tesseract --list-langs');
+    expect(command).toContain('import docx, lxml');
     for (const language of LANGUAGES) {
       expect(command).toContain(`grep -qx -- '${language}'`);
     }
@@ -67,6 +68,13 @@ describe('probeSlotAttachments', () => {
     const { result } = await probe({
       answerShell: command =>
         command.includes('command -v pdfinfo') ? 'AMAN_MISSING:pdftotext\nAMAN_MISSING:tesseract-hin\n' : undefined,
+    });
+    expect(result).toEqual({ state: 'not_ready', problem: 'tools_missing' });
+  });
+
+  it('is not ready when the image cannot read Word documents', async () => {
+    const { result } = await probe({
+      answerShell: command => (command.includes('command -v pdfinfo') ? 'AMAN_MISSING:python-docx\n' : undefined),
     });
     expect(result).toEqual({ state: 'not_ready', problem: 'tools_missing' });
   });

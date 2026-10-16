@@ -10,6 +10,7 @@ import {
   createDocumentExtractionBudget,
   createSessionDocumentExtractionBudget,
   extractDocumentText,
+  isSupportedDocumentExtension,
   MAX_BYTES_PER_DOCUMENT,
   MAX_CHARS_PER_DOCUMENT,
   MAX_DOCUMENT_FILES,
@@ -111,6 +112,8 @@ function observation(
   return { ...input, source };
 }
 
+const unusedWordText = (): Promise<{ text: string }> => Promise.reject(new Error('no Word file in this test'));
+
 describe('local document pipeline', () => {
   it('preserves native multiline PDF text and OCRs only the empty mixed-PDF page', async () => {
     const pdf = makePdf([['Statement date: 2026-08-01', 'Checking account balance: $100.00'], []]);
@@ -121,6 +124,7 @@ describe('local document pipeline', () => {
       budget: undefined,
       pageRange: undefined,
       downloadFile: async () => pdf,
+      runWordText: unusedWordText,
       runNativePdfText: async () => ({
         total_pages: 2,
         pages: [
@@ -152,6 +156,7 @@ describe('local document pipeline', () => {
       budget: undefined,
       pageRange: undefined,
       downloadFile: async () => syntheticPng(),
+      runWordText: unusedWordText,
       runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async input => {
         calls.push({ pages: input.pages, content: Buffer.from(input.filePath) });
@@ -170,6 +175,7 @@ describe('local document pipeline', () => {
       budget: undefined,
       pageRange: undefined,
       downloadFile: async () => syntheticPng(),
+      runWordText: unusedWordText,
       runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async () => {
         throw new Error('(exit code 1): tesseract failed');
@@ -194,6 +200,7 @@ describe('local document pipeline', () => {
       budget: undefined,
       pageRange: undefined,
       downloadFile: async () => syntheticPng(),
+      runWordText: unusedWordText,
       runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async () => [{ page_number: 1, text: 'x'.repeat(MAX_CHARS_PER_DOCUMENT + 100) }],
     });
@@ -468,6 +475,7 @@ describe('local document pipeline', () => {
         const entry = files.find(candidate => candidate[0] === filename);
         return filename.endsWith('.pdf') ? makePdf([entry?.[1] ?? []]) : syntheticPng();
       },
+      runWordText: unusedWordText,
       runNativePdfText: async input => {
         const filename = input.filePath.slice(input.filePath.lastIndexOf('/') + 1);
         const entry = files.find(candidate => candidate[0] === filename);
@@ -535,6 +543,7 @@ describe('document page-range extraction', () => {
       budget: overrides.budget,
       pageRange: overrides.pageRange,
       downloadFile: async () => syntheticPdf(),
+      runWordText: unusedWordText,
       runNativePdfText: async input => {
         const pages = Object.entries(overrides.nativePages ?? {}).map(([page, text]) => ({
           page_number: Number(page),
@@ -583,14 +592,110 @@ describe('document page-range extraction', () => {
     expect(result.documents[0]?.pages).toHaveLength(0);
   });
 
-  it('fails loudly and helpfully on DOCX files', async () => {
+  it('fails loudly and helpfully on old Word and RTF files it cannot read', async () => {
     const input = pdfInput({});
-    input.files = [{ filename: 'contract.docx', path: 'uploads/contract.docx' }];
+    input.files = [{ filename: 'contract.doc', path: 'uploads/contract.doc' }];
     const result = await extractDocumentText(input);
     expect(result.documents[0]?.issue).toBe(
-      "I can't read contract.docx yet: .docx files are not supported. Convert it to PDF and I'll read all of it.",
+      "I can't read contract.doc yet: .doc files are not supported. Convert it to PDF and I'll read all of it.",
     );
     expect(result.documents[0]?.pages).toHaveLength(0);
+  });
+
+  describe('Word documents', () => {
+    const zipHeader = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(32)]);
+
+    function wordInput({ filename, bytes, text }: { filename: string; bytes: Buffer; text: string }) {
+      const reads: string[] = [];
+      const input = pdfInput({});
+      input.files = [{ filename, path: `uploads/${filename}` }];
+      input.downloadFile = async () => bytes;
+      input.runWordText = async call => {
+        reads.push(call.filePath);
+        return { text };
+      };
+      return { input, reads };
+    }
+
+    it('accepts .docx and .odt as readable attachments, in any letter case', () => {
+      for (const name of ['plan.docx', 'PLAN.DOCX', 'notes.odt', 'scan.pdf', 'photo.png']) {
+        expect(isSupportedDocumentExtension(name)).toBe(true);
+      }
+      for (const name of ['plan.doc', 'plan.rtf', 'sheet.xlsx', 'notes.txt']) {
+        expect(isSupportedDocumentExtension(name)).toBe(false);
+      }
+    });
+
+    it.each(['plan.docx', 'notes.odt'])('reads %s as one text page with line numbers', async filename => {
+      const { input, reads } = wordInput({ filename, bytes: zipHeader, text: 'Reunião às 19h\n\nSegunda linha\n' });
+      const result = await extractDocumentText(input);
+      expect(reads).toEqual([`uploads/${filename}`]);
+      expect(result.documents[0]).toMatchObject({
+        extraction_mode: 'text',
+        issue: null,
+        pages: [
+          {
+            page_number: 1,
+            extraction_mode: 'text',
+            lines: [
+              { line_number: 1, text: 'Reunião às 19h' },
+              { line_number: 3, text: 'Segunda linha' },
+            ],
+          },
+        ],
+      });
+    });
+
+    it('does not send a file to the reader unless it is a zip', async () => {
+      const { input, reads } = wordInput({ filename: 'fake.docx', bytes: Buffer.from('plain text'), text: 'x' });
+      const result = await extractDocumentText(input);
+      expect(reads).toEqual([]);
+      expect(result.documents[0]?.issue).toBe('fake.docx is not a valid Word document, so it cannot be read.');
+    });
+
+    it('says plainly when the document holds no text', async () => {
+      const { input } = wordInput({ filename: 'pictures.docx', bytes: zipHeader, text: '\n  \n' });
+      const result = await extractDocumentText(input);
+      expect(result.documents[0]?.pages).toHaveLength(0);
+      expect(result.documents[0]?.issue).toBe('pictures.docx has no text to read. It may hold only pictures.');
+    });
+
+    it('keeps the size cap: a Word file over 25 MB is skipped unread', async () => {
+      const { input, reads } = wordInput({
+        filename: 'huge.docx',
+        bytes: Buffer.alloc(MAX_BYTES_PER_DOCUMENT + 1),
+        text: 'x',
+      });
+      const result = await extractDocumentText(input);
+      expect(reads).toEqual([]);
+      expect(result.documents[0]?.issue).toBe('Skipped huge.docx: document byte limit exceeded.');
+    });
+
+    it('rejects a page range, which only a PDF has', async () => {
+      const { input } = wordInput({ filename: 'plan.docx', bytes: zipHeader, text: 'x' });
+      input.pageRange = { page_start: 2, page_end: 3 };
+      const result = await extractDocumentText(input);
+      expect(result.documents[0]?.issue).toBe('page_start/page_end apply to PDF files only; plan.docx is not a PDF.');
+    });
+
+    it('says only the head is shown when the text passes the per-document character cap', async () => {
+      const { input } = wordInput({
+        filename: 'long.docx',
+        bytes: zipHeader,
+        text: 'a'.repeat(MAX_CHARS_PER_DOCUMENT + 500),
+      });
+      const result = await extractDocumentText(input);
+      expect(result.documents[0]?.issue).toContain('only its head is shown');
+    });
+
+    it('names the supported types when a file is none of them', async () => {
+      const input = pdfInput({});
+      input.files = [{ filename: 'sheet.xlsx', path: 'uploads/sheet.xlsx' }];
+      const result = await extractDocumentText(input);
+      expect(result.documents[0]?.issue).toBe(
+        'Unsupported document type for sheet.xlsx; expected a PDF, a Word document (.docx or .odt) or a raster image.',
+      );
+    });
   });
 
   it('OCRs empty native pages with absolute page numbers (401-405)', async () => {
@@ -673,6 +778,7 @@ describe('files are checked by their bytes before OCR', () => {
       budget: undefined,
       pageRange: undefined,
       downloadFile: async () => bytes,
+      runWordText: unusedWordText,
       runNativePdfText: async () => ({ total_pages: totalPages, pages: [] }),
       runOcr: async input => {
         ocrCalls.push({ pages: input.pages, maxPages: input.maxPages });

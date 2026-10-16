@@ -84,7 +84,7 @@ describe('attachments', () => {
     expect(check).toEqual({
       id: 'attachments',
       state: 'ok',
-      detail: 'Reading attachments is ready: PDFs, images and email attachments can be read.',
+      detail: 'Reading attachments is ready: PDFs, Word documents, images and email attachments can be read.',
       fix: '',
     });
     expect(asked[0]?.socketPaths).toHaveLength(4);
@@ -114,7 +114,7 @@ describe('attachments', () => {
   });
 
   it.each([
-    ['tools_missing', 'This sandbox cannot read PDFs and images yet.'],
+    ['tools_missing', 'This sandbox cannot read PDFs, Word documents and images yet.'],
     ['sandbox_unavailable', 'The sandbox is not running, so attachments cannot be read.'],
     ['file_not_sent', 'A test file could not be sent into the sandbox.'],
     ['file_changed', 'A test file came back from the sandbox changed.'],

@@ -1,29 +1,31 @@
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
-import { extensionMatchesImage, inspectImageHeader, looksLikePdf, MAX_OCR_PIXELS } from './fileSniff';
+import { extensionMatchesImage, inspectImageHeader, looksLikePdf, looksLikeZip, MAX_OCR_PIXELS } from './fileSniff';
 
 const OCR_IMAGE_EXTENSIONS = new Set(['.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
 
-/** True for the PDF and raster-image extensions this module can extract text from. */
+const WORD_DOCUMENT_EXTENSIONS = new Set(['.docx', '.odt']);
+
+/** True for the PDF, Word (.docx, .odt) and raster-image extensions this module can extract text from. */
 export function isSupportedDocumentExtension(filename: string): boolean {
   const extension = extname(filename).toLowerCase();
-  return extension === '.pdf' || OCR_IMAGE_EXTENSIONS.has(extension);
+  return extension === '.pdf' || WORD_DOCUMENT_EXTENSIONS.has(extension) || OCR_IMAGE_EXTENSIONS.has(extension);
 }
 
 /** Single source of truth for the unsupported-type issue text used within this module. */
 function unsupportedDocumentTypeIssue(filename: string): string {
   const extension = extname(filename).toLowerCase();
-  // F2: office documents fail loudly with a way forward, not a dead end.
+  // Office formats we cannot read fail loudly with a way forward, not a dead end.
   if (OFFICE_DOCUMENT_EXTENSIONS.has(extension)) {
     return (
       `I can't read ${filename} yet: ${extension} files are not supported. ` +
       `Convert it to PDF and I'll read all of it.`
     );
   }
-  return `Unsupported document type for ${filename}; expected PDF or a raster image.`;
+  return `Unsupported document type for ${filename}; expected a PDF, a Word document (.docx or .odt) or a raster image.`;
 }
 
-const OFFICE_DOCUMENT_EXTENSIONS = new Set(['.doc', '.docx', '.odt', '.rtf']);
+const OFFICE_DOCUMENT_EXTENSIONS = new Set(['.doc', '.rtf']);
 
 export const MAX_DOCUMENT_FILES = 32;
 export const MAX_BYTES_PER_DOCUMENT = 25 * 1024 * 1024;
@@ -332,6 +334,8 @@ export async function extractDocumentText(input: {
     total_pages: number;
     pages: DocumentOcrPage[];
   }>;
+  /** Reads the whole text of a .docx or .odt in the sandbox. */
+  runWordText: (input: { filePath: string }) => Promise<{ text: string }>;
   /** File-progress callback. Absent when the caller does not need progress events. */
   onFileProgress: ((progress: DocumentFileProgress) => void) | undefined;
   /**
@@ -546,6 +550,42 @@ export async function extractDocumentText(input: {
             }
           }
         }
+      } else if (WORD_DOCUMENT_EXTENSIONS.has(extension)) {
+        // A Word file is one continuous page: it has no fixed pages to continue from.
+        const problem =
+          input.pageRange !== undefined
+            ? `page_start/page_end apply to PDF files only; ${file.filename} is not a PDF.`
+            : !looksLikeZip(buffer)
+              ? `${file.filename} is not a valid Word document, so it cannot be read.`
+              : undefined;
+        const pagesAllowed = problem === undefined ? reservePages(1) : 0;
+        if (problem !== undefined) {
+          pushDocument({ ...file, sha256, extraction_mode: null, pages: [], issue: problem }, fileStartedAt);
+        } else if (pagesAllowed === 0) {
+          pushDocument(
+            {
+              ...file,
+              sha256,
+              extraction_mode: null,
+              pages: [],
+              issue: 'Extraction skipped because the total page budget was exhausted.',
+            },
+            fileStartedAt,
+          );
+        } else {
+          const lines = linesFromText((await input.runWordText({ filePath: file.path })).text);
+          pushDocument(
+            {
+              ...file,
+              sha256,
+              extraction_mode: 'text',
+              pages: lines.length > 0 ? [{ page_number: 1, extraction_mode: 'text', lines }] : [],
+              issue: lines.length > 0 ? null : `${file.filename} has no text to read. It may hold only pictures.`,
+            },
+            fileStartedAt,
+          );
+        }
+        rangeInfo = undefined;
       } else if (OCR_IMAGE_EXTENSIONS.has(extension)) {
         const problem = imageProblem(buffer, extension);
         if (input.pageRange !== undefined) {
@@ -619,7 +659,11 @@ export async function extractDocumentText(input: {
         {
           ...file,
           sha256,
-          extraction_mode: isSupportedDocumentExtension(file.filename) ? 'ocr' : null,
+          extraction_mode: WORD_DOCUMENT_EXTENSIONS.has(extension)
+            ? 'text'
+            : isSupportedDocumentExtension(file.filename)
+              ? 'ocr'
+              : null,
           pages: [],
           issue: issueMessage(error, file.filename),
         },
