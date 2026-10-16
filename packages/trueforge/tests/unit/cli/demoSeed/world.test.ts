@@ -39,9 +39,15 @@ describe('buildDemoWorld dates', () => {
   it('dates the tasks from the seed day', () => {
     const body = tasksBody(worldOn(MONDAY));
 
-    expect(body).toContain('- [ ] Find English-speaking GP (in progress) - due Thursday, October 29');
+    expect(body).toContain('- [ ] Find English-speaking GP (in progress)\n  GP appointment Thu Oct 22, 2026, 09:30');
     expect(body).toContain('- [x] Get NIF (tax number) - done Sunday, October 18');
     expect(noteBody(worldOn(MONDAY), 'newcomers')).toContain('Thursday, Nov 5 at Café do Cais');
+  });
+
+  it('keeps the GP appointment on its fixed date whatever day the seed runs', () => {
+    for (const seedDay of ['2026-10-19', '2026-10-20', '2026-11-02']) {
+      expect(tasksBody(worldOn(day(seedDay)))).toContain('GP appointment Thu Oct 22, 2026, 09:30');
+    }
   });
 
   it('changes only dated content when the day moves', () => {
@@ -141,7 +147,7 @@ describe('buildDemoWorld content', () => {
     const world = worldOn(MONDAY);
 
     expect(tasksBody(world)).toContain(
-      'GP appointment Thursday Oct 29, 09:30 at Brightwater Family Clinic with Dra. Helena Rocha',
+      'GP appointment Thu Oct 22, 2026, 09:30 at Brightwater Family Clinic with Dra. Helena Rocha',
     );
     expect(noteBody(world, 'short-term-rental')).toContain('Rua da Emenda 45, 1200-169 Lisboa, in Chiado');
   });

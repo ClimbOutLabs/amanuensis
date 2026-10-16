@@ -31,9 +31,10 @@ const MAYA_TASKS: readonly MayaTask[] = [
     title: 'Find English-speaking GP',
     state: 'in_progress',
     doneOffset: null,
-    dueOffset: 3,
-    notes: days =>
-      `GP appointment ${days.weekday(3)} ${days.monthDay(3)}, 09:30 at ${GP_CLINIC.name} with Dra. Helena Rocha (confirmation email in the inbox). Mention the penicillin allergy.`,
+    dueOffset: null,
+    // A fixed date: it must match the confirmation email and the calendar event, whatever day the seed runs.
+    notes: () =>
+      `GP appointment Thu Oct 22, 2026, 09:30 at ${GP_CLINIC.name} with Dra. Helena Rocha (confirmation email in the inbox). Mention the penicillin allergy.`,
   },
   {
     title: 'Complete visa medical',
