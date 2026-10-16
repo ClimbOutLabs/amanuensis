@@ -78,7 +78,7 @@ const ENV_ALLOWED_NAME_RE = /^\.env\.(example|sample|template|test)(\.[^/]*)?$/i
 
 // (e) The test mailbox sender's credentials file. scripts/send-test-mailbox.mjs
 // reads SMTP credentials from a .env.test-mailbox file, which is local-only
-// and gitignored — but gitignore does not stop a force-add, and the generic
+// and gitignored, but gitignore does not stop a force-add, and the generic
 // .env rule above only fires on populated non-placeholder values, so a copy
 // full of dummy-looking values would slip through. The name alone is enough:
 // this file must never be tracked, wherever it sits in the tree.
