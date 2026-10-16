@@ -513,7 +513,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 href={begun.authorizationUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="underline hover:text-text-primary"
+                className="text-text-primary underline"
               >
                 open Google sign-in here
               </a>
