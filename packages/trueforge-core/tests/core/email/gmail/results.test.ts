@@ -44,7 +44,7 @@ describe('message reading', () => {
 describe('result shapes', () => {
   it('names the account and marks mail untrusted on every result', () => {
     const results = [
-      listThreadsResult({ context, threads: [], providerEstimate: 0, nextPageToken: undefined }),
+      listThreadsResult({ context, threads: [], providerEstimate: 0, nextPageToken: undefined, notReached: 0 }),
       readEmailResult({ context, message: message({ id: 'm1', body: 'hi' }) }),
       threadResult({ context, thread: thread('t1', [message({ id: 'm1', body: 'hi' })]), format: 'full' }),
       getDraftResult({ context, draftId: 'd1', message: message({ id: 'm1', body: 'hi' }) }),
@@ -66,6 +66,7 @@ describe('result shapes', () => {
       ],
       providerEstimate: 12,
       nextPageToken: 'next',
+      notReached: 0,
     });
     expect(result.threads[0]).toMatchObject({
       id: 't1',

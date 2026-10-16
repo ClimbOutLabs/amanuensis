@@ -1,7 +1,7 @@
 /** The shapes the Gmail read tools return to the model. Every result names the account and marks mail as untrusted. */
 import type { GmailMessage, GmailThread } from './gmailWire';
 import { decodeEntities } from './htmlText';
-import { headerOf, labelIdsOf, rawHeaderOf, readMessage, type AttachmentInfo } from './message';
+import { headerOf, labelIdsOf, MAX_RAW_HEADER_CHARS, rawHeaderOf, readMessage, type AttachmentInfo } from './message';
 import { stripInvisible } from './mimeText';
 import { estimateTokens, MAX_TOKENS_PER_CALL, snippetOf, truncateToTokens } from './tokenBound';
 
@@ -13,7 +13,7 @@ export const UNTRUSTED_NOTICE =
  * `<tfy-...` tag written in a subject, sender name, body or file name is turned into plain text.
  */
 export function neutralizeInternalTags(text: string): string {
-  return text.replace(/<(\s*\/?\s*tfy-)/gi, '&lt;$1');
+  return text.replace(/<(?=[\s/]*tfy-)/gi, '&lt;');
 }
 
 /** Every string of a result made safe to hand the model: invisible characters removed, internal tags neutralized. */
@@ -44,16 +44,64 @@ const MAX_ATTACHMENTS_LISTED = 20;
 
 /** Most addresses one header lists in a result; a longer list is cut so a result stays inside its bound. */
 const MAX_ADDRESSES = 50;
+const MAX_ANGLE_ADDRESS_CHARS = 320;
+
+/** Said plainly when a list stopped waiting; the page token is withheld then, since it would skip the rest. */
+function slowNote(input: { shown: number; notReached: number }) {
+  return input.notReached > 0
+    ? { note: `Gmail was slow; showing the first ${String(input.shown)}. Ask for fewer results or try again.` }
+    : {};
+}
+
+/** The parts of an address header, split at commas outside quotes in one pass. */
+function addressParts(rawHeader: string): { parts: string[]; balanced: boolean } {
+  const header = rawHeader.slice(0, MAX_RAW_HEADER_CHARS);
+  const parts: string[] = [];
+  let inQuotes = false;
+  let start = 0;
+  for (let index = 0; index < header.length; index += 1) {
+    const character = header[index];
+    if (character === '"') {
+      inQuotes = !inQuotes;
+    } else if (character === ',' && !inQuotes) {
+      parts.push(header.slice(start, index));
+      start = index + 1;
+    }
+  }
+  parts.push(header.slice(start));
+  return { parts, balanced: !inQuotes };
+}
 
 /**
  * Bare addresses out of a raw (still encoded) header such as `Ada <ada@example.com>, grace@example.com`. The
- * header is split before any name is decoded, so a name like "Doe, John" stays one name.
+ * header is cut at a fixed length and split before any name is decoded, so a name like "Doe, John" stays one
+ * name. One linear pass: no pattern here can be made to backtrack.
  */
 export function addressesOf(rawHeader: string): string[] {
-  return rawHeader
-    .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
-    .map(part => /<([^<>]{1,320})>/.exec(part)?.[1] ?? part.trim())
-    .filter(address => address !== '');
+  const out: string[] = [];
+  for (const part of addressParts(rawHeader).parts) {
+    const close = part.indexOf('>');
+    const open = close === -1 ? -1 : part.lastIndexOf('<', close);
+    const inner = open === -1 ? '' : part.slice(open + 1, close);
+    const address = inner !== '' && inner.length <= MAX_ANGLE_ADDRESS_CHARS ? inner : part.trim();
+    if (address !== '') {
+      out.push(address);
+    }
+  }
+  return out;
+}
+
+/** Whether every address is plain `addr` or `Name <addr>` with balanced quotes, so no reader could see another list. */
+export function addressListIsPlain(rawHeader: string): boolean {
+  const { parts, balanced } = addressParts(rawHeader);
+  return (
+    balanced &&
+    parts.every(part => {
+      const opens = part.split('<').length - 1;
+      const closes = part.split('>').length - 1;
+      return opens === closes && opens <= 1;
+    })
+  );
 }
 
 /** Every address of a header, uncapped: a send must be shown and hashed with all of them. */
@@ -116,6 +164,8 @@ export function listThreadsResult(input: {
   threads: GmailThread[];
   providerEstimate: number;
   nextPageToken: string | undefined;
+  /** Rows the call stopped waiting for because Gmail was slow. */
+  notReached: number;
 }) {
   const rows = [];
   let tokens = 0;
@@ -138,7 +188,8 @@ export function listThreadsResult(input: {
       truncated_by: omitted > 0 ? 'token_bound' : input.nextPageToken === undefined ? null : 'max_results',
       omitted_by_token_bound: omitted,
     },
-    ...(input.nextPageToken === undefined ? {} : { next_page_token: input.nextPageToken }),
+    ...(input.nextPageToken === undefined || input.notReached > 0 ? {} : { next_page_token: input.nextPageToken }),
+    ...slowNote({ shown: rows.length, notReached: input.notReached }),
   };
 }
 
@@ -217,6 +268,7 @@ export function listDraftsResult(input: {
   context: ResultContext;
   drafts: { draftId: string; message: GmailMessage }[];
   nextPageToken: string | undefined;
+  notReached: number;
 }) {
   const rows = [];
   let tokens = 0;
@@ -240,7 +292,8 @@ export function listDraftsResult(input: {
     ...envelope(input.context),
     drafts: rows,
     ...(rows.length < input.drafts.length ? { omitted_by_token_bound: input.drafts.length - rows.length } : {}),
-    ...(input.nextPageToken === undefined ? {} : { next_page_token: input.nextPageToken }),
+    ...(input.nextPageToken === undefined || input.notReached > 0 ? {} : { next_page_token: input.nextPageToken }),
+    ...slowNote({ shown: rows.length, notReached: input.notReached }),
   };
 }
 

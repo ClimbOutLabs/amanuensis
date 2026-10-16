@@ -145,18 +145,37 @@ function attributeValue(input: { tag: string; name: string }): string | null {
   }
 }
 
+/** True for a CSS declaration that takes the element's text out of sight. */
+function hidesText(input: { property: string; value: string }): boolean {
+  const { property, value } = input;
+  switch (property) {
+    case 'display':
+      return value === 'none';
+    case 'visibility':
+      return value === 'hidden' || value === 'collapse';
+    case 'mso-hide':
+      return value === 'all';
+    case 'font-size':
+    case 'max-height':
+    case 'opacity':
+      return Number.parseFloat(value) === 0;
+    default:
+      return false;
+  }
+}
+
 function isHiddenTag(tag: string): boolean {
   if (attributeValue({ tag, name: 'hidden' }) !== null) {
     return true;
   }
-  const style = (attributeValue({ tag, name: 'style' }) ?? '').toLowerCase().replace(/\s+/g, '');
-  return (
-    style.includes('display:none') ||
-    style.includes('visibility:hidden') ||
-    style.includes('font-size:0') ||
-    style.includes('max-height:0') ||
-    style.includes('mso-hide:all')
-  );
+  const style = (attributeValue({ tag, name: 'style' }) ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/!important/g, '');
+  return style.split(';').some(declaration => {
+    const colon = declaration.indexOf(':');
+    return colon !== -1 && hidesText({ property: declaration.slice(0, colon), value: declaration.slice(colon + 1) });
+  });
 }
 
 function safeLink(href: string): string | null {

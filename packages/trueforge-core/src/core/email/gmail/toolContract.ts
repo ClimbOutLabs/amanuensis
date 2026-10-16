@@ -3,6 +3,7 @@
  * snake_case like the sandbox tools; the mapping onto Gmail's own field names stays inside the API client.
  */
 import { z } from 'zod';
+import { hasHiddenCharacters } from './mimeText';
 
 export const GMAIL_SERVER_ID = 'gmail';
 
@@ -74,12 +75,21 @@ export const ListDraftsSchema = z
 
 export const DraftIdSchema = z.object({ draft_id: id }).strict();
 
+const VISIBLE_ONLY = {
+  message:
+    'The text contains characters that do not show, such as hidden Unicode tags or zero-width marks. Remove them.',
+};
+
+/** Text that is shown to the user must be text they can see: a send is refused if part of it would be hidden. */
+const visible = <T extends z.ZodType<string>>(schema: T) =>
+  schema.refine(text => !hasHiddenCharacters(text), VISIBLE_ONLY);
+
 const DraftContentShape = {
-  to: z.array(z.email()).min(1).max(20),
-  subject: z.string().min(1).max(300),
-  body: z.string().max(20_000),
-  cc: z.array(z.email()).max(20).optional(),
-  bcc: z.array(z.email()).max(20).optional(),
+  to: z.array(visible(z.email())).min(1).max(20),
+  subject: visible(z.string().min(1).max(300)),
+  body: visible(z.string().max(20_000)),
+  cc: z.array(visible(z.email())).max(20).optional(),
+  bcc: z.array(visible(z.email())).max(20).optional(),
   thread_id: id.optional(),
   in_reply_to: id.optional(),
 };

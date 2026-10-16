@@ -80,6 +80,8 @@ export interface GmailToolSetOptions {
   sentinel: SentinelHostContext;
   /** What the user was shown before each send, shared by every turn of this process. */
   reviews: DraftReviewLedger;
+  /** How long a list call may spend before it returns the rows it has. */
+  listDeadlineMs: number;
 }
 
 function errorResult(error: string) {
@@ -387,15 +389,17 @@ export class GmailToolSet extends LocalToolMCP {
   }
 
   async #listThreads(input: z.infer<typeof ListInboxThreadsSchema>) {
+    const startedAt = Date.now();
     try {
       const list = await this.#options.api.listThreads({
         query: input.query,
         maxResults: input.max_results,
         pageToken: input.page_token,
       });
-      const threads = await mapSkippingMissing({
+      const { results: threads, notReached } = await mapSkippingMissing({
         items: list.threadIds,
         work: threadId => this.#options.api.getThreadSummary(threadId),
+        deadlineMs: this.#options.listDeadlineMs - (Date.now() - startedAt),
       });
       return jsonResult(
         listThreadsResult({
@@ -403,6 +407,7 @@ export class GmailToolSet extends LocalToolMCP {
           threads,
           providerEstimate: list.resultSizeEstimate,
           nextPageToken: list.nextPageToken,
+          notReached,
         }),
       );
     } catch (error) {
@@ -476,11 +481,13 @@ export class GmailToolSet extends LocalToolMCP {
   }
 
   async #listDrafts(input: z.infer<typeof ListDraftsSchema>) {
+    const startedAt = Date.now();
     try {
       const list = await this.#options.api.listDrafts({ maxResults: input.max_results, pageToken: input.page_token });
-      const drafts = await mapSkippingMissing({
+      const { results: drafts, notReached } = await mapSkippingMissing({
         items: list.draftIds,
         work: draftId => this.#options.api.getDraft(draftId),
+        deadlineMs: this.#options.listDeadlineMs - (Date.now() - startedAt),
       });
       return jsonResult(
         listDraftsResult({
@@ -489,6 +496,7 @@ export class GmailToolSet extends LocalToolMCP {
             draft.message === undefined ? [] : [{ draftId: draft.id, message: draft.message }],
           ),
           nextPageToken: list.nextPageToken,
+          notReached,
         }),
       );
     } catch (error) {

@@ -269,6 +269,7 @@ describe('RFC 2047 encoded words in headers', () => {
       threads: [{ id: 't1', messages: [mail] }],
       providerEstimate: 1,
       nextPageToken: undefined,
+      notReached: 0,
     });
     expect(list.threads[0]?.subject).toBe('会議の予定');
   });

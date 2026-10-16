@@ -4,7 +4,7 @@
  */
 import type { AgentCapability, AgentTracing, SentinelHostContext } from '@truefoundry/trueforge-core/core';
 import { DraftReviewLedger } from '@truefoundry/trueforge-core/core/email/gmail/draftReview';
-import { GmailApi } from '@truefoundry/trueforge-core/core/email/gmail/gmailApi';
+import { GmailApi, LIST_DEADLINE_MS } from '@truefoundry/trueforge-core/core/email/gmail/gmailApi';
 import { GmailToolSet, type AttachmentStager } from '@truefoundry/trueforge-core/core/email/gmail/GmailToolSet';
 import type { GoogleConnectionStore, GoogleOwner } from '@truefoundry/trueforge-core/core/google/connection';
 import { GoogleAccessTokens } from '@truefoundry/trueforge-core/core/google/GoogleAccessTokens';
@@ -49,6 +49,7 @@ export async function gmailCapability(options: GmailCapabilityOptions): Promise<
         attachmentStager: options.attachmentStager,
         sentinel: options.sentinel,
         reviews: SHARED_REVIEWS,
+        listDeadlineMs: LIST_DEADLINE_MS,
       }),
     ],
   };

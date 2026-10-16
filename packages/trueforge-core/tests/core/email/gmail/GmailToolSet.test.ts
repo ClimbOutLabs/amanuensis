@@ -105,6 +105,7 @@ describe('GmailToolSet reads', () => {
       attachmentStager: undefined,
       sentinel: createSentinelHostContext({ ...OWNER, conversation_id: 'c1' }),
       reviews: new DraftReviewLedger(),
+      listDeadlineMs: 60_000,
     });
     const response = await tools.callTool({ name: 'read_email', arguments: { message_id: 'm1' } });
     expect(text(response)).toContain('connected again');

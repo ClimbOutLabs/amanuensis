@@ -2,7 +2,7 @@ import { GmailApi, mapSkippingMissing } from '../../../../src/core/email/gmail/g
 import { GoogleAccessTokens } from '../../../../src/core/google/GoogleAccessTokens';
 import { connectedRecord, FakeConnections, OWNER } from '../../google/fakes';
 import { message } from './fixtures';
-import { build, gmailThreadResponse, googleError, INSUFFICIENT_SCOPE_BODY, json, route, text } from './harness';
+import { build, gmailThreadResponse, googleError, HANG, INSUFFICIENT_SCOPE_BODY, json, route, text } from './harness';
 
 function threadRows(count: number) {
   return Array.from({ length: count }, (_unused, index) => ({ id: `t${String(index)}` }));
@@ -184,6 +184,27 @@ describe('failures reaching Google', () => {
   });
 });
 
+describe('a slow Gmail', () => {
+  it('returns the rows it has, says Gmail was slow, and withholds the page token that would skip the rest', async () => {
+    const { tools } = await build({
+      listDeadlineMs: 150,
+      routes: [
+        route('/threads', { threads: threadRows(8), resultSizeEstimate: 8, nextPageToken: 'more' }),
+        url => {
+          const id = /\/threads\/(t\d+)$/.exec(url.pathname)?.[1];
+          // Later threads never answer.
+          return id !== undefined && Number(id.slice(1)) >= 4 ? HANG : undefined;
+        },
+        threadAnswers(() => undefined),
+      ],
+    });
+    const result = JSON.parse(text(await tools.callTool({ name: 'list_inbox_threads', arguments: {} })));
+    expect(result.threads).toHaveLength(4);
+    expect(result.note).toBe('Gmail was slow; showing the first 4. Ask for fewer results or try again.');
+    expect(result.next_page_token).toBeUndefined();
+  });
+});
+
 describe('mapSkippingMissing', () => {
   it('runs at most four at once', async () => {
     let inFlight = 0;
@@ -197,6 +218,7 @@ describe('mapSkippingMissing', () => {
         await Promise.resolve();
         inFlight -= 1;
       },
+      deadlineMs: 60_000,
     });
     expect(peak).toBe(4);
   });
@@ -205,7 +227,26 @@ describe('mapSkippingMissing', () => {
     const out = await mapSkippingMissing({
       items: [1, 2, 3, 4, 5, 6],
       work: item => Promise.resolve(item * 10),
+      deadlineMs: 60_000,
     });
-    expect(out).toEqual([10, 20, 30, 40, 50, 60]);
+    expect(out).toEqual({ results: [10, 20, 30, 40, 50, 60], notReached: 0 });
+  });
+
+  it('stops waiting at the deadline and says how many items it never reached', async () => {
+    const out = await mapSkippingMissing({
+      items: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      work: item => (item > 4 ? new Promise<number>(() => undefined) : Promise.resolve(item)),
+      deadlineMs: 50,
+    });
+    expect(out).toEqual({ results: [1, 2, 3, 4], notReached: 5 });
+  });
+
+  it('returns nothing, not an error, when the first batch never answers', async () => {
+    const out = await mapSkippingMissing({
+      items: [1, 2],
+      work: () => new Promise<number>(() => undefined),
+      deadlineMs: 20,
+    });
+    expect(out).toEqual({ results: [], notReached: 2 });
   });
 });

@@ -140,11 +140,38 @@ export function decodeEncodedWords(header: string): string {
 
 /**
  * Characters that change what a reader sees without being visible: Unicode tag characters (a known way to
- * smuggle instructions), bidirectional controls (which reorder text to disguise it), and zero-width or soft
- * hyphen padding. Joiners (ZWNJ, ZWJ) stay, because Persian, Indic scripts and emoji need them.
+ * smuggle instructions), variation selectors, bidirectional controls (which reorder text to disguise it), the
+ * deprecated format controls, and zero-width or soft hyphen padding. Joiners (ZWNJ, ZWJ) stay, because Persian,
+ * Indic scripts and emoji need them.
  */
-const INVISIBLE = /[\u{E0000}-\u{E007F}\u061C\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\u00AD]/gu;
+const INVISIBLE_RANGES: readonly (readonly [number, number])[] = [
+  [0xe0000, 0xe007f],
+  [0xe0100, 0xe01ef],
+  [0xfe00, 0xfe0e],
+  [0x061c, 0x061c],
+  [0x180e, 0x180e],
+  [0x200b, 0x200b],
+  [0x200e, 0x200f],
+  [0x202a, 0x202e],
+  [0x2060, 0x206f],
+  [0xfeff, 0xfeff],
+  [0x00ad, 0x00ad],
+];
+
+// Built from code points so the pattern is readable and the character-class lint rule has nothing to flag.
+const INVISIBLE = new RegExp(
+  `[${INVISIBLE_RANGES.map(([low, high]) => `\\u{${low.toString(16)}}-\\u{${high.toString(16)}}`).join('')}]`,
+  'gu',
+);
+
+/** The emoji presentation marker is legitimate only right after a pictograph. */
+const STRAY_EMOJI_MARKER = /(?<!\p{Extended_Pictographic})\uFE0F/gu;
 
 export function stripInvisible(text: string): string {
-  return text.replace(INVISIBLE, '');
+  return text.replace(INVISIBLE, '').replace(STRAY_EMOJI_MARKER, '');
+}
+
+/** True when the text carries a character that would not show, so what is read or sent is not what is seen. */
+export function hasHiddenCharacters(text: string): boolean {
+  return stripInvisible(text) !== text;
 }

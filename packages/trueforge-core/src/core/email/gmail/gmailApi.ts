@@ -297,18 +297,34 @@ export class GmailApi {
   }
 }
 
+/** How long a list call may spend fetching its rows before it returns what it has. */
+export const LIST_DEADLINE_MS = 60_000;
+
 /**
  * Runs the work for each item with a few in flight at once, keeping the order. An item Gmail no longer has
  * (a thread deleted while the list was read) is left out instead of failing the whole list; any other
- * failure still fails it.
+ * failure still fails it. Once the deadline passes it stops waiting and returns the rows it has, saying how
+ * many items it never reached.
  */
 export async function mapSkippingMissing<T, R>(input: {
   items: readonly T[];
   work: (item: T) => Promise<R>;
-}): Promise<R[]> {
+  deadlineMs: number;
+}): Promise<{ results: R[]; notReached: number }> {
   const results: R[] = [];
+  const startedAt = Date.now();
   for (let start = 0; start < input.items.length; start += DETAIL_CONCURRENCY) {
-    const batch = await Promise.all(
+    const remaining = input.deadlineMs - (Date.now() - startedAt);
+    if (remaining <= 0) {
+      return { results, notReached: input.items.length - start };
+    }
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<'timeout'>(resolve => {
+      timer = setTimeout(() => {
+        resolve('timeout');
+      }, remaining);
+    });
+    const batch = Promise.all(
       input.items.slice(start, start + DETAIL_CONCURRENCY).map(async item => {
         try {
           return { found: true as const, value: await input.work(item) };
@@ -320,11 +336,19 @@ export async function mapSkippingMissing<T, R>(input: {
         }
       }),
     );
-    for (const entry of batch) {
+    const outcome = await Promise.race([batch, timedOut]).finally(() => {
+      clearTimeout(timer);
+    });
+    if (outcome === 'timeout') {
+      // The requests still in flight finish or fail on their own; their results are not used.
+      batch.catch(() => undefined);
+      return { results, notReached: input.items.length - start };
+    }
+    for (const entry of outcome) {
       if (entry.found) {
         results.push(entry.value);
       }
     }
   }
-  return results;
+  return { results, notReached: 0 };
 }

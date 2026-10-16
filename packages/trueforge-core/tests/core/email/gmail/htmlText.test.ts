@@ -67,6 +67,22 @@ describe('htmlToText content', () => {
     ).toBe('Shown\nAlso shown');
   });
 
+  it('drops text hidden with opacity, a zero font size in any unit, or visibility, however the style is written', () => {
+    expect(
+      htmlToText(
+        '<p>Shown</p><span style="opacity:0">a</span><span style="OPACITY: 0 !important">b</span><span style="font-size:0px">c</span><span style="color:red;font-size:0.0em">d</span><div style="visibility:collapse">e</div><p>Also shown</p>',
+      ),
+    ).toBe('Shown\nAlso shown');
+  });
+
+  it('keeps text that is only small or faint', () => {
+    expect(
+      htmlToText(
+        '<span style="opacity:0.5">faint</span> <span style="font-size:0.9em">small</span> <span style="font-size:10px">ten</span>',
+      ),
+    ).toBe('faint small ten');
+  });
+
   it('removes Outlook conditional comments and markers', () => {
     expect(
       htmlToText(

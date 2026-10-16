@@ -99,6 +99,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** The emoji presentation marker is shown as it is after a pictograph, and escaped anywhere else. */
+const EXTENDED_PICTOGRAPHIC = /^\p{Extended_Pictographic}$/u;
+
 /** True for code points that can hide or fake text: controls, bidi controls, zero-width and line separators. */
 function needsEscape(codePoint: number): boolean {
   return (
@@ -107,8 +110,13 @@ function needsEscape(codePoint: number): boolean {
     codePoint === 0x061c ||
     (codePoint >= 0x200b && codePoint <= 0x200f) ||
     (codePoint >= 0x2028 && codePoint <= 0x202e) ||
-    (codePoint >= 0x2060 && codePoint <= 0x2069) ||
+    (codePoint >= 0x2060 && codePoint <= 0x206f) ||
+    codePoint === 0x00ad ||
+    codePoint === 0x180e ||
+    (codePoint >= 0xfe00 && codePoint <= 0xfe0f) ||
     codePoint === 0xfeff ||
+    (codePoint >= 0xe0000 && codePoint <= 0xe007f) ||
+    (codePoint >= 0xe0100 && codePoint <= 0xe01ef) ||
     (codePoint >= 0xd800 && codePoint <= 0xdfff)
   );
 }
@@ -121,11 +129,14 @@ function needsEscape(codePoint: number): boolean {
 export function escapeDisplayText(text: string, options?: { keepNewlines?: boolean }): string {
   const keepNewlines = options?.keepNewlines === true;
   let out = '';
+  let previous = '';
   for (const char of keepNewlines ? text.replace(/\r\n/g, '\n') : text) {
     const codePoint = char.codePointAt(0) ?? 0;
+    const emojiMarker = codePoint === 0xfe0f && EXTENDED_PICTOGRAPHIC.test(previous);
+    previous = char;
     if (keepNewlines && codePoint === 0x0a) {
       out += char;
-    } else if (needsEscape(codePoint)) {
+    } else if (needsEscape(codePoint) && !emojiMarker) {
       out += `\\u{${codePoint.toString(16).toUpperCase().padStart(4, '0')}}`;
     } else {
       out += char;

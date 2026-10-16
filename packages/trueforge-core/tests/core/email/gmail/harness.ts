@@ -17,7 +17,9 @@ export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-export type Route = (url: URL, init: RequestInit | undefined) => Response | undefined;
+/** `HANG` is a request Google never answers. */
+export const HANG = 'hang';
+export type Route = (url: URL, init: RequestInit | undefined) => Response | typeof HANG | undefined;
 
 /** A scripted stand-in for Google: answers by route, records every request. */
 export function scriptedGoogle(routes: Route[]) {
@@ -34,6 +36,9 @@ export function scriptedGoogle(routes: Route[]) {
     }
     for (const route of routes) {
       const response = route(url, init);
+      if (response === HANG) {
+        return new Promise<Response>(() => undefined);
+      }
       if (response !== undefined) {
         return Promise.resolve(response);
       }
@@ -49,6 +54,7 @@ export async function build(input: {
   stager?: AttachmentStager | undefined;
   unattended?: boolean;
   reviews?: DraftReviewLedger;
+  listDeadlineMs?: number;
 }) {
   const connections = new FakeConnections();
   await connections.save(connectedRecord());
@@ -77,6 +83,7 @@ export async function build(input: {
     attachmentStager: input.stager,
     sentinel,
     reviews,
+    listDeadlineMs: input.listDeadlineMs ?? 60_000,
   });
   return { tools, google, sentinel, connections, reviews, sleeps };
 }

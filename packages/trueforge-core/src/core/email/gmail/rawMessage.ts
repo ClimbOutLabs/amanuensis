@@ -56,7 +56,11 @@ function messageIds(value: string): string[] {
 
 /** `Re: <original subject>` without stacking prefixes. */
 export function replySubject(original: string): string {
-  const base = original.replace(/^(\s*re\s*:\s*)+/i, '').trim();
+  // The subject is already cut to a short length; a loop keeps this free of nested quantifiers.
+  let base = original.trim();
+  while (/^re\s*:/i.test(base)) {
+    base = base.slice(base.indexOf(':') + 1).trim();
+  }
   return `Re: ${base}`;
 }
 
