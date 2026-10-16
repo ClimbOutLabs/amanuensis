@@ -11,10 +11,12 @@
  * script-bearing SVG (SMIL elements, `foreignObject`, nested documents) are not on the list and
  * are removed like everything else unlisted. `xlink:href` is checked by the same rules as `href`.
  *
- * `<style>` elements and inline `style` attributes are kept, with the CSS scrubbed by
- * `scrubCss`: `@import` is dropped whole, every `url(...)` whose target is not a `data:` URI is
- * neutralised, `image-set(...)` is dropped, and legacy `expression(...)` / `-moz-binding`
- * declarations are stripped. A `style` attribute value therefore never carries a remote fetch.
+ * `<style>` elements and inline `style` attributes are kept, with the CSS scrubbed by `scrubCss`:
+ * CSS escapes are decoded first so no spelling hides a keyword, then `@import` is dropped and
+ * every `url(...)` that is not a same-document fragment or a raster `data:` image, `image-set(...)`
+ * and the other fetching functions are replaced by `none`. SVG presentation attributes get the
+ * same decoding and a fragment-only rule for any `url(...)`. Output is re-sanitised until it is
+ * stable, so markup that only appears after a reparse never reaches the frame.
  *
  * The sandboxed iframe (`sandbox="allow-same-origin"`, no `allow-scripts`) is the primary
  * boundary; this sanitiser is defense in depth so the srcdoc itself never carries anything live.
@@ -78,33 +80,121 @@ function isAllowedUseReference(value: string): boolean {
   return isFragmentReference(value) || isAllowedImageSrc(value);
 }
 
-/** A CSS `url(...)` in a presentation attribute may only name a same-document fragment. */
+/**
+ * A CSS `url(...)` in a presentation attribute may only name a same-document fragment, with an
+ * optional plain-word fallback paint (`url(#grad) red`).
+ */
 function isFragmentUrl(value: string): boolean {
-  return /^url\(\s*(['"]?)#[^'")]*\1\s*\)$/i.test(value.trim());
+  return /^url\(\s*(['"]?)#[^'"()\s]*\1\s*\)(?:\s+[a-zA-Z0-9#%.,\s-]+)?$/i.test(value.trim());
 }
 
 /**
+ * Decodes CSS escapes so `u\72l(` and `@\69mport` are seen as the browser reads them. Escapes
+ * that would yield a backslash, NUL, a surrogate, or an out-of-range code point are dropped or
+ * replaced so decoding can never produce a fresh escape.
+ */
+function decodeCssEscapes(css: string): string {
+  const decoded = css.replace(
+    /\\(?:([0-9a-fA-F]{1,6})[ \t\n\r\f]?|(\r\n|[\n\r\f])|([\s\S]))/g,
+    (_match, hex: string | undefined, newline: string | undefined, char: string | undefined) => {
+      if (hex !== undefined) {
+        const code = Number.parseInt(hex, 16);
+        if (code === 0x5c) return '';
+        if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return '�';
+        return String.fromCodePoint(code);
+      }
+      if (newline !== undefined) return '';
+      return char === '\\' ? '' : (char ?? '');
+    },
+  );
+  return decoded.replaceAll('\\', '');
+}
+
+/** Index just past the `)` closing the call whose `(` is at `open`, or the end when unclosed. */
+function endOfCssCall({ css, open }: { css: string; open: number }): number {
+  let depth = 0;
+  let i = open;
+  while (i < css.length) {
+    const char = css.charAt(i);
+    if (char === '"' || char === "'") {
+      const close = css.indexOf(char, i + 1);
+      const newline = css.slice(i + 1, close === -1 ? css.length : close).search(/[\n\r\f]/);
+      if (close === -1 || newline !== -1) return css.length;
+      i = close + 1;
+      continue;
+    }
+    if (char === '(') depth += 1;
+    if (char === ')') {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+    i += 1;
+  }
+  return css.length;
+}
+
+/** Functions that can fetch or run something; each is replaced by `none` (`url` is vetted below). */
+const CSS_CALL_RE = /(image-set|cross-fade|image|src|element|paint|expression|url)\(/gi;
+
+/** The raw target of a well-formed `url(...)` call, or null for anything malformed or unclosed. */
+function cssUrlTarget(call: string): string | null {
+  if (!call.endsWith(')')) return null;
+  const inner = call.slice(call.indexOf('(') + 1, -1).trim();
+  const quoted = /^(["'])([^"'\n\r\f]*)\1$/.exec(inner);
+  if (quoted !== null) return quoted[2] ?? null;
+  return /^[^\s"'()]*$/.test(inner) ? inner : null;
+}
+
+function isAllowedCssUrl(call: string): boolean {
+  const target = cssUrlTarget(call);
+  if (target === null) return false;
+  return isFragmentReference(target) || isAllowedImageSrc(target);
+}
+
+function scrubCssOnce(css: string): string {
+  // `<` is never needed in CSS and would let a decoded `</style>` end the element on reparse.
+  let result = css.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, '').replaceAll('<', '');
+  result = decodeCssEscapes(result);
+  result = result.replace(/@import[^;{}]*;?/gi, '');
+  result = result.replace(/(?:-moz-binding|behavior)\s*:[^;}]*;?/gi, '');
+
+  let out = '';
+  let position = 0;
+  CSS_CALL_RE.lastIndex = 0;
+  for (let match = CSS_CALL_RE.exec(result); match !== null; match = CSS_CALL_RE.exec(result)) {
+    const end = endOfCssCall({ css: result, open: match.index + match[0].length - 1 });
+    const call = result.slice(match.index, end);
+    const keep = (match[1] ?? '').toLowerCase() === 'url' && isAllowedCssUrl(call);
+    out += result.slice(position, match.index) + (keep ? call : 'none');
+    position = end;
+    CSS_CALL_RE.lastIndex = end;
+  }
+  return out + result.slice(position);
+}
+
+/** Longest scrub chain tried before giving up; real CSS settles after one or two passes. */
+const MAX_CSS_PASSES = 4;
+
+/**
  * One CSS scrubber for both `<style>` blocks and inline `style` attributes, so there is a single
- * place that decides what CSS may reach off-page rather than a special case per property.
- *
- *   - `@import` at-rules are dropped whole: their target is external by construction.
- *   - every remaining `url(...)` is neutralised unless its target is a `data:` URI, covering
- *     `background`, `background-image`, `cursor`, `list-style-image`, `border-image`, `mask`,
- *     `content`, and any other property that can carry a `url()` — not just `@import`.
- *   - `image-set(...)` is dropped outright: every branch can carry a remote URL, and
- *     allowlisting per-branch `data:` URIs is not worth the parsing risk.
- *   - `expression(...)` (legacy IE script-in-CSS) and `-moz-binding` (legacy Gecko XBL, which can
- *     load an external binding document) are stripped too.
+ * place that decides what CSS may reach off-page. It runs to a fixed point: what the browser
+ * parses is exactly what was scanned, and a value that never settles is dropped.
  */
 function scrubCss(css: string): string {
-  let result = css.replace(/@import\b[^;]*;?/gi, '');
-  result = result.replace(/image-set\s*\([^)]*\)/gi, 'none');
-  result = result.replace(/url\(\s*(['"]?)([^'")]*)\1\s*\)/gi, (match, _quote: string, target: string) =>
-    /^data:/i.test(target.trim()) ? match : 'none',
-  );
-  result = result.replace(/expression\s*\([^)]*\)/gi, 'none');
-  result = result.replace(/-moz-binding\s*:[^;]*;?/gi, '');
-  return result;
+  let current = css;
+  for (let pass = 0; pass < MAX_CSS_PASSES; pass += 1) {
+    const next = scrubCssOnce(current);
+    if (next === current) return current;
+    current = next;
+  }
+  return '';
+}
+
+/** True when an SVG attribute value, read as CSS, holds nothing that can fetch off-page. */
+function isSafePresentationValue(value: string): boolean {
+  const decoded = decodeCssEscapes(value);
+  CSS_CALL_RE.lastIndex = 0;
+  return !CSS_CALL_RE.test(decoded) || isFragmentUrl(decoded);
 }
 
 /**
@@ -172,20 +262,21 @@ const SVG_PRESENTATION_ATTRIBUTES = [
 ];
 
 /**
- * The element allow-list: tag name to the attributes that element may carry beyond the global
- * set. Tag names are the names the HTML parser reports, so SVG tags whose names are not
- * all-lowercase (`clipPath`, `linearGradient`, `textPath`, ...) are spelled as parsed. Any tag
- * absent here is removed with its contents: scripts, frames, forms and every form control,
+ * The element allow-lists, one per namespace: tag name to the attributes that element may carry
+ * beyond the global set. HTML and SVG share tag names (`a`, `style`, `title`) but not rules, so
+ * they never share an entry. SVG tag names are spelled as parsed (`clipPath`, `linearGradient`,
+ * ...). An element in any other namespace (MathML, unknown), or absent from its list, is removed with its contents: scripts, frames, forms and every form control,
  * media elements, embedded documents, SMIL animation, `template`, and anything unrecognised.
  */
-const ALLOWED_ELEMENTS = new Map<string, ReadonlySet<string>>();
+const HTML_ELEMENTS = new Map<string, ReadonlySet<string>>();
+const SVG_ELEMENTS = new Map<string, ReadonlySet<string>>();
 
 function allowElement(tag: string, attributes: readonly string[]): void {
-  ALLOWED_ELEMENTS.set(tag, new Set(attributes));
+  HTML_ELEMENTS.set(tag, new Set(attributes));
 }
 
 function allowSvgElement(tag: string, attributes: readonly string[]): void {
-  ALLOWED_ELEMENTS.set(tag, new Set([...SVG_PRESENTATION_ATTRIBUTES, ...attributes]));
+  SVG_ELEMENTS.set(tag, new Set([...SVG_PRESENTATION_ATTRIBUTES, ...attributes]));
 }
 
 // Text, structure, and formatting.
@@ -278,6 +369,7 @@ allowSvgElement('g', []);
 allowSvgElement('defs', []);
 allowSvgElement('switch', []);
 allowSvgElement('symbol', ['viewBox', 'preserveAspectRatio']);
+allowSvgElement('style', []);
 allowSvgElement('title', []);
 allowSvgElement('desc', []);
 allowSvgElement('a', ['href', 'xlink:href', 'target', 'rel']);
@@ -331,13 +423,12 @@ allowSvgElement('marker', [
 allowSvgElement('mask', ['maskUnits', 'maskContentUnits', 'x', 'y', 'width', 'height']);
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
-/**
- * The tag key for the allow-list. HTML tag names are reported upper-case and are matched
- * lower-case; SVG tag names keep their parsed spelling (`clipPath`, `textPath`, ...).
- */
-function elementTag(element: Element): string {
-  return element.namespaceURI === SVG_NAMESPACE ? element.tagName : element.tagName.toLowerCase();
+function allowedAttributesFor(element: Element): ReadonlySet<string> | undefined {
+  if (element.namespaceURI === HTML_NAMESPACE) return HTML_ELEMENTS.get(element.localName);
+  if (element.namespaceURI === SVG_NAMESPACE) return SVG_ELEMENTS.get(element.localName);
+  return undefined;
 }
 
 /**
@@ -365,8 +456,8 @@ function urlPasses(rule: UrlRule, value: string): boolean {
 }
 
 function sanitiseElement(element: Element): void {
-  const tag = elementTag(element);
-  const allowedAttributes = ALLOWED_ELEMENTS.get(tag);
+  const tag = element.localName;
+  const allowedAttributes = allowedAttributesFor(element);
   if (allowedAttributes === undefined) {
     element.remove();
     return;
@@ -412,8 +503,17 @@ function sanitiseElement(element: Element): void {
       element.removeAttribute(name);
       continue;
     }
-    // A presentation attribute may reference a paint server or clip path only in-document.
-    if ((name === 'clip-path' || name === 'mask') && attr.value.includes('url(') && !isFragmentUrl(attr.value)) {
+    // SVG presentation attributes are parsed as CSS: any value that can fetch is fragment-only.
+    if (
+      element.namespaceURI === SVG_NAMESPACE &&
+      rule === null &&
+      !isGlobalAttribute(lowerName) &&
+      !isSafePresentationValue(attr.value)
+    ) {
+      element.removeAttribute(name);
+      continue;
+    }
+    if (name === 'xmlns' && attr.value !== SVG_NAMESPACE) {
       element.removeAttribute(name);
       continue;
     }
@@ -430,12 +530,7 @@ function sanitiseElement(element: Element): void {
   }
 }
 
-/**
- * Returns `null` when no DOM parser is available (e.g. during server rendering); callers should
- * skip the iframe in that case rather than render unsanitised content.
- */
-export function sanitizeSpaceHtml(html: string): string | null {
-  if (typeof DOMParser === 'undefined') return null;
+function sanitizeOnce(html: string): string {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   for (const child of Array.from(doc.body.children)) {
     sanitiseElement(child);
@@ -446,4 +541,24 @@ export function sanitizeSpaceHtml(html: string): string | null {
     sanitiseElement(child);
   }
   return doc.head.innerHTML + doc.body.innerHTML;
+}
+
+/** Re-sanitise passes tried before a page is treated as unstable and rejected. */
+const MAX_REPARSE_PASSES = 4;
+
+/**
+ * Returns `null` when no DOM parser is available (e.g. during server rendering) or when the
+ * output does not settle: serialised markup can parse into a different tree (mutation XSS), so
+ * the result is sanitised again until a pass changes nothing. Callers should skip the iframe on
+ * `null` rather than render unsanitised content.
+ */
+export function sanitizeSpaceHtml(html: string): string | null {
+  if (typeof DOMParser === 'undefined') return null;
+  let current = sanitizeOnce(html);
+  for (let pass = 0; pass < MAX_REPARSE_PASSES; pass += 1) {
+    const next = sanitizeOnce(current);
+    if (next === current) return current;
+    current = next;
+  }
+  return null;
 }

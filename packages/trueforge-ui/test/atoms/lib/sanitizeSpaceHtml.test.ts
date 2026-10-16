@@ -492,3 +492,211 @@ describe('sanitizeSpaceHtml safe content', () => {
     expect(sanitizeSpaceHtml(once ?? '')).toBe(once);
   });
 });
+
+describe('sanitizeSpaceHtml CSS bypass attempts', () => {
+  const remote = /evil\.example/;
+
+  it.each([
+    ['an escaped @import keyword', '<style>@\\69mport "https://evil.example/x.css"; .a{color:red}</style>'],
+    ['a fully escaped @import', '<style>@\\000069\\00006d\\000070ort url(https://evil.example/x.css);</style>'],
+    ['an escaped url function name', '<div style="background:u\\72l(https://evil.example/b.png)">x</div>'],
+    ['an escaped paren-less url name', '<div style="background:\\75rl(https://evil.example/b.png)">x</div>'],
+    ['a quoted url containing a paren', '<div style="background:url(\'https://evil.example/a)b\')">x</div>'],
+    ['a double-quoted url containing a paren', '<div style=\'background:url("https://evil.example/a)b")\'>x</div>'],
+    ['an unclosed url(', '<div style="background:url(https://evil.example/b.png">x</div>'],
+    ['an unclosed quoted url(', '<style>.a{background:url("https://evil.example/b.png}</style>'],
+    ['a url with a comment between letters', '<style>.a{background:url(/**/https://evil.example/b.png)}</style>'],
+    ['a nested import that reassembles', '<style>@im@importport "https://evil.example/x.css";</style>'],
+    ['an escaped image-set', '<div style="background:image-\\73 et(\'https://evil.example/a.png\' 1x)">x</div>'],
+    ['a prefixed image-set', '<div style="background:-webkit-image-set(url(https://evil.example/a.png) 1x)">x</div>'],
+    ['cross-fade', '<div style="background:cross-fade(url(https://evil.example/a.png), red)">x</div>'],
+    ['the src() function', '<div style="background:src(\'https://evil.example/a.png\')">x</div>'],
+    ['an escaped -moz-binding', '<div style="-moz-bin\\64ing:url(https://evil.example/b.xml)">x</div>'],
+    ['expression()', '<div style="width:expression(alert(1))">x</div>'],
+  ])('neutralises %s', (_label, html) => {
+    const out = sanitizeSpaceHtml(html) ?? '';
+    expect(out).not.toMatch(remote);
+    expect(out).not.toMatch(/@import|@\\|expression|binding/i);
+    expect(out).not.toMatch(/url\((?!#|["']?data:)/i);
+  });
+
+  it('decodes escapes in the kept CSS so no escape survives to the frame', () => {
+    const out = sanitizeSpaceHtml('<style>.a{content:"\\201C";color:\\72 ed}</style>') ?? '';
+    expect(out).not.toContain('\\');
+    expect(out).toContain('color:red');
+  });
+
+  it('keeps a data: raster url and a fragment url but drops a data: svg url', () => {
+    const out =
+      sanitizeSpaceHtml(
+        '<style>.a{background:url("data:image/png;base64,AAAA")}.b{fill:url(#grad)}' +
+          '.c{background:url("data:image/svg+xml;utf8,<svg/>")}</style>',
+      ) ?? '';
+    expect(out).toContain('url("data:image/png;base64,AAAA")');
+    expect(out).toContain('fill:url(#grad)');
+    expect(out).not.toContain('svg+xml');
+  });
+
+  it('cannot end the style element through a decoded closing tag', () => {
+    const out = sanitizeSpaceHtml('<style>.a{color:red}<\\2f style><img src=x onerror=alert(1)></style>') ?? '';
+    const doc = new DOMParser().parseFromString(out, 'text/html');
+    expect(doc.querySelector('img')).toBeNull();
+    expect(doc.querySelectorAll('style')).toHaveLength(1);
+  });
+});
+
+describe('sanitizeSpaceHtml SVG url() attributes', () => {
+  it.each(['fill', 'stroke', 'clip-path', 'mask', 'color', 'font-family'])('drops a remote url() in %s', attribute => {
+    const out = sanitizeSpaceHtml(
+      `<svg><rect width="1" height="1" ${attribute}="url(https://evil.example/p.svg#x)"/></svg>`,
+    );
+    expect(out).not.toContain('evil.example');
+    expect(out).toContain('<rect');
+  });
+
+  it('drops an escaped or quoted remote url() in fill', () => {
+    const escaped = sanitizeSpaceHtml('<svg><rect fill="u\\72l(https://evil.example/p.svg#x)"/></svg>');
+    const quoted = sanitizeSpaceHtml('<svg><rect stroke="url(&quot;https://evil.example/a)b&quot;)"/></svg>');
+    const unclosed = sanitizeSpaceHtml('<svg><rect fill="url(https://evil.example/p.svg"/></svg>');
+    for (const out of [escaped, quoted, unclosed]) {
+      expect(out).not.toContain('evil.example');
+      expect(out).not.toContain('fill=');
+      expect(out).not.toContain('stroke=');
+    }
+  });
+
+  it('keeps fragment paints, with or without a fallback colour', () => {
+    const out = sanitizeSpaceHtml(
+      '<svg><defs><linearGradient id="g"></linearGradient></defs>' +
+        '<rect fill="url(#g)" stroke="url(#g) red" width="1" height="1"/></svg>',
+    );
+    expect(out).toContain('fill="url(#g)"');
+    expect(out).toContain('stroke="url(#g) red"');
+  });
+
+  it('drops a fragment paint whose fallback tries to carry a second url', () => {
+    const out = sanitizeSpaceHtml('<svg><rect fill="url(#g) url(https://evil.example/p)"/></svg>');
+    expect(out).not.toContain('evil.example');
+  });
+});
+
+describe('sanitizeSpaceHtml namespaces', () => {
+  it('keeps the HTML a link and its href when the SVG a entry is registered', () => {
+    const out = sanitizeSpaceHtml('<a href="https://example.com" target="_blank" rel="noopener">x</a>') ?? '';
+    expect(out).toContain('href="https://example.com"');
+    expect(out).toContain('target="_blank"');
+  });
+
+  it('keeps the SVG a with its xlink:href rules', () => {
+    const out =
+      sanitizeSpaceHtml(
+        '<svg><a xlink:href="javascript:alert(1)"><text>x</text></a><a href="https://example.com"><text>y</text></a></svg>',
+      ) ?? '';
+    expect(out).not.toContain('javascript:');
+    expect(out).toContain('href="https://example.com"');
+  });
+
+  it('does not let the SVG a entry loosen the HTML a: HTML a still drops xlink:href and ping', () => {
+    const out =
+      sanitizeSpaceHtml('<a href="/ok" ping="https://evil.example" xlink:href="https://evil.example">x</a>') ?? '';
+    expect(out).not.toContain('evil.example');
+    expect(out).toContain('href="/ok"');
+  });
+
+  it('removes an SVG-namespace element that shares a name with an HTML-only element', () => {
+    const out = sanitizeSpaceHtml('<svg><iframe src="https://evil.example"></iframe><img src="x"/></svg>') ?? '';
+    expect(out).not.toContain('iframe');
+    expect(out).not.toContain('<img');
+  });
+
+  it('removes MathML and the namespace-confusion nesting around it', () => {
+    const out =
+      sanitizeSpaceHtml(
+        '<math><mtext><table><mglyph><style><!--</style><img title="--&gt;&lt;/mglyph&gt;&lt;img src=1 onerror=alert(1)&gt;">' +
+          '</table></mtext></math><p>after</p>',
+      ) ?? '';
+    expect(out).not.toContain('onerror');
+    expect(out).not.toContain('<math');
+    expect(out).toContain('<p>after</p>');
+  });
+
+  it('keeps svg style text from carrying markup into the page', () => {
+    const out =
+      sanitizeSpaceHtml('<svg><style><a id="</style><img src=x onerror=alert(1)>">.a{fill:red}</style></svg>') ?? '';
+    expect(out).not.toContain('onerror');
+    expect(out).not.toContain('<img');
+  });
+
+  it('keeps xmlns only when it is the SVG namespace', () => {
+    const good = sanitizeSpaceHtml('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>') ?? '';
+    const bad = sanitizeSpaceHtml('<svg xmlns="http://www.w3.org/1999/xhtml"><rect/></svg>') ?? '';
+    expect(good).toContain('xmlns="http://www.w3.org/2000/svg"');
+    expect(bad).not.toContain('xmlns');
+  });
+});
+
+describe('sanitizeSpaceHtml link and element corpus', () => {
+  it.each([
+    ['javascript: href', '<a href="javascript:alert(1)">x</a>'],
+    ['data: href', '<a href="data:text/html,<script>alert(1)</script>">x</a>'],
+    ['data: svg src', '<img src="data:image/svg+xml,<svg onload=alert(1)>">'],
+    ['javascript: xlink:href on a', '<svg><a xlink:href="javascript:alert(1)"><text>x</text></a></svg>'],
+    ['javascript: href on svg a', '<svg><a href="javascript:alert(1)"><text>x</text></a></svg>'],
+    ['data: xlink:href on use', '<svg><use xlink:href="data:image/svg+xml,<svg/>#a"/></svg>'],
+    ['data: href on image', '<svg><image href="data:text/html,x"/></svg>'],
+    ['mixed-case scheme', '<a href="JaVaScRiPt:alert(1)">x</a>'],
+    ['tab-split scheme', '<a href="java&#9;script:alert(1)">x</a>'],
+    ['vbscript href', '<a href="vbscript:msgbox(1)">x</a>'],
+  ])('drops %s', (_label, html) => {
+    const out = sanitizeSpaceHtml(html) ?? '';
+    expect(out).not.toMatch(/javascript:|vbscript:|data:text|svg\+xml|onload/i);
+  });
+
+  it.each([
+    ['onerror on img', '<img src="data:image/png;base64,AAAA" onerror="alert(1)">'],
+    ['onload on svg', '<svg onload="alert(1)"><rect/></svg>'],
+    ['onfocus with autofocus', '<div tabindex="0" autofocus onfocus="alert(1)">x</div>'],
+    ['onmouseover on a', '<a href="/x" onmouseover="alert(1)">x</a>'],
+    ['onclick on svg rect', '<svg><rect onclick="alert(1)"/></svg>'],
+    ['ontoggle on details', '<details open ontoggle="alert(1)">x</details>'],
+  ])('removes the event handler: %s', (_label, html) => {
+    expect(sanitizeSpaceHtml(html) ?? '').not.toMatch(/on[a-z]+=/i);
+  });
+
+  it.each([
+    ['base', '<base href="https://evil.example/"><p>x</p>', '<base'],
+    ['form', '<form action="https://evil.example"><button>go</button></form>', '<form'],
+    ['meta refresh', '<meta http-equiv="refresh" content="0;url=https://evil.example"><p>x</p>', '<meta'],
+    ['meta in body', '<p>x</p><meta http-equiv="refresh" content="0;url=https://evil.example">', '<meta'],
+    ['iframe', '<iframe srcdoc="<script>alert(1)</script>"></iframe>', '<iframe'],
+    ['object', '<object data="https://evil.example"></object>', '<object'],
+    ['embed', '<embed src="https://evil.example">', '<embed'],
+    ['noscript', '<noscript><img src="https://evil.example"></noscript>', 'noscript'],
+    ['link', '<link rel="stylesheet" href="https://evil.example/x.css">', '<link'],
+  ])('removes <%s>', (_label, html, needle) => {
+    const out = sanitizeSpaceHtml(html) ?? '';
+    expect(out).not.toContain(needle);
+    expect(out).not.toContain('evil.example');
+  });
+});
+
+describe('sanitizeSpaceHtml reparse stability', () => {
+  const corpus = [
+    '<p>plain</p>',
+    '<style>.a>.b{color:red}.c::after{content:"a & b"}</style><div class="a"><span class="b">x</span></div>',
+    '<svg><style>.a>.b{fill:red}</style><g class="a"><rect class="b"/></g></svg>',
+    '<table><tr><td>1,234</td><td>text</td></tr></table>',
+    '<ul><li>one<li>two</ul><p>para<p>para two',
+    '<a href="https://example.com/?a=1&b=2">q</a>',
+    '<svg><a href="https://example.com"><text>x</text></a></svg>',
+    '<math><mi>x</mi></math><p>after</p>',
+    '<div style="color:red;background:url(&quot;data:image/png;base64,AAAA&quot;)">x</div>',
+    '<style>@\\69mport "https://evil.example/x.css";.a{color:blue}</style>',
+  ];
+
+  it.each(corpus)('output is a fixed point: %s', html => {
+    const once = sanitizeSpaceHtml(html);
+    expect(once).not.toBeNull();
+    expect(sanitizeSpaceHtml(once ?? '')).toBe(once);
+  });
+});
