@@ -15,9 +15,8 @@ const ORIGINS = [
   'http://127.0.0.1:8791',
   'http://localhost:8791',
   'http://192.168.1.20:8791',
-  'http://100.101.102.103:8791',
+  'http://10.0.0.5:8791',
   'http://spark.local:8791',
-  'http://spark.example.ts.net:8791',
   'https://aman.example.com',
 ];
 
@@ -191,7 +190,7 @@ describe('signing in to an instance opened on several addresses', () => {
   });
 
   it('talks to the sign-in service only at its own internal address, and the token still names that issuer', async () => {
-    await signInAt('http://100.101.102.103:8791');
+    await signInAt('http://10.0.0.5:8791');
     expect(upstream.every(url => url.startsWith(`${ISSUER}/`))).toBe(true);
   });
 

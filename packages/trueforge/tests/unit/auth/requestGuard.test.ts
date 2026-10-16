@@ -208,9 +208,8 @@ describe('request guard: instance opened on several addresses', () => {
     'http://127.0.0.1:18791',
     'http://localhost:18791',
     'http://192.168.1.20:18791',
-    'http://100.101.102.103:18791',
+    'http://10.0.0.5:18791',
     'http://spark.local:18791',
-    'http://spark.example.ts.net:18791',
   ];
   const app = () => appFor({ port: 8790, publicBaseUrl: 'http://192.168.1.20:18791', allowedOrigins: ORIGINS });
 
@@ -226,7 +225,7 @@ describe('request guard: instance opened on several addresses', () => {
     'spark:18791',
     'evil.example:18791',
     'spark.local.evil.example:18791',
-    '10.0.0.5:18791',
+    '10.0.0.6:18791',
   ])('rejects %s with 421', async host => {
     expect(await status({ app: app(), headers: { host } })).toBe(421);
   });

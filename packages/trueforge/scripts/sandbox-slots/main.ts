@@ -102,7 +102,7 @@ function prepareSudo(ui: Ui): Promise<boolean> {
     return Promise.resolve(false);
   }
   ui.hint('The next steps need your password once.');
-  const asked = spawnSync('sudo', ['-v', '-p', ui.promptText({ label: 'Your password, for sudo (not shown):' })], {
+  const asked = spawnSync('sudo', ['-v', '-p', ui.promptText({ label: 'Your password, for sudo (not shown)' })], {
     stdio: 'inherit',
   });
   return Promise.resolve(asked.status === 0 && spawnSync('sudo', ['-n', 'true'], { stdio: 'ignore' }).status === 0);

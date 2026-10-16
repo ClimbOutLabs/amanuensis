@@ -294,7 +294,8 @@ test_purge_removes_leftovers_that_were_never_saved() {
   install_machine
   printf '%s\n' "ghost-slots c-ghost1" "ghost-slots c-ghost2" >"$SB_STATE/leftover_containers"
   printf '%s\n' "ghost-slots net-ghost" >"$SB_STATE/leftover_networks"
-  printf '%s\n' ghost_slot_ws_1 ghost_slot_ctl_1 aman_ghost_data >>"$SB_STATE/volumes"
+  printf '%s\n' ghost_slot_ws_1 ghost_slot_ctl_1 aman_ghost_data ghost_slot_data >>"$SB_STATE/volumes"
+  printf '%s\n' "ghost_slot_ws_1 ghost-slots" "ghost_slot_ctl_1 ghost-slots" >"$SB_STATE/volume_projects"
   assert_no_path "$AMAN_HOME/state/instances/ghost.conf"
   run_install instance remove ghost
   assert_rc 0
@@ -312,6 +313,7 @@ test_purge_removes_leftovers_that_were_never_saved() {
   assert_contains "$(cat "$SB_STATE/volumes_removed")" "ghost_slot_ctl_1"
   assert_contains "$(cat "$SB_STATE/volumes_removed")" "aman_ghost_data"
   assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_data" "the saved instance is untouched"
+  assert_contains "$(cat "$SB_STATE/volumes")" "ghost_slot_data" "an unrelated volume that only looks like a slot volume survives"
   assert_file "$SB_STATE/up/aman-machine"
   run_install instance remove ghost --purge-data --confirm-name ghost
   assert_contains "$OUT" "nothing to do"
@@ -378,11 +380,13 @@ test_a_failed_first_install_names_its_cleanup() {
     *) t_fail "the error output does not end with the cleanup command: [$ERR]" ;;
   esac
   printf '%s\n' "main-slots c-left" >"$SB_STATE/leftover_containers"
-  printf '%s\n' main_slot_ctl_1 >>"$SB_STATE/volumes"
+  printf '%s\n' main_slot_ctl_1 main_slot_data >>"$SB_STATE/volumes"
+  printf '%s\n' "main_slot_ctl_1 main-slots" >"$SB_STATE/volume_projects"
   run_install instance remove main --purge-data --confirm-name main
   assert_rc 0
   assert_contains "$(cat "$SB_STATE/containers_removed")" "c-left"
   assert_contains "$(cat "$SB_STATE/volumes_removed")" "main_slot_ctl_1"
+  assert_contains "$(cat "$SB_STATE/volumes")" "main_slot_data" "an unrelated volume that is not labelled for the instance survives"
   sandbox_drop
 }
 

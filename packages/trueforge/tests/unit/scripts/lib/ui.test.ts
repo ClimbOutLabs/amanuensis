@@ -155,6 +155,34 @@ describe('helpers', () => {
   });
 });
 
+describe('prompts', () => {
+  const collect = ({ assumeYes }: { assumeYes: boolean }): { ui: Ui; output: () => string } => {
+    let output = '';
+    const sink = { write: (text: string): void => void (output += text), isTTY: false, columns: 100 };
+    const ui = createUi({
+      env: { LANG: 'C.UTF-8', TERM: 'xterm', NO_COLOR: '1' },
+      out: sink,
+      err: sink,
+      readLine: () => Promise.resolve(undefined),
+      verbose: false,
+      assumeYes,
+    });
+    return { ui, output: () => output };
+  };
+
+  it('ends a prompt with a colon and a space, after the default when there is one', () => {
+    const { ui } = collect({ assumeYes: false });
+    expect(ui.promptText({ label: 'Your name' })).toBe('  › Your name: ');
+    expect(ui.promptText({ label: 'Your name', fallback: 'main' })).toBe('  › Your name [main]: ');
+  });
+
+  it('asks a yes or no question the same way, also when --yes answers it', async () => {
+    const { ui, output } = collect({ assumeYes: true });
+    expect(await ui.confirm({ question: 'Create the sandbox disks?', fallback: 'n' })).toBe(false);
+    expect(output()).toContain('Create the sandbox disks? [y/N]: ');
+  });
+});
+
 describe('progress lines', () => {
   const collect = (tty: boolean): { ui: Ui; output: () => string } => {
     let output = '';

@@ -379,12 +379,12 @@ describe('isPrivateNetworkHost', () => {
 
   it('reads a list with every class', () => {
     expect(new Set(hosts.map(entry => entry.kind))).toEqual(
-      new Set(['private', 'cgnat', 'public', 'app-private', 'app-public']),
+      new Set(['private', 'public', 'app-private', 'app-public']),
     );
   });
 
-  it.each(hosts.filter(entry => ['private', 'app-private', 'cgnat'].includes(entry.kind)))(
-    'accepts $host ($kind), since a listed address is the operator choice',
+  it.each(hosts.filter(entry => ['private', 'app-private'].includes(entry.kind)))(
+    'accepts $host ($kind)',
     ({ host }) => {
       expect(isPrivateNetworkHost(host)).toBe(true);
     },
@@ -409,13 +409,13 @@ describe('parseAllowedOrigins', () => {
   it('keeps plain http for this computer and private networks, and https for anything', () => {
     expect(
       parseAllowedOrigins(
-        'http://127.0.0.1:8791, http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791,http://spark.local:8791,https://aman.example.com',
+        'http://127.0.0.1:8791, http://localhost:8791,http://192.168.1.20:8791,http://10.0.0.5:8791,http://spark.local:8791,https://aman.example.com',
       ),
     ).toEqual([
       'http://127.0.0.1:8791',
       'http://localhost:8791',
       'http://192.168.1.20:8791',
-      'http://100.101.102.103:8791',
+      'http://10.0.0.5:8791',
       'http://spark.local:8791',
       'https://aman.example.com',
     ]);

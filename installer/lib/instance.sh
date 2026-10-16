@@ -949,7 +949,7 @@ instance_volumes() {
     for volume in $(D volume ls -q 2>/dev/null || true); do
       case "$volume" in
         aman_stt_cache | aman_machine) ;;
-        "aman_${name}_"* | "${name}_slot_"*) printf '%s\n' "$volume" ;;
+        "aman_${name}_"*) printf '%s\n' "$volume" ;;
       esac
     done
     for volume in "aman_${name}_data" "aman_${name}_dex"; do

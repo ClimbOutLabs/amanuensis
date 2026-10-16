@@ -2362,7 +2362,7 @@ export function isLoopbackHost(host: string): boolean {
   return false;
 }
 
-/** A private IPv4 address: RFC 1918, link-local, or the 100.64.0.0/10 range Tailscale uses. Loopback is not included. */
+/** A private IPv4 address: RFC 1918 or link-local. Loopback is not included. */
 function isPrivateIpv4(addr: string): boolean {
   const octets = addr.split('.').map(part => Number.parseInt(part, 10));
   const [a, b] = octets;
@@ -2381,12 +2381,12 @@ function isPrivateIpv4(addr: string): boolean {
   if (a === 172 && b !== undefined && b >= 16 && b <= 31) {
     return true;
   }
-  return a === 100 && b !== undefined && b >= 64 && b <= 127;
+  return false;
 }
 
 /**
- * Whether `host` is this computer or sits on a private network: loopback, a private IPv4 address, a `.local` or
- * `.ts.net` name, or a single-label name. An allowed origin may use plain http only for these; a public one needs https.
+ * Whether `host` is this computer or sits on a private network: loopback, a private IPv4 address, a `.local` name,
+ * or a single-label name. An allowed origin may use plain http only for these; a public one needs https.
  */
 export function isPrivateNetworkHost(host: string): boolean {
   if (isLoopbackHost(host)) {
@@ -2401,7 +2401,7 @@ export function isPrivateNetworkHost(host: string): boolean {
   if (ipVersion === 6 || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(bare)) {
     return false;
   }
-  return !bare.includes('.') || bare.endsWith('.local') || bare.endsWith('.ts.net');
+  return !bare.includes('.') || bare.endsWith('.local');
 }
 
 export interface NetworkAuthRequirement {

@@ -190,7 +190,7 @@ each_host() { # class... ; prints the hosts of those classes
 }
 
 test_private_and_public_hosts_match_the_shared_list() {
-  t_begin "private, 100.64.0.0/10 and public hosts are told apart as in the list the app's tests read too"
+  t_begin "private and public hosts are told apart as in the list the app's tests read too"
   sandbox_new_plain
   local host
   while read -r host; do
@@ -198,7 +198,7 @@ test_private_and_public_hosts_match_the_shared_list() {
   done < <(each_host private)
   while read -r host; do
     if in_lib "private_host '$host'"; then t_fail "public host accepted: $host"; else t_pass; fi
-  done < <(each_host public cgnat)
+  done < <(each_host public)
   sandbox_drop
 }
 

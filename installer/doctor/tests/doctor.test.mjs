@@ -1255,6 +1255,26 @@ describe('network address check', () => {
     assert.match(find(result.doc.instances.main, 'ports').detail, /on purpose/);
   });
 
+  it('does not call the app open to the network when the instance is recorded on this computer only (Mac, WSL2)', () => {
+    make();
+    world.network('main', { origins: 'http://127.0.0.1:8791,http://localhost:8791' });
+    const ports = find(world.json().doc.instances.main, 'ports');
+    assert.equal(ports.state, 'ok');
+    assert.doesNotMatch(ports.detail, /on purpose|your network/);
+    assert.match(ports.detail, /this computer only/);
+  });
+
+  it('flags an old record that still lists Tailscale addresses, and points to install.sh', () => {
+    make();
+    world.network('main', {
+      origins: 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://100.101.102.103:8791',
+    });
+    const check = find(world.json().doc.instances.main, 'network');
+    assert.equal(check.state, 'warn');
+    assert.match(check.detail, /Tailscale address \(100\.101\.102\.103\)/);
+    assert.match(check.fix, /install\.sh/);
+  });
+
   for (const [label, out] of [
     ['the sign-in port', '8790/tcp -> 127.0.0.1:8791\n5556/tcp -> 0.0.0.0:5556\n'],
     ['the app port on every interface', '8790/tcp -> 0.0.0.0:8791\n5556/tcp -> 127.0.0.1:5556\n'],
