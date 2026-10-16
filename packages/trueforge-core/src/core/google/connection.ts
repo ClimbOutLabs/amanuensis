@@ -10,8 +10,7 @@ export interface GoogleOwner {
   created_by: string;
 }
 
-export const GOOGLE_CONNECTION_STATUSES = ['connected', 'needs_reconnect'] as const;
-export type GoogleConnectionStatus = (typeof GOOGLE_CONNECTION_STATUSES)[number];
+export type GoogleConnectionStatus = 'connected' | 'needs_reconnect';
 
 export interface GoogleConnectionRecord extends GoogleOwner {
   client_id: string;
@@ -50,6 +49,13 @@ export interface PendingGoogleAuthorization extends GoogleOwner {
 export interface PendingGoogleAuthorizationStore {
   /** A user has at most one consent in flight; saving replaces it. */
   savePending(pending: PendingGoogleAuthorization): Promise<void>;
-  /** Returns and removes the user's consent in flight, so a state can be used once. */
-  takePending(owner: GoogleOwner): Promise<PendingGoogleAuthorization | null>;
+  /**
+   * Returns and removes the user's consent in flight, but only when its state hash matches, so a state can be
+   * used once and a wrong state never spends the real attempt.
+   */
+  takePending(input: GoogleOwner & { state_hash: string }): Promise<PendingGoogleAuthorization | null>;
+  /** Whether the user has a consent in flight, to tell "none" from "not that one". */
+  hasPending(owner: GoogleOwner): Promise<boolean>;
+  /** Drops the user's consent in flight, whatever its state. */
+  clearPending(owner: GoogleOwner): Promise<void>;
 }

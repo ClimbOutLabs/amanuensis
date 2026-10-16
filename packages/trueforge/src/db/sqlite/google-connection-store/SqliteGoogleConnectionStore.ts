@@ -89,13 +89,32 @@ export class SqliteGoogleConnectionStore implements IGoogleConnectionStore {
       .execute();
   }
 
-  async takePending(owner: GoogleOwner): Promise<PendingGoogleAuthorization | null> {
+  async takePending(input: GoogleOwner & { state_hash: string }): Promise<PendingGoogleAuthorization | null> {
     const row = await this.#db
       .deleteFrom('google_oauth_pending')
-      .where('tenant_id', '=', owner.tenant_id)
-      .where('created_by', '=', owner.created_by)
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('state_hash', '=', input.state_hash)
       .returningAll()
       .executeTakeFirst();
     return row === undefined ? null : { ...row, scopes: splitScopes(row.scopes) };
+  }
+
+  async hasPending(owner: GoogleOwner): Promise<boolean> {
+    const row = await this.#db
+      .selectFrom('google_oauth_pending')
+      .select('created_by')
+      .where('tenant_id', '=', owner.tenant_id)
+      .where('created_by', '=', owner.created_by)
+      .executeTakeFirst();
+    return row !== undefined;
+  }
+
+  async clearPending(owner: GoogleOwner): Promise<void> {
+    await this.#db
+      .deleteFrom('google_oauth_pending')
+      .where('tenant_id', '=', owner.tenant_id)
+      .where('created_by', '=', owner.created_by)
+      .execute();
   }
 }

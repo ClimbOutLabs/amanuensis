@@ -46,10 +46,22 @@ export class FakePending implements PendingGoogleAuthorizationStore {
     return Promise.resolve();
   }
 
-  takePending(owner: GoogleOwner): Promise<PendingGoogleAuthorization | null> {
-    const pending = this.records.get(keyOf(owner)) ?? null;
-    this.records.delete(keyOf(owner));
+  takePending(input: GoogleOwner & { state_hash: string }): Promise<PendingGoogleAuthorization | null> {
+    const pending = this.records.get(keyOf(input));
+    if (pending?.state_hash !== input.state_hash) {
+      return Promise.resolve(null);
+    }
+    this.records.delete(keyOf(input));
     return Promise.resolve(pending);
+  }
+
+  hasPending(owner: GoogleOwner): Promise<boolean> {
+    return Promise.resolve(this.records.has(keyOf(owner)));
+  }
+
+  clearPending(owner: GoogleOwner): Promise<void> {
+    this.records.delete(keyOf(owner));
+    return Promise.resolve();
   }
 }
 

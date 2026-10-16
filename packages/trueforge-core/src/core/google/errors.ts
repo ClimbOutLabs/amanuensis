@@ -10,9 +10,12 @@ export class GoogleOAuthError extends Error {
     this.status = input.status;
   }
 
-  /** The stored login no longer works: revoked, expired (a Testing-mode client lasts 7 days), or the client was deleted. */
+  /**
+   * The stored login no longer works: revoked, expired (a Testing-mode client lasts 7 days), or its client was
+   * deleted or disabled (`invalid_client`, `unauthorized_client`).
+   */
   get needsReconnect(): boolean {
-    return this.code === 'invalid_grant';
+    return this.code === 'invalid_grant' || this.code === 'invalid_client' || this.code === 'unauthorized_client';
   }
 }
 

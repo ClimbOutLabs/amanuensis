@@ -122,8 +122,8 @@ export function runGoogleConnectionStoreContractSuite(getStore: () => IGoogleCon
       const saved = pending();
       await store.savePending(saved);
 
-      expect(await store.takePending(OWNER)).toEqual(saved);
-      expect(await store.takePending(OWNER)).toBeNull();
+      expect(await store.takePending({ ...OWNER, state_hash: 'hash-1' })).toEqual(saved);
+      expect(await store.takePending({ ...OWNER, state_hash: 'hash-1' })).toBeNull();
     });
 
     it('keeps one consent per user, the newest', async () => {
@@ -131,14 +131,15 @@ export function runGoogleConnectionStoreContractSuite(getStore: () => IGoogleCon
       await store.savePending(pending({ state_hash: 'old' }));
       await store.savePending(pending({ state_hash: 'new' }));
 
-      expect((await store.takePending(OWNER))?.state_hash).toBe('new');
+      expect(await store.takePending({ ...OWNER, state_hash: 'old' })).toBeNull();
+      expect((await store.takePending({ ...OWNER, state_hash: 'new' }))?.state_hash).toBe('new');
     });
 
     it('never hands one user the consent of another', async () => {
       const store = getStore();
       await store.savePending(pending());
-      expect(await store.takePending({ tenant_id: 'tenant-a', created_by: 'user-b' })).toBeNull();
-      expect(await store.takePending(OWNER)).not.toBeNull();
+      expect(await store.takePending({ tenant_id: 'tenant-a', created_by: 'user-b', state_hash: 'hash-1' })).toBeNull();
+      expect(await store.takePending({ ...OWNER, state_hash: 'hash-1' })).not.toBeNull();
     });
 
     it('drops abandoned consents so their client secrets do not linger', async () => {
@@ -148,7 +149,24 @@ export function runGoogleConnectionStoreContractSuite(getStore: () => IGoogleCon
 
       await store.savePending(pending());
 
-      expect(await store.takePending(other)).toBeNull();
+      expect(await store.takePending({ ...other, state_hash: 'hash-1' })).toBeNull();
+    });
+
+    it('keeps the consent when the wrong state is offered, so the real attempt can still finish', async () => {
+      const store = getStore();
+      await store.savePending(pending());
+
+      expect(await store.takePending({ ...OWNER, state_hash: 'forged' })).toBeNull();
+      expect(await store.hasPending(OWNER)).toBe(true);
+      expect(await store.takePending({ ...OWNER, state_hash: 'hash-1' })).not.toBeNull();
+      expect(await store.hasPending(OWNER)).toBe(false);
+    });
+
+    it('clears a consent in flight whatever its state', async () => {
+      const store = getStore();
+      await store.savePending(pending());
+      await store.clearPending(OWNER);
+      expect(await store.hasPending(OWNER)).toBe(false);
     });
   });
 }

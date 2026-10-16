@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { generateOAuthState } from '../util/oauthState';
 import { checkClientWithGoogle } from './checkClient';
 import { clientProblems, type ClientProblem, type ClientType } from './clientJson';
 import type {
@@ -7,14 +7,13 @@ import type {
   GoogleOwner,
   PendingGoogleAuthorizationStore,
 } from './connection';
-import { GoogleReconnectRequiredError } from './errors';
+import { GoogleOAuthError, GoogleReconnectRequiredError } from './errors';
 import { GoogleAccessTokens } from './GoogleAccessTokens';
 import {
   buildAuthorizationUrl,
   exchangeCodeForTokens,
   fetchProfileEmail,
   generatePkceVerifier,
-  generateState,
   hashState,
   revokeToken,
 } from './oauth';
@@ -54,12 +53,6 @@ export type GoogleTestResult =
   { ok: true; account_email: string } | { ok: false; reason: 'not_connected' | 'needs_reconnect' | 'unreachable' };
 
 export type GoogleDisconnectResult = 'disconnected' | 'revoke_failed';
-
-function sameHash(input: { left: string; right: string }): boolean {
-  const a = Buffer.from(input.left);
-  const b = Buffer.from(input.right);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
 
 /**
  * The connect flow behind Settings, Connectors, Google. The user's own client, PKCE, one login per user.
@@ -143,7 +136,7 @@ export class GoogleConnectService {
     }
     const features = [...input.features, ...grantedFeatures(stored?.granted_scopes ?? [])];
     const scopes = scopesForFeatures(features);
-    const state = generateState();
+    const state = generateOAuthState();
     const pkceVerifier = generatePkceVerifier();
     await this.#pending.savePending({
       ...input.owner,
@@ -167,17 +160,21 @@ export class GoogleConnectService {
     };
   }
 
-  /** Finishes the consent the user started: checks the state, trades the code, stores the login. */
+  /**
+   * Finishes the consent the user started: checks the state, trades the code, names the account, stores the
+   * login. A state that is not the one in flight spends nothing, so the real attempt can still finish.
+   */
   async complete(input: { owner: GoogleOwner; state: string; code: string }): Promise<GoogleConnectionRecord> {
-    const pending = await this.#pending.takePending(input.owner);
+    const pending = await this.#pending.takePending({ ...input.owner, state_hash: hashState(input.state) });
     if (pending === null) {
-      throw new GoogleConsentError('There is no connection in progress. Start again.');
+      throw new GoogleConsentError(
+        (await this.#pending.hasPending(input.owner))
+          ? 'That response does not belong to the connection in progress. Use the address from the page Google just opened, or start again.'
+          : 'There is no connection in progress. Start again.',
+      );
     }
     if (this.#now().getTime() - Date.parse(pending.created_at) > PENDING_TTL_MS) {
       throw new GoogleConsentError('That connection attempt took too long. Start again.');
-    }
-    if (!sameHash({ left: pending.state_hash, right: hashState(input.state) })) {
-      throw new GoogleConsentError('That response does not belong to the connection in progress. Start again.');
     }
     let tokens: Awaited<ReturnType<typeof exchangeCodeForTokens>>;
     try {
@@ -191,10 +188,17 @@ export class GoogleConnectService {
     } catch (error) {
       throw new GoogleConsentError('Google did not accept the code. Start again.', { cause: error });
     }
-    const accountEmail = await fetchProfileEmail({
-      access_token: tokens.access_token,
-      fetchImpl: this.#fetchImpl,
-    }).catch(() => null);
+    let accountEmail: string;
+    try {
+      accountEmail = await fetchProfileEmail({ access_token: tokens.access_token, fetchImpl: this.#fetchImpl });
+    } catch (error) {
+      throw new GoogleConsentError(
+        error instanceof GoogleOAuthError && error.status === 403
+          ? 'You signed in, but Gmail would not answer. Check that the Gmail API is turned on in your Google project (step 2), then connect again.'
+          : 'You signed in, but Aman could not reach Gmail. Try connecting again in a minute.',
+        { cause: error },
+      );
+    }
     const existing = await this.#connections.get(input.owner);
     const now = this.#now().toISOString();
     const record: GoogleConnectionRecord = {
@@ -248,7 +252,7 @@ export class GoogleConnectService {
         return 'revoke_failed';
       }
     }
-    await this.#pending.takePending(owner);
+    await this.#pending.clearPending(owner);
     await this.#connections.delete(owner);
     return 'disconnected';
   }

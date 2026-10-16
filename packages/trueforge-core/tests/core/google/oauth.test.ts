@@ -2,6 +2,7 @@ import { GoogleOAuthError } from '../../../src/core/google/errors';
 import {
   buildAuthorizationUrl,
   exchangeCodeForTokens,
+  generatePkceVerifier,
   GOOGLE_REVOKE_URL,
   GOOGLE_TOKEN_URL,
   hashState,
@@ -14,7 +15,7 @@ import { FakeGoogle, json } from './fakes';
 const CLIENT = { client_id: 'id', client_secret: 'secret' };
 
 describe('buildAuthorizationUrl', () => {
-  it('carries PKCE S256, state, offline access and the previously granted scopes', () => {
+  it('carries PKCE S256, state and offline access, and does not ask Google to merge earlier grants', () => {
     const url = new URL(
       buildAuthorizationUrl({
         client_id: 'id',
@@ -30,8 +31,24 @@ describe('buildAuthorizationUrl', () => {
     expect(url.searchParams.get('code_challenge')).toBe(pkceChallenge('verifier'));
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
     expect(url.searchParams.get('access_type')).toBe('offline');
-    expect(url.searchParams.get('include_granted_scopes')).toBe('true');
+    expect(url.searchParams.get('include_granted_scopes')).toBeNull();
     expect(url.searchParams.get('code_verifier')).toBeNull();
+  });
+});
+
+describe('PKCE', () => {
+  it('matches the RFC 7636 appendix B example', () => {
+    expect(pkceChallenge('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')).toBe(
+      'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
+    );
+  });
+
+  it('makes verifiers that are long, URL-safe and different each time', () => {
+    const verifiers = new Set(Array.from({ length: 20 }, () => generatePkceVerifier()));
+    expect(verifiers.size).toBe(20);
+    for (const verifier of verifiers) {
+      expect(verifier).toMatch(/^[A-Za-z0-9_-]{43,128}$/);
+    }
   });
 });
 

@@ -16,22 +16,13 @@ export interface OAuthClient {
   client_secret: string;
 }
 
-function base64Url(bytes: Buffer): string {
-  return bytes.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
 /** 64 random bytes give an 86 character verifier, inside the 43 to 128 the PKCE spec allows. */
 export function generatePkceVerifier(): string {
-  return base64Url(randomBytes(64));
+  return randomBytes(64).toString('base64url');
 }
 
 export function pkceChallenge(verifier: string): string {
-  return base64Url(createHash('sha256').update(verifier, 'utf8').digest());
-}
-
-/** 32 random bytes: 256 bits of state. */
-export function generateState(): string {
-  return base64Url(randomBytes(32));
+  return createHash('sha256').update(verifier, 'utf8').digest('base64url');
 }
 
 export function hashState(state: string): string {
@@ -39,8 +30,8 @@ export function hashState(state: string): string {
 }
 
 /**
- * The consent address for the user's own client. `include_granted_scopes` makes a later consent carry the
- * scopes granted before, so adding a feature never narrows the login.
+ * The consent address for the user's own client. A later consent names the earlier scopes too, so adding a
+ * feature never narrows the login.
  */
 export function buildAuthorizationUrl(input: {
   client_id: string;
@@ -58,7 +49,6 @@ export function buildAuthorizationUrl(input: {
     code_challenge: pkceChallenge(input.pkce_verifier),
     code_challenge_method: 'S256',
     access_type: 'offline',
-    include_granted_scopes: 'true',
     prompt: 'consent',
   });
   return `${GOOGLE_AUTH_URL}?${params.toString()}`;
@@ -75,15 +65,36 @@ const OAuthErrorBodySchema = z.object({ error: z.string(), error_description: z.
 
 type FetchImpl = typeof fetch;
 
+/** Longest a request to Google may take. */
+export const GOOGLE_REQUEST_TIMEOUT_MS = 15_000;
+
+/** A request to Google that fails to connect, or runs out of time, becomes a plain, retryable error. */
+export async function fetchGoogle(input: { fetchImpl: FetchImpl; url: string; init: RequestInit }): Promise<Response> {
+  try {
+    return await input.fetchImpl(input.url, { ...input.init, signal: AbortSignal.timeout(GOOGLE_REQUEST_TIMEOUT_MS) });
+  } catch (error) {
+    throw new GoogleOAuthError({
+      message: 'Could not reach Google. Check your connection and try again in a minute.',
+      code: null,
+      status: 0,
+      cause: error,
+    });
+  }
+}
+
 async function postForm(input: {
   url: string;
   params: Record<string, string>;
   fetchImpl: FetchImpl;
 }): Promise<Response> {
-  return await input.fetchImpl(input.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams(input.params).toString(),
+  return await fetchGoogle({
+    fetchImpl: input.fetchImpl,
+    url: input.url,
+    init: {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(input.params).toString(),
+    },
   });
 }
 
@@ -202,8 +213,10 @@ export async function fetchProfileEmail(input: {
   access_token: string;
   fetchImpl?: FetchImpl | undefined;
 }): Promise<string> {
-  const response = await (input.fetchImpl ?? fetch)(GMAIL_PROFILE_URL, {
-    headers: { Authorization: `Bearer ${input.access_token}` },
+  const response = await fetchGoogle({
+    fetchImpl: input.fetchImpl ?? fetch,
+    url: GMAIL_PROFILE_URL,
+    init: { headers: { Authorization: `Bearer ${input.access_token}` } },
   });
   if (!response.ok) {
     throw new GoogleOAuthError({

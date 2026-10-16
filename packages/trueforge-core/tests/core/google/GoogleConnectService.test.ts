@@ -1,9 +1,10 @@
+import { createHash } from 'node:crypto';
 import {
   GoogleClientError,
   GoogleConnectService,
   GoogleConsentError,
 } from '../../../src/core/google/GoogleConnectService';
-import { GOOGLE_REVOKE_URL, GOOGLE_TOKEN_URL } from '../../../src/core/google/oauth';
+import { GOOGLE_REVOKE_URL, GOOGLE_TOKEN_URL, hashState } from '../../../src/core/google/oauth';
 import type { GoogleSetupInfo } from '../../../src/core/google/setupMode';
 import { connectedRecord, FakeConnections, FakeGoogle, FakePending, json, OWNER } from './fakes';
 
@@ -81,21 +82,103 @@ describe('GoogleConnectService', () => {
       expect(await connections.get({ ...OWNER, created_by: 'someone-else' })).toBeNull();
     });
 
-    it('rejects a state that is not the one in flight, and the attempt is spent', async () => {
-      const { service, google } = setup();
+    it('rejects a state that is not the one in flight without spending the real attempt', async () => {
+      const { service, google, pending } = setup();
       google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at', refresh_token: 'rt', scope: READ }));
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
       const { authorization_url } = await service.begin({
         owner: OWNER,
         setup: SETUP,
         client: CLIENT,
         features: ['gmail_read'],
       });
-      await expect(service.complete({ owner: OWNER, state: 'forged', code: 'code' })).rejects.toBeInstanceOf(
-        GoogleConsentError,
+      await expect(service.complete({ owner: OWNER, state: 'forged', code: 'code' })).rejects.toThrow(
+        /does not belong to the connection in progress/,
       );
+      expect(pending.records.size).toBe(1);
+      expect(google.requests.some(request => request.url.startsWith(GOOGLE_TOKEN_URL))).toBe(false);
+      const record = await service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' });
+      expect(record.status).toBe('connected');
+    });
+
+    it('rejects a state that another user started', async () => {
+      const { service } = setup();
+      const other = { ...OWNER, created_by: 'someone-else' };
+      const { authorization_url } = await service.begin({
+        owner: other,
+        setup: SETUP,
+        client: CLIENT,
+        features: ['gmail_read'],
+      });
       await expect(service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' })).rejects.toThrow(
         /no connection in progress/,
       );
+    });
+
+    it('says there is nothing in progress when nothing was started, and spends an attempt only once', async () => {
+      const { service, google } = setup();
+      google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at', refresh_token: 'rt', scope: READ }));
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+      await expect(service.complete({ owner: OWNER, state: 'x', code: 'code' })).rejects.toThrow(
+        /no connection in progress/,
+      );
+      const { authorization_url } = await service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: CLIENT,
+        features: ['gmail_read'],
+      });
+      await service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' });
+      await expect(service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' })).rejects.toThrow(
+        /no connection in progress/,
+      );
+    });
+
+    it('proves the code with the verifier whose S256 challenge it sent, with a 256-bit state kept only as a hash', async () => {
+      const { service, google, pending } = setup();
+      google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at', refresh_token: 'rt', scope: READ }));
+      google.on(PROFILE_URL, () => json({ emailAddress: 'ada@example.com' }));
+      const { authorization_url } = await service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: CLIENT,
+        features: ['gmail_read'],
+      });
+      const begun = new URL(authorization_url).searchParams;
+      const state = begun.get('state') ?? '';
+      expect(Buffer.from(state, 'base64url')).toHaveLength(32);
+      expect(begun.get('code_challenge_method')).toBe('S256');
+      const stored = [...pending.records.values()][0];
+      expect(JSON.stringify(stored)).not.toContain(state);
+      expect(stored?.state_hash).toBe(hashState(state));
+
+      await service.complete({ owner: OWNER, state, code: 'the-code' });
+      const exchange = google.requests.find(request => request.url.startsWith(GOOGLE_TOKEN_URL));
+      const verifier = exchange?.body?.get('code_verifier') ?? '';
+      expect(verifier).not.toBe('');
+      expect(createHash('sha256').update(verifier).digest('base64url')).toBe(begun.get('code_challenge'));
+      expect(exchange?.body?.get('code')).toBe('the-code');
+    });
+
+    it('explains a profile failure, and points at the API step when Google says 403', async () => {
+      for (const [status, says] of [
+        [403, /step 2/],
+        [500, /could not reach Gmail/],
+      ] as const) {
+        const { service, google, connections } = setup();
+        google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at', refresh_token: 'rt', scope: READ }));
+        google.on(PROFILE_URL, () => json({ error: 'x' }, status));
+        const { authorization_url } = await service.begin({
+          owner: OWNER,
+          setup: SETUP,
+          client: CLIENT,
+          features: ['gmail_read'],
+        });
+        await expect(
+          service.complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' }),
+        ).rejects.toThrow(says);
+        expect(await connections.get(OWNER)).toBeNull();
+      }
     });
 
     it('rejects a consent that took longer than ten minutes', async () => {

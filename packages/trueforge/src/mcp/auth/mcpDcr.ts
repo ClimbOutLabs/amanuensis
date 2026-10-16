@@ -14,7 +14,7 @@ import type {
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { McpConnectionError, McpDcrConfigurationError } from '@truefoundry/trueforge-core/core';
-import { randomBytes } from 'node:crypto';
+import { generateOAuthState } from '@truefoundry/trueforge-core/core/util/oauthState';
 import {
   isOAuthAccessTokenUsable,
   mcpAuthorizationServerMetadata,
@@ -299,7 +299,7 @@ export async function buildMcpAuthorizationUrl(params: {
   mcpServerName: string;
   returnTo?: string;
 }): Promise<URL> {
-  const state = randomBytes(32).toString('base64url');
+  const state = generateOAuthState();
   const redirectUri = mcpOAuthCallbackUrl();
   let started: Awaited<ReturnType<typeof startAuthorization>>;
   try {
