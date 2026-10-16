@@ -19,8 +19,8 @@
 import { Buffer } from 'node:buffer';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { connect } from 'node:net';
-import { connect as tlsConnect } from 'node:tls';
 import path from 'node:path';
+import { connect as tlsConnect } from 'node:tls';
 import { fileURLToPath } from 'node:url';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
