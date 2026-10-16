@@ -7634,7 +7634,7 @@
             "$ref": "#/components/schemas/SessionAgent"
           },
           "approval_grants": {
-            "description": "Server-derived exact-tool grants created by \"Allow for this chat\" (server:tool pairs).",
+            "description": "Server-derived exact-tool grants created by \"Approve for this chat\" (server:tool pairs).",
             "items": {
               "type": "string"
             },
