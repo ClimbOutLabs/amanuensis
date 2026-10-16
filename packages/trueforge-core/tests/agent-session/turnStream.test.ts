@@ -1953,59 +1953,90 @@ describe('TurnResourceResolver caches', () => {
     expect(received[0]?.conversation_id).toBe('s');
   });
 
-  it.each([
-    { source: { type: 'schedule' as const, id: 'sched-1', run_id: 'run-1' }, relaxed: [], unattended: true },
-    { source: null, relaxed: ['file_write'], unattended: false },
-  ])('applies relaxations only when attended (source: $source)', async ({ source, relaxed, unattended }) => {
-    const sandbox = makeStubPublicSandbox();
-    jest.spyOn(sandbox, 'close').mockResolvedValue(undefined);
-    const sentinelServices = {
-      ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
-      tier2AutoAllow: () => Promise.resolve(new Set<'file_write'>(['file_write'])),
-    };
-    const received: SentinelHostContext[] = [];
-    const resolver = new TurnResourceResolver({
-      llm: () =>
-        Promise.resolve({
-          modelClient: makeMockILLM({ create: jest.fn().mockImplementation(() => emptyLlmStream()) }),
-          defaultModelParams: {},
-          modelId: undefined,
-          modelSupportsVision: false,
-        }),
-      mcp: () => Promise.resolve({ url: 'http://localhost' }),
-      mcpRequestTimeoutMs: 60_000,
-      mcpConnectTimeoutMs: 5_000,
-      sandboxProvider: input => {
-        received.push(input.sentinel);
-        return Promise.resolve(sandbox);
-      },
-      logger: makeSilentLogger(),
-    });
-    const sessions = new Sessions({ sessionStore: new InMemorySessionStore(), sentinelServices });
-    const session = await sessions.create({
-      tenant_id: 't',
-      session_id: 's',
-      created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
-      agent: {
-        type: 'inline',
-        spec: makeAgentSpec({ config: { sandbox: { enabled: true, file_downloads: true } } }),
-      },
-      external_id: null,
-      source,
-    });
-    const turn = await session.createTurn({
-      turn_id: mintTestTurnId(),
-      input: [{ type: EventType.USER_MESSAGE, content: 'hi' }],
-      previous_turn_id: 'none',
-      signal: new AbortController().signal,
-      resolver,
-    });
-    for await (const event of turn.stream()) {
-      void event;
+  describe('per-turn unattended services', () => {
+    const scheduleSource = { type: 'schedule' as const, id: 'sched-1', run_id: 'run-1' };
+
+    async function setup(source: typeof scheduleSource | null) {
+      const sandbox = makeStubPublicSandbox();
+      jest.spyOn(sandbox, 'close').mockResolvedValue(undefined);
+      const sentinelServices = {
+        ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
+        tier2AutoAllow: () => Promise.resolve(new Set<'file_write'>(['file_write'])),
+      };
+      const received: SentinelHostContext[] = [];
+      const resolver = new TurnResourceResolver({
+        llm: () =>
+          Promise.resolve({
+            modelClient: makeMockILLM({ create: jest.fn().mockImplementation(() => emptyLlmStream()) }),
+            defaultModelParams: {},
+            modelId: undefined,
+            modelSupportsVision: false,
+          }),
+        mcp: () => Promise.resolve({ url: 'http://localhost' }),
+        mcpRequestTimeoutMs: 60_000,
+        mcpConnectTimeoutMs: 5_000,
+        sandboxProvider: input => {
+          received.push(input.sentinel);
+          return Promise.resolve(sandbox);
+        },
+        logger: makeSilentLogger(),
+      });
+      const sessions = new Sessions({ sessionStore: new InMemorySessionStore(), sentinelServices });
+      const session = await sessions.create({
+        tenant_id: 't',
+        session_id: 's',
+        created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+        agent: {
+          type: 'inline',
+          spec: makeAgentSpec({ config: { sandbox: { enabled: true, file_downloads: true } } }),
+        },
+        external_id: null,
+        source,
+      });
+      const runTurn = async (input: { unattended?: boolean | undefined; previous_turn_id: 'none' | 'auto' }) => {
+        const turn = await session.createTurn({
+          turn_id: mintTestTurnId(),
+          input: [{ type: EventType.USER_MESSAGE, content: 'hi' }],
+          previous_turn_id: input.previous_turn_id,
+          signal: new AbortController().signal,
+          resolver,
+          unattended: input.unattended,
+        });
+        for await (const event of turn.stream()) {
+          void event;
+        }
+      };
+      return { received, runTurn, sentinelServices };
     }
-    const granted = await received[0]?.services.tier2AutoAllow({ tenant_id: 't', created_by: 'user-1' });
-    expect([...(granted ?? [])]).toEqual(relaxed);
-    // A held-back web search is denied instead of asked only while nobody watches.
-    expect(received[0]?.services.unattended).toBe(unattended);
+
+    it.each([
+      { source: scheduleSource, unattended: true, relaxed: [] },
+      { source: scheduleSource, unattended: undefined, relaxed: [] },
+      { source: null, unattended: undefined, relaxed: ['file_write'] },
+    ])(
+      'applies relaxations only outside scheduled chats (source: $source, unattended: $unattended)',
+      async ({ source, relaxed, unattended }) => {
+        const { received, runTurn } = await setup(source);
+        await runTurn({ unattended, previous_turn_id: 'none' });
+        const granted = await received[0]?.services.tier2AutoAllow({ tenant_id: 't', created_by: 'user-1' });
+        expect([...(granted ?? [])]).toEqual(relaxed);
+        // A call that would ask is held for the owner only while nobody watches this turn.
+        expect(received[0]?.services.unattended).toBe(unattended === true);
+      },
+    );
+
+    it('treats the owner following up in a scheduled chat as attended, on the same token and grant stores', async () => {
+      const { received, runTurn, sentinelServices } = await setup(scheduleSource);
+      await runTurn({ unattended: true, previous_turn_id: 'none' });
+      await runTurn({ previous_turn_id: 'auto' });
+      expect(received.map(context => context.services.unattended)).toEqual([true, false]);
+      expect(received[0]?.services.token_store).toBe(sentinelServices.token_store);
+      expect(received[1]?.services.token_store).toBe(sentinelServices.token_store);
+      expect(received[0]?.services.tool_grants).toBe(sentinelServices.tool_grants);
+      // The owner typing still gets no relaxations: the chat's context holds what the run read.
+      expect([
+        ...((await received[1]?.services.tier2AutoAllow({ tenant_id: 't', created_by: 'user-1' })) ?? []),
+      ]).toEqual([]);
+    });
   });
 });

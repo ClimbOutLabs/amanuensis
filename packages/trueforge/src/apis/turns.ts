@@ -20,6 +20,7 @@ import {
   AgentHarnessError,
   existingSandboxIdForProvider,
   extractErrorLogFields,
+  HeldActionRefusedError,
   isAgentInputUserMessage,
   isFileContentPart,
   McpConnectionError,
@@ -29,6 +30,7 @@ import {
   SandboxNotAvailableError,
   VercelAILLM,
   type BoundRepository,
+  type HeldRefusalReason,
 } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -167,7 +169,10 @@ export const TurnConflictCode = {
   APPROVAL_CONFLICT: 'approval_conflict',
 } as const;
 
-export type TurnConflictCode = (typeof TurnConflictCode)[keyof typeof TurnConflictCode];
+/** An answer to a held action that cannot run now; `error.code` says why, e.g. `held_action_expired`. */
+export type HeldActionConflictCode = `held_action_${HeldRefusalReason}`;
+
+export type TurnConflictCode = (typeof TurnConflictCode)[keyof typeof TurnConflictCode] | HeldActionConflictCode;
 
 /** The conflict code for a store rejection, or null when the store raised one we do not name. */
 export function turnConflictCodeFor(error: SessionStoreConflictError): TurnConflictCode | null {
@@ -955,6 +960,8 @@ export async function beginTurnExecution(params: {
   previous_turn_id: string | undefined;
   userRef: string;
   deps: BeginTurnExecutionDeps;
+  /** No person watches this turn (a scheduled run): what would ask is held for the owner. */
+  unattended?: boolean | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const { session, input, previous_turn_id: previousTurnId, userRef, deps } = params;
   const sessionId = session.session_id;
@@ -1060,6 +1067,7 @@ export async function beginTurnExecution(params: {
       executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
     },
     command_execution_owner_id: configuration.EXECUTOR_ID,
+    unattended: params.unattended,
   });
 
   executionDeadline.arm();
@@ -1107,6 +1115,7 @@ export async function startTurnInProcess(params: {
   previous_turn_id: string | undefined;
   userRef: string;
   deps: BeginTurnExecutionDeps;
+  unattended?: boolean | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -1832,6 +1841,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     // never overwrites an existing title.
     const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
 
+    // Answering actions a scheduled run held runs just those calls; the chat is not asked anything new.
+    const stopAfterToolResponse = await session.answersOnlyHeldActions({
+      previous_turn_id: body.previous_turn_id,
+      input: body.input,
+    });
+
     let turn;
     try {
       turn = await session.createTurn({
@@ -1846,6 +1861,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
         },
         command_execution_owner_id: configuration.EXECUTOR_ID,
+        stop_after_tool_response: stopAfterToolResponse,
       });
     } catch (error) {
       if (error instanceof SessionStoreNotFoundError) {
@@ -1878,6 +1894,19 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           case 'invalid_file_input':
             return c.json({ error: { message: error.message } }, 400);
           case 'invalid_send_input': {
+            // A held action that cannot run is a conflict with what is stored, and says why by code.
+            if (error instanceof HeldActionRefusedError) {
+              return c.json(
+                {
+                  error: {
+                    message: error.message,
+                    type: 'conflict',
+                    code: `held_action_${error.reason}` satisfies HeldActionConflictCode,
+                  },
+                },
+                409,
+              );
+            }
             // A decision the session already recorded is a resubmission, not a bad request:
             // the tool has run (or been denied) once and must not run again. Answer from
             // stored state; only a genuinely unrecorded decision keeps the 422.
