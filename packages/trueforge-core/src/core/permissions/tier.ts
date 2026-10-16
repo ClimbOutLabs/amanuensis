@@ -17,7 +17,12 @@ export const TIER2_ACTION_KINDS = ['file_write'] as const;
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 
 /** Machine-readable reasons a Tier 3 action is auto-denied without a card. */
-export const AUTO_DENY_REASONS = ['destination_unverifiable', 'offline_mode', 'outbound_guard'] as const;
+export const AUTO_DENY_REASONS = [
+  'destination_unverifiable',
+  'offline_mode',
+  'outbound_guard',
+  'unattended_run',
+] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
 
 /**

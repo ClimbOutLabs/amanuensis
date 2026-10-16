@@ -13,7 +13,14 @@
  */
 import { realpathSync } from 'fs';
 import path from 'path';
-import { GMAIL_SERVER_ID, isGmailReadToolName } from '../email/gmail/toolContract';
+import type { ReviewableDraft } from '../email/gmail/draftReview';
+import {
+  GMAIL_SERVER_ID,
+  isGmailReadToolName,
+  isGmailWriteToolName,
+  SEND_DRAFT_TOOL_NAME,
+  UPDATE_DRAFT_TOOL_NAME,
+} from '../email/gmail/toolContract';
 import type { MapsHosts } from '../llm/LLMTypes';
 import {
   actionIdFor,
@@ -117,6 +124,11 @@ export interface SentinelAction {
    * server-owned maps tool from server config, never from model params.
    */
   maps_hosts?: MapsHosts | undefined;
+  /**
+   * The draft a Gmail send would deliver, as Gmail holds it now. Set by the Gmail tool set from a live read,
+   * never from model params, so the send card shows what would really go out.
+   */
+  mail_draft?: ReviewableDraft | undefined;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {
@@ -1203,6 +1215,72 @@ async function classifySearchProviderTool(input: {
   });
 }
 
+/** Most characters of subject the card shows inside its sentence. */
+const GMAIL_CARD_SUBJECT_MAX_CHARS = 80;
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+/**
+ * The approval card for a Gmail write. A draft card is built from the call's own params; a send card from the
+ * draft Gmail holds now (null when it could not be loaded). Recipients, subject and body are escaped, and the
+ * body is shown in full as the exact text that would be sent.
+ */
+function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | null }): Tier3Card | null {
+  const { action } = input;
+  const isSend = action.tool_name === SEND_DRAFT_TOOL_NAME;
+  const params = action.canonical_params;
+  const content: ReviewableDraft | undefined = isSend
+    ? action.mail_draft
+    : {
+        to: stringList(params['to']),
+        cc: stringList(params['cc']),
+        bcc: stringList(params['bcc']),
+        subject: typeof params['subject'] === 'string' ? params['subject'] : '',
+        body: typeof params['body'] === 'string' ? params['body'] : '',
+        threadId: '',
+      };
+  if (content === undefined) {
+    return null;
+  }
+  const recipients = [...content.to, ...content.cc, ...content.bcc]
+    .map(address => escapeDisplayText(address))
+    .join(', ');
+  const subjectChars = Array.from(escapeDisplayText(content.subject));
+  const subject =
+    subjectChars.length > GMAIL_CARD_SUBJECT_MAX_CHARS
+      ? `${subjectChars.slice(0, GMAIL_CARD_SUBJECT_MAX_CHARS - 1).join('')}…`
+      : subjectChars.join('');
+  const quoted = `"${subject.replace(/"/g, '\\"')}"`;
+  const to = recipients === '' ? 'no recipients' : recipients;
+  const plainWhat = isSend
+    ? `Send ${quoted} to ${to} from your Gmail.`
+    : action.tool_name === UPDATE_DRAFT_TOOL_NAME
+      ? `Change a saved Gmail draft: ${quoted} to ${to}. It is not sent.`
+      : `Save a Gmail draft ${quoted} to ${to}. It is not sent.`;
+  const outbound = renderOutboundArguments({
+    to: content.to,
+    ...(content.cc.length > 0 ? { cc: content.cc } : {}),
+    ...(content.bcc.length > 0 ? { bcc: content.bcc } : {}),
+    subject: content.subject,
+    body: content.body,
+  });
+  return {
+    plain_what: plainWhat,
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone: isSend ? "Once this is sent, it can't be unsent." : null,
+    why_asked_again: null,
+    destination: 'Gmail',
+    recipient: recipients === '' ? null : recipients,
+    amount: null,
+    parsed_command: null,
+    outbound_text: outbound.text,
+    destination_host: 'gmail.googleapis.com',
+    outbound_truncated: outbound.truncated,
+  };
+}
+
 /**
  * Gmail tools are the host's own, named by server so a connector's tool of the same name never takes this
  * path. Reads are silent but flagged as sensitive, and a turn that read mail can no longer search silently.
@@ -1223,7 +1301,32 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
       sensitive_read: true,
     });
   }
-  return failClosedDecision({ reason_detail: `Unknown Gmail tool \`${action.tool_name}\`.` });
+  if (!isGmailWriteToolName(action.tool_name)) {
+    return failClosedDecision({ reason_detail: `Unknown Gmail tool \`${action.tool_name}\`.` });
+  }
+  if (ctx.services.unattended) {
+    return autoDenyDecision({
+      reason: 'unattended_run',
+      reason_detail: 'Scheduled runs can read your email but never draft or send it.',
+      sensitive_read: false,
+    });
+  }
+  const card = gmailWriteCard({ action, agent_intent: ctx.agent_intent });
+  if (card === null) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'The draft to send could not be loaded to show you, so the send was not offered.',
+      sensitive_read: false,
+    });
+  }
+  const isSend = action.tool_name === SEND_DRAFT_TOOL_NAME;
+  return tier3Decision({
+    card,
+    reason: isSend ? 'gmail_send' : 'gmail_draft',
+    reason_detail: isSend ? 'Sending email always asks.' : 'Saving a draft always asks.',
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
 }
 
 async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
