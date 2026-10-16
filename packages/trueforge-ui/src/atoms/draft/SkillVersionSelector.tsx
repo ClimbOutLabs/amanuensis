@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { copyText } from '@/utils/copyText.js';
 import { Icon } from '../../icons/Icon.js';
 import type { AgentSkill } from '../../server/types.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
@@ -112,7 +113,7 @@ export function SkillVersionSelector({
             type="button"
             className="text-text-secondary hover:text-text-primary shrink-0 underline"
             onClick={() => {
-              void navigator.clipboard.writeText(error).catch(() => undefined);
+              void copyText(error).catch(() => undefined);
             }}
           >
             Copy error

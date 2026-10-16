@@ -26,6 +26,21 @@ export interface ModelProvidersRouterDeps<TTransaction> {
   resolveModelProviderStore: (c: Context) => IModelProviderStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   resolveRequestContext: ResolveRequestContext;
+  /** Providers whose record the environment rewrites at startup; the API keeps them read-only. */
+  envManagedNames: ReadonlySet<string>;
+}
+
+/** Machine-readable `error.code` when a write targets an environment-managed provider. */
+export const ENV_MANAGED_PROVIDER_CODE = 'env_managed_provider';
+
+function envManagedConflict(name: string) {
+  return {
+    error: {
+      message: `Model provider ${name} is managed by the server environment and cannot be changed here.`,
+      type: 'conflict',
+      code: ENV_MANAGED_PROVIDER_CODE,
+    },
+  };
 }
 
 function redactModelProvider(manifest: ModelProviderManifest): ModelProviderManifest {
@@ -60,10 +75,17 @@ function resolveModelProviderManifestForWrite({
   };
 }
 
-function toWireProvider(record: ModelProviderRecord): ConfiguredModelProvider {
+function toWireProvider({
+  record,
+  envManagedNames,
+}: {
+  record: ModelProviderRecord;
+  envManagedNames: ReadonlySet<string>;
+}): ConfiguredModelProvider {
   return {
     name: record.name,
     manifest: redactModelProvider(record.manifest),
+    ...(envManagedNames.has(record.name) ? { env_managed: true } : {}),
   };
 }
 
@@ -71,7 +93,10 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
   const listHandler: RouteHandler<typeof listModelProvidersRoute> = async c => {
     const requestContext = deps.resolveRequestContext(c);
     const records = await deps.resolveModelProviderStore(c).listProviders({ tenant_id: requestContext.tenant_id });
-    return c.json({ data: records.map(toWireProvider) }, 200);
+    return c.json(
+      { data: records.map(record => toWireProvider({ record, envManagedNames: deps.envManagedNames })) },
+      200,
+    );
   };
 
   const createHandler: RouteHandler<typeof createModelProviderRoute> = async c => {
@@ -79,6 +104,9 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
     const requestContext = deps.resolveRequestContext(c);
     const provider = body.manifest;
     const name = modelProviderName(provider);
+    if (deps.envManagedNames.has(name)) {
+      return c.json(envManagedConflict(name), 409);
+    }
     try {
       // Create has no prior row; redacted keep resolves to MissingStoredSecretError → 400.
       const manifest = resolveModelProviderManifestForWrite({ incoming: provider, existing: undefined });
@@ -87,7 +115,7 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
         name,
         manifest,
       });
-      return c.json({ data: toWireProvider(record) }, 201);
+      return c.json({ data: toWireProvider({ record, envManagedNames: deps.envManagedNames }) }, 201);
     } catch (error) {
       if (error instanceof MissingStoredSecretError) {
         return c.json({ error: { message: 'API key is required' } }, 400);
@@ -105,6 +133,9 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
     const requestContext = deps.resolveRequestContext(c);
     const provider = body.manifest;
     const name = modelProviderName(provider);
+    if (deps.envManagedNames.has(name)) {
+      return c.json(envManagedConflict(name), 409);
+    }
     try {
       // Lock → resolve secret from that snapshot → upsert, all in one txn so concurrent keep
       // cannot re-write a secret over a rotate that committed in between.
@@ -116,7 +147,7 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
         });
         return store.upsertProvider({ tenant_id: requestContext.tenant_id, name, manifest }, transaction);
       });
-      return c.json({ data: toWireProvider(record) }, 200);
+      return c.json({ data: toWireProvider({ record, envManagedNames: deps.envManagedNames }) }, 200);
     } catch (error) {
       if (error instanceof MissingStoredSecretError) {
         return c.json({ error: { message: 'API key is required' } }, 400);
@@ -127,6 +158,9 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
 
   const deleteHandler: RouteHandler<typeof deleteModelProviderRoute> = async c => {
     const { name } = c.req.valid('param');
+    if (deps.envManagedNames.has(name)) {
+      return c.json(envManagedConflict(name), 409);
+    }
     const requestContext = deps.resolveRequestContext(c);
     // model_name is unused by deleteProvider (row is keyed by tenant_id + name); GetModelProviderInput
     // is shared with getProvider, which does need it.

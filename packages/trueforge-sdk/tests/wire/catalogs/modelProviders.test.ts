@@ -10,7 +10,7 @@ describe("ModelProvidersClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : [ { "logo" : "logo" , "models" : [ { "model_id" : "model_id" , "name" : "name" , "properties" : { } } ] , "type" : "openai" } ] };
+        const rawResponseBody = { "data" : [ { "base_url" : "base_url" , "logo" : "logo" , "models" : [ { "model_id" : "model_id" , "name" : "name" , "properties" : { } } ] , "type" : "openai" } ] };
         
         server
             .mockEndpoint()
@@ -23,6 +23,7 @@ describe("ModelProvidersClient", () => {
                                 const response = await client.catalogs.modelProviders.list();
                                 expect(response).toEqual({
     data: [{
+            baseUrl: "base_url",
             logo: "logo",
             models: [{
                     modelId: "model_id",
