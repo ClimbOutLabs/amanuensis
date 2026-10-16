@@ -259,7 +259,7 @@ describe('stageAttachment on sandbox slots', () => {
         },
         sandbox,
       ),
-    ).rejects.toThrow(/Attachment staging failed.*The sandbox is not responding/);
+    ).rejects.toThrow(/Attachment staging failed.*Code can't run on this computer yet/);
   });
 });
 

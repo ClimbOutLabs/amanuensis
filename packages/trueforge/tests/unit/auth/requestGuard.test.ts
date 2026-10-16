@@ -262,3 +262,49 @@ describe('request guard: instance opened on several addresses', () => {
     expect(await status({ app: remote, headers: { host: '127.0.0.1:18791' } })).toBe(421);
   });
 });
+
+describe('request guard: ports belong to their scheme', () => {
+  const secure = { port: 8790, publicBaseUrl: 'http://127.0.0.1:8790', allowedOrigins: ['https://aman.example.com'] };
+  const plain = { port: 8790, publicBaseUrl: 'http://127.0.0.1:8790', allowedOrigins: ['http://192.168.1.20:80'] };
+
+  it('takes :443 only for an https address and :80 only for an http one', async () => {
+    expect(await status({ app: appFor(secure), headers: { host: 'aman.example.com' } })).toBe(200);
+    expect(await status({ app: appFor(secure), headers: { host: 'aman.example.com:443' } })).toBe(200);
+    expect(await status({ app: appFor(secure), headers: { host: 'aman.example.com:80' } })).toBe(421);
+    expect(await status({ app: appFor(plain), headers: { host: '192.168.1.20:80' } })).toBe(200);
+    expect(await status({ app: appFor(plain), headers: { host: '192.168.1.20' } })).toBe(200);
+    expect(await status({ app: appFor(plain), headers: { host: '192.168.1.20:443' } })).toBe(421);
+  });
+
+  it('does not let a leading zero in a port name another port', async () => {
+    expect(await status({ app: appFor(LOCAL), headers: { host: 'localhost:08790' } })).toBe(200);
+    expect(await status({ app: appFor(LOCAL), headers: { host: 'localhost:08791' } })).toBe(421);
+  });
+});
+
+describe('request guard: sign-in address passed through by the app', () => {
+  const options = {
+    port: 8790,
+    publicBaseUrl: 'https://aman.example.com',
+    loginGatewayUrl: 'https://login.example.com/dex',
+  };
+
+  it('serves the sign-in address only under the sign-in path, and lets its form post without an Origin signal', async () => {
+    const app = appFor(options);
+    const host = { host: 'login.example.com' };
+    expect(await status({ app, path: '/dex/auth', headers: host })).toBe(200);
+    expect(await status({ app, path: '/dex/auth/local/login', method: 'POST', headers: host })).toBe(200);
+    expect(await status({ app, path: '/api/v1/sessions', headers: host })).toBe(421);
+    expect(await status({ app, path: '/dexterity', headers: host })).toBe(421);
+    expect(await status({ app, path: '/api/v1/sessions', method: 'POST', headers: host })).toBe(421);
+  });
+
+  it('keeps checking the app address as before', async () => {
+    const app = appFor(options);
+    expect(await status({ app, path: '/api/v1/sessions', headers: { host: 'aman.example.com' } })).toBe(200);
+    expect(await status({ app, path: '/api/v1/sessions', method: 'POST', headers: { host: 'aman.example.com' } })).toBe(
+      403,
+    );
+    expect(await status({ app, headers: { host: 'other.example.com' } })).toBe(421);
+  });
+});

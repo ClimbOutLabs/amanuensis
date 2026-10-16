@@ -29,6 +29,7 @@ describe('the sign-in pass-through in the running app', () => {
     OIDC: configuration.OIDC,
     PUBLIC_BASE_URL: configuration.PUBLIC_BASE_URL,
     ALLOWED_ORIGINS: configuration.ALLOWED_ORIGINS,
+    LOGIN_UPSTREAM_URL: configuration.LOGIN_UPSTREAM_URL,
   };
   let upstream: string[];
   let server: ApprovalTestServer | undefined;
@@ -90,5 +91,52 @@ describe('the sign-in pass-through in the running app', () => {
     const res = await app.request('http://127.0.0.1:8790/dex/auth', { headers: { host: '127.0.0.1:8790' } });
     expect(res.status).toBe(404);
     expect(upstream).toEqual([]);
+  });
+
+  describe('an instance with a public https sign-in address', () => {
+    const PUBLIC_ISSUER = 'https://login.example.com/dex';
+
+    async function startHosted(): Promise<ApprovalTestServer> {
+      Object.assign(configuration, {
+        OIDC: { ...OIDC_CONFIG, OIDC_ISSUER_URL: PUBLIC_ISSUER },
+        PUBLIC_BASE_URL: 'https://aman.example.com',
+        ALLOWED_ORIGINS: [],
+        LOGIN_UPSTREAM_URL: ISSUER,
+      });
+      server = await startApprovalTestServer({ authenticator: signedOut });
+      return server;
+    }
+
+    it('serves the sign-in pages at the sign-in address, through the limiter, and nothing else there', async () => {
+      const app = await startHosted();
+      const page = await app.request('https://login.example.com/dex/auth?client_id=c', {
+        headers: { host: 'login.example.com' },
+      });
+      expect(page.status).toBe(200);
+      expect(upstream).toEqual(['http://127.0.0.1:5556/dex/auth?client_id=c']);
+      const post = () =>
+        app.request('https://login.example.com/dex/auth/local/login?state=s', {
+          method: 'POST',
+          headers: { host: 'login.example.com', 'content-type': 'application/x-www-form-urlencoded' },
+          body: 'login=a%40b.c&password=x',
+        });
+      const statuses: number[] = [];
+      for (let i = 0; i < 8; i += 1) {
+        statuses.push((await post()).status);
+      }
+      expect(statuses.filter(status => status === 429).length).toBeGreaterThan(0);
+      expect(upstream.filter(url => url.includes('/login')).length).toBeLessThanOrEqual(5);
+      const elsewhere = await app.request('https://login.example.com/api/v1/sessions', {
+        headers: { host: 'login.example.com' },
+      });
+      expect(elsewhere.status).toBe(421);
+    });
+
+    it('does not serve the sign-in pages at the app address', async () => {
+      const app = await startHosted();
+      const res = await app.request('https://aman.example.com/dex/auth', { headers: { host: 'aman.example.com' } });
+      expect(res.status).toBe(421);
+      expect(upstream).toEqual([]);
+    });
   });
 });

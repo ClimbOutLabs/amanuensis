@@ -94,12 +94,12 @@ describe('docker-compose.slots.yml', () => {
   });
 });
 
-/** The installer's instance template with the sandbox on and no https front end, for an instance named main. */
+/** The installer's instance template with the sandbox on and no https front end of either kind, for an instance named main. */
 function renderInstanceTemplate(): unknown {
   const text = readFileSync(resolve(REPO_ROOT, 'installer/templates/instance/compose.yaml.tpl'), 'utf8');
   const rendered = text
     .split('\n')
-    .filter(line => !line.startsWith('@@IF_EDGE@@'))
+    .filter(line => !line.startsWith('@@IF_EDGE@@') && !line.startsWith('@@IF_TLS@@'))
     .map(line => line.replace('@@IF_SANDBOX@@', ''))
     .join('\n')
     .replace(/@@NAME@@/g, 'main')

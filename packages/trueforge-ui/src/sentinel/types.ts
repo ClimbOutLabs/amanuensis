@@ -89,6 +89,14 @@ export type SentinelApprovalCard = {
   email: SentinelApprovalEmail | null;
 };
 
+/** What the server says about an action a scheduled run held for its owner instead of asking. */
+export type HeldActionInfo = {
+  /** Whether "Always allow" may be offered; the server refuses it for other tools. */
+  alwaysAllowOffered: boolean;
+  /** ISO time after which the held action can no longer be approved, or null when not sent. */
+  expiresAt: string | null;
+};
+
 /** Everything the UI needs to render a Tier 2 or Tier 3 approval, keyed to one tool call. */
 export type SentinelApprovalInfo = {
   toolCallId: string;
@@ -98,7 +106,17 @@ export type SentinelApprovalInfo = {
   eventId: string | null;
   /** Thread that owns the call; a sub-agent's calls carry its own thread id. */
   threadId: string | null;
+  /** Present only for an action a scheduled run held; such a card never pauses the chat. */
+  held?: HeldActionInfo | undefined;
+  /** Present only for an action a scheduled run could not save for the owner, and why. */
+  notSaved?: NotSavedReason | undefined;
 };
+
+/** Why a scheduled run could not save an action that needed the owner's OK. */
+export type NotSavedReason = 'too_many' | 'helper_agent';
+
+/** A recorded answer to an approval request. */
+export type ApprovalAnswer = 'approved' | 'denied';
 
 export const SENTINEL_AUDIT_OUTCOMES = ['logged', 'ran', 'approved', 'denied', 'auto_denied'] as const;
 
@@ -160,6 +178,8 @@ export type SentinelApi = {
 /** Durable per-tool-call Sentinel state for one session. */
 export type SentinelSessionContext = {
   approvals: SentinelApprovalInfo[];
+  /** Answers already given, by tool call id. Absent when the host reads none. */
+  answers?: Record<string, ApprovalAnswer> | undefined;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -264,6 +284,19 @@ function toolCallIdFrom(record: Record<string, unknown>): string | undefined {
   );
 }
 
+function parseHeldInfo(ref: Record<string, unknown>): HeldActionInfo | undefined {
+  if (ref.held !== true) return undefined;
+  return {
+    alwaysAllowOffered: ref.can_always_allow === true || ref.canAlwaysAllow === true,
+    expiresAt: nullableString(ref, 'expires_at') ?? nullableString(ref, 'expiresAt'),
+  };
+}
+
+function parseNotSaved(ref: Record<string, unknown>): NotSavedReason | undefined {
+  const value = ref.not_saved ?? ref.notSaved;
+  return value === 'too_many' || value === 'helper_agent' ? value : undefined;
+}
+
 function parseApprovalInfo(
   ref: Record<string, unknown>,
   origin: { eventId: string | null; threadId: string | null },
@@ -272,7 +305,16 @@ function parseApprovalInfo(
   const card = parseApprovalCard(ref.tier3_card ?? ref.tier3Card ?? ref.card);
   const toolCallId = toolCallIdFrom(ref);
   if (tier === undefined || card === undefined || toolCallId === undefined) return undefined;
-  return { toolCallId, tier, card, ...origin };
+  const held = parseHeldInfo(ref);
+  const notSaved = parseNotSaved(ref);
+  return {
+    toolCallId,
+    tier,
+    card,
+    ...origin,
+    ...(held === undefined ? {} : { held }),
+    ...(notSaved === undefined ? {} : { notSaved }),
+  };
 }
 
 export const APPROVAL_REQUIRED_EVENT_TYPE = 'tool.approval_required';
@@ -303,13 +345,32 @@ export function extractSentinelFromEvent(event: unknown): SentinelApprovalInfo[]
   return approvals;
 }
 
+/**
+ * The decisions a created turn carries as input. A held action is answered by a turn whose only
+ * input is a `user.tool_approval`, so reading these tells a reloaded chat which cards are done.
+ */
+function answersFromEvent(event: unknown): [string, ApprovalAnswer][] {
+  if (!isRecord(event) || event.type !== 'turn.created' || !Array.isArray(event.input)) return [];
+  const answers: [string, ApprovalAnswer][] = [];
+  for (const item of event.input) {
+    if (!isRecord(item) || item.type !== 'user.tool_approval' || !isRecord(item.approval)) continue;
+    const toolCallId = optionalString(item, 'tool_call_id') ?? optionalString(item, 'toolCallId');
+    if (toolCallId === undefined) continue;
+    if (item.approval.status === 'allow') answers.push([toolCallId, 'approved']);
+    if (item.approval.status === 'deny') answers.push([toolCallId, 'denied']);
+  }
+  return answers;
+}
+
 /** Folds raw session events into per-tool-call Sentinel state (later events win). */
 export function extractSentinelSessionContext(events: unknown[]): SentinelSessionContext {
   const approvals = new Map<string, SentinelApprovalInfo>();
+  const answers: Record<string, ApprovalAnswer> = {};
   for (const event of events) {
     for (const approval of extractSentinelFromEvent(event)) approvals.set(approval.toolCallId, approval);
+    for (const [toolCallId, answer] of answersFromEvent(event)) answers[toolCallId] = answer;
   }
-  return { approvals: [...approvals.values()] };
+  return { approvals: [...approvals.values()], answers };
 }
 
 function parseAuditEntry(value: unknown): SentinelAuditEntry | undefined {

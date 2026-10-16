@@ -329,6 +329,9 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         port: configuration.PORT,
         publicBaseUrl: getPublicBaseUrl(),
         allowedOrigins: getAllowedOrigins(),
+        ...(configuration.OIDC !== undefined && configuration.LOGIN_UPSTREAM_URL !== ''
+          ? { loginGatewayUrl: configuration.OIDC.OIDC_ISSUER_URL }
+          : {}),
       }),
     );
   }
@@ -338,18 +341,31 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   }
   app.use('*', createRequestBodyLimitMiddleware(configuration.MAX_REQUEST_BODY_BYTES));
 
-  // An instance opened on several addresses serves its sign-in service under the app's own origin.
-  if (
-    configuration.STANDALONE &&
-    configuration.OIDC !== undefined &&
-    getAllowedOrigins().length > 0 &&
-    isProxiableIssuer(configuration.OIDC.OIDC_ISSUER_URL)
-  ) {
-    const issuerPath = new URL(configuration.OIDC.OIDC_ISSUER_URL).pathname.replace(/\/$/, '');
-    app.all(
-      `${issuerPath}/*`,
-      createLoginProxy({ issuerUrl: configuration.OIDC.OIDC_ISSUER_URL, allowedOrigins: getAllowedOrigins() }),
-    );
+  // The app serves its sign-in service itself, so password guessing is limited: under every listed address for an
+  // instance opened on the network, or under the issuer's public address when LOGIN_UPSTREAM_URL says where it runs.
+  if (configuration.STANDALONE && configuration.OIDC !== undefined) {
+    const issuerUrl = configuration.OIDC.OIDC_ISSUER_URL;
+    const issuerPath = new URL(issuerUrl).pathname.replace(/\/$/, '');
+    if (getAllowedOrigins().length > 0 && isProxiableIssuer(issuerUrl)) {
+      app.all(
+        `${issuerPath}/*`,
+        createLoginProxy({
+          issuerUrl,
+          allowedOrigins: getAllowedOrigins(),
+          trustedProxies: configuration.TRUSTED_PROXY_ADDRESSES,
+        }),
+      );
+    } else if (configuration.LOGIN_UPSTREAM_URL !== '') {
+      app.all(
+        `${issuerPath}/*`,
+        createLoginProxy({
+          issuerUrl,
+          upstreamUrl: configuration.LOGIN_UPSTREAM_URL,
+          trustedProxies: configuration.TRUSTED_PROXY_ADDRESSES,
+          allowedOrigins: [new URL(issuerUrl).origin],
+        }),
+      );
+    }
   }
 
   app.get('/healthz', c => c.json({ status: 'ok', version: PACKAGE_VERSION }));

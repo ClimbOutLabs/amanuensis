@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="docs/quickstart.mdx"><strong>Quickstart</strong></a> &nbsp;·&nbsp;
+  <a href="docs/quickstart.mdx"><strong>Developer quickstart</strong></a> &nbsp;·&nbsp;
   <a href="docs/install.mdx">Install</a> &nbsp;·&nbsp;
   <a href="docs/introduction.mdx">Introduction</a> &nbsp;·&nbsp;
   <a href="docs/deployment-security.mdx">Deployment security</a> &nbsp;·&nbsp;
@@ -78,7 +78,19 @@ flowchart TB
 | `docs`                    | Product, setup, architecture, and API documentation                   |
 | `ops`                     | Aman-specific design records, evaluations, and runbooks               |
 
-## Quick start
+## Install on your own computer
+
+The installer sets everything up in one command. You need Docker (on Linux the installer can install it for you). Check out the release tag you were given, then run the installer.
+
+```bash
+git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
+git checkout vX.Y.Z
+./installer/install.sh
+```
+
+Then open http://localhost:8791 and see [docs/try-aman.md](docs/try-aman.md).
+
+## Development quick start
 
 > **Install from a release, not from main.** The commands below pin the latest stable release. For the newest stable release, see [Releases](https://github.com/ClimbOutLabs/amanuensis/releases). The `main` branch is active development and may be unstable.
 

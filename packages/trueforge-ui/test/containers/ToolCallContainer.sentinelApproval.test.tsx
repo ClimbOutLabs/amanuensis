@@ -154,7 +154,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
 
   it('Approve all sends allow-once for each call even when allow-chat is declared first', () => {
     const chatFirst: ApprovalOptions = [
-      { id: 'allow-chat', kind: 'allow-always', label: 'Allow in this chat' },
+      { id: 'allow-chat', kind: 'allow-always', label: 'Approve for this chat' },
       { id: 'allow-once', kind: 'allow-once' },
       { id: 'deny', kind: 'reject-once', confirm: {} },
     ];
@@ -256,7 +256,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
           id: 'a',
           tier,
           options: [
-            { id: 'allow-chat', kind: 'allow-always', label: 'Allow in this chat' },
+            { id: 'allow-chat', kind: 'allow-always', label: 'Approve for this chat' },
             { id: 'allow-once', kind: 'allow-once' },
             { id: 'deny', kind: 'reject-once', confirm: {} },
           ],

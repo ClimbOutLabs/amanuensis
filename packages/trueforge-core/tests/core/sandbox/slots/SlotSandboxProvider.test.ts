@@ -6,6 +6,7 @@ import {
   SandboxNotAvailableError,
   SandboxPathIsDirectoryError,
 } from '../../../../src/core/sandbox/SandboxErrors';
+import { SLOT_NOT_READY_MESSAGE } from '../../../../src/core/sandbox/slots/SlotDriver';
 import { chatCapacity, SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
 import { makeSilentLogger } from '../../harnessMocks';
 import { attestation, bodyOf, errorBody, FakeAgent, type FakeHandler } from './fakeAgent';
@@ -85,7 +86,7 @@ describe('SlotSandboxProvider', () => {
     expect(sandboxId).toMatch(/^s2-[0-9a-f]{32}$/);
   });
 
-  test('createSandbox fails with the repair command when no slot attests', async () => {
+  test('createSandbox fails with the one plain message when no slot attests', async () => {
     const provider = new SlotSandboxProvider({
       socketPaths: [join(tmpdir(), 'no-such', 'agent.sock')],
       defaultExecTimeoutSeconds: 60,
@@ -95,7 +96,7 @@ describe('SlotSandboxProvider', () => {
       sleepMs: undefined,
       gitBridge: undefined,
     });
-    await expect(provider.createSandbox()).rejects.toThrow('aman doctor sandbox --fix');
+    await expect(provider.createSandbox()).rejects.toThrow(SLOT_NOT_READY_MESSAGE);
     expect((await provider.getImageBuildStatus()).status).toBe('failed');
   });
 

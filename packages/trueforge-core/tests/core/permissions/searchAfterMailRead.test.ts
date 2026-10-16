@@ -55,10 +55,11 @@ describe('web search after the turn read mail', () => {
     expect((await classifyTier(SEARCH, makeCtx())).tier).toBe(1);
   });
 
-  it('is denied in a scheduled run, where nobody could approve it', async () => {
+  it('is held for the owner in a scheduled run, where nobody could approve it on the spot', async () => {
     const ctx = makeCtx(true);
     await classifyTier(MAIL_READ, ctx);
     const decision = await classifyTier(SEARCH, ctx);
-    expect(decision.auto_deny).toBe('outbound_guard');
+    expect(decision.auto_deny).toBeNull();
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_after_private_read' });
   });
 });

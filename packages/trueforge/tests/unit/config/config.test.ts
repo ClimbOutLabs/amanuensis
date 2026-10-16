@@ -8,8 +8,10 @@ import {
   isLoopbackHost,
   isPrivateNetworkHost,
   parseAllowedOrigins,
+  parseLoginUpstreamUrl,
   parsePublicBaseUrl,
   parseTokenFactoryMode,
+  parseTrustedProxyAddresses,
   TrueForgeAuthMode,
   type PublicUrlConfig,
   type ServerConfiguration,
@@ -443,4 +445,59 @@ describe('parseAllowedOrigins', () => {
   ])('refuses %s', entry => {
     expect(() => parseAllowedOrigins(entry)).toThrow(/ALLOWED_ORIGINS/);
   });
+
+  it.each(['http://:pw@192.168.1.20:8791', 'http://:@192.168.1.20:8791', 'http://user:pw@192.168.1.20:8791'])(
+    'refuses a login of any kind (%s)',
+    entry => {
+      expect(() => parseAllowedOrigins(entry)).toThrow(/no path, query or login/);
+    },
+  );
+
+  it.each([
+    'http://0x7f.1:8791',
+    'http://0xc0a80114:8791',
+    'http://0300.0250.01.020:8791',
+    'http://3232235796:8791',
+    'http://192.168.01.20:8791',
+    'http://010.1.1.1:8791',
+    'http://192.168.1:8791',
+  ])('refuses an address written in octal, hex or as one number (%s) instead of rewriting it', entry => {
+    expect(() => parseAllowedOrigins(entry)).toThrow(/octal, hex or as one number|public address/);
+  });
+
+  it('keeps an address written as four plain decimal parts', () => {
+    expect(parseAllowedOrigins('http://192.168.1.20:8791,http://10.0.0.1')).toEqual([
+      'http://192.168.1.20:8791',
+      'http://10.0.0.1',
+    ]);
+  });
+});
+
+describe('parseLoginUpstreamUrl', () => {
+  it('is empty when unset and keeps a loopback address with a path', () => {
+    expect(parseLoginUpstreamUrl(undefined)).toBe('');
+    expect(parseLoginUpstreamUrl(' ')).toBe('');
+    expect(parseLoginUpstreamUrl('http://127.0.0.1:5556/dex/')).toBe('http://127.0.0.1:5556/dex');
+  });
+
+  it.each(['http://192.168.1.20:5556/dex', 'https://127.0.0.1:5556/dex', 'http://127.0.0.1:5556', 'nonsense'])(
+    'refuses %s',
+    value => {
+      expect(() => parseLoginUpstreamUrl(value)).toThrow(/LOGIN_UPSTREAM_URL/);
+    },
+  );
+});
+
+describe('parseTrustedProxyAddresses', () => {
+  it('is empty when unset and keeps IP addresses', () => {
+    expect(parseTrustedProxyAddresses(undefined)).toEqual([]);
+    expect(parseTrustedProxyAddresses(' 172.17.0.1, fd00::1 ')).toEqual(['172.17.0.1', 'fd00::1']);
+  });
+
+  it.each(['proxy.example.com', '172.17.0.0/16', '*'])(
+    'refuses %s, so a name or range cannot widen the trust',
+    value => {
+      expect(() => parseTrustedProxyAddresses(value)).toThrow(/TRUSTED_PROXY_ADDRESSES/);
+    },
+  );
 });

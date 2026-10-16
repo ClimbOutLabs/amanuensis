@@ -230,6 +230,9 @@ test_public_url_rules() {
   assert_contains "$(cat "$AMAN_HOME/instances/pub/dex.yaml")" "issuer: https://login.example.invalid/dex"
   assert_contains "$(cat "$AMAN_HOME/instances/pub/dex.yaml")" "https://aman.example.invalid/api/v1/auth/callback"
   assert_contains "$OUT" "Requirements for your reverse proxy"
+  assert_eq "$(env_value pub TRUSTED_PROXY_ADDRESSES)" "172.30.0.1" "the app believes the proxy that reaches it through the network's gateway"
+  assert_contains "$(cat "$STUB_LOG")" "--force-recreate --no-deps --wait --wait-timeout 120 app"
+  assert_eq "$(env_value pub LOGIN_UPSTREAM_URL)" "http://127.0.0.1:$(sed -n 's/^login_port=//p' "$AMAN_HOME/state/instances/pub.conf")/dex"
   assert_contains "$OUT" "Never a path prefix"
   assert_contains "$OUT" "Forward the original Host header"
   assert_contains "$OUT" "Do not buffer responses"
@@ -374,6 +377,7 @@ test_refresh_leaves_a_complete_file_alone() {
   assert_rc 0
   assert_eq "$(cat "$AMAN_HOME/instances/main/.env")" "$before"
   assert_not_contains "$OUT$ERR" "Put back"
+  assert_eq "$(env_value main LOGIN_UPSTREAM_URL)" "" "an instance opened on this computer has no public sign-in address to limit"
   sandbox_drop
 }
 
