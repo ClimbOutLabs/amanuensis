@@ -29,7 +29,7 @@ export interface SentinelServices {
   searchWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Exact secret values the host holds for this user, for the outbound secret guard. */
   outboundSecrets: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
-  /** True when no person watches the session (a scheduled run), so a call that would ask is denied instead. */
+  /** True when no person watches this turn (a scheduled run), so a call that would ask is held for the owner. */
   unattended: boolean;
 }
 
@@ -66,9 +66,9 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
 }
 
 /**
- * Services for unattended sessions: user relaxations never apply, so a Tier 2
- * action parks for approval instead of running while nobody watches, and a web
- * search the outbound guard holds back is denied instead of asked.
+ * Services for one unattended turn: user relaxations never apply, so a Tier 2
+ * action that would run silently is held for the owner while nobody watches.
+ * Token and grant stores stay shared with the session.
  */
 export function forUnattendedRun(services: SentinelServices): SentinelServices {
   return { ...services, tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()), unattended: true };

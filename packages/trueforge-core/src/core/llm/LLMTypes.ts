@@ -155,6 +155,10 @@ export const InternalToolCallInfoSchema = z.object({
     .string()
     .optional()
     .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
+  held_for_owner: z
+    .object({ expires_at: z.string() })
+    .optional()
+    .describe('Set when an unattended run held this call for the owner instead of asking. Never model-authored.'),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
     .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),

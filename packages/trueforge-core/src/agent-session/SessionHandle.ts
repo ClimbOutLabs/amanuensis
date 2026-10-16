@@ -33,6 +33,7 @@ import type {
 } from '../core/runtime/AgentThread.types';
 import { AgentThreadOrchestrator } from '../core/runtime/AgentThreadOrchestrator';
 import {
+  findUndecidedHeldToolCalls,
   isApprovalDecisionMessage,
   isClientSideToolResponseMessage,
   isInputUserMessage,
@@ -213,6 +214,7 @@ export class SessionHandle<
    * Session-scoped Sentinel services. Created once per SessionHandle so
    * tracked-executable grants and approval tokens are shared across the
    * main thread, sub-agent threads, and ToolSet batches within the session.
+   * An unattended turn wraps them per turn and keeps the same stores.
    */
   private readonly sentinelServices: SentinelServices;
 
@@ -223,9 +225,7 @@ export class SessionHandle<
   }) {
     this.store = options.store;
     this.session = options.session;
-    const services = options.sentinelServices ?? defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH });
-    // Nobody watches a scheduled run, so relaxations never apply: Tier 2 parks for approval.
-    this.sentinelServices = options.session.source?.type === 'schedule' ? forUnattendedRun(services) : services;
+    this.sentinelServices = options.sentinelServices ?? defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH });
   }
 
   get session_id(): string {
@@ -238,9 +238,9 @@ export class SessionHandle<
    * come from the authoritative session record. Services are the session's
    * shared instance so grants and tokens are visible across threads.
    */
-  private createSentinelContext(): SentinelHostContext {
+  private createSentinelContext(services: SentinelServices): SentinelHostContext {
     return createSentinelHostContext({
-      services: this.sentinelServices,
+      services,
       tenant_id: this.session.tenant_id,
       created_by: this.session.created_by_subject.subject_id,
       conversation_id: this.session.session_id,
@@ -304,6 +304,13 @@ export class SessionHandle<
     on_command_execution_started?: ((execution: RegisteredCommandExecution) => void) | undefined;
     /** Durable owner written on registered-command leases (replica id in distributed mode). */
     command_execution_owner_id?: string | undefined;
+    /**
+     * No person watches this turn (a scheduled run): relaxations never apply and a call that would
+     * ask is held for the owner. A follow-up turn in the same chat is attended unless it sets this too.
+     */
+    unattended?: boolean | undefined;
+    /** End the turn after its tool step without calling the model; see {@link answersOnlyHeldActions}. */
+    stop_after_tool_response?: boolean | undefined;
   }): Promise<TurnHandle<TTurnCustom>> {
     const previousTurnId = resolvePreviousTurnId(input.previous_turn_id, this.session.last_turn_id);
     // Read, do not freeze: cancelling here would make a submission that then fails
@@ -312,6 +319,8 @@ export class SessionHandle<
     const previous = previousTurnId ? await this.getTurnRecord(previousTurnId) : undefined;
 
     const custom = typeof input.custom === 'function' ? input.custom(previous?.custom ?? undefined) : input.custom;
+    const sentinelServices =
+      input.unattended === true ? forUnattendedRun(this.sentinelServices) : this.sentinelServices;
 
     // Dispose-on-early-failure: any resource acquired below (sandbox handle,
     // MCP connections) is owned by createTurn() until the TurnHandle is returned; from then
@@ -333,7 +342,7 @@ export class SessionHandle<
         turn_id: input.turn_id,
         signal: input.signal,
         tracing,
-        sentinel: this.createSentinelContext(),
+        sentinel: this.createSentinelContext(sentinelServices),
       });
 
       const definitionsByThreadId = await this.resolveAgentDefinitions({
@@ -342,6 +351,7 @@ export class SessionHandle<
         spec,
         tracing,
         signal: input.signal,
+        sentinelServices,
       });
 
       // Wire Code Mode once from main toolSets before threads share the sandbox.
@@ -411,6 +421,8 @@ export class SessionHandle<
         chatApprovalGrants,
         loadImplementationPlanGrants,
         isRequestContinuation,
+        sentinelServices,
+        stopAfterToolResponse: input.stop_after_tool_response === true,
       });
 
       const createDynamicSubAgentThread = this.makeCreateDynamicSubAgentThread({
@@ -421,6 +433,7 @@ export class SessionHandle<
         tracing,
         chatApprovalGrants,
         loadImplementationPlanGrants,
+        sentinelServices,
       });
 
       const orchestrator = new AgentThreadOrchestrator({
@@ -624,6 +637,31 @@ export class SessionHandle<
   }
 
   /**
+   * True when every item of the input answers an action an unattended run held and nobody has
+   * answered yet. Such a turn runs only those actions, so the caller ends it without a model call.
+   */
+  async answersOnlyHeldActions(input: {
+    previous_turn_id: string | undefined;
+    input: readonly TurnInputItem[] | undefined;
+  }): Promise<boolean> {
+    const items = input.input ?? [];
+    const previousTurnId = resolvePreviousTurnId(input.previous_turn_id, this.session.last_turn_id);
+    if (items.length === 0 || previousTurnId === null || !items.every(isApprovalDecisionMessage)) {
+      return false;
+    }
+    const previous = await this.store.getTurn({ session_id: this.session.session_id, turn_id: previousTurnId });
+    return (
+      previous !== undefined &&
+      items.every(item => {
+        const thread = previous.snapshot.threads[item.thread_id];
+        return (
+          thread !== undefined && findUndecidedHeldToolCalls(thread.context).some(call => call.id === item.tool_call_id)
+        );
+      })
+    );
+  }
+
+  /**
    * Conditionally cancel a running turn in this session and return the
    * now-immutable record. Already-terminal turns are returned unchanged.
    * Missing turn → {@link TurnNotFoundError}.
@@ -711,6 +749,7 @@ export class SessionHandle<
     spec: AgentSpec;
     tracing: AgentTracing;
     signal: AbortSignal;
+    sentinelServices: SentinelServices;
   }): Promise<Map<string, ResolvedAgentDefinition>> {
     const snapshots = input.previous?.snapshot.threads;
     const threadIds = threadIdsForCurrentTurn(input.previous);
@@ -727,7 +766,7 @@ export class SessionHandle<
           tenant_id: this.session.tenant_id,
           created_by: this.session.created_by_subject.subject_id,
           session_id: this.session.session_id,
-          sentinel_services: this.sentinelServices,
+          sentinel_services: input.sentinelServices,
           workspace_cwd: this.session.workspace_cwd ?? null,
         });
         definitionsByThreadId.set(threadId, resolved);
@@ -746,6 +785,8 @@ export class SessionHandle<
     chatApprovalGrants: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
     isRequestContinuation: boolean;
+    sentinelServices: SentinelServices;
+    stopAfterToolResponse: boolean;
   }): Map<string, AgentThread> {
     const snapshots = input.previous?.snapshot.threads;
     const map = new Map<string, AgentThread>();
@@ -767,6 +808,8 @@ export class SessionHandle<
           chatApprovalGrants: input.chatApprovalGrants,
           loadImplementationPlanGrants: input.loadImplementationPlanGrants,
           isRequestContinuation: input.isRequestContinuation,
+          sentinelServices: input.sentinelServices,
+          stopAfterToolResponse: input.stopAfterToolResponse,
         }),
       );
     }
@@ -784,6 +827,8 @@ export class SessionHandle<
     chatApprovalGrants: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
     isRequestContinuation: boolean;
+    sentinelServices: SentinelServices;
+    stopAfterToolResponse: boolean;
   }): AgentThread {
     const { definition, extraCapabilities, compactionModel } = input.resolvedDefinition;
     const isChild = Boolean(input.previousThreadSnapshot?.parent);
@@ -830,7 +875,8 @@ export class SessionHandle<
       runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
       modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
       toolCallPolicy: input.resolver.toolCallPolicy,
-      sentinel: this.createSentinelContext(),
+      stopAfterToolResponse: input.stopAfterToolResponse,
+      sentinel: this.createSentinelContext(input.sentinelServices),
     });
   }
 
@@ -842,6 +888,7 @@ export class SessionHandle<
     tracing: AgentTracing;
     chatApprovalGrants: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
+    sentinelServices: SentinelServices;
   }): CreateDynamicSubAgentThread {
     return async params => {
       throwIfSignalAborted(params.signal);
@@ -861,7 +908,7 @@ export class SessionHandle<
         tenant_id: this.session.tenant_id,
         created_by: this.session.created_by_subject.subject_id,
         session_id: this.session.session_id,
-        sentinel_services: this.sentinelServices,
+        sentinel_services: input.sentinelServices,
         workspace_cwd: this.session.workspace_cwd ?? null,
       });
       throwIfSignalAborted(params.signal);
@@ -922,7 +969,7 @@ export class SessionHandle<
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
         modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
         toolCallPolicy: input.resolver.toolCallPolicy,
-        sentinel: this.createSentinelContext(),
+        sentinel: this.createSentinelContext(input.sentinelServices),
       });
     };
   }

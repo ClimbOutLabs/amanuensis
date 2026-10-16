@@ -391,6 +391,23 @@ export function scanApprovalDecisions(context: ContextMessage[]): Map<string, Ap
   return decisions;
 }
 
+/** Every call an unattended run held for the owner, in the order it was made. */
+export function findHeldToolCalls(context: readonly ContextMessage[]): InternalEnrichedToolCall[] {
+  const held: InternalEnrichedToolCall[] = [];
+  for (const msg of context) {
+    if (isLLMContextMessage(msg) && msg.role === 'assistant') {
+      held.push(...(msg.tool_calls ?? []).filter(call => call.tool_info.held_for_owner !== undefined));
+    }
+  }
+  return held;
+}
+
+/** Held calls the owner has not answered yet. */
+export function findUndecidedHeldToolCalls(context: ContextMessage[]): InternalEnrichedToolCall[] {
+  const decisions = scanApprovalDecisions(context);
+  return findHeldToolCalls(context).filter(call => !decisions.has(call.id));
+}
+
 export function makeUnknownToolInfo(toolName: string): InternalToolCallInfo {
   return {
     type: 'mcp',

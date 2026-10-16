@@ -470,6 +470,9 @@ export class AgentThreadOrchestrator {
 
     switch (chunk.type) {
       case EventType.TOOL_APPROVAL_REQUIRED:
+        yield chunk;
+        // Held actions list what the owner can approve later; the run itself has nothing to wait for.
+        return { shouldStopExecution: !chunk.tool_calls.every(call => call.held === true) };
       case EventType.TOOL_RESPONSE_REQUIRED:
         yield chunk;
         return { shouldStopExecution: true };

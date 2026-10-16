@@ -933,6 +933,8 @@ export async function beginTurnExecution(params: {
   previous_turn_id: string | undefined;
   userRef: string;
   deps: BeginTurnExecutionDeps;
+  /** No person watches this turn (a scheduled run): what would ask is held for the owner. */
+  unattended?: boolean | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const { session, input, previous_turn_id: previousTurnId, userRef, deps } = params;
   const sessionId = session.session_id;
@@ -1035,6 +1037,7 @@ export async function beginTurnExecution(params: {
       executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
     },
     command_execution_owner_id: configuration.EXECUTOR_ID,
+    unattended: params.unattended,
   });
 
   executionDeadline.arm();
@@ -1082,6 +1085,7 @@ export async function startTurnInProcess(params: {
   previous_turn_id: string | undefined;
   userRef: string;
   deps: BeginTurnExecutionDeps;
+  unattended?: boolean | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -1803,6 +1807,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     // never overwrites an existing title.
     const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
 
+    // Answering actions a scheduled run held runs just those calls; the chat is not asked anything new.
+    const stopAfterToolResponse = await session.answersOnlyHeldActions({
+      previous_turn_id: body.previous_turn_id,
+      input: body.input,
+    });
+
     let turn;
     try {
       turn = await session.createTurn({
@@ -1817,6 +1827,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
         },
         command_execution_owner_id: configuration.EXECUTOR_ID,
+        stop_after_tool_response: stopAfterToolResponse,
       });
     } catch (error) {
       if (error instanceof SessionStoreNotFoundError) {

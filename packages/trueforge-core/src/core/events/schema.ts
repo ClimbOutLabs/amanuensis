@@ -637,6 +637,11 @@ export const ApprovalToolCallRefSchema = z
       .union([Tier3CardSchema, z.null()])
       .optional()
       .describe('Plain-language approval card for a Tier 2 or Tier 3 call, or null.'),
+    held: z
+      .literal(true)
+      .optional()
+      .describe('Set when a scheduled run held this action for the owner. The run did not wait for an answer.'),
+    can_always_allow: z.boolean().optional().describe('Whether the owner may allow this tool for good.'),
   })
   .openapi('ApprovalToolCallRef');
 

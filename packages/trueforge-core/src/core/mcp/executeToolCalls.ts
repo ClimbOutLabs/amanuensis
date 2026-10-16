@@ -30,6 +30,7 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
 import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
+import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryUnwrapCallToolInput } from '../runtime/DeferredTool';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
@@ -100,7 +101,7 @@ export function selectRepeatedActionStopMessage(input: {
   repeatedGithubFileRead: boolean;
 }): string {
   if (input.repeatedDeniedApproval) {
-    return 'The model repeated an action the user already denied, so the turn was stopped. Change strategy or explain why a different action is needed.';
+    return 'The model repeated an action the user already denied or that is waiting for their OK, so the turn was stopped. Change strategy or explain why a different action is needed.';
   }
   if (input.repeatedSideEffects) {
     return 'The model attempted a side-effecting action whose dependent precondition was violated (a preceding workspace mutation did not complete as expected, or the durable execution marker was missing), so the turn was stopped and the action was not retried.';
@@ -676,6 +677,7 @@ export function prepareSideEffectToolCalls({
     if (
       toolInfo === undefined ||
       toolCall.tool_info.pre_dispatch_failure !== undefined ||
+      toolCall.tool_info.held_for_owner !== undefined ||
       toolCall.tool_info.is_thread_creation === true ||
       toolCall.tool_info.is_client_side === true ||
       toolCall.tool_info.effect === 'inspect' ||
@@ -1115,6 +1117,48 @@ export async function executeToolCalls({
               suggested_action: 'retry',
             },
         admissionProvenance: admission,
+      };
+    }
+
+    // A held call is never dispatched here; it runs later only if the owner approves it. Repeating an
+    // identical held call counts toward the repeated-denial guard so a loop cannot pile up holds.
+    if (toolCall.tool_info.held_for_owner !== undefined) {
+      const heldIdentity = `${approvalGrantKey(toolCall.tool_info)}|held|${createHash('sha256')
+        .update(toolCall.function.arguments, 'utf8')
+        .digest('hex')}`;
+      const repeatedHold = memoState.deniedApprovalIdentities.has(heldIdentity);
+      memoState.deniedApprovalIdentities.add(heldIdentity);
+      memoState.repeatedDeniedApproval ||= repeatedHold;
+      return {
+        toolCall,
+        toolInfo,
+        response: repeatedHold
+          ? toolResultResponse({
+              text: JSON.stringify({
+                error: 'This exact action is already waiting for the owner. Continue without it.',
+              }),
+              isError: true,
+            })
+          : toolResultResponse({ text: HELD_RESULT_TEXT }),
+        failure: repeatedHold,
+        completedAt: new Date().toISOString(),
+        memoized: false,
+        repeatCount: 1,
+        blockedPrivateFallback: false,
+        repeatedSideEffect: false,
+        disposition: repeatedHold ? 'policy_blocked' : 'never_ran',
+        remediation: repeatedHold
+          ? {
+              reason_code: 'repeated_denied_action',
+              message: 'Change strategy or explain why a different action is needed.',
+              suggested_action: 'change_strategy',
+            }
+          : {
+              reason_code: HELD_REASON_CODE,
+              message: 'Saved for the owner to approve later. Continue without it.',
+              suggested_action: 'contact_user',
+            },
+        admissionProvenance: { source: 'internal' },
       };
     }
 

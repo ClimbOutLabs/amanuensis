@@ -135,6 +135,8 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     input: prepared.input,
     previous_turn_id: prepared.previous_turn_id,
     userRef: prepared.userRef,
+    // Nobody watches a scheduled run, so it holds what would ask instead of stopping at a card.
+    unattended: true,
     deps: {
       activeTurns: deps.activeTurns,
       turnDrains: deps.turnDrains,

@@ -1086,8 +1086,8 @@ function searchQueryText(strings: OutboundStrings): string {
 }
 
 /**
- * A designated-provider call that stops for approval, or is denied while nobody watches. The card
- * shows the exact text the call would send; the audit row of a denial names only the rule that fired.
+ * A designated-provider call that stops for approval. The card shows the exact text the call would
+ * send. An unattended run holds it for the owner like any other call that asks.
  */
 async function holdSearchCall(input: {
   action: SentinelAction;
@@ -1096,16 +1096,8 @@ async function holdSearchCall(input: {
   why: string;
   queryText: string;
   fields: ExtractionResult['fields'];
-  denyWhenUnattended: boolean;
 }): Promise<TierDecision> {
   const { action, ctx, fields } = input;
-  if (input.denyWhenUnattended && ctx.services.unattended) {
-    return autoDenyDecision({
-      reason: 'outbound_guard',
-      reason_detail: `Web search denied: ${input.why}.`,
-      sensitive_read: false,
-    });
-  }
   const shown =
     input.queryText.length > SEARCH_CARD_TEXT_MAX
       ? `${input.queryText.slice(0, SEARCH_CARD_TEXT_MAX)}...`
@@ -1167,11 +1159,11 @@ async function classifySearchProviderTool(input: {
   const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
   const strings = collectOutboundStrings(action.canonical_params);
   const queryText = strings === undefined ? '' : searchQueryText(strings);
-  const held = (reason: SearchAskReason, why: string, denyWhenUnattended = true): Promise<TierDecision> =>
-    holdSearchCall({ action, ctx, reason, why, queryText, fields: extraction.fields, denyWhenUnattended });
+  const held = (reason: SearchAskReason, why: string): Promise<TierDecision> =>
+    holdSearchCall({ action, ctx, reason, why, queryText, fields: extraction.fields });
 
   if (!(await ctx.services.searchWithoutAsking(owner))) {
-    return held('mcp_search_setting_ask', '', false);
+    return held('mcp_search_setting_ask', '');
   }
   const verdict =
     strings === undefined
