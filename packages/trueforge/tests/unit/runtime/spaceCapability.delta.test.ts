@@ -2,7 +2,7 @@
  * User journey test for update_space delta edits.
  *
  * This is not a unit test with mocked stores. It uses a stateful in-memory
- * store and drives the real tool sequence the way Mannie would: create a
+ * store and drives the real tool sequence the way Aman would: create a
  * space, make small delta edits to a large board, hit failure modes, and
  * recover with revert_space. The scenario is the Madrid trip board that
  * motivated delta edits — a large HTML page where resending the full body

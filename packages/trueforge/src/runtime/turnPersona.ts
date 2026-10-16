@@ -246,7 +246,7 @@ export async function resolveTurnPersona(input: {
   for (const text of turnInvocationTexts(input.turnInput)) {
     const personaMatch = matchPersonaInvocation({ text, personas });
     // Default-assistant names match only after a switch lead-in: addressing
-    // the default assistant by name ("Mannie, I have a friend named Inez.")
+    // the default assistant by name ("Aman, I have a friend named Inez.")
     // is ordinary conversation, not a speaker change.
     const defaultMatch =
       defaultContent === undefined

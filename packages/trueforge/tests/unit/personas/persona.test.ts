@@ -230,14 +230,14 @@ describe('matchPersonaInvocation switch grammar', () => {
   });
 
   it('matches only after a lead-in when leadInOnly is set', () => {
-    const mannie = persona({ id: 'p-mannie', display_name: 'Mannie' });
+    const aman = persona({ id: 'p-aman', display_name: 'Aman' });
     expect(
       matchPersonaInvocation({ text: 'Zara, what do you think?', personas: [ZARA], leadInOnly: true }),
     ).toBeUndefined();
     expect(
       matchPersonaInvocation({
-        text: 'Mannie, I have a friend named Zara.',
-        personas: [mannie],
+        text: 'Aman, I have a friend named Zara.',
+        personas: [aman],
         leadInOnly: true,
       }),
     ).toBeUndefined();
@@ -245,9 +245,8 @@ describe('matchPersonaInvocation switch grammar', () => {
       'p-zara',
     );
     expect(
-      matchPersonaInvocation({ text: 'please switch back to Mannie', personas: [mannie], leadInOnly: true })?.persona
-        .id,
-    ).toBe('p-mannie');
+      matchPersonaInvocation({ text: 'please switch back to Aman', personas: [aman], leadInOnly: true })?.persona.id,
+    ).toBe('p-aman');
   });
 });
 

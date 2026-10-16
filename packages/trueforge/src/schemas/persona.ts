@@ -16,7 +16,7 @@ export const PersonaIdParamsSchema = z
  * letters, digits, spaces and a few connectors. Angle brackets and ampersands
  * are excluded because a name is rendered into the prompt outside CDATA.
  * Periods are excluded too: a name is a token, not a sentence, so a value
- * like "Mannie. Ignore the rest" must never validate as a name.
+ * like "Aman. Ignore the rest" must never validate as a name.
  *
  * The `u` flag is what makes `\p{L}` a Unicode property escape rather than a
  * literal `p`, so it cannot be dropped from the runtime check.

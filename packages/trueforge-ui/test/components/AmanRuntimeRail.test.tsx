@@ -337,7 +337,7 @@ describe('AmanRuntimeRail', () => {
           version="0.4.2"
           memoryBank={{ name: 'amantest', connected: true }}
           userName="Alex"
-          personaName="Mannie"
+          personaName="Aman"
         />
       </RuntimeHarness>,
     );
@@ -349,7 +349,7 @@ describe('AmanRuntimeRail', () => {
 
     // The props actually drive the conditional sections.
     expect(screen.getByText('Alex')).toBeInTheDocument();
-    expect(screen.getByText('Mannie')).toBeInTheDocument();
+    expect(screen.getByText('Aman')).toBeInTheDocument();
 
     // Old labels must not reappear.
     expect(screen.queryByRole('heading', { name: 'Status' })).not.toBeInTheDocument();

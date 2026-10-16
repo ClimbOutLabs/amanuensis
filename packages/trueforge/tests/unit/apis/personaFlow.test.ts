@@ -322,11 +322,11 @@ describe('persona switching inside one conversation', () => {
       };
       expect(session.data.agent.spec.model.name).toBe(MODEL_FQN);
 
-      await setAssistantName(server, 'Mannie');
+      await setAssistantName(server, 'Aman');
 
       // Natural language changes durable host state before the answer. The
-      // model cannot merely claim that Mannie is back while Zara stays active.
-      await runTurn(server, sessionId, 'switch back to Mannie');
+      // model cannot merely claim that Aman is back while Zara stays active.
+      await runTurn(server, sessionId, 'switch back to Aman');
       const backToDefault = lastCompletion(server);
       expect(backToDefault.model).toBe('scripted-model');
       expect(backToDefault.system).not.toContain('<persona-name>');
@@ -522,13 +522,13 @@ describe('persona switching inside one conversation', () => {
         instructions: 'Answer as Inez.',
         model_name: ALT_MODEL_FQN,
       });
-      await setAssistantName(server, 'Mannie');
+      await setAssistantName(server, 'Aman');
 
       for (const content of [
         'I have a friend named Inez.',
         "Don't switch to Inez; tell me what the name means.",
         'In the transcript, the user said "Inez, help me."',
-        'Mannie, I have a friend named Inez.',
+        'Aman, I have a friend named Inez.',
       ]) {
         await runTurn(server, sessionId, content);
         expect(lastCompletion(server).model).toBe('scripted-model');
@@ -730,7 +730,7 @@ describe('persona switching inside one conversation', () => {
         instructions: 'Answer as Nia Two.',
         model_name: ALT_MODEL_FQN,
       });
-      await setAssistantName(server, 'Mannie');
+      await setAssistantName(server, 'Aman');
       await runTurn(server, sessionId, 'Sora, begin here.');
 
       const original = SqlitePersonaStore.prototype.recordPersonaActivationIfManualCurrent;
@@ -916,7 +916,7 @@ describe('persona switching inside one conversation', () => {
         instructions: 'Answer as Petra.',
         model_name: ALT_MODEL_FQN,
       });
-      await setAssistantName(server, 'Mannie');
+      await setAssistantName(server, 'Aman');
 
       // The chat starts on the default assistant: no switch, no notice.
       await runTurn(server, sessionId, 'Hello.');
@@ -971,7 +971,7 @@ describe('persona switching inside one conversation', () => {
 
       // Naming the already-active default by its configured name is a no-op:
       // the turn runs, but no notice and no extra activation row.
-      await runTurn(server, sessionId, 'switch back to Mannie');
+      await runTurn(server, sessionId, 'switch back to Aman');
       const noOp = lastCompletion(server);
       expect(noOp.model).toBe('scripted-model');
       expect(noOp.system).not.toContain('<persona-switch-notice>');

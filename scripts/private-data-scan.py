@@ -9,9 +9,36 @@ Usage:
   python3 private-data-scan.py --diff <git-diff-file>
 """
 
+import hashlib
+import json
 import re
 import sys
 import os
+
+FINGERPRINTS_PATH = os.environ.get(
+    "PRIVATE_DATA_FINGERPRINTS",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "private-data-fingerprints.json"),
+)
+TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def fingerprint(salt, text):
+    """Salted SHA-256 of a lowercase token or a space-joined token pair."""
+    return hashlib.sha256(f"{salt}:{text}".encode("utf-8")).hexdigest()
+
+
+def load_fingerprints(path=FINGERPRINTS_PATH):
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data["salt"], frozenset(data["hashes"])
+
+
+def find_private_words(line, salt, hashes):
+    """Hash each word-like token and each consecutive token pair, compare to the committed set."""
+    tokens = TOKEN_RE.findall(line.lower())
+    candidates = tokens + [f"{a} {b}" for a, b in zip(tokens, tokens[1:])]
+    return any(fingerprint(salt, c) in hashes for c in candidates)
+
 
 # Patterns that indicate private data. Each is (name, regex).
 PATTERNS = [
@@ -28,15 +55,13 @@ PATTERNS = [
     ("Private key block", r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     ("Bearer token", r"(?i)bearer\s+[A-Za-z0-9\-._~+/]{20,}"),
     ("Email address", r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
-    # Personal identifiers (Sidd's info - add more as needed)
-    ("Personal full name", r"(?i)siddharth\s+choure"),
     ("Home path with username", r"/home/[a-z_][a-z0-9_-]*/"),
     ("macOS user path", r"/Users/[A-Z][a-z]+/"),
 ]
 
 # File extensions to skip (binaries, lockfiles with hashes are OK)
 SKIP_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".mp4", ".webm"}
-SKIP_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "Cargo.lock", "poetry.lock"}
+SKIP_FILES = {".private-words.local", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "Cargo.lock", "poetry.lock"}
 
 # Allowlist: (pattern_name, file_substring) - known false positives by file path
 ALLOWLIST = [
@@ -53,9 +78,11 @@ CONTENT_ALLOWLIST = [
     ("Email address", "example.com"),
 ]
 
-def scan_file(path):
+def scan_file(path, fingerprints=None):
     """Scan a single file. Returns list of (pattern_name, line_no, line_preview)."""
     findings = []
+    if fingerprints is None:
+        fingerprints = load_fingerprints()
     ext = os.path.splitext(path)[1].lower()
     if ext in SKIP_EXTENSIONS:
         return findings
@@ -80,6 +107,9 @@ def scan_file(path):
                         if not allowed:
                             preview = line.strip()[:100]
                             findings.append((name, i, preview))
+                if find_private_words(line, *fingerprints):
+                    # Never echo the matched line: it holds the private word.
+                    findings.append(("Private word fingerprint", i, "<redacted>"))
     except (UnicodeDecodeError, PermissionError, IsADirectoryError):
         pass
     return findings
@@ -87,12 +117,13 @@ def scan_file(path):
 def scan_directory(root):
     """Walk a directory and scan all files."""
     all_findings = {}
+    fingerprints = load_fingerprints()
     for dirpath, dirnames, filenames in os.walk(root):
         # Skip node_modules, .git, build outputs
         dirnames[:] = [d for d in dirnames if d not in {".git", "node_modules", "dist", "build", ".next", "__pycache__"}]
         for fn in filenames:
             fp = os.path.join(dirpath, fn)
-            findings = scan_file(fp)
+            findings = scan_file(fp, fingerprints)
             if findings:
                 all_findings[fp] = findings
     return all_findings

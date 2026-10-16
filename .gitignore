@@ -96,3 +96,5 @@ packages/trueforge-sdk/NOTICE
 ops/sandbox-slot/packs/archives/*
 !ops/sandbox-slot/packs/archives/.gitkeep
 ops/sandbox-slot/packs/selected.json
+.private-words.local
+__pycache__/
