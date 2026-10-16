@@ -321,6 +321,34 @@ time.sleep(20)' >"$SB/listener.out" &
   sandbox_drop
 }
 
+test_a_port_held_on_one_address_is_busy() {
+  t_begin "a port that a program holds on 127.0.0.1 or on a home-network address counts as busy, not only one held on all addresses"
+  sandbox_new_plain
+  fixture_network 192.168.1.20
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf 'skip: python3 missing\n'
+    sandbox_drop
+    return 0
+  fi
+  python3 -c 'import socket, time
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+s.listen(1)
+print(s.getsockname()[1], flush=True)
+time.sleep(20)' >"$SB/listener.out" &
+  local pid=$! n=0 port
+  while [ ! -s "$SB/listener.out" ] && [ "$n" -lt 50 ]; do
+    sleep 0.1
+    n=$((n + 1))
+  done
+  port=$(head -n 1 "$SB/listener.out")
+  assert_eq "$(in_lib "PATH=\$PATH . '$INSTALLER_DIR/lib/ports.sh'; port_in_use $port && echo busy || echo free")" busy
+  assert_contains "$(in_lib "PATH=\$PATH . '$INSTALLER_DIR/lib/ports.sh'; port_bind_addresses")" "127.0.0.1"
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  sandbox_drop
+}
+
 test_refresh_adds_a_new_address() {
   t_begin "instance refresh reads the addresses again, keeps the names given at install, and restarts without touching secrets"
   sandbox_new_plain
@@ -587,6 +615,7 @@ test_summary_lists_the_addresses_and_the_plain_warning
 test_no_question_about_the_address
 test_the_plan_names_the_addresses
 test_a_busy_port_on_any_interface_is_skipped
+test_a_port_held_on_one_address_is_busy
 test_refresh_adds_a_new_address
 test_refresh_of_a_local_instance_renders_again
 tests_finish

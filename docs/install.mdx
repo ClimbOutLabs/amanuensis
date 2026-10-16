@@ -246,7 +246,7 @@ Running code (`run_code`, Python and shell in a sandbox with no network) is on a
 
 **The `docker` group needs a sign-out.** After a fresh Linux Docker install, your shell does not know about the new `docker` group until you sign out and back in (or reboot). The installer works around this for its own run and prints a reminder; if later commands say permission denied on the Docker socket, sign out and back in.
 
-**Ports in use.** `instance add` tests each port with a real bind before using it. If it reports a port conflict, either free the port or pass `--port` and `--login-port` explicitly.
+**Ports in use.** `instance add` tests each port with a real bind, on `127.0.0.1` and on each home-network address, before using it. If Docker still cannot open a port the installer picked, the installer moves to the next free one (up to three times) and says so, for example "Port 8791 was busy, so Aman uses 8792." A port you chose with `--port` or `--login-port` is never moved: the install stops, names the port and the program holding it when that can be found, and suggests a free one.
 
 **Docker Desktop credential store.** If image pulls fail with credential errors, open Docker Desktop, sign the credential helper back in, and rerun the installer.
 
