@@ -494,6 +494,14 @@ check_clock() {
   fi
 }
 
+# A schedule turned on within the last two days has not had its first run yet.
+backup_mode_is_recent() {
+  local mtime
+  mtime=$(file_mtime "$(backups_mode_file)")
+  case "$mtime" in '' | *[!0-9]*) return 1 ;; esac
+  [ $(($(now_epoch) - mtime)) -lt 172800 ]
+}
+
 check_backup() {
   local dir newest="" newest_time=0 entry mtime age_days=-1 now mode scheduled=0 days=""
   dir="${AMAN_HOME}/backups"
@@ -521,6 +529,8 @@ check_backup() {
     daily)
       if [ "$scheduled" != 1 ]; then
         record machine backup warn "Daily backups are on, but the schedule that runs them is missing." "Run aman doctor backup --fix"
+      elif [ "$age_days" -lt 0 ] && backup_mode_is_recent; then
+        record machine backup ok "Daily backups are on; the first one runs within a day." ""
       elif [ "$age_days" -lt 0 ] || [ "$age_days" -gt 2 ]; then
         record machine backup warn "Daily backups are scheduled, but ${newest:+the last one is ${days} old}${newest:-none has been made yet}." "Run aman doctor backup --fix"
       else
