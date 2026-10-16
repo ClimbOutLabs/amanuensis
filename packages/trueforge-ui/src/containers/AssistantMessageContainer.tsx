@@ -11,6 +11,7 @@ import {
 import { useTrueFoundryResumeUnavailable } from '@truefoundry/assistant-ui-runtime';
 import type { ReactNode } from 'react';
 
+import { copyText } from '@/utils/copyText.js';
 import type { AgentStepsPhase } from '../atoms/adapters/AgentStepsCardAdapter.js';
 import { AgentInternalsDisclosure } from '../atoms/agent-chat/AgentInternalsDisclosure.js';
 import { MemoryContextCard } from '../atoms/agent-chat/MemoryContextCard.js';
@@ -134,7 +135,7 @@ export function AssistantMessageContainer() {
   const sessionId = useAuiState(s => s.threadListItem.remoteId ?? undefined);
   const { visibility: agentDetailsVisibility } = useAgentDetailsVisibility(sessionId);
   const { copy, isCopied } = useActionBarCopy({
-    copyToClipboard: text => navigator.clipboard.writeText(text),
+    copyToClipboard: text => copyText(text),
   });
 
   // `metadata.custom.turnId` is set by the runtime for both live and replayed messages (see
