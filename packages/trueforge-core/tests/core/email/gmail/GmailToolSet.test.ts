@@ -1,75 +1,14 @@
+import { DraftReviewLedger } from '../../../../src/core/email/gmail/draftReview';
 import { GmailApi } from '../../../../src/core/email/gmail/gmailApi';
 import { GmailToolSet, type AttachmentStager } from '../../../../src/core/email/gmail/GmailToolSet';
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
 import { UNTRUSTED_NOTICE } from '../../../../src/core/email/gmail/results';
 import { GoogleAccessTokens } from '../../../../src/core/google/GoogleAccessTokens';
-import { GOOGLE_TOKEN_URL } from '../../../../src/core/google/oauth';
 import { createSentinelHostContext } from '../../../../src/core/permissions/context';
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 import { connectedRecord, FakeConnections, OWNER } from '../../google/fakes';
 import { b64url, message } from './fixtures';
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-}
-
-type Route = (url: URL) => Response | undefined;
-
-function scriptedGoogle(routes: Route[]) {
-  const urls: string[] = [];
-  const fetchImpl: typeof fetch = (input, init) => {
-    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
-    urls.push(`${init?.method ?? 'GET'} ${url.pathname}${url.search}`);
-    if (url.href.startsWith(GOOGLE_TOKEN_URL)) {
-      return Promise.resolve(json({ access_token: 'at', expires_in: 3600 }));
-    }
-    for (const route of routes) {
-      const response = route(url);
-      if (response !== undefined) {
-        return Promise.resolve(response);
-      }
-    }
-    return Promise.resolve(new Response('', { status: 404 }));
-  };
-  return { fetchImpl, urls };
-}
-
-async function build(input: {
-  routes: Route[];
-  features?: ('gmail_read' | 'gmail_compose')[];
-  stager?: AttachmentStager | undefined;
-}) {
-  const connections = new FakeConnections();
-  await connections.save(connectedRecord());
-  const google = scriptedGoogle(input.routes);
-  const api = new GmailApi({
-    tokens: new GoogleAccessTokens({ connections, owner: OWNER, fetchImpl: google.fetchImpl }),
-    fetchImpl: google.fetchImpl,
-  });
-  const sentinel = createSentinelHostContext({ ...OWNER, conversation_id: 'c1' });
-  const tools = new GmailToolSet({
-    tracing: NOOP_AGENT_TRACING,
-    api,
-    account: 'ada@example.com',
-    features: input.features ?? ['gmail_read'],
-    attachmentStager: input.stager,
-    sentinel,
-  });
-  return { tools, google, sentinel, connections };
-}
-
-function text(response: Awaited<ReturnType<GmailToolSet['callTool']>>): string {
-  if (!('result' in response)) {
-    throw new Error('expected a tool result');
-  }
-  const [block] = response.result.content;
-  return block?.type === 'text' ? block.text : '';
-}
-
-const route =
-  (path: string, body: unknown, status = 200): Route =>
-  url =>
-    url.pathname === `/gmail/v1/users/me${path}` ? json(body, status) : undefined;
+import { build, json, route, text } from './harness';
 
 describe('GmailToolSet reads', () => {
   it('offers only the tools the granted scopes allow', async () => {
@@ -147,6 +86,7 @@ describe('GmailToolSet reads', () => {
       features: ['gmail_read'],
       attachmentStager: undefined,
       sentinel: createSentinelHostContext({ ...OWNER, conversation_id: 'c1' }),
+      reviews: new DraftReviewLedger(),
     });
     const response = await tools.callTool({ name: 'read_email', arguments: { messageId: 'm1' } });
     expect(text(response)).toContain('connected again');

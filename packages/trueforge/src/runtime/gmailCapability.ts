@@ -3,11 +3,15 @@
  * granted mail access. Without one nothing mounts, and the chat simply has no mail tools.
  */
 import type { AgentCapability, AgentTracing, SentinelHostContext } from '@truefoundry/trueforge-core/core';
+import { DraftReviewLedger } from '@truefoundry/trueforge-core/core/email/gmail/draftReview';
 import { GmailApi } from '@truefoundry/trueforge-core/core/email/gmail/gmailApi';
 import { GmailToolSet, type AttachmentStager } from '@truefoundry/trueforge-core/core/email/gmail/GmailToolSet';
 import type { GoogleConnectionStore, GoogleOwner } from '@truefoundry/trueforge-core/core/google/connection';
 import { GoogleAccessTokens } from '@truefoundry/trueforge-core/core/google/GoogleAccessTokens';
 import { grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes';
+
+/** What users were shown before a send, kept for the life of the process so approval and send can meet. */
+const SHARED_REVIEWS = new DraftReviewLedger();
 
 export interface GmailCapabilityOptions {
   connections: GoogleConnectionStore;
@@ -43,6 +47,7 @@ export async function gmailCapability(options: GmailCapabilityOptions): Promise<
         features,
         attachmentStager: options.attachmentStager,
         sentinel: options.sentinel,
+        reviews: SHARED_REVIEWS,
       }),
     ],
   };

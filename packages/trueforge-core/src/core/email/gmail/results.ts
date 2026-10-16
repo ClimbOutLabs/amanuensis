@@ -1,4 +1,5 @@
 /** The shapes the Gmail read tools return to the model. Every result names the account and marks mail as untrusted. */
+import type { ReviewableDraft } from './draftReview';
 import type { GmailMessage, GmailThread } from './gmailWire';
 import { headerOf, labelIdsOf, readMessage, type AttachmentInfo } from './message';
 import { estimateTokens, MAX_TOKENS_PER_CALL, snippetOf, truncateToTokens } from './tokenBound';
@@ -208,5 +209,21 @@ export function getDraftResult(input: { context: ResultContext; draftId: string;
     threadId: message.threadId,
     inReplyTo: inReplyTo === '' ? null : inReplyTo,
     attachments: attachmentList(attachments),
+  };
+}
+
+/** A draft as a send would deliver it, and how many attachments it carries (a send refuses any). */
+export function reviewableDraft(message: GmailMessage): { draft: ReviewableDraft; attachmentCount: number } {
+  const { body, attachments } = readMessage(message);
+  return {
+    draft: {
+      to: addressesOf(headerOf({ message, name: 'To' })),
+      cc: addressesOf(headerOf({ message, name: 'Cc' })),
+      bcc: addressesOf(headerOf({ message, name: 'Bcc' })),
+      subject: headerOf({ message, name: 'Subject' }),
+      body,
+      threadId: message.threadId,
+    },
+    attachmentCount: attachments.length,
   };
 }

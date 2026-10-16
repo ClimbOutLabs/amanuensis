@@ -9,14 +9,17 @@ import { stampSentinelDecision } from '../../mcp/ToolSet';
 import { classifyHostToolCall } from '../../permissions/classifier';
 import type { SentinelHostContext } from '../../permissions/context';
 import type { AgentTracing } from '../../tracing/AgentTracing';
+import { hashDraft, type DraftReviewLedger, type ReviewableDraft } from './draftReview';
 import { GmailApi, GmailApiError, mapWithConcurrency } from './gmailApi';
-import { readMessage } from './message';
+import { headerOf, readMessage } from './message';
+import { buildRawMessage, type ReplyTarget } from './rawMessage';
 import {
   getDraftResult,
   listDraftsResult,
   listThreadsResult,
   neutralizeInternalTags,
   readEmailResult,
+  reviewableDraft,
   threadResult,
   UNTRUSTED_NOTICE,
   type ResultContext,
@@ -24,6 +27,8 @@ import {
 import {
   DOWNLOAD_ATTACHMENT_TOOL_NAME,
   DownloadAttachmentSchema,
+  DRAFT_EMAIL_TOOL_NAME,
+  DraftEmailSchema,
   DraftIdSchema,
   GET_DRAFT_TOOL_NAME,
   GET_THREAD_TOOL_NAME,
@@ -36,6 +41,11 @@ import {
   READ_ANNOTATIONS,
   READ_EMAIL_TOOL_NAME,
   ReadEmailSchema,
+  SEND_DRAFT_TOOL_NAME,
+  UPDATE_DRAFT_TOOL_NAME,
+  UpdateDraftSchema,
+  WRITE_ANNOTATIONS,
+  type DraftContent,
 } from './toolContract';
 
 /** Largest attachment that is fetched and handed to the sandbox, matching the document reader's own limit. */
@@ -66,6 +76,8 @@ export interface GmailToolSetOptions {
   attachmentStager: AttachmentStager | undefined;
   /** Where the host classifies each call; the same turn state the web search provider reads. */
   sentinel: SentinelHostContext;
+  /** What the user was shown before each send, shared by every turn of this process. */
+  reviews: DraftReviewLedger;
 }
 
 function errorResult(error: string) {
@@ -162,15 +174,55 @@ export class GmailToolSet extends LocalToolMCP {
         }),
       );
     }
+    // A scheduled run holds a login that reads but never writes, so it is not even offered the write tools.
+    if (features.includes('gmail_compose') && !this.#options.sentinel.services.unattended) {
+      tools.push(
+        defineTool({
+          name: DRAFT_EMAIL_TOOL_NAME,
+          description:
+            'Save a new plain-text draft. Nothing is sent. Pass threadId and inReplyTo (a message id) to reply inside a thread. The user is asked before the draft is saved.',
+          schema: DraftEmailSchema,
+          annotations: WRITE_ANNOTATIONS,
+          handler: input => this.#draftEmail(input),
+        }),
+        defineTool({
+          name: UPDATE_DRAFT_TOOL_NAME,
+          description: 'Replace the content of a saved draft, keeping its draftId. The user is asked first.',
+          schema: UpdateDraftSchema,
+          annotations: WRITE_ANNOTATIONS,
+          handler: input => this.#updateDraft(input),
+        }),
+        defineTool({
+          name: SEND_DRAFT_TOOL_NAME,
+          description:
+            'Send a saved draft. The only way to send. The user always sees the whole message and is asked first; a draft with attachments cannot be sent.',
+          schema: DraftIdSchema,
+          annotations: WRITE_ANNOTATIONS,
+          handler: input => this.#sendDraft(input),
+        }),
+      );
+    }
     return tools;
   }
 
-  /** The host classifies every call, so a tier and its card come from the classifier and never from this class. */
+  /**
+   * The host classifies every call, so a tier and its card come from the classifier and never from this
+   * class. A send is the one call whose card needs more than its params: it is built from the draft as
+   * Gmail holds it now, and that draft's hash is remembered so the send can refuse if it changes.
+   */
   override async toolCallInfo(
     params: CallToolRequest['params'],
     resolveUnderlyingTool?: boolean,
   ): Promise<InternalToolCallInfo> {
     const info = await super.toolCallInfo(params, resolveUnderlyingTool);
+    let mailDraft: ReviewableDraft | undefined;
+    if (params.name === SEND_DRAFT_TOOL_NAME) {
+      const reviewed = await this.#reviewForSend(params.arguments);
+      if ('failure' in reviewed) {
+        return { ...info, pre_dispatch_failure: { kind: 'policy_blocked', message: reviewed.failure } };
+      }
+      mailDraft = reviewed.draft;
+    }
     const decision = await classifyHostToolCall({
       sentinel: this.#options.sentinel,
       repository_id: null,
@@ -185,9 +237,46 @@ export class GmailToolSet extends LocalToolMCP {
           destructive_hint: info.destructive_hint,
           open_world_hint: info.open_world_hint,
         },
+        ...(mailDraft === undefined ? {} : { mail_draft: mailDraft }),
       },
     });
     return { ...info, ...stampSentinelDecision({ decision }) };
+  }
+
+  get #owner() {
+    return { tenant_id: this.#options.sentinel.tenant_id, created_by: this.#options.sentinel.created_by };
+  }
+
+  async #liveDraft(draftId: string) {
+    const draft = await this.#options.api.getDraft(draftId);
+    if (draft.message === undefined) {
+      throw new GmailApiError({ status: 404, message: 'Gmail has no such message, thread or draft.' });
+    }
+    return reviewableDraft(draft.message);
+  }
+
+  /** Loads the draft a send would deliver and remembers its hash; a failure says why the send cannot be shown. */
+  async #reviewForSend(args: unknown): Promise<{ draft: ReviewableDraft } | { failure: string }> {
+    const parsed = DraftIdSchema.safeParse(args);
+    if (!parsed.success) {
+      return { failure: 'send_draft needs a draftId.' };
+    }
+    try {
+      const live = await this.#liveDraft(parsed.data.draftId);
+      if (live.attachmentCount > 0) {
+        return { failure: 'This draft has attachments, which Aman cannot send. Remove them in Gmail and ask again.' };
+      }
+      if (live.draft.to.length === 0) {
+        return { failure: 'The draft has no recipients.' };
+      }
+      this.#options.reviews.record({ ...this.#owner, draft_id: parsed.data.draftId, hash: hashDraft(live.draft) });
+      return { draft: live.draft };
+    } catch (error) {
+      if (error instanceof GoogleReconnectRequiredError || error instanceof GmailApiError) {
+        return { failure: `The draft could not be loaded to show you, so nothing was sent. ${error.message}` };
+      }
+      throw error;
+    }
   }
 
   async #listThreads(input: z.infer<typeof ListInboxThreadsSchema>) {
@@ -299,6 +388,88 @@ export class GmailToolSet extends LocalToolMCP {
       return draft.message === undefined
         ? errorResult(`Draft not found: ${input.draftId}`)
         : jsonResult(getDraftResult({ context: this.#context, draftId: draft.id, message: draft.message }));
+    } catch (error) {
+      return failureResult(error);
+    }
+  }
+  async #replyTarget(input: DraftContent): Promise<{ reply: ReplyTarget | undefined; threadId: string | undefined }> {
+    if (input.inReplyTo === undefined) {
+      return { reply: undefined, threadId: input.threadId };
+    }
+    const original = await this.#options.api.getMessage(input.inReplyTo);
+    return {
+      reply: {
+        messageIdHeader: headerOf({ message: original, name: 'Message-ID' }),
+        referencesHeader: headerOf({ message: original, name: 'References' }),
+      },
+      threadId: input.threadId ?? original.threadId,
+    };
+  }
+
+  async #draftEmail(input: z.infer<typeof DraftEmailSchema>) {
+    try {
+      const { reply, threadId } = await this.#replyTarget(input);
+      const created = await this.#options.api.createDraft({
+        raw: buildRawMessage({ content: input, reply }),
+        threadId,
+      });
+      return jsonResult({
+        account: this.#options.account,
+        messageId: created.message?.id ?? '',
+        draftId: created.id,
+        action: 'drafted',
+        threadId: created.message?.threadId ?? '',
+      });
+    } catch (error) {
+      return error instanceof RangeError ? errorResult(error.message) : failureResult(error);
+    }
+  }
+
+  async #updateDraft(input: z.infer<typeof UpdateDraftSchema>) {
+    try {
+      const { reply, threadId } = await this.#replyTarget(input);
+      this.#options.reviews.forget({ ...this.#owner, draft_id: input.draftId });
+      const updated = await this.#options.api.updateDraft({
+        draftId: input.draftId,
+        raw: buildRawMessage({ content: input, reply }),
+        threadId,
+      });
+      return jsonResult({
+        account: this.#options.account,
+        draftId: updated.id,
+        messageId: updated.message?.id ?? '',
+        threadId: updated.message?.threadId ?? '',
+        status: 'updated',
+      });
+    } catch (error) {
+      return error instanceof RangeError ? errorResult(error.message) : failureResult(error);
+    }
+  }
+
+  /** Sends only the text the user was shown: the draft is read again and must still hash to the reviewed text. */
+  async #sendDraft(input: z.infer<typeof DraftIdSchema>) {
+    try {
+      const reviewed = this.#options.reviews.take({ ...this.#owner, draft_id: input.draftId });
+      if (reviewed === undefined) {
+        return errorResult('This send was not reviewed, so nothing was sent. Ask to send the draft again.');
+      }
+      const live = await this.#liveDraft(input.draftId);
+      if (live.attachmentCount > 0) {
+        return errorResult('This draft has attachments, which Aman cannot send. Remove them in Gmail and ask again.');
+      }
+      if (reviewed !== hashDraft(live.draft)) {
+        return errorResult(
+          'The draft changed after you reviewed it, so nothing was sent. Ask to send it again to review the new text.',
+        );
+      }
+      const sent = await this.#options.api.sendDraft(input.draftId);
+      return jsonResult({
+        account: this.#options.account,
+        draftId: input.draftId,
+        messageId: sent.id,
+        threadId: sent.threadId,
+        status: 'sent',
+      });
     } catch (error) {
       return failureResult(error);
     }
