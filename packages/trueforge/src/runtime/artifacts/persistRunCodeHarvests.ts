@@ -39,7 +39,9 @@ export interface PersistRunCodeHarvestsParams {
 }
 
 /** Builds the `onRunCodeHarvestedFiles` sink for one turn. Pure constructor — no I/O. */
-export function buildRunCodeHarvestSink(params: PersistRunCodeHarvestsParams): (files: HarvestedFile[]) => Promise<void> {
+export function buildRunCodeHarvestSink(
+  params: PersistRunCodeHarvestsParams,
+): (files: HarvestedFile[]) => Promise<void> {
   const { store, tenantId, sessionId, turnId, logger } = params;
   return async (files: HarvestedFile[]): Promise<void> => {
     const failures: string[] = [];

@@ -4,11 +4,11 @@
  * The config module is mocked with MEMORY_SUMMARIZE=true; the summarizeTurnContent
  * module is mocked to control the LLM outcome without network access.
  */
-import winston from 'winston';
-import { Writable } from 'stream';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { Writable } from 'stream';
+import winston from 'winston';
 
 import { createMemoryClient } from '../../../../src/runtime/memory/createMemoryClient';
 

@@ -2,12 +2,11 @@
 
 /** Bounded next action; never an instruction inferred from tool output. */
 export const ToolResultRemediationSuggestedAction = {
-    Retry: "retry",
-    ChangeStrategy: "change_strategy",
-    RequestApproval: "request_approval",
-    Authenticate: "authenticate",
-    InspectState: "inspect_state",
-    ContactUser: "contact_user",
-} as const;
-export type ToolResultRemediationSuggestedAction =
-    (typeof ToolResultRemediationSuggestedAction)[keyof typeof ToolResultRemediationSuggestedAction];
+        Retry: "retry",
+        ChangeStrategy: "change_strategy",
+        RequestApproval: "request_approval",
+        Authenticate: "authenticate",
+        InspectState: "inspect_state",
+        ContactUser: "contact_user"
+    } as const;
+export type ToolResultRemediationSuggestedAction = typeof ToolResultRemediationSuggestedAction[keyof typeof ToolResultRemediationSuggestedAction];

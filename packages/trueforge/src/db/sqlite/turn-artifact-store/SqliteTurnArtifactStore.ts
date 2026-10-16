@@ -170,10 +170,7 @@ export class SqliteTurnArtifactStore implements ITurnArtifactStore<Transaction<D
     return rows.map(toRecord);
   }
 
-  async deleteArtifactsOlderThan(
-    input: { older_than: string },
-    transaction?: Transaction<Database>,
-  ): Promise<number> {
+  async deleteArtifactsOlderThan(input: { older_than: string }, transaction?: Transaction<Database>): Promise<number> {
     return await this.#write(transaction, async trx => {
       const deleted = await trx
         .deleteFrom('turn_artifact')

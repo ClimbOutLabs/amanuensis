@@ -1,13 +1,12 @@
-import { createRoute } from '@hono/zod-openapi';
-import { z } from '@hono/zod-openapi';
+import { createRoute, z } from '@hono/zod-openapi';
 
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import { PersonaIdParamsSchema } from '../schemas/persona';
 import {
   CreateKnowledgeDocumentRequestSchema,
   DeleteKnowledgeDocumentResponseSchema,
-  GetKnowledgeEmbeddingModelResponseSchema,
   GetKnowledgeDocumentResponseSchema,
+  GetKnowledgeEmbeddingModelResponseSchema,
   ListKnowledgeDocumentsResponseSchema,
 } from '../schemas/personaKnowledge';
 import { OpenApiTag } from './openapiTags';

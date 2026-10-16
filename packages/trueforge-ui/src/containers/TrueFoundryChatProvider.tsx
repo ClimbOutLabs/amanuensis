@@ -11,13 +11,13 @@ import { useCallback, useMemo, type ReactNode } from 'react';
 import { withImageDownscaling } from '../server/imageAttachmentAdapter.js';
 
 import { sessionIsCreateAgent } from '../atoms/lib/sessionCreateAgent.js';
+import { AvatarActivityProvider, useAvatarActivitySink, type AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import {
   ComposerBusyScopeProvider,
   getActiveComposerSendId,
   notifyComposerBusyFailure,
   useComposerBusyScope,
 } from '../hooks/useComposerBusyState.js';
-import { AvatarActivityProvider, useAvatarActivitySink, type AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
 import { ForegroundEventSync } from '../hooks/useForegroundEventSync.js';
 import { ActiveSessionPermissionsProvider } from '../hooks/useResourcePermissions.js';
 import {
@@ -25,6 +25,7 @@ import {
   publishBlockedSend,
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
 import type { AgentUIServer } from '../server/types.js';
+import { isStaleApprovalError, publishStaleApproval } from '../utils/staleApproval.js';
 import { ToasterProvider, useToaster } from './ToasterContainer.js';
 
 type RuntimeAdapters = NonNullable<UseTrueFoundryAgentRuntimeOptions['adapters']>;
@@ -143,6 +144,10 @@ function ChatRuntimeScope({
         // the approvals even when the approval card never rendered.
         publishBlockedSend();
       }
+      if (isStaleApprovalError(error)) {
+        // Reload so the expired card is replaced by the chat's current state.
+        publishStaleApproval();
+      }
       reportError(error);
     },
     [activitySink, composerBusyScope, reportError],
@@ -177,8 +182,17 @@ function ChatRuntimeScope({
  * assistant-ui + error toasts.
  */
 export function TrueFoundryChatProvider(props: TrueFoundryChatProviderProps) {
-  const { server, initialSessionId, adapters, onError, onAgentActivity, children, agent, agentName, listSessionsAgentId } =
-    props;
+  const {
+    server,
+    initialSessionId,
+    adapters,
+    onError,
+    onAgentActivity,
+    children,
+    agent,
+    agentName,
+    listSessionsAgentId,
+  } = props;
 
   const stableServer = useMemo(() => server, [server]);
 

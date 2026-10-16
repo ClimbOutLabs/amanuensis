@@ -2,9 +2,15 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
 import type { SessionEventItem } from '@/server/types.js';
+import { resolvePresetTokens } from '@/theme/presets/index.js';
 import { buildSessionMetrics } from '@/utils/buildSessionMetrics.js';
 import { buildSessionTimelineSegments } from '@/utils/buildSessionTimelineSegments.js';
-import { getSessionEventColor, type SessionEventTimelineSegment } from '@/utils/sessionEventTimeline.js';
+import {
+  getSessionEventChartVar,
+  getSessionEventColor,
+  SESSION_EVENT_TYPES,
+  type SessionEventTimelineSegment,
+} from '@/utils/sessionEventTimeline.js';
 import {
   buildTimelineAxisTicks,
   compressInterTurnGaps,
@@ -19,11 +25,20 @@ import {
 import { buildSessionTurnViews } from '@/utils/sessionTurnViews.js';
 
 describe('session event colors', () => {
-  it('uses dark overrides when present and otherwise falls back to the base color', () => {
-    assert.equal(getSessionEventColor('model'), '#3b82f6');
-    assert.equal(getSessionEventColor('model', true), '#6366f1');
-    assert.equal(getSessionEventColor('sub_agent', true), '#3f3f46');
-    assert.equal(getSessionEventColor('tool_call', true), '#f59e0b');
+  it('falls back to the default preset chart tokens in legend order', () => {
+    const light = resolvePresetTokens(undefined, 'light');
+    const dark = resolvePresetTokens(undefined, 'dark');
+    assert.equal(getSessionEventColor('system'), light.chart1);
+    assert.equal(getSessionEventColor('model'), light.chart3);
+    assert.equal(getSessionEventColor('model', true), dark.chart3);
+    assert.equal(getSessionEventColor('error', true), dark.chart8);
+  });
+
+  it('maps each legend entry to its own chart variable', () => {
+    assert.deepEqual(
+      SESSION_EVENT_TYPES.map(eventType => getSessionEventChartVar(eventType.id)),
+      [1, 2, 3, 4, 5, 6, 7, 8].map(index => `var(--chart-${index})`),
+    );
   });
 });
 

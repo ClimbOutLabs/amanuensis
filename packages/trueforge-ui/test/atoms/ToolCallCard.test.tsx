@@ -27,6 +27,15 @@ describe('ToolCallCard', () => {
     expect(screen.getByTestId('denied-header-muted-icon')).toBeInTheDocument();
     expect(screen.queryByTestId('denied-header-error-icon')).not.toBeInTheDocument();
   });
+  it('shows what was searched in a chip beside the title, and nothing without a query', () => {
+    const { rerender } = render(<ToolCallCard toolName="lookup" searchedQuery="tallest building" dataTestPrefix="s" />);
+    expect(screen.getByTestId('s-searched-chip')).toHaveTextContent('Searched: tallest building');
+    expect(screen.getByTestId('s-searched-chip')).toHaveAttribute('title', 'tallest building');
+
+    rerender(<ToolCallCard toolName="lookup" dataTestPrefix="s" />);
+    expect(screen.queryByTestId('s-searched-chip')).not.toBeInTheDocument();
+  });
+
   it('toggles expandable request content and only shows response content when expanded', () => {
     const onToggle = vi.fn();
     const { rerender } = render(

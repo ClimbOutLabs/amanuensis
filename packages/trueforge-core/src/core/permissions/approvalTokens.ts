@@ -22,10 +22,10 @@
  * cwd falls back to the workspace root); a normalization mismatch fails
  * closed.
  */
+import { z } from '@hono/zod-openapi';
 import { createHash, randomBytes } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
-import { z } from '@hono/zod-openapi';
 
 /** Deterministic JSON serialization: object keys sorted recursively. */
 export function stableStringify(value: unknown): string {
@@ -49,10 +49,39 @@ export function hashCanonicalParams(params: unknown): string {
   return createHash('sha256').update(stableStringify(params)).digest('hex');
 }
 
-/** Deterministic action id over tool name + canonical params. */
-export function actionIdFor(input: { tool_name: string; canonical_params: unknown }): string {
+/**
+ * Normalize canonical params to their JSON-serialized form.
+ *
+ * Approval tokens bind an approval to sha256(stableStringify(canonical_params)),
+ * but the verify path rebuilds params with JSON.parse of the serialized
+ * arguments string. Values that do not survive a JSON round-trip (class
+ * instances, Dates, undefined, functions) would hash differently at mint than
+ * at verify, and legitimate approvals would be rejected as "action identity
+ * changed". Normalize here, at the classification choke point, so ToolSet,
+ * Sandbox, and AgentThread all share the invariant.
+ */
+export function toJsonSafeParams(params: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(params)) as Record<string, unknown>;
+}
+
+/** The connector an approval was granted for: its server id and the host its URL points at. */
+export interface ConnectorBinding {
+  server_id: string;
+  destination_host: string | null;
+}
+
+/**
+ * Deterministic action id over tool name + canonical params, plus the connector for a connector
+ * call so an approval cannot be replayed against a connector that now points somewhere else.
+ */
+export function actionIdFor(input: {
+  tool_name: string;
+  canonical_params: unknown;
+  connector?: ConnectorBinding | undefined;
+}): string {
+  const connector = input.connector === undefined ? '' : `\n${stableStringify(input.connector)}`;
   return createHash('sha256')
-    .update(`${input.tool_name}\n${stableStringify(input.canonical_params)}`)
+    .update(`${input.tool_name}\n${stableStringify(input.canonical_params)}${connector}`)
     .digest('hex');
 }
 
@@ -101,29 +130,134 @@ export interface ApprovalToken {
   created_at: string;
 }
 
+/** Tenant and user an approval belongs to; both are required, so an unscoped token cannot exist. */
+export interface ApprovalTokenScope {
+  tenant_id: string;
+  created_by: string;
+}
+
+export interface MintApprovalTokenInput extends ApprovalTokenScope {
+  action_id: string;
+  /** The caller supplies the canonical params; the store hashes them. */
+  canonical_params: unknown;
+  shell?: ShellApprovalBinding | null;
+  /** ISO instant after which the token no longer redeems. */
+  expires_at: string;
+}
+
+/** Identifies a token to look up or redeem; the scope must match the one it was minted with. */
+export interface ApprovalTokenRef extends ApprovalTokenScope {
+  token_id: string;
+}
+
+/**
+ * Redeem is atomic and single-use: of any number of concurrent redeems of one
+ * token, at most one returns it. Stores fail closed: errors propagate, and a
+ * token that is missing, used, expired or outside the caller's scope reads as
+ * undefined.
+ */
 export interface ApprovalTokenStore {
-  /**
-   * Mint a token binding the action id to the canonical params hash. The
-   * caller supplies the canonical params; the store hashes them.
-   */
-  mint(input: { action_id: string; canonical_params: unknown; shell?: ShellApprovalBinding | null }): ApprovalToken;
-  /** Look up a token without consuming it. */
-  peek(input: { token_id: string }): ApprovalToken | undefined;
-  /**
-   * Single-use redeem: returns the token and marks it consumed. Returns
-   * undefined when the token is missing or already redeemed.
-   */
-  redeem(input: { token_id: string }): ApprovalToken | undefined;
-  /** Drop tokens created before the cutoff (abandoned denials, restarts). */
-  pruneBefore(input: { cutoff_iso: string }): void;
+  /** Mint a token binding the action id to the canonical params hash, and drop spent tokens. */
+  mint(input: MintApprovalTokenInput): Promise<ApprovalToken>;
+  /** Look up a token that can still be redeemed, without consuming it. */
+  peek(input: ApprovalTokenRef): Promise<ApprovalToken | undefined>;
+  /** Single-use redeem: returns the token and marks it consumed. */
+  redeem(input: ApprovalTokenRef): Promise<ApprovalToken | undefined>;
+}
+
+/**
+ * How long a pending approval stays redeemable. Bounds how long an unanswered
+ * card or an abandoned denial can leave a live token behind.
+ */
+export const APPROVAL_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+export function approvalTokenExpiry(): string {
+  return new Date(Date.now() + APPROVAL_TOKEN_TTL_MS).toISOString();
+}
+
+export function hasApprovalScope(scope: ApprovalTokenScope): boolean {
+  return (
+    typeof scope.tenant_id === 'string' &&
+    scope.tenant_id.length > 0 &&
+    typeof scope.created_by === 'string' &&
+    scope.created_by.length > 0
+  );
+}
+
+/** Token ids are bearer secrets; stores keep only this digest. */
+export function hashApprovalTokenId(tokenId: string): string {
+  return createHash('sha256').update(tokenId).digest('hex');
+}
+
+export interface PreparedApprovalToken {
+  token: ApprovalToken;
+  token_hash: string;
+  /** Normalized to an ISO instant, so text comparison orders by time. */
+  expires_at: string;
+}
+
+/**
+ * Shared mint rules for every store: a complete scope, a parseable expiry, a
+ * fresh random id, and the params hash. Throws instead of minting a token the
+ * redeem path could never scope or expire.
+ */
+export function prepareApprovalToken(input: MintApprovalTokenInput): PreparedApprovalToken {
+  if (!hasApprovalScope(input)) {
+    throw new Error('Approval token requires a tenant and a user');
+  }
+  const expiresAt = new Date(input.expires_at);
+  if (Number.isNaN(expiresAt.getTime())) {
+    throw new Error('Approval token requires a valid expiry');
+  }
+  const token: ApprovalToken = {
+    token_id: randomBytes(16).toString('hex'),
+    action_id: input.action_id,
+    params_hash: hashCanonicalParams(input.canonical_params),
+    shell: input.shell ?? null,
+    created_at: new Date().toISOString(),
+  };
+  return { token, token_hash: hashApprovalTokenId(token.token_id), expires_at: expiresAt.toISOString() };
+}
+
+/** Rebuilds a token from a persisted row; a stored shell binding that no longer parses throws. */
+export function restoreApprovalToken(input: {
+  token_id: string;
+  action_id: string;
+  params_hash: string;
+  shell: unknown;
+  created_at: string;
+}): ApprovalToken {
+  return {
+    token_id: input.token_id,
+    action_id: input.action_id,
+    params_hash: input.params_hash,
+    shell: ShellApprovalBindingSchema.nullable().parse(input.shell),
+    created_at: input.created_at,
+  };
 }
 
 const MAX_TOKENS = 5000;
 
-export class InMemoryApprovalTokenStore implements ApprovalTokenStore {
-  private readonly tokens = new Map<string, { token: ApprovalToken; used: boolean }>();
+interface InMemoryEntry {
+  token: ApprovalToken;
+  scope: ApprovalTokenScope;
+  expires_at_ms: number;
+  used: boolean;
+}
 
-  mint(input: { action_id: string; canonical_params: unknown; shell?: ShellApprovalBinding | null }): ApprovalToken {
+export class InMemoryApprovalTokenStore implements ApprovalTokenStore {
+  private readonly tokens = new Map<string, InMemoryEntry>();
+
+  mint(input: MintApprovalTokenInput): Promise<ApprovalToken> {
+    // A throw inside the executor rejects, as a persisted store's failed mint would.
+    return new Promise(resolve => {
+      resolve(this.insert(input));
+    });
+  }
+
+  private insert(input: MintApprovalTokenInput): ApprovalToken {
+    const prepared = prepareApprovalToken(input);
+    this.dropSpent();
     if (this.tokens.size >= MAX_TOKENS) {
       // Oldest first: insertion-ordered map, evict from the front.
       const oldest = this.tokens.keys().next();
@@ -131,42 +265,61 @@ export class InMemoryApprovalTokenStore implements ApprovalTokenStore {
         this.tokens.delete(oldest.value);
       }
     }
-    const token: ApprovalToken = {
-      token_id: randomBytes(16).toString('hex'),
-      action_id: input.action_id,
-      params_hash: hashCanonicalParams(input.canonical_params),
-      shell: input.shell ?? null,
-      created_at: new Date().toISOString(),
-    };
-    this.tokens.set(token.token_id, { token, used: false });
-    return token;
+    this.tokens.set(prepared.token.token_id, {
+      token: prepared.token,
+      scope: { tenant_id: input.tenant_id, created_by: input.created_by },
+      expires_at_ms: Date.parse(prepared.expires_at),
+      used: false,
+    });
+    return prepared.token;
   }
 
-  peek(input: { token_id: string }): ApprovalToken | undefined {
-    return this.tokens.get(input.token_id)?.token;
+  peek(input: ApprovalTokenRef): Promise<ApprovalToken | undefined> {
+    return Promise.resolve(this.live(input)?.token);
   }
 
-  redeem(input: { token_id: string }): ApprovalToken | undefined {
-    const entry = this.tokens.get(input.token_id);
-    if (entry === undefined || entry.used) {
-      return undefined;
+  redeem(input: ApprovalTokenRef): Promise<ApprovalToken | undefined> {
+    const entry = this.live(input);
+    if (entry === undefined) {
+      return Promise.resolve(undefined);
     }
     entry.used = true;
-    return entry.token;
+    return Promise.resolve(entry.token);
   }
 
-  pruneBefore(input: { cutoff_iso: string }): void {
+  /** Rows held, spent ones included until the next mint drops them. */
+  get size(): number {
+    return this.tokens.size;
+  }
+
+  private live(input: ApprovalTokenRef): InMemoryEntry | undefined {
+    if (!hasApprovalScope(input)) {
+      return undefined;
+    }
+    const entry = this.tokens.get(input.token_id);
+    if (
+      entry === undefined ||
+      entry.used ||
+      entry.expires_at_ms <= Date.now() ||
+      entry.scope.tenant_id !== input.tenant_id ||
+      entry.scope.created_by !== input.created_by
+    ) {
+      return undefined;
+    }
+    return entry;
+  }
+
+  private dropSpent(): void {
+    const now = Date.now();
     for (const [id, entry] of this.tokens) {
-      if (entry.token.created_at < input.cutoff_iso) {
+      if (entry.used || entry.expires_at_ms <= now) {
         this.tokens.delete(id);
       }
     }
   }
 }
 
-export type TokenVerification =
-  | { valid: true }
-  | { valid: false; reason: string };
+export type TokenVerification = { valid: true } | { valid: false; reason: string };
 
 /**
  * Pre-invocation byte-for-byte re-verification. The caller rebuilds the

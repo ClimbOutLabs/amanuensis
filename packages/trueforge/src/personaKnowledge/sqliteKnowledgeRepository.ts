@@ -5,8 +5,8 @@ import path from 'node:path';
 import * as sqliteVec from 'sqlite-vec';
 import { ulid } from 'ulid';
 
-import { PersonaKnowledgeDocumentSchema } from '../schemas/personaKnowledge';
 import type { KnowledgeDocumentStatus } from '../schemas/personaKnowledge';
+import { PersonaKnowledgeDocumentSchema } from '../schemas/personaKnowledge';
 import type {
   IndexedKnowledgeChunk,
   KnowledgeDocumentRecord,
@@ -90,9 +90,7 @@ function embeddingToBuffer(embedding: Float32Array): Buffer {
 
 function bufferToEmbedding(bytes: Uint8Array, dimensions: number): Float32Array {
   if (bytes.byteLength !== dimensions * 4) {
-    throw new Error(
-      `Stored embedding has ${String(bytes.byteLength)} bytes; expected ${String(dimensions * 4)}.`,
-    );
+    throw new Error(`Stored embedding has ${String(bytes.byteLength)} bytes; expected ${String(dimensions * 4)}.`);
   }
   // Buffers from the driver may sit at a non-float-aligned offset inside a
   // pooled ArrayBuffer; copy to a fresh aligned buffer before viewing.
@@ -116,7 +114,7 @@ function cosineDistance(input: { a: Float32Array; b: Float32Array }): number {
   if (normA === 0 || normB === 0) {
     return 1;
   }
-  return 1 - (dot / Math.sqrt(normA * normB));
+  return 1 - dot / Math.sqrt(normA * normB);
 }
 
 /**
@@ -134,12 +132,7 @@ export class SqlitePersonaKnowledgeRepository implements PersonaKnowledgeReposit
   readonly #vecAvailable: boolean;
   readonly #release: (() => void) | undefined;
 
-  constructor(input: {
-    db: Database.Database;
-    dimensions: number;
-    vecAvailable: boolean;
-    release?: () => void;
-  }) {
+  constructor(input: { db: Database.Database; dimensions: number; vecAvailable: boolean; release?: () => void }) {
     this.#db = input.db;
     this.#dimensions = input.dimensions;
     this.#vecAvailable = input.vecAvailable;
@@ -147,16 +140,12 @@ export class SqlitePersonaKnowledgeRepository implements PersonaKnowledgeReposit
   }
 
   listDocuments(): KnowledgeDocumentRecord[] {
-    const rows = this.#db
-      .prepare('SELECT * FROM knowledge_documents ORDER BY created_at DESC, id DESC')
-      .all();
+    const rows = this.#db.prepare('SELECT * FROM knowledge_documents ORDER BY created_at DESC, id DESC').all();
     return rows.map(toDocumentRecord);
   }
 
   getDocument(input: { documentId: string }): KnowledgeDocumentRecord | undefined {
-    const row = this.#db
-      .prepare('SELECT * FROM knowledge_documents WHERE id = ?')
-      .get(input.documentId);
+    const row = this.#db.prepare('SELECT * FROM knowledge_documents WHERE id = ?').get(input.documentId);
     return row === undefined ? undefined : toDocumentRecord(row);
   }
 
@@ -204,11 +193,7 @@ export class SqlitePersonaKnowledgeRepository implements PersonaKnowledgeReposit
       });
   }
 
-  updateDocumentSource(input: {
-    documentId: string;
-    title?: string;
-    sourceUrl?: string | null;
-  }): void {
+  updateDocumentSource(input: { documentId: string; title?: string; sourceUrl?: string | null }): void {
     this.#db
       .prepare(
         `UPDATE knowledge_documents
@@ -241,9 +226,7 @@ export class SqlitePersonaKnowledgeRepository implements PersonaKnowledgeReposit
          VALUES (@id, @documentId, @chunkIndex, @text, @embedding)`,
       );
       const insertVec = this.#vecAvailable
-        ? this.#db.prepare(
-            'INSERT INTO knowledge_vec_chunks (chunk_id, embedding) VALUES (@chunkId, @embedding)',
-          )
+        ? this.#db.prepare('INSERT INTO knowledge_vec_chunks (chunk_id, embedding) VALUES (@chunkId, @embedding)')
         : undefined;
       chunks.forEach((chunk, chunkIndex) => {
         if (chunk.embedding.length !== this.#dimensions) {
@@ -476,7 +459,7 @@ export function openPersonaKnowledgeRepository(input: {
   const columns = z
     .array(z.object({ name: z.string() }))
     .parse(db.prepare('PRAGMA table_info(knowledge_documents)').all());
-  if (!columns.some((column) => column.name === 'title_explicit')) {
+  if (!columns.some(column => column.name === 'title_explicit')) {
     db.exec('ALTER TABLE knowledge_documents ADD COLUMN title_explicit INTEGER NOT NULL DEFAULT 0');
   }
   let vecAvailable = false;
@@ -489,21 +472,13 @@ export function openPersonaKnowledgeRepository(input: {
     vecAvailable = true;
     // Crash insurance: the vec index is written in the same transaction as
     // the chunk rows, so a count mismatch means an older writer — rebuild.
-    const vecCount = CountRowSchema.parse(
-      db.prepare('SELECT COUNT(*) AS count FROM knowledge_vec_chunks').get(),
-    ).count;
-    const chunkCount = CountRowSchema.parse(
-      db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks').get(),
-    ).count;
+    const vecCount = CountRowSchema.parse(db.prepare('SELECT COUNT(*) AS count FROM knowledge_vec_chunks').get()).count;
+    const chunkCount = CountRowSchema.parse(db.prepare('SELECT COUNT(*) AS count FROM knowledge_chunks').get()).count;
     if (vecCount !== chunkCount) {
       const rebuild = db.transaction(() => {
         db.exec('DELETE FROM knowledge_vec_chunks');
-        const rows = z
-          .array(RebuildRowSchema)
-          .parse(db.prepare('SELECT id, embedding FROM knowledge_chunks').all());
-        const insert = db.prepare(
-          'INSERT INTO knowledge_vec_chunks (chunk_id, embedding) VALUES (?, ?)',
-        );
+        const rows = z.array(RebuildRowSchema).parse(db.prepare('SELECT id, embedding FROM knowledge_chunks').all());
+        const insert = db.prepare('INSERT INTO knowledge_vec_chunks (chunk_id, embedding) VALUES (?, ?)');
         for (const row of rows) {
           insert.run(row.id, embeddingToBuffer(bufferToEmbedding(row.embedding, dimensions)));
         }

@@ -4,10 +4,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { PersonaProvider, type Persona, type PersonaApi } from '@/components/PersonaContext.js';
-import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
 import PersonaSettings from '@/containers/SettingsBuilder/PersonaSettings.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { ModelSelection } from '@/server/types.js';
+import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
 import { createMockAgentUIServer } from '../../server/mockServer.js';
 
 const models: ModelSelection[] = [

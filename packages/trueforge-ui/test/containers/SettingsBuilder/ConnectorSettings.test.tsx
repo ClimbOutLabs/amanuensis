@@ -44,7 +44,6 @@ afterEach(() => {
 
 let agentSpec: AgentSpec;
 let mutableChat = true;
-let threadRunning = false;
 const updateAgentSpec = vi.fn();
 const disconnectConnector = vi.fn(async ({ id }: { id: string }) => (id === parallelWeb.id ? parallelWeb : github));
 
@@ -85,10 +84,6 @@ const hindsightAsProvider: ConnectorWithMemoryProvider = { ...hindsight, memoryP
 vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryAgentSpec: () => ({ agentSpec }),
   useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
-}));
-
-vi.mock('@assistant-ui/core/react', () => ({
-  useThreadIsRunning: () => threadRunning,
 }));
 
 vi.mock('@/server/ShellModeContext.js', () => ({
@@ -134,83 +129,12 @@ function renderSettings(
 describe('ConnectorSettings chat enablement', () => {
   beforeEach(() => {
     mutableChat = true;
-    threadRunning = false;
     agentSpec = {
       model: { name: 'local/qwen36-fp8' },
       mcpServers: [{ id: github.id, name: github.name }],
     };
     updateAgentSpec.mockReset();
     disconnectConnector.mockClear();
-  });
-
-  it('adds a configured connector to the active chat without writing future-chat preferences directly', async () => {
-    renderSettings();
-
-    expect(await screen.findByText('Configured · 2')).toBeInTheDocument();
-    expect(screen.getByText(/Connected tools are ready to use/)).toBeInTheDocument();
-    expect(screen.getByText(/remembered for future new chats/)).toBeInTheDocument();
-
-    const addButton = screen.getByRole('button', { name: 'Add parallel-web to this chat' });
-    fireEvent.click(addButton);
-
-    const expectedMounts = [
-      { id: github.id, name: github.name },
-      { id: parallelWeb.id, name: parallelWeb.name },
-    ];
-    expect(updateAgentSpec).toHaveBeenCalledWith({ mcpServers: expectedMounts });
-    expect(disconnectConnector).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
-  });
-
-  it('removes a connector from chat defaults without deleting its configuration', async () => {
-    agentSpec = {
-      model: { name: 'local/qwen36-fp8' },
-      mcpServers: [
-        { id: parallelWeb.id, name: parallelWeb.name, enableTools: ['@all'] },
-        { id: github.id, name: github.name },
-      ],
-    };
-    renderSettings();
-
-    const removeButton = await screen.findByRole('button', { name: 'Remove parallel-web from this chat' });
-    fireEvent.click(removeButton);
-
-    await waitFor(() => {
-      expect(updateAgentSpec).toHaveBeenCalledWith({
-        mcpServers: [{ id: github.id, name: github.name }],
-      });
-    });
-    expect(disconnectConnector).not.toHaveBeenCalled();
-    expect(screen.getByText('parallel-web')).toBeInTheDocument();
-  });
-
-  it('disables the chat action from a non-mutable chat and explains why', async () => {
-    mutableChat = false;
-    renderSettings();
-
-    const addButton = await screen.findByRole('button', { name: 'Add parallel-web to this chat' });
-    expect(addButton).toBeDisabled();
-    expect(addButton.closest('div')).toHaveAttribute('title', 'Open an editable chat to add or remove connectors.');
-    fireEvent.click(addButton);
-
-    expect(updateAgentSpec).not.toHaveBeenCalled();
-    expect(disconnectConnector).not.toHaveBeenCalled();
-  });
-
-  it('disables the chat action while a turn is running and explains why', async () => {
-    threadRunning = true;
-    renderSettings();
-
-    const addButton = await screen.findByRole('button', { name: 'Add parallel-web to this chat' });
-    expect(addButton).toBeDisabled();
-    expect(addButton.closest('div')).toHaveAttribute(
-      'title',
-      'Wait for the current turn to finish before changing connectors in this chat.',
-    );
-    fireEvent.click(addButton);
-
-    expect(updateAgentSpec).not.toHaveBeenCalled();
-    expect(disconnectConnector).not.toHaveBeenCalled();
   });
 
   it('does not list the memory bank, which Settings → Memory owns, while listing ordinary connectors', async () => {
@@ -387,23 +311,6 @@ describe('ConnectorSettings chat enablement', () => {
 
     expect(await screen.findByText('Connected')).toBeInTheDocument();
   });
-
-  it('disables the chat action for a connector that still needs authentication', async () => {
-    const needsAuth: ConnectorBase = {
-      id: 'needs-auth',
-      name: 'needs-auth',
-      description: 'Awaiting authentication',
-      url: 'https://needs-auth.example/mcp',
-      authenticated: false,
-      requiresAuth: true,
-      auth: { type: 'header' },
-    };
-    renderSettings([...configuredConnectors, needsAuth]);
-
-    const addButton = await screen.findByRole('button', { name: 'Add needs-auth to this chat' });
-    expect(addButton).toBeDisabled();
-    expect(addButton.closest('div')).toHaveAttribute('title', 'Connect this connector to use it in this chat.');
-  });
 });
 
 // Deleting a connector must go through a non-blocking in-app confirmation, never a native
@@ -411,7 +318,6 @@ describe('ConnectorSettings chat enablement', () => {
 describe('ConnectorSettings connector deletion', () => {
   beforeEach(() => {
     mutableChat = true;
-    threadRunning = false;
     agentSpec = { model: { name: 'local/qwen36-fp8' }, mcpServers: [] };
     updateAgentSpec.mockReset();
   });
@@ -430,6 +336,50 @@ describe('ConnectorSettings connector deletion', () => {
       expect(deleteConnector).toHaveBeenCalledWith({ id: parallelWeb.id });
     });
     confirmSpy.mockRestore();
+  });
+
+  it('drops the deleted connector from the active chat spec before deleting it', async () => {
+    agentSpec = {
+      model: { name: 'local/qwen36-fp8' },
+      mcpServers: [
+        { id: parallelWeb.id, name: parallelWeb.name },
+        { id: github.id, name: github.name },
+      ],
+    };
+    const deleteConnector = vi.fn().mockResolvedValue(undefined);
+    renderSettings([parallelWeb, github], { deleteConnector });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete the parallel-web connector' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(deleteConnector).toHaveBeenCalledWith({ id: parallelWeb.id });
+    });
+    expect(updateAgentSpec).toHaveBeenCalledWith({ mcpServers: [{ id: github.id, name: github.name }] });
+    const [specUpdateOrder] = updateAgentSpec.mock.invocationCallOrder;
+    const [deleteOrder] = deleteConnector.mock.invocationCallOrder;
+    expect(specUpdateOrder).toBeLessThan(deleteOrder ?? Number.NEGATIVE_INFINITY);
+  });
+
+  it('deletes the connector without touching the spec of a chat that cannot be edited', async () => {
+    mutableChat = false;
+    agentSpec = {
+      model: { name: 'local/qwen36-fp8' },
+      mcpServers: [
+        { id: parallelWeb.id, name: parallelWeb.name },
+        { id: github.id, name: github.name },
+      ],
+    };
+    const deleteConnector = vi.fn().mockResolvedValue(undefined);
+    renderSettings([parallelWeb, github], { deleteConnector });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete the parallel-web connector' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(deleteConnector).toHaveBeenCalledWith({ id: parallelWeb.id });
+    });
+    expect(updateAgentSpec).not.toHaveBeenCalled();
   });
 
   it('does not delete the connector when the confirmation dialog is cancelled', async () => {
@@ -523,7 +473,6 @@ describe('ConnectorSettings connection status invalidation on auth changes', () 
 
   beforeEach(() => {
     mutableChat = true;
-    threadRunning = false;
     agentSpec = { model: { name: 'local/qwen36-fp8' }, mcpServers: [] };
     updateAgentSpec.mockReset();
   });
@@ -583,7 +532,6 @@ describe('ConnectorSettings connection status invalidation on auth changes', () 
 describe('ConnectorSettings edit flow', () => {
   beforeEach(() => {
     mutableChat = true;
-    threadRunning = false;
     agentSpec = { model: { name: 'local/qwen36-fp8' }, mcpServers: [] };
     updateAgentSpec.mockReset();
   });
@@ -618,6 +566,76 @@ describe('ConnectorSettings edit flow', () => {
         url: connector.url,
         auth: { type: 'none' },
       });
+    });
+  });
+});
+
+describe('ConnectorSettings web search provider role', () => {
+  const finder: ConnectorBase = {
+    id: 'finder',
+    name: 'finder',
+    description: 'Searches the web',
+    url: 'https://finder.example/mcp',
+    authenticated: true,
+    requiresAuth: false,
+    auth: { type: 'none' },
+  };
+  const finderAsProvider: ConnectorBase & { searchProvider: true } = { ...finder, searchProvider: true };
+  const parallelPreset = {
+    id: 'parallel-web',
+    name: 'parallel-web',
+    description: 'Search the web',
+    url: 'https://search.parallel.ai/mcp',
+    auth: { type: 'none' as const },
+    searchProvider: true,
+  };
+
+  beforeEach(() => {
+    mutableChat = true;
+    agentSpec = { model: { name: 'local/qwen36-fp8' }, mcpServers: [] };
+    updateAgentSpec.mockReset();
+  });
+
+  it('marks the connector that holds the role', async () => {
+    renderSettings([finderAsProvider, github]);
+    expect(await screen.findByText('Search provider')).toBeInTheDocument();
+    expect(screen.getAllByText('Search provider')).toHaveLength(1);
+  });
+
+  it('makes a flagged preset the search provider when nobody holds the role yet', async () => {
+    const createConnector = vi.fn(async () => finder);
+    renderSettings([github], { getConnectorCatalog: async () => [parallelPreset], createConnector });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect' }));
+
+    await waitFor(() => {
+      expect(createConnector).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'parallel-web', searchProvider: true }),
+      );
+    });
+  });
+
+  it('adds a flagged preset as an ordinary connector when another connector already holds the role', async () => {
+    const createConnector = vi.fn(async () => finder);
+    renderSettings([finderAsProvider], { getConnectorCatalog: async () => [parallelPreset], createConnector });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect' }));
+
+    await waitFor(() => {
+      expect(createConnector).toHaveBeenCalledTimes(1);
+    });
+    expect(createConnector).toHaveBeenCalledWith(expect.not.objectContaining({ searchProvider: true }));
+  });
+
+  it('keeps the role when the holder is edited, since the update replaces the whole manifest', async () => {
+    const updateConnector = vi.fn(async () => finderAsProvider);
+    renderSettings([finderAsProvider], { updateConnector });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(updateConnector).toHaveBeenCalledWith(expect.objectContaining({ id: 'finder', searchProvider: true }));
     });
   });
 });

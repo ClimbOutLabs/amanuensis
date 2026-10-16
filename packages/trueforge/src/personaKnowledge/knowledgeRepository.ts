@@ -66,11 +66,7 @@ export interface PersonaKnowledgeRepository {
     statusMessage?: string | null;
   }): void;
   /** Updates mutable source metadata (used to record a URL's final address after redirects). */
-  updateDocumentSource(input: {
-    documentId: string;
-    title?: string;
-    sourceUrl?: string | null;
-  }): void;
+  updateDocumentSource(input: { documentId: string; title?: string; sourceUrl?: string | null }): void;
   /**
    * Atomically replaces the document's chunks and vectors. Implementations
    * must not leave partial chunk rows visible to readers.

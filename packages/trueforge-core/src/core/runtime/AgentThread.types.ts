@@ -2,7 +2,6 @@ import type { Logger } from 'winston';
 import { z } from 'zod';
 import type { AgentCapability, CapabilityState, JsonValue } from '../capabilities/AgentCapability';
 import type { RegisteredPassthroughEvent, WithRegisteredPassthrough } from '../events/PassthroughEvents';
-import type { SentinelHostContext } from '../permissions';
 import type {
   ActionRequiredEvent,
   AgentApprovalDecisionMessage,
@@ -38,11 +37,13 @@ import type {
   LLMUserMessage,
 } from '../llm/LLMTypes';
 import type { ToolCallMemoSnapshot } from '../mcp/executeToolCalls';
+import type { SentinelHostContext } from '../permissions';
 import type { Sandbox } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import type { AbnormalHandoffCause } from './AbnormalHandoff';
 import type { AgentDefinition } from './AgentDefinition';
 import type { CurrentContextUsage } from './contextUsage';
+import type { HostToolCallPolicy } from './HostToolCallPolicy';
 import type { TaskStateSnapshot } from './taskState';
 
 export type { AgentInfo, AgentParent };
@@ -264,6 +265,13 @@ export interface AgentThreadConstructorInput {
    * forwarded to executeToolCalls. Undefined falls back to the core default.
    */
   toolDispatchMaxConcurrency?: number | undefined;
+  /**
+   * Synchronous host policy consulted for every tool call during
+   * assistant-message enrichment, before provider dispatch. A block resolves
+   * the call as `policy_blocked` with the host message as the tool error.
+   * Undefined disables the hook.
+   */
+  toolCallPolicy?: HostToolCallPolicy | undefined;
   /**
    * Per-tool-call dispatch deadline in milliseconds, forwarded to
    * executeToolCalls. Undefined falls back to the core default.

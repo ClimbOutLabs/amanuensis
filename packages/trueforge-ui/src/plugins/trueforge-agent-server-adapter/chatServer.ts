@@ -14,18 +14,16 @@
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { readSessionAgentDetails, type AgentDetailsVisibility } from '../../atoms/lib/sessionAgentDetails.js';
 import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js';
-import { awaitPendingPersonaMutation } from '../../personaMutationGate.js';
-import { extractSentinelFromEvent } from '../../sentinel/types.js';
-import { publishSentinelEvent } from '../../sentinel/sentinelEvents.js';
 import type { MemoryTurnContext } from '../../components/MemoryRecallContext.js';
+import { awaitPendingPersonaMutation } from '../../personaMutationGate.js';
+import { publishSentinelEvent } from '../../sentinel/sentinelEvents.js';
+import { extractSentinelFromEvent } from '../../sentinel/types.js';
 import type {
   AgentChatServer,
   CreateSessionRequest,
   ListResult,
   Session,
   SessionEventItem,
-  TaskStateRuntimeConfig,
-  TrueForgeAgentRuntimeConfig,
   Turn,
   TurnInputItem,
   TurnStreamingEvent,
@@ -33,17 +31,13 @@ import type {
   UserMessageContent,
 } from '../../server/types.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
+import { createSessionResyncExtensions, type HarnessChatServerExtensions } from './sessionResync.js';
 import {
-  createSessionResyncExtensions,
-  type HarnessChatServerExtensions,
-} from './sessionResync.js';
-import type { WireRuntimeConfig } from './taskStateTypes.js';
-import {
+  isCompatibleSessionEvent,
+  isCompatibleStreamingEvent,
   toUiSessionEvent,
   toUiTurnState,
   toUiStreamingEvent as toUiVendorStreamingEvent,
-  isCompatibleSessionEvent,
-  isCompatibleStreamingEvent,
 } from './toUiTurnState.js';
 import type { HarnessAgentSpec, HarnessMcpServerMount, HarnessSkillMount } from './types.js';
 
@@ -181,25 +175,15 @@ function toHarnessSkill(skill: HarnessSkillMount): TrueForgeApi.Skill {
 /** Drop UI draft `id` before admission; Harness MCP mounts are name-keyed. */
 export function toHarnessAgentSpec(spec: HarnessAgentSpec): TrueForgeApi.AgentSpec {
   const { skills, mcpServers, config, ...rest } = spec;
-  // Convert UI camelCase taskState to wire snake_case task_state.
-  // WireRuntimeConfig carries the not-yet-generated task_state key (see taskStateTypes.ts).
   // The harness leaves sandbox.enabled optional; the wire schema requires it, so
   // normalize an unset enabled to false (sandbox off) rather than dropping the key.
-  const { taskState, sandbox, ...restConfig } = config ?? {};
-  const wireConfig: WireRuntimeConfig | undefined =
+  const { sandbox, ...restConfig } = config ?? {};
+  const wireConfig: TrueForgeApi.RuntimeConfig | undefined =
     config === undefined
       ? undefined
       : {
           ...restConfig,
           ...(sandbox === undefined ? {} : { sandbox: { ...sandbox, enabled: sandbox.enabled ?? false } }),
-          ...(taskState === undefined
-            ? {}
-            : {
-                task_state: {
-                  ...(taskState.toolCallBudget === undefined ? {} : { tool_call_budget: taskState.toolCallBudget }),
-                  ...(taskState.budgetedTools === undefined ? {} : { budgeted_tools: taskState.budgetedTools }),
-                },
-              }),
         };
   return {
     ...rest,
@@ -221,34 +205,11 @@ export function toHarnessAgentSpec(spec: HarnessAgentSpec): TrueForgeApi.AgentSp
   };
 }
 
-/** Drop the wire-only task_state key before exposing config to the UI. */
-const stripWireTaskState = (wire: WireRuntimeConfig): TrueForgeApi.RuntimeConfig => {
-  const { task_state: _dropped, ...rest } = wire;
-  void _dropped;
-  return rest;
-};
-
 export function toUiAgentSpec(spec: TrueForgeApi.AgentSpec): HarnessAgentSpec {
   const { mcpServers, skills, config, ...rest } = spec;
-  // Convert wire snake_case task_state back to UI camelCase taskState.
-  // WireRuntimeConfig carries the not-yet-generated task_state key (see taskStateTypes.ts).
-  const wire: WireRuntimeConfig | undefined = config;
-  const wireTaskState = wire?.task_state;
-  const uiTaskState: TaskStateRuntimeConfig | undefined =
-    wireTaskState === undefined
-      ? undefined
-      : {
-          ...(wireTaskState.tool_call_budget === undefined ? {} : { toolCallBudget: wireTaskState.tool_call_budget }),
-          ...(wireTaskState.budgeted_tools === undefined ? {} : { budgetedTools: wireTaskState.budgeted_tools }),
-        };
-  const restConfig: TrueForgeAgentRuntimeConfig = wire === undefined ? {} : stripWireTaskState(wire);
-  const uiConfig: TrueForgeAgentRuntimeConfig | undefined =
-    config === undefined && uiTaskState === undefined
-      ? undefined
-      : { ...restConfig, ...(uiTaskState === undefined ? {} : { taskState: uiTaskState }) };
   return {
     ...rest,
-    ...(uiConfig === undefined ? {} : { config: uiConfig }),
+    ...(config === undefined ? {} : { config }),
     ...(mcpServers ? { mcpServers: mcpServers.map(toUiMcpServer) } : {}),
     ...(skills ? { skills: skills.map(toUiSkill) } : {}),
   };
@@ -405,19 +366,14 @@ function publishDocumentIngestionEvent(turnId: string, event: TrueForgeApi.Docum
 }
 
 /**
- * Taps Sentinel permission events off a raw SSE stream item before `toUiStreamingEvent`
+ * Taps Sentinel approval events off a raw SSE stream item before `toUiStreamingEvent`
  * narrows it away: the vendor `TurnStreamingEvent` union has no case for
- * `tool.approval_required` / `tool.tier2_notice`, so they cannot travel the normal chat
- * pipeline. The SDK parser passes unknown event types and fields through, so the raw
- * `type` string is readable here and `extractSentinelFromEvent` parses the rest
- * defensively. Published per tool call; `SentinelStateProvider` subscribes.
+ * `tool.approval_required`, so it cannot travel the normal chat pipeline. The SDK parser
+ * passes unknown event types and fields through, so `extractSentinelFromEvent` parses the
+ * raw item defensively. Published per tool call; `SentinelStateProvider` subscribes.
  */
 function tapSentinelStreamEvent(data: TrueForgeApi.TurnStreamingEvent): void {
-  const eventType: string = data.type;
-  if (eventType !== 'tool.approval_required' && eventType !== 'tool.tier2_notice') return;
-  const { approvals, notices } = extractSentinelFromEvent(data);
-  for (const info of approvals) publishSentinelEvent({ kind: 'approval', info });
-  for (const notice of notices) publishSentinelEvent({ kind: 'notice', notice });
+  for (const info of extractSentinelFromEvent(data)) publishSentinelEvent(info);
 }
 
 /**
@@ -662,8 +618,7 @@ function toHarnessInput(input: TurnInputItem[]): TrueForgeApi.TurnInputItem[] {
 
 export function createHarnessChatServer(
   options: CreateHarnessChatServerOptions = {},
-): AgentChatServer<HarnessAgentSpec, HarnessUiSession, HarnessCreateSessionRequest> &
-  HarnessChatServerExtensions {
+): AgentChatServer<HarnessAgentSpec, HarnessUiSession, HarnessCreateSessionRequest> & HarnessChatServerExtensions {
   const client = options.client ?? createTrueForgeClient(options);
   return {
     // Foreground delta probe + pending-approval escape hatch (see sessionResync.ts).

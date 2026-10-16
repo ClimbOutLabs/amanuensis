@@ -24,9 +24,10 @@
     "format:check:files": "prettier --check --ignore-unknown --config .prettierrc --",
     "format:fix": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\" --cache --cache-location .prettiercache --cache-strategy content --config .prettierrc",
     "format": "prettier --write . --cache --cache-location .prettiercache --cache-strategy content --config .prettierrc",
-    "lint:ci": "eslint .",
+    "lint:ci": "eslint . --cache --cache-location node_modules/.cache/eslint",
     "lint:check:files": "eslint --",
     "lint": "eslint . --fix --cache --cache-location .eslintcache --cache-strategy content",
+    "lint:theme": "node scripts/check-theme-tokens.mjs",
     "nightona:sandbox:build": "docker build --build-arg \"TESSERACT_LANGS=eng deu fra spa ita por nld rus hin mar jpn chi_sim chi_tra kor ara\" --build-arg NIGHTONA_BASE_IMAGE=ghcr.io/OWNER/nightona-sandbox-base:0.6.0 -t ghcr.io/OWNER/nightona-sandbox:0.6.0-slim-tf7 -f ops/nightona-sandbox/Dockerfile .",
     "nightona:sandbox:push": "docker push ghcr.io/OWNER/nightona-sandbox:0.6.0-slim-tf7",
     "nightona:sandbox:verify": "bash ops/nightona-sandbox/verify-image.sh ghcr.io/OWNER/nightona-sandbox:0.6.0-slim-tf7",
@@ -66,7 +67,7 @@
     "test:trueforge-ui": "pnpm --filter @truefoundry/trueforge-ui test",
     "test": "pnpm test:trueforge-core && pnpm test:trueforge-sdk && pnpm test:trueforge-ui && pnpm test:trueforge && pnpm test:frontend",
     "verify": "pnpm run test:private-data && pnpm run format:check && pnpm run typecheck && pnpm run lint:ci && pnpm run build && pnpm run test",
-    "typecheck": "pnpm --filter @truefoundry/trueforge-core typecheck && pnpm --filter @truefoundry/trueforge-ui typecheck && pnpm --filter @truefoundry/trueforge typecheck && pnpm --filter frontend typecheck && pnpm --filter amanuensis typecheck",
+    "typecheck": "pnpm --filter @truefoundry/trueforge-sdk build && pnpm --filter @truefoundry/trueforge-ui build && pnpm --filter @truefoundry/trueforge-ui --filter @truefoundry/trueforge --filter frontend --parallel typecheck:only && pnpm --filter @truefoundry/trueforge-core --filter amanuensis --parallel typecheck",
     "version": "node scripts/version.mjs"
   },
   "devDependencies": {

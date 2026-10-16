@@ -1,9 +1,9 @@
 import type { ResolvedAgentDefinition } from '@truefoundry/trueforge-core/agent-session';
 import type { AgentCapability, ModelMessageEvent } from '@truefoundry/trueforge-core/core';
-import type { PersonalizationProfile } from '../personalization/profile';
-import type { PersonaContext } from '../personas/persona';
 import { repairAssistantMessageContent, stripCitationMarkers } from '../personaKnowledge/knowledgeAttribution';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
+import type { PersonalizationProfile } from '../personalization/profile';
+import type { PersonaContext } from '../personas/persona';
 import { PersonalizationTurnResourceResolver } from './PersonalizationTurnResourceResolver';
 
 /** Root-only capability: the persona is who is answering the user, not who runs a sub-agent. */
@@ -29,7 +29,10 @@ function personaKnowledgeCapability(block: string): AgentCapability {
 }
 
 /** Root-only: tells the model a switch request was ambiguous so it can ask which persona was meant. */
-export interface PersonaSwitchNotice { kind: 'ambiguous'; candidates: string[] }
+export interface PersonaSwitchNotice {
+  kind: 'ambiguous';
+  candidates: string[];
+}
 
 const MAX_SWITCH_NOTICE_NAME_CHARACTERS = 120;
 
@@ -40,7 +43,10 @@ const MAX_SWITCH_NOTICE_NAME_CHARACTERS = 120;
  * prompt structure or newlines past it.
  */
 function sanitizeSwitchNoticeName(name: string): string {
-  return name.replace(/[\p{C}]/gu, '').slice(0, MAX_SWITCH_NOTICE_NAME_CHARACTERS).trim();
+  return name
+    .replace(/[\p{C}]/gu, '')
+    .slice(0, MAX_SWITCH_NOTICE_NAME_CHARACTERS)
+    .trim();
 }
 
 /** Renders the notice; undefined when sanitization leaves nothing to say. */
@@ -106,9 +112,7 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
    * final assistant message. Present only when the turn injected passages;
    * the harness applies it once, before the terminal state is persisted.
    */
-  readonly finalizeAssistantOutput:
-    | ((output: ModelMessageEvent) => ModelMessageEvent | undefined)
-    | undefined;
+  readonly finalizeAssistantOutput: ((output: ModelMessageEvent) => ModelMessageEvent | undefined) | undefined;
   /**
    * Host marker strip for the durable thread context: persona turns never
    * persist live citation markers, so a stale marker in history cannot
@@ -215,6 +219,7 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
     return {
       modelClient: chatModel.modelClient,
       modelParams: { ...chatModel.defaultModelParams, ...spec.model.params },
+      modelProperties: chatModel.modelProperties,
     };
   }
 }

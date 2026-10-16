@@ -57,8 +57,20 @@ function seedLibrary(knowledgeDir: string, personaId: string, chunks: { text: st
 }
 
 const CANDIDATES = [
-  { text: 'The solo project sold for twenty million dollars.', title: 'Exit story', sourceLabel: 'Pasted text', sourceUrl: null, similarity: 0.89 },
-  { text: 'Negotiations took three months.', title: 'Exit story', sourceLabel: 'Pasted text', sourceUrl: null, similarity: 0.87 },
+  {
+    text: 'The solo project sold for twenty million dollars.',
+    title: 'Exit story',
+    sourceLabel: 'Pasted text',
+    sourceUrl: null,
+    similarity: 0.89,
+  },
+  {
+    text: 'Negotiations took three months.',
+    title: 'Exit story',
+    sourceLabel: 'Pasted text',
+    sourceUrl: null,
+    similarity: 0.87,
+  },
 ];
 
 describe('parseRelevanceJudgeResponse', () => {

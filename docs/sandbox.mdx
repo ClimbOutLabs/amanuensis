@@ -6,7 +6,7 @@ description: 'Connect an isolated execution environment for code, files, and she
 
 The sandbox gives your agent a secure, isolated environment to run code, manipulate files, and execute shell commands — separate from the TrueForge server and your infrastructure.
 
-Skills and [Code Mode](/key-features/code-mode) require a sandbox. Configure a provider once under **Settings → Sandbox providers**, then enable the sandbox on each agent that needs it.
+Skills and [Code Mode](/key-features/code-mode) require a sandbox. Check that it is ready under **Settings → Sandbox**, then enable the sandbox on each agent that needs it.
 
 ## TrueForge's approach
 
@@ -25,23 +25,11 @@ That means:
 - Conversation state survives a sandbox crash.
 - A sandbox is created only when the agent actually needs one — simple Q&A and MCP calls incur no sandbox cost.
 
-## Configuring a provider
+## The Docker sandbox
 
-**Daytona is the only sandbox provider supported today.** Support for additional providers is planned.
+Code the assistant writes with `run_code` (Python and Node.js) runs in an isolated Docker container with no network access. **Settings → Sandbox** shows whether it can run right now: ready, or off with the reason (Docker not available to the server, image not downloaded, image signature not verified, and so on) and what to do about it. Use **Re-check** after you fix the cause. The image and the limits for each run (time, memory, disk) come from the server configuration and change only with a restart.
 
-Open **Settings → Sandbox providers**, pick the [Daytona](https://www.daytona.io) preset from the catalog, and paste your API key.
-
-<Note>
-  The Daytona API key needs permission to create **snapshots**, not only sandboxes. The first time you configure the
-  provider, TrueForge builds a release snapshot in your Daytona account, and every sandbox it starts afterwards is
-  cloned from that snapshot. Create the key with **Sandboxes** access and **Snapshots** write (create) permission.
-
-  If the key is missing snapshot permission, configuring the provider fails 
-  even though the key is otherwise valid. If you hit that, check the key's permissions before regenerating it.
-</Note>
-
-
-The provider presets come from the shipped sandbox catalog — see [Initial Setup](/harness/initial-setup#what-is-supported-out-of-the-box) for how catalogs work and how to change what the UI offers.
+Settings no longer offers a choice of sandbox provider. Docker is the only option offered there.
 
 ## Enabling the sandbox on an agent
 
@@ -74,11 +62,6 @@ note; the `extract_document_text` tool re-extracts a file on demand for page- an
 line-addressable provenance, or for the remainder of a truncated document. Attachments of an
 unsupported type get no extraction note; the upload announcement already lists them and the
 model can read them with its own file tools.
-
-Existing sandbox-provider configurations remain pinned to the runtime image they originally
-registered. After updating Aman, open **Settings → Sandbox providers** and choose **Upgrade
-runtime** once to register the current image for newly created sandboxes. Running sandboxes and
-older snapshots are not replaced.
 
 ## Repository-bound coding sessions
 

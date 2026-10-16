@@ -2,12 +2,12 @@
 
 /** ok: at least one curated line injected. empty: nothing relevant. withheld/dropped: lines were read but none survived the screen or the budget. disabled: layer off. timeout/error: the worse of the profile and mental-model reads failed; lines from the other read are still injected. */
 export const MemoryRecallCuratedOutcome = {
-    Ok: "ok",
-    Empty: "empty",
-    Withheld: "withheld",
-    Dropped: "dropped",
-    Disabled: "disabled",
-    Timeout: "timeout",
-    Error: "error",
-} as const;
-export type MemoryRecallCuratedOutcome = (typeof MemoryRecallCuratedOutcome)[keyof typeof MemoryRecallCuratedOutcome];
+        Ok: "ok",
+        Empty: "empty",
+        Withheld: "withheld",
+        Dropped: "dropped",
+        Disabled: "disabled",
+        Timeout: "timeout",
+        Error: "error"
+    } as const;
+export type MemoryRecallCuratedOutcome = typeof MemoryRecallCuratedOutcome[keyof typeof MemoryRecallCuratedOutcome];

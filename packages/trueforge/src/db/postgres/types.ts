@@ -21,8 +21,10 @@ import type {
   JsonValue,
   MCPServerInitInfo,
   SandboxInfo,
+  ShellApprovalBinding,
   SubAgentCompletionMarker,
   TaskStateSnapshot,
+  Tier2ActionKind,
   ToolCallMemoSnapshot,
 } from '@truefoundry/trueforge-core/core';
 import type { CurrentContextUsage } from '@truefoundry/trueforge-core/core/runtime/contextUsage';
@@ -178,9 +180,33 @@ export interface SentinelAuditTable {
   tier: number;
   tool_name: string;
   description: string;
-  outcome: 'logged' | 'ran' | 'stopped_by_user' | 'undone' | 'approved' | 'denied' | 'auto_denied';
+  outcome: 'logged' | 'ran' | 'approved' | 'denied' | 'auto_denied';
   auto_deny_reason: string | null;
   created_at: Date;
+}
+
+/** Sentinel approval token, keyed by the sha256 of the token id. PRIMARY KEY (token_hash). */
+export interface ApprovalTokenTable {
+  token_hash: string;
+  action_id: string;
+  params_hash: string;
+  shell_binding: JSONColumnType<ShellApprovalBinding | null, ShellApprovalBinding | null, ShellApprovalBinding | null>;
+  tenant_id: string;
+  created_by: string;
+  created_at: Date;
+  expires_at: Date;
+  used_at: Date | null;
+}
+
+/** Per-user Sentinel preferences. PRIMARY KEY (tenant_id, created_by). */
+export interface SentinelUserSettingsTable {
+  tenant_id: string;
+  created_by: string;
+  offline_mode: boolean;
+  tier2_auto_allow: JSONColumnType<Tier2ActionKind[], Tier2ActionKind[] | string, Tier2ActionKind[] | string>;
+  search_without_asking: boolean;
+  created_at: Date;
+  updated_at: Date;
 }
 
 /** Content-addressed artifact bytes, deduplicated by digest within a tenant. PRIMARY KEY (tenant_id, digest). */
@@ -215,6 +241,15 @@ export interface TurnArtifactTable {
 }
 
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
+/** "Always allow this tool" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
+export interface McpToolGrantTable {
+  tenant_id: string;
+  created_by: string;
+  mcp_server_name: string;
+  tool_name: string;
+  created_at: Date;
+}
+
 export interface GlobalSettingsTable {
   key: string;
   value: string;
@@ -673,6 +708,8 @@ export interface McpServerTable {
    * oauth_client are null until first successful DCR.
    */
   oauth_client: JSONColumnType<OAuthClient, OAuthClient, OAuthClient> | null;
+  /** Defaults to false, never client-supplied: true only for a connector the product's own setup provisioned. */
+  first_party: Generated<boolean>;
   created_at: Date;
   updated_at: Date;
 }
@@ -809,6 +846,8 @@ export interface Database {
   space: SpaceTable;
   space_revision: SpaceRevisionTable;
   sentinel_audit: SentinelAuditTable;
+  approval_token: ApprovalTokenTable;
+  sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;
   implementation_plan_dispatch: ImplementationPlanDispatchTable;
   turn: TurnTable;
@@ -827,6 +866,7 @@ export interface Database {
   persona_name_key: PersonaNameKeyTable;
   session_persona: SessionPersonaTable;
   mcp_server: McpServerTable;
+  mcp_tool_grant: McpToolGrantTable;
   oauth_token: OAuthTokenTable;
   oauth_pending_authorization: OAuthPendingAuthorizationTable;
   repository: RepositoryTable;

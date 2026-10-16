@@ -139,3 +139,37 @@ test('tree scan fails closed on non-UTF-8 Git pathnames', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+function scanTailnetFixture(content) {
+  const root = mkdtempSync(join(tmpdir(), 'aman-private-data-scan-'));
+  try {
+    git(root, ['init', '--quiet']);
+    git(root, ['config', 'user.email', 'private-data-test@example.invalid']);
+    git(root, ['config', 'user.name', 'Private Data Test']);
+    writeFileSync(join(root, 'config.mjs'), content);
+    git(root, ['add', '.']);
+    git(root, ['commit', '--quiet', '-m', 'tailnet fixture']);
+    return scanPrivateData({ rootDirectory: root }).findings;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+// Hostnames are assembled from parts so this file does not match its own rule.
+const tailnetHost = (...labels) => [...labels, 'ts', 'net'].join('.');
+const tailnetFinding = [{ file: 'config.mjs', reasons: ['file content matches Tailscale tailnet hostname'] }];
+
+test('tree scan flags Tailscale tailnet hostnames', () => {
+  const host = tailnetHost('box-1', 'tail1234ab');
+  assert.deepEqual(scanTailnetFixture(`const base_url = 'https://${host}:8456/v1';\n`), tailnetFinding);
+});
+
+test('tree scan flags uppercase and port-suffixed tailnet hostnames', () => {
+  assert.deepEqual(scanTailnetFixture(`BOX.${tailnetHost('TAIL1234AB').toUpperCase()}\n`), tailnetFinding);
+  assert.deepEqual(scanTailnetFixture(`${tailnetHost('box', 'tail1234ab')}:443\n`), tailnetFinding);
+});
+
+test('tree scan ignores tailnet lookalikes', () => {
+  assert.deepEqual(scanTailnetFixture(`${tailnetHost('foo', 'tail-scale')}\n`), []);
+  assert.deepEqual(scanTailnetFixture('const base_url = process.env.BASE_URL;\n'), []);
+});

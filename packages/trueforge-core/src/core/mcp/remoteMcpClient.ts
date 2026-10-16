@@ -3,10 +3,12 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { context, propagation } from '@opentelemetry/api';
 import { McpConnectionError } from '../errors';
 import { withTimeout } from '../util/promiseUtils';
+import { isRedirectStatus, redirectTargetOrigin } from '../util/redirects';
 import type { ToolSchema } from './IMCPServer';
 
 /** Networking for remote (url-based) MCP servers, kept separate so it can be mocked in tests. */
@@ -42,18 +44,96 @@ class McpClientWithTimeout extends Client {
   }
 }
 
-function createTransport(
-  type: RemoteMcpTransportType,
-  url: URL,
-  headers: Record<string, string>,
-  sessionId?: string,
-): McpTransport {
+function createTransport({
+  type,
+  url,
+  headers,
+  sessionId,
+  fetchFn,
+}: {
+  type: RemoteMcpTransportType;
+  url: URL;
+  headers: Record<string, string>;
+  sessionId?: string | undefined;
+  /** Replaces the global fetch for every request the transport makes, its streams included. */
+  fetchFn?: FetchLike | undefined;
+}): McpTransport {
   const requestInit = { headers };
+  const fetchOption = fetchFn === undefined ? {} : { fetch: fetchFn };
   if (type === 'streamable-http') {
-    return new StreamableHTTPClientTransport(url, { requestInit, ...(sessionId !== undefined ? { sessionId } : {}) });
+    return new StreamableHTTPClientTransport(url, {
+      requestInit,
+      ...fetchOption,
+      ...(sessionId !== undefined ? { sessionId } : {}),
+    });
   }
   // eslint-disable-next-line @typescript-eslint/no-deprecated -- dual-transport probe; see TRANSPORT_PROBE_ORDER
-  return new SSEClientTransport(url, { requestInit });
+  return new SSEClientTransport(url, { requestInit, ...fetchOption });
+}
+
+/** Where a refused redirect pointed. `target` is an origin only: a Location can carry a secret in its query. */
+interface RefusedRedirect {
+  status: number;
+  target: string | undefined;
+  /** True when redirects within the server's own origin were still allowed. */
+  sameOriginOnly: boolean;
+}
+
+function redirectRefusedMessage({ status, target, sameOriginOnly }: RefusedRedirect): string {
+  const to = target === undefined ? '' : ` to ${target}`;
+  return sameOriginOnly
+    ? `server answered HTTP ${String(status)} with a redirect${to}, and this connection does not follow redirects to another origin`
+    : `server answered HTTP ${String(status)} with a redirect${to}, and this connection does not follow redirects`;
+}
+
+const MAX_SAME_ORIGIN_REDIRECTS = 5;
+
+/**
+ * A fetch that never follows a redirect to another origin, and remembers the first one it refused.
+ * The connector's headers, secrets included, belong to the origin the user configured: following
+ * a redirect would hand them, and the approved arguments, to wherever that origin points. A host
+ * vouched for as first-party refuses every redirect; any other connector may still follow one that
+ * stays on its own origin. The transports make several kinds of request (POST, the event stream,
+ * DELETE) and wrap what a failing fetch throws in their own types, so the refusal is recorded here
+ * and read back by the caller instead of recovered from the error.
+ */
+function createRedirectGuardFetch({ sameOriginOnly }: { sameOriginOnly: boolean }): {
+  fetch: FetchLike;
+  refusal: () => RefusedRedirect | undefined;
+} {
+  let refusal: RefusedRedirect | undefined;
+  return {
+    fetch: async (requestUrl, init) => {
+      let currentUrl: string | URL = requestUrl;
+      let currentInit = init;
+      for (let hop = 0; ; hop += 1) {
+        const response = await fetch(currentUrl, { ...currentInit, redirect: 'manual' });
+        if (!isRedirectStatus(response.status)) {
+          return response;
+        }
+        const target = redirectTargetOrigin({ response, requestUrl: currentUrl });
+        const location = response.headers.get('location');
+        const sameOrigin = target !== undefined && target === new URL(currentUrl).origin && location !== null;
+        if (!sameOriginOnly || !sameOrigin || hop >= MAX_SAME_ORIGIN_REDIRECTS) {
+          const refused = { status: response.status, target, sameOriginOnly };
+          refusal ??= refused;
+          await response.body?.cancel().catch(() => {
+            /* no-op */
+          });
+          throw new McpConnectionError(redirectRefusedMessage(refused), 502);
+        }
+        await response.body?.cancel().catch(() => {
+          /* no-op */
+        });
+        currentUrl = new URL(location, currentUrl);
+        // 307 and 308 repeat the request as it was; the older codes turn a POST into a bodiless GET.
+        if (response.status !== 307 && response.status !== 308 && currentInit?.method?.toUpperCase() === 'POST') {
+          currentInit = { ...currentInit, method: 'GET', body: null };
+        }
+      }
+    },
+    refusal: () => refusal,
+  };
 }
 
 export function isSessionExpiredError(error: unknown): boolean {
@@ -165,18 +245,30 @@ export async function connectRemoteMcp(params: {
   requestTimeoutMs: number;
   connectTimeoutMs: number;
   signal: AbortSignal;
+  /**
+   * Answer any redirect with an error. Set for a connection the host marked first-party; every other
+   * connection refuses a redirect to another origin and follows one within the server's own origin.
+   */
+  refuseRedirects?: boolean | undefined;
   onClose?: (() => void) | undefined;
   onError?: ((error: Error) => void) | undefined;
 }): Promise<RemoteMcpConnection> {
   const url = new URL(params.url);
   const requestOptions = { signal: params.signal };
+  const redirectRefusal = createRedirectGuardFetch({ sameOriginOnly: params.refuseRedirects !== true });
   const candidates = params.knownTransportType
     ? [params.knownTransportType, ...TRANSPORT_PROBE_ORDER.filter(t => t !== params.knownTransportType)]
     : TRANSPORT_PROBE_ORDER;
   const failures: { transport: RemoteMcpTransportType; error: string }[] = [];
 
   for (const transportType of candidates) {
-    const transport = createTransport(transportType, url, params.headers, params.sessionId);
+    const transport = createTransport({
+      type: transportType,
+      url,
+      headers: params.headers,
+      sessionId: params.sessionId,
+      fetchFn: redirectRefusal.fetch,
+    });
     const client = new McpClientWithTimeout(params.requestTimeoutMs);
     try {
       stampTraceHeaders(params.headers);
@@ -191,6 +283,11 @@ export async function connectRemoteMcp(params: {
       await client.close().catch(() => {
         /* no-op */
       });
+      // A refused redirect is final: the URL does not serve MCP itself, so another transport on it would fare no better.
+      const refused = redirectRefusal.refusal();
+      if (refused !== undefined) {
+        throw new McpConnectionError(redirectRefusedMessage(refused), 502, { cause: error });
+      }
       if (isAuthError(error)) {
         throw toConnectError(error);
       }
