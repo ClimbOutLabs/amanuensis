@@ -55,7 +55,7 @@ test_install_without_demo_never_seeds() {
 }
 
 test_demo_user_is_not_an_option() {
-  t_begin "--demo-user is gone: an instance has one account, so the demo world is always the owner's"
+  t_begin "--demo-user is gone: the demo world is always the owner's"
   sandbox_new
   install_demo --demo-user judge@demo.invalid
   assert_rc 2

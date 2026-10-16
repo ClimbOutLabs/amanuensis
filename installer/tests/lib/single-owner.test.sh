@@ -85,7 +85,7 @@ test_a_new_instance_has_one_user() {
 }
 
 test_install_rerun_removes_extra_users() {
-  t_begin "re-running install removes the extra users, says which emails and why once, logs it, and restarts the instance"
+  t_begin "re-running install removes the extra users, says which emails once, logs it, and restarts the instance"
   sandbox_new
   install_machine
   make_legacy_users

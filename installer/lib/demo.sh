@@ -87,7 +87,7 @@ demo_seed_instance() {
   printf '%s' "$name"
 }
 
-# The demo world is always the owner's: an instance has one account.
+# The demo world is always the owner's.
 cmd_instance_demo_seed() {
   local name
   [ -z "${OPT_NAME:-}" ] || usage_die "usage: install.sh instance demo-seed [--reset] [--instance NAME]"

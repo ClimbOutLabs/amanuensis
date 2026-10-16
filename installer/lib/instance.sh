@@ -708,8 +708,8 @@ instance_env_repair() {
   if [ "$restored" -gt 0 ]; then ui_ok "Put back $restored lost settings of instance $name"; fi
 }
 
-# An instance has one sign-in account, the owner's. An earlier version let `instance add-user` add more: a registry
-# record, a password hash in dex.env and an allowed email each. The next install, upgrade or refresh removes them.
+# An earlier version let `instance add-user` add sign-in users: a registry record, a password hash in dex.env and an
+# allowed email each. The next install, upgrade or refresh removes them.
 
 # The emails other than the owner's in any OIDC_ALLOWED_EMAILS line of instance NAME's .env, or in a user record,
 # lower case, one per line. Every line counts because Compose reads the last one, wherever it sits.
