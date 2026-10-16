@@ -171,6 +171,21 @@ test_no_scheduler_is_said_plainly() {
   assert_flat_contains "$OUT$ERR" "Automatic backups are not possible here"
   assert_not_contains "$OUT$ERR" "Back up automatically every day?"
   assert_eq "$(mode_file)" off
+  assert_flat_contains "$OUT" "Backups off. Make one: aman backup"
+  sandbox_drop
+}
+
+test_cron_that_is_not_running_is_not_a_scheduler() {
+  t_begin "a crontab line is not used while cron is not running (WSL2 without systemd); backups say off and how to make one"
+  sandbox_new
+  STUB_CRON_STOPPED=1
+  install_machine
+  assert_rc 0
+  assert_flat_contains "$OUT$ERR" "Automatic backups are not possible here"
+  assert_not_contains "$(cron_table)" "amanuensis-backup"
+  assert_eq "$(mode_file)" off
+  assert_flat_contains "$OUT" "Backups off. Make one: aman backup"
+  unset STUB_CRON_STOPPED
   sandbox_drop
 }
 
@@ -207,6 +222,7 @@ test_the_question_is_asked_once
 test_an_existing_install_is_asked_once_and_never_after
 test_the_command_turns_it_on_and_off_and_is_repeatable
 test_other_crontab_lines_are_kept
+test_cron_that_is_not_running_is_not_a_scheduler
 test_a_user_systemd_timer_is_used_where_it_works
 test_launchd_is_used_on_macos
 test_no_scheduler_is_said_plainly

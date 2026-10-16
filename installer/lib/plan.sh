@@ -139,6 +139,9 @@ preflight_system() {
       ;;
   esac
   if [ "$unsupported" = 0 ]; then check_ok "$pretty on $arch"; fi
+  if running_in_wsl && [ "${REPO_ROOT#/mnt/}" != "$REPO_ROOT" ]; then
+    check_block "This folder is on the Windows drive ($REPO_ROOT), where building is very slow and file permissions do not work" "Clone Aman inside Ubuntu, for example in your home folder, then run install.sh from there."
+  fi
   if command -v git >/dev/null 2>&1; then
     check_ok "git is installed"
   else
@@ -242,7 +245,7 @@ print_plan() {
     total_gb=$(awk -v mb="$DL_TOTAL_MB" 'BEGIN {printf "%.1f", mb / 1024}')
     hosts=$(printf '%s' "$DL_HOSTS" | tr ' ' '\n' | sort -u | tr '\n' ' ')
     for host in $hosts; do count=$((count + 1)); done
-    ui_hint "Downloads: about $total_gb GB from $count sources. The first run takes several minutes, mostly for the image builds."
+    ui_hint "Downloads: about $total_gb GB from $count sources. The first run takes 20 to 40 minutes, mostly for the image builds."
     if [ "$UI_VERBOSE" = 1 ]; then
       say "  First-run downloads (approximate):$DL_LINES"
       say "    total: about $DL_TOTAL_MB MB ($total_gb GB)"
@@ -467,7 +470,7 @@ backups_collect() {
   B_MODE=daily
   if [ -z "$(backup_scheduler)" ]; then
     B_MODE=off
-    if [ "$DRY_RUN" != 1 ]; then ui_warn "Automatic backups are not possible here" "This computer has no scheduler that works without admin rights."; fi
+    if [ "$DRY_RUN" != 1 ]; then ui_warn "Automatic backups are not possible here" "Nothing on this computer can run them without admin rights. Make one yourself: aman backup"; fi
     return 0
   fi
   if [ "$DRY_RUN" != 1 ] && ! ui_confirm "Back up automatically every day?" y; then B_MODE=off; fi

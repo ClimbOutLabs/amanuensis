@@ -26,7 +26,8 @@ backup_scheduler() {
     echo systemd
     return
   fi
-  if command -v crontab >/dev/null 2>&1; then echo cron; fi
+  # A crontab line does nothing unless cron is running, which it often is not where there is no systemd (WSL2).
+  if command -v crontab >/dev/null 2>&1 && { pgrep -x cron || pgrep -x crond; } >/dev/null 2>&1; then echo cron; fi
 }
 
 # What the schedule is made of, in words for the plan.

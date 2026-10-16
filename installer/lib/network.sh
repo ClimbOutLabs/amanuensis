@@ -161,13 +161,15 @@ network_default_hosts() {
 # WSL2 are the virtual machine's own, not the PC's home-network ones; a wildcard would open Aman on public Wi-Fi. So
 # Aman is published on 127.0.0.1 alone, which Windows forwards to its own localhost. Looked up once.
 NETWORK_LOOPBACK_ONLY=
+running_in_wsl() { case "$(uname -r)" in *[Mm]icrosoft* | *WSL* | *wsl*) return 0 ;; *) return 1 ;; esac; }
+
 network_publishes_on_loopback_only() {
   local os
   if [ -z "$NETWORK_LOOPBACK_ONLY" ]; then
     NETWORK_LOOPBACK_ONLY=0
     if [ "$(uname -s)" = Darwin ]; then
       NETWORK_LOOPBACK_ONLY=1
-    elif case "$(uname -r)" in *[Mm]icrosoft* | *WSL* | *wsl*) true ;; *) false ;; esac; then
+    elif running_in_wsl; then
       NETWORK_LOOPBACK_ONLY=1
     elif command -v docker >/dev/null 2>&1; then
       os=$(run_bounded 8 docker info --format '{{.OperatingSystem}}' 2>/dev/null || true)

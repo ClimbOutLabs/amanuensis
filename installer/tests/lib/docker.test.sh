@@ -4,6 +4,34 @@ set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
+test_wsl_is_sent_to_docker_desktop() {
+  t_begin "inside WSL2 a missing Docker is never installed with apt; the person is told to turn on Docker Desktop's WSL integration"
+  sandbox_new
+  os_release_ubuntu
+  fixture_uname Linux x86_64 5.15.90.1-microsoft-standard-WSL2
+  rm -f "$SB_BIN/docker"
+  run_install --print-root-steps
+  assert_flat_contains "$OUT" "Turn on Docker Desktop's WSL integration for this Ubuntu"
+  assert_not_contains "$OUT" "download.docker.com"
+  run_install --dry-run
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "Docker is not installed Next: Turn on Docker Desktop's WSL integration for this Ubuntu"
+  assert_log_lacks "sudo "
+  sandbox_drop
+}
+
+test_wsl_checkout_on_the_windows_drive_is_blocked() {
+  t_begin "inside WSL2 a checkout under /mnt/ is blocked with the way out"
+  sandbox_new
+  fixture_uname Linux x86_64 5.15.90.1-microsoft-standard-WSL2
+  REPO=/mnt/c/fake-checkout
+  run_install --dry-run
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "This folder is on the Windows drive (/mnt/c/fake-checkout)"
+  assert_flat_contains "$OUT$ERR" "Clone Aman inside Ubuntu, for example in your home folder, then run install.sh from there."
+  sandbox_drop
+}
+
 test_rootless_is_unsupported() {
   t_begin "rootless Docker is reported as unsupported"
   sandbox_new
@@ -37,6 +65,24 @@ test_old_engine_and_compose_v1() {
   run_install --dry-run
   assert_rc 1
   assert_flat_contains "$OUT$ERR" "Compose 1.29.2 is too old; version 2 is needed"
+  sandbox_drop
+}
+
+test_old_engine_names_the_fix() {
+  t_begin "a Docker Engine that is too old says what to run, on apt systems and elsewhere"
+  sandbox_new
+  os_release_ubuntu
+  STUB_ENGINE_VERSION=20.10.24
+  run_install --dry-run
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "Docker Engine 20.10.24 is too old; 23 or newer is required Next: Run install.sh docker to update it, then run this again."
+  sandbox_drop
+  sandbox_new
+  printf 'ID=fedora\n' >"$SB/os-release"
+  STUB_ENGINE_VERSION=20.10.24
+  run_install --dry-run
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "Next: Update Docker (Docker Desktop, or the Docker packages of your system), then run this again."
   sandbox_drop
 }
 
@@ -308,6 +354,7 @@ test_print_root_steps() {
 test_rootless_is_unsupported
 test_podman_is_unsupported
 test_old_engine_and_compose_v1
+test_old_engine_names_the_fix
 test_compose_v2_or_newer_passes
 test_unreadable_compose_version_is_named
 test_blocker_stops_before_any_prompt
@@ -318,6 +365,8 @@ test_doctor_follows_sudo_access
 test_install_offer_declined
 test_install_offer_accepted
 test_print_root_steps
+test_wsl_is_sent_to_docker_desktop
+test_wsl_checkout_on_the_windows_drive_is_blocked
 test_group_decline_stops_without_sudo
 test_yes_does_not_consent_to_root_changes
 test_key_fingerprint_is_checked

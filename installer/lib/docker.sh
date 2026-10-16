@@ -3,6 +3,7 @@
 
 # Vendor repository signing key; the installer refuses the repository on any other fingerprint.
 DOCKER_APT_KEY_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+WSL_DOCKER_HINT="Turn on Docker Desktop's WSL integration for this Ubuntu (Docker Desktop, Settings, Resources, WSL integration), then run install.sh again."
 DOCKER_MIN_ENGINE_MAJOR=23
 DOCKER_MIN_COMPOSE_MAJOR=2
 
@@ -88,8 +89,9 @@ docker_plan_access() {
   esac
 }
 
+# Not inside WSL2: Docker comes from Docker Desktop there, and an Engine installed next to it would clash.
 docker_install_supported() {
-  [ "$(uname -s)" = Linux ] && [ -n "$(os_release_value ID | grep -E '^(debian|ubuntu)$' || true)" ] &&
+  [ "$(uname -s)" = Linux ] && ! running_in_wsl && [ -n "$(os_release_value ID | grep -E '^(debian|ubuntu)$' || true)" ] &&
     command -v apt-get >/dev/null 2>&1
 }
 
@@ -156,6 +158,8 @@ print_root_steps() {
   if docker_install_supported; then
     say "Root steps to install Docker Engine (run as root, key fingerprint pinned to $DOCKER_APT_KEY_FPR):"
     docker_root_steps_script | sed 's/^/    /'
+  elif running_in_wsl; then
+    say "$WSL_DOCKER_HINT"
   else
     say "This computer does not use apt, so the installer cannot install Docker for you."
     say "Follow the Docker Engine install guide for your Linux system, or install Docker Desktop on macOS and Windows."
@@ -238,8 +242,19 @@ docker_blocked_text() {
 
 docker_fail_message() { die "$(docker_blocked_text)"; }
 
-docker_install_hint() {
+# What to do about a Docker that is too old: one command or one step for this computer.
+docker_update_hint() {
   if docker_install_supported; then
+    echo "Run install.sh docker to update it, then run this again."
+  else
+    echo "Update Docker (Docker Desktop, or the Docker packages of your system), then run this again."
+  fi
+}
+
+docker_install_hint() {
+  if running_in_wsl; then
+    echo "$WSL_DOCKER_HINT"
+  elif docker_install_supported; then
     echo "Run install.sh --print-root-steps to see the install steps, or let this installer run them."
   else
     echo "Install Docker Engine with Compose v2 or newer (Linux) or Docker Desktop (macOS, Windows), then run this again."
@@ -274,7 +289,7 @@ docker_runtime_problem() {
       ;;
   esac
   if [ "$major" -lt "$DOCKER_MIN_ENGINE_MAJOR" ]; then
-    RUNTIME_PROBLEM="Docker Engine $engine is too old; $DOCKER_MIN_ENGINE_MAJOR or newer is required."
+    RUNTIME_PROBLEM="Docker Engine $engine is too old; $DOCKER_MIN_ENGINE_MAJOR or newer is required. $(docker_update_hint)"
     return 0
   fi
   compose=$(D compose version --short 2>/dev/null || true)
@@ -333,7 +348,7 @@ docker_attach() {
 # Installs the Compose plugin where the system's packages have it; every sudo is asked about first.
 docker_install_compose() {
   if ! docker_install_supported; then
-    die "Docker Compose 2 is needed. Docker Desktop includes it: update Docker Desktop, then run aman doctor."
+    die "Docker Compose 2 is needed. Docker Desktop includes it: update Docker Desktop. On Linux, install the Compose plugin package from your system's package manager (usually docker-compose-plugin), then run aman doctor."
   fi
   ui_line "Docker Compose 2 is missing or too old. Installing it needs administrator rights (sudo)."
   consent_root "Install the Docker Compose plugin now?" 0 ||

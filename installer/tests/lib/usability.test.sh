@@ -4,6 +4,14 @@ set -euo pipefail
 # shellcheck source=../helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
+test_plan_gives_a_realistic_time() {
+  t_begin "the plan says the first run takes 20 to 40 minutes"
+  sandbox_new
+  run_install --dry-run --email owner@example.invalid
+  assert_flat_contains "$OUT" "The first run takes 20 to 40 minutes, mostly for the image builds."
+  sandbox_drop
+}
+
 test_docker_data_disk_is_checked() {
   t_begin "free space is checked on the disk holding Docker's data, not only the install home"
   sandbox_new
@@ -219,4 +227,5 @@ test_prompts_and_summary_use_plain_words
 test_model_hint
 test_list_columns_align
 test_upgrade_says_what_it_does
+test_plan_gives_a_realistic_time
 tests_finish

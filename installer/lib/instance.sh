@@ -689,7 +689,13 @@ print_backups_row() {
         ui_check_row warn "Backups" "the daily schedule is missing: aman doctor backup --fix"
       fi
       ;;
-    off) ui_check_row skip "Backups" "off. Turn on: aman doctor backup --fix" ;;
+    off)
+      if [ -z "$(backup_scheduler)" ]; then
+        ui_check_row skip "Backups" "off. Make one: aman backup"
+      else
+        ui_check_row skip "Backups" "off. Turn on: aman doctor backup --fix"
+      fi
+      ;;
     *)
       if [ "$count" -gt 0 ]; then
         ui_check_row ok "Backups" "$count kept"

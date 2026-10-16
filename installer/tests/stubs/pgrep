@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Test double for `pgrep -x NAME`: cron and crond run unless STUB_CRON_STOPPED is set.
+[ -n "${STUB_CRON_STOPPED:-}" ] && exit 1
+case "${2:-}" in cron | crond) exit 0 ;; *) exit 1 ;; esac
