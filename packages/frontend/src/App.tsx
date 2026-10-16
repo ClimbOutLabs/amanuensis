@@ -132,7 +132,6 @@ function AmanShell({
   overrides,
   modelName,
   memoryBank,
-  version,
   buildRef,
 }: {
   defaultAgentSpec: HarnessAgentSpec;
@@ -141,7 +140,6 @@ function AmanShell({
   overrides: SlotOverrides;
   modelName: string;
   memoryBank: MemoryBankStatus | null | undefined;
-  version: string | undefined;
   buildRef: string | undefined;
 }) {
   // Raw agent activity driving the living avatar in the runtime rail. The rail's motion
@@ -180,7 +178,6 @@ function AmanShell({
         avatarSrc={apiPath('/aman-avatar.png')}
         avatarMotion={AMAN_AVATAR_MOTION_SOURCES}
         activity={avatarActivity}
-        version={version}
         buildRef={buildRef}
         memoryBank={memoryBank}
         settingsHref="/settings"
@@ -447,7 +444,6 @@ export function App() {
                               overrides={overrides}
                               modelName={setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')}
                               memoryBank={setup === null ? boot.memoryBank : setup.memoryBank}
-                              version={boot.build?.version}
                               buildRef={boot.build?.ref}
                             />
                           </ComposerDraftScopeProvider>

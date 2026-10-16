@@ -77,7 +77,7 @@ export default function AgentCodeSnippets({ snippets }: AgentCodeSnippetsProps) 
             ))}
           </div>
           <a
-            href="https://trueforge.dev/api/use-agent"
+            href="https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/api/use-agent.mdx"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1 text-xs text-text-secondary"

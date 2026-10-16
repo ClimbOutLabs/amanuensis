@@ -28,6 +28,7 @@ let getConfiguredSecretValues: typeof import('./config').getConfiguredSecretValu
 let assertNetworkAuthRequirement: typeof import('./config').assertNetworkAuthRequirement;
 let getPublicUiBasePath: typeof import('./config').getPublicUiBasePath;
 let TrueForgeAuthMode: typeof import('./config').TrueForgeAuthMode;
+let UNSTAMPED_BUILD_REF: typeof import('./config').UNSTAMPED_BUILD_REF;
 
 try {
   ({
@@ -39,6 +40,7 @@ try {
     assertNetworkAuthRequirement,
     getPublicUiBasePath,
     TrueForgeAuthMode,
+    UNSTAMPED_BUILD_REF,
   } = await import('./config'));
 } catch (error) {
   console.error(
@@ -756,7 +758,10 @@ try {
   }
 
   if (configuration.STANDALONE) {
-    printStandaloneStartupBanner({ version: PACKAGE_VERSION, color: shouldColorize() });
+    printStandaloneStartupBanner({
+      buildRef: configuration.BUILD_REF === UNSTAMPED_BUILD_REF ? undefined : configuration.BUILD_REF,
+      color: shouldColorize(),
+    });
     await prepareCodeModeSocketParent({ path: configuration.CODE_MODE_SOCKET_PARENT, logger });
     await ensureLocalSandboxRootParent(configuration.LOCAL_SANDBOX_ROOT_PARENT);
     const { LocalSandboxProvider } = await import('./sandbox/local/provider/LocalSandboxProvider');
@@ -778,7 +783,7 @@ try {
       });
     }
   } else {
-    logger.info('TrueForge starting', { mode: 'distributed' });
+    logger.info('Aman starting in distributed mode');
   }
 
   const {

@@ -7,7 +7,7 @@
 #   APP_VERSION — npm version to install, e.g. 0.1.0
 #
 # Example:
-#   docker build --build-arg APP_VERSION=0.1.0 -t trueforge:0.1.0 .
+#   docker build --build-arg APP_VERSION=0.1.0 -t aman:1.0.0 .
 
 FROM node:24-slim AS runner
 WORKDIR /app

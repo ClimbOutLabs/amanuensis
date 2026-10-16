@@ -2,22 +2,19 @@
  * Standalone boot chrome: wordmark, version, and a boxed local-only warning.
  * Printed raw (not through winston) so the art is not prefixed with timestamps.
  */
+import { formatDisplayVersion } from '@truefoundry/trueforge-core/core/displayVersion';
 
 const STANDALONE_MODE_DISCLAIMER =
   'Standalone mode is intended for local use on your own machine. It is not hardened for production or shared internet access — please keep it on localhost. We cannot take responsibility for data loss or unauthorized access if this mode is used beyond that.';
 
-/** ANSI Shadow glyphs used to render `TRUEFORGE`. Each letter is six equal-width rows. */
+/** ANSI Shadow glyphs used to render `AMAN`. Each letter is six equal-width rows. */
 const ANSI_SHADOW: Record<string, readonly string[]> = {
-  T: ['████████╗', '╚══██╔══╝', '   ██║   ', '   ██║   ', '   ██║   ', '   ╚═╝   '],
-  R: ['██████╗ ', '██╔══██╗', '██████╔╝', '██╔══██╗', '██║  ██║', '╚═╝  ╚═╝'],
-  U: ['██╗   ██╗', '██║   ██║', '██║   ██║', '██║   ██║', '╚██████╔╝', ' ╚═════╝ '],
-  E: ['███████╗', '██╔════╝', '█████╗  ', '██╔══╝  ', '███████╗', '╚══════╝'],
-  F: ['███████╗', '██╔════╝', '█████╗  ', '██╔══╝  ', '██║     ', '╚═╝     '],
-  O: [' ██████╗ ', '██╔═══██╗', '██║   ██║', '██║   ██║', '╚██████╔╝', ' ╚═════╝ '],
-  G: [' ██████╗ ', '██╔════╝ ', '██║  ███╗', '██║   ██║', '╚██████╔╝', ' ╚═════╝ '],
+  A: [' █████╗ ', '██╔══██╗', '███████║', '██╔══██║', '██║  ██║', '╚═╝  ╚═╝'],
+  M: ['███╗   ███╗', '████╗ ████║', '██╔████╔██║', '██║╚██╔╝██║', '██║ ╚═╝ ██║', '╚═╝     ╚═╝'],
+  N: ['███╗   ██╗', '████╗  ██║', '██╔██╗ ██║', '██║╚██╗██║', '██║ ╚████║', '╚═╝  ╚═══╝'],
 };
 
-const WORDMARK_TEXT = 'TRUEFORGE';
+const WORDMARK_TEXT = 'AMAN';
 const WARNING_INNER_WIDTH = 72;
 const BRAND_COLOR = '\x1b[38;5;99m';
 const YELLOW = '\x1b[33m';
@@ -41,7 +38,7 @@ function rowOf(glyph: readonly string[], row: number): string {
   return cell;
 }
 
-function renderTrueForgeWordmark(): string {
+function renderWordmark(): string {
   const glyphs: (readonly string[])[] = [];
   for (let i = 0; i < WORDMARK_TEXT.length; i += 1) {
     const ch = WORDMARK_TEXT[i];
@@ -109,18 +106,22 @@ function warningBox(message: string): string {
   return [top, ...body, bottom].join('\n');
 }
 
-function formatStandaloneStartupBanner(options: { version: string; color: boolean }): {
+function formatStandaloneStartupBanner(options: { buildRef: string | undefined; color: boolean }): {
   wordmark: string;
   warning: string;
 } {
-  const { version, color } = options;
-  const wordmark = paint({ text: renderTrueForgeWordmark(), color: `${BOLD}${BRAND_COLOR}`, enabled: color });
-  const subtitle = paint({ text: `  TrueForge v${version}  ·  standalone`, color: DIM, enabled: color });
+  const { buildRef, color } = options;
+  const wordmark = paint({ text: renderWordmark(), color: `${BOLD}${BRAND_COLOR}`, enabled: color });
+  const subtitle = paint({
+    text: `  Aman v${formatDisplayVersion(buildRef)}  ·  standalone`,
+    color: DIM,
+    enabled: color,
+  });
   const warning = paint({ text: warningBox(STANDALONE_MODE_DISCLAIMER), color: `${BOLD}${YELLOW}`, enabled: color });
   return { wordmark: `\n${wordmark}\n${subtitle}\n`, warning };
 }
 
-export function printStandaloneStartupBanner(options: { version: string; color: boolean }): void {
+export function printStandaloneStartupBanner(options: { buildRef: string | undefined; color: boolean }): void {
   const { wordmark, warning } = formatStandaloneStartupBanner(options);
   console.log(wordmark);
   console.warn(warning);

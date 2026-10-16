@@ -1,4 +1,5 @@
 import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
+import { formatDisplayVersion, formatDisplayVersionFull } from '@truefoundry/trueforge-core/core/displayVersion';
 import { useCallback, useState, type FC, type ReactNode } from 'react';
 
 import type { AmanAvatarActivity } from '../hooks/useAvatarActivity.js';
@@ -37,8 +38,6 @@ export type AmanRuntimeRailProps = {
   personaName?: string | undefined;
   /** Host-provided status wins; when omitted the rail probes `/healthz` itself. */
   status?: AmanRuntimeRailStatus;
-  /** Package version of the server answering. Without it the release line is left out. */
-  version?: string | undefined;
   /** Source reference the server's build was stamped with; absent on an unstamped build. */
   buildRef?: string | undefined;
   /**
@@ -81,29 +80,18 @@ const STATUS_LABELS: Record<AmanRuntimeRailStatus, string> = {
   degraded: 'Degraded',
 };
 
-/** Enough of a commit SHA to compare against a branch or an image tag by eye. */
-const SHORT_REF_LENGTH = 7;
-
-/** Shortens a commit SHA; anything else (a tag, a branch) is already meant to be read whole. */
-function shortenBuildRef(ref: string): string {
-  return /^[0-9a-f]{12,}$/i.test(ref) ? ref.slice(0, SHORT_REF_LENGTH) : ref;
-}
-
 type BuildSummary = { label: string; title: string };
 
 /**
  * The footer keeps one narrow line for this, so the label stays short and the tooltip carries
- * the full reference for a bug report. An unstamped build degrades to the version alone.
+ * the full reference for a bug report. The version is the shared display constant, never the
+ * server's package version; an unstamped build reads as a dev build.
  * The word is "Release", not "Session": the number names the shipped build, not the chat.
  */
-function summarizeBuild({ version, buildRef }: { version: string; buildRef: string | undefined }): BuildSummary {
-  const ref = buildRef?.trim();
-  if (ref === undefined || ref === '') {
-    return { label: `Release ${version}`, title: `Release ${version}` };
-  }
+function summarizeBuild({ buildRef }: { buildRef: string | undefined }): BuildSummary {
   return {
-    label: `Release ${version} · ${shortenBuildRef(ref)}`,
-    title: `Release ${version} · ${ref}`,
+    label: `Release ${formatDisplayVersion(buildRef)}`,
+    title: `Release ${formatDisplayVersionFull(buildRef)}`,
   };
 }
 
@@ -153,7 +141,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   userName,
   personaName,
   status: statusOverride,
-  version,
   buildRef,
   memoryBank,
   settingsHref,
@@ -166,7 +153,6 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const connectivity = useRuntimeConnectivity({ enabled: selfProbed });
   const status = statusOverride ?? connectivity.status;
   const statusLabel = STATUS_LABELS[status];
-  const trimmedVersion = version?.trim();
   const toggleLabel = collapsed ? 'Expand rail' : 'Collapse rail';
   // Collapsed, and at phone width where the full status row is hidden, this one string is the
   // only place the connection state and the active model stay readable.
@@ -186,10 +172,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
     });
   }, []);
 
-  const build =
-    trimmedVersion === undefined || trimmedVersion === ''
-      ? undefined
-      : summarizeBuild({ version: trimmedVersion, buildRef });
+  const build = summarizeBuild({ buildRef });
 
   return (
     <aside
@@ -365,20 +348,14 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
                   <dd className="aman-runtime-rail__latency">{Math.round(connectivity.latencyMs)} ms</dd>
                 </>
               )}
-              {build === undefined ? null : (
-                <>
-                  <dt>Build reference</dt>
-                  <dd className="aman-runtime-rail__details-ref">{buildRef?.trim() || 'Not stamped'}</dd>
-                </>
-              )}
+              <dt>Build reference</dt>
+              <dd className="aman-runtime-rail__details-ref">{buildRef?.trim() || 'Not stamped'}</dd>
             </dl>
           </details>
 
-          {build === undefined ? null : (
-            <p className="aman-runtime-rail__footer" title={build.title}>
-              {build.label}
-            </p>
-          )}
+          <p className="aman-runtime-rail__footer" title={build.title}>
+            {build.label}
+          </p>
         </>
       )}
     </aside>

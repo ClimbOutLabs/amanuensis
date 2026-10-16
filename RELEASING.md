@@ -37,6 +37,12 @@ This creates the `v0.2.0` tag on the current `main` HEAD and publishes the relea
 
 ## Versioning
 
+The version users see is separate from package versions and lives in one display constant.
+Raise it with `pnpm release:version <x.y.z>`: patch for fixes, minor for new features, major for breaking changes.
+The script refuses a version that is not higher, updates the constant, and opens a dated changelog entry.
+Run the script, review the diff, commit, then create the tag with the exact command it prints.
+The banner and the side panel read that constant, so one raise updates every surface.
+
 Tags use `vMAJOR.MINOR.PATCH`:
 
 - `MAJOR` for breaking changes (config format, API, deployment topology).
