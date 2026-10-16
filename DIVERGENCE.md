@@ -137,8 +137,7 @@ Shared files carrying Google wiring:
 | packages/trueforge/src/runtime/outboundSecrets.ts                            | The user's Google client secret and refresh token join the outbound secret guard |
 | packages/trueforge-ui/...ConnectorSettings.tsx, catalogs/connectorCatalog.ts | A Google row and panel; the port is spread onto the connector catalog            |
 
-The UI reads the Google routes with a direct fetch and local parsers until the generated SDK carries them; switch the
-adapter to the SDK once `pnpm sdk:generate` has run in CI.
+The UI maps its Google port onto the generated SDK's `settings.google` routes (`catalogs/googleSetup.ts`).
 
 ## Product docs (resolution: ours)
 
