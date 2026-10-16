@@ -323,7 +323,10 @@ export class ToolSet implements IToolSet {
     if (tool_info.pre_dispatch_failure !== undefined) {
       // The turn loop refuses these before it gets here; a caller that skips that step still cannot
       // run a call the host auto-denied, such as a search the outbound guard held in a scheduled run.
-      return toolResultResponse({ text: JSON.stringify({ error: tool_info.pre_dispatch_failure.message }), isError: true });
+      return toolResultResponse({
+        text: JSON.stringify({ error: tool_info.pre_dispatch_failure.message }),
+        isError: true,
+      });
     }
     if (decision === undefined && classification !== undefined && isSearchAskReason(classification.reason)) {
       // The turn settled this call as silent before dispatch, and a count, setting, or secret

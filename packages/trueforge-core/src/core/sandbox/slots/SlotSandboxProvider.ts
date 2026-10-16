@@ -84,6 +84,9 @@ export function chatCapacity(input: {
 const STORAGE_FULL_MESSAGE =
   'The sandbox storage is almost full, so nothing was run. Free some disk space on this machine, then try again.';
 
+/** What a person sees when no slot answers. */
+const NOT_RESPONDING_MESSAGE = `The sandbox is not responding, so this file could not be read. Run \`${SLOT_FIX_COMMAND}\`.`;
+
 function describeAgentError(error: SlotCallError): string {
   if (error.kind === 'agent' && error.code === 'isolation_refused') {
     return `The sandbox could not prove its safety limits, so nothing was run (${error.message}). Run \`${SLOT_FIX_COMMAND}\`, then try again.`;
@@ -92,7 +95,7 @@ function describeAgentError(error: SlotCallError): string {
     return STORAGE_FULL_MESSAGE;
   }
   if (error.kind === 'unreachable') {
-    return `The sandbox slot for this chat is not reachable. Run \`${SLOT_FIX_COMMAND}\`, then try again.`;
+    return NOT_RESPONDING_MESSAGE;
   }
   return `The sandbox failed: ${error.message}`;
 }
@@ -251,11 +254,11 @@ export class SlotSandboxProvider implements SandboxProvider {
     }
   }
 
-  async destroySandbox(params: { sandboxId: string }): Promise<void> {
+  async destroySandbox(params: { sandboxId: string; signal?: AbortSignal | undefined }): Promise<void> {
     const target = this.resolve(params.sandboxId);
     const result = await this.whileBusy({
-      call: () => target.client.destroySession({ sessionId: target.sessionId, signal: undefined }),
-      signal: undefined,
+      call: () => target.client.destroySession({ sessionId: target.sessionId, signal: params.signal }),
+      signal: params.signal,
     });
     if (!result.ok) {
       throw new Error(`Failed to remove the sandbox workspace: ${describeAgentError(result.error)}`);
@@ -288,6 +291,11 @@ export class SlotSandboxProvider implements SandboxProvider {
 
   getFileUploadsDir(): string {
     return `${STATE_DIR}/uploads`;
+  }
+
+  /** Reads below the transfer directory may be as large as a document; ordinary reads are capped lower by the agent. */
+  getDocumentSnapshotDir(): string {
+    return `${STATE_DIR}/transfer`;
   }
 
   getSkillsDir(): string {
@@ -455,9 +463,14 @@ export class SlotSandboxProvider implements SandboxProvider {
         reason: `The sandbox is full: every slot already holds as many chats as its disk fits (${full.join('; ')}). Delete old chats, then try again.`,
       };
     }
+    // Slots that did not answer need no detail; slots that answered but failed a safety check do.
+    const detail = problems.filter(problem => !problem.endsWith('is not reachable'));
     return {
       ok: false,
-      reason: `The sandbox is not available: ${problems.join('; ') || 'no slots are configured'}. Run \`${SLOT_FIX_COMMAND}\`, then try again.`,
+      reason:
+        detail.length === 0
+          ? NOT_RESPONDING_MESSAGE
+          : `The sandbox is not available: ${detail.join('; ')}. Run \`${SLOT_FIX_COMMAND}\`.`,
     };
   }
 

@@ -9,6 +9,9 @@ export function slotSocketPathsIn({ dir, count }: { dir: string; count: number }
   return Array.from({ length: count }, (_, index) => join(dir, String(index + 1), SLOT_AGENT_SOCKET_NAME));
 }
 
+/** Disk quota of one chat's workspace on a slot, MiB, when the server is not told otherwise. */
+export const DEFAULT_SESSION_DISK_MB = 2048;
+
 /** The agent build and gVisor release this server was written against; a slot reporting others is refused. */
 export const SLOT_AGENT_VERSION = '0.3.0';
 export const SLOT_RUNSC_VERSION = 'runsc version release-20260928.0';

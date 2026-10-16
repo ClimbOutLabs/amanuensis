@@ -34,7 +34,7 @@ Ready. Instance main is running.
               http://localhost:8791
   + Sign in   owner@example.invalid
   > Model     not set: add one in Settings > Models
-  + Run code  on, in a sandbox
+  + Run code  on, in a sandbox, with PDF and image reading
   + Data      saved in Docker
   + Backups   daily, keeps the last 7
   Sign-in on your home network is not encrypted. Use the Tailscale
@@ -70,7 +70,7 @@ Ready. Instance main is running.
   + Sign in   owner@example.invalid
   + Model     Token Factory, nvidia/nemotron-3-super-120b-a12b, limit
               500000 tokens a day
-  + Run code  on, in a sandbox
+  + Run code  on, in a sandbox, with PDF and image reading
   + Data      saved in Docker
   + Backups   daily, keeps the last 7
   Open a new terminal window to use the aman command.

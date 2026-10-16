@@ -1,3 +1,4 @@
+import type { ToolOutputScreenDecision } from '../../schemas/toolOutputScreen';
 import type { InstructionBuilder } from '../InstructionBuilder';
 import type { IToolSet } from '../mcp/IMCPServer';
 import type {
@@ -17,6 +18,11 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 /** Cross-turn capability KV map. Keys: capability.state.key; `tfy.` reserved for builtins. */
 export type CapabilityState = Record<string, JsonValue>;
 
+/** Screens untrusted text that reaches the model outside a tool result, such as text read from an uploaded file. */
+export interface UntrustedTextScreen {
+  screenText(input: { text: string; signal: AbortSignal | undefined }): Promise<ToolOutputScreenDecision>;
+}
+
 export interface AgentCapability {
   readonly systemToolSets?: readonly IToolSet[] | undefined;
   readonly preSendProcessors?: readonly PreSendContextProcessor[] | undefined;
@@ -24,6 +30,7 @@ export interface AgentCapability {
   readonly preLLMEphemeralProcessors?: readonly PreLLMEphemeralAgentContextProcessor[] | undefined;
   readonly postToolCallProcessors?: readonly PostToolCallAgentContextProcessor[] | undefined;
   readonly toolResponseProcessors?: readonly ToolResponseProcessor[] | undefined;
+  readonly untrustedTextScreens?: readonly UntrustedTextScreen[] | undefined;
   readonly instructionBuilders?: readonly ((builder: InstructionBuilder) => void)[] | undefined;
   /**
    * Cross-turn durable state. `key` must be unique across capabilities on a

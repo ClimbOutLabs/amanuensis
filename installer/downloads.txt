@@ -9,7 +9,7 @@ stt-deps|200|Python packages fetched while building the speech-to-text service|p
 stt-weights|464|Whisper small speech model weights, downloaded once at first start|huggingface.co
 dex|36|Sign-in service (pinned by digest)|ghcr.io
 embed|120|Search embedding model, downloaded once per instance at first start|huggingface.co
-slot-image|900|The sandbox: base images, Ubuntu packages, Python and npm packages, and its isolation runtime (built once)|registry-1.docker.io archive.ubuntu.com ports.ubuntu.com pypi.org files.pythonhosted.org registry.npmjs.org storage.googleapis.com
+slot-image|1050|The sandbox: base images, Ubuntu packages (including PDF tools and OCR language data), Python and npm packages, and its isolation runtime (built once)|registry-1.docker.io archive.ubuntu.com ports.ubuntu.com pypi.org files.pythonhosted.org registry.npmjs.org storage.googleapis.com
 caddy|5|Caddy web server package, only with --tls caddy|archive.ubuntu.com
 acme|0|Certificates Caddy requests for your two https addresses, only with --tls caddy|acme-v02.api.letsencrypt.org
 public-ip|0|This computer's public address, asked once for the --tls caddy DNS check (--public-ip skips it)|api.ipify.org

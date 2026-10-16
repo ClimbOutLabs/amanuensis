@@ -233,7 +233,7 @@ Upgrade refuses to start unless doctor shows no failures, unless you pass `--for
 
 ## What is off in this version
 
-Running code (`run_code`, Python and shell in a gVisor sandbox with no network) is on after a normal install. Settings → Sandbox shows it as ready, and new chats have the sandbox enabled. Email attachment extraction and skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` has run code off too.
+After a normal install the assistant can run code (Python and shell, in a sandbox with no network) and read PDFs and images you attach in a chat, including scanned pages and text in many languages (English, Portuguese, Spanish, French, German, Italian, Dutch, Hindi, Marathi, Arabic, Russian, Chinese, Japanese and Korean). Settings → Sandbox shows whether the sandbox is ready, `aman doctor` reports code and attachments separately, and new chats have the sandbox enabled. Email attachments are read the same way once an email connection hands them over. Skills show as **off** in this version, with the plain reason shown in the app. An instance installed with `--no-sandbox` can do neither. An install from before this release gets PDF and image reading with `install.sh upgrade`, which rebuilds the sandbox image (about 140 MB larger) and starts it again.
 
 ## Troubleshooting
 

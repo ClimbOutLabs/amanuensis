@@ -502,10 +502,10 @@ print_instance_summary() {
   if instance_sandbox_wanted "$name"; then
     case "$SANDBOX_FAILED_NAMES " in
       *" $name "*) ui_check_row warn "Run code" "not ready: $(sandbox_repair_command)" ;;
-      *) ui_check_row ok "Run code" "on, in a sandbox" ;;
+      *) ui_check_row ok "Run code" "on, in a sandbox, with PDF and image reading" ;;
     esac
   else
-    ui_check_row skip "Run code" "off (installed with --no-sandbox)"
+    ui_check_row skip "Run code" "off, with no PDF or image reading (installed with --no-sandbox)"
   fi
   ui_check_row ok "Data" "saved in Docker"
   print_backups_row

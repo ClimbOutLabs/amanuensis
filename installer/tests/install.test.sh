@@ -16,6 +16,7 @@ test_dry_run_changes_nothing() {
   assert_not_contains "$OUT" "Whisper small speech model weights" "the long list waits for --verbose"
   assert_flat_contains "$OUT" "Everything is built on this computer; nothing is pushed anywhere"
   assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in a sandbox"
+  assert_flat_contains "$OUT" "and so does reading attachments (PDFs and images)"
   assert_contains "$OUT" "Dry run: nothing was changed."
   assert_not_contains "$OUT" "will do" "the plan words are done, to do and needs admin"
   run_install --dry-run --verbose

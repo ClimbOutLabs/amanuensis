@@ -7,6 +7,7 @@ import {
   MAX_CHARS_PER_DOCUMENT,
   MAX_PAGES_PER_DOCUMENT,
 } from '../../documents/documentExtraction';
+import { ocrLanguageSelectionScript } from '../../documents/ocrLanguages';
 import {
   ImplementationPlanAdmissionBlockedError,
   StructuredEditPreconditionBlockedError,
@@ -135,6 +136,8 @@ export interface SandboxInfo {
 
 // Downloader/setup scripts can run longer than a normal exec.
 export const SKILL_DOWNLOAD_TIMEOUT_SECONDS = 180;
+/** One scanned page: render and read. A page that takes longer is not worth holding the sandbox for. */
+const OCR_PAGE_TIMEOUT_SECONDS = 60;
 
 function validateDocumentPageLimit(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1 || value > MAX_PAGES_PER_DOCUMENT) {
@@ -5633,10 +5636,10 @@ export class Sandbox extends LocalToolMCP {
       );
     }
     const { sandboxId, canonicalFilePath, canonicalUploadDir } = await this.canonicalStagedFilePath(input.filePath);
-    const uploadDir = this.provider.getFileUploadsDir(sandboxId).replace(/\/+$/g, '');
-    const snapshotPath = `${uploadDir}/.amanuensis-document-${randomUUID().replace(/-/g, '')}`;
+    const snapshotDir = this.documentSnapshotDir(sandboxId);
+    const snapshotPath = `${snapshotDir}/.amanuensis-document-${randomUUID().replace(/-/g, '')}`;
     const marker = `AMAN_DOCUMENT_SNAPSHOT_${randomUUID().replace(/-/g, '')}`;
-    const command = `set -eu; exec 3<${shellEscape(canonicalFilePath)}; opened_path=$(realpath -e -- /proc/self/fd/3); case "$opened_path" in ${shellEscape(`${canonicalUploadDir}/`)}*) ;; *) printf '%sUNSAFE_PATH\\n' ${shellEscape(`${marker}:`)}; exit 0 ;; esac; if [ ! -f /proc/self/fd/3 ]; then printf '%sUNSAFE_TYPE\\n' ${shellEscape(`${marker}:`)}; exit 0; fi; before=$(stat -Lc '%s:%i:%y' /proc/self/fd/3); original_size=$(stat -Lc %s /proc/self/fd/3); if [ "$original_size" -gt ${String(maxBytes)} ]; then printf '%sTOO_LARGE:%s\\n' ${shellEscape(`${marker}:`)} "$original_size"; exit 0; fi; source_hash_before=$(sha256sum /proc/self/fd/3 | awk '{print $1}'); head -c ${String(maxBytes)} <&3 > ${shellEscape(snapshotPath)}; source_hash_after=$(sha256sum /proc/self/fd/3 | awk '{print $1}'); snapshot_hash=$(sha256sum ${shellEscape(snapshotPath)} | awk '{print $1}'); after=$(stat -Lc '%s:%i:%y' /proc/self/fd/3); snapshot_size=$(stat -Lc %s -- ${shellEscape(snapshotPath)}); if [ "$before" != "$after" ] || [ "$snapshot_size" -ne "$original_size" ] || [ "$source_hash_before" != "$source_hash_after" ] || [ "$source_hash_after" != "$snapshot_hash" ]; then rm -f -- ${shellEscape(snapshotPath)}; printf '%sCHANGED\\n' ${shellEscape(`${marker}:`)}; exit 0; fi; chmod 400 -- ${shellEscape(snapshotPath)}; printf '%sOK:%s:%s\\n' ${shellEscape(`${marker}:`)} "$snapshot_size" "$snapshot_hash"`;
+    const command = `set -eu; mkdir -p -- ${shellEscape(snapshotDir)}; exec 3<${shellEscape(canonicalFilePath)}; opened_path=$(realpath -e -- /proc/self/fd/3); case "$opened_path" in ${shellEscape(`${canonicalUploadDir}/`)}*) ;; *) printf '%sUNSAFE_PATH\\n' ${shellEscape(`${marker}:`)}; exit 0 ;; esac; if [ ! -f /proc/self/fd/3 ]; then printf '%sUNSAFE_TYPE\\n' ${shellEscape(`${marker}:`)}; exit 0; fi; before=$(stat -Lc '%s:%i:%y' /proc/self/fd/3); original_size=$(stat -Lc %s /proc/self/fd/3); if [ "$original_size" -gt ${String(maxBytes)} ]; then printf '%sTOO_LARGE:%s\\n' ${shellEscape(`${marker}:`)} "$original_size"; exit 0; fi; source_hash_before=$(sha256sum /proc/self/fd/3 | awk '{print $1}'); head -c ${String(maxBytes)} <&3 > ${shellEscape(snapshotPath)}; source_hash_after=$(sha256sum /proc/self/fd/3 | awk '{print $1}'); snapshot_hash=$(sha256sum ${shellEscape(snapshotPath)} | awk '{print $1}'); after=$(stat -Lc '%s:%i:%y' /proc/self/fd/3); snapshot_size=$(stat -Lc %s -- ${shellEscape(snapshotPath)}); if [ "$before" != "$after" ] || [ "$snapshot_size" -ne "$original_size" ] || [ "$source_hash_before" != "$source_hash_after" ] || [ "$source_hash_after" != "$snapshot_hash" ]; then rm -f -- ${shellEscape(snapshotPath)}; printf '%sCHANGED\\n' ${shellEscape(`${marker}:`)}; exit 0; fi; chmod 400 -- ${shellEscape(snapshotPath)}; printf '%sOK:%s:%s\\n' ${shellEscape(`${marker}:`)} "$snapshot_size" "$snapshot_hash"`;
     const cleanup = async (): Promise<void> => {
       await this.removeSandboxFile({ sandboxId, filePath: snapshotPath });
     };
@@ -5702,17 +5705,33 @@ export class Sandbox extends LocalToolMCP {
     ensureExecSuccess(result);
   }
 
+  private documentSnapshotDir(sandboxId: string): string {
+    return (this.provider.getDocumentSnapshotDir?.(sandboxId) ?? this.provider.getFileUploadsDir(sandboxId)).replace(
+      /\/+$/g,
+      '',
+    );
+  }
+
+  /**
+   * Resolves a staged upload to its real path. With `allowSnapshots` a private snapshot of an upload
+   * (see {@link createDocumentSnapshot}) is accepted too, which is what the text and OCR tools are given.
+   */
   private async canonicalStagedFilePath(
     filePath: string,
+    options: { allowSnapshots: boolean } = { allowSnapshots: false },
   ): Promise<{ sandboxId: string; canonicalFilePath: string; canonicalUploadDir: string }> {
     validateNoPathTraversal(filePath);
     const { sandboxInfo } = await this.ensureReadySandbox();
     const sandboxId = this.providerSandboxId(sandboxInfo.sandbox_id);
     const uploadDir = this.provider.getFileUploadsDir(sandboxId).replace(/\\+$/g, '').replace(/\\/g, '/');
+    const snapshotDir = this.documentSnapshotDir(sandboxId).replace(/\\/g, '/');
     const normalizedPath = filePath.replace(/\\/g, '/');
-    if (normalizedPath !== uploadDir && !normalizedPath.startsWith(`${uploadDir}/`)) {
+    const under = (dir: string): boolean => normalizedPath !== dir && normalizedPath.startsWith(`${dir}/`);
+    const allowedDir = [uploadDir, ...(options.allowSnapshots ? [snapshotDir] : [])].find(dir => under(dir));
+    if (allowedDir === undefined && normalizedPath !== uploadDir) {
       throw new Error(`Document path must refer to a staged upload: ${filePath}`);
     }
+    const containingDir = allowedDir ?? uploadDir;
     const canonicalize = async (path: string): Promise<string> => {
       const result = await this.provider.exec({ sandboxId, command: `realpath -e -- ${shellEscape(path)}` });
       ensureExecSuccess(result);
@@ -5725,7 +5744,7 @@ export class Sandbox extends LocalToolMCP {
       }
       return canonical;
     };
-    const canonicalUploadDir = await canonicalize(uploadDir);
+    const canonicalUploadDir = await canonicalize(containingDir);
     const canonicalFilePath = await canonicalize(filePath);
     const canonicalPrefix = canonicalUploadDir.replace(/\\/g, '/').replace(/\/+$/g, '');
     const normalizedCanonicalFilePath = canonicalFilePath.replace(/\\/g, '/');
@@ -5754,7 +5773,9 @@ export class Sandbox extends LocalToolMCP {
     if (!Number.isSafeInteger(firstPage) || firstPage < 1) {
       throw new Error('Document first page must be a positive integer');
     }
-    const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath);
+    const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath, {
+      allowSnapshots: true,
+    });
     const operationId = randomUUID().replace(/-/g, '');
     const marker = `AMAN_PDF_TEXT_${operationId}`;
     // Efficiency: single pdftotext invocation for the whole range. pdftotext
@@ -5804,7 +5825,10 @@ export class Sandbox extends LocalToolMCP {
     return { total_pages, pages };
   }
 
-  /** Run the pinned local OCR tools inside the selected sandbox, never in the server process. */
+  /**
+   * Runs the local OCR tools inside the selected sandbox, never in the server process. A PDF is read one
+   * page per call, so a failure or timeout on a later page keeps the pages already read.
+   */
   async runDocumentOcr(input: {
     filePath: string;
     kind: 'pdf' | 'image';
@@ -5826,51 +5850,88 @@ export class Sandbox extends LocalToolMCP {
         }
       }
     }
-    const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath);
+    const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath, {
+      allowSnapshots: true,
+    });
+    const requestedPages =
+      input.kind === 'image'
+        ? [1]
+        : [...new Set(input.pages ?? Array.from({ length: maxPages }, (_, index) => index + 1))].sort(
+            (left, right) => left - right,
+          );
+    const pages: { page_number: number; text: string }[] = [];
+    let remaining = MAX_CHARS_PER_DOCUMENT;
+    for (const pageNumber of requestedPages) {
+      if (remaining <= 0) {
+        break;
+      }
+      throwIfSignalAborted(input.signal);
+      try {
+        const text = await this.ocrOnePage({
+          sandboxId,
+          canonicalFilePath,
+          kind: input.kind,
+          pageNumber,
+          remainingChars: remaining,
+          fallbackLanguages: this.ocrLanguages,
+          signal: input.signal,
+        });
+        pages.push({ page_number: pageNumber, text });
+        remaining -= text.length;
+      } catch (error) {
+        // Pages already read are kept; an abort or a failure on the first page is the caller's to handle.
+        if (pages.length === 0 || input.signal?.aborted === true) {
+          throw error;
+        }
+        this.logger.warn('OCR stopped after some pages', { page: pageNumber, ...extractErrorLogFields(error) });
+        break;
+      }
+    }
+    if (pages.length === 0) {
+      throw new Error('OCR completed without producing a page result');
+    }
+    return pages;
+  }
+
+  private async ocrOnePage(input: {
+    sandboxId: string;
+    canonicalFilePath: string;
+    kind: 'pdf' | 'image';
+    pageNumber: number;
+    remainingChars: number;
+    fallbackLanguages: string;
+    signal: AbortSignal | undefined;
+  }): Promise<string> {
     const operationId = randomUUID().replace(/-/g, '');
-    const directory = this.provider.getToolResultDumpDir(sandboxId).replace(/\/+$/g, '');
+    const directory = this.provider.getToolResultDumpDir(input.sandboxId).replace(/\/+$/g, '');
     const outputPrefix = `${directory}/document-ocr-${operationId}`;
     const marker = `AMAN_OCR_PAGE_${operationId}`;
-    const cleanup =
-      input.kind === 'pdf'
-        ? `rm -f -- ${shellEscape(outputPrefix)}-*.png ${shellEscape(outputPrefix)}-*.txt`
-        : `rm -f -- ${shellEscape(`${outputPrefix}.ocr.txt`)} ${shellEscape(`${outputPrefix}.txt`)}`;
-    const cleanupTrap = `trap ${shellEscape(cleanup)} EXIT;`;
-    const requestedPages = [...new Set(input.pages ?? [])].sort((left, right) => left - right);
-    const tesseractLangFlags = this.ocrLanguages ? ` -l ${this.ocrLanguages.split(/\s+/).join('+')}` : '';
+    const cleanup = `rm -f -- ${shellEscape(`${outputPrefix}.png`)} ${shellEscape(`${outputPrefix}.ocr.txt`)} ${shellEscape(`${outputPrefix}.txt`)}`;
+    // One OCR thread: OpenMP otherwise starts a thread per core and a single page can starve the whole slot.
+    const prelude = `trap ${shellEscape(cleanup)} EXIT; set -eu; ulimit -v 2097152; export OMP_THREAD_LIMIT=1;`;
+    const imageInput = input.kind === 'pdf' ? '"$page_prefix.png"' : shellEscape(input.canonicalFilePath);
+    const languages = ocrLanguageSelectionScript({ imagePath: imageInput, fallback: input.fallbackLanguages });
+    const read = `${languages}; raw_text_file=${shellEscape(`${outputPrefix}.ocr.txt`)}; text_file=${shellEscape(`${outputPrefix}.txt`)}; tesseract ${imageInput} stdout -l "$ocr_languages" --psm 6 > "$raw_text_file"; head -c ${String(input.remainingChars)} < "$raw_text_file" > "$text_file"; printf '%s%s\\n' ${shellEscape(`${marker}:`)} ${shellEscape(String(input.pageNumber))}; cat "$text_file"`;
     const command =
       input.kind === 'pdf'
-        ? requestedPages.length > 0
-          ? `${cleanupTrap} set -eu; ulimit -v 2097152; remaining=${String(MAX_CHARS_PER_DOCUMENT)}; for page_number in ${requestedPages.map(page => shellEscape(String(page))).join(' ')}; do [ "$remaining" -gt 0 ] || break; page_prefix=${shellEscape(outputPrefix)}-$page_number; pdftoppm -f "$page_number" -l "$page_number" -png -r 150 -scale-to 4096 -singlefile ${shellEscape(canonicalFilePath)} "$page_prefix"; raw_text_file="$page_prefix.ocr.txt"; text_file="$page_prefix.txt"; tesseract "$page_prefix.png" stdout${tesseractLangFlags} --psm 6 > "$raw_text_file"; head -c "$remaining" < "$raw_text_file" > "$text_file"; printf '%s%s\\n' ${shellEscape(`${marker}:`)} "$page_number"; cat "$text_file"; printf '\\n'; used=$(wc -c < "$text_file"); remaining=$((remaining - used)); done`
-          : `${cleanupTrap} set -eu; ulimit -v 2097152; total=$(pdfinfo ${shellEscape(canonicalFilePath)} | awk '/^Pages:/ {print $2}'); limit=$total; if [ "$limit" -gt ${String(maxPages)} ]; then limit=${String(maxPages)}; fi; remaining=${String(MAX_CHARS_PER_DOCUMENT)}; page_number=1; while [ "$page_number" -le "$limit" ] && [ "$remaining" -gt 0 ]; do page_prefix=${shellEscape(outputPrefix)}-$page_number; pdftoppm -f "$page_number" -l "$page_number" -png -r 150 -scale-to 4096 -singlefile ${shellEscape(canonicalFilePath)} "$page_prefix"; raw_text_file="$page_prefix.ocr.txt"; text_file="$page_prefix.txt"; tesseract "$page_prefix.png" stdout${tesseractLangFlags} --psm 6 > "$raw_text_file"; head -c "$remaining" < "$raw_text_file" > "$text_file"; printf '%s%s\\n' ${shellEscape(`${marker}:`)} "$page_number"; cat "$text_file"; printf '\\n'; used=$(wc -c < "$text_file"); remaining=$((remaining - used)); page_number=$((page_number + 1)); done`
-        : `${cleanupTrap} set -eu; ulimit -v 2097152; raw_text_file=${shellEscape(`${outputPrefix}.ocr.txt`)}; text_file=${shellEscape(`${outputPrefix}.txt`)}; tesseract ${shellEscape(canonicalFilePath)} stdout${tesseractLangFlags} --psm 6 > "$raw_text_file"; head -c ${String(MAX_CHARS_PER_DOCUMENT)} < "$raw_text_file" > "$text_file"; printf '%s1\\n' ${shellEscape(`${marker}:`)}; cat "$text_file"`;
+        ? `${prelude} page_prefix=${shellEscape(outputPrefix)}; pdftoppm -f ${shellEscape(String(input.pageNumber))} -l ${shellEscape(String(input.pageNumber))} -png -r 150 -scale-to 4096 -singlefile ${shellEscape(input.canonicalFilePath)} "$page_prefix"; ${read}`
+        : `${prelude} ${read}`;
     const result = await this.provider.exec({
-      sandboxId,
+      sandboxId: input.sandboxId,
       command,
-      timeoutSeconds: SKILL_DOWNLOAD_TIMEOUT_SECONDS,
+      timeoutSeconds: OCR_PAGE_TIMEOUT_SECONDS,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     ensureExecSuccess(result);
     if (!result.success) {
       throw new Error('Unreachable: OCR result was not successful');
     }
-    const pages = result.response.result
-      .split(`${marker}:`)
-      .slice(1)
-      .flatMap(chunk => {
-        const newline = chunk.indexOf('\n');
-        if (newline < 0) {
-          return [];
-        }
-        const page_number = Number(chunk.slice(0, newline).trim());
-        return Number.isInteger(page_number) && page_number > 0
-          ? [{ page_number, text: chunk.slice(newline + 1).trim() }]
-          : [];
-      });
-    if (pages.length === 0) {
+    const chunk = result.response.result.split(`${marker}:`)[1];
+    const newline = chunk?.indexOf('\n') ?? -1;
+    if (chunk === undefined || newline < 0) {
       throw new Error('OCR completed without producing a page result');
     }
-    return pages;
+    return chunk.slice(newline + 1).trim();
   }
 
   async writeArtifact(input: {
