@@ -32,6 +32,8 @@ function assertFixed(check) {
   assert.ok(check.fix.trim().length > 0, `${check.id} has a fix`);
 }
 
+const ESC = String.fromCharCode(27);
+
 describe('document and exit codes', () => {
   it('prints {machine, instances} with {id,state,detail,fix} checks and exits 0 when healthy', () => {
     make();
@@ -163,12 +165,12 @@ describe('document and exit codes', () => {
   it('keeps color out of a report that is not on a terminal, and uses it when forced', () => {
     make();
     world.df(5 * GIB_KB);
-    assert.doesNotMatch(world.run().stdout, /\u001b/);
+    assert.ok(!world.run().stdout.includes(ESC));
     const forced = world.run([], { env: { CLICOLOR_FORCE: '1', LANG: 'C.UTF-8', TERM: 'xterm' } });
-    assert.match(forced.stdout, /\u001b\[33m!\u001b\[0m/);
+    assert.ok(forced.stdout.includes(`${ESC}[33m!${ESC}[0m`));
     assert.match(forced.stdout, /\u2713/);
     const none = world.run([], { env: { CLICOLOR_FORCE: '1', NO_COLOR: '1', LANG: 'C.UTF-8', TERM: 'xterm' } });
-    assert.doesNotMatch(none.stdout, /\u001b/);
+    assert.ok(!none.stdout.includes(ESC));
     assert.match(none.stdout, /\u2713/);
   });
 
