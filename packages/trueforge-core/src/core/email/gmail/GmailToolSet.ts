@@ -565,7 +565,9 @@ export class GmailToolSet extends LocalToolMCP {
     try {
       const reviewed = this.#options.reviews.take({ ...this.#owner, draft_id: input.draft_id });
       if (reviewed === undefined) {
-        return errorResult('This send was not reviewed, so nothing was sent. Ask to send the draft again.');
+        return errorResult(
+          'Aman restarted, so this send needs your OK again. Nothing was sent. Ask to send the draft again.',
+        );
       }
       const assessed = assessDraft({
         message: await this.#liveDraft(input.draft_id),

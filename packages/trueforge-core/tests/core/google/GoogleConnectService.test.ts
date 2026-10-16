@@ -181,6 +181,26 @@ describe('GoogleConnectService', () => {
       }
     });
 
+    it('names the real cause when the profile call is refused because read permission was not granted', async () => {
+      const { service, google, connections } = setup();
+      google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at', refresh_token: 'rt', scope: COMPOSE }));
+      google.on(PROFILE_URL, () => json({ error: 'insufficient' }, 403));
+      const { authorization_url } = await service.begin({
+        owner: OWNER,
+        setup: SETUP,
+        client: CLIENT,
+        features: ['gmail_read', 'gmail_compose'],
+      });
+      const error = await service
+        .complete({ owner: OWNER, state: stateOf(authorization_url), code: 'code' })
+        .catch((caught: unknown) => caught);
+      expect(error instanceof Error && error.message).toBe(
+        "Aman wasn't given permission to read mail. Connect again and leave the read box ticked.",
+      );
+      expect(error instanceof Error && error.message).not.toContain('Gmail API');
+      expect(await connections.get(OWNER)).toBeNull();
+    });
+
     it('rejects a consent that took longer than ten minutes', async () => {
       const { service, advance } = setup();
       const { authorization_url } = await service.begin({

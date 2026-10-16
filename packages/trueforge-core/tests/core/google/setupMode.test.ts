@@ -94,6 +94,20 @@ describe('parsePastedAddress', () => {
     });
   });
 
+  it('completes an address Safari showed without its scheme, for the return address only', () => {
+    expect(parsePastedAddress('127.0.0.1:53682/callback?state=abc&code=4%2F0AxYz&scope=x')).toEqual({
+      ok: true,
+      code: '4/0AxYz',
+      state: 'abc',
+    });
+    expect(parsePastedAddress('  127.0.0.1:53682/callback?state=abc&code=c ')).toMatchObject({ ok: true });
+    expect(parsePastedAddress('example.com/callback?state=abc&code=c')).toMatchObject({ ok: false });
+    expect(parsePastedAddress('127.0.0.1:9999/callback?state=abc&code=c')).toMatchObject({ ok: false });
+    expect(parsePastedAddress('evil.example.com/127.0.0.1:53682/callback?state=abc&code=c')).toMatchObject({
+      ok: false,
+    });
+  });
+
   it('refuses a bare code, because the state could not be checked', () => {
     expect(parsePastedAddress('4/0AxYz')).toMatchObject({ ok: false });
   });
