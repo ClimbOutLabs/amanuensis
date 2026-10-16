@@ -5,9 +5,7 @@
 
 export const PREVIOUS_MIGRATION = '20261011_000001_sentinel_search_without_asking';
 
-export interface StoredManifest {
-  [key: string]: unknown;
-}
+export type StoredManifest = Record<string, unknown>;
 
 export interface SearchProviderMigrationHarness {
   /** Inserts a connector row while the schema is still at the previous migration. */
