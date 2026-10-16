@@ -118,7 +118,7 @@ describe('the sign-in pass-through in the running app', () => {
         app.request('https://login.example.com/dex/auth/local/login?state=s', {
           method: 'POST',
           headers: { host: 'login.example.com', 'content-type': 'application/x-www-form-urlencoded' },
-          body: 'password=x',
+          body: 'login=a%40b.c&password=x',
         });
       const statuses: number[] = [];
       for (let i = 0; i < 8; i += 1) {

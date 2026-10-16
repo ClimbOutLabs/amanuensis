@@ -623,7 +623,7 @@ check_checkout() {
 # Https on the instances opened on the network: the authority and its key, the certificate (how long it lasts, which
 # addresses it lists) and a real answer over https from this computer. One line for the worst thing found.
 check_tls() {
-  local name release image info root_days leaf_days names host origin expected missing='' status any=0 state=ok detail='' fix=''
+  local name release image info root_days leaf_days names host origin expected missing='' status any=0 state=ok detail='' fix='' constrained covers
   local ca_dir="${AMAN_HOME}/tls/ca" mode
   tls_note() { # state detail fix: keeps the worst
     case "$1:$state" in
@@ -656,12 +656,18 @@ check_tls() {
       root_days=$(printf '%s' "$info" | sed -n 's/.*"root_days_left":\(-\{0,1\}[0-9]*\).*/\1/p')
       leaf_days=$(printf '%s' "$info" | sed -n 's/.*"leaf_days_left":\(-\{0,1\}[0-9]*\).*/\1/p')
       names=$(printf '%s' "$info" | sed -n 's/.*"leaf_names":\[\([^]]*\)\].*/\1/p' | tr -d '"' | tr ',' ' ')
+      constrained=$(printf '%s' "$info" | sed -n 's/.*"root_constrained":\(true\|false\).*/\1/p')
+      covers=$(printf '%s' "$info" | sed -n 's/.*"root_covers_leaf":\(true\|false\).*/\1/p')
       if [ -z "$leaf_days" ]; then
         tls_note fail "The https certificate of instance $name is missing." "Run aman doctor tls --fix"
       elif [ "$leaf_days" -le 0 ] || [ "${root_days:-1}" -le 0 ]; then
         tls_note fail "The https certificate of instance $name has run out, so devices refuse it." "Run aman doctor tls --fix"
       elif [ "$leaf_days" -lt 60 ] || [ "${root_days:-1000}" -lt 60 ]; then
         tls_note warn "The https certificate of instance $name ends in $([ "$leaf_days" -lt "${root_days:-1000}" ] && echo "$leaf_days" || echo "$root_days") days." "Run aman doctor tls --fix"
+      elif [ "$constrained" = false ]; then
+        tls_note warn "The certificate authority of this computer, from an earlier version, has no limit on the names it can vouch for. A new one is limited to private addresses and names; each device then trusts it again." "Run aman doctor tls --fix"
+      elif [ "$covers" = false ]; then
+        tls_note warn "The certificate authority of this computer does not cover every name of instance $name. A new one does; each device then trusts it again." "Run aman doctor tls --fix"
       else
         missing=''
         while IFS= read -r origin; do
@@ -671,7 +677,7 @@ check_tls() {
         if [ -n "$missing" ]; then
           tls_note warn "The https certificate of instance $name does not list:${missing}." "Run aman doctor tls --fix"
         elif [ "$state" = ok ]; then
-          detail="Https is on; the certificate of instance $name lasts $leaf_days more days and is renewed by the daily backup."
+          detail="Https is on; the certificate of instance $name lasts $leaf_days more days, and Aman renews it in its last 60 days. Authority fingerprint, to compare on a device before trusting it: $(head -n 1 "$ca_dir/root.fingerprint" 2>/dev/null)"
         fi
       fi
     fi
@@ -683,6 +689,10 @@ check_tls() {
       fi
     fi
   done
+  STATE_DIR="${AMAN_HOME}/state"
+  if [ "$state" = ok ] && [ "$(backups_mode)" != daily ]; then
+    tls_note warn "Daily backups are off, so the https certificate is renewed only when you run an aman command in its last 60 days, or run aman doctor tls --fix." "Run aman doctor backup --fix"
+  fi
   if [ "$state" = ok ] && [ -z "$detail" ]; then detail="Https is on, with a certificate from this computer's own authority."; fi
   record machine tls "$state" "$detail" "$fix"
 }
@@ -1542,7 +1552,32 @@ run_installer() { # command args...
   exec bash "$installer" --home "$AMAN_HOME" "$@"
 }
 
+# Any aman command renews an https certificate that has 60 days or fewer left, quietly; the installer does it, so it needs
+# the installer's folder to be safe to run, and it never runs from inside the installer's own run.
+renew_tls_if_due() {
+  local conf name ends now installer due=0
+  [ -z "${AMAN_NO_TLS_RENEW:-}" ] || return 0
+  now=$(now_epoch)
+  for conf in "${AMAN_HOME}/state/instances"/*.conf; do
+    [ -f "$conf" ] || continue
+    name=${conf##*/}
+    name=${name%.conf}
+    [ "$(registry_value "$name" tls)" = local ] && [ -n "$(registry_value "$name" tls_port)" ] || continue
+    ends=$(head -n 1 "${AMAN_HOME}/tls/leaf/${name}/leaf.notafter" 2>/dev/null)
+    case "$ends" in '' | *[!0-9]*) continue ;; esac
+    if [ $((ends - now)) -le $((60 * 86400)) ]; then due=1; fi
+  done
+  [ "$due" = 1 ] || return 0
+  if installer=$(checkout_installer); then
+    AMAN_NO_TLS_RENEW=1 bounded 300 bash "$installer" --home "$AMAN_HOME" tls >/dev/null 2>&1 || true
+  fi
+}
+
 # ---------------------------------------------------------------- main
+
+case "${1:-}" in
+  doctor | backup | upgrade) renew_tls_if_due ;;
+esac
 
 case "${1:-}" in
   doctor) shift ;;

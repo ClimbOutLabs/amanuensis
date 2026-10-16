@@ -119,17 +119,98 @@ function writeFile({ file, text, mode }) {
   fs.renameSync(temporary, file);
 }
 
-/** Makes the root certificate and its key unless they exist. The key is readable by its owner only. */
-export function ensureCa({ caDir, now = new Date() }) {
+/** What the authority may vouch for: private address ranges and names that only mean something on a private network. */
+const PERMITTED_RANGES = [
+  [
+    [10, 0, 0, 0],
+    [255, 0, 0, 0],
+  ],
+  [
+    [172, 16, 0, 0],
+    [255, 240, 0, 0],
+  ],
+  [
+    [192, 168, 0, 0],
+    [255, 255, 0, 0],
+  ],
+  [
+    [100, 64, 0, 0],
+    [255, 192, 0, 0],
+  ],
+  [
+    [127, 0, 0, 0],
+    [255, 0, 0, 0],
+  ],
+];
+const PERMITTED_SUFFIXES = ['local', 'lan', 'home.arpa', 'ts.net', 'localhost'];
+
+const isAddress = text => /^\d+\.\d+\.\d+\.\d+$/.test(text);
+
+/** True when the authority, with these extra names, may vouch for the name or address. */
+export function permitted({ name: candidate, extras = [] }) {
+  if (isAddress(candidate)) {
+    const parts = candidate.split('.').map(Number);
+    return PERMITTED_RANGES.some(([base, mask]) => parts.every((part, index) => (part & mask[index]) === base[index]));
+  }
+  const lower = candidate.toLowerCase();
+  return [...PERMITTED_SUFFIXES, ...extras].some(allowed => lower === allowed || lower.endsWith(`.${allowed}`));
+}
+
+function nameConstraints(extras) {
+  const subtree = base => seq(base);
+  const addresses = PERMITTED_RANGES.map(([base, mask]) => subtree(der(0x87, Buffer.from([...base, ...mask]))));
+  const names = [...PERMITTED_SUFFIXES, ...extras].map(allowed => subtree(der(0x82, Buffer.from(allowed, 'ascii'))));
+  return seq(der(0xa0, ...names, ...addresses));
+}
+
+const namesFile = caDir => path.join(caDir, 'root.names');
+
+function storedExtras(caDir) {
+  try {
+    return JSON.parse(fs.readFileSync(namesFile(caDir), 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+const fingerprintOf = cert => cert.fingerprint256;
+
+/** True when the certificate and the private key next to it are a pair; anything else is a torn or swapped write. */
+function pairMatches({ certFile, keyFile }) {
+  try {
+    const cert = new crypto.X509Certificate(fs.readFileSync(certFile));
+    const key = crypto.createPrivateKey(fs.readFileSync(keyFile));
+    const fromKey = crypto.createPublicKey(key).export({ type: 'spki', format: 'der' });
+    return Buffer.compare(cert.publicKey.export({ type: 'spki', format: 'der' }), fromKey) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Makes the root certificate and its key unless a good one exists. The root may vouch only for private addresses and
+ * names that mean something on a private network, plus the other names given here: a root that lacks a name asked for,
+ * has no limits at all (from an earlier version), or is about to end is made again, and `rotated` says so, since every
+ * device must then trust the new one. The key is readable by its owner only.
+ */
+export function ensureCa({ caDir, names = [], now = new Date() }) {
   const certFile = path.join(caDir, 'root.crt');
   const keyFile = path.join(caDir, 'root.key');
-  if (fs.existsSync(certFile) && fs.existsSync(keyFile)) {
-    const current = new crypto.X509Certificate(fs.readFileSync(certFile)).validToDate;
+  const asked = names.filter(candidate => !isAddress(candidate));
+  const stored = storedExtras(caDir);
+  const exists = fs.existsSync(certFile) && fs.existsSync(keyFile);
+  if (exists && stored !== undefined && pairMatches({ certFile, keyFile })) {
+    const current = new crypto.X509Certificate(fs.readFileSync(certFile));
+    const covered = asked.every(candidate => permitted({ name: candidate, extras: stored }));
     // An authority about to end is replaced; devices then trust the new one the way they did the first.
-    if (current.getTime() - now.getTime() > ROOT_REPLACE_DAYS * DAY_MS) {
-      return { created: false, notAfter: current };
+    if (covered && current.validToDate.getTime() - now.getTime() > ROOT_REPLACE_DAYS * DAY_MS) {
+      writeFile({ file: path.join(caDir, 'root.fingerprint'), text: `${fingerprintOf(current)}\n`, mode: 0o644 });
+      return { created: false, rotated: false, notAfter: current.validToDate, fingerprint: fingerprintOf(current) };
     }
   }
+  const extras = [...new Set([...(stored ?? []), ...asked.filter(candidate => !permitted({ name: candidate }))])]
+    .map(candidate => candidate.toLowerCase())
+    .sort();
   const { publicKey, privateKey } = makeKey();
   const notBefore = new Date(now.getTime() - DAY_MS);
   const notAfter = new Date(now);
@@ -145,11 +226,15 @@ export function ensureCa({ caDir, now = new Date() }) {
       extension('2.5.29.19', seq(bool(true)), true),
       extension('2.5.29.15', bits(Buffer.from([0x06]), 1), true),
       extension('2.5.29.14', octets(keyId(publicKey))),
+      extension('2.5.29.30', nameConstraints(extras), true),
     ],
   });
   writeFile({ file: keyFile, text: privateKey.export({ type: 'pkcs8', format: 'pem' }), mode: 0o600 });
   writeFile({ file: certFile, text: pem, mode: 0o644 });
-  return { created: true, notAfter };
+  writeFile({ file: namesFile(caDir), text: `${JSON.stringify(extras)}\n`, mode: 0o644 });
+  const created = new crypto.X509Certificate(pem);
+  writeFile({ file: path.join(caDir, 'root.fingerprint'), text: `${fingerprintOf(created)}\n`, mode: 0o644 });
+  return { created: true, rotated: exists, notAfter, fingerprint: fingerprintOf(created) };
 }
 
 function namesOf(cert) {
@@ -163,7 +248,8 @@ function namesOf(cert) {
 /** True when the leaf there is still good for these names, under this root, for long enough. */
 export function leafIsCurrent({ caDir, leafDir, names, now = new Date() }) {
   const leafFile = path.join(leafDir, 'leaf.crt');
-  if (!fs.existsSync(leafFile) || !fs.existsSync(path.join(leafDir, 'leaf.key'))) {
+  const keyFile = path.join(leafDir, 'leaf.key');
+  if (!fs.existsSync(leafFile) || !fs.existsSync(keyFile) || !pairMatches({ certFile: leafFile, keyFile })) {
     return false;
   }
   const leaf = new crypto.X509Certificate(fs.readFileSync(leafFile));
@@ -179,6 +265,11 @@ export function leafIsCurrent({ caDir, leafDir, names, now = new Date() }) {
 export function issueLeaf({ caDir, leafDir, names, now = new Date() }) {
   if (names.length === 0) {
     throw new Error('A certificate needs at least one name or address');
+  }
+  const extras = storedExtras(caDir) ?? [];
+  const refused = names.filter(candidate => !permitted({ name: candidate, extras }));
+  if (refused.length > 0) {
+    throw new Error(`The authority may not vouch for ${refused.join(', ')}`);
   }
   if (leafIsCurrent({ caDir, leafDir, names, now })) {
     return { issued: false };
@@ -203,36 +294,49 @@ export function issueLeaf({ caDir, leafDir, names, now = new Date() }) {
       extension('2.5.29.35', seq(der(0x80, keyId(root.publicKey)))),
     ],
   });
+  // The certificate goes last: a reader that sees the new certificate finds its key already in place.
   writeFile({
     file: path.join(leafDir, 'leaf.key'),
     text: privateKey.export({ type: 'pkcs8', format: 'pem' }),
     mode: 0o600,
   });
+  writeFile({
+    file: path.join(leafDir, 'leaf.notafter'),
+    text: `${Math.floor(notAfter.getTime() / 1000)}\n`,
+    mode: 0o644,
+  });
   writeFile({ file: path.join(leafDir, 'leaf.crt'), text: pem, mode: 0o644 });
   return { issued: true, notAfter };
 }
 
-/** When the root and the leaf end and which names the leaf serves; missing files read as null. */
+/** When the root and the leaf end, which names the leaf serves, and what the root limits; missing files read as null. */
 export function info({ caDir, leafDir, now = new Date() }) {
   const read = file => (fs.existsSync(file) ? new crypto.X509Certificate(fs.readFileSync(file)) : undefined);
   const root = read(path.join(caDir, 'root.crt'));
   const leaf = read(path.join(leafDir, 'leaf.crt'));
+  const extras = storedExtras(caDir);
   const daysLeft = cert =>
     cert === undefined ? null : Math.floor((cert.validToDate.getTime() - now.getTime()) / DAY_MS);
+  const leafNames = leaf === undefined ? [] : namesOf(leaf);
   return {
     root_not_after: root?.validToDate.toISOString() ?? null,
     root_days_left: daysLeft(root),
+    root_fingerprint: root === undefined ? null : fingerprintOf(root),
+    root_constrained: extras !== undefined,
+    root_covers_leaf: extras !== undefined && leafNames.every(candidate => permitted({ name: candidate, extras })),
     leaf_not_after: leaf?.validToDate.toISOString() ?? null,
     leaf_days_left: daysLeft(leaf),
-    leaf_names: leaf === undefined ? [] : namesOf(leaf),
+    leaf_names: leafNames,
   };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [command, caDir, third, ...rest] = process.argv.slice(2);
   if (command === 'ensure-ca' && caDir !== undefined) {
-    const result = ensureCa({ caDir });
-    process.stdout.write(`${JSON.stringify({ created: result.created, not_after: result.notAfter.toISOString() })}\n`);
+    const result = ensureCa({ caDir, names: [third, ...rest].filter(item => item !== undefined) });
+    process.stdout.write(
+      `${JSON.stringify({ created: result.created, rotated: result.rotated, not_after: result.notAfter.toISOString(), fingerprint: result.fingerprint })}\n`,
+    );
   } else if (command === 'issue' && caDir !== undefined && third !== undefined) {
     const result = issueLeaf({ caDir, leafDir: third, names: rest });
     process.stdout.write(`${JSON.stringify({ issued: result.issued })}\n`);
@@ -240,7 +344,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.stdout.write(`${JSON.stringify(info({ caDir, leafDir: third }))}\n`);
   } else {
     process.stderr.write(
-      'usage: pki.mjs ensure-ca <ca-dir> | issue <ca-dir> <leaf-dir> <names...> | info <ca-dir> <leaf-dir>\n',
+      'usage: pki.mjs ensure-ca <ca-dir> [names...] | issue <ca-dir> <leaf-dir> <names...> | info <ca-dir> <leaf-dir>\n',
     );
     process.exit(2);
   }

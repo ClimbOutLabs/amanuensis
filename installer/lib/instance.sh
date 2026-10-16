@@ -245,7 +245,7 @@ aman_command_current() {
 
 # Installs or refreshes the aman command and puts it on the path of new terminals.
 install_doctor_shim() {
-  local src="$INSTALLER_DIR/doctor/aman" lib
+  local src="$INSTALLER_DIR/doctor/aman" lib problem words
   if [ ! -f "$src" ]; then
     warn "The aman command was not found in the installer, so it will be unavailable."
     return 0
@@ -263,6 +263,11 @@ install_doctor_shim() {
   # person later, so it is made private once here instead of asking them to.
   if tighten_checkout "$REPO_ROOT"; then
     ui_ok "Made $(ui_path "$REPO_ROOT") private to you, so only you can change what the installer runs"
+  fi
+  # What cannot be made right here is said once, in the words the doctor uses, since aman will refuse to run it.
+  if problem=$(checkout_problem "$REPO_ROOT"); then
+    words=$(checkout_problem_words "$problem")
+    warn "${words%%|*} ${words#*|}"
   fi
 }
 
@@ -605,6 +610,10 @@ print_trust_lines() { # name
   link=$(tls_trust_link "$1")
   ui_line "Trust this computer on each device: $link"
   ui_line "On an iPhone, open it in Safari, install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
+  ui_line "Before you trust it, check that the fingerprint your device shows is $(tls_fingerprint). If it differs, stop."
+  if [ "$TLS_AUTHORITY_REPLACED" = 1 ]; then
+    ui_line "This computer's certificate authority was made again (it did not cover a name now in use, or was from an earlier version), so each device must trust it again."
+  fi
   tls_print_qr "$link"
 }
 

@@ -447,6 +447,10 @@ plan_tls() {
     change=$(instance_address_change "$name")
     if tls_active "$name" || { [ -n "$change" ] && [ "$change" != close ] && [ "$(tls_target "$name")" = local ]; }; then need=1; fi
   done
+  if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then
+    plan_add todo "Make this computer's certificate authority again" \
+      "The one from an earlier version has no limit on what it can vouch for. The new one is limited to private addresses and names. Each device trusts it again."
+  fi
   [ "$need" = 1 ] || return 0
   plan_image "$(tls_image)" "The https front end is downloaded" "Download the https front end" https-front
   if [ -f "$(tls_ca_dir)/root.crt" ]; then
@@ -613,6 +617,9 @@ install_execute() {
     AMAN_PASSWORD=
   fi
   tf_rotation_apply
+  if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then
+    tls_renew_all "$REL_APP_TAG" || warn "A certificate could not be renewed. Run: aman doctor tls --fix"
+  fi
   for name in $(reg_names); do
     edge_ensure "$name"
   done

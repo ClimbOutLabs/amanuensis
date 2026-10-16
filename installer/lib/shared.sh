@@ -32,9 +32,16 @@ checkout_writable_by_others() { # dir
     [ -n "$(find "$1/installer" ! -type l \( -perm -g+w -o -perm -o+w \) -print -quit 2>/dev/null)" ]
 }
 
-# The folder that holds it decides who can swap it for another; a sticky one (like /tmp) lets only an owner do that.
+# Every folder above it decides who can swap it for another, with links resolved; a sticky one (like /tmp) lets only an
+# owner do that.
 checkout_parent_writable() { # dir
-  [ -n "$(find "$(dirname "$1")" -maxdepth 0 \( -perm -g+w -o -perm -o+w \) ! -perm -1000 -print 2>/dev/null)" ]
+  local dir
+  dir=$(cd -P -- "$1" 2>/dev/null && pwd -P) || return 1
+  while [ "$dir" != / ]; do
+    dir=$(dirname "$dir")
+    if [ -n "$(find "$dir" -maxdepth 0 \( -perm -g+w -o -perm -o+w \) ! -perm -1000 -print 2>/dev/null)" ]; then return 0; fi
+  done
+  return 1
 }
 
 checkout_owned_by_other() { # dir
@@ -64,24 +71,17 @@ checkout_problem_words() {
   case "$1" in
     links) printf 'The installer of the folder Aman was installed from contains links, so Aman will not run it.|Copy the folder to one of yours and run install.sh from there.' ;;
     writable) printf 'The folder Aman was installed from can be changed by other users, so Aman will not run its installer from it.|Run aman doctor checkout --fix' ;;
-    parent) printf 'The folder that holds the folder Aman was installed from can be changed by other users, so Aman will not run its installer from it.|Run aman doctor checkout --fix' ;;
+    parent) printf 'A folder above the folder Aman was installed from can be changed by other users, so Aman will not run its installer from it.|Move the folder to one only you can change, such as one inside your home folder, then run install.sh from there.' ;;
     *) printf 'The folder Aman was installed from belongs to another user, so Aman will not run its installer from it.|Copy it to a folder of yours and run install.sh from there.' ;;
   esac
 }
 
-# Takes the right to change the installer from everyone but its owner: the folder, everything in its installer and,
-# when the person owns it, the folder that holds it. Succeeds only when something changed.
+# Takes the right to change the installer from everyone but its owner: the folder and everything in its installer. It
+# never changes a folder above it, which is not Aman's to change, and never touches an installer that holds links. Succeeds
+# only when something changed.
 tighten_checkout() { # dir
-  local dir=$1 parent changed=1
-  parent=$(dirname "$dir")
-  if checkout_writable_by_others "$dir"; then
-    chmod go-w "$dir" 2>/dev/null || true
-    chmod -R go-w "$dir/installer" 2>/dev/null || true
-    changed=0
-  fi
-  if checkout_parent_writable "$dir" && [ -O "$parent" ]; then
-    chmod go-w "$parent" 2>/dev/null || true
-    changed=0
-  fi
-  return "$changed"
+  local dir=$1
+  if checkout_has_links "$dir" || ! checkout_writable_by_others "$dir"; then return 1; fi
+  chmod go-w "$dir" 2>/dev/null || true
+  chmod -R go-w "$dir/installer" 2>/dev/null || true
 }

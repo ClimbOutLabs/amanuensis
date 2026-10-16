@@ -293,6 +293,9 @@ export function createWorld({ instances = ['main'] } = {}) {
         origins = 'http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443',
         keyMode = 0o600,
         healthz = 200,
+        constrained = true,
+        covers = true,
+        endsInSeconds = undefined,
         info = undefined,
       } = {},
     ) {
@@ -302,6 +305,7 @@ export function createWorld({ instances = ['main'] } = {}) {
         path.join(dir, `${name}.conf`),
         `name=${name}\napp_port=8791\npublic_url=http://127.0.0.1:8791\norigins=${origins}\nextra_hosts=\ntls=local\ntls_port=8443\n`,
       );
+      writeFileSync(path.join(home, 'state', 'backups'), 'daily\n');
       mkdirSync(path.join(home, 'tls', 'ca'), { recursive: true });
       writeFileSync(path.join(home, 'tls', 'ca', 'root.crt'), 'certificate\n');
       writeFileSync(path.join(home, 'tls', 'ca', 'root.key'), 'key\n', { mode: keyMode });
@@ -311,10 +315,18 @@ export function createWorld({ instances = ['main'] } = {}) {
         JSON.stringify({
           root_not_after: 'x',
           root_days_left: rootDays,
+          root_fingerprint: 'AA:BB',
+          root_constrained: constrained,
+          root_covers_leaf: covers,
           leaf_not_after: 'x',
           leaf_days_left: leafDays,
           leaf_names: leafNames,
         });
+      writeFileSync(path.join(home, 'tls', 'ca', 'root.fingerprint'), 'AA:BB:CC\n');
+      if (endsInSeconds !== undefined) {
+        mkdirSync(path.join(home, 'tls', 'leaf', name), { recursive: true });
+        writeFileSync(path.join(home, 'tls', 'leaf', name, 'leaf.notafter'), `${String(NOW + endsInSeconds)}\n`);
+      }
       world.set('pki_info', { out: `${report}\n`, rc: 0 });
       world.install('curl', FAKE_CURL);
       world.curlRoute('https://127.0.0.1:8443/healthz', {

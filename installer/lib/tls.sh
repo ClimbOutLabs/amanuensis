@@ -7,6 +7,14 @@
 TLS_HTTP_IN=8081
 TLS_HTTPS_IN=8443
 
+# The instances served over https, one per line.
+tls_instances() {
+  local name
+  for name in $(reg_names); do
+    if tls_active "$name"; then printf '%s\n' "$name"; fi
+  done
+}
+
 tls_dir() { printf '%s/tls' "$AMAN_HOME"; }
 tls_ca_dir() { printf '%s/ca' "$(tls_dir)"; }
 tls_leaf_dir() { printf '%s/leaf/%s' "$(tls_dir)" "$1"; }
@@ -46,18 +54,56 @@ tls_node() { # app_image shell_command
     --entrypoint sh "$1" -c "$2"
 }
 
+# Every name any instance served over https is opened at: the authority may vouch only for these and for private
+# addresses and names.
+tls_all_names() { # name of the instance being set up
+  local other
+  {
+    tls_names "$(reg_get "$1" origins)"
+    for other in $(reg_names); do
+      if tls_active "$other"; then tls_names "$(reg_get "$other" origins)"; fi
+    done
+  } | sort -u | tr '\n' ' '
+}
+
 # Makes the authority (once for this computer) and the certificate for the instance's addresses (again when they
-# change or it is close to its end). Prints nothing; a failure is fatal because the instance would be unreachable.
+# change or it is close to its end). The authority is made again, with every device needing to trust it again, only
+# when it lacks a name that is now needed or has no limits at all (from an earlier version); TLS_AUTHORITY_REPLACED says
+# so for the closing lines, and every other instance gets a certificate under the new one. A failure is fatal because
+# the instance would be unreachable.
+TLS_AUTHORITY_REPLACED=0
 tls_issue() { # name app_image
-  local name=$1 names
+  local name=$1 names all out other
   names=$(tls_names "$(reg_get "$name" origins)" | tr '\n' ' ')
+  all=$(tls_all_names "$name")
   ensure_private_dir "$(tls_dir)"
   ensure_private_dir "$(tls_dir)/leaf"
   ensure_private_dir "$(tls_leaf_dir "$name")"
   # shellcheck disable=SC2086 # the names are checked hosts without spaces
-  tls_node "$2" "node /pki.mjs ensure-ca /tls/ca && node /pki.mjs issue /tls/ca /tls/leaf/$name $names" >/dev/null ||
+  out=$(tls_node "$2" "node /pki.mjs ensure-ca /tls/ca $all && node /pki.mjs issue /tls/ca /tls/leaf/$name $names") ||
     die "The certificate for instance $name could not be made. Run: aman doctor tls --fix"
+  case "$out" in
+    *'"rotated":true'*)
+      TLS_AUTHORITY_REPLACED=1
+      for other in $(reg_names); do
+        if [ "$other" = "$name" ] || ! tls_active "$other"; then continue; fi
+        ensure_private_dir "$(tls_leaf_dir "$other")"
+        # shellcheck disable=SC2046 # the names are checked hosts without spaces
+        tls_node "$2" "node /pki.mjs issue /tls/ca /tls/leaf/$other $(tls_names "$(reg_get "$other" origins)" | tr '\n' ' ')" >/dev/null ||
+          die "The certificate for instance $other could not be made again. Run: aman doctor tls --fix"
+        tls_publish_trust "$other"
+        dc "$other" restart tls >/dev/null 2>&1 || true
+      done
+      tls_publish_trust "$name"
+      ;;
+  esac
 }
+
+# An authority from before the limits were added has no record of the names it may vouch for; the next install replaces it.
+tls_authority_needs_replacing() { [ -f "$(tls_ca_dir)/root.crt" ] && [ ! -f "$(tls_ca_dir)/root.names" ]; }
+
+# The fingerprint of the authority's certificate, in the form a device shows it.
+tls_fingerprint() { head -n 1 "$(tls_ca_dir)/root.fingerprint" 2>/dev/null || true; }
 
 # The files a device downloads to trust this computer, and the page that explains it, next to the front end.
 tls_publish_trust() { # name
@@ -74,7 +120,7 @@ tls_publish_trust() { # name
     "UUID_CERTIFICATE=$(uuid_from_hex "${uuid:0:32}")" "UUID_PROFILE=$(uuid_from_hex "${uuid:32:32}")" |
     write_if_changed "$dir/aman.mobileconfig" 644 || true
   open_url=$(tls_open_url "$name")
-  render_template "$TEMPLATES_DIR/tls/trust.html.tpl" "OPEN_URL=$open_url" | write_if_changed "$dir/index.html" 644 || true
+  render_template "$TEMPLATES_DIR/tls/trust.html.tpl" "OPEN_URL=$open_url" "FINGERPRINT=$(tls_fingerprint)" | write_if_changed "$dir/index.html" 644 || true
 }
 
 # 32 hex digits as a UUID.
@@ -98,11 +144,13 @@ tls_trust_link() { # name
 
 # The instance's front end configuration.
 tls_render_caddyfile() { # name
-  local name=$1 names first
+  local name=$1 names first hosts
   names=$(tls_names "$(reg_get "$name" origins)")
   first=$(printf '%s\n' "$names" | head -n 1)
+  hosts=$(printf '%s\n' "$names" | tr '\n' ' ')
   render_template "$TEMPLATES_DIR/tls/Caddyfile.tpl" \
-    "NAME=$name" "DEFAULT_NAME=$first" "HTTPS_IN=$TLS_HTTPS_IN" "HTTP_IN=$TLS_HTTP_IN" "HTTPS_PORT=$(reg_get "$name" tls_port)" |
+    "NAME=$name" "DEFAULT_NAME=$first" "HOSTS=${hosts% }" "HTTPS_IN=$TLS_HTTPS_IN" "HTTP_IN=$TLS_HTTP_IN" \
+    "HTTPS_PORT=$(reg_get "$name" tls_port)" |
     write_if_changed "$(instance_dir "$name")/tls.Caddyfile" 644 || true
 }
 
@@ -135,12 +183,16 @@ tls_renew_all() { # app_image
 
 # install.sh tls: renews what is due and says so; the one repair behind aman doctor tls --fix.
 cmd_tls() {
+  local name
   require_installed
   docker_prepare
   lock_acquire
   load_installed_release
   if tls_renew_all "$REL_APP_TAG"; then
     ui_ok "The https certificates are up to date"
+    if [ "$TLS_AUTHORITY_REPLACED" = 1 ]; then
+      for name in $(tls_instances); do print_trust_lines "$name"; done
+    fi
   else
     die "A certificate could not be renewed."
   fi

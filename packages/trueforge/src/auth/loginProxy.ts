@@ -54,9 +54,42 @@ function clientKeyFor(trustedProxies: readonly string[]): (c: Context) => string
   };
 }
 
-/** The account a password post is for, as the sign-in form names it. */
-function accountOf(body: ArrayBuffer): string {
-  return new URLSearchParams(new TextDecoder().decode(body)).get('login') ?? '';
+const URLENCODED_FORM = /^application\/x-www-form-urlencoded\s*(;\s*charset=utf-8)?$/i;
+/** Text that the sign-in service and this proxy could read differently: a broken escape or a semicolon. */
+const AMBIGUOUS_FORM_TEXT = /%(?![0-9a-fA-F]{2})|;/;
+
+type LoginForm = { account: string } | { error: string; status: 400 | 415 };
+
+/**
+ * The account a password post is for, read so that it is exactly the account the sign-in service will read: that service
+ * takes a field from the form body, else from the query string, and the first of several. So a post is passed on only when
+ * the form is plain urlencoded text with exactly one login and one password in the body, none in the query, and nothing
+ * either reader could split differently. Anything else is refused rather than guessed at.
+ */
+function readLoginForm({
+  search,
+  contentType,
+  body,
+}: {
+  search: string;
+  contentType: string | undefined;
+  body: ArrayBuffer;
+}): LoginForm {
+  if (contentType === undefined || !URLENCODED_FORM.test(contentType.trim())) {
+    return { error: 'The sign-in form must be sent as a plain form.', status: 415 };
+  }
+  const text = new TextDecoder().decode(body);
+  if (AMBIGUOUS_FORM_TEXT.test(text) || AMBIGUOUS_FORM_TEXT.test(search)) {
+    return { error: 'The sign-in form could not be read.', status: 400 };
+  }
+  const fields = new URLSearchParams(text);
+  const query = new URLSearchParams(search);
+  for (const field of ['login', 'password']) {
+    if (query.has(field) || fields.getAll(field).length !== 1) {
+      return { error: 'The sign-in form could not be read.', status: 400 };
+    }
+  }
+  return { account: fields.get('login') ?? '' };
 }
 
 /**
@@ -134,7 +167,18 @@ export function createLoginProxy({
         return c.text('The request could not be read.', 400);
       }
     }
-    const permit = guessing && body !== undefined ? limiter.begin(key, accountOf(body)) : undefined;
+    let account = '';
+    if (guessing && body !== undefined) {
+      const form = readLoginForm({ search: requested.search, contentType: c.req.header('content-type'), body });
+      if ('error' in form) {
+        return new Response(form.error, {
+          status: form.status,
+          headers: { 'content-type': 'text/plain; charset=UTF-8', ...SECURITY_HEADERS },
+        });
+      }
+      account = form.account;
+    }
+    const permit = guessing && body !== undefined ? limiter.begin(key, account) : undefined;
     if (permit !== undefined && !permit.allowed) {
       return tooMany(permit.retryAfterSeconds);
     }
