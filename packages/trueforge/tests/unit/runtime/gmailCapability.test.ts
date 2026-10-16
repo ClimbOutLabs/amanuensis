@@ -1,5 +1,6 @@
 import { createSentinelHostContext } from '@truefoundry/trueforge-core/core';
 import type { GoogleConnectionRecord } from '@truefoundry/trueforge-core/core/google/connection';
+import { defaultSentinelServices, forUnattendedRun } from '@truefoundry/trueforge-core/core/permissions/context';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import { gmailCapability } from '../../../src/runtime/gmailCapability';
@@ -35,12 +36,18 @@ describe('gmailCapability', () => {
   let env: SqliteTestDatabase;
   let store: SqliteGoogleConnectionStore;
 
-  const mount = (owner = OWNER) =>
+  const mount = (owner = OWNER, unattended = false) =>
     gmailCapability({
       connections: store,
       owner,
       tracing: NOOP_AGENT_TRACING,
-      sentinel: createSentinelHostContext({ ...owner, conversation_id: 'c1' }),
+      sentinel: createSentinelHostContext({
+        ...owner,
+        conversation_id: 'c1',
+        services: unattended
+          ? forUnattendedRun(defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }))
+          : defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
+      }),
       attachmentStager: undefined,
       fetchImpl: () => Promise.reject(new Error('no network in this test')),
     });
@@ -78,5 +85,21 @@ describe('gmailCapability', () => {
   it('never mounts one user login for another', async () => {
     await store.save(record());
     expect(await mount({ ...OWNER, created_by: 'grace' })).toBeUndefined();
+  });
+
+  it('offers drafts and sends only to an attended turn that holds the compose grant', async () => {
+    await store.save(record({ granted_scopes: [READ, COMPOSE] }));
+    expect(await toolNames(await mount())).toEqual(
+      expect.arrayContaining(['draft_email', 'update_draft', 'send_draft']),
+    );
+    const scheduled = await toolNames(await mount(OWNER, true));
+    expect(scheduled).toContain('read_email');
+    expect(scheduled).not.toContain('send_draft');
+    expect(scheduled).not.toContain('draft_email');
+  });
+
+  it('offers no write tool with only the read grant', async () => {
+    await store.save(record());
+    expect(await toolNames(await mount())).not.toContain('send_draft');
   });
 });
