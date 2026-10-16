@@ -1,21 +1,14 @@
 /**
  * Host state and helpers for the designated search provider's silent runs: the per-turn count that
- * trips the loop breaker, the set of URLs the provider's own results returned, which is all a
- * silent fetch may name, and the encoded-looking values it returned, which are the only plumbing
- * values (its own session id) the guard lets through as such. All live in host memory for one turn
- * and never reach the model.
+ * trips the loop breaker and the set of URLs the provider's own results returned, which is all a
+ * silent fetch may name. Both live in host memory for one turn and never reach the model.
  */
-
-import { encodedRunsIn } from './outboundGuard';
 
 /** Silent searches one turn may run before the next one asks. */
 export const SILENT_SEARCH_LIMIT = 20;
 
 /** Cap on remembered result URLs per turn, so a huge result cannot grow host memory without bound. */
 const MAX_RESULT_URLS = 500;
-
-/** Cap on remembered result tokens per turn, for the same reason. */
-const MAX_RESULT_TOKENS = 200;
 
 /** Reason code for a search the designated provider ran without asking. */
 export const SEARCH_SILENT_REASON = 'mcp_search_provider';
@@ -46,8 +39,6 @@ export interface WebSearchTurnState {
   silentSearches: number;
   /** URLs the designated provider returned this turn, exactly as returned. */
   resultUrls: Set<string>;
-  /** Encoded-looking values the designated provider returned this turn, exactly as returned. */
-  resultTokens: Set<string>;
   /** Tail of the text those searches sent, so a secret split across two searches is seen whole. */
   sentText: string;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
@@ -58,7 +49,6 @@ export function createWebSearchTurnState(): WebSearchTurnState {
   return {
     silentSearches: 0,
     resultUrls: new Set(),
-    resultTokens: new Set(),
     sentText: '',
     admission: Promise.resolve(),
   };
@@ -142,19 +132,6 @@ export function recordResultUrls(input: { state: WebSearchTurnState; texts: read
           if (variant.length > 0 && input.state.resultUrls.size < MAX_RESULT_URLS) {
             input.state.resultUrls.add(variant);
           }
-        }
-      }
-    }
-  }
-}
-
-/** Remembers every value in a search provider result that the guard would read as an encoded run. */
-export function recordResultTokens(input: { state: WebSearchTurnState; texts: readonly string[] }): void {
-  for (const text of input.texts) {
-    for (const candidate of textCandidates(text)) {
-      for (const token of encodedRunsIn(candidate)) {
-        if (input.state.resultTokens.size < MAX_RESULT_TOKENS) {
-          input.state.resultTokens.add(token);
         }
       }
     }

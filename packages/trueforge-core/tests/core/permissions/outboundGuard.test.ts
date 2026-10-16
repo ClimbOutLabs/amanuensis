@@ -352,22 +352,22 @@ describe('outbound guard: provider plumbing fields', () => {
   // Invented values only.
   const inventedHexId = 'c0ffee00d15ea5e0bad0cafe12345678';
   const inventedUuid = '3f2b8c1e-7a44-4d0e-9b61-5e2f0c9a1d77';
+  const inventedBase64Url = 'Zm9vYmFyYmF6cXV4cXV1eHF1dXpfYWJjLTEyMzQ';
+  const inventedBase64Padded = 'Zm9vYmFyYmF6cXV4cXV1eHF1dXo9PQ+/ab==';
   const plumbing = ['session_id', 'model_name'];
 
   function ruleWithPlumbing({
     args,
-    returned,
     secrets = [],
   }: {
     args: unknown;
-    returned?: ReadonlySet<string>;
     secrets?: readonly string[];
   }): OutboundGuardRule | undefined {
     const strings = collectOutboundStrings(args, plumbing);
     if (strings === undefined) {
       return 'uninspectable';
     }
-    const verdict = checkOutboundStrings({ strings, secrets, returned });
+    const verdict = checkOutboundStrings({ strings, secrets });
     return verdict.ok ? undefined : verdict.rule;
   }
 
@@ -398,17 +398,27 @@ describe('outbound guard: provider plumbing fields', () => {
     ).toBeUndefined();
   });
 
-  test('a long hex session id is held until the provider has returned it, and then only as plumbing', () => {
-    const args = { objective: 'zipper history', session_id: inventedHexId };
-    expect(ruleWithPlumbing({ args })).toBe('encoded_run');
-    expect(ruleWithPlumbing({ args, returned: new Set([inventedHexId]) })).toBeUndefined();
-    expect(ruleWithPlumbing({ args, returned: new Set(['00000000000000000000000000000000']) })).toBe('encoded_run');
+  test('a long random session id passes as plumbing, whatever its alphabet', () => {
+    for (const sessionId of [inventedHexId, inventedBase64Url, inventedBase64Padded]) {
+      expect(
+        ruleWithPlumbing({
+          args: {
+            objective: 'zipper history',
+            search_queries: ['zipper inventor'],
+            session_id: sessionId,
+            model_name: 'invented-model-7',
+          },
+        }),
+      ).toBeUndefined();
+    }
   });
 
-  test('the same hex run in user text is held even when the provider returned it', () => {
-    const returned = new Set([inventedHexId]);
-    expect(ruleWithPlumbing({ args: { objective: `look up ${inventedHexId}` }, returned })).toBe('encoded_run');
-    expect(ruleWithPlumbing({ args: { filters: { session_id: inventedHexId } }, returned })).toBe('encoded_run');
+  test('the same runs in user text, or in a field the catalog does not declare, are held', () => {
+    for (const run of [inventedHexId, inventedBase64Url, inventedBase64Padded]) {
+      expect(ruleWithPlumbing({ args: { objective: `look up ${run}` } })).toBe('encoded_run');
+      expect(ruleWithPlumbing({ args: { filters: { session_id: run } } })).toBe('encoded_run');
+      expect(ruleWithPlumbing({ args: { note_id: run } })).toBe('encoded_run');
+    }
   });
 
   test('every other rule still reads a plumbing value', () => {

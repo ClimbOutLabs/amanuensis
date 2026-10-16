@@ -1283,7 +1283,6 @@ async function classifySearchProviderTool(input: {
           strings,
           secrets: await ctx.services.outboundSecrets(owner),
           earlier: ctx.web_search.sentText,
-          returned: ctx.web_search.resultTokens,
         });
   if (!verdict.ok) {
     return held('mcp_search_guard', describeOutboundRule(verdict.rule));

@@ -31,7 +31,7 @@ Everything is enforced by the server (classifier, tool executor, host state). No
 - a payment card number that passes Luhn;
 - more than 200 characters in any one string, or more than 1,000 in all.
 
-Arguments the catalog declares as a provider's plumbing (`search_plumbing_fields`, such as `session_id` and `model_name`) are not user text: they stay out of the search chip and the length rule, every other rule still reads them, and a hex or base64 value there passes the encoded-run rule only when the provider itself returned it earlier in the turn.
+Arguments the catalog declares as a provider's plumbing (`search_plumbing_fields`, such as `session_id` and `model_name`) are not user text: they stay out of the search chip and the length rule, every rule except the encoded-run rule still reads them (a session id is a long random value by design), and a value there is capped at 128 characters.
 
 The guard is tuned so ordinary queries with numbers, dates, and names pass.
 

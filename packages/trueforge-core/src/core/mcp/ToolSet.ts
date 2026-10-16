@@ -14,11 +14,10 @@ import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outb
 import {
   isSearchAskReason,
   namesUrl,
-  recordResultTokens,
   recordResultUrls,
-  type SearchProviderGrant,
   runOneAtATime,
   SEARCH_SILENT_REASON,
+  type SearchProviderGrant,
 } from '../permissions/webSearch';
 import { normalizeGithubFileContentsResponse } from './githubFileContents';
 import {
@@ -286,9 +285,7 @@ export class ToolSet implements IToolSet {
       // names a URL is a fetch: its page's links are not search results, so they stay unreturned.
       const sent = collectOutboundStrings(params.arguments ?? {}, this.searchPlumbingFields);
       if (sent !== undefined && !namesUrl([...sent.values, ...sent.plumbing])) {
-        const texts = resultTexts(response.result);
-        recordResultUrls({ state: this.sentinel.web_search, texts });
-        recordResultTokens({ state: this.sentinel.web_search, texts });
+        recordResultUrls({ state: this.sentinel.web_search, texts: resultTexts(response.result) });
       }
     }
     // The priming listTools() may have captured the first-connect init; carry it forward since the

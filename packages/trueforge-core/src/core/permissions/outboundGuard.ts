@@ -359,26 +359,9 @@ function containsServerSecret(input: { texts: readonly string[]; secrets: readon
 export const OUTBOUND_EARLIER_MAX_CHARS = 1024;
 
 /** User text first, then plumbing values, so `userCount` splits the two. */
-function scannedValues(strings: OutboundStrings): {
-  original: string[];
-  raw: string[];
-  decoded: string[];
-  userCount: number;
-} {
-  const original = [...strings.values, ...strings.scalars, ...strings.plumbing];
-  const raw = original.map(normalizeForScan);
-  return { original, raw, decoded: raw.map(decodeOnce), userCount: strings.values.length + strings.scalars.length };
-}
-
-const TOKEN_RUN = /[A-Za-z0-9+/_=-]{20,}/g;
-/** Longest returned token kept; a plumbing value is far shorter, so a longer run could never match one. */
-const MAX_RETURNED_TOKEN_CHARS = OUTBOUND_MAX_PLUMBING_CHARS;
-
-/** Runs of text the encoded-run rule would flag, so a value a provider returned can be told apart later. */
-export function encodedRunsIn(text: string): string[] {
-  return [...text.matchAll(TOKEN_RUN)]
-    .map(match => match[0])
-    .filter(run => run.length <= MAX_RETURNED_TOKEN_CHARS && isEncodedRun(run));
+function scannedValues(strings: OutboundStrings): { raw: string[]; decoded: string[]; userCount: number } {
+  const raw = [...strings.values, ...strings.scalars, ...strings.plumbing].map(normalizeForScan);
+  return { raw, decoded: raw.map(decodeOnce), userCount: strings.values.length + strings.scalars.length };
 }
 
 /**
@@ -400,27 +383,20 @@ export function appendOutboundTrace(input: { earlier: string; strings: OutboundS
  * containing one is blocked. `earlier` is the text of the calls that already went out this turn
  * without asking: a secret that straddles the boundary is still seen. Everything else is pattern
  * based. Text is normalized and percent-decoded once before the rules run; the original spelling is
- * scanned as well. Plumbing values are scanned by every rule except length. `returned` holds the
- * encoded-looking values the provider itself sent back this turn: a plumbing value among them (its
- * own session id) is not read as an encoded run, and nothing else is exempt.
+ * scanned as well. Plumbing values are scanned by every rule except the encoded-run rule.
  */
 export function checkOutboundStrings(input: {
   strings: OutboundStrings;
   secrets: readonly string[];
   earlier?: string | undefined;
-  returned?: ReadonlySet<string> | undefined;
 }): OutboundGuardVerdict {
-  const { original, raw, decoded, userCount } = scannedValues(input.strings);
+  const { raw, decoded, userCount } = scannedValues(input.strings);
   const keys = input.strings.keys.map(normalizeForScan);
   const keyTexts = [...keys, ...keys.map(decodeOnce)];
   const text = [...raw, ...decoded, ...keyTexts].join('\n');
-  const isReturnedPlumbing = (index: number): boolean =>
-    index >= userCount && input.returned?.has(original[index] ?? '') === true;
-  const encodedScan = [
-    ...raw.filter((_, index) => !isReturnedPlumbing(index)),
-    ...decoded.filter((_, index) => !isReturnedPlumbing(index)),
-    ...keyTexts,
-  ].join('\n');
+  // A plumbing value is an identifier the provider hands out (a session id), so a long random run
+  // there is expected; the length cap and every other rule still apply to it.
+  const encodedScan = [...raw.slice(0, userCount), ...decoded.slice(0, userCount), ...keyTexts].join('\n');
   // Adjacent values glued together, on either side of the earlier calls' text: a key split across
   // array items or across searches shows its prefix, whichever of the parallel calls was read first.
   const earlier = input.earlier ?? '';

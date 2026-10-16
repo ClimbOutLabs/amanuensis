@@ -311,47 +311,43 @@ describe('provider plumbing fields on the designated provider', () => {
 
   it('counts the same fields as text when the catalog does not declare them', async () => {
     const h = harness({ searchProvider: true });
-    const result = await info(h, { objective, search_queries: queries, session_id: uuid, model_name: 'invented-model-7' });
+    const result = await info(h, {
+      objective,
+      search_queries: queries,
+      session_id: uuid,
+      model_name: 'invented-model-7',
+    });
     expect(result.silent_search_query).toContain(uuid);
   });
 
-  it('holds a long hex session id the provider did not return, and runs it once the provider did', async () => {
-    const h = harness({
-      searchProvider: true,
-      plumbingFields,
-      result: () => JSON.stringify({ session_id: hexId, results: [] }),
-    });
-    const args = { objective, search_queries: queries, session_id: hexId };
-    const first = await info(h, args);
-    expect(first.tier).toBe(3);
-    expect(first.tier3_card?.why_asked_again).toContain('long encoded string');
-
-    await runSearch(h, 'quillfeather loom');
-    const second = await info(h, args);
-    expect(second.tier).toBe(1);
+  it('runs a plain-words search with the arguments Parallel sends, whatever the session id looks like', async () => {
+    const sessionIds = [hexId, 'Zm9vYmFyYmF6cXV4cXV1eHF1dXpfYWJjLTEyMzQ', 'dGhpcyBpcyBhbiBpbnZlbnRlZCBpZA==', uuid];
+    for (const sessionId of sessionIds) {
+      const h = harness({ searchProvider: true, plumbingFields });
+      const args = {
+        objective: 'Who organised the first public exhibition of the fictional Quillfeather loom?',
+        search_queries: ['quillfeather loom first exhibition', 'quillfeather loom organiser'],
+        session_id: sessionId,
+        model_name: 'invented-model-7',
+      };
+      const result = await info(h, args);
+      expect(result.tier).toBe(1);
+      expect(result.is_approval_required).toBe(false);
+      expect(result.silent_search_query).not.toContain(sessionId);
+      await h.toolSet.callTool({ name: 'lookup', arguments: args });
+      expect(h.dispatched).toHaveLength(1);
+    }
   });
 
-  it('does not let a returned id pass in the query text, or in a field the catalog does not declare', async () => {
-    const h = harness({
-      searchProvider: true,
-      plumbingFields,
-      result: () => JSON.stringify({ session_id: hexId }),
-    });
-    await runSearch(h, 'quillfeather loom');
-    expect((await info(h, { query: `again ${hexId}` })).tier).toBe(3);
-    expect((await info(h, { query: 'again', note_id: hexId })).tier).toBe(3);
+  it('holds an encoded run in the query, or in a field the catalog does not declare, even beside a session id', async () => {
+    const h = harness({ searchProvider: true, plumbingFields });
+    expect((await info(h, { objective: `again ${hexId}`, session_id: hexId })).tier).toBe(3);
+    expect((await info(h, { objective: 'again', session_id: hexId, note_id: hexId })).tier).toBe(3);
   });
 
-  it('remembers returned ids only for the turn and the designated provider that saw them', async () => {
-    const other = harness({ searchProvider: false, serverName: 'other', result: () => JSON.stringify({ id: hexId }) });
-    await runSearch(other, 'quillfeather loom');
-    expect(other.host.web_search.resultTokens.size).toBe(0);
-
-    const first = harness({ searchProvider: true, plumbingFields, result: () => JSON.stringify({ id: hexId }) });
-    await runSearch(first, 'quillfeather loom');
-    expect(first.host.web_search.resultTokens.has(hexId)).toBe(true);
-    const nextTurn = harness({ searchProvider: true, plumbingFields });
-    expect((await info(nextTurn, { query: 'again', session_id: hexId })).tier).toBe(3);
+  it('holds a plumbing value that carries a secret, whatever it is named', async () => {
+    const h = harness({ searchProvider: true, plumbingFields, secrets: ['invented-server-secret-9f2c'] });
+    expect((await info(h, { objective: 'loom', session_id: 'invented-server-secret-9f2c' })).tier).toBe(3);
   });
 
   it('asks for a link carried in a plumbing field that no result returned', async () => {
