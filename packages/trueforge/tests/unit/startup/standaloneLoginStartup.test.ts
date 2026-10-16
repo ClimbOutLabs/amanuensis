@@ -126,11 +126,11 @@ describe('standalone login startup', () => {
   });
 
   it.each([
-    ['no allowed email', {}, /OIDC_ALLOWED_EMAILS must hold the email address of the owner/],
+    ['no allowed email', {}, /OIDC_ALLOWED_EMAILS is empty; it must hold one address/],
     [
       'two allowed emails',
       { OIDC_ALLOWED_EMAILS: 'owner@example.invalid,guest@example.invalid' },
-      /lists 2 addresses.*exactly one account/,
+      /lists 2 addresses; it must hold one/,
     ],
   ])('refuses to start with OIDC and %s', async (_label, extra, message) => {
     const booted = boot(

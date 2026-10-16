@@ -367,8 +367,7 @@ plan_build() {
   if [ -n "$(reg_names)" ]; then
     for name in $(reg_names); do
       if instance_has_extra_users "$name"; then
-        plan_add todo "Remove the extra sign-in users of instance $name" \
-          "An instance has one account, the owner's."
+        plan_add todo "Remove $(instance_extra_list "$name") from instance $name"
       fi
       if [ "$INSTALL_UPGRADE" = 1 ]; then
         plan_add todo "Restart instance $name on the new version"

@@ -774,7 +774,7 @@ function parseAuthCookieSuffix(raw: string | undefined): string {
   return value;
 }
 
-function resolveOIDCConfig(): OIDCConfig | undefined {
+function resolveOIDCConfig({ standalone }: { standalone: boolean }): OIDCConfig | undefined {
   const issuerUrl = getEnv('OIDC_ISSUER_URL');
   const clientId = getEnv('OIDC_CLIENT_ID');
   const clientSecret = getEnv('OIDC_CLIENT_SECRET');
@@ -811,6 +811,7 @@ function resolveOIDCConfig(): OIDCConfig | undefined {
       getEnv('OIDC_ADMIN_ROLE_VALUE', { defaultValue: DEFAULT_OIDC_ADMIN_ROLE_VALUE }) ?? DEFAULT_OIDC_ADMIN_ROLE_VALUE,
     OIDC_SCOPES: parseOidcScopes(getEnv('OIDC_SCOPES', { defaultValue: DEFAULT_OIDC_SCOPES }) ?? DEFAULT_OIDC_SCOPES),
     OIDC_ALLOWED_EMAILS: parseOidcAllowedEmails(getEnv('OIDC_ALLOWED_EMAILS')),
+    OIDC_REQUIRE_VERIFIED_EMAIL: standalone,
   };
 }
 
@@ -851,9 +852,11 @@ export interface OIDCConfig {
    * Optional allowlist of emails that may sign in. Env: `OIDC_ALLOWED_EMAILS`.
    * Comma-separated exact addresses and/or `*` globs (e.g. `alice@acme.com,*@partner.com`).
    * Matching is case-insensitive against the ID token `email` claim. Empty = unrestricted when distributed;
-   * standalone requires exactly one literal address, the owner's.
+   * standalone requires exactly one address.
    */
   OIDC_ALLOWED_EMAILS: string[];
+  /** Turn away tokens whose `email_verified` claim is false. On for standalone, where the email is the only identity check. */
+  OIDC_REQUIRE_VERIFIED_EMAIL: boolean;
 }
 
 export interface SharedServerConfiguration {
@@ -1678,7 +1681,7 @@ const shared: SharedServerConfiguration = {
   PORT: port,
   HOST: host,
   REQUIRE_AUTH: parseBoolean({ envKey: 'REQUIRE_AUTH', raw: getEnv('REQUIRE_AUTH'), defaultValue: true }),
-  OIDC: resolveOIDCConfig(),
+  OIDC: resolveOIDCConfig({ standalone }),
   AUTH_COOKIE_SUFFIX: parseAuthCookieSuffix(getEnv('AUTH_COOKIE_SUFFIX')),
   EXECUTOR_ID: standalone ? LOCAL_EXECUTOR_ID : randomAlphanumeric(6),
   MODEL_CATALOG_PATH: resolveOptionalPathEnv('MODEL_CATALOG_PATH'),
@@ -2447,37 +2450,35 @@ export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement
   );
 }
 
-export interface SingleOwnerSignIn {
+/** Same shape the installer accepts for the owner's email. */
+const OWNER_EMAIL_SHAPE = /^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+
+interface SingleOwnerSignIn {
   /** True for `STANDALONE=true`. */
   standalone: boolean;
   oidc: Pick<OIDCConfig, 'OIDC_ALLOWED_EMAILS'> | undefined;
 }
 
-/**
- * A standalone instance has exactly one account, the owner, because memory and history are not
- * separated between accounts. Sign-in must therefore be limited to one literal address
- * (`OIDC_ALLOWED_EMAILS`); distributed mode keeps its multi-user allowlist. Runs at load, so the
- * server never starts with a wider list.
- */
+/** Standalone allows one literal address (distributed mode keeps its allowlist); runs at load, before the server starts. */
 export function assertSingleOwnerSignIn({ standalone, oidc }: SingleOwnerSignIn): void {
   if (!standalone || oidc === undefined) {
     return;
   }
   const allowed = oidc.OIDC_ALLOWED_EMAILS;
   const owner = allowed[0];
-  if (allowed.length === 1 && owner !== undefined && owner.includes('@') && !owner.includes('*')) {
+  if (allowed.length === 1 && owner !== undefined && OWNER_EMAIL_SHAPE.test(owner) && owner.length <= 254) {
     return;
   }
   const fix = "Set OIDC_ALLOWED_EMAILS to the owner's email address only.";
   if (allowed.length === 0) {
-    throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS must hold the email address of the owner. ${fix}`);
+    throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS is empty; it must hold one address. ${fix}`);
   }
   if (allowed.length > 1) {
     throw new Error(
-      `Refusing to start: OIDC_ALLOWED_EMAILS lists ${String(allowed.length)} addresses, but a standalone instance has exactly one account. ${fix}`,
+      `Refusing to start: OIDC_ALLOWED_EMAILS lists ${String(allowed.length)} addresses; it must hold one. ${fix}`,
     );
   }
-  throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS must be one exact email address, not a pattern. ${fix}`);
+  throw new Error(`Refusing to start: OIDC_ALLOWED_EMAILS must be one email address, not a pattern. ${fix}`);
 }
 
 assertSingleOwnerSignIn({ standalone: configuration.STANDALONE, oidc: configuration.OIDC });

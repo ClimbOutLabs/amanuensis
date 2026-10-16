@@ -53,7 +53,7 @@ assert_single_owner() {
 }
 
 test_user_commands_and_options_are_gone() {
-  t_begin "add-user, remove-user, list-users, --role and --demo-user are refused, and and the help no longer mentions them"
+  t_begin "add-user, remove-user, list-users, --role and --demo-user are refused, and the help no longer mentions them"
   sandbox_new
   install_machine
   local command
@@ -93,17 +93,16 @@ test_install_rerun_removes_extra_users() {
   recreated=$(log_count "force-recreate")
   run_install --dry-run
   assert_rc 0
-  assert_flat_contains "$OUT" "Remove the extra sign-in users of instance main"
+  assert_flat_contains "$OUT" "Remove judge1@demo.invalid, judge2@demo.invalid from instance main"
   assert_contains "$(registry)" "user_judge1="
   assert_contains "$(dex_env)" "DEX_USER_PASSWORD_HASH_JUDGE1"
   run_install --yes
   assert_rc 0
   assert_eq "$(removal_lines)" 1 "one plain line"
-  assert_flat_contains "$OUT" "Removed judge1@demo.invalid, judge2@demo.invalid from instance main: an instance has one account, the owner's"
-  assert_not_contains "$OUT" "instance of their own"
+  assert_eq "$(printf '%s\n' "$OUT" | grep '^Removed ')" "Removed judge1@demo.invalid, judge2@demo.invalid from instance main." "nothing after the names"
   assert_not_contains "$OUT$ERR" 'legacyhash'
   assert_single_owner
-  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "removed extra sign-in users from instance main: judge1@demo.invalid, judge2@demo.invalid"
+  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "removed judge1@demo.invalid, judge2@demo.invalid from instance main; an upgrade rollback restores the database but not these accounts"
   assert_not_contains "$(cat "$AMAN_HOME/state/install.log")" 'legacyhash'
   if [ "$(log_count "force-recreate")" -gt "$recreated" ]; then t_pass; else t_fail "the instance was not recreated"; fi
   run_install --yes
@@ -124,7 +123,41 @@ test_upgrade_removes_extra_users() {
   assert_eq "$(removal_lines)" 1
   assert_flat_contains "$OUT" "Removed judge1@demo.invalid, judge2@demo.invalid from instance main"
   assert_single_owner
-  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "removed extra sign-in users from instance main"
+  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "removed judge1@demo.invalid, judge2@demo.invalid from instance main"
+  sandbox_drop
+}
+
+test_upgrade_recreates_an_instance_that_lost_users() {
+  t_begin "an upgrade force-recreates an instance that lost users, and only that one"
+  sandbox_new
+  install_machine
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_eq "$(log_count "force-recreate")" 0 "a plain upgrade does not force a recreate"
+  sandbox_drop
+  sandbox_new
+  install_machine
+  make_legacy_users
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_log_has "up -d --force-recreate"
+  sandbox_drop
+}
+
+test_a_late_allowed_emails_line_is_removed() {
+  t_begin "an allowed-emails line below the managed block is counted and removed, so the managed value is the one Compose reads"
+  sandbox_new
+  install_machine
+  printf 'MY_OWN_SETTING=keep-me\nOIDC_ALLOWED_EMAILS=%s,late@demo.invalid\n' "$OWNER" >>"$AMAN_HOME/instances/main/.env"
+  run_install --dry-run
+  assert_flat_contains "$OUT" "Remove late@demo.invalid from instance main"
+  run_install instance refresh main
+  assert_rc 0
+  assert_eq "$(printf '%s\n' "$OUT" | grep '^Removed ')" "Removed late@demo.invalid from instance main."
+  assert_single_owner
+  assert_contains "$(cat "$AMAN_HOME/instances/main/.env")" "MY_OWN_SETTING=keep-me"
   sandbox_drop
 }
 
@@ -144,7 +177,7 @@ test_refresh_removes_extra_users() {
 }
 
 test_leftover_hashes_without_emails() {
-  t_begin "a password hash left without a record or an allowed email is removed with a line that names no email"
+  t_begin "a password hash left without a record or an allowed email is removed with a line that names the user"
   sandbox_new
   install_machine
   printf '%s\n' '# >>> sign-in users added with install.sh instance add-user: one password hash each, kept by the installer' \
@@ -152,9 +185,9 @@ test_leftover_hashes_without_emails() {
   run_install instance refresh main
   assert_rc 0
   assert_eq "$(removal_lines)" 1
-  assert_flat_contains "$OUT" "Removed extra sign-in passwords from instance main"
+  assert_eq "$(printf '%s\n' "$OUT" | grep '^Removed ')" "Removed ghost from instance main."
   assert_single_owner
-  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "removed extra sign-in passwords from instance main"
+  assert_contains "$(cat "$AMAN_HOME/state/install.log")" "removed ghost from instance main"
   sandbox_drop
 }
 
@@ -199,6 +232,8 @@ test_user_commands_and_options_are_gone
 test_a_new_instance_has_one_user
 test_install_rerun_removes_extra_users
 test_upgrade_removes_extra_users
+test_upgrade_recreates_an_instance_that_lost_users
+test_a_late_allowed_emails_line_is_removed
 test_refresh_removes_extra_users
 test_leftover_hashes_without_emails
 test_a_hand_edited_allowlist_is_cut_back_to_the_owner

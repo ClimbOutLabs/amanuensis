@@ -135,7 +135,7 @@ The hosted default (`STANDALONE=false`; standalone always needs login). Do **not
     | `OIDC_USER_ROLE_CLAIM` | No (default `groups`) | Claim inspected for admin membership |
     | `OIDC_ADMIN_ROLE_VALUE` | No (default `admin`) | Exact string that grants `admin` (case-sensitive) |
     | `OIDC_SCOPES` | No (default `openid,profile,email`) | Scopes for the authorize request |
-    | `OIDC_ALLOWED_EMAILS` | No | Comma-separated allowlist of exact emails and/or `*` globs (e.g. `alice@acme.com,*@partner.com`). When set, only ID tokens whose `email` claim matches an entry may sign in. Empty / unset = unrestricted. Matching is case-insensitive. A standalone server (`STANDALONE=true`, which includes the installer and `npx amanuensis`) has one account, so it refuses to start unless this holds exactly one exact address, with no `*`. |
+    | `OIDC_ALLOWED_EMAILS` | No | Comma-separated allowlist of exact emails and/or `*` globs (e.g. `alice@acme.com,*@partner.com`). When set, only ID tokens whose `email` claim matches an entry may sign in. Empty / unset = unrestricted. Matching is case-insensitive. Standalone (`STANDALONE=true`) requires exactly one address, with no `*`, and a login provider only the owner can sign in to. |
 
     How you pass these depends on how you run TrueForge:
 

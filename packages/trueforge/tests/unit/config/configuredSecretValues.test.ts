@@ -33,6 +33,7 @@ describe('getConfiguredSecretValues', () => {
           OIDC_USER_ROLE_CLAIM: 'email',
           OIDC_ADMIN_ROLE_VALUE: 'owner@example.invalid',
           OIDC_ALLOWED_EMAILS: ['owner@example.invalid'],
+          OIDC_REQUIRE_VERIFIED_EMAIL: false,
           OIDC_SCOPES: ['openid'],
         },
       }),

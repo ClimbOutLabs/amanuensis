@@ -1,8 +1,4 @@
-/**
- * The sign-in model of an installed instance, loaded from the settings the installer writes to the instance .env:
- * the role claim is the email, the owner's email is the admin value, and the owner is the only allowed email. An
- * instance has one account, so nobody else signs in, whatever the login service vouches for.
- */
+/** Sign-in under the settings the installer writes: the owner is the only allowed email. */
 import type { OIDCConfig } from '../../../src/config';
 
 const OWNER = 'owner@demo.example';
@@ -89,6 +85,33 @@ describe('owner sign-in with the installer settings', () => {
     }
   });
 
+  it('keeps the owner one identity whatever subject the login service gives the token', async () => {
+    const { claims, identity, oidc } = await loadAuth(INSTALLER_ENV);
+    const context = claims.toRequestContext({
+      claims: { sub: 'another-subject', email: OWNER },
+      config: oidc,
+      user_credential: 'jwt',
+    });
+    expect(context.subject.id).toBe(OWNER);
+    expect(identity.hasAdminRole(context)).toBe(true);
+  });
+
+  it('turns away a token whose email is not verified', async () => {
+    const { claims, oidc, EmailNotAllowedError } = await loadAuth(INSTALLER_ENV);
+    expect(oidc.OIDC_REQUIRE_VERIFIED_EMAIL).toBe(true);
+    expect(() =>
+      claims.toRequestContext({
+        claims: { email: OWNER, email_verified: false },
+        config: oidc,
+        user_credential: 'jwt',
+      }),
+    ).toThrow(EmailNotAllowedError);
+    expect(
+      claims.toRequestContext({ claims: { email: OWNER, email_verified: true }, config: oidc, user_credential: 'jwt' })
+        .subject.id,
+    ).toBe(OWNER);
+  });
+
   it('turns away a token that names a subject but carries no email', async () => {
     const { claims, oidc, EmailNotAllowedError } = await loadAuth(INSTALLER_ENV);
     for (const tokenClaims of [{ sub: 'owner' }, { sub: OWNER }, { email: '' }, { email: 42 }]) {
@@ -100,18 +123,18 @@ describe('owner sign-in with the installer settings', () => {
 
   it('refuses to start with a second email, so a left-over member cannot sign in', async () => {
     await expect(loadAuth({ ...INSTALLER_ENV, OIDC_ALLOWED_EMAILS: `${OWNER},${GUEST}` })).rejects.toThrow(
-      /lists 2 addresses.*exactly one account/,
+      /lists 2 addresses; it must hold one/,
     );
   });
 
   it('refuses to start with a pattern or without an allowed email', async () => {
     await expect(loadAuth({ ...INSTALLER_ENV, OIDC_ALLOWED_EMAILS: '*@demo.example' })).rejects.toThrow(
-      /one exact email address/,
+      /must be one email address/,
     );
     const withoutAllowed = Object.fromEntries(
       Object.entries(INSTALLER_ENV).filter(([key]) => key !== 'OIDC_ALLOWED_EMAILS'),
     );
-    await expect(loadAuth(withoutAllowed)).rejects.toThrow(/must hold the email address of the owner/);
+    await expect(loadAuth(withoutAllowed)).rejects.toThrow(/is empty; it must hold one address/);
   });
 
   it('asks the login service for the email claim', async () => {

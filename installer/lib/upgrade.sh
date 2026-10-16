@@ -73,15 +73,16 @@ upgrade_prepare() {
 
 # Records the new release and restarts everything on it; from here a failure restores the backup and the old images.
 upgrade_switch() {
-  local name
+  local name rc
   UPGRADE_STAGE=applying
   release_write
   machine_up "$REL_STT_TAG"
   for name in $(reg_names); do
     if instance_sandbox_wanted "$name"; then sandbox_ensure "$name" refresh; fi
-    instance_enforce_single_owner "$name" || true
+    rc=
+    if instance_enforce_single_owner "$name"; then rc=recreate; fi
     instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
-    instance_up "$name" || exit 1
+    instance_up "$name" ${rc:+"$rc"} || exit 1
   done
   UPGRADE_STAGE=finished
   log_event "upgrade to $REL_APP_TAG"

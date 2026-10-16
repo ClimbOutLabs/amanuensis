@@ -19,6 +19,7 @@ function config(overrides: Partial<OIDCConfig> = {}): OIDCConfig {
     OIDC_ADMIN_ROLE_VALUE: 'harness-admins',
     OIDC_SCOPES: ['openid', 'profile', 'email', 'groups'],
     OIDC_ALLOWED_EMAILS: [],
+    OIDC_REQUIRE_VERIFIED_EMAIL: false,
     ...overrides,
   };
 }

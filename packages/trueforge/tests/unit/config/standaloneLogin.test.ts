@@ -115,12 +115,13 @@ describe('standalone login configuration', () => {
   });
 
   it.each([
-    ['no allowed email', undefined, /OIDC_ALLOWED_EMAILS must hold the email address of the owner/],
-    ['an empty list', ' ', /OIDC_ALLOWED_EMAILS must hold the email address of the owner/],
-    ['two addresses', 'owner@example.invalid,guest@example.invalid', /lists 2 addresses.*exactly one account/],
-    ['a pattern', '*@example.invalid', /one exact email address, not a pattern/],
+    ['no allowed email', undefined, /OIDC_ALLOWED_EMAILS is empty; it must hold one address/],
+    ['an empty list', ' ', /OIDC_ALLOWED_EMAILS is empty; it must hold one address/],
+    ['two addresses', 'owner@example.invalid,guest@example.invalid', /lists 2 addresses; it must hold one/],
+    ['a pattern', '*@example.invalid', /must be one email address, not a pattern/],
     ['a pattern next to the owner', 'owner@example.invalid,*@example.invalid', /lists 2 addresses/],
-    ['text that is not an address', 'owner', /one exact email address/],
+    ['text that is not an address', 'owner', /must be one email address/],
+    ['an address with a space', 'ow ner@example.invalid', /must be one email address/],
   ])('refuses to start with %s', async (_label, allowed, message) => {
     await expect(
       loadConfig(

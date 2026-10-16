@@ -686,8 +686,7 @@ describe('instance settings file', () => {
         ],
       });
       assert.equal(check.state, 'warn');
-      assert.match(check.detail, /more than the owner can sign in: a@x\.invalid, b@x\.invalid\./);
-      assert.match(check.detail, /one account/);
+      assert.equal(check.detail, 'More than the owner can sign in: a@x.invalid, b@x.invalid.');
       assert.equal(check.fix, fixCommand);
       assert.doesNotMatch(world.json().stdout, /SENTINEL/);
     });
@@ -714,9 +713,15 @@ describe('instance settings file', () => {
     it('warns about left-over password hashes even when the emails are already the owner only', () => {
       const check = setUp({ allowed: OWNER, hashes: ["DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'"] });
       assert.equal(check.state, 'warn');
-      assert.match(check.detail, /1 extra sign-in password\(s\)/);
+      assert.equal(check.detail, 'More than the owner can sign in: judge1.');
       assert.equal(check.fix, fixCommand);
       assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('reads every allowed-emails line, since Compose takes the last one', () => {
+      const check = setUp({ allowed: `${OWNER}\nOIDC_ALLOWED_EMAILS=late@x.invalid` });
+      assert.equal(check.state, 'warn');
+      assert.equal(check.detail, 'More than the owner can sign in: late@x.invalid.');
     });
 
     it('no longer mentions members or add-user', () => {

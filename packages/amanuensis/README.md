@@ -26,15 +26,14 @@ Amanuensis always requires sign-in and refuses to start without it. Set these be
 export OIDC_ISSUER_URL=https://login.example.com/dex   # http is accepted only for localhost, 127.0.0.1, ::1
 export OIDC_CLIENT_ID=<client id>
 export OIDC_CLIENT_SECRET=<client secret>
-export OIDC_ALLOWED_EMAILS=<your email>                # exactly one address: an instance has one account, yours
+export OIDC_ALLOWED_EMAILS=<your email>                # exactly one address, no wildcard
 ```
 
 Register `<public url>/api/v1/auth/callback` as the redirect URI, where the public URL is
 `http://localhost:8790` unless you set `PUBLIC_BASE_URL` (an origin with no path; use `https` behind a
-reverse proxy). Amanuensis has one account per instance, because memory and history are not separated
-between accounts: it refuses to start unless `OIDC_ALLOWED_EMAILS` holds exactly one address, with no
-wildcard. So that you can change server settings,
-also set `OIDC_USER_ROLE_CLAIM=email` and `OIDC_ADMIN_ROLE_VALUE=<your email>`. Running several instances on one
+reverse proxy). It refuses to start unless `OIDC_ALLOWED_EMAILS` holds exactly one address, and the login
+provider must be one only you can sign in to. So that you can change server settings, also set
+`OIDC_USER_ROLE_CLAIM=email` and `OIDC_ADMIN_ROLE_VALUE=<your email>`. Running several instances on one
 hostname? Give each its own `AUTH_COOKIE_SUFFIX`. From a repository checkout, `pnpm dev:login` starts a
 local Dex in Docker and prints these lines. See the authentication docs for details.
 

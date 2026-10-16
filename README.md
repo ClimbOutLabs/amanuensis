@@ -157,7 +157,7 @@ The untracked `packages/trueforge/.env` file created during setup is required by
 
 ## Security boundaries and limitations
 
-- Standalone mode requires OIDC login and refuses to start without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`. An http issuer is accepted only on a loopback host. It has one account, the owner: it also refuses to start unless `OIDC_ALLOWED_EMAILS` holds exactly one email address.
+- Standalone mode requires OIDC login and refuses to start without `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`. An http issuer is accepted only on a loopback host. It also refuses to start unless `OIDC_ALLOWED_EMAILS` holds exactly one email address.
 - Hosted mode also uses a shared admin identity when OIDC is unset. Configure OIDC (the Compose `login` profile, or your own identity provider) and appropriate network controls before any shared or internet-facing deployment.
 - Tool approval and sandboxing reduce risk; they are not an unlimited safety boundary. Review enabled capabilities, provider trust, egress policy, and approval requests.
 - Model credentials stay in the harness. Built-in MCP access from Code Mode is bridged back through the harness so its stored MCP tokens do not enter the sandbox; do not assume the same boundary for arbitrary custom code, tools, or integrations. Administrators remain responsible for secret storage, transport security, and provider configuration.

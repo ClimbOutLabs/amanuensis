@@ -31,7 +31,7 @@ pnpm install --frozen-lockfile
 cp packages/trueforge/.env.example packages/trueforge/.env
 ```
 
-Login is mandatory in standalone mode, and the server refuses to start without it. In a second terminal run `pnpm dev:login`: it starts a local [Dex](https://dexidp.io) identity provider in Docker and prints the `OIDC_*` lines (and the account to sign in with). Add them to `packages/trueforge/.env`, together with `PUBLIC_BASE_URL=http://localhost:3000`. Standalone has one account, so `OIDC_ALLOWED_EMAILS` must hold exactly one address; the lines it prints already do. Any other OIDC provider works too; see [Setup Login](/authentication/overview). Then start the app:
+Login is mandatory in standalone mode, and the server refuses to start without it. In a second terminal run `pnpm dev:login`: it starts a local [Dex](https://dexidp.io) identity provider in Docker and prints the `OIDC_*` lines (and the account to sign in with). Add them to `packages/trueforge/.env`, together with `PUBLIC_BASE_URL=http://localhost:3000`. Standalone needs `OIDC_ALLOWED_EMAILS` to hold exactly one address; the lines it prints do. Any other OIDC provider works too; see [Setup Login](/authentication/overview). Then start the app:
 
 ```bash
 pnpm standalone:dev

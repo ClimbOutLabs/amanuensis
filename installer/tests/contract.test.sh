@@ -128,7 +128,7 @@ test_token_factory_settings_match_the_server() {
 }
 
 test_sign_in_settings_match_the_server() {
-  t_begin "the installer writes the sign-in settings the server reads, with the owner as the one allowed email the server demands"
+  t_begin "the installer writes the sign-in settings the server reads, and the owner as its one allowed email"
   local repo=$INSTALLER_DIR/.. config key out allowed
   config=$(cat "$repo/packages/trueforge/src/config.ts")
   for key in OIDC_ALLOWED_EMAILS OIDC_ADMIN_ROLE_VALUE OIDC_USER_ROLE_CLAIM OIDC_USER_REFERENCE_CLAIM; do
