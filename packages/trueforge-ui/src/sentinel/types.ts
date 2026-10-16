@@ -14,6 +14,8 @@
  * server sent an explicit `tier`.
  */
 
+import { toolInvocationKey } from '@truefoundry/assistant-ui-runtime';
+
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
 export const TOOL_TIERS = [1, 2, 3] as const;
 
@@ -88,11 +90,20 @@ export type SentinelApprovalInfo = {
   eventId: string | null;
   /** Thread that owns the call; a sub-agent's calls carry its own thread id. */
   threadId: string | null;
+  /** Event that requested the tool call; tells apart two calls that reuse the same call id. */
+  sourceEventId?: string | undefined;
   /** Present only for an action a scheduled run held; such a card never pauses the chat. */
   held?: HeldActionInfo | undefined;
   /** Present only for an action a scheduled run could not save for the owner, and why. */
   notSaved?: NotSavedReason | undefined;
 };
+
+/** Same key the runtime gives the chat part, so a call id a model reuses never lands on an earlier call's card. */
+export function approvalKey(info: SentinelApprovalInfo): string {
+  return info.sourceEventId === undefined
+    ? info.toolCallId
+    : toolInvocationKey({ sourceEventId: info.sourceEventId, toolCallId: info.toolCallId });
+}
 
 /** Why a scheduled run could not save an action that needed the owner's OK. */
 export type NotSavedReason = 'too_many' | 'helper_agent';
@@ -253,11 +264,13 @@ function parseApprovalInfo(
   if (tier === undefined || card === undefined || toolCallId === undefined) return undefined;
   const held = parseHeldInfo(ref);
   const notSaved = parseNotSaved(ref);
+  const sourceEventId = optionalString(ref, 'source_event_id') ?? optionalString(ref, 'sourceEventId');
   return {
     toolCallId,
     tier,
     card,
     ...origin,
+    ...(sourceEventId === undefined ? {} : { sourceEventId }),
     ...(held === undefined ? {} : { held }),
     ...(notSaved === undefined ? {} : { notSaved }),
   };
@@ -313,7 +326,7 @@ export function extractSentinelSessionContext(events: unknown[]): SentinelSessio
   const approvals = new Map<string, SentinelApprovalInfo>();
   const answers: Record<string, ApprovalAnswer> = {};
   for (const event of events) {
-    for (const approval of extractSentinelFromEvent(event)) approvals.set(approval.toolCallId, approval);
+    for (const approval of extractSentinelFromEvent(event)) approvals.set(approvalKey(approval), approval);
     for (const [toolCallId, answer] of answersFromEvent(event)) answers[toolCallId] = answer;
   }
   return { approvals: [...approvals.values()], answers };

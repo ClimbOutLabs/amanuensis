@@ -7,7 +7,7 @@ import { useAuiState } from '../assistant-ui.js';
 
 import { useOptionalSentinelApi } from './SentinelApiContext.js';
 import { subscribeToSentinelEvents } from './sentinelEvents.js';
-import type { ApprovalAnswer, SentinelApprovalInfo } from './types.js';
+import { approvalKey, type ApprovalAnswer, type SentinelApprovalInfo } from './types.js';
 
 export type SentinelState = {
   /** Tiered approval info the server attached to a tool call, if any. */
@@ -21,6 +21,21 @@ export type SentinelState = {
   /** Remembers an answer given in this tab until a reload reads it back from the server. */
   recordAnswer: (toolCallId: string, answer: ApprovalAnswer) => void;
 };
+
+/**
+ * The card for a chat part. A part id carries its source event, so it matches exactly or falls back to a card
+ * filed without one; a bare id (no event known) takes the newest card for that call id.
+ */
+function findApproval(
+  approvals: ReadonlyMap<string, SentinelApprovalInfo>,
+  partToolCallId: string,
+): SentinelApprovalInfo | undefined {
+  const exact = approvals.get(partToolCallId);
+  if (exact !== undefined) return exact;
+  const rawId = toolInvocationRawId(partToolCallId);
+  if (rawId !== partToolCallId) return approvals.get(rawId);
+  return [...approvals.values()].findLast(info => info.toolCallId === rawId);
+}
 
 const SentinelStateContext = createContext<SentinelState | null>(null);
 
@@ -37,7 +52,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
   const [answers, setAnswers] = useState<Map<string, ApprovalAnswer>>(new Map());
 
   useEffect(() => {
-    return subscribeToSentinelEvents(info => setApprovals(previous => new Map(previous).set(info.toolCallId, info)));
+    return subscribeToSentinelEvents(info => setApprovals(previous => new Map(previous).set(approvalKey(info), info)));
   }, []);
 
   useEffect(() => {
@@ -52,7 +67,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
         // A live card that arrived while this read was in flight is newer than what it saw, so it wins:
         // replacing the map would turn a card the user is looking at back into the generic bar.
         setApprovals(previous => {
-          const merged = new Map(context.approvals.map(info => [info.toolCallId, info]));
+          const merged = new Map(context.approvals.map(info => [approvalKey(info), info]));
           for (const [toolCallId, info] of previous) merged.set(toolCallId, info);
           return merged;
         });
@@ -70,13 +85,13 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
 
   const state = useMemo<SentinelState>(
     () => ({
-      // Entries are keyed by the server tool call id; chat parts pass the runtime's invocation key.
-      approvalFor: toolCallId => approvals.get(toolInvocationRawId(toolCallId)),
+      // Entries are keyed like the runtime's invocation key; chat parts pass that key.
+      approvalFor: toolCallId => findApproval(approvals, toolCallId),
       heldFor: toolCallId => {
-        const info = approvals.get(toolInvocationRawId(toolCallId));
+        const info = findApproval(approvals, toolCallId);
         return info?.held === undefined ? undefined : info;
       },
-      wasNotSaved: toolCallId => approvals.get(toolInvocationRawId(toolCallId))?.notSaved !== undefined,
+      wasNotSaved: toolCallId => findApproval(approvals, toolCallId)?.notSaved !== undefined,
       answerFor: toolCallId => answers.get(toolInvocationRawId(toolCallId)),
       recordAnswer: (toolCallId, answer) =>
         setAnswers(previous => new Map(previous).set(toolInvocationRawId(toolCallId), answer)),

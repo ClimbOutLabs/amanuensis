@@ -279,6 +279,20 @@ describe('extractSentinelSessionContext', () => {
     expect(context.approvals[0]?.card.plain_what).toBe('Second');
     expect(context.approvals[0]?.tier).toBe(3);
   });
+
+  it('keeps a call id that two source events reuse as two records', () => {
+    const context = extractSentinelSessionContext([
+      {
+        type: 'tool.approval_required',
+        tool_calls: [{ id: 'call-1', source_event_id: 'evt-1', tier: 3, tier3_card: { plain_what: 'First' } }],
+      },
+      {
+        type: 'tool.approval_required',
+        tool_calls: [{ id: 'call-1', source_event_id: 'evt-2', tier: 3, tier3_card: { plain_what: 'Second' } }],
+      },
+    ]);
+    expect(context.approvals.map(info => info.card.plain_what)).toEqual(['First', 'Second']);
+  });
 });
 
 describe('held actions', () => {
