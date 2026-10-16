@@ -334,9 +334,9 @@ Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD
 Set up the sandbox now?=>y"
   assert_eq "$RC" 0
-  assert_contains "$OUT" "The sandbox needs these steps as root"
-  assert_contains "$OUT" "setup-disks.sh setup /var/lib/aman-slots/<instance> 16 4"
-  assert_not_contains "$OUT" "apparmor_parser" "only the missing part is listed"
+  assert_flat_contains "$OUT" "The sandbox needs administrator rights on this computer."
+  assert_flat_contains "$OUT" "sets up 4 disks of up to 16 GB"
+  assert_not_contains "$OUT" "loads again at every start" "only the missing part is listed"
   assert_log_has "--fix --yes"
   sandbox_drop
 }
@@ -353,7 +353,7 @@ Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD
 Set up the sandbox now?=>n"
   assert_eq "$RC" 1
-  assert_contains "$OUT" "were not approved"
+  assert_flat_contains "$OUT$ERR" "administrator rights that were not given"
   assert_log_lacks "--fix --yes"
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
   sandbox_drop
