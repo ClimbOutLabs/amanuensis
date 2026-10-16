@@ -92,7 +92,7 @@ async function resolveWithJudge(judge: KnowledgeRelevanceJudge | undefined) {
     { text: 'Negotiations took three months.', title: 'Exit story' },
   ]);
   const sourceState = createInternalSourceState();
-  const block = await resolvePersonaKnowledgeBlock({
+  const result = await resolvePersonaKnowledgeBlock({
     personaId: 'zara',
     tenantId: 'default',
     turnInput: [userMessage(QUESTION)],
@@ -102,7 +102,7 @@ async function resolveWithJudge(judge: KnowledgeRelevanceJudge | undefined) {
     judge,
     sourceState,
   });
-  return { block, sourceState };
+  return { block: result?.block, sourceState };
 }
 
 describe('resolvePersonaKnowledgeBlock near-miss wiring', () => {
@@ -143,7 +143,11 @@ describe('resolvePersonaKnowledgeBlock near-miss wiring', () => {
   });
 
   it('records answered when the judge keeps a passage, leaving web_search alone', async () => {
-    const { block, sourceState } = await resolveWithJudge(async () => [0]);
+    // Both seeded chunks embed identically, so their order ties: keep the
+    // sale passage by content, not by position.
+    const { block, sourceState } = await resolveWithJudge(async (_question, candidates) =>
+      candidates.flatMap((candidate, index) => (candidate.text.includes('twenty million') ? [index] : [])),
+    );
 
     expect(block).toContain('twenty million dollars');
     expect(sourceState.libraryConsulted).toBe(true);

@@ -45,8 +45,10 @@ RUN apt-get update \
 # nothing is installed at runtime.
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 
-# Sandbox layout + non-root execution user (uid/gid 65532, matching the
-# driver's ownership handoff). The driver bind-mounts per-run dirs over these.
+# Sandbox layout + default non-root user (uid/gid 65532). The driver runs the
+# container as this user only when the server is root; otherwise it passes the
+# server's numeric uid:gid, so nothing may rely on this account existing at run
+# time. The driver bind-mounts per-run dirs over these.
 RUN groupadd -g 65532 sandbox \
       && useradd -u 65532 -g 65532 -m -s /bin/sh sandbox \
       && mkdir -p /ingress /scratch /egress \

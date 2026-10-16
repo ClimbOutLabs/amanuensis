@@ -13,6 +13,7 @@ import {
   LLMUserMessageSchema,
   RegisteredCommandExecutionSchema,
 } from '../llm/LLMTypes';
+import { Tier3CardSchema, TierSchema } from '../permissions/tier';
 import { CurrentContextUsageSchema } from '../runtime/contextUsage';
 
 /**
@@ -79,9 +80,12 @@ export const AgentApprovalDecisionAllowSchema = z
   .object({
     status: z.literal('allow').describe('Allow the pending tool call(s).'),
     scope: z
-      .enum(['once', 'chat'])
+      .enum(['once', 'chat', 'always'])
       .optional()
-      .describe('Omitted or once allows only this invocation; chat grants this exact tool for the current session.'),
+      .describe(
+        'Omitted or once allows only this invocation; chat grants this exact tool for the current session; ' +
+          'always allows this read-only connector tool for the caller until revoked.',
+      ),
   })
   .openapi('ApprovalAllow');
 
@@ -232,7 +236,7 @@ const AutomaticAdmissionProvenanceSchema = z.object({
 const UserApprovalAdmissionProvenanceSchema = z.object({
   source: z.literal('user_approval').describe('The user supplied this invocation decision.'),
   decision: z.enum(['allow', 'deny']),
-  scope: z.enum(['once', 'chat']).optional(),
+  scope: z.enum(['once', 'chat', 'always']).optional(),
 });
 const ChatGrantAdmissionProvenanceSchema = z.object({
   source: z.literal('chat_grant').describe('A previously recorded exact chat grant admitted this invocation.'),
@@ -503,16 +507,23 @@ export const ContextCompactionEventSchema = z
       .describe(
         'applied: context was overwritten with the summary. skipped_invalid: the model produced a malformed ' +
           'summary and the attempt was discarded. skipped_blocked: the turn was cancelled before the attempt ' +
-          'could complete. truncated_fallback: the summary was invalid so old turns were truncated instead.',
+          'could complete. truncated_fallback: no usable summary was produced, so old turns were truncated instead.',
       ),
     reason: z
-      .enum(['missing_block', 'missing_section', 'duplicate_section', 'self_referential', 'over_length'])
+      .enum([
+        'missing_block',
+        'missing_section',
+        'duplicate_section',
+        'self_referential',
+        'over_length',
+        'summarizer_failed',
+        'request_too_large',
+      ])
       .optional()
       .describe(
-        'Rejection reason when outcome is skipped_invalid. missing_block: no complete <summary> block. ' +
-          'missing_section: a required section is absent. duplicate_section: a section appears more than once. ' +
-          'self_referential: the goal/user_goal describes the summarization request instead of the user objective. ' +
-          'over_length: summary exceeds bounded length.',
+        'Why no summary was applied. missing_block, missing_section, duplicate_section, self_referential, ' +
+          'over_length: the summary was invalid. summarizer_failed: the summarization call failed. ' +
+          'request_too_large: the summarization request could not fit the model context.',
       ),
   })
   .openapi('ContextCompactionEvent');
@@ -618,13 +629,24 @@ export const ToolCallRefSchema = z
   })
   .openapi('ToolCallRef');
 
+export const ApprovalToolCallRefSchema = z
+  .object({
+    ...ToolCallRefSchema.shape,
+    tier: TierSchema.optional().describe('Permission tier of the call; absent when the call was not classified.'),
+    tier3_card: z
+      .union([Tier3CardSchema, z.null()])
+      .optional()
+      .describe('Plain-language approval card for a Tier 2 or Tier 3 call, or null.'),
+  })
+  .openapi('ApprovalToolCallRef');
+
 export const ToolApprovalRequiredEventSchema = z
   .object({
     type: z.literal(EventType.TOOL_APPROVAL_REQUIRED).describe('One or more tool calls need human approval.'),
     id: EventIdSchema,
     created_at: z.string().describe('ISO 8601 event timestamp.'),
     thread_id: z.string().describe('Thread that owns the pending tool calls.'),
-    tool_calls: z.array(ToolCallRefSchema).describe('Tool calls waiting for approval.'),
+    tool_calls: z.array(ApprovalToolCallRefSchema).describe('Tool calls waiting for approval.'),
   })
   .openapi('ToolApprovalRequiredEvent');
 

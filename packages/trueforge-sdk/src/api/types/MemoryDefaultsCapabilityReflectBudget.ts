@@ -2,9 +2,8 @@
 
 /** `MEMORY_REFLECT_BUDGET` as resolved. */
 export const MemoryDefaultsCapabilityReflectBudget = {
-    Low: "low",
-    Mid: "mid",
-    High: "high",
-} as const;
-export type MemoryDefaultsCapabilityReflectBudget =
-    (typeof MemoryDefaultsCapabilityReflectBudget)[keyof typeof MemoryDefaultsCapabilityReflectBudget];
+        Low: "low",
+        Mid: "mid",
+        High: "high"
+    } as const;
+export type MemoryDefaultsCapabilityReflectBudget = typeof MemoryDefaultsCapabilityReflectBudget[keyof typeof MemoryDefaultsCapabilityReflectBudget];

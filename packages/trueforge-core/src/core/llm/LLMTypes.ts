@@ -80,6 +80,14 @@ const ToolEffectHintsSchema = z.object({
     .describe('Server-classified effect of this tool call.'),
 });
 
+export const MapsHostsSchema = z
+  .object({
+    geocoder: z.string(),
+    router: z.string(),
+    tile: z.string(),
+  })
+  .describe('Configured maps upstream URLs for the approval card destination.');
+
 export const InternalToolCallInfoSchema = z.object({
   type: z.enum(['truefoundry-system', 'mcp']).describe('Whether the tool is a system tool or MCP tool.'),
   mcp_server_id: z.string().describe('Internal MCP server id (empty for system tools).'),
@@ -124,25 +132,29 @@ export const InternalToolCallInfoSchema = z.object({
   structured_edit_precondition: StructuredEditPreconditionSchema.optional().describe(
     'Host-observed structured-edit target state captured before approval. Never model-authored or client supplied.',
   ),
+  maps_hosts: MapsHostsSchema.optional().describe(
+    'Host-derived configured maps upstream hosts for the approval card destination. Never model-authored or client supplied.',
+  ),
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.
   tier: TierSchema.optional().describe('Server-owned Sentinel permission tier. Never model-authored.'),
-  tier3_card: Tier3CardSchema.nullable().optional().describe('Server-rendered Tier 3 approval card, or null.'),
+  tier3_card: Tier3CardSchema.nullable()
+    .optional()
+    .describe('Server-rendered approval card for Tier 2 and Tier 3 actions, or null.'),
   tier2_kind: z
     .enum(TIER2_ACTION_KINDS)
     .nullable()
     .optional()
-    .describe('Tier 2 member kind for the per-action "always ask me" toggle, or null.'),
-  tier2_files: z
-    .array(z.string())
-    .nullable()
-    .optional()
-    .describe('Tracked executable files named in the Tier 2 inline indicator, or null.'),
+    .describe('Tier 2 member kind governed by the per-kind relaxation, or null.'),
   approval_token_id: z
     .string()
     .nullable()
     .optional()
-    .describe('Single-use approval token id for Tier 3 carded actions, or null.'),
+    .describe('Single-use approval token id for actions that need approval, or null.'),
+  silent_search_query: z
+    .string()
+    .optional()
+    .describe('Text of a web search the host ran without asking, shown as a chip. Never model-authored.'),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
     .describe('Host-derived tracked-execution content/argv binding. Never model-authored.'),
@@ -174,6 +186,10 @@ export const MCPToolInfoSchema = z
       .string()
       .optional()
       .describe('Host-observed structured-edit target summary shown during approval.'),
+    silent_search_query: z
+      .string()
+      .optional()
+      .describe('Text of a web search the host ran without asking, for the Searched chip.'),
     ...ToolEffectHintsSchema.shape,
   })
   .openapi('MCPToolInfo');
@@ -277,6 +293,7 @@ export const FinishReasonSchema = ChatCompletionChunkFinishReasonSchema.openapi(
 export type ThinkingBlock = z.infer<typeof ThinkingBlockSchema>;
 export type RedactedThinkingBlock = z.infer<typeof RedactedThinkingBlockSchema>;
 export type ToolEffectHints = z.infer<typeof ToolEffectHintsSchema>;
+export type MapsHosts = z.infer<typeof MapsHostsSchema>;
 export type InternalToolCallInfo = z.infer<typeof InternalToolCallInfoSchema>;
 export type RegisteredCommandExecution = z.infer<typeof RegisteredCommandExecutionSchema>;
 export type TrueFoundrySystemToolInfo = z.infer<typeof TrueFoundrySystemToolInfoSchema>;

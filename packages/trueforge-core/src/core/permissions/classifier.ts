@@ -4,22 +4,47 @@
  * Full action matrix, fail-closed on anything unrecognized. Ordering per the
  * spec: offline auto-deny first; write-then-execute check before allowlist
  * matching; allowlist before Tier 3; extractor fallback for external-service
- * actions; MCP hints escalate-only, never lower. Returns a TierDecision with
- * stable reason codes, the Tier 3 card when required, Tier 2 matched
- * files/kind, and the tracked-execution approval binding.
+ * actions. A connector tool's own MCP hints escalate it but never lower it by
+ * themselves. Two things let a read-only, explicitly closed-world connector
+ * tool skip its card: the host's first-party trust in the connector, and the
+ * user's own standing grant for the tool. Every escalation is checked before
+ * either. Returns a TierDecision with stable reason codes, the approval card,
+ * the Tier 2 kind, and the tracked-execution approval binding.
  */
 import { realpathSync } from 'fs';
 import path from 'path';
-import { actionIdFor, normalizeCwd, toJsonSafeParams, type ShellApprovalBinding } from './approvalTokens';
+import type { MapsHosts } from '../llm/LLMTypes';
+import {
+  actionIdFor,
+  approvalTokenExpiry,
+  normalizeCwd,
+  toJsonSafeParams,
+  type ApprovalTokenScope,
+  type ConnectorBinding,
+  type ShellApprovalBinding,
+} from './approvalTokens';
 import { recordClassificationAudit } from './audit';
+import { FIRST_PARTY_TOOL_REASON } from './connectorTrust';
 import {
   classifyContextFor,
   type SentinelCallIdentity,
   type SentinelHostContext,
   type SentinelServices,
 } from './context';
-import { extractCardFields } from './extractorRegistry';
+import {
+  escapeDisplayText,
+  extractCardFields,
+  renderOutboundArguments,
+  type ExtractionResult,
+} from './extractorRegistry';
+import { isMapsToolName, RENDER_ROUTE_TOOL_NAME } from './mapsToolNames';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
+import {
+  checkOutboundStrings,
+  collectOutboundStrings,
+  describeOutboundRule,
+  type OutboundStrings,
+} from './outboundGuard';
 import { isRunnerWorkflow } from './runner';
 import {
   hashArgv,
@@ -35,9 +60,11 @@ import {
   tier2Decision,
   tier3Decision,
   type Tier2ActionKind,
+  type Tier3Card,
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
+import { TOOL_GRANT_REASON } from './toolGrants';
 import {
   canonicalFileIdentity,
   canonicalWriteTarget,
@@ -46,27 +73,127 @@ import {
   sha256FileContent,
   splitCompoundSegments,
   splitWordsLenient,
+  writeTargetTouchesGitControl,
   type TrackedExecutableScope,
 } from './trackedExecutables';
+import {
+  SEARCH_SILENT_REASON,
+  SILENT_SEARCH_LIMIT,
+  unreturnedUrls,
+  type SearchAskReason,
+  type WebSearchTurnState,
+} from './webSearch';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
   tool_name: string;
   /** The exact arguments the server will act on. */
   canonical_params: Record<string, unknown>;
-  /** 'truefoundry-system' for sandbox/first-party tools, 'mcp' for MCP tools. */
+  /** 'truefoundry-system' for sandbox and other built-in tools, 'mcp' for MCP tools. */
   tool_type: 'truefoundry-system' | 'mcp';
   /** Sandbox command effect when the action ran through the sandbox effect layer. */
   sandbox_effect?: string | undefined;
+  /** Connector serving an MCP tool; keys the user's standing tool grants. */
+  mcp_server_name?: string | undefined;
+  /** Connector's server id; with `mcp_server_host` it is bound into the approval token. */
+  mcp_server_id?: string | undefined;
+  /** Host of the connector's configured server URL, for the approval card. Never derived from tool arguments. */
+  mcp_server_host?: string | undefined;
+  /** The host provisioned this connector itself. Never derived from tool metadata or client input. */
+  mcp_first_party?: boolean | undefined;
+  /** The user designated this connector as their search provider. Set by the host from the connector record only. */
+  mcp_search_provider?: boolean | undefined;
+  /** The host's own list for the designated provider names this tool as a search tool. Never from tool metadata. */
+  mcp_search_tool?: boolean | undefined;
   mcp_hints: {
     read_only_hint?: boolean | undefined;
     destructive_hint?: boolean | undefined;
     open_world_hint?: boolean | undefined;
   };
+  /**
+   * Configured maps upstream hosts for the approval card destination. Set by the
+   * server-owned maps tool from server config, never from model params.
+   */
+  maps_hosts?: MapsHosts | undefined;
 }
 
 export interface ClassifyContext extends SentinelCallIdentity {
   services: SentinelServices;
+  /** Host state for the turn's silent web searches. */
+  web_search: WebSearchTurnState;
+}
+
+/** Longest place string the approval card shows; the tool schemas cap the same fields at this length. */
+const MAPS_CARD_PLACE_MAX_CHARS = 128;
+
+/**
+ * One call parameter as the card shows it: quoted with escapes so a crafted name cannot close the
+ * quote and read as part of the sentence, truncated to the schema cap, and a visible placeholder for
+ * a value that is not text (the tool rejects it after approval, but the card must not lie).
+ */
+function mapsCardLabel(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '(not text)';
+  }
+  const chars = Array.from(value);
+  const shown =
+    chars.length > MAPS_CARD_PLACE_MAX_CHARS ? `${chars.slice(0, MAPS_CARD_PLACE_MAX_CHARS - 1).join('')}…` : value;
+  return JSON.stringify(shown);
+}
+
+/**
+ * Single predicate owning the maps approval policy. Both maps tools are Tier 3
+ * for now; when the policy changes (e.g. approved providers run without asking),
+ * only this predicate changes.
+ */
+export function isMapsToolAlwaysTier3(tool_name: string): boolean {
+  return isMapsToolName(tool_name);
+}
+
+/** Host part of a URL for card display; falls back to the raw value. */
+function mapsHost(url: string | undefined): string {
+  if (url === undefined || url === '') {
+    return 'the configured maps host';
+  }
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * The configured maps hosts as one string, from server config only. It is both the card's
+ * "sends to" line and the connector host the approval token is bound to, so an approval stops
+ * working once any maps upstream points elsewhere.
+ */
+export function mapsDestinationHosts(hosts: MapsHosts): string {
+  const parts = [mapsHost(hosts.geocoder), mapsHost(hosts.router), mapsHost(hosts.tile)];
+  return [...new Set(parts)].join(', ');
+}
+
+/** Card plain_what naming the quoted place strings and the configured hosts. */
+function mapsPlainWhat(action: SentinelAction): string {
+  const params = action.canonical_params;
+  const hosts = action.maps_hosts;
+  const geocoder = mapsHost(hosts?.geocoder);
+  const router = mapsHost(hosts?.router);
+  const tile = mapsHost(hosts?.tile);
+  if (action.tool_name === RENDER_ROUTE_TOOL_NAME) {
+    return (
+      `Send ${mapsCardLabel(params['from_place'])} and ${mapsCardLabel(params['to_place'])} to ${geocoder}, ` +
+      `ask ${router} for a driving route between them, then load map tiles for that area from ${tile}.`
+    );
+  }
+  const placeName = mapsCardLabel(params['place_name']);
+  if (params['poi'] !== undefined && params['poi'] !== '') {
+    const poi = mapsCardLabel(params['poi']);
+    return (
+      `Send ${placeName} and ${poi} to ${geocoder} to find ${poi} near it, ` +
+      `then load map tiles for that area from ${tile}.`
+    );
+  }
+  return `Send ${placeName} to ${geocoder} to find it, then load map tiles for that area from ${tile}.`;
 }
 
 const SENSITIVE_PATH_PATTERNS = [
@@ -122,9 +249,10 @@ function firstSentence(text: string): string {
   return (match !== null ? match[0] : trimmed).trim().slice(0, 280);
 }
 
-function plainWhy(agentIntent: string | null): string {
+/** Null when the agent gave no reason, so the card shows no line instead of an empty one. */
+function plainWhy(agentIntent: string | null): string | null {
   if (agentIntent === null || agentIntent.trim() === '') {
-    return 'The agent did not state a reason.';
+    return null;
   }
   return firstSentence(agentIntent);
 }
@@ -393,17 +521,43 @@ export function shellBindingFromForm(form: CanonicalShellForm): ShellApprovalBin
   };
 }
 
-function mintShellToken(input: { services: SentinelServices; tool_name: string; form: CanonicalShellForm }): {
+async function mintShellToken(input: { ctx: ClassifyContext; tool_name: string; form: CanonicalShellForm }): Promise<{
   token_id: string;
   binding: ShellApprovalBinding;
-} {
+}> {
   const binding = shellBindingFromForm(input.form);
-  const token = input.services.token_store.mint({
+  const token = await input.ctx.services.token_store.mint({
+    ...approvalTokenOwner(input.ctx),
     action_id: actionIdFor({ tool_name: input.tool_name, canonical_params: input.form }),
     canonical_params: input.form,
     shell: binding,
   });
   return { token_id: token.token_id, binding };
+}
+
+/** Scope and expiry every approval token is minted with; dispatch redeems under the same identity. */
+function approvalTokenOwner(ctx: ClassifyContext): ApprovalTokenScope & { expires_at: string } {
+  return { tenant_id: ctx.tenant_id, created_by: ctx.created_by, expires_at: approvalTokenExpiry() };
+}
+
+/** Token and parsed binding that let dispatch re-verify an approved shell command. */
+async function mintShellApproval(input: {
+  ctx: ClassifyContext;
+  action: SentinelAction;
+  command: string;
+  cwd: string | null;
+  env: Record<string, string> | null;
+}): Promise<{ approval_token_id: string; shell_binding: ShellApprovalBinding }> {
+  const { ctx, action } = input;
+  const form = canonicalShellForm({
+    command: input.command,
+    cwd: input.cwd,
+    env: input.env,
+    allowlist: ctx.services.shell_allowlist,
+    workspace_cwd: ctx.workspace_cwd,
+  });
+  const { token_id, binding } = await mintShellToken({ ctx, tool_name: action.tool_name, form });
+  return { approval_token_id: token_id, shell_binding: binding };
 }
 
 function envOverrides(params: Record<string, unknown>): Record<string, string> | null {
@@ -430,16 +584,20 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       card: {
         plain_what: `Run \`${command}\` with custom environment variables.`,
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: 'Environment variables like LD_PRELOAD can inject code into the command.',
+        cannot_be_undone: 'This changes how programs start, which can make them run other code.',
         why_asked_again: null,
         destination: null,
         recipient: null,
         amount: null,
         parsed_command: command,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
       },
       reason: 'env_overrides_present',
       reason_detail: 'Custom environment variables require approval.',
       sensitive_read: false,
+      ...(await mintShellApproval({ ctx, action, command, cwd, env })),
     });
   }
 
@@ -460,15 +618,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         sensitive_read: false,
       });
     }
-    const identityCwd = resolveIdentityCwd(ctx, cwd);
-    const decision = tier2Decision({
-      kind: 'shell',
-      files: operandIdentities(parsed, identityCwd),
-      reason: 'shell_allowlist_offline',
-      reason_detail: `Offline: ran allowlisted command \`${commandName}\`.`,
-      sensitive_read: sensitiveReadHit(action.canonical_params),
-    });
-    return applyAlwaysAsk({ decision, kind: 'shell', ctx, action });
+    // An allowed offline command continues to the same containment checks as online.
   }
 
   // Write-then-execute check BEFORE allowlist matching. Scan every segment
@@ -490,17 +640,20 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         card: {
           plain_what: `Execute \`${basenameOf(executedOperand)}\`, which the server cannot resolve to a workspace file.`,
           plain_why: plainWhy(ctx.agent_intent),
-          cannot_be_undone: 'The executed file could do anything once it runs.',
+          cannot_be_undone: 'This runs a file, and it can do anything once started.',
           why_asked_again: null,
           destination: null,
           recipient: null,
           amount: null,
           parsed_command: command,
+          outbound_text: null,
+          destination_host: null,
+          outbound_truncated: false,
         },
         reason: 'tracked_check_unresolvable',
         reason_detail: 'The executed operand could not be resolved; failing closed.',
         sensitive_read: false,
-        approval_token_id: mintPlainToken({ services, tool_name: action.tool_name, params: action.canonical_params }),
+        approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
       });
     }
     if (services.tracked_store.isTracked({ scope: workspaceScope(ctx), file_identity: identity })) {
@@ -526,21 +679,21 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         };
         const token =
           grantParams === null
-            ? mintPlainToken({ services, tool_name: action.tool_name, params: action.canonical_params })
-            : services.token_store.mint({
-                action_id: actionIdFor({ tool_name: action.tool_name, canonical_params: grantParams }),
-                canonical_params: grantParams,
-              }).token_id;
+            ? await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params })
+            : await mintPlainToken({ ctx, tool_name: action.tool_name, params: grantParams });
         return tier3Decision({
           card: {
             plain_what: `Execute \`${basenameOf(identity)}\`, a script the agent wrote earlier.`,
             plain_why: plainWhy(ctx.agent_intent),
-            cannot_be_undone: 'The script runs with full shell access once approved.',
+            cannot_be_undone: 'This script gets full access to your shell.',
             why_asked_again: null,
             destination: null,
             recipient: null,
             amount: null,
             parsed_command: command,
+            outbound_text: null,
+            destination_host: null,
+            outbound_truncated: false,
           },
           reason: 'tracked_executable_unapproved',
           reason_detail: 'No matching approval grant for this (content, argv) pair.',
@@ -559,53 +712,80 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     if (matched !== undefined) {
       const identityCwd = resolveIdentityCwd(ctx, cwd);
       // The cwd and every file operand must resolve inside the workspace.
-      // An agent-controlled cwd or a symlink escape must not get Tier 2.
+      // An agent-controlled cwd or a symlink escape must not run silently.
       const workspaceRoot = ctx.workspace_cwd;
-      if (workspaceRoot !== null) {
-        const cwdInside = isInsideWorkspace({ p: identityCwd, cwd: '/', workspace_root: workspaceRoot });
-        if (!cwdInside) {
-          return tier3Decision({
-            card: {
-              plain_what: `Run \`${command}\` from outside the workspace.`,
-              plain_why: plainWhy(ctx.agent_intent),
-              cannot_be_undone: 'Running outside the workspace can access system files.',
-              why_asked_again: null,
-              destination: null,
-              recipient: null,
-              amount: null,
-              parsed_command: command,
-            },
-            reason: 'cwd_outside_workspace',
-            reason_detail: 'The working directory is outside the workspace.',
-            sensitive_read: false,
-          });
-        }
-        if (!shellOperandsInsideWorkspace({ parsed, cwd: identityCwd, workspace_root: workspaceRoot })) {
-          return tier3Decision({
-            card: {
-              plain_what: `Access a file outside the workspace with \`${command}\`.`,
-              plain_why: plainWhy(ctx.agent_intent),
-              cannot_be_undone: 'This file is outside the workspace boundary.',
-              why_asked_again: null,
-              destination: null,
-              recipient: null,
-              amount: null,
-              parsed_command: command,
-            },
-            reason: 'file_outside_workspace',
-            reason_detail: 'A file operand resolves outside the workspace.',
-            sensitive_read: false,
-          });
-        }
+      if (workspaceRoot === null) {
+        // Without a workspace there is nothing to contain the command in, so it must ask.
+        return tier3Decision({
+          card: {
+            plain_what: `Run \`${command}\` where no workspace is set.`,
+            plain_why: plainWhy(ctx.agent_intent),
+            cannot_be_undone: 'No workspace is set, so this command can read any of your files.',
+            why_asked_again: null,
+            destination: null,
+            recipient: null,
+            amount: null,
+            parsed_command: command,
+            outbound_text: null,
+            destination_host: null,
+            outbound_truncated: false,
+          },
+          reason: 'workspace_unknown',
+          reason_detail: 'There is no workspace to keep the command inside.',
+          sensitive_read: false,
+          ...(await mintShellApproval({ ctx, action, command, cwd, env })),
+        });
       }
-      const decision = tier2Decision({
-        kind: 'shell',
-        files: operandIdentities(parsed, identityCwd),
+      const cwdInside = isInsideWorkspace({ p: identityCwd, cwd: '/', workspace_root: workspaceRoot });
+      if (!cwdInside) {
+        return tier3Decision({
+          card: {
+            plain_what: `Run \`${command}\` from outside the workspace.`,
+            plain_why: plainWhy(ctx.agent_intent),
+            cannot_be_undone: 'This runs outside your workspace and can reach system files.',
+            why_asked_again: null,
+            destination: null,
+            recipient: null,
+            amount: null,
+            parsed_command: command,
+            outbound_text: null,
+            destination_host: null,
+            outbound_truncated: false,
+          },
+          reason: 'cwd_outside_workspace',
+          reason_detail: 'The working directory is outside the workspace.',
+          sensitive_read: false,
+          ...(await mintShellApproval({ ctx, action, command, cwd, env })),
+        });
+      }
+      if (!shellOperandsInsideWorkspace({ parsed, cwd: identityCwd, workspace_root: workspaceRoot })) {
+        return tier3Decision({
+          card: {
+            plain_what: `Access a file outside the workspace with \`${command}\`.`,
+            plain_why: plainWhy(ctx.agent_intent),
+            cannot_be_undone: 'This file is outside your workspace.',
+            why_asked_again: null,
+            destination: null,
+            recipient: null,
+            amount: null,
+            parsed_command: command,
+            outbound_text: null,
+            destination_host: null,
+            outbound_truncated: false,
+          },
+          reason: 'file_outside_workspace',
+          reason_detail: 'A file operand resolves outside the workspace.',
+          sensitive_read: false,
+          ...(await mintShellApproval({ ctx, action, command, cwd, env })),
+        });
+      }
+      // Every allowlist entry is read-only by curation (no writes, no network), so a match
+      // that passed the checks above runs silently. Anything that failed them asked instead.
+      return tier1Decision({
         reason: 'shell_allowlist',
         reason_detail: `Ran allowlisted command \`${parsed.argv[0] ?? command}\`.`,
         sensitive_read: sensitiveReadHit(action.canonical_params),
       });
-      return applyAlwaysAsk({ decision, kind: 'shell', ctx, action });
     }
   }
 
@@ -617,7 +797,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     allowlist: services.shell_allowlist,
     workspace_cwd: ctx.workspace_cwd,
   });
-  const { token_id, binding } = mintShellToken({ services, tool_name: action.tool_name, form });
+  const { token_id, binding } = await mintShellToken({ ctx, tool_name: action.tool_name, form });
   return tier3Decision({
     card: {
       plain_what:
@@ -625,12 +805,15 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
           ? 'Run a compound shell command (pipes, chaining, or redirects).'
           : `Run \`${form.argv[0] ?? command}\` with arguments the safe list does not allow.`,
       plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'Shell commands can change or delete files once they run.',
+      cannot_be_undone: 'Commands can change or delete files.',
       why_asked_again: null,
       destination: null,
       recipient: null,
       amount: null,
       parsed_command: form.raw_command,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
     },
     reason: 'shell_not_allowlisted',
     reason_detail: 'The command is not on the server-side safe list.',
@@ -640,34 +823,56 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   });
 }
 
-function mintPlainToken(input: { services: SentinelServices; tool_name: string; params: unknown }): string {
-  return input.services.token_store.mint({
-    action_id: actionIdFor({ tool_name: input.tool_name, canonical_params: input.params }),
+async function mintPlainToken(input: {
+  ctx: ClassifyContext;
+  tool_name: string;
+  params: unknown;
+  connector?: ConnectorBinding | undefined;
+}): Promise<string> {
+  const token = await input.ctx.services.token_store.mint({
+    ...approvalTokenOwner(input.ctx),
+    action_id: actionIdFor({
+      tool_name: input.tool_name,
+      canonical_params: input.params,
+      connector: input.connector,
+    }),
     canonical_params: input.params,
-  }).token_id;
+  });
+  return token.token_id;
+}
+
+/** The connector an approval is bound to; only a call that came through a configured connector has one. */
+function connectorBindingFor(action: SentinelAction): ConnectorBinding | undefined {
+  return action.mcp_server_id === undefined
+    ? undefined
+    : { server_id: action.mcp_server_id, destination_host: action.mcp_server_host ?? null };
 }
 
 async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const target = stringParam(action.canonical_params, 'path') ?? stringParam(action.canonical_params, 'target');
-  const identityCwd = resolveIdentityCwd(ctx, null);
+  // Relative targets resolve against the call's cwd, matching dispatch.
+  const identityCwd = resolveIdentityCwd(ctx, stringParam(action.canonical_params, 'cwd'));
   // Fail closed on null target or missing workspace: treat as outside workspace.
   if (target === null || ctx.workspace_cwd === null) {
     return tier3Decision({
       card: {
         plain_what: 'Write a file outside the workspace.',
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: 'The file will exist outside the workspace once written.',
+        cannot_be_undone: 'This file will be saved outside your workspace.',
         why_asked_again: null,
         destination: null,
         recipient: null,
         amount: null,
         parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
       },
       reason: 'write_outside_workspace',
       reason_detail: 'Write target is null or workspace is unknown.',
       sensitive_read: false,
-      approval_token_id: mintPlainToken({
-        services: ctx.services,
+      approval_token_id: await mintPlainToken({
+        ctx,
         tool_name: action.tool_name,
         params: action.canonical_params,
       }),
@@ -693,52 +898,82 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
       card: {
         plain_what: `Write a file outside the workspace at \`${target}\`.`,
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: 'The file will exist outside the workspace once written.',
+        cannot_be_undone: 'This file will be saved outside your workspace.',
         why_asked_again: null,
         destination: null,
         recipient: null,
         amount: null,
         parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
       },
       reason: 'write_outside_workspace',
       reason_detail: 'Write targets outside the workspace are never Tier 2.',
       sensitive_read: false,
-      approval_token_id: mintPlainToken({
-        services: ctx.services,
+      approval_token_id: await mintPlainToken({
+        ctx,
         tool_name: action.tool_name,
         params: action.canonical_params,
       }),
     });
   }
-  // `target` is `string` (not null) here: the early return above guarantees it.
-  // `inside` is true, so the path is in the workspace.
-  const identity = canonicalWriteTarget({ p: target, cwd: identityCwd });
-  const decision = tier2Decision({
+  // Git control files can make later allowlisted git commands run code.
+  if (writeTargetTouchesGitControl({ p: target, cwd: identityCwd })) {
+    return tier3Decision({
+      card: {
+        plain_what: `Write Git control file \`${target}\`.`,
+        plain_why: plainWhy(ctx.agent_intent),
+        cannot_be_undone: 'Git settings can make Git run other programs.',
+        why_asked_again: null,
+        destination: null,
+        recipient: null,
+        amount: null,
+        parsed_command: null,
+        outbound_text: null,
+        destination_host: null,
+        outbound_truncated: false,
+      },
+      reason: 'git_control_write',
+      reason_detail: 'Writes to .git, .gitattributes, and .gitmodules always require approval.',
+      sensitive_read: false,
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+      }),
+    });
+  }
+  return decideTier2({
+    ctx,
+    action,
     kind: 'file_write',
-    files: identity === null ? [] : [identity],
+    plain_what: `Change \`${target}\` in your workspace.`,
+    parsed_command: null,
     reason: 'sandbox_write',
     reason_detail: `Sandbox file write to \`${target}\`.`,
     sensitive_read: isSensitivePath(target),
   });
-  return applyAlwaysAsk({ decision, kind: 'file_write', ctx, action });
 }
 
 function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierDecision {
   const workflowParam = action.canonical_params['workflow'];
   const workflowName = typeof workflowParam === 'string' ? workflowParam : 'unknown';
-  // Runner workflows execute agent-controlled package.json script targets.
-  // Tier 2 is non-blocking, which would allow code execution without
-  // approval: escalate to Tier 3.
+  // Runner workflows execute agent-controlled package.json script targets,
+  // which a Tier 2 relaxation must not be able to auto-run: always Tier 3.
   return tier3Decision({
     card: {
       plain_what: `Run the \`${workflowName}\` workflow (executes package.json scripts).`,
       plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'The workflow runs scripts that the agent can modify.',
+      cannot_be_undone: 'This workflow runs scripts Aman can edit.',
       why_asked_again: null,
       destination: null,
       recipient: null,
       amount: null,
       parsed_command: `pnpm ${workflowName}`,
+      outbound_text: null,
+      destination_host: null,
+      outbound_truncated: false,
     },
     reason: 'runner_workflow',
     reason_detail: `Run the \`${workflowName}\` workflow requires approval.`,
@@ -746,40 +981,50 @@ function classifyRunnerTool(action: SentinelAction, ctx: ClassifyContext): TierD
   });
 }
 
-/** Tier 2 decision escalated to Tier 3 by the user's "always ask me" toggle. */
-async function applyAlwaysAsk(input: {
-  decision: TierDecision;
-  kind: Tier2ActionKind;
+/**
+ * Tier 2 asks unless the user relaxed its kind. An unrelaxed call carries a
+ * single-use token and parks for approval; a relaxed one runs after the
+ * containment re-check.
+ */
+async function decideTier2(input: {
   ctx: ClassifyContext;
   action: SentinelAction;
+  kind: Tier2ActionKind;
+  plain_what: string;
+  parsed_command: string | null;
+  reason: string;
+  reason_detail: string;
+  sensitive_read: boolean;
 }): Promise<TierDecision> {
-  const { decision, kind, ctx, action } = input;
-  if (decision.tier !== 2) {
-    return decision;
+  const { ctx, action } = input;
+  const card = {
+    plain_what: input.plain_what,
+    plain_why: plainWhy(ctx.agent_intent),
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: input.parsed_command,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+  };
+  const base = {
+    kind: input.kind,
+    card,
+    reason: input.reason,
+    reason_detail: input.reason_detail,
+    sensitive_read: input.sensitive_read,
+  };
+  const relaxed = await ctx.services.tier2AutoAllow({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
+  if (relaxed.has(input.kind)) {
+    return tier2Decision(base);
   }
-  const alwaysAsk = await ctx.services.alwaysAsk({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
-  if (!alwaysAsk.has(kind)) {
-    return decision;
-  }
-  return tier3Decision({
-    card: {
-      plain_what: decision.reason_detail ?? 'Run an action you asked to always approve.',
-      plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'You turned on "always ask me" for this kind of action.',
-      why_asked_again: null,
-      destination: null,
-      recipient: null,
-      amount: null,
-      parsed_command: null,
-    },
-    reason: 'always_ask_toggle',
-    reason_detail: `Escalated by the always-ask toggle for ${kind}.`,
-    sensitive_read: decision.sensitive_read,
-    escalated: true,
-    tier2_kind: kind,
-    tier2_files: decision.tier2_files,
-    approval_token_id: mintPlainToken({
-      services: ctx.services,
+  return tier2Decision({
+    ...base,
+    approval_token_id: await mintPlainToken({
+      ctx,
       tool_name: action.tool_name,
       params: action.canonical_params,
     }),
@@ -795,6 +1040,15 @@ function externalServiceWhat(input: {
   const name = input.tool_name.toLowerCase();
   const where = input.recipient ?? input.destination ?? 'an external destination';
   if (name.includes('email') || name.includes('mail')) {
+    if (name.includes('draft')) {
+      return `Save an email draft for ${where}.`;
+    }
+    if (name.includes('forward')) {
+      return `Forward an email to ${where}.`;
+    }
+    if (name.includes('reply')) {
+      return `Reply to an email, sending it to ${where}.`;
+    }
     return `Send an email to ${where}.`;
   }
   if (name.includes('sms') || name.includes('message') || name.includes('notify')) {
@@ -821,6 +1075,129 @@ function externalServiceWhat(input: {
 const DESTRUCTIVE_FRAGMENTS = ['delete', 'remove', 'uninstall', 'drop', 'destroy', 'erase'];
 const INSTALL_FRAGMENTS = ['install'];
 
+/** Most characters of query text an approval card shows. */
+const SEARCH_CARD_TEXT_MAX = 1000;
+
+function searchQueryText(strings: OutboundStrings): string {
+  return strings.values
+    .map(value => value.trim())
+    .filter(value => value !== '')
+    .join(' | ');
+}
+
+/**
+ * A designated-provider call that stops for approval, or is denied while nobody watches. The card
+ * shows the exact text the call would send; the audit row of a denial names only the rule that fired.
+ */
+async function holdSearchCall(input: {
+  action: SentinelAction;
+  ctx: ClassifyContext;
+  reason: SearchAskReason;
+  why: string;
+  queryText: string;
+  fields: ExtractionResult['fields'];
+  denyWhenUnattended: boolean;
+}): Promise<TierDecision> {
+  const { action, ctx, fields } = input;
+  if (input.denyWhenUnattended && ctx.services.unattended) {
+    return autoDenyDecision({
+      reason: 'outbound_guard',
+      reason_detail: `Web search denied: ${input.why}.`,
+      sensitive_read: false,
+    });
+  }
+  const shown =
+    input.queryText.length > SEARCH_CARD_TEXT_MAX
+      ? `${input.queryText.slice(0, SEARCH_CARD_TEXT_MAX)}...`
+      : input.queryText;
+  const server = action.mcp_server_name ?? 'the search provider';
+  return tier3Decision({
+    card: {
+      plain_what: `Search the web through ${server} for: ${shown}`,
+      plain_why: plainWhy(ctx.agent_intent),
+      cannot_be_undone: null,
+      why_asked_again: input.why === '' ? null : `Held for approval: ${input.why}.`,
+      destination: action.mcp_server_name ?? null,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+      outbound_text: fields.outbound_text,
+      destination_host: fields.destination_host,
+      outbound_truncated: fields.outbound_truncated,
+    },
+    reason: input.reason,
+    reason_detail: input.why === '' ? 'Searches are set to ask.' : `Web search held: ${input.why}.`,
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({
+      ctx,
+      tool_name: action.tool_name,
+      params: action.canonical_params,
+      connector: connectorBindingFor(action),
+    }),
+  });
+}
+
+/**
+ * The designated search provider's call. Runs without asking unless the user switched searches to
+ * ask, the outbound secret guard trips, the turn already ran its allowance of silent searches, or
+ * the call names a URL no search result of this turn returned. Returns undefined, leaving the call
+ * to the ordinary rules, for a tool that the server did not declare read-only and the host's list
+ * does not name as a search tool, that declares itself destructive or not read-only, falls in a
+ * name-based escalation class, or touches a sensitive path: the role never lowers those, so
+ * designating a connector that can write does not make its unannotated tools silent.
+ */
+async function classifySearchProviderTool(input: {
+  action: SentinelAction;
+  ctx: ClassifyContext;
+  extraction: ExtractionResult;
+}): Promise<TierDecision | undefined> {
+  const { action, ctx, extraction } = input;
+  const name = action.tool_name.toLowerCase();
+  if (
+    (action.mcp_hints.read_only_hint !== true && action.mcp_search_tool !== true) ||
+    action.mcp_hints.destructive_hint === true ||
+    action.mcp_hints.read_only_hint === false ||
+    extraction.external_service ||
+    DESTRUCTIVE_FRAGMENTS.some(fragment => name.includes(fragment)) ||
+    INSTALL_FRAGMENTS.some(fragment => name.includes(fragment)) ||
+    sensitiveReadHit(action.canonical_params)
+  ) {
+    return undefined;
+  }
+  const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
+  const strings = collectOutboundStrings(action.canonical_params);
+  const queryText = strings === undefined ? '' : searchQueryText(strings);
+  const held = (reason: SearchAskReason, why: string, denyWhenUnattended = true): Promise<TierDecision> =>
+    holdSearchCall({ action, ctx, reason, why, queryText, fields: extraction.fields, denyWhenUnattended });
+
+  if (!(await ctx.services.searchWithoutAsking(owner))) {
+    return held('mcp_search_setting_ask', '', false);
+  }
+  const verdict =
+    strings === undefined
+      ? ({ ok: false, rule: 'uninspectable' } as const)
+      : checkOutboundStrings({
+          strings,
+          secrets: await ctx.services.outboundSecrets(owner),
+          earlier: ctx.web_search.sentText,
+        });
+  if (!verdict.ok) {
+    return held('mcp_search_guard', describeOutboundRule(verdict.rule));
+  }
+  if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
+    return held('mcp_search_limit', `this turn already ran ${String(SILENT_SEARCH_LIMIT)} searches without asking`);
+  }
+  if (strings !== undefined && unreturnedUrls({ values: strings.values, state: ctx.web_search }).length > 0) {
+    return held('mcp_search_unreturned_url', 'it names a link that no search result this turn returned');
+  }
+  return tier1Decision({
+    reason: SEARCH_SILENT_REASON,
+    reason_detail: `Searched: ${queryText}`,
+    sensitive_read: false,
+    silent_search_query: queryText,
+  });
+}
+
 async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const { services } = ctx;
   const name = action.tool_name.toLowerCase();
@@ -828,7 +1205,13 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   // Offline: network-required tools are filtered from the list; a stale call
   // that slips through is auto-denied here.
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
-  const extraction = extractCardFields({ tool_name: action.tool_name, canonical_params: action.canonical_params });
+  const extraction = extractCardFields({
+    tool_name: action.tool_name,
+    canonical_params: action.canonical_params,
+    tool_type: action.tool_type,
+    server_host: action.mcp_server_host,
+    server_name: action.mcp_server_name,
+  });
   if (offline) {
     if (extraction.external_service) {
       return autoDenyDecision({
@@ -855,6 +1238,14 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     });
   }
 
+  // The user's designated search provider runs without asking behind the outbound secret guard.
+  if (action.tool_type === 'mcp' && action.mcp_search_provider === true) {
+    const searchDecision = await classifySearchProviderTool({ action, ctx, extraction });
+    if (searchDecision !== undefined) {
+      return searchDecision;
+    }
+  }
+
   // MCP hints: destructive or open-world escalate to Tier 3, never lower.
   const destructiveHint = action.mcp_hints.destructive_hint === true;
   const openWorldHint = action.mcp_hints.open_world_hint === true;
@@ -863,6 +1254,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     const { fields } = extraction;
     return tier3Decision({
       card: {
+        // The external-service sentence wins: it is the more specific warning about where this goes.
         plain_what: extraction.external_service
           ? externalServiceWhat({
               tool_name: action.tool_name,
@@ -870,22 +1262,32 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
               recipient: fields.recipient,
               amount: fields.amount,
             })
-          : `Run \`${action.tool_name}\`, flagged as ${destructiveHint ? 'destructive' : 'reaching outside this machine'}.`,
+          : destructiveHint || extraction.connector_what === null
+            ? `Run ${action.tool_name}, flagged as ${destructiveHint ? 'destructive' : 'reaching outside this machine'}.`
+            : extraction.connector_what,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: destructiveHint
-          ? 'The action is flagged as destructive; its effects may not be reversible.'
-          : 'Once data leaves this machine it cannot be taken back.',
+          ? 'This might change or delete something for good.'
+          : "Once this is sent, it can't be unsent.",
         why_asked_again: null,
         destination: fields.destination,
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
+        outbound_text: fields.outbound_text,
+        destination_host: fields.destination_host,
+        outbound_truncated: fields.outbound_truncated,
       },
       reason: destructiveHint ? 'mcp_destructive_hint' : 'mcp_open_world_hint',
       reason_detail: 'MCP annotations flagged the tool; hints escalate only.',
       sensitive_read: sensitiveReadHit(action.canonical_params),
       escalated: true,
-      approval_token_id: mintPlainToken({ services, tool_name: action.tool_name, params: action.canonical_params }),
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
     });
   }
 
@@ -908,23 +1310,65 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       card: {
         plain_what: what,
         plain_why: plainWhy(ctx.agent_intent),
-        cannot_be_undone: isDestructive
-          ? 'Deleted data cannot be recovered.'
-          : 'Once this runs it cannot be taken back.',
+        cannot_be_undone: isDestructive ? "Once deleted, it's gone for good." : "Once this runs, it can't be undone.",
         why_asked_again: null,
         destination: fields.destination,
         recipient: fields.recipient,
         amount: fields.amount,
         parsed_command: null,
+        outbound_text: fields.outbound_text,
+        destination_host: fields.destination_host,
+        outbound_truncated: fields.outbound_truncated,
       },
       reason: extraction.external_service ? 'external_service' : isInstall ? 'install_action' : 'destructive_action',
       reason_detail: 'Name-based Tier 3 class.',
       sensitive_read: sensitiveReadHit(action.canonical_params),
-      approval_token_id: mintPlainToken({ services, tool_name: action.tool_name, params: action.canonical_params }),
+      approval_token_id: await mintPlainToken({
+        ctx,
+        tool_name: action.tool_name,
+        params: action.canonical_params,
+        connector: connectorBindingFor(action),
+      }),
     });
   }
 
-  // Local read-only first-party tools: Tier 1.
+  // A connector tool's own hints never lower it. Trust in the connector (first-party) or in the
+  // tool (the user's standing grant) skips the card, but only after every escalation above, never
+  // for a sensitive read, and only while the tool still claims to be read-only and explicitly
+  // closed-world (an absent openWorldHint means open).
+  if (
+    action.tool_type === 'mcp' &&
+    readOnlyHint &&
+    action.mcp_hints.open_world_hint === false &&
+    !sensitiveReadHit(action.canonical_params)
+  ) {
+    if (action.mcp_first_party === true) {
+      return tier1Decision({
+        reason: FIRST_PARTY_TOOL_REASON,
+        reason_detail: `First-party read-only tool \`${action.tool_name}\`${
+          action.mcp_server_name === undefined ? '' : ` on ${action.mcp_server_name}`
+        }.`,
+        sensitive_read: false,
+      });
+    }
+    if (
+      action.mcp_server_name !== undefined &&
+      (await services.tool_grants.hasToolGrant({
+        tenant_id: ctx.tenant_id,
+        created_by: ctx.created_by,
+        mcp_server_name: action.mcp_server_name,
+        tool_name: action.tool_name,
+      }))
+    ) {
+      return tier1Decision({
+        reason: TOOL_GRANT_REASON,
+        reason_detail: `Always allowed: \`${action.tool_name}\` on ${action.mcp_server_name}.`,
+        sensitive_read: false,
+      });
+    }
+  }
+
+  // Host built-in read-only tools: Tier 1.
   if (action.tool_type === 'truefoundry-system' && readOnlyHint && !openWorldHint) {
     return tier1Decision({
       reason: 'local_read_only',
@@ -934,27 +1378,78 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   }
 
   // Fail closed: anything unrecognized is Tier 3 with a card.
+  const card = connectorApprovalCard({ action, extraction, agent_intent: ctx.agent_intent });
+  const recognized = extraction.connector_what !== null;
   return tier3Decision({
-    card: {
-      plain_what: `Run \`${action.tool_name}\`, which the classifier does not recognize.`,
-      plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'Unrecognized actions are treated as potentially irreversible.',
-      why_asked_again: null,
-      destination: null,
-      recipient: null,
-      amount: null,
-      parsed_command: null,
-    },
-    reason: 'unrecognized_tool',
-    reason_detail: 'Fail-closed: unrecognized tools require approval.',
+    card,
+    reason: recognized ? 'connector_outbound' : 'unrecognized_tool',
+    reason_detail: recognized
+      ? 'Connector call that sends data out; always asks.'
+      : 'Fail-closed: unrecognized tools require approval.',
     sensitive_read: sensitiveReadHit(action.canonical_params),
-    approval_token_id: mintPlainToken({ services, tool_name: action.tool_name, params: action.canonical_params }),
+    approval_token_id: await mintPlainToken({
+      ctx,
+      tool_name: action.tool_name,
+      params: action.canonical_params,
+      connector: connectorBindingFor(action),
+    }),
+  });
+}
+
+/**
+ * The card for a call that has to ask but matched no more specific class. A connector call shows its
+ * exact arguments and server host, and a known search, fetch, write or mail tool is named in plain
+ * words. Pure: it mints nothing, so it can also describe an approval that was gated some other way.
+ */
+function connectorApprovalCard(input: {
+  action: SentinelAction;
+  extraction: ExtractionResult;
+  agent_intent: string | null;
+}): Tier3Card {
+  const { action, extraction } = input;
+  const { fields } = extraction;
+  return {
+    plain_what: extraction.connector_what ?? `Aman doesn't know this tool yet: ${escapeDisplayText(action.tool_name)}.`,
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone:
+      extraction.connector_what === null
+        ? 'Check the details before you go ahead.'
+        : "Once this is sent, it can't be unsent.",
+    why_asked_again: null,
+    destination: fields.destination,
+    recipient: fields.recipient,
+    amount: fields.amount,
+    parsed_command: null,
+    outbound_text: fields.outbound_text,
+    destination_host: fields.destination_host,
+    outbound_truncated: fields.outbound_truncated,
+  };
+}
+
+/**
+ * The card for an approval that no classifier decision carded, such as a call a selector gates
+ * though Sentinel let it through. It describes the call the same way an unrecognized one is
+ * described, so every approval the user is asked for reads the same.
+ */
+export function approvalCardForGatedCall(input: { action: SentinelAction; agent_intent: string | null }): Tier3Card {
+  const { action } = input;
+  return connectorApprovalCard({
+    action,
+    extraction: extractCardFields({
+      tool_name: action.tool_name,
+      canonical_params: action.canonical_params,
+      tool_type: action.tool_type,
+      server_host: action.mcp_server_host,
+      server_name: action.mcp_server_name,
+    }),
+    agent_intent: input.agent_intent,
   });
 }
 
 /**
  * The single authoritative tier classifier. Fail-closed on anything
- * unrecognized; MCP hints escalate-only.
+ * unrecognized; MCP hints escalate, and lower a connector tool only through
+ * first-party trust or a standing grant.
  */
 export async function classifyTier(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const name = action.tool_name;
@@ -983,20 +1478,61 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
               ? 'Run code the agent wrote in the sandbox.'
               : 'Submit an implementation plan for review.',
           plain_why: plainWhy(ctx.agent_intent),
-          cannot_be_undone: 'Execution cannot be taken back once it runs.',
+          cannot_be_undone: "Once this runs, it can't be undone.",
           why_asked_again: null,
           destination: null,
           recipient: null,
           amount: null,
           parsed_command: null,
+          outbound_text: null,
+          destination_host: null,
+          outbound_truncated: false,
         },
         reason: name === 'run_code' ? 'arbitrary_code_execution' : 'plan_submission',
         reason_detail: 'Always Tier 3 by policy.',
         sensitive_read: false,
-        approval_token_id: mintPlainToken({
-          services: ctx.services,
+        approval_token_id: await mintPlainToken({
+          ctx,
           tool_name: action.tool_name,
           params: action.canonical_params,
+        }),
+      });
+    }
+    // Embedded maps: always Tier 3, whatever hints the tool declares. The card
+    // names the place strings verbatim and the configured hosts from server
+    // config; the destination never comes from model params.
+    if (isMapsToolAlwaysTier3(name)) {
+      // Offline outranks the card: a stale call is denied, not offered for approval.
+      if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+        return autoDenyDecision({
+          reason: 'offline_mode',
+          reason_detail: 'Maps need network access, which is disabled while offline.',
+          sensitive_read: false,
+        });
+      }
+      const outbound = renderOutboundArguments(action.canonical_params);
+      return tier3Decision({
+        card: {
+          plain_what: mapsPlainWhat(action),
+          plain_why: plainWhy(ctx.agent_intent),
+          cannot_be_undone: null,
+          why_asked_again: null,
+          destination: null,
+          recipient: null,
+          amount: null,
+          parsed_command: null,
+          outbound_text: outbound.text,
+          destination_host: action.maps_hosts === undefined ? null : mapsDestinationHosts(action.maps_hosts),
+          outbound_truncated: outbound.truncated,
+        },
+        reason: 'maps_tool',
+        reason_detail: 'Maps tools are always Tier 3 by policy.',
+        sensitive_read: false,
+        approval_token_id: await mintPlainToken({
+          ctx,
+          tool_name: action.tool_name,
+          params: action.canonical_params,
+          connector: connectorBindingFor(action),
         }),
       });
     }

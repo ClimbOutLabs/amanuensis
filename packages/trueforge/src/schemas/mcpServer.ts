@@ -178,6 +178,9 @@ export const MemoryProviderSettingsSchema = z
 
 export type MemoryProviderSettings = z.infer<typeof MemoryProviderSettingsSchema>;
 
+/** Names of the tools of a web search provider that may run without asking. */
+export const McpSearchToolsSchema = z.array(z.string().min(1).max(128)).max(16);
+
 /** User-configured remote MCP endpoint. */
 const RemoteMcpServerManifestSchema = z
   .object({
@@ -193,6 +196,15 @@ const RemoteMcpServerManifestSchema = z
         'When true, this connector is the long-term memory provider: the host recalls from it before every model call and retains every completed turn. Its URL must be a single-bank Hindsight MCP URL.',
       ),
     memory_settings: MemoryProviderSettingsSchema.optional(),
+    search_provider: z
+      .boolean()
+      .optional()
+      .describe(
+        'When true, this connector is the web search provider: its read-only tools run without asking, behind an outbound secret check, unless the user switched searches to Ask. At most one connector holds it.',
+      ),
+    search_tools: McpSearchToolsSchema.optional().describe(
+      'Tools that run without asking as the web search provider even when the server does not declare them read-only. Set by the server for a known provider; a value sent is replaced.',
+    ),
   })
   .strict()
   .openapi('RemoteMCPServerManifest');
@@ -290,6 +302,30 @@ export const GetAvailableMcpServerResponseSchema = z
   .object({ data: AvailableMcpServerSchema })
   .openapi('GetAvailableMCPServerResponse');
 
+export const McpToolGrantParamsSchema = z
+  .object({
+    name: z.string().min(1).describe('MCP server name.'),
+    tool_name: z.string().min(1).describe('Tool name on the MCP server.'),
+  })
+  .openapi('MCPToolGrantParams');
+
+/** One tool the caller always allows on an MCP server. */
+export const McpToolGrantSchema = z
+  .object({
+    tool_name: z.string().describe('Tool name on the MCP server.'),
+    created_at: z.string().describe('When the caller chose Always allow, as an ISO 8601 UTC instant.'),
+  })
+  .strict()
+  .openapi('MCPToolGrant');
+
+export const ListMcpToolGrantsResponseSchema = z
+  .object({
+    data: z.array(McpToolGrantSchema).describe('Tools the caller always allows on this MCP server, oldest first.'),
+  })
+  .openapi('ListMCPToolGrantsResponse');
+
+export const DeleteMcpToolGrantResponseSchema = z.object({}).openapi('DeleteMCPToolGrantResponse');
+
 export type McpServerType = z.infer<typeof McpServerTypeSchema>;
 export type McpServerManifestAuth = z.infer<typeof McpServerManifestAuthSchema>;
 export type RemoteMcpServerManifest = z.infer<typeof RemoteMcpServerManifestSchema>;
@@ -301,6 +337,7 @@ export type ConfiguredMcpServer = z.infer<typeof ConfiguredMcpServerSchema>;
 export type CreateMcpServerRequest = z.infer<typeof CreateMcpServerRequestSchema>;
 export type UpdateMcpServerRequest = z.infer<typeof UpdateMcpServerRequestSchema>;
 export type AvailableMcpServer = z.infer<typeof AvailableMcpServerSchema>;
+export type McpToolGrant = z.infer<typeof McpToolGrantSchema>;
 
 /**
  * Headers for live MCP calls against a configured server.

@@ -2,7 +2,7 @@
 
 /** Who wrote it. */
 export const BugReportChatMessageRole = {
-    User: "user",
-    Assistant: "assistant",
-} as const;
-export type BugReportChatMessageRole = (typeof BugReportChatMessageRole)[keyof typeof BugReportChatMessageRole];
+        User: "user",
+        Assistant: "assistant"
+    } as const;
+export type BugReportChatMessageRole = typeof BugReportChatMessageRole[keyof typeof BugReportChatMessageRole];

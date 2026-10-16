@@ -1,9 +1,9 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { mountFrontend } from '../../src/frontend';
+import { APP_SHELL_IMAGE_CSP, mountFrontend } from '../../src/frontend';
 
 function buildDir(): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'trueforge-frontend-'));
@@ -81,5 +81,28 @@ describe('mountFrontend', () => {
 
     // Navigations are the only thing the shell answers.
     expect((await app.request('/sessions/abc123', { method: 'POST', headers: HTML_ACCEPT })).status).toBe(404);
+  });
+});
+
+describe('mountFrontend security headers', () => {
+  it('sends an image-and-media-only CSP and no-referrer on the app shell', async () => {
+    const app = appWithFrontend(buildDir());
+
+    for (const shellPath of ['/', '/index.html', '/sessions/abc123']) {
+      const response = await app.request(shellPath, { headers: HTML_ACCEPT });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-security-policy')).toBe(APP_SHELL_IMAGE_CSP);
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    }
+  });
+
+  it('keeps the Vite index.html meta CSP equal to the served header', () => {
+    // packages/frontend/index.html cannot import the constant, so the
+    // equality is asserted here instead of shared by import.
+    const indexPath = path.resolve(__dirname, '../../../frontend/index.html');
+    const html = readFileSync(indexPath, 'utf-8');
+    const match = html.match(/<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i);
+    expect(match).not.toBeNull();
+    expect(match?.[1]).toBe(APP_SHELL_IMAGE_CSP);
   });
 });

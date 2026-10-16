@@ -47,6 +47,7 @@ export type VendorIncompatibleEventType =
   | 'aman.memory.recall'
   | 'aman.profile.learned'
   | 'aman.skill.used'
+  | 'aman.sandbox.provisioning'
   | 'agent.context.compaction'
   | 'document.ingestion';
 
@@ -55,6 +56,7 @@ const INCOMPATIBLE_EVENT_TYPES: readonly string[] = [
   'aman.memory.recall',
   'aman.profile.learned',
   'aman.skill.used',
+  'aman.sandbox.provisioning',
   'agent.context.compaction',
   'document.ingestion',
 ];

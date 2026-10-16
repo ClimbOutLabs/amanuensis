@@ -4,6 +4,8 @@ import { useState, type ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import ConnectorDetails from '@/containers/SettingsBuilder/ConnectorDetails.js';
+import type { ConnectorToolGrants } from '@/server/connectorToolGrants.js';
+import type { SearchProviderFields } from '@/server/searchProviderTypes.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { ConnectorBase, ToolBase } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
@@ -269,5 +271,162 @@ describe('ConnectorDetails OAuth connection', () => {
     expect(getToolsByConnectorId).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument();
+  });
+});
+
+describe('ConnectorDetails always-allowed tools', () => {
+  function renderWithGrants(grants: Partial<ConnectorToolGrants>) {
+    const server = createMockAgentUIServer({
+      catalog: createMockCatalog({
+        connectorCatalog: {
+          getConnectorCatalog: async () => [],
+          listConnectors: async () => [],
+          getConnector: async () => connector,
+          getToolsByConnectorId: async () => [{ id: 'tool-1', name: 'list_issues', description: 'Lists issues' }],
+          createConnector: async () => connector,
+          updateConnector: async () => connector,
+          authenticateConnector: async () => ({ authorization_endpoint: '' }),
+          disconnectConnector: async () => connector,
+          ...grants,
+        },
+      }),
+    });
+    return render(
+      <ServerProvider server={server}>
+        <ConnectorDetails
+          connector={connector}
+          onBack={() => {}}
+          onConnectorRefreshed={() => {}}
+          onEdit={() => {}}
+          onDisconnect={() => {}}
+        />
+      </ServerProvider>,
+    );
+  }
+
+  it('lists the always-allowed tools and revokes one', async () => {
+    const listToolGrants = vi.fn(async () => ['list_issues', 'get_issue']);
+    const revokeToolGrant = vi.fn(async () => {});
+    renderWithGrants({ listToolGrants, revokeToolGrant });
+
+    const revoke = await screen.findByRole('button', { name: 'Stop always allowing list_issues' });
+    expect(screen.getByRole('heading', { name: /Always allowed/ })).toBeInTheDocument();
+    expect(listToolGrants).toHaveBeenCalledWith({ id: connector.id });
+
+    fireEvent.click(revoke);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Stop always allowing list_issues' })).not.toBeInTheDocument();
+    });
+    expect(revokeToolGrant).toHaveBeenCalledWith({ id: connector.id, toolName: 'list_issues' });
+    expect(screen.getByRole('button', { name: 'Stop always allowing get_issue' })).toBeInTheDocument();
+  });
+
+  it('keeps the grant and shows why when revoking fails', async () => {
+    renderWithGrants({
+      listToolGrants: async () => ['list_issues'],
+      revokeToolGrant: async () => {
+        throw new Error('MCP server not found: Linear');
+      },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop always allowing list_issues' }));
+
+    expect(await screen.findByText('MCP server not found: Linear')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop always allowing list_issues' })).toBeInTheDocument();
+  });
+
+  it('shows no grant section when the catalog cannot report grants or none exist', async () => {
+    const { unmount } = renderWithGrants({});
+    expect(await screen.findByText('list_issues')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Always allowed/ })).not.toBeInTheDocument();
+    unmount();
+
+    renderWithGrants({ listToolGrants: async () => [], revokeToolGrant: async () => {} });
+    expect(await screen.findByText('list_issues')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Always allowed/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('ConnectorDetails web search provider switch', () => {
+  function renderDetails({
+    held,
+    updateConnector,
+    onConnectorRefreshed = () => {},
+  }: {
+    held: boolean;
+    updateConnector: (request: object) => Promise<ConnectorBase>;
+    onConnectorRefreshed?: (connector: ConnectorBase) => void;
+  }) {
+    const server = createMockAgentUIServer({
+      catalog: createMockCatalog({
+        connectorCatalog: {
+          getConnectorCatalog: async () => [],
+          listConnectors: async () => [],
+          getConnector: async () => connector,
+          getToolsByConnectorId: async () => [],
+          createConnector: async () => connector,
+          updateConnector,
+          authenticateConnector: async () => ({ authorization_endpoint: '' }),
+          disconnectConnector: async () => connector,
+        },
+      }),
+    });
+    const shown: ConnectorBase & SearchProviderFields = held ? { ...connector, searchProvider: true } : connector;
+    return render(
+      <ServerProvider server={server}>
+        <ConnectorDetails
+          connector={shown}
+          onBack={() => {}}
+          onConnectorRefreshed={onConnectorRefreshed}
+          onEdit={() => {}}
+          onDisconnect={() => {}}
+        />
+      </ServerProvider>,
+    );
+  }
+
+  it('turns the role on through a full update that keeps the rest of the manifest', async () => {
+    const updated: ConnectorBase & SearchProviderFields = { ...connector, searchProvider: true };
+    const updateConnector = vi.fn(async () => updated);
+    const onConnectorRefreshed = vi.fn();
+    renderDetails({ held: false, updateConnector, onConnectorRefreshed });
+
+    const toggle = await screen.findByRole('switch', { name: 'Use Linear as the web search provider' });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(updateConnector).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'conn-1', url: connector.url, searchProvider: true }),
+      );
+    });
+    await waitFor(() => {
+      expect(onConnectorRefreshed).toHaveBeenCalledWith(updated);
+    });
+  });
+
+  it('turns the role off from the holder', async () => {
+    const updateConnector = vi.fn(async () => connector);
+    renderDetails({ held: true, updateConnector });
+
+    const toggle = await screen.findByRole('switch', { name: 'Use Linear as the web search provider' });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(updateConnector).toHaveBeenCalledWith(expect.objectContaining({ searchProvider: false }));
+    });
+  });
+
+  it('shows the server’s reason when another connector already holds the role', async () => {
+    const updateConnector = vi.fn(async () => {
+      throw new Error('search provider already set on exa; disable it first');
+    });
+    renderDetails({ held: false, updateConnector });
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Use Linear as the web search provider' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('search provider already set on exa; disable it first');
   });
 });

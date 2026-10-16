@@ -7,6 +7,7 @@ import {
   MCP_AUTO_PRELOAD_MAX_TOOLS,
   selectorsIncludeAll,
   toolMatchesAnySelector,
+  TOOL_TAG_UNCLASSIFIED,
   toolRequiresApproval,
 } from './toolSelectors';
 
@@ -168,8 +169,30 @@ export class ToolSelectorPolicy {
    * Whether the tool requires human approval. Honors `requireApprovalForTools` exactly: omit /
    * undefined defaults to write+destructive+unclassified, i.e. fail-closed (constructor); an
    * explicit list — including empty — is exact.
+   *
+   * `waiveUnclassified` lets a host that already vouches for the tool (the user's search provider
+   * running a tool its own list names) pass what the default list gates only for missing
+   * annotations. It applies to the default list alone: a list the user changed in any way, `@all`,
+   * a literal tool name, or `@unclassified` on its own, is the user's explicit choice and gates.
    */
-  requiresApproval(toolName: string, annotations: ToolAnnotations | undefined): boolean {
-    return toolRequiresApproval(toolName, annotations, this.requireApprovalForTools);
+  requiresApproval(
+    toolName: string,
+    annotations: ToolAnnotations | undefined,
+    options?: { waiveUnclassified: boolean },
+  ): boolean {
+    const selectors =
+      options?.waiveUnclassified === true && this.usesDefaultApproval()
+        ? this.requireApprovalForTools.filter(selector => selector !== TOOL_TAG_UNCLASSIFIED)
+        : this.requireApprovalForTools;
+    return toolRequiresApproval(toolName, annotations, selectors);
+  }
+
+  /** The agent spec fills the default in when the user sets nothing, so equal to it counts as unset. */
+  private usesDefaultApproval(): boolean {
+    const defaults = new Set(DEFAULT_REQUIRE_APPROVAL_FOR_TOOLS);
+    return (
+      this.requireApprovalForTools.length === defaults.size &&
+      this.requireApprovalForTools.every(selector => defaults.has(selector))
+    );
   }
 }

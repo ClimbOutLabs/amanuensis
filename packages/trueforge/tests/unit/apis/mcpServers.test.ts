@@ -13,6 +13,7 @@ import type { IMcpServerWithAuthStore } from '../../../src/db/mcpServerStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
 import {
@@ -41,8 +42,8 @@ const putBodyWithDcr = {
 };
 
 const HEADER_TOKEN = 'Bearer test-token';
-/** Wire form of HEADER_TOKEN for length ≥ 10: first 3 + SECRET_REDACTION + last 3. */
-const HEADER_TOKEN_REDACTED = 'Bea-***REDACTED***-ken';
+/** Wire form of HEADER_TOKEN: the fixed mask, with no prefix or suffix of the secret. */
+const HEADER_TOKEN_REDACTED = '***REDACTED***';
 
 const putBodyWithHeaderAuth = {
   type: 'remote' as const,
@@ -84,6 +85,8 @@ function memoryRecallResponse(body: unknown = { results: [], entities: {} }, sta
  */
 let hindsightRecall: () => Response | Promise<Response> = () => memoryRecallResponse();
 const hindsightRecallCalls: string[] = [];
+/** The request options each save-time check was dialed with, in order. */
+const hindsightRecallInits: (RequestInit | undefined)[] = [];
 
 function wrapManifest(manifest: unknown) {
   return { manifest };
@@ -119,6 +122,7 @@ describe('mcp-servers routers', () => {
   let mcpServersRouter: ReturnType<typeof createMcpServersRouter>;
   let mcpServerStore: IMcpServerWithAuthStore;
   let tokenStore: SqliteOAuthTokenStore;
+  let toolGrantStore: SqliteMcpToolGrantStore;
   let withTransaction: <T>(callback: (transaction: unknown) => Promise<T>) => Promise<T>;
   let logger: ReturnType<typeof winston.createLogger>;
   const originalFetch = globalThis.fetch;
@@ -132,6 +136,7 @@ describe('mcp-servers routers', () => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       if (url === HINDSIGHT_RECALL_URL) {
         hindsightRecallCalls.push(url);
+        hindsightRecallInits.push(init);
         return await hindsightRecall();
       }
       if (new URL(url).hostname === '127.0.0.1') {
@@ -142,6 +147,7 @@ describe('mcp-servers routers', () => {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     tokenStore = new SqliteOAuthTokenStore(db);
+    toolGrantStore = new SqliteMcpToolGrantStore(db);
     mcpServerStore = new McpServerWithAuthStore({
       store: new SqliteMcpServerStore(db),
       tokenStore,
@@ -150,8 +156,10 @@ describe('mcp-servers routers', () => {
     withTransaction = callback => db.transaction().execute(callback);
     logger = winston.createLogger({ silent: true });
     settingsRouter = createSettingsMcpServersRouter({
+      mcpCatalog: McpCatalog.load(),
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
+      toolGrantStore,
       withTransaction,
       logger,
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
@@ -165,6 +173,7 @@ describe('mcp-servers routers', () => {
     mcpServersRouter = createMcpServersRouter({
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
+      toolGrantStore,
       withTransaction,
       logger,
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
@@ -177,6 +186,7 @@ describe('mcp-servers routers', () => {
       tenant_id: 'default',
       name: body.name,
       manifest: body,
+      first_party: false,
     });
     await mcpServerStore.saveClient({
       id: record.id,
@@ -218,6 +228,7 @@ describe('mcp-servers routers', () => {
           description: 'Memory provider whose tools listing must stay complete.',
           memory_provider: true,
         },
+        first_party: false,
       });
 
       const response = await mcpServersRouter.request(`/${name}/tools`);
@@ -543,6 +554,7 @@ describe('mcp-servers routers', () => {
         tenant_id: 'default',
         name: putBodyWithDcr.name,
         manifest: putBodyWithDcr,
+        first_party: false,
       });
       await mcpServerStore.saveClient({
         id: record.id,
@@ -623,7 +635,7 @@ describe('mcp-servers routers', () => {
   it('PUT with a different redacted header value still keeps the stored secret', async () => {
     await settingsRouter.request('/', putInit(wrapManifest(putBodyWithHeaderAuth)));
 
-    // Any value containing ***REDACTED*** is treated as keep, not only the exact GET mask.
+    // Any value containing ***REDACTED*** is treated as keep, so masks from older GETs still round-trip.
     const keep = {
       ...putBodyWithHeaderAuth,
       url: 'https://mcp.example.com/v3/mcp',
@@ -659,7 +671,7 @@ describe('mcp-servers routers', () => {
     await settingsRouter.request('/', putInit(wrapManifest(putBodyWithHeaderAuth)));
 
     const rotatedToken = 'Bearer rotated-token';
-    const rotatedTokenRedacted = 'Bea-***REDACTED***-ken';
+    const rotatedTokenRedacted = '***REDACTED***';
     const rotated = {
       ...putBodyWithHeaderAuth,
       auth: {
@@ -835,6 +847,7 @@ describe('mcp-servers routers', () => {
           description: 'Memory provider that must not be offered in chats.',
           memory_provider: true,
         },
+        first_party: false,
       });
 
       const chat = await mcpServersRouter.request('/');
@@ -919,6 +932,7 @@ describe('mcp-servers routers', () => {
     const otherRouter = createMcpServersRouter({
       resolveMcpServerStore: () => mcpServerStore,
       tokenStore,
+      toolGrantStore,
       withTransaction,
       logger,
       resolveRequestContext: () => ({
@@ -1190,6 +1204,150 @@ describe('mcp-servers routers', () => {
     expect(missing.status).toBe(404);
   });
 
+  describe('search provider single-flag enforcement', () => {
+    function searchManifest(name: string, extra: Record<string, unknown> = {}) {
+      return {
+        type: 'remote' as const,
+        name,
+        url: `https://${name}.example.com/mcp`,
+        description: `Search connector "${name}".`,
+        ...extra,
+      };
+    }
+
+    it('PUT creates the first search provider and keeps the flag on the wire', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(searchManifest('search-primary', { search_provider: true }))),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: { name: 'search-primary', manifest: { search_provider: true } },
+      });
+    });
+
+    it('POST create rejects a second search provider with 409 naming the existing one', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        postInit(wrapManifest(searchManifest('search-secondary', { search_provider: true }))),
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: { message: 'search provider already set on search-primary; disable it first' },
+      });
+      expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'search-secondary' })).toBeUndefined();
+    });
+
+    it('PUT rejects flagging a second, already-existing server with 409 and leaves it unflagged', async () => {
+      const created = await settingsRouter.request('/', putInit(wrapManifest(searchManifest('search-secondary'))));
+      expect(created.status).toBe(200);
+
+      const response = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(searchManifest('search-secondary', { search_provider: true }))),
+      );
+      expect(response.status).toBe(409);
+      const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'search-secondary' });
+      expect(stored?.manifest.type === 'remote' ? stored.manifest.search_provider : undefined).toBeUndefined();
+    });
+
+    it('PUT re-saving the holder is not a conflict with itself, and designation moves in two steps', async () => {
+      const resave = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(searchManifest('search-primary', { search_provider: true, description: 'Renamed.' }))),
+      );
+      expect(resave.status).toBe(200);
+
+      const disable = await settingsRouter.request('/', putInit(wrapManifest(searchManifest('search-primary'))));
+      expect(disable.status).toBe(200);
+      const enable = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(searchManifest('search-secondary', { search_provider: true }))),
+      );
+      expect(enable.status).toBe(200);
+      expect(await enable.json()).toMatchObject({
+        data: { name: 'search-secondary', manifest: { search_provider: true } },
+      });
+    });
+  });
+
+  describe('search tools of the search provider come from the shipped catalog', () => {
+    const PARALLEL_URL = 'https://search.parallel.ai/mcp';
+
+    function providerManifest(extra: Record<string, unknown>) {
+      return {
+        type: 'remote' as const,
+        name: 'catalog-search',
+        url: PARALLEL_URL,
+        description: 'A connector the user designates as the search provider.',
+        ...extra,
+      };
+    }
+
+    async function save(manifest: Record<string, unknown>) {
+      const response = await settingsRouter.request('/', putInit(wrapManifest(manifest)));
+      expect(response.status).toBe(200);
+      const stored = await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'catalog-search' });
+      return stored?.manifest.type === 'remote' ? stored.manifest : undefined;
+    }
+
+    beforeAll(async () => {
+      // Another test of this file may still hold the single role.
+      for (const holder of await mcpServerStore.listServers({ tenant_id: TENANT_ID, names: undefined })) {
+        if (holder.manifest.type === 'remote' && holder.manifest.search_provider === true) {
+          await mcpServerStore.upsertServer({
+            tenant_id: TENANT_ID,
+            name: holder.name,
+            manifest: { ...holder.manifest, search_provider: undefined },
+            first_party: false,
+          });
+        }
+      }
+    });
+
+    it('fills the list for a connector at a known provider’s address once it is designated', async () => {
+      const stored = await save(providerManifest({ search_provider: true }));
+      expect(stored?.search_tools).toEqual(['web_search', 'web_fetch']);
+      const read = await settingsRouter.request('/catalog-search');
+      expect(await read.json()).toMatchObject({ data: { manifest: { search_tools: ['web_search', 'web_fetch'] } } });
+    });
+
+    it('replaces a list the request carried, so a client cannot widen what runs without asking', async () => {
+      const stored = await save(providerManifest({ search_provider: true, search_tools: ['delete_everything'] }));
+      expect(stored?.search_tools).toEqual(['web_search', 'web_fetch']);
+    });
+
+    it('gives a designated connector at an unknown address no list, whatever the request carried', async () => {
+      const stored = await save(
+        providerManifest({
+          url: 'https://api.githubcopilot.com/mcp/',
+          search_provider: true,
+          search_tools: ['create_issue', 'delete_file'],
+        }),
+      );
+      expect(stored?.search_provider).toBe(true);
+      expect(stored?.search_tools).toBeUndefined();
+    });
+
+    it('drops the list when the role is turned off or the address moves off the preset', async () => {
+      await save(providerManifest({ search_provider: true }));
+      const roleOff = await save(providerManifest({ search_tools: ['web_search'] }));
+      expect(roleOff?.search_provider).toBeUndefined();
+      expect(roleOff?.search_tools).toBeUndefined();
+
+      await save(providerManifest({ search_provider: true }));
+      const moved = await save(providerManifest({ search_provider: true, url: 'https://other.example.com/mcp' }));
+      expect(moved?.search_tools).toBeUndefined();
+    });
+
+    it('matches the address the way the catalog does, so a key in the query string still counts', async () => {
+      const stored = await save(
+        providerManifest({ search_provider: true, url: 'https://mcp.tavily.com/mcp/?tavilyApiKey=synthetic' }),
+      );
+      expect(stored?.search_tools).toEqual(['tavily_search', 'tavily_extract']);
+    });
+  });
+
   describe('memory provider single-flag enforcement', () => {
     const hindsightUrl = HINDSIGHT_MCP_URL;
 
@@ -1312,7 +1470,12 @@ describe('mcp-servers routers', () => {
           server.manifest.type === 'remote' && server.manifest.memory_provider === true,
       )) {
         const { memory_provider: _flag, ...withoutFlag } = holder.manifest;
-        await mcpServerStore.upsertServer({ tenant_id: TENANT_ID, name: holder.name, manifest: withoutFlag });
+        await mcpServerStore.upsertServer({
+          tenant_id: TENANT_ID,
+          name: holder.name,
+          manifest: withoutFlag,
+          first_party: false,
+        });
       }
     });
 
@@ -1349,6 +1512,37 @@ describe('mcp-servers routers', () => {
       });
       expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name: 'hindsight-create-401' })).toBeUndefined();
     });
+
+    it.each([
+      ['PUT', putInit],
+      ['POST', postInit],
+    ])(
+      'rejects a %s whose provider answers the check with a redirect, and does not follow it',
+      async (method, init) => {
+        hindsightRecall = () =>
+          new Response(null, {
+            status: 308,
+            headers: { location: 'https://other.example.com/v1/default/banks/aman/memories/recall?key=hunter2' },
+          });
+        const name = `hindsight-redirect-${method.toLowerCase()}`;
+        const dialed = hindsightRecallInits.length;
+
+        const response = await settingsRouter.request(
+          '/',
+          init(wrapManifest(hindsightManifest(name, { memory_provider: true }))),
+        );
+
+        expect(response.status).toBe(422);
+        expect(await response.json()).toEqual({
+          error: {
+            message:
+              'memory provider check failed: recall returned HTTP 308, a redirect to https://other.example.com; redirects are not followed',
+          },
+        });
+        expect(await mcpServerStore.getServer({ tenant_id: TENANT_ID, name })).toBeUndefined();
+        expect(hindsightRecallInits.slice(dialed)).toEqual([expect.objectContaining({ redirect: 'manual' })]);
+      },
+    );
 
     it('leaves an existing provider untouched when a later edit fails the check', async () => {
       const enable = await settingsRouter.request(
@@ -1489,6 +1683,7 @@ describe('mcp-servers routers', () => {
         tenant_id: TENANT_ID,
         name: dcrProvider.name,
         manifest: dcrProvider,
+        first_party: false,
       });
       await mcpServerStore.saveClient({
         id: record.id,
@@ -1553,7 +1748,7 @@ describe('mcp-servers routers', () => {
       };
       hindsightRecall = async () => {
         // Lands after the unlocked read the check resolved from, before the write txn locks.
-        await mcpServerStore.upsertServer({ tenant_id: TENANT_ID, name, manifest: raced });
+        await mcpServerStore.upsertServer({ tenant_id: TENANT_ID, name, manifest: raced, first_party: false });
         return memoryRecallResponse();
       };
 
@@ -1671,6 +1866,91 @@ describe('mcp-servers routers', () => {
       const list = await settingsRouter.request('/');
       const listBody = (await list.json()) as { data: { name: string }[] };
       expect(listBody.data.find(server => server.name === memoryProviderBody.name)).toBeUndefined();
+    });
+  });
+
+  describe('Always allow tool grants', () => {
+    const OTHER_USER = 'user:someone-else';
+    const notesBody = {
+      type: 'remote' as const,
+      name: 'grant-notes-mcp',
+      url: 'https://notes.example.com/mcp',
+      description: 'Notes connector used by the grant tests.',
+    };
+
+    function grantFor(input: { created_by: string; tool_name: string }) {
+      return { tenant_id: TENANT_ID, mcp_server_name: notesBody.name, ...input };
+    }
+
+    async function listedGrants(): Promise<string[]> {
+      const response = await mcpServersRouter.request(`/${notesBody.name}/tool-grants`);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { data: { tool_name: string; created_at: string }[] };
+      return body.data.map(grant => grant.tool_name);
+    }
+
+    beforeEach(async () => {
+      const put = await settingsRouter.request('/', putInit(wrapManifest(notesBody)));
+      expect(put.status).toBe(200);
+      await toolGrantStore.recordToolGrant(
+        grantFor({ created_by: STANDALONE_REQUEST_CONTEXT.subject.id, tool_name: 'lookup_note' }),
+      );
+      await toolGrantStore.recordToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }));
+    });
+
+    afterEach(async () => {
+      await settingsRouter.request(`/${notesBody.name}`, { method: 'DELETE' });
+    });
+
+    it("lists only the caller's grants", async () => {
+      await toolGrantStore.recordToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'list_notes' }));
+      expect(await listedGrants()).toEqual(['lookup_note']);
+    });
+
+    it("revokes one of the caller's grants and leaves other users' grants alone", async () => {
+      const response = await mcpServersRouter.request(`/${notesBody.name}/tool-grants/lookup_note`, {
+        method: 'DELETE',
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({});
+      expect(await listedGrants()).toEqual([]);
+      expect(await toolGrantStore.hasToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }))).toBe(
+        true,
+      );
+    });
+
+    it('404s for an unknown connector', async () => {
+      const list = await mcpServersRouter.request('/missing-grant-mcp/tool-grants');
+      expect(list.status).toBe(404);
+      const revoke = await mcpServersRouter.request('/missing-grant-mcp/tool-grants/lookup_note', { method: 'DELETE' });
+      expect(revoke.status).toBe(404);
+    });
+
+    it('drops the grants of every user when the connector URL changes, but not on an unrelated edit', async () => {
+      const described = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest({ ...notesBody, description: 'Same server, new words.' })),
+      );
+      expect(described.status).toBe(200);
+      expect(await listedGrants()).toEqual(['lookup_note']);
+
+      const moved = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest({ ...notesBody, url: 'https://elsewhere.example.com/mcp' })),
+      );
+      expect(moved.status).toBe(200);
+      expect(await listedGrants()).toEqual([]);
+      expect(await toolGrantStore.hasToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }))).toBe(
+        false,
+      );
+    });
+
+    it('drops the grants of every user when the connector is deleted', async () => {
+      const response = await settingsRouter.request(`/${notesBody.name}`, { method: 'DELETE' });
+      expect(response.status).toBe(200);
+      for (const created_by of [STANDALONE_REQUEST_CONTEXT.subject.id, OTHER_USER]) {
+        expect(await toolGrantStore.hasToolGrant(grantFor({ created_by, tool_name: 'lookup_note' }))).toBe(false);
+      }
     });
   });
 });

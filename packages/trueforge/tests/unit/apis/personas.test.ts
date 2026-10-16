@@ -1,5 +1,9 @@
-import { OpenAPIHono } from '@hono/zod-openapi';
+import { OpenAPIHono, z } from '@hono/zod-openapi';
 import { AgentSpecSchema, Sessions } from '@truefoundry/trueforge-core/agent-session';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { createLogger } from 'winston';
 import { createPersonasRouter, createSessionPersonasRouter } from '../../../src/apis/personas';
 import { TENANT_ID } from '../../../src/apis/sessions';
@@ -10,6 +14,7 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
+import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
 
 const userA: RequestContext = {
   tenant_id: 'default',
@@ -65,6 +70,7 @@ async function setup() {
   });
   const personaStore = new SqlitePersonaStore(db);
   const sessionStore = new SqliteSessionStore(db);
+  const knowledgeDir = await mkdtemp(path.join(tmpdir(), 'personas-knowledge-'));
   let user = userA;
   // Mounted behind the app's own error handler so a thrown HTTPException is
   // judged as the JSON the API actually returns, not as a bare text body.
@@ -79,6 +85,7 @@ async function setup() {
       personaStore,
       resolveModelProviderStore: () => modelProviderStore,
       resolveRequestContext: () => user,
+      knowledgeDir,
     }),
   );
   const sessionPersonas = mount(
@@ -104,6 +111,7 @@ async function setup() {
     sessionPersonas,
     createSession,
     personaStore,
+    knowledgeDir,
     as: (next: RequestContext) => {
       user = next;
     },
@@ -134,6 +142,33 @@ describe('personas router', () => {
 
     expect((await personas.request(`/${persona.id}`, { method: 'DELETE' })).status).toBe(200);
     expect(((await (await personas.request('/')).json()) as { data: unknown[] }).data).toHaveLength(0);
+  });
+
+  it('deletes a knowledge library only for the owner of its persona', async () => {
+    const { personas, knowledgeDir, as } = await setup();
+    const { data: persona } = z
+      .object({ data: z.object({ id: z.string() }) })
+      .parse(await (await personas.request('/', jsonInit('POST', personaBody()))).json());
+    // Synthetic library files: the database, its SQLite sidecars, and a pending upload blob.
+    const { dbPath } = personaKnowledgeLocation({ knowledgeDir, tenantId: TENANT_ID, personaId: persona.id });
+    const blobDir = path.join(knowledgeDir, TENANT_ID, `${persona.id}.blobs`);
+    const blob = path.join(blobDir, 'doc-1.bin');
+    const libraryFiles = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, blob];
+    await mkdir(blobDir, { recursive: true });
+    for (const file of libraryFiles) {
+      await writeFile(file, 'synthetic library bytes');
+    }
+
+    as(userB);
+    const denied = await personas.request(`/${persona.id}`, { method: 'DELETE' });
+    expect(denied.status).toBe(404);
+    expect(libraryFiles.map(file => existsSync(file))).toEqual([true, true, true, true]);
+
+    as(userA);
+    expect((await personas.request(`/${persona.id}`, { method: 'DELETE' })).status).toBe(200);
+    expect(libraryFiles.map(file => existsSync(file))).toEqual([false, false, false, false]);
+    expect(existsSync(blobDir)).toBe(false);
+    expect((await personas.request(`/${persona.id}`, { method: 'DELETE' })).status).toBe(404);
   });
 
   it('refuses a name or alias another persona already answers to', async () => {

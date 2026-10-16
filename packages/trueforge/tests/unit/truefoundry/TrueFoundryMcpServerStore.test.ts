@@ -98,6 +98,7 @@ function dcrRecord(overrides: { name?: string } = {}) {
       description: 'GitHub MCP',
       auth: { type: 'dcr' as const },
     },
+    first_party: false,
     created_at: '2026-01-15T12:00:00.000Z',
     updated_at: '2026-01-16T12:00:00.000Z',
   };
@@ -115,6 +116,7 @@ function truefoundryRecordWithoutAuth(overrides: { name?: string; id?: string } 
       url: `https://gateway.example/mcp-server/${name}`,
       description: 'Per-user token MCP',
     },
+    first_party: false,
     created_at: '2026-01-15T12:00:00.000Z',
     updated_at: '2026-01-16T12:00:00.000Z',
   };
@@ -144,6 +146,15 @@ describe('TrueFoundryMcpServerStore', () => {
       });
       expect(client.getMcpServerByName).not.toHaveBeenCalled();
       expect(records.map(server => server.name)).toEqual(['github']);
+    });
+
+    it('never marks a gateway-managed server first-party', async () => {
+      const { store, client } = createStore();
+      client.listMcpServers.mockResolvedValue([SFY_ROW]);
+
+      const records = await store.listServers({ tenant_id: TENANT, names: undefined });
+
+      expect(records.map(server => server.first_party)).toEqual([false]);
     });
   });
 

@@ -5,92 +5,88 @@ import { TrueForge } from "../../src/Client";
 import { mockServerPool } from "../mock-server/MockServerPool";
 
 describe("BugReportsClient", () => {
+    
     test("create (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {};
-        const rawResponseBody = {
-            data: {
-                build: { ref: "ref", version: "version" },
-                config_flags: { sandbox_enabled: true, settings_enabled: true, skill_enabled: true },
-                generated_at: "generated_at",
-                redaction: { notes: "notes", stripped_fields: ["stripped_fields"] },
-                schema_version: 1,
-                user_description: "user_description",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { };
+        const rawResponseBody = { "data" : { "build" : { "ref" : "ref" , "version" : "version" } , "config_flags" : { "sandbox_enabled" : true , "settings_enabled" : true , "skill_enabled" : true } , "generated_at" : "generated_at" , "redaction" : { "notes" : "notes" , "stripped_fields" : [ "stripped_fields" ] } , "schema_version" : 1 , "user_description" : "user_description" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/bug-reports")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/bug-reports").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.bugReports.create();
-        expect(response).toEqual({
-            data: {
-                build: {
-                    ref: "ref",
-                    version: "version",
-                },
-                configFlags: {
-                    sandboxEnabled: true,
-                    settingsEnabled: true,
-                    skillEnabled: true,
-                },
-                generatedAt: "generated_at",
-                redaction: {
-                    notes: "notes",
-                    strippedFields: ["stripped_fields"],
-                },
-                schemaVersion: 1,
-                userDescription: "user_description",
-            },
-        });
+        
+                        
+                                const response = await client.bugReports.create();
+                                expect(response).toEqual({
+    data: {
+        build: {
+            ref: "ref",
+            version: "version"
+        },
+        configFlags: {
+            sandboxEnabled: true,
+            settingsEnabled: true,
+            skillEnabled: true
+        },
+        generatedAt: "generated_at",
+        redaction: {
+            notes: "notes",
+            strippedFields: ["stripped_fields"]
+        },
+        schemaVersion: 1,
+        userDescription: "user_description"
+    }
+});
+                              
+                    
     });
-
+          
     test("create (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {};
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/bug-reports")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(400)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/bug-reports").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.bugReports.create();
-        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        
+            await expect(async () => {
+                return await client.bugReports.create()
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-
+          
     test("get_handoff", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { data: { issue_url: "issue_url" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "issue_url" : "issue_url" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/bug-reports/handoff")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/bug-reports/handoff").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.bugReports.getHandoff();
-        expect(response).toEqual({
-            data: {
-                issueUrl: "issue_url",
-            },
-        });
+        
+                        
+                                const response = await client.bugReports.getHandoff();
+                                expect(response).toEqual({
+    data: {
+        issueUrl: "issue_url"
+    }
+});
+                              
+                    
     });
+          
 });

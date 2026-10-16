@@ -6,6 +6,7 @@ import {
   toJsonSafeParams,
   verifyApprovalToken,
 } from '../../../src/core/permissions/approvalTokens';
+import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';
 
 describe('stableStringify', () => {
   test('sorts object keys recursively and drops undefined', () => {
@@ -70,15 +71,16 @@ describe('toJsonSafeParams', () => {
     expect(fromMint).toBe(fromVerify);
   });
 
-  test('minting over normalized params verifies against JSON-parsed args', () => {
+  test('minting over normalized params verifies against JSON-parsed args', async () => {
     const store = new InMemoryApprovalTokenStore();
     const liveParams = { command: 'ls', at: new Date('2026-01-02T03:04:05.006Z') };
     const normalized = toJsonSafeParams(liveParams);
-    const token = store.mint({
+    const token = await store.mint({
+      ...testApprovalOwner(),
       action_id: actionIdFor({ tool_name: 'exec', canonical_params: normalized }),
       canonical_params: normalized,
     });
-    const redeemed = store.redeem({ token_id: token.token_id });
+    const redeemed = await store.redeem({ ...TEST_TOKEN_SCOPE, token_id: token.token_id });
     expect(redeemed).toBeDefined();
     if (redeemed === undefined) {
       return;
@@ -96,31 +98,25 @@ describe('toJsonSafeParams', () => {
 });
 
 describe('InMemoryApprovalTokenStore', () => {
-  test('redeem is single-use', () => {
+  test('redeem is single-use', async () => {
     const store = new InMemoryApprovalTokenStore();
-    const token = store.mint({ action_id: 'act-1', canonical_params: { a: 1 } });
-    expect(store.redeem({ token_id: token.token_id })).toBeDefined();
-    expect(store.redeem({ token_id: token.token_id })).toBeUndefined();
-    expect(store.peek({ token_id: 'missing' })).toBeUndefined();
-  });
-
-  test('pruneBefore drops old tokens', () => {
-    const store = new InMemoryApprovalTokenStore();
-    const token = store.mint({ action_id: 'act-1', canonical_params: {} });
-    store.pruneBefore({ cutoff_iso: '2999-01-01T00:00:00.000Z' });
-    expect(store.peek({ token_id: token.token_id })).toBeUndefined();
+    const token = await store.mint({ ...testApprovalOwner(), action_id: 'act-1', canonical_params: { a: 1 } });
+    expect(await store.redeem({ ...TEST_TOKEN_SCOPE, token_id: token.token_id })).toBeDefined();
+    expect(await store.redeem({ ...TEST_TOKEN_SCOPE, token_id: token.token_id })).toBeUndefined();
+    expect(await store.peek({ ...TEST_TOKEN_SCOPE, token_id: 'missing' })).toBeUndefined();
   });
 });
 
 describe('verifyApprovalToken', () => {
-  test('accepts byte-identical params', () => {
+  test('accepts byte-identical params', async () => {
     const store = new InMemoryApprovalTokenStore();
     const params = { command: 'ls -la', cwd: '/tmp' };
-    const token = store.mint({
+    const token = await store.mint({
+      ...testApprovalOwner(),
       action_id: actionIdFor({ tool_name: 'exec', canonical_params: params }),
       canonical_params: params,
     });
-    const redeemed = store.redeem({ token_id: token.token_id });
+    const redeemed = await store.redeem({ ...TEST_TOKEN_SCOPE, token_id: token.token_id });
     expect(redeemed).toBeDefined();
     if (redeemed === undefined) {
       return;
@@ -133,14 +129,15 @@ describe('verifyApprovalToken', () => {
     expect(result).toEqual({ valid: true });
   });
 
-  test('rejects changed params and changed action identity', () => {
+  test('rejects changed params and changed action identity', async () => {
     const store = new InMemoryApprovalTokenStore();
     const params = { command: 'ls -la' };
-    const token = store.mint({
+    const token = await store.mint({
+      ...testApprovalOwner(),
       action_id: actionIdFor({ tool_name: 'exec', canonical_params: params }),
       canonical_params: params,
     });
-    const redeemed = store.redeem({ token_id: token.token_id });
+    const redeemed = await store.redeem({ ...TEST_TOKEN_SCOPE, token_id: token.token_id });
     expect(redeemed).toBeDefined();
     if (redeemed === undefined) {
       return;
@@ -158,5 +155,22 @@ describe('verifyApprovalToken', () => {
       canonical_params: params,
     });
     expect(wrongAction.valid).toBe(false);
+  });
+});
+
+describe('actionIdFor connector binding', () => {
+  const base = { tool_name: 'web_search', canonical_params: { query: 'q' } };
+
+  test('is unchanged for a call with no connector', () => {
+    expect(actionIdFor({ ...base, connector: undefined })).toBe(actionIdFor(base));
+  });
+
+  test('differs when the connector server or its host differs', () => {
+    const exa = actionIdFor({ ...base, connector: { server_id: 'exa', destination_host: 'mcp.exa.ai' } });
+    expect(actionIdFor({ ...base, connector: { server_id: 'exa', destination_host: 'mcp.exa.ai' } })).toBe(exa);
+    expect(actionIdFor({ ...base, connector: { server_id: 'exa', destination_host: 'evil.example' } })).not.toBe(exa);
+    expect(actionIdFor({ ...base, connector: { server_id: 'other', destination_host: 'mcp.exa.ai' } })).not.toBe(exa);
+    expect(actionIdFor({ ...base, connector: { server_id: 'exa', destination_host: null } })).not.toBe(exa);
+    expect(exa).not.toBe(actionIdFor(base));
   });
 });

@@ -43,6 +43,7 @@ import type { AgentTracing } from '../tracing/AgentTracing';
 import type { AbnormalHandoffCause } from './AbnormalHandoff';
 import type { AgentDefinition } from './AgentDefinition';
 import type { CurrentContextUsage } from './contextUsage';
+import type { HostToolCallPolicy } from './HostToolCallPolicy';
 import type { TaskStateSnapshot } from './taskState';
 
 export type { AgentInfo, AgentParent };
@@ -264,6 +265,13 @@ export interface AgentThreadConstructorInput {
    * forwarded to executeToolCalls. Undefined falls back to the core default.
    */
   toolDispatchMaxConcurrency?: number | undefined;
+  /**
+   * Synchronous host policy consulted for every tool call during
+   * assistant-message enrichment, before provider dispatch. A block resolves
+   * the call as `policy_blocked` with the host message as the tool error.
+   * Undefined disables the hook.
+   */
+  toolCallPolicy?: HostToolCallPolicy | undefined;
   /**
    * Per-tool-call dispatch deadline in milliseconds, forwarded to
    * executeToolCalls. Undefined falls back to the core default.

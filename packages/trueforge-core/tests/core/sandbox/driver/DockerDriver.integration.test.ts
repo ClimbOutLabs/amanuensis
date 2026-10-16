@@ -5,12 +5,14 @@
  * is unreachable, so the suite is green on machines without Docker.
  */
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { DockerDriver } from '../../../../src/core/sandbox/driver/DockerDriver';
+import { DOCKER_SOCKET_PATH, DockerDriver } from '../../../../src/core/sandbox/driver/DockerDriver';
 import type { DriverRunParams } from '../../../../src/core/sandbox/driver/IsolationDriver';
+import { resolveSandboxIdentity, SANDBOX_RUN_ENV, stageRunDirs } from '../../../../src/core/sandbox/driver/RunStaging';
+import { makeSilentLogger } from '../../harnessMocks';
 
 const execFileAsync = promisify(execFile);
 
@@ -49,25 +51,35 @@ async function containersWithLabel(labelValue: string): Promise<string> {
 }
 
 describe('DockerDriver integration (live daemon)', () => {
-  test('ensureReady reports image_unavailable (not daemon_unavailable) when the daemon is up but the image is missing', async () => {
+  test('ensureReady reports image_missing (not daemon_unavailable) when the daemon is up but the image is absent', async () => {
     if (!(await dockerAvailable())) {
       return;
     }
-    const driver = new DockerDriver(
-      {
-        image: 'ghcr.io/climboutlabs/amanuensis-sandbox:0.0.0-integration-missing@sha256:' + '0'.repeat(64),
-        cosignPublicKeyPath: '/nonexistent/cosign.pub',
-        dockerBinary: undefined,
-        cosignBinary: undefined,
-        commandTimeoutMs: undefined,
-        createTimeoutMs: undefined,
-      },
-      undefined,
-    );
-    const readiness = await driver.ensureReady();
-    expect(readiness.ready).toBe(false);
-    if (!readiness.ready) {
-      expect(readiness.error_code).toBe('image_unavailable');
+    const stateDir = await mkdtemp(join(tmpdir(), 'sandbox-itest-state-'));
+    try {
+      const driver = new DockerDriver(
+        {
+          image: 'ghcr.io/climboutlabs/amanuensis-sandbox:0.0.0-integration-missing@sha256:' + '0'.repeat(64),
+          cosignPublicKeyPath: '/nonexistent/cosign.pub',
+          stateDir,
+          dataDir: tmpdir(),
+          dockerBinary: undefined,
+          cosignBinary: undefined,
+          dockerSocketPath: DOCKER_SOCKET_PATH,
+          commandTimeoutMs: undefined,
+          createTimeoutMs: undefined,
+          logger: makeSilentLogger(),
+        },
+        undefined,
+      );
+      const readiness = await driver.ensureReady();
+      expect(readiness.ready).toBe(false);
+      if (!readiness.ready) {
+        // An image absent locally is healable; RunCodeService provisions it before surfacing image_unavailable.
+        expect(readiness.error_code).toBe('image_missing');
+      }
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
     }
   });
 
@@ -80,29 +92,35 @@ describe('DockerDriver integration (live daemon)', () => {
     }
     const runRoot = await mkdtemp(join(tmpdir(), 'sandbox-itest-'));
     try {
-      const ingressDir = join(runRoot, 'ingress');
-      const scratchDir = join(runRoot, 'scratch');
-      const egressDir = join(runRoot, 'egress');
-      await mkdir(ingressDir, { recursive: true });
-      await mkdir(scratchDir, { recursive: true });
-      await mkdir(egressDir, { recursive: true });
-      await writeFile(join(ingressDir, '__runcode_main.py'), 'print("hello from sandbox")\n');
+      const code = 'print("hello from sandbox")';
+      const sandboxIdentity = resolveSandboxIdentity();
+      const { ingressDir, scratchDir, egressDir } = await stageRunDirs({
+        runRoot,
+        language: 'python',
+        code,
+        files: [],
+        identity: sandboxIdentity,
+      });
 
       const runId = `itest-${String(Date.now())}`;
       const driver = new DockerDriver(
         {
           image: TEST_IMAGE,
           cosignPublicKeyPath: '/nonexistent/cosign.pub',
+          stateDir: join(runRoot, 'state'),
           dockerBinary: undefined,
           cosignBinary: undefined,
+          dockerSocketPath: DOCKER_SOCKET_PATH,
+          dataDir: tmpdir(),
           commandTimeoutMs: undefined,
           createTimeoutMs: undefined,
+          logger: makeSilentLogger(),
         },
         undefined,
       );
       const params: DriverRunParams = {
         language: 'python',
-        code: 'print("hello from sandbox")',
+        code,
         filesIn: [],
         ingressDir,
         scratchDir,
@@ -111,7 +129,8 @@ describe('DockerDriver integration (live daemon)', () => {
         memoryMb: 512,
         diskMb: 256,
         runId,
-        env: { PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8', HOME: '/scratch' },
+        env: SANDBOX_RUN_ENV,
+        sandboxIdentity,
         signal: undefined,
         harvestGraceMs: 2000,
       };

@@ -9,6 +9,24 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryApprovals: useApprovals,
 }));
 
+// Every pending approval sits on the newest message, which is the answerable one.
+vi.mock('@assistant-ui/react', () => ({
+  useAuiState: (selector: (state: unknown) => unknown) =>
+    selector({
+      thread: {
+        messages: [
+          {
+            role: 'assistant',
+            content: pending.map(item => ({
+              type: 'tool-call',
+              approval: { id: item.approvalId, approved: undefined },
+            })),
+          },
+        ],
+      },
+    }),
+}));
+
 vi.mock('@/containers/approvalFocus.js', () => ({
   useOptionalApprovalFocus: () => ({ focus }),
 }));
