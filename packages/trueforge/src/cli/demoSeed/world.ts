@@ -114,26 +114,26 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
   const notes: DemoNote[] = [
     {
       key: 'style',
-      body: 'Mara prefers short, friendly answers. She leaves 15 minutes early for anything medical.',
+      body: 'Maya prefers short, friendly answers. She leaves 15 minutes early for anything medical.',
     },
     {
       key: 'travel',
-      body: 'Mara usually gets around Barcelona by metro and taxi, not by car. Her insurance card lives in the blue wallet.',
+      body: 'Maya usually gets around Barcelona by metro and taxi, not by car. Her insurance card lives in the blue wallet.',
     },
     {
       key: 'home-area',
-      body: "Mara's home area is Gràcia, Barcelona. Only the neighborhood is noted, never a street address.",
+      body: "Maya's home area is Gràcia, Barcelona. Only the neighborhood is noted, never a street address.",
     },
     {
       key: 'work-area',
-      body: "Mara's work area is Poblenou, Barcelona, where her team has a shared office. Only the neighborhood is noted, never a street address.",
+      body: "Maya's work area is Poblenou, Barcelona, where her team has a shared office. Only the neighborhood is noted, never a street address.",
     },
     {
       key: 'appointment-today',
       body:
         `Appointment today, ${todayLabel}, at ${appointmentLabel}: check-up with Dr. Halloran, her GP, at ${TO_PLACE}. ` +
         'Bring the referral letter from the orthopedics department and the insurance card from the blue wallet. ' +
-        `Today Mara is working from the Poblenou office, so she would head to the clinic from there. ` +
+        `Today Maya is working from the Poblenou office, so she would head to the clinic from there. ` +
         'Her friend Teo Marsh (teo.marsh@example.com) suggested coffee after the appointment.',
     },
     {
@@ -142,12 +142,12 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
     },
     {
       key: 'project-lisbon',
-      body: 'Project: a Lisbon weekend with Teo Marsh in mid-November. Flights are not booked yet; Mara wants to agree dates first.',
+      body: 'Project: a Lisbon weekend with Teo Marsh in mid-November. Flights are not booked yet; Maya wants to agree dates first.',
     },
     {
       key: 'week-overview',
       body: [
-        `What is on Mara's plate this week, starting ${todayLabel}:`,
+        `What is on Maya's plate this week, starting ${todayLabel}:`,
         `- ${todayLabel}: ${appointmentLabel} appointment with Dr. Halloran at ${TO_PLACE}.`,
         ...[
           { offset: plan.library, text: 'return the library books.' },
@@ -166,7 +166,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
     model: { name: input.modelName },
     config: { sandbox: { enabled: true } },
     instructions: [
-      'You are Aman, a calm personal assistant for Mara Hollis, a fictional demo user.',
+      'You are Aman, a calm personal assistant for Maya Hollis, a fictional demo user.',
       'Use what you remember about her. Keep answers short and friendly.',
       'For an appointment brief: recall the appointment, use render_route from where she starts to the appointment place, then give a short brief with when to leave and what to bring.',
       PDF_GUIDANCE,
@@ -188,7 +188,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       display_name: 'Sol',
       aliases: ['Planner'],
       instructions: [
-        'Sol is a calm planner who helps Mara Hollis, a fictional demo user, with appointments, errands and weekly planning.',
+        'Sol is a calm planner who helps Maya Hollis, a fictional demo user, with appointments, errands and weekly planning.',
         'Be brief and friendly. Use what you remember about her before asking.',
         PDF_GUIDANCE,
       ].join(' '),
@@ -198,7 +198,7 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       assistant_name: null,
       assistant_identity: null,
       voice_guidance: 'Warm, plain and brief.',
-      user_profile: `Mara Hollis, a fictional demo user (${DEMO_MARKER}). Lives in Gràcia, Barcelona and works in Poblenou.`,
+      user_profile: `Maya Hollis, a fictional demo user (${DEMO_MARKER}). Lives in Gràcia, Barcelona and works in Poblenou.`,
       pinned_preferences: ['Keep answers short and friendly.', 'Leave 15 minutes early for anything medical.'],
       learned_profile: null,
       learning_enabled: false,
