@@ -10,7 +10,7 @@
 # verified before loading. Later starts reuse the verified cache with no
 # network access. Pin AMAN_STT_MODEL_DIR to a baked-in directory to ship the
 # weights inside the image instead.
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

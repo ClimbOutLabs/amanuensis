@@ -842,6 +842,7 @@ export class SessionsClient {
                 case 412: throw new TrueForge.PreconditionFailedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 case 413: throw new TrueForge.ContentTooLargeError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 case 422: throw new TrueForge.UnprocessableEntityError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 429: throw new TrueForge.TooManyRequestsError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 default: throw new errors.TrueForgeError({
                     statusCode: _response.error.statusCode,
                     body: _response.error.body,
@@ -872,6 +873,7 @@ export class SessionsClient {
      * @throws {@link TrueForge.PreconditionFailedError}
      * @throws {@link TrueForge.ContentTooLargeError}
      * @throws {@link TrueForge.UnprocessableEntityError}
+     * @throws {@link TrueForge.TooManyRequestsError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
      *
@@ -913,6 +915,7 @@ export class SessionsClient {
                 case 412: throw new TrueForge.PreconditionFailedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 case 413: throw new TrueForge.ContentTooLargeError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 case 422: throw new TrueForge.UnprocessableEntityError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 429: throw new TrueForge.TooManyRequestsError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 default: throw new errors.TrueForgeError({
                     statusCode: _response.error.statusCode,
                     body: _response.error.body,

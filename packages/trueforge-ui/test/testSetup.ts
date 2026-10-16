@@ -6,6 +6,11 @@ import { vi } from 'vitest';
 // atoms/theme modules directly never hit the package entry, so load them here.
 import '../src/icons/registerAgentIcons.js';
 
+// jsdom does not define isSecureContext; the clipboard API is the default path, and copyText tests set it per case.
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+}
+
 // react-syntax-highlighter ships both CJS and ESM; refractor (its dependency)
 // is ESM-only and breaks when required via CJS. Mock in tests since it is
 // external in production anyway.

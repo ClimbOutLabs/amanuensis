@@ -28,6 +28,7 @@ import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { ListSessionsResponseSchema } from '../../../src/schemas/session';
+import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 describe('public CRUD after session deletion', () => {
   it('returns not found for session and turn operations', async () => {
@@ -76,6 +77,7 @@ describe('public CRUD after session deletion', () => {
       '/',
       createTurnsRouter({
         globalSettingsStore: new SqliteGlobalSettingsStore(db),
+        tokenFactoryBudget: uncappedTokenFactoryBudget,
         sessions,
         sessionStore,
         activeTurns,

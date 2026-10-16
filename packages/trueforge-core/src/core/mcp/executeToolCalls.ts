@@ -30,6 +30,7 @@ import { awaitWithAbort, signalAbortError, throwIfSignalAborted } from '../util/
 // carries its own `message`, so this is a compatibility path, not a normal dependency.
 import type { Logger } from 'winston';
 import { verifyPreDispatch, type SentinelCallIdentity, type SentinelServices } from '../permissions';
+import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryUnwrapCallToolInput } from '../runtime/DeferredTool';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
@@ -100,7 +101,7 @@ export function selectRepeatedActionStopMessage(input: {
   repeatedGithubFileRead: boolean;
 }): string {
   if (input.repeatedDeniedApproval) {
-    return 'The model repeated an action the user already denied, so the turn was stopped. Change strategy or explain why a different action is needed.';
+    return 'The model repeated an action the user already denied or that is waiting for their OK, so the turn was stopped. Change strategy or explain why a different action is needed.';
   }
   if (input.repeatedSideEffects) {
     return 'The model attempted a side-effecting action whose dependent precondition was violated (a preceding workspace mutation did not complete as expected, or the durable execution marker was missing), so the turn was stopped and the action was not retried.';
@@ -490,6 +491,8 @@ function parseToolArguments(argumentsJson: string): Record<string, unknown> {
 async function verifySentinelPreDispatch(input: {
   toolCall: InternalEnrichedToolCall;
   toolInfo: MappedMCPTool;
+  /** Reads file digests from the sandbox the call runs in, when the tool set has one the server cannot see. */
+  fileDigest: ((absolutePath: string) => Promise<string | null>) | undefined;
   approvalDecisions: Map<string, ApprovalDecision>;
   sentinel: { services: SentinelServices; identity: SentinelCallIdentity } | undefined;
 }): Promise<string | undefined> {
@@ -549,7 +552,13 @@ async function verifySentinelPreDispatch(input: {
       approval_binding: info.approval_binding ?? null,
       shell_binding: info.shell_binding ?? null,
     },
-    ctx: { ...sentinel.identity, services: sentinel.services, offline },
+    ctx: {
+      ...sentinel.identity,
+      services: sentinel.services,
+      offline,
+      path_resolution: info.path_resolution,
+      file_digest: input.fileDigest,
+    },
   });
 }
 
@@ -676,6 +685,7 @@ export function prepareSideEffectToolCalls({
     if (
       toolInfo === undefined ||
       toolCall.tool_info.pre_dispatch_failure !== undefined ||
+      toolCall.tool_info.held_for_owner !== undefined ||
       toolCall.tool_info.is_thread_creation === true ||
       toolCall.tool_info.is_client_side === true ||
       toolCall.tool_info.effect === 'inspect' ||
@@ -1118,12 +1128,79 @@ export async function executeToolCalls({
       };
     }
 
+    // A held call is never dispatched here; it runs later only if the owner approves it. Repeating an
+    // identical held call counts toward the repeated-denial guard so a loop cannot pile up holds.
+    if (toolCall.tool_info.held_for_owner?.duplicate === true) {
+      // The same call is already held in this batch: nothing more to save, and nothing to count.
+      return {
+        toolCall,
+        toolInfo,
+        response: toolResultResponse({ text: HELD_RESULT_TEXT }),
+        failure: false,
+        completedAt: new Date().toISOString(),
+        memoized: false,
+        repeatCount: 1,
+        blockedPrivateFallback: false,
+        repeatedSideEffect: false,
+        disposition: 'never_ran',
+        remediation: {
+          reason_code: HELD_REASON_CODE,
+          message: 'Already saved for the owner to approve later. Continue without it.',
+          suggested_action: 'contact_user',
+        },
+        admissionProvenance: { source: 'internal' },
+      };
+    }
+    if (toolCall.tool_info.held_for_owner !== undefined) {
+      const heldIdentity = `${approvalGrantKey(toolCall.tool_info)}|held|${createHash('sha256')
+        .update(toolCall.function.arguments, 'utf8')
+        .digest('hex')}`;
+      const repeatedHold = memoState.deniedApprovalIdentities.has(heldIdentity);
+      memoState.deniedApprovalIdentities.add(heldIdentity);
+      memoState.repeatedDeniedApproval ||= repeatedHold;
+      return {
+        toolCall,
+        toolInfo,
+        response: repeatedHold
+          ? toolResultResponse({
+              text: JSON.stringify({
+                error: 'This exact action is already waiting for the owner. Continue without it.',
+              }),
+              isError: true,
+            })
+          : toolResultResponse({ text: HELD_RESULT_TEXT }),
+        failure: repeatedHold,
+        completedAt: new Date().toISOString(),
+        memoized: false,
+        repeatCount: 1,
+        blockedPrivateFallback: false,
+        repeatedSideEffect: false,
+        disposition: repeatedHold ? 'policy_blocked' : 'never_ran',
+        remediation: repeatedHold
+          ? {
+              reason_code: 'repeated_denied_action',
+              message: 'Change strategy or explain why a different action is needed.',
+              suggested_action: 'change_strategy',
+            }
+          : {
+              reason_code: HELD_REASON_CODE,
+              message: 'Saved for the owner to approve later. Continue without it.',
+              suggested_action: 'contact_user',
+            },
+        admissionProvenance: { source: 'internal' },
+      };
+    }
+
     // Sentinel: re-verify an approved Tier 3 call byte-for-byte immediately
     // before invocation. A failed verification blocks dispatch (policy_blocked)
     // and never records a side-effect attempt or memo entry.
     const sentinelVerificationError = await verifySentinelPreDispatch({
       toolCall,
       toolInfo,
+      fileDigest:
+        toolInfo.toolSet.fileDigest === undefined
+          ? undefined
+          : path => toolInfo.toolSet.fileDigest?.(path) ?? Promise.resolve(null),
       approvalDecisions,
       sentinel,
     });

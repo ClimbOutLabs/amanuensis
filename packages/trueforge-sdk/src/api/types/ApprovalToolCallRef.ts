@@ -3,8 +3,16 @@
 import * as TrueForge from "../index.js";
 
 export interface ApprovalToolCallRef {
+    /** Whether the owner may allow this tool for good. */
+    canAlwaysAllow?: boolean;
+    /** ISO 8601 time after which a held action can no longer be approved. */
+    expiresAt?: string;
+    /** Set when a scheduled run held this action for the owner. The run did not wait for an answer. */
+    held?: true;
     /** Tool call id awaiting action. */
     id: string;
+    /** Set when a scheduled run could not save this action for the owner, and why. It will not run. */
+    notSaved?: TrueForge.ApprovalToolCallRefNotSaved;
     /** Event id of the model.message that requested the tool call. */
     sourceEventId: string;
     /** Permission tier of the call; absent when the call was not classified. */

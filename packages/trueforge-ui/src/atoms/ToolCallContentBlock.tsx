@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { copyText } from '@/utils/copyText.js';
 import { Icon } from '../icons/Icon.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { cn } from './lib/cn.js';
@@ -81,7 +82,7 @@ export function ToolCallContentBlock({
 
   const handleCopy = () => {
     const val = copyValue ?? content;
-    void navigator.clipboard.writeText(val).then(() => {
+    void copyText(val).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
