@@ -666,7 +666,7 @@ describe('ConnectorSettings Google row', () => {
       beginGoogleConsent: async () => ({ authorizationUrl: 'https://accounts.example.test', setup: status.setup }),
       completeGoogleConsent: async () => status,
       testGoogleConnection: async () => ({ result: 'ok', accountEmail: null }),
-      disconnectGoogle: async () => ({ disconnected: true }),
+      disconnectGoogle: async () => ({ revocationConfirmed: true }),
     };
   }
 
@@ -683,6 +683,31 @@ describe('ConnectorSettings Google row', () => {
     renderSettings([parallelWeb], googlePort(googleStatus({ state: 'needs_reconnect' })));
     expect(await screen.findByText('Reconnect needed')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
+  });
+
+  it('shows the row with a plain message, and a way to try again, when the status cannot be read', async () => {
+    let calls = 0;
+    const port: Partial<GoogleSetupPort> = {
+      ...googlePort(googleStatus()),
+      getGoogleStatus: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('boom');
+        return googleStatus({ state: 'connected', accountEmail: 'ada@example.com' });
+      },
+    };
+    renderSettings([parallelWeb], port);
+    expect(await screen.findByText("Couldn't check Google right now")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('button', { name: 'Manage' })).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't check Google right now")).not.toBeInTheDocument();
+  });
+
+  it('uses a neutral G tile for Google, not a generic server icon', async () => {
+    renderSettings([parallelWeb], googlePort(googleStatus()));
+    await screen.findByText('Not connected');
+    const tile = screen.getByText('G');
+    expect(tile).toHaveAttribute('aria-hidden', 'true');
+    expect(tile.querySelector('svg')).toBeNull();
   });
 
   it('is not shown at all on an instance where Google is unavailable', async () => {

@@ -96,7 +96,7 @@ function makePort(overrides: Partial<GoogleSetupPort> = {}) {
     beginGoogleConsent: begin,
     completeGoogleConsent: complete,
     testGoogleConnection: async () => ({ result: 'ok', accountEmail: 'ada@example.com' }),
-    disconnectGoogle: async () => ({ disconnected: true }),
+    disconnectGoogle: async () => ({ revocationConfirmed: true }),
     ...overrides,
   };
   return { port, begin, complete };
@@ -191,7 +191,9 @@ describe('GoogleSetupPanel', () => {
     const file = new File(['{"hello":1}'], 'x.json', { type: 'application/json' });
     Object.defineProperty(file, 'text', { value: async () => '{"hello":1}' });
     fireEvent.change(screen.getByLabelText('Or choose the downloaded client JSON'), { target: { files: [file] } });
-    expect(await screen.findByRole('alert')).toHaveTextContent('not a Google OAuth client file');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "That file isn't the sign-in file from Google Cloud. Download it again from the client you created.",
+    );
   });
 
   it('shows each problem the client check finds in plain language', async () => {
@@ -344,14 +346,35 @@ describe('GoogleSetupPanel', () => {
     expect(await screen.findByText(/Working. Connected as ada@example.com/)).toBeInTheDocument();
   });
 
-  it('asks before disconnecting and keeps the login when Google cannot confirm', async () => {
-    const disconnectGoogle = vi.fn(async () => ({ disconnected: false }));
-    renderPanel(makePort({ getGoogleStatus: async () => connectedStatus(), disconnectGoogle }).port);
+  it('asks before disconnecting, and says when Google did not confirm that the connection is gone here anyway', async () => {
+    const disconnectGoogle = vi.fn(async () => ({ revocationConfirmed: false }));
+    let connected = true;
+    const { port } = makePort({
+      getGoogleStatus: async () => (connected ? connectedStatus() : statusOf()),
+      disconnectGoogle: async () => {
+        connected = false;
+        return disconnectGoogle();
+      },
+    });
+    const { onChanged } = renderPanel(port);
     fireEvent.click(await screen.findByRole('button', { name: 'Disconnect' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('everywhere it is used');
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Emails already sent stay in Gmail.');
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect Google' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('nothing was removed here');
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      "Google didn't confirm. Aman removed the connection here; you can also remove access in your Google account settings.",
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(await screen.findByText('Add yourself as a test user')).toBeInTheDocument();
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it('says access was revoked when Google confirmed', async () => {
+    const { port } = makePort({ getGoogleStatus: async () => connectedStatus() });
+    renderPanel(port);
+    fireEvent.click(await screen.findByRole('button', { name: 'Disconnect' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect Google' }));
+    expect(await screen.findByText('Google is disconnected and its access was revoked.')).toBeInTheDocument();
   });
 
   it('writes no em dashes', async () => {
@@ -368,9 +391,10 @@ describe('GoogleSetupPanel', () => {
     expect(await screen.findByText('Add yourself as a test user')).toBeInTheDocument();
     expect(
       screen.getByText(
-        /under Test users, click Add users and add the Gmail address you will connect as\. Without it, Google blocks sign-in with an access_denied error\./,
+        /under Test users, click Add users and add the Gmail address you will connect as\. Without it, Google shows an "Access blocked" page when you try to sign in\./,
       ),
     ).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('access_denied');
     expect(screen.getByText('Choose Testing or Production')).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -437,6 +461,90 @@ describe('GoogleSetupPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('That client cannot be used.');
     expect(tab.close).toHaveBeenCalledTimes(1);
+  });
+
+  describe('with the clock under test control', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('stops waiting after ten minutes and says so, with the form to try again', async () => {
+      vi.useFakeTimers();
+      const { port } = makePort({
+        beginGoogleConsent: async () => ({
+          authorizationUrl: 'https://accounts.example.test/auth',
+          setup: { ...PASTE_SETUP, mode: 'loopback' },
+        }),
+      });
+      await act(async () => {
+        render(<GoogleSetupPanel open onOpenChange={() => undefined} port={port} onChanged={() => undefined} />);
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      fillClient();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByText(/This panel updates by itself/)).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(9 * 60 * 1000);
+      });
+      expect(screen.getByText(/This panel updates by itself/)).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(61 * 1000);
+      });
+      expect(screen.getByRole('alert')).toHaveTextContent('Sign-in timed out. Select Connect to try again.');
+      expect(screen.getByRole('button', { name: 'Connect Google' })).toBeInTheDocument();
+    });
+
+    it('does not say it timed out after the user cancelled the wait', async () => {
+      vi.useFakeTimers();
+      const { port } = makePort({
+        beginGoogleConsent: async () => ({
+          authorizationUrl: 'https://accounts.example.test/auth',
+          setup: { ...PASTE_SETUP, mode: 'loopback' },
+        }),
+      });
+      await act(async () => {
+        render(<GoogleSetupPanel open onOpenChange={() => undefined} port={port} onChanged={() => undefined} />);
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      fillClient();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+        await vi.advanceTimersByTimeAsync(11 * 60 * 1000);
+      });
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('leaves no copy-confirmation timer running after the panel is gone', async () => {
+      vi.useFakeTimers();
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: vi.fn(async () => undefined) },
+      });
+      let view: ReturnType<typeof render> | undefined;
+      await act(async () => {
+        view = render(
+          <GoogleSetupPanel open onOpenChange={() => undefined} port={makePort().port} onChanged={() => undefined} />,
+        );
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Copy Gmail API link' }));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByRole('button', { name: 'Copy Gmail API link' })).toHaveTextContent('Copied');
+      view?.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 
   describe('in offline mode', () => {

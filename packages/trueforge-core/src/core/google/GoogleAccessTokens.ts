@@ -5,7 +5,7 @@ import { refreshAccessToken } from './oauth';
 /** Seconds kept back from a token's lifetime so a call never starts on a token about to lapse. */
 const EXPIRY_MARGIN_SECONDS = 60;
 
-export interface GoogleAccess {
+interface GoogleAccess {
   access_token: string;
   granted_scopes: string[];
   account_email: string | null;
@@ -66,7 +66,10 @@ export class GoogleAccessTokens {
       return access;
     } catch (error) {
       if (error instanceof GoogleOAuthError && error.needsReconnect) {
-        await this.#connections.markNeedsReconnect(this.#owner);
+        await this.#connections.markNeedsReconnect({
+          owner: this.#owner,
+          expected: { refresh_token: record.refresh_token, updated_at: record.updated_at },
+        });
         throw new GoogleReconnectRequiredError({ cause: error });
       }
       throw error;

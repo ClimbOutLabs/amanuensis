@@ -2291,13 +2291,13 @@
       },
       "DisconnectGoogleResult": {
         "properties": {
-          "disconnected": {
-            "description": "False when Google could not confirm the revocation; nothing was deleted and Disconnect can be retried.",
+          "revocation_confirmed": {
+            "description": "False when Google did not confirm the revocation. The login is removed from Aman either way.",
             "type": "boolean"
           }
         },
         "required": [
-          "disconnected"
+          "revocation_confirmed"
         ],
         "type": "object"
       },
@@ -20503,7 +20503,7 @@
     },
     "/api/v1/user/settings/google/disconnect": {
       "post": {
-        "description": "Revokes Aman’s access at Google, then deletes the stored login. Nothing is deleted if Google cannot confirm.",
+        "description": "Revokes Aman’s access at Google, then deletes the stored login. The login is deleted even when Google cannot confirm.",
         "responses": {
           "200": {
             "content": {
@@ -20513,7 +20513,7 @@
                 }
               }
             },
-            "description": "Whether the login was removed."
+            "description": "The login was removed; says whether Google confirmed the revocation."
           },
           "401": {
             "content": {
@@ -20524,6 +20524,16 @@
               }
             },
             "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
           }
         },
         "summary": "Disconnect Google",
@@ -20569,7 +20579,7 @@
                 }
               }
             },
-            "description": "The client cannot be used, or no saved client exists to reuse."
+            "description": "The client cannot be used, no saved client exists to reuse, or sending was asked for without reading."
           },
           "401": {
             "content": {
@@ -20580,6 +20590,16 @@
               }
             },
             "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
           }
         },
         "summary": "Start connecting Google",
@@ -20691,6 +20711,16 @@
               }
             },
             "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
           }
         },
         "summary": "Check a Google OAuth client",
@@ -20747,6 +20777,16 @@
               }
             },
             "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
           }
         },
         "summary": "Finish connecting Google with a pasted address",
@@ -20819,6 +20859,16 @@
               }
             },
             "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unavailable on a demo instance, or the request did not come from the Aman page."
           }
         },
         "summary": "Test the Google connection",

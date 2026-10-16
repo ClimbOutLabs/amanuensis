@@ -26,7 +26,7 @@ export const GMAIL_READ_TOOL_NAMES = [
   GET_DRAFT_TOOL_NAME,
 ] as const;
 
-export const GMAIL_WRITE_TOOL_NAMES = [DRAFT_EMAIL_TOOL_NAME, UPDATE_DRAFT_TOOL_NAME, SEND_DRAFT_TOOL_NAME] as const;
+const GMAIL_WRITE_TOOL_NAMES = [DRAFT_EMAIL_TOOL_NAME, UPDATE_DRAFT_TOOL_NAME, SEND_DRAFT_TOOL_NAME] as const;
 
 export function isGmailReadToolName(tool_name: string): boolean {
   return GMAIL_READ_TOOL_NAMES.some(name => name === tool_name);
@@ -36,8 +36,8 @@ export function isGmailWriteToolName(tool_name: string): boolean {
   return GMAIL_WRITE_TOOL_NAMES.some(name => name === tool_name);
 }
 
-export const MAX_RESULTS_CAP = 100;
-export const DEFAULT_MAX_RESULTS = 50;
+const MAX_RESULTS_CAP = 100;
+const DEFAULT_MAX_RESULTS = 50;
 
 const id = z.string().min(1).max(128);
 

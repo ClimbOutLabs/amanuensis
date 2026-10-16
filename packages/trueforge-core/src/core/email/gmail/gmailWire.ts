@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 const HeaderSchema = z.object({ name: z.string(), value: z.string() });
 
-export const MessagePartSchema = z.object({
+const MessagePartSchema = z.object({
   partId: z.string().optional(),
   mimeType: z.string().optional(),
   filename: z.string().optional(),

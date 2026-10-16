@@ -34,7 +34,7 @@ export function sandboxAttachmentStager(
   };
 }
 
-export interface GmailCapabilityOptions {
+interface GmailCapabilityOptions {
   connections: GoogleConnectionStore;
   owner: GoogleOwner;
   tracing: AgentTracing;

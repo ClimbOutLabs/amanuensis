@@ -6,7 +6,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { GoogleOAuthError } from './errors';
 
-export const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 export const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 export const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const GMAIL_PROFILE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/profile';
@@ -66,7 +66,7 @@ const OAuthErrorBodySchema = z.object({ error: z.string(), error_description: z.
 type FetchImpl = typeof fetch;
 
 /** Longest a request to Google may take. */
-export const GOOGLE_REQUEST_TIMEOUT_MS = 15_000;
+const GOOGLE_REQUEST_TIMEOUT_MS = 15_000;
 
 /** A request to Google that fails to connect, or runs out of time, becomes a plain, retryable error. */
 export async function fetchGoogle(input: { fetchImpl: FetchImpl; url: string; init: RequestInit }): Promise<Response> {
@@ -109,7 +109,7 @@ async function tokenError(response: Response): Promise<GoogleOAuthError> {
   });
 }
 
-export interface TokenExchange {
+interface TokenExchange {
   access_token: string;
   refresh_token: string;
   expires_in_seconds: number;

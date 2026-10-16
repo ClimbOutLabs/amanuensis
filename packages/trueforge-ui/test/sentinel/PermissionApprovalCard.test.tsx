@@ -217,7 +217,7 @@ describe('PermissionApprovalCard for mail', () => {
     return renderCard(
       {
         plain_what:
-          'Send "Lease" from your Gmail to grace@example.com and lin@example.com. Copy: sam@example.com. Hidden copy (Bcc): audit@example.com.',
+          'Send "Lease" from your Gmail to grace@example.com and lin@example.com. Copy: sam@example.com. Hidden copy: audit@example.com.',
         cannot_be_undone: "Once this is sent, it can't be unsent.",
         email: { ...email, ...overrides },
       },
@@ -225,14 +225,15 @@ describe('PermissionApprovalCard for mail', () => {
     );
   }
 
-  it('shows To, Copy and Hidden copy as rows and the sentence the server wrote', () => {
+  it('lists the recipients once, in the box, besides the sentence the server wrote', () => {
     renderMail();
     expect(screen.getByText(/^Send "Lease" from your Gmail to grace@example.com/)).toBeInTheDocument();
-    expect(screen.getByText('To')).toBeInTheDocument();
-    expect(screen.getByText('grace@example.com, lin@example.com')).toBeInTheDocument();
-    expect(screen.getByText('Copy')).toBeInTheDocument();
-    expect(screen.getByText('Hidden copy')).toBeInTheDocument();
-    expect(screen.getByText('audit@example.com')).toBeInTheDocument();
+    expect(screen.getByText('To: grace@example.com, lin@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Copy: sam@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Hidden copy: audit@example.com')).toBeInTheDocument();
+    expect(screen.queryByText('To')).not.toBeInTheDocument();
+    expect(screen.queryByText('Copy')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('(Bcc)');
     expect(screen.getByText("Once this is sent, it can't be unsent.")).toBeInTheDocument();
   });
 

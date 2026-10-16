@@ -5,11 +5,11 @@ import * as core from "../../core/index.js";
 import * as serializers from "../index.js";
 
 export const DisconnectGoogleResult: core.serialization.ObjectSchema<serializers.DisconnectGoogleResult.Raw, TrueForge.DisconnectGoogleResult> = core.serialization.object({
-        "disconnected": core.serialization.boolean()
+        "revocationConfirmed": core.serialization.property("revocation_confirmed", core.serialization.boolean())
     });
 
 export declare namespace DisconnectGoogleResult {
     export interface Raw {
-        disconnected: boolean;
+        revocation_confirmed: boolean;
     }
 }

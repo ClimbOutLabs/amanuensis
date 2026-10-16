@@ -17,7 +17,7 @@ import { assessDraft } from './draftAssessment';
 import { hashDraft, type DraftReviewLedger, type ReviewableDraft } from './draftReview';
 import { GmailApi, GmailApiError, mapSkippingMissing } from './gmailApi';
 import type { GmailMessage } from './gmailWire';
-import { headerOf, rawHeaderOf, readMessage } from './message';
+import { headerOf, listAttachments, rawHeaderOf } from './message';
 import { buildRawMessage, replyHeaders, replySubject, type RawDraftContent, type ReplyTarget } from './rawMessage';
 import {
   getDraftResult,
@@ -68,7 +68,7 @@ export interface AttachmentStager {
   }): Promise<{ filename: string; path: string; sandboxCreated: SandboxInfo | undefined }>;
 }
 
-export interface GmailToolSetOptions {
+interface GmailToolSetOptions {
   tracing: AgentTracing;
   api: GmailApi;
   /** The connected address, named in every result. */
@@ -457,7 +457,9 @@ export class GmailToolSet extends LocalToolMCP {
     }
     try {
       const message = await this.#options.api.getMessage(input.message_id);
-      const attachment = readMessage(message).attachments.find(file => file.id === input.attachment_id);
+      const attachment = listAttachments({ message, max: Number.POSITIVE_INFINITY }).attachments.find(
+        file => file.id === input.attachment_id,
+      );
       if (attachment === undefined) {
         return errorResult(
           `Attachment not found on message ${input.message_id}. Read the message again for its current attachment ids.`,
@@ -593,9 +595,7 @@ export class GmailToolSet extends LocalToolMCP {
     try {
       const reviewed = this.#options.reviews.take({ ...this.#owner, draft_id: input.draft_id });
       if (reviewed === undefined) {
-        return errorResult(
-          'Aman restarted, so this send needs your OK again. Nothing was sent. Ask to send the draft again.',
-        );
+        return errorResult('This send needs your OK again. Nothing was sent. Ask to send the draft again.');
       }
       const assessed = assessDraft({
         message: await this.#liveDraft(input.draft_id),

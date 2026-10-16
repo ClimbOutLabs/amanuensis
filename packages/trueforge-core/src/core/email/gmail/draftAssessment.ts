@@ -17,7 +17,7 @@ import {
 import { addressesIn, addressListIsPlain } from './results';
 
 /** Longest body a send card shows; anything longer is refused because no one reads it in full. */
-export const MAX_SENDABLE_BODY_CHARS = 20_000;
+const MAX_SENDABLE_BODY_CHARS = 20_000;
 
 /**
  * The only headers a sendable draft may carry. Anything else (a Reply-To, a Sender, a receipt request, a
@@ -60,7 +60,7 @@ const TRANSFER_ENCODINGS = new Set(['7bit', '8bit', 'binary', 'quoted-printable'
 /** Longest subject a send may have, so the card's header cap can never hide any of it. */
 const MAX_SENDABLE_SUBJECT_CHARS = 300;
 
-export type DraftAssessment = { ok: true; draft: ReviewableDraft } | { ok: false; reason: string };
+type DraftAssessment = { ok: true; draft: ReviewableDraft } | { ok: false; reason: string };
 
 /**
  * The one address of a From header, or null when it is anything but `addr` or `Name <addr>`. Only the address

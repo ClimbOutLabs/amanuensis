@@ -1,4 +1,5 @@
 import { GmailApi, mapSkippingMissing } from '../../../../src/core/email/gmail/gmailApi';
+import { estimateTokens, MAX_TOKENS_PER_CALL } from '../../../../src/core/email/gmail/tokenBound';
 import { GoogleAccessTokens } from '../../../../src/core/google/GoogleAccessTokens';
 import { connectedRecord, FakeConnections, OWNER } from '../../google/fakes';
 import { message } from './fixtures';
@@ -248,5 +249,160 @@ describe('mapSkippingMissing', () => {
       deadlineMs: 20,
     });
     expect(out).toEqual({ results: [], notReached: 2 });
+  });
+});
+
+/** A GmailApi over a scripted fetch, for tests that need to shape the raw response. */
+async function apiOver(answer: (url: URL, init: RequestInit | undefined) => Response | Promise<Response>) {
+  const connections = new FakeConnections();
+  await connections.save(connectedRecord());
+  const requests: string[] = [];
+  const sleeps: number[] = [];
+  const fetchImpl: typeof fetch = (input, init) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    if (url.pathname.endsWith('/token')) {
+      return Promise.resolve(json({ access_token: 'at', expires_in: 3600 }));
+    }
+    requests.push(`${init?.method ?? 'GET'} ${url.pathname}`);
+    return Promise.resolve(answer(url, init));
+  };
+  const api = new GmailApi({
+    tokens: new GoogleAccessTokens({ now: undefined, connections, owner: OWNER, fetchImpl }),
+    fetchImpl,
+    sleep: ms => {
+      sleeps.push(ms);
+      return Promise.resolve();
+    },
+  });
+  return { api, requests, sleeps };
+}
+
+describe('the size of a response', () => {
+  it('refuses a response whose Content-Length is over the limit without reading or parsing it', async () => {
+    const response = new Response('{}', { headers: { 'Content-Length': String(17 * 1024 * 1024) } });
+    const parse = jest.spyOn(response, 'json');
+    const { api } = await apiOver(() => response);
+    await expect(api.getMessage('m1')).rejects.toThrow('more than Aman will read at once');
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it('counts a body with no Content-Length as it streams, and stops reading at the limit', async () => {
+    let pulled = 0;
+    const chunk = new Uint8Array(1024 * 1024);
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(chunk);
+      },
+    });
+    const { api } = await apiOver(() => new Response(stream));
+    await expect(api.getMessage('m1')).rejects.toThrow('more than Aman will read at once');
+    expect(pulled).toBeLessThan(25);
+  });
+
+  it('refuses a body that is bigger than its Content-Length says', async () => {
+    const big = JSON.stringify({ id: 'm1', threadId: 't1', snippet: 'x'.repeat(17 * 1024 * 1024) });
+    const { api } = await apiOver(() => new Response(big, { headers: { 'Content-Length': '10' } }));
+    await expect(api.getMessage('m1')).rejects.toThrow('more than Aman will read at once');
+  });
+
+  it('reads an ordinary response', async () => {
+    const { api } = await apiOver(() => json(message({ id: 'm1', body: 'hello' })));
+    expect((await api.getMessage('m1')).id).toBe('m1');
+  });
+
+  it('says a response it cannot parse is unreadable, even when it is nested deep enough to overflow a parser', async () => {
+    const depth = 200_000;
+    const nested = `${'{"parts":['.repeat(depth)}${']}'.repeat(depth)}`;
+    const { api } = await apiOver(() => new Response(`{"id":"m1","threadId":"t1","payload":${nested}}`));
+    await expect(api.getMessage('m1')).rejects.toThrow('could not read');
+  });
+
+  it('reads a whole attachment even though it is larger than a thread may be', async () => {
+    const bytes = Buffer.alloc(20 * 1024 * 1024, 1);
+    const { api } = await apiOver(() => json({ size: bytes.length, data: bytes.toString('base64url') }));
+    expect((await api.getAttachment({ messageId: 'm1', attachmentId: 'a1' })).length).toBe(bytes.length);
+  });
+
+  it('refuses a hostile thread of huge headers and thousands of file names through the tool, inside the bound', async () => {
+    const parts = Array.from({ length: 3000 }, (_unused, index) => ({
+      mimeType: 'application/pdf',
+      filename: `${String(index)}-${'n'.repeat(250)}.pdf`,
+      body: { attachmentId: `att-${String(index)}`, size: index },
+    }));
+    const hostile = {
+      id: 'm1',
+      threadId: 't1',
+      payload: {
+        mimeType: 'multipart/mixed',
+        headers: ['From', 'To', 'Cc', 'Subject'].map(name => ({ name, value: 'h'.repeat(9000) })),
+        parts,
+      },
+    };
+    const { tools } = await build({ routes: [route('/messages/m1', hostile)] });
+    const said = text(await tools.callTool({ name: 'read_email', arguments: { message_id: 'm1' } }));
+    expect(estimateTokens(said)).toBeLessThanOrEqual(MAX_TOKENS_PER_CALL);
+    expect(JSON.parse(said).attachments_omitted).toBeGreaterThan(0);
+  });
+});
+
+describe('requests that create or send', () => {
+  const SENT = 'The send may have gone through. Check your Sent folder before trying again.';
+  const SAVED = 'The draft may have been saved. Check your Drafts folder before trying again.';
+
+  it('are not tried again after a server error, and say the send may have gone through', async () => {
+    const { api, requests, sleeps } = await apiOver(() =>
+      json(googleError({ status: 500, reason: 'backendError' }), 500),
+    );
+    await expect(api.sendDraft('d1')).rejects.toThrow(SENT);
+    expect(requests).toEqual(['POST /gmail/v1/users/me/drafts/send']);
+    expect(sleeps).toEqual([]);
+  });
+
+  it('say the send may have gone through when it times out or the connection drops', async () => {
+    const { api, requests } = await apiOver(() => {
+      throw new TypeError('fetch failed');
+    });
+    await expect(api.sendDraft('d1')).rejects.toThrow(SENT);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('say the send may have gone through when the answer to a send cannot be read', async () => {
+    const { api } = await apiOver(() => new Response('<html>', { status: 200 }));
+    await expect(api.sendDraft('d1')).rejects.toThrow(SENT);
+  });
+
+  it('say the draft may have been saved, and are not tried again, for a new draft', async () => {
+    const { api, requests } = await apiOver(() => json(googleError({ status: 503, reason: 'backendError' }), 503));
+    await expect(api.createDraft({ raw: 'r', threadId: undefined })).rejects.toThrow(SAVED);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('are tried again only when Gmail refused for going too fast, which it does before doing anything', async () => {
+    let calls = 0;
+    const { api, sleeps } = await apiOver(() => {
+      calls += 1;
+      return calls === 1
+        ? json(googleError({ status: 429, reason: 'rateLimitExceeded' }), 429)
+        : json({ id: 'sent', threadId: 't1' });
+    });
+    expect((await api.sendDraft('d1')).id).toBe('sent');
+    expect(calls).toBe(2);
+    expect(sleeps).toHaveLength(1);
+  });
+
+  it('still tell a plain refusal apart from an unknown outcome', async () => {
+    const { api } = await apiOver(() => json(googleError({ status: 404, reason: 'notFound' }), 404));
+    await expect(api.sendDraft('d1')).rejects.toThrow('Gmail has no such message, thread or draft.');
+  });
+
+  it('keep trying a read after a server error', async () => {
+    let calls = 0;
+    const { api } = await apiOver(() => {
+      calls += 1;
+      return calls < 3 ? json(googleError({ status: 500, reason: 'backendError' }), 500) : json(message({ id: 'm1' }));
+    });
+    expect((await api.getMessage('m1')).id).toBe('m1');
+    expect(calls).toBe(3);
   });
 });

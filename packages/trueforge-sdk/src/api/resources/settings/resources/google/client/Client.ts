@@ -26,11 +26,12 @@ export class GoogleClient {
     }
 
     /**
-     * Revokes Aman’s access at Google, then deletes the stored login. Nothing is deleted if Google cannot confirm.
+     * Revokes Aman’s access at Google, then deletes the stored login. The login is deleted even when Google cannot confirm.
      *
      * @param {GoogleClient.RequestOptions} requestOptions - Request-specific configuration.
      *
      * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.ForbiddenError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
      *
@@ -62,6 +63,7 @@ export class GoogleClient {
         if (_response.error.reason === "status-code") {
             switch (_response.error.statusCode) {
                 case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 403: throw new TrueForge.ForbiddenError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 default: throw new errors.TrueForgeError({
                     statusCode: _response.error.statusCode,
                     body: _response.error.body,
@@ -81,6 +83,7 @@ export class GoogleClient {
      *
      * @throws {@link TrueForge.BadRequestError}
      * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.ForbiddenError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
      *
@@ -118,6 +121,7 @@ export class GoogleClient {
             switch (_response.error.statusCode) {
                 case 400: throw new TrueForge.BadRequestError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 403: throw new TrueForge.ForbiddenError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 default: throw new errors.TrueForgeError({
                     statusCode: _response.error.statusCode,
                     body: _response.error.body,
@@ -136,6 +140,7 @@ export class GoogleClient {
      * @param {GoogleClient.RequestOptions} requestOptions - Request-specific configuration.
      *
      * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.ForbiddenError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
      *
@@ -176,6 +181,7 @@ export class GoogleClient {
         if (_response.error.reason === "status-code") {
             switch (_response.error.statusCode) {
                 case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 403: throw new TrueForge.ForbiddenError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 default: throw new errors.TrueForgeError({
                     statusCode: _response.error.statusCode,
                     body: _response.error.body,
@@ -195,6 +201,7 @@ export class GoogleClient {
      *
      * @throws {@link TrueForge.BadRequestError}
      * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.ForbiddenError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
      *
@@ -232,6 +239,7 @@ export class GoogleClient {
             switch (_response.error.statusCode) {
                 case 400: throw new TrueForge.BadRequestError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 403: throw new TrueForge.ForbiddenError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 default: throw new errors.TrueForgeError({
                     statusCode: _response.error.statusCode,
                     body: _response.error.body,
@@ -297,6 +305,7 @@ export class GoogleClient {
      * @param {GoogleClient.RequestOptions} requestOptions - Request-specific configuration.
      *
      * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.ForbiddenError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
      *
@@ -328,6 +337,7 @@ export class GoogleClient {
         if (_response.error.reason === "status-code") {
             switch (_response.error.statusCode) {
                 case 401: throw new TrueForge.UnauthorizedError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
+                case 403: throw new TrueForge.ForbiddenError(serializers.RequestErrorResponse.parseOrThrow(_response.error.body, { unrecognizedObjectKeys: "passthrough", allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true, skipValidation: true, breadcrumbsPrefix: ["response"] }), _response.rawResponse);
                 default: throw new errors.TrueForgeError({
                     statusCode: _response.error.statusCode,
                     body: _response.error.body,

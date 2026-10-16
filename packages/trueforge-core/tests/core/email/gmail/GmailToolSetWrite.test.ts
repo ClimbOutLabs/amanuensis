@@ -274,7 +274,7 @@ describe('send_draft', () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute(mail)] });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier3_card?.plain_what).toBe(
-      'Send "Lease" from your Gmail to a@example.com and b@example.com. Copy: c@example.com. Hidden copy (Bcc): d@example.com. Sent as "Ada".',
+      'Send "Lease" from your Gmail to a@example.com and b@example.com. Copy: c@example.com. Hidden copy: d@example.com. Sent as "Ada".',
     );
   });
 
@@ -292,6 +292,22 @@ describe('send_draft', () => {
     const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(text(response)).toContain('needs your OK again');
     expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
+  });
+
+  it('says the send may have gone through, and does not send again, when Gmail does not answer', async () => {
+    const dropped: Route = url => {
+      if (url.pathname === '/gmail/v1/users/me/drafts/send') {
+        throw new TypeError('fetch failed');
+      }
+      return undefined;
+    };
+    const { tools, google, sleeps } = await build({ features: [...COMPOSE], routes: [draftRoute(), dropped] });
+    await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    expect(text(response)).toContain('The send may have gone through. Check your Sent folder before trying again.');
+    expect(text(response)).not.toContain('busy');
+    expect(google.urls.filter(entry => entry.includes('/drafts/send'))).toHaveLength(1);
+    expect(sleeps).toEqual([]);
   });
 
   it('will not send twice on one review', async () => {
@@ -413,7 +429,23 @@ describe('send_draft', () => {
     await first.tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     const restarted = await build({ features: [...COMPOSE], routes: [draftRoute()], reviews: new DraftReviewLedger() });
     const response = await restarted.tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
-    expect(text(response)).toContain('Aman restarted, so this send needs your OK again.');
+    expect(text(response)).toContain('This send needs your OK again.');
+    expect(text(response)).not.toContain('restarted');
+  });
+
+  it('asks again, without blaming a restart, when the review has expired', async () => {
+    let now = 1_000_000;
+    const { tools, google } = await build({
+      features: [...COMPOSE],
+      routes: [draftRoute()],
+      reviews: new DraftReviewLedger(() => now),
+    });
+    await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    now += 31 * 60 * 1000;
+    const response = await tools.callTool({ name: 'send_draft', arguments: { draft_id: 'd1' } });
+    expect(text(response)).toContain('This send needs your OK again.');
+    expect(text(response)).not.toContain('restarted');
+    expect(google.urls.some(entry => entry.includes('/drafts/send'))).toBe(false);
   });
 
   it('voids the review when the draft is changed through update_draft', async () => {

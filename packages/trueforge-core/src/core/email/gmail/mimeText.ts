@@ -35,7 +35,7 @@ export function isUsableCharset(label: string): boolean {
 }
 
 /** What a Content-Type header says about its charset. */
-export type ContentTypeCharset =
+type ContentTypeCharset =
   | { kind: 'none' }
   | { kind: 'one'; charset: string }
   /** More than one `charset`, or a `charset*` form (RFC 2231), which readers resolve differently. */
@@ -307,7 +307,8 @@ const SOUTHEAST_ASIAN = `[${LETTER_OR_MARK}&&${scriptsOf('Thai', 'Lao', 'Khmer',
 const PICTOGRAPH_OR_MODIFIER = '[\\p{Extended_Pictographic}\\p{Emoji_Modifier}]';
 
 /** A character matched only when it is not in a place it is allowed: the cheap test for the character comes first. */
-const outOfContext = (character: string, allowed: string) => `(?=${character})(?!${allowed})${character}`;
+const outOfContext = ({ character, allowed }: { character: string; allowed: string }) =>
+  `(?=${character})(?!${allowed})${character}`;
 
 /**
  * The only tag sequences that are allowed: the three subdivision flags emoji keyboards offer (England,
@@ -331,16 +332,22 @@ const FLAG_ENDINGS = FLAG_REGIONS.map(region => `${BLACK_FLAG}${tagCodes(region)
 
 const HIDDEN_SOURCE = [
   '(?!\\t|\\n|\\r|\\u200B|\\u200C|\\u200D|\\uFE0E|\\uFE0F|\\u180B|\\u180C|\\u180D|\\u180F|[\\u{E0100}-\\u{E01EF}]|[\\u{E0030}-\\u{E0039}\\u{E0061}-\\u{E007A}\\u{E007F}])[\\p{Default_Ignorable_Code_Point}\\p{Cc}\\p{Zl}\\p{Zp}\\p{Co}\\u2800\\uFFF9-\\uFFFB]',
-  outOfContext(
-    '\\u200D',
-    `(?<=${PICTOGRAPH_OR_MODIFIER}\\uFE0F?)(?=\\u200D\\p{Extended_Pictographic})|(?<=${INDIC})(?=\\u200D${INDIC})|(?<=${INDIC_MARK})`,
-  ),
-  outOfContext('\\u200C', `(?<=${ARABIC_OR_INDIC})(?=\\u200C${ARABIC_OR_INDIC})`),
-  outOfContext('\\u200B', `(?<=${SOUTHEAST_ASIAN})(?=\\u200B${SOUTHEAST_ASIAN})`),
-  outOfContext('\\uFE0F', '(?<=[\\p{Extended_Pictographic}--\\p{Emoji_Presentation}])|(?<=[0-9#*])(?=\\uFE0F\\u20E3)'),
-  outOfContext('\\uFE0E', '(?<=\\p{Extended_Pictographic})'),
-  outOfContext('[\\u{E0100}-\\u{E01EF}]', '(?<=\\p{Script=Han})'),
-  outOfContext('[\\u180B\\u180C\\u180D\\u180F]', '(?<=[\\p{L}&&\\p{Script=Mongolian}])'),
+  outOfContext({
+    character: '\\u200D',
+    allowed: `(?<=${PICTOGRAPH_OR_MODIFIER}\\uFE0F?)(?=\\u200D\\p{Extended_Pictographic})|(?<=${INDIC})(?=\\u200D${INDIC})|(?<=${INDIC_MARK})`,
+  }),
+  outOfContext({ character: '\\u200C', allowed: `(?<=${ARABIC_OR_INDIC})(?=\\u200C${ARABIC_OR_INDIC})` }),
+  outOfContext({ character: '\\u200B', allowed: `(?<=${SOUTHEAST_ASIAN})(?=\\u200B${SOUTHEAST_ASIAN})` }),
+  outOfContext({
+    character: '\\uFE0F',
+    allowed: '(?<=[\\p{Extended_Pictographic}--\\p{Emoji_Presentation}])|(?<=[0-9#*])(?=\\uFE0F\\u20E3)',
+  }),
+  outOfContext({ character: '\\uFE0E', allowed: '(?<=\\p{Extended_Pictographic})' }),
+  outOfContext({ character: '[\\u{E0100}-\\u{E01EF}]', allowed: '(?<=\\p{Script=Han})' }),
+  outOfContext({
+    character: '[\\u180B\\u180C\\u180D\\u180F]',
+    allowed: '(?<=[\\p{L}&&\\p{Script=Mongolian}])',
+  }),
   `(?=${TAG_CHARACTER})(?!${FLAG_TAG_POSITIONS})${TAG_CHARACTER}`,
   `${CANCEL_TAG}(?<!${FLAG_ENDINGS})`,
 ].join('|');

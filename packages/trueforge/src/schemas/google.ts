@@ -5,12 +5,12 @@ import { GoogleTestResultSchema } from '@truefoundry/trueforge-core/core/google/
 import { GOOGLE_FEATURES } from '@truefoundry/trueforge-core/core/google/scopes';
 import { GoogleSetupInfoSchema as CoreGoogleSetupInfoSchema } from '@truefoundry/trueforge-core/core/google/setupMode';
 
-export const GoogleClientTypeSchema = z.enum(CLIENT_TYPES).openapi('GoogleClientType');
-export const GoogleFeatureSchema = z.enum(GOOGLE_FEATURES).openapi('GoogleFeature');
+const GoogleClientTypeSchema = z.enum(CLIENT_TYPES).openapi('GoogleClientType');
+const GoogleFeatureSchema = z.enum(GOOGLE_FEATURES).openapi('GoogleFeature');
 
 export const GoogleSetupInfoSchema = CoreGoogleSetupInfoSchema.openapi('GoogleSetupInfo');
 
-export const GoogleFeatureStatusSchema = z
+const GoogleFeatureStatusSchema = z
   .object({
     feature: GoogleFeatureSchema,
     label: z.string().describe('Plain-language name of what the feature allows.'),
@@ -18,7 +18,7 @@ export const GoogleFeatureStatusSchema = z
   })
   .openapi('GoogleFeatureStatus');
 
-export const GoogleConnectionStatusSchema = z
+const GoogleConnectionStatusSchema = z
   .object({
     state: z
       .enum(['not_connected', 'connected', 'needs_reconnect'])
@@ -37,7 +37,7 @@ export const GetGoogleConnectionStatusResponseSchema = z
   .object({ data: GoogleConnectionStatusSchema })
   .openapi('GetGoogleConnectionStatusResponse');
 
-export const GoogleClientCredentialsSchema = z
+const GoogleClientCredentialsSchema = z
   .object({
     client_id: z.string().min(1).describe("The user's own Google OAuth client id."),
     client_secret: z.string().min(1).describe("The user's own Google OAuth client secret."),
@@ -54,14 +54,14 @@ export const CheckGoogleClientRequestSchema = z
   })
   .openapi('CheckGoogleClientRequest');
 
-export const GoogleClientProblemSchema = z
+const GoogleClientProblemSchema = z
   .object({
     code: z.enum(CLIENT_PROBLEM_CODES).describe('Stable problem code.'),
     message: z.string().describe('Plain-language explanation and next step.'),
   })
   .openapi('GoogleClientProblem');
 
-export const GoogleClientCheckSchema = z
+const GoogleClientCheckSchema = z
   .object({
     ok: z.boolean().describe('True when no problem was found.'),
     problems: z.array(GoogleClientProblemSchema),
@@ -79,7 +79,7 @@ export const BeginGoogleConsentRequestSchema = z
   })
   .openapi('BeginGoogleConsentRequest');
 
-export const GoogleConsentStartSchema = z
+const GoogleConsentStartSchema = z
   .object({
     authorization_url: z.string().describe('The Google consent address to open in the browser.'),
     setup: GoogleSetupInfoSchema,
@@ -107,19 +107,17 @@ export const CompleteGoogleConsentRequestSchema = z
   })
   .openapi('CompleteGoogleConsentRequest');
 
-export const TestGoogleConnectionResultSchema = GoogleTestResultSchema.openapi('TestGoogleConnectionResult');
+const TestGoogleConnectionResultSchema = GoogleTestResultSchema.openapi('TestGoogleConnectionResult');
 
 export const TestGoogleConnectionResponseSchema = z
   .object({ data: TestGoogleConnectionResultSchema })
   .openapi('TestGoogleConnectionResponse');
 
-export const DisconnectGoogleResultSchema = z
+const DisconnectGoogleResultSchema = z
   .object({
-    disconnected: z
+    revocation_confirmed: z
       .boolean()
-      .describe(
-        'False when Google could not confirm the revocation; nothing was deleted and Disconnect can be retried.',
-      ),
+      .describe('False when Google did not confirm the revocation. The login is removed from Aman either way.'),
   })
   .openapi('DisconnectGoogleResult');
 

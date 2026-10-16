@@ -1,6 +1,9 @@
+import { Writable } from 'node:stream';
+import { createLogger, format, transports, type Logger } from 'winston';
 import type {
   GoogleConnectionRecord,
   GoogleConnectionStore,
+  GoogleConnectionVersion,
   GoogleOwner,
   PendingGoogleAuthorization,
   PendingGoogleAuthorizationStore,
@@ -14,7 +17,6 @@ function keyOf(owner: GoogleOwner): string {
 
 export class FakeConnections implements GoogleConnectionStore {
   readonly records = new Map<string, GoogleConnectionRecord>();
-
   get(owner: GoogleOwner): Promise<GoogleConnectionRecord | null> {
     return Promise.resolve(this.records.get(keyOf(owner)) ?? null);
   }
@@ -24,12 +26,37 @@ export class FakeConnections implements GoogleConnectionStore {
     return Promise.resolve();
   }
 
-  markNeedsReconnect(owner: GoogleOwner): Promise<void> {
-    const record = this.records.get(keyOf(owner));
+  /** Mirrors the stores: a write applies only while the row still is the one the caller read. */
+  #matching(input: { owner: GoogleOwner; expected: GoogleConnectionVersion }): GoogleConnectionRecord | undefined {
+    const record = this.records.get(keyOf(input.owner));
+    return record?.refresh_token === input.expected.refresh_token && record.updated_at === input.expected.updated_at
+      ? record
+      : undefined;
+  }
+
+  markNeedsReconnect(input: { owner: GoogleOwner; expected: GoogleConnectionVersion }): Promise<boolean> {
+    const record = this.#matching(input);
     if (record !== undefined) {
-      this.records.set(keyOf(owner), { ...record, status: 'needs_reconnect' });
+      this.records.set(keyOf(input.owner), { ...record, status: 'needs_reconnect' });
     }
-    return Promise.resolve();
+    return Promise.resolve(record !== undefined);
+  }
+
+  setAccountEmail(input: {
+    owner: GoogleOwner;
+    expected: GoogleConnectionVersion;
+    account_email: string;
+    updated_at: string;
+  }): Promise<boolean> {
+    const record = this.#matching(input);
+    if (record !== undefined) {
+      this.records.set(keyOf(input.owner), {
+        ...record,
+        account_email: input.account_email,
+        updated_at: input.updated_at,
+      });
+    }
+    return Promise.resolve(record !== undefined);
   }
 
   delete(owner: GoogleOwner): Promise<void> {
@@ -114,4 +141,21 @@ export class FakeGoogle {
 
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+/** A logger that keeps every line it emits, so a test can check what was logged and that no secret was. */
+export function capturingLogger(): { logger: Logger; lines: string[] } {
+  const lines: string[] = [];
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      lines.push(String(chunk));
+      callback();
+    },
+  });
+  const logger = createLogger({
+    level: 'debug',
+    format: format.json(),
+    transports: [new transports.Stream({ stream })],
+  });
+  return { logger, lines };
 }

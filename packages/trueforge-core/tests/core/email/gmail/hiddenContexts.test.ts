@@ -272,7 +272,7 @@ describe('what else must be plain for a send', () => {
   const assess = (mail: ReturnType<typeof plainDraft>) =>
     assessDraft({ message: mail, account: ACCOUNT, forSend: true });
   const base = { id: 'd', to: 'grace@example.com', body: 'x' };
-  const withHeader = (name: string, value: string) => {
+  const withHeader = ({ name, value }: { name: string; value: string }) => {
     const mail = plainDraft(base);
     return { ...mail, payload: { ...mail.payload, headers: [...(mail.payload?.headers ?? []), { name, value }] } };
   };
@@ -280,14 +280,14 @@ describe('what else must be plain for a send', () => {
   it.each(['7bit', '8bit', 'binary', 'quoted-printable', 'base64', 'BASE64', ' base64 '])(
     'allows a transfer encoding of %s',
     value => {
-      expect(assess(withHeader('Content-Transfer-Encoding', value)).ok).toBe(true);
+      expect(assess(withHeader({ name: 'Content-Transfer-Encoding', value })).ok).toBe(true);
     },
   );
 
   it.each(['x-uuencode', 'uuencode', 'base64; x=1', 'x-unknown', '7bit 7bit'])(
     'refuses a transfer encoding of %s',
     value => {
-      expect(assess(withHeader('Content-Transfer-Encoding', value)).ok).toBe(false);
+      expect(assess(withHeader({ name: 'Content-Transfer-Encoding', value })).ok).toBe(false);
     },
   );
 
@@ -577,11 +577,11 @@ describe('the name a message is sent under is shown and hashed', () => {
   it('quotes the name, so a name written like card text cannot read as card text', async () => {
     const { tools } = await build({
       features: [...COMPOSE],
-      routes: COMPOSE_ROUTES(() => draftFrom('"Ada. Hidden copy (Bcc): nobody" <ada@example.com>')),
+      routes: COMPOSE_ROUTES(() => draftFrom('"Ada. Hidden copy: nobody" <ada@example.com>')),
     });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier3_card?.plain_what).toBe(
-      'Send "Lease" from your Gmail to grace@example.com. Sent as "Ada. Hidden copy (Bcc): nobody".',
+      'Send "Lease" from your Gmail to grace@example.com. Sent as "Ada. Hidden copy: nobody".',
     );
     expect(info.tier3_card?.email?.bcc).toEqual([]);
   });

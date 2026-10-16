@@ -570,8 +570,9 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       authMiddleware,
     ),
   );
-  // Every route is authenticated, including the browser callback: Google's redirect carries the
-  // session cookie, which ties it to the user who started the consent.
+  // Browser session only: bearer credentials (agents, sandboxes, API clients) are refused. Every route is
+  // authenticated, including the browser callback, whose redirect carries the cookie that ties it to the
+  // user who started the consent.
   app.route(
     '/api/v1/user/settings/google',
     withAuth(
@@ -581,7 +582,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveRequestContext,
         logger: deps.logger,
       }),
-      authMiddleware,
+      createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
   // Same-origin tile proxy for embedded maps. Browser session only: bearer

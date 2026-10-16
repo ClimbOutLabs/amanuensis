@@ -46,6 +46,7 @@ describe('Google connection API', () => {
   let app: Hono;
   let granted = `${READ}`;
   let revoked = false;
+  let revokeStatus = 200;
   const calls: string[] = [];
   const originalBase = configuration.PUBLIC_BASE_URL;
 
@@ -67,7 +68,7 @@ describe('Google connection API', () => {
       return Promise.resolve(jsonResponse({ emailAddress: 'ada@example.com' }));
     }
     if (url.startsWith('https://oauth2.googleapis.com/revoke')) {
-      return Promise.resolve(new Response('', { status: 200 }));
+      return Promise.resolve(new Response('', { status: revokeStatus }));
     }
     return Promise.resolve(new Response('', { status: 500 }));
   };
@@ -101,6 +102,7 @@ describe('Google connection API', () => {
     env = await createSqliteTestDatabase();
     granted = READ;
     revoked = false;
+    revokeStatus = 200;
     calls.length = 0;
     configuration.PUBLIC_BASE_URL = '';
     const router = createGoogleRouter({
@@ -183,6 +185,97 @@ describe('Google connection API', () => {
       configuration.DEMO_MODE = original;
     }
     expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.available).toBe(true);
+  });
+
+  it('refuses every route but the status on a demo instance', async () => {
+    const original = configuration.DEMO_MODE;
+    configuration.DEMO_MODE = true;
+    try {
+      const routes: { method: string; path: string }[] = [
+        { method: 'POST', path: '/oauth/check-client' },
+        { method: 'POST', path: '/oauth/begin' },
+        { method: 'GET', path: '/oauth/callback?code=a&state=b' },
+        { method: 'POST', path: '/oauth/complete' },
+        { method: 'POST', path: '/test' },
+        { method: 'POST', path: '/disconnect' },
+      ];
+      for (const { method, path } of routes) {
+        const response = await call({ method, path, body: method === 'POST' ? {} : undefined });
+        expect({ path, status: response.status }).toEqual({ path, status: 403 });
+      }
+      expect((await call({ method: 'GET', path: '/status' })).status).toBe(200);
+    } finally {
+      configuration.DEMO_MODE = original;
+    }
+  });
+
+  describe('a request that did not come from the Aman page', () => {
+    const post = (path: string, headers: Record<string, string>) =>
+      app.request(`${LAN}${BASE}${path}`, { method: 'POST', headers: { 'x-test-user': 'ada', ...headers } });
+
+    it.each(['/test', '/disconnect'])('refuses a cross-site form to %s', async path => {
+      await connect();
+      const form = { 'Content-Type': 'application/x-www-form-urlencoded' };
+      expect((await post(path, { ...form, Origin: 'https://evil.example.net' })).status).toBe(403);
+      expect((await post(path, { ...form, Origin: 'null' })).status).toBe(403);
+      expect((await post(path, form)).status).toBe(403);
+      expect((await post(path, { 'Content-Type': 'text/plain', Origin: 'https://evil.example.net' })).status).toBe(403);
+      expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.state).toBe('connected');
+    });
+
+    it('answers a JSON call and a same-origin call with no body', async () => {
+      await connect();
+      expect((await post('/test', { 'Content-Type': 'application/json' })).status).toBe(200);
+      expect((await post('/test', { Origin: LAN })).status).toBe(200);
+      expect((await post('/disconnect', { Origin: LAN })).status).toBe(200);
+    });
+
+    it('trusts the public address as an origin too', async () => {
+      configuration.PUBLIC_BASE_URL = 'https://aman.example.org';
+      expect((await post('/test', { Origin: 'https://aman.example.org' })).status).toBe(200);
+    });
+  });
+
+  it('asks for read access when sending alone is requested', async () => {
+    const begin = await call({
+      method: 'POST',
+      path: '/oauth/begin',
+      body: { client: { client_id: ID, client_secret: SECRET, client_type: 'desktop' }, features: ['gmail_compose'] },
+    });
+    expect(begin.status).toBe(400);
+    expect(JSON.parse(begin.text).error).toMatchObject({ type: 'invalid_features' });
+    expect(JSON.parse(begin.text).error.message).toContain('Sending needs permission to read mail too');
+  });
+
+  it('does not spend the attempt in progress on a pasted page that is not the return address', async () => {
+    const begin = await call({
+      method: 'POST',
+      path: '/oauth/begin',
+      body: { client: { client_id: ID, client_secret: SECRET, client_type: 'desktop' }, features: ['gmail_read'] },
+    });
+    const state = new URL(JSON.parse(begin.text).data.authorization_url).searchParams.get('state') ?? '';
+    const wrong = await call({
+      method: 'POST',
+      path: '/oauth/complete',
+      body: { address: `https://example.com/callback?state=${state}&code=abc` },
+    });
+    expect(wrong.status).toBe(400);
+    expect(JSON.parse(wrong.text).error.message).toContain('not the page Google sent you to');
+    const real = await call({
+      method: 'POST',
+      path: '/oauth/complete',
+      body: { address: `http://127.0.0.1:53682/callback?state=${state}&code=abc` },
+    });
+    expect(real.status).toBe(200);
+  });
+
+  it('removes the connection even when Google does not confirm the revocation', async () => {
+    await connect();
+    revokeStatus = 503;
+    const gone = await call({ method: 'POST', path: '/disconnect' });
+    expect(gone.status).toBe(200);
+    expect(JSON.parse(gone.text).data).toEqual({ revocation_confirmed: false });
+    expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.state).toBe('not_connected');
   });
 
   it('connects through the pasted address, names the account, and never returns a secret', async () => {
@@ -378,7 +471,7 @@ describe('Google connection API', () => {
     const test = await call({ method: 'POST', path: '/test' });
     expect(JSON.parse(test.text).data).toEqual({ result: 'ok', account_email: 'ada@example.com' });
     const gone = await call({ method: 'POST', path: '/disconnect' });
-    expect(JSON.parse(gone.text).data).toEqual({ disconnected: true });
+    expect(JSON.parse(gone.text).data).toEqual({ revocation_confirmed: true });
     expect(calls.filter(entry => entry.includes('/revoke'))).toHaveLength(1);
     expect(JSON.parse((await call({ method: 'GET', path: '/status' })).text).data.state).toBe('not_connected');
   });
@@ -407,6 +500,19 @@ describe('Google connection API authentication', () => {
     const response = await server.request(`${BASE}${path}`, {
       method,
       headers: { 'content-type': 'application/json' },
+      ...(method === 'POST' ? { body: '{}' } : {}),
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it.each([
+    ['GET', '/status'],
+    ['POST', '/test'],
+    ['POST', '/disconnect'],
+  ])('refuses a bearer credential on %s %s, even with a signed-in user header', async (method, path) => {
+    const response = await server.request(`${BASE}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', 'x-test-user': 'ada', authorization: 'Bearer agent-token' },
       ...(method === 'POST' ? { body: '{}' } : {}),
     });
     expect(response.status).toBe(401);

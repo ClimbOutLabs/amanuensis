@@ -56,6 +56,17 @@ describe('DraftReviewLedger', () => {
     expect(ledger.take(ADA)).toBe('first');
   });
 
+  it('lets an expired review be replaced, and sweeps every expired entry when the ledger is used', () => {
+    let now = 1_000_000;
+    const ledger = new DraftReviewLedger(() => now);
+    ledger.record({ ...ADA, hash: 'old' });
+    ledger.record({ ...ADA, draft_id: 'd2', hash: 'other-old' });
+    now += 31 * 60 * 1000;
+    ledger.record({ ...ADA, hash: 'new' });
+    expect(ledger.take(ADA)).toBe('new');
+    expect(ledger.take({ ...ADA, draft_id: 'd2' })).toBeUndefined();
+  });
+
   it('forgets a review after thirty minutes', () => {
     let now = 1_000_000;
     const ledger = new DraftReviewLedger(() => now);

@@ -25,12 +25,25 @@ export interface GoogleConnectionRecord extends GoogleOwner {
   updated_at: string;
 }
 
+/** Identifies the exact login a caller read, so a later write can tell whether the row was replaced meanwhile. */
+export type GoogleConnectionVersion = Pick<GoogleConnectionRecord, 'refresh_token' | 'updated_at'>;
+
 export interface GoogleConnectionStore {
   get(owner: GoogleOwner): Promise<GoogleConnectionRecord | null>;
   /** Inserts or replaces the user's login. */
   save(record: GoogleConnectionRecord): Promise<void>;
-  /** Flags the login as no longer working; a missing login stays missing. */
-  markNeedsReconnect(owner: GoogleOwner): Promise<void>;
+  /**
+   * Flags the login as no longer working, only if the row still is the one read; a login that was
+   * replaced or removed in the meantime is left alone. Returns whether the row changed.
+   */
+  markNeedsReconnect(input: { owner: GoogleOwner; expected: GoogleConnectionVersion }): Promise<boolean>;
+  /** Records the address Google names, under the same condition. Returns whether the row changed. */
+  setAccountEmail(input: {
+    owner: GoogleOwner;
+    expected: GoogleConnectionVersion;
+    account_email: string;
+    updated_at: string;
+  }): Promise<boolean>;
   delete(owner: GoogleOwner): Promise<void>;
 }
 

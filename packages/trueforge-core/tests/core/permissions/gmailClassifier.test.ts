@@ -40,6 +40,17 @@ describe('Gmail read classification', () => {
     expect(decision).toMatchObject({ tier: 1, sensitive_read: true, card: null, auto_deny: null });
   });
 
+  it.each(READ_TOOLS)('explains %s in plain words, without the tool id', async name => {
+    const decision = await classifyTier(gmailAction(name), makeCtx());
+    expect(decision.reason_detail).toBe('Read your email.');
+  });
+
+  it('names an unknown Gmail tool without repeating its id', async () => {
+    const decision = await classifyTier(gmailAction('wipe_everything'), makeCtx());
+    expect(decision.reason_detail).toBe('Unknown Gmail tool.');
+    expect(decision.reason_detail).not.toContain('wipe_everything');
+  });
+
   it('marks the turn as having read private data', async () => {
     const ctx = makeCtx();
     expect(ctx.web_search.privateDataRead).toBe(false);

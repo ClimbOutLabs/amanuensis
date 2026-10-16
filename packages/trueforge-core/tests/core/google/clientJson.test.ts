@@ -40,7 +40,8 @@ describe('parseClientJson', () => {
 });
 
 describe('clientProblems', () => {
-  const ok = { client_id: ID, client_secret: SECRET, registered_redirect_uris: [] as string[] };
+  const noRedirectUris: string[] = [];
+  const ok = { client_id: ID, client_secret: SECRET, registered_redirect_uris: noRedirectUris };
 
   it('finds nothing wrong with a client of the right type', () => {
     expect(clientProblems({ ...ok, client_type: 'desktop', setup: DESKTOP_SETUP })).toEqual([]);
