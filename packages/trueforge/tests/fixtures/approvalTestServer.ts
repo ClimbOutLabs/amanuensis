@@ -60,6 +60,7 @@ import { createSentinelServices } from '../../src/runtime/sentinelServices';
 import { TurnDrainRegistry } from '../../src/runtime/turnDrains';
 import { INERT_SERVER_NAME, startInertMcpServer, type InertMcpServer } from './inertMcpServer';
 import { startScriptedModelServer, type ScriptedModelServer } from './scriptedModelServer';
+import { uncappedTokenFactoryBudget } from './uncappedTokenFactoryBudget';
 
 export const MODEL_PROVIDER_NAME = 'scripted';
 export const MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-model`;
@@ -141,6 +142,7 @@ function buildApp(input: {
     sessionMetricsStore: new SqliteSessionMetricsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     globalSettingsStore,
+    tokenFactoryBudget: uncappedTokenFactoryBudget,
     sessionStore,
     sentinelAuditStore,
     sentinelSettingsStore,
@@ -150,7 +152,7 @@ function buildApp(input: {
     requestReplyRouter: new RequestReplyRouter(),
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
-    oidcClient: undefined,
+    oidcDiscovery: undefined,
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
     resolveModelProviderStore: () => modelProviderStore,

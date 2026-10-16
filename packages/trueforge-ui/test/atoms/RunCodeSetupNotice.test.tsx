@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { RunCodeSetupNotice } from '@/atoms/RunCodeSetupNotice.js';
 
@@ -53,5 +53,31 @@ describe('RunCodeSetupNotice', () => {
     const notice = screen.getByRole('status');
     expect(notice).toHaveTextContent('The sandbox could not apply all isolation guarantees.');
     expect(within(notice).queryAllByRole('link')).toEqual([]);
+  });
+
+  describe('when the sandbox is not ready', () => {
+    const NOT_READY =
+      "Code can't run on this computer yet. To turn it on, run `aman doctor sandbox --fix` on the computer where Aman is installed, then try again.";
+
+    it('shows the one fix as a command that can be copied, without the quote marks', async () => {
+      const writeText = vi.fn(() => Promise.resolve());
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+      render(<RunCodeSetupNotice message={NOT_READY} />);
+
+      expect(screen.getByTestId('run-code-setup-notice-message').textContent).toBe(NOT_READY.replaceAll('`', ''));
+      expect(screen.getByTestId('run-code-setup-notice-command')).toHaveTextContent(/^aman doctor sandbox --fix$/);
+      fireEvent.click(screen.getByRole('button', { name: 'Copy command' }));
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith('aman doctor sandbox --fix');
+      });
+      expect(await screen.findByRole('button', { name: 'Copied' })).toBeVisible();
+    });
+
+    it('keeps links in the text around a command', () => {
+      render(<RunCodeSetupNotice message="Run `aman doctor sandbox --fix`, or see https://example.com/help." />);
+      const notice = screen.getByRole('status');
+      expect(within(notice).getByRole('link')).toHaveAttribute('href', 'https://example.com/help');
+      expect(within(notice).getAllByTestId('run-code-setup-notice-command')).toHaveLength(1);
+    });
   });
 });

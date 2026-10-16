@@ -281,6 +281,82 @@ describe('extractSentinelSessionContext', () => {
   });
 });
 
+describe('held actions', () => {
+  const heldRef = {
+    id: 'call-held',
+    source_event_id: 'evt-0',
+    tier: 3,
+    held: true,
+    can_always_allow: true,
+    expires_at: '2026-10-17T07:00:00.000Z',
+    tier3_card: { plain_what: 'Send a note to Ana.', plain_why: 'It was on the list.' },
+  };
+
+  it('reads the held flag, the always-allow offer and the expiry', () => {
+    const [info] = extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [heldRef] });
+    expect(info?.held).toEqual({ alwaysAllowOffered: true, expiresAt: '2026-10-17T07:00:00.000Z' });
+  });
+
+  it('reads the same fields after the SDK camel-cases them', () => {
+    const parsed = ToolApprovalRequiredEvent.parseOrThrow(
+      {
+        type: 'tool.approval_required',
+        id: 'evt-1',
+        created_at: '2026-10-16T07:00:00.000Z',
+        thread_id: 'main',
+        tool_calls: [
+          {
+            ...heldRef,
+            tier3_card: {
+              plain_what: 'Send a note to Ana.',
+              plain_why: null,
+              cannot_be_undone: null,
+              why_asked_again: null,
+              destination: null,
+              recipient: null,
+              amount: null,
+              parsed_command: null,
+              outbound_text: null,
+              destination_host: null,
+              outbound_truncated: false,
+            },
+          },
+        ],
+      },
+      { unrecognizedObjectKeys: 'passthrough', allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true },
+    );
+    const [info] = extractSentinelFromEvent(parsed);
+    expect(info?.held).toEqual({ alwaysAllowOffered: true, expiresAt: '2026-10-17T07:00:00.000Z' });
+  });
+
+  it('leaves an ordinary approval without a held marker, and never offers always-allow it did not get', () => {
+    const [ordinary] = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [{ id: 'call-1', tier: 3, tier3_card: { plain_what: 'Do it' } }],
+    });
+    expect(ordinary?.held).toBeUndefined();
+    const [held] = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [{ ...heldRef, can_always_allow: undefined, expires_at: undefined }],
+    });
+    expect(held?.held).toEqual({ alwaysAllowOffered: false, expiresAt: null });
+  });
+
+  it('reads the answers a session already recorded from the inputs of its turns', () => {
+    const context = extractSentinelSessionContext([
+      {
+        type: 'turn.created',
+        input: [
+          { type: 'user.tool_approval', thread_id: 'main', tool_call_id: 'call-a', approval: { status: 'allow' } },
+          { type: 'user.tool_approval', threadId: 'main', toolCallId: 'call-b', approval: { status: 'deny' } },
+          { type: 'user.message', content: 'hello' },
+        ],
+      },
+    ]);
+    expect(context.answers).toEqual({ 'call-a': 'approved', 'call-b': 'denied' });
+  });
+});
+
 describe('parseAuditEntries', () => {
   const entry = {
     id: 'entry-1',

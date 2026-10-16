@@ -280,7 +280,7 @@ describe('createMcpOAuthClient / ensureMcpClientRegistered', () => {
       createMcpOAuthClient({
         mcpServerUrl: SERVER_URL,
         mcpServerName: SERVER_NAME,
-        redirectUri: mcpOAuthCallbackUrl(),
+        redirectUris: [mcpOAuthCallbackUrl()],
         clientName: CLIENT_NAME,
       }),
     ).rejects.toMatchObject({ name: 'McpConnectionError', statusCode: 424 });
@@ -332,7 +332,7 @@ describe('createMcpOAuthClient / ensureMcpClientRegistered', () => {
       createMcpOAuthClient({
         mcpServerUrl: SERVER_URL,
         mcpServerName: SERVER_NAME,
-        redirectUri: mcpOAuthCallbackUrl(),
+        redirectUris: [mcpOAuthCallbackUrl()],
         clientName: CLIENT_NAME,
       }),
     ).rejects.toMatchObject({ name: 'McpConnectionError', statusCode: 424 });
@@ -404,7 +404,7 @@ describe('buildMcpAuthorizationUrl', () => {
       createMcpOAuthClient({
         mcpServerUrl: SERVER_URL,
         mcpServerName: SERVER_NAME,
-        redirectUri: mcpOAuthCallbackUrl(),
+        redirectUris: [mcpOAuthCallbackUrl()],
         clientName: CLIENT_NAME,
       }),
     ).rejects.toMatchObject({

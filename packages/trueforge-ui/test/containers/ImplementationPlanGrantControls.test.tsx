@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { Profiler } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ImplementationPlanGrantProvider,
@@ -132,6 +133,106 @@ describe('ImplementationPlanGrantControls', () => {
     });
   });
 
+  describe('polling while a turn runs', () => {
+    let visibility: DocumentVisibilityState = 'visible';
+
+    function usePageVisibility() {
+      visibility = 'visible';
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
+    }
+
+    afterEach(() => {
+      Reflect.deleteProperty(document, 'visibilityState');
+      vi.useRealTimers();
+    });
+
+    async function advance(ms: number) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    }
+
+    function renderRunning(listImplementationPlanGrants: (sessionId: string) => Promise<ImplementationPlanGrant[]>) {
+      let commits = 0;
+      render(
+        <Profiler id="grants" onRender={() => (commits += 1)}>
+          <ImplementationPlanGrantProvider
+            api={{ listImplementationPlanGrants, revokeImplementationPlanGrant: vi.fn().mockResolvedValue(undefined) }}
+          >
+            <ImplementationPlanGrantControls sessionId="session-1" isRunning />
+          </ImplementationPlanGrantProvider>
+        </Profiler>,
+      );
+      return { commits: () => commits };
+    }
+
+    it('skips poll ticks while the previous read is still in flight', async () => {
+      vi.useFakeTimers();
+      usePageVisibility();
+      let resolveFirst: (grants: ImplementationPlanGrant[]) => void = () => {};
+      const listImplementationPlanGrants = vi
+        .fn<(sessionId: string) => Promise<ImplementationPlanGrant[]>>()
+        .mockImplementationOnce(
+          () =>
+            new Promise(resolve => {
+              resolveFirst = resolve;
+            }),
+        )
+        .mockResolvedValue([grant]);
+      renderRunning(listImplementationPlanGrants);
+
+      await advance(6_000);
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        resolveFirst([grant]);
+        await Promise.resolve();
+      });
+      await advance(2_000);
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(2);
+      expect(screen.getByText(grant.plan.approach)).toBeInTheDocument();
+    });
+
+    it('does not re-render when a poll returns the same grants', async () => {
+      vi.useFakeTimers();
+      usePageVisibility();
+      // Fresh objects each time, as a real response would be.
+      const listImplementationPlanGrants = vi.fn(async () => [structuredClone(grant)]);
+      const { commits } = renderRunning(listImplementationPlanGrants);
+      await advance(0);
+      expect(screen.getByText(grant.plan.approach)).toBeInTheDocument();
+      const settled = commits();
+
+      await advance(20_000);
+      expect(listImplementationPlanGrants.mock.calls.length).toBeGreaterThanOrEqual(10);
+      expect(commits()).toBe(settled);
+    });
+
+    it('stops polling while the page is hidden and reloads once it is shown again', async () => {
+      vi.useFakeTimers();
+      usePageVisibility();
+      const listImplementationPlanGrants = vi.fn(async () => [grant]);
+      renderRunning(listImplementationPlanGrants);
+      await advance(2_000);
+      const beforeHide = listImplementationPlanGrants.mock.calls.length;
+
+      await act(async () => {
+        visibility = 'hidden';
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await advance(20_000);
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(beforeHide);
+
+      await act(async () => {
+        visibility = 'visible';
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await advance(0);
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(beforeHide + 1);
+      await advance(2_000);
+      expect(listImplementationPlanGrants).toHaveBeenCalledTimes(beforeHide + 2);
+    });
+  });
   it('does not poll while the tab is hidden', async () => {
     const visibility = stubVisibility();
     try {

@@ -2,8 +2,11 @@ import { spawnSync } from 'node:child_process';
 import {
   buildHostAuthenticatedGit,
   buildHostAuthenticatedGitConfigProbe,
+  buildHostGitInvocation,
   HOST_AUTHENTICATED_GIT_BINARY,
   isGitNetworkCommand,
+  parseGithubRepository,
+  pickGitNetworkEnv,
   planHostAuthenticatedGit,
 } from '../../../src/core/sandbox/hostAuthenticatedGit';
 
@@ -174,6 +177,57 @@ describe('buildHostAuthenticatedGit', () => {
         expect(other.status).not.toBe(0);
         expect(other.stdout).not.toContain(TOKEN);
       }
+    });
+  });
+});
+
+describe('parseGithubRepository', () => {
+  test('reads plain github.com repositories and nothing else', () => {
+    expect(parseGithubRepository('https://github.com/acme/widgets')).toEqual({
+      slug: 'acme/widgets',
+      canonical: 'https://github.com/acme/widgets.git',
+    });
+    expect(parseGithubRepository('https://github.com/acme/widgets.git/')?.slug).toBe('acme/widgets');
+    for (const url of [
+      'http://github.com/a/b',
+      'https://github.com.evil.test/a/b',
+      'https://github.com/a',
+      'ssh://github.com/a/b',
+    ]) {
+      expect(parseGithubRepository(url)).toBeUndefined();
+    }
+  });
+});
+
+describe('host git network environment', () => {
+  test('keeps only the named proxy and certificate settings with plain values', () => {
+    expect(
+      pickGitNetworkEnv({
+        HTTPS_PROXY: 'http://proxy:3128',
+        NO_PROXY: 'localhost',
+        SSL_CERT_FILE: '/etc/ca.pem',
+        GIT_SSH_COMMAND: 'evil',
+        LD_PRELOAD: '/x.so',
+        PATH: '/tmp',
+        https_proxy: 'http://bad\nproxy',
+        SSL_CERT_DIR: '',
+        CURL_CA_BUNDLE: undefined,
+      }),
+    ).toEqual({ HTTPS_PROXY: 'http://proxy:3128', NO_PROXY: 'localhost', SSL_CERT_FILE: '/etc/ca.pem' });
+  });
+
+  test('the settings sit under the pinned environment, which they cannot override', () => {
+    const invocation = buildHostGitInvocation({
+      gitArguments: ['status'],
+      token: undefined,
+      networkEnv: { HTTPS_PROXY: 'http://proxy:3128', HOME: '/root', PATH: '/tmp' },
+      ceilingDirectory: '/scratch',
+    });
+    expect(invocation.env).toMatchObject({
+      HTTPS_PROXY: 'http://proxy:3128',
+      HOME: '/nonexistent',
+      PATH: '/usr/bin:/bin',
+      GIT_CEILING_DIRECTORIES: '/scratch',
     });
   });
 });
