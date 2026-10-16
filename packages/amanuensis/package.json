@@ -2,7 +2,7 @@
   "name": "amanuensis",
   "version": "0.1.0",
   "description": "Amanuensis: agent server and chat UI in one command (npx amanuensis)",
-  "license": "MIT",
+  "license": "MPL-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/<your-fork>.git",

@@ -24,4 +24,4 @@ npx @truefoundry/trueforge
 
 ## License
 
-[MIT](https://github.com/truefoundry/trueforge/blob/main/LICENSE)
+[MPL-2.0](../../LICENSE). Portions derived from TrueForge are MIT licensed; see [NOTICE](../../NOTICE).

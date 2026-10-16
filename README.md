@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg" alt="License: MPL 2.0"></a>
   <img src="https://img.shields.io/badge/node-%3E%3D22.14-brightgreen.svg" alt="Node.js >= 22.14">
   <img src="https://img.shields.io/badge/pnpm-11.16_via_Corepack-orange.svg" alt="pnpm 11.16 via Corepack">
   <img src="https://img.shields.io/badge/local--first-blue.svg" alt="local-first">
@@ -226,4 +226,4 @@ Useful targeted commands include `pnpm test:trueforge-core`, `pnpm test:trueforg
 
 Amanuensis is derived from [TrueForge](https://github.com/truefoundry/trueforge), an open-source agent harness by [TrueFoundry](https://truefoundry.com). Upstream package names, copyright notices, source lineage, and attribution are retained; see [the attribution note](docs/AMANUENSIS_ATTRIBUTION.md).
 
-Licensed under the [MIT License](LICENSE), Copyright 2024–2026 TrueFoundry.
+Licensed under the Mozilla Public License 2.0. Portions derived from TrueForge are MIT licensed, Copyright 2024-2026 TrueFoundry; see NOTICE.

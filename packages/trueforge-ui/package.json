@@ -3,7 +3,7 @@
   "version": "0.3.0-rc.6",
   "description": "TrueForge Agent Chat UI (atoms + containers) built on assistant-ui, with owned theming, presets, and swappable slots.",
   "author": "TrueFoundry",
-  "license": "MIT",
+  "license": "MPL-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/truefoundry/trueforge.git",
