@@ -11,6 +11,8 @@ const initialProfile: PersonalizationProfile = {
   assistant_name: 'Mira',
   assistant_identity: 'A thoughtful local assistant.',
   voice_guidance: 'Warm and direct.',
+  user_name: null,
+  address_as: null,
   user_profile: 'Values privacy.',
   pinned_preferences: ['Use short summaries.'],
   learned_profile: null,
@@ -18,6 +20,42 @@ const initialProfile: PersonalizationProfile = {
 };
 
 describe('PersonalizationPanel', () => {
+  it('asks for the name and form of address first and saves them', async () => {
+    const updateProfile = vi.fn(async profile => ({ ...profile }));
+    render(
+      <PersonalizationProvider
+        api={{
+          getProfile: async () => null,
+          updateProfile,
+          deleteProfile: async () => {},
+        }}
+      >
+        <PersonalizationPanel />
+      </PersonalizationProvider>,
+    );
+
+    const nameField = await screen.findByLabelText('Your name');
+    const addressField = screen.getByLabelText('How Aman should address you');
+    const [firstSection] = screen.getAllByRole('region');
+    expect(firstSection).toHaveAccessibleName('About you');
+    expect(firstSection).toContainElement(nameField);
+    expect(firstSection).toContainElement(addressField);
+    // The name fields come before everything else on the page, including the assistant's own profile.
+    expect(nameField.compareDocumentPosition(screen.getByLabelText('Assistant name'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+
+    fireEvent.change(nameField, { target: { value: 'Sam Rivera' } });
+    fireEvent.change(addressField, { target: { value: 'Sam' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
+
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ user_name: 'Sam Rivera', address_as: 'Sam' }),
+      ),
+    );
+  });
+
   it('loads and saves the profile from Settings while updating the runtime identity', async () => {
     const updateProfile = vi.fn(async profile => ({ ...profile }));
     render(
@@ -203,6 +241,8 @@ describe('PersonalizationPanel', () => {
       assistant_name: null,
       assistant_identity: null,
       voice_guidance: null,
+      user_name: null,
+      address_as: null,
       user_profile: null,
       pinned_preferences: [],
       learned_profile: null,
@@ -277,6 +317,8 @@ describe('PersonalizationPanel', () => {
       assistant_name: 'Mira',
       assistant_identity: null,
       voice_guidance: null,
+      user_name: null,
+      address_as: null,
       user_profile: null,
       pinned_preferences: [],
       learned_profile: null,

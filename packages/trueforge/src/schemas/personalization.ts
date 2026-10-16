@@ -30,6 +30,8 @@ const PersonalizationProfileContentExample = {
   assistant_name: 'Aman',
   assistant_identity: 'A thoughtful local-first personal assistant.',
   voice_guidance: 'Warm, direct, and concise.',
+  user_name: 'Sam Rivera',
+  address_as: 'Sam',
   user_profile: 'Prefers local-first tools and plain English.',
   pinned_preferences: ['Use short bullet points.'],
   learned_profile: null,
@@ -43,6 +45,14 @@ const PersonalizationProfileContentBaseSchema = z
       example: 'A thoughtful local-first personal assistant.',
     }),
     voice_guidance: OptionalPersonalizationTextSchema.openapi({ example: 'Warm, direct, and concise.' }),
+    // Defaulted like learned_profile below: clients that predate the two name fields still PUT
+    // a complete profile without them, and an omitted key reads as null.
+    user_name: OptionalPersonalizationTextSchema.default(null)
+      .describe('What the user is called.')
+      .openapi({ example: 'Sam Rivera' }),
+    address_as: OptionalPersonalizationTextSchema.default(null)
+      .describe('How the assistant should address the user.')
+      .openapi({ example: 'Sam' }),
     user_profile: OptionalPersonalizationTextSchema.openapi({
       example: 'Prefers local-first tools and plain English.',
     }),
@@ -73,6 +83,8 @@ function validatePersonalizationContent(
     (value.assistant_name?.length ?? 0) +
     (value.assistant_identity?.length ?? 0) +
     (value.voice_guidance?.length ?? 0) +
+    (value.user_name?.length ?? 0) +
+    (value.address_as?.length ?? 0) +
     (value.user_profile?.length ?? 0) +
     value.pinned_preferences.reduce((sum, preference) => sum + preference.length, 0);
   if (totalLength > 5_500) {
@@ -85,6 +97,8 @@ function validatePersonalizationContent(
     value.assistant_name === null &&
     value.assistant_identity === null &&
     value.voice_guidance === null &&
+    value.user_name === null &&
+    value.address_as === null &&
     value.user_profile === null &&
     value.pinned_preferences.length === 0 &&
     value.learned_profile === null &&

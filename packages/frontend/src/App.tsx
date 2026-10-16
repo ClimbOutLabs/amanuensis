@@ -21,6 +21,7 @@ import {
   type AmanAvatarActivity,
   type AmanAvatarMotionSources,
   type CurrentUser,
+  type FirstRunGuideState,
   type MemoryBankStatus,
   type RoutesConfig,
   type SlotOverrides,
@@ -43,6 +44,7 @@ import { probeSession, type SessionState } from './authSession';
 import { parseAuthErrorReason, shouldShowAuthErrorScreen, stripAuthErrorSearch } from './authStatusSearch';
 import { createBugReportApi } from './bugReportApi';
 import { createChatFolderStore } from './chatFolderStore';
+import { createFirstRunGuideApi } from './firstRunGuideApi';
 import { GetStartedScreen } from './GetStartedScreen';
 import { createImplementationPlanGrantApi } from './implementationPlanGrantApi';
 import { LogoutButton } from './LogoutButton';
@@ -64,6 +66,13 @@ const routerBasename = uiRouterBasename();
 const chatFolders = createChatFolderStore(authAwareFetch);
 const spaces = createSpaceStore(authAwareFetch);
 const SERVER_CONFIG: TrueForgeServerConfig = { type: 'trueforge', baseUrl: API_BASE_URL, fetch: authAwareFetch };
+const firstRunGuideApi = createFirstRunGuideApi(authAwareFetch);
+
+/** Whether this owner has at least one chat; one page of one is enough to know. */
+async function hasAnyChat(): Promise<boolean> {
+  const page = await bootClient.sessions.list({ limit: 1 });
+  return page.data.length > 0;
+}
 const ROUTES: RoutesConfig | undefined = routerBasename ? { basename: routerBasename } : undefined;
 
 /**
@@ -124,6 +133,10 @@ type BootState =
       build: BuildIdentity | undefined;
       /** Memory bank, null when off, undefined when the boot read failed. */
       memoryBank: MemoryBankStatus | null | undefined;
+      /** Whether a chat exists yet; undefined when the boot read failed. */
+      hasChatted: boolean | undefined;
+      /** Whether the owner has put the first-run checklist away; a failed read shows it. */
+      firstRunGuideDismissed: boolean;
     };
 
 /**
@@ -278,11 +291,14 @@ export function App() {
     const state = { cancelled: false };
     void (async () => {
       try {
-        const [models, capabilities, memoryBank] = await Promise.all([
+        const [models, capabilities, memoryBank, hasChatted, firstRunGuideDismissed] = await Promise.all([
           listModels(bootClient),
           getCapabilities(bootClient),
           // Informational only: a failed read leaves memory unknown rather than failing boot.
           getMemoryBankStatus(bootClient).catch((): undefined => undefined),
+          hasAnyChat().catch((): undefined => undefined),
+          // A failed read shows the checklist: one extra look at it is the harmless side.
+          firstRunGuideApi.getDismissed().catch((): boolean => false),
         ]);
         if (state.cancelled) {
           return;
@@ -296,6 +312,8 @@ export function App() {
             openSettings: true,
             build,
             memoryBank,
+            hasChatted,
+            firstRunGuideDismissed,
             defaultAgentSpec: {
               model: { name: '' },
               config: sandboxConfig,
@@ -312,6 +330,8 @@ export function App() {
           openSettings: false,
           build,
           memoryBank,
+          hasChatted,
+          firstRunGuideDismissed,
           defaultAgentSpec: {
             model: {
               name: first.name,
@@ -349,7 +369,11 @@ export function App() {
   const setup: SetupSnapshot | null =
     setupRead ??
     (boot.status === 'ready'
-      ? { modelName: boot.defaultAgentSpec.model.name || null, memoryBank: boot.memoryBank }
+      ? {
+          modelName: boot.defaultAgentSpec.model.name || null,
+          memoryBank: boot.memoryBank,
+          hasChatted: boot.hasChatted,
+        }
       : null);
   const setupComplete = setup !== null && isSetupComplete(setup);
   useEffect(() => {
@@ -360,12 +384,14 @@ export function App() {
     const bootSnapshot: SetupSnapshot = {
       modelName: boot.defaultAgentSpec.model.name || null,
       memoryBank: boot.memoryBank,
+      hasChatted: boot.hasChatted,
     };
     const state = { cancelled: false };
     const refresh = async () => {
-      const [models, memoryBank] = await Promise.all([
+      const [models, memoryBank, hasChatted] = await Promise.all([
         listModels(bootClient).catch((): undefined => undefined),
         getMemoryBankStatus(bootClient).catch((): undefined => undefined),
+        hasAnyChat().catch((): undefined => undefined),
       ]);
       if (state.cancelled) {
         return;
@@ -374,6 +400,7 @@ export function App() {
         mergeSetupRead(previous ?? bootSnapshot, {
           modelName: models === undefined ? undefined : (models[0]?.name ?? null),
           memoryBank,
+          hasChatted,
         }),
       );
     };
@@ -394,6 +421,21 @@ export function App() {
       }
     };
   }, [boot, setupComplete]);
+  // The checklist's dismissal lives on the server so it follows the owner to every browser. The
+  // card hides at once; a failed write brings it back, since nothing was remembered.
+  const [guideDismissedLocally, setGuideDismissedLocally] = useState<boolean | undefined>(undefined);
+  const firstRunGuide = useMemo(
+    (): FirstRunGuideState => ({
+      dismissed: guideDismissedLocally ?? (boot.status === 'ready' && boot.firstRunGuideDismissed),
+      dismiss: () => {
+        setGuideDismissedLocally(true);
+        void firstRunGuideApi.setDismissed(true).catch(() => {
+          setGuideDismissedLocally(false);
+        });
+      },
+    }),
+    [guideDismissedLocally, boot],
+  );
   const personalizationApi = useMemo(() => createPersonalizationApi(authAwareFetch), []);
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
   const implementationPlanGrantApi = useMemo(() => createImplementationPlanGrantApi(authAwareFetch), []);
@@ -475,6 +517,8 @@ export function App() {
                           value={{
                             modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
                             memoryBank: setup === null ? boot.memoryBank : setup.memoryBank,
+                            hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
+                            firstRunGuide,
                             settingsHref: '/settings',
                           }}
                         >

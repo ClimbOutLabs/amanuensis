@@ -26,6 +26,43 @@ function jsonInit(method: string, body: unknown): RequestInit {
 }
 
 describe('personalization router', () => {
+  it('stores the user name and form of address, and reads them as unset when a client omits them', async () => {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const router = createPersonalizationRouter({
+      personalizationStore: new SqlitePersonalizationStore(db),
+      resolveRequestContext: () => userA,
+    });
+    const base = {
+      assistant_name: null,
+      assistant_identity: null,
+      voice_guidance: null,
+      user_profile: null,
+      pinned_preferences: [],
+    };
+
+    const named = await router.request(
+      '/profile',
+      jsonInit('PUT', { profile: { ...base, user_name: 'Sam Rivera', address_as: 'Sam' } }),
+    );
+    const namedBody = GetPersonalizationProfileResponseSchema.parse(await named.json());
+    expect(namedBody.data).toMatchObject({ user_name: 'Sam Rivera', address_as: 'Sam', revision: 1 });
+    const context = GetPersonalizationContextResponseSchema.parse(await (await router.request('/context')).json());
+    expect(context.data?.injected_context).toContain('<user-name>Sam Rivera</user-name>');
+
+    // A client that predates the fields PUTs without them; the complete replace reads them as null.
+    const older = await router.request(
+      '/profile',
+      jsonInit('PUT', { profile: { ...base, user_profile: 'Plain English.' } }),
+    );
+    const olderBody = GetPersonalizationProfileResponseSchema.parse(await older.json());
+    expect(olderBody.data).toMatchObject({ user_name: null, address_as: null, revision: 2 });
+
+    // Only the name is still content: the profile is not empty, so this is not a DELETE in disguise.
+    const nameOnly = await router.request('/profile', jsonInit('PUT', { profile: { ...base, user_name: 'Sam' } }));
+    expect(nameOnly.status).toBe(200);
+  });
+
   it('keeps profiles user scoped and returns the exact model-facing context', async () => {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
@@ -39,6 +76,8 @@ describe('personalization router', () => {
         assistant_name: 'Aman',
         assistant_identity: 'A local-first personal assistant.',
         voice_guidance: 'Warm and concise.',
+        user_name: null,
+        address_as: null,
         user_profile: 'Prefers plain English.',
         pinned_preferences: ['Do not use em dashes.'],
       },
@@ -74,6 +113,8 @@ describe('personalization router', () => {
       assistant_name: 'Aman',
       assistant_identity: null,
       voice_guidance: null,
+      user_name: null,
+      address_as: null,
       user_profile: null,
       pinned_preferences: [],
     };
@@ -122,6 +163,8 @@ describe('personalization router', () => {
       assistant_name: 'Aman',
       assistant_identity: null,
       voice_guidance: null,
+      user_name: null,
+      address_as: null,
       user_profile: null,
       pinned_preferences: [],
     };
@@ -159,6 +202,8 @@ describe('personalization router', () => {
       assistant_name: null,
       assistant_identity: null,
       voice_guidance: null,
+      user_name: null,
+      address_as: null,
       user_profile: null,
       pinned_preferences: [],
     };

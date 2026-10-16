@@ -6,6 +6,8 @@ const profile = {
   assistant_name: 'Mira',
   assistant_identity: null,
   voice_guidance: null,
+  user_name: 'Sam Rivera',
+  address_as: 'Sam',
   user_profile: null,
   pinned_preferences: [],
   learned_profile: null,
@@ -42,6 +44,18 @@ async function loadProfile(api: ReturnType<typeof createPersonalizationApi>) {
   }
   return loaded;
 }
+
+test('personalization API reads the name fields, and reads them as unset from an older server', async () => {
+  const named = createPersonalizationApi(async () => Response.json({ data: profile }));
+  assert.deepEqual(await named.getProfile(), profile);
+
+  const { user_name: _name, address_as: _address, ...olderServerProfile } = profile;
+  const older = createPersonalizationApi(async () => Response.json({ data: olderServerProfile }));
+  assert.deepEqual(await older.getProfile(), { ...profile, user_name: null, address_as: null });
+
+  const invalid = createPersonalizationApi(async () => Response.json({ data: { ...profile, user_name: 7 } }));
+  await assert.rejects(invalid.getProfile(), /invalid/);
+});
 
 test('personalization API keeps an absent learning switch absent and rejects a non-boolean one', async () => {
   // Synthesizing a value here would make it indistinguishable from one the server sent, and the

@@ -543,6 +543,8 @@ async function distillProfile(params: SubmitProfileLearningParams): Promise<void
     assistant_name: fresh.assistant_name,
     assistant_identity: fresh.assistant_identity,
     voice_guidance: fresh.voice_guidance,
+    user_name: fresh.user_name,
+    address_as: fresh.address_as,
     user_profile: fresh.user_profile,
     pinned_preferences: fresh.pinned_preferences,
     learned_profile: next,

@@ -198,6 +198,8 @@ export function buildDemoWorld(input: DemoWorldInput): DemoWorld {
       assistant_name: null,
       assistant_identity: null,
       voice_guidance: 'Warm, plain and brief.',
+      user_name: 'Mara Hollis',
+      address_as: 'Mara',
       user_profile: `Mara Hollis, a fictional demo user (${DEMO_MARKER}). Lives in Gràcia, Barcelona and works in Poblenou.`,
       pinned_preferences: ['Keep answers short and friendly.', 'Leave 15 minutes early for anything medical.'],
       learned_profile: null,

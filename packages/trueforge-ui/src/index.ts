@@ -210,11 +210,13 @@ export { ToolGroupCard } from './atoms/ToolGroupCard.js';
 export type { ToolGroupCardProps } from './atoms/ToolGroupCard.js';
 export { AmanAvatarMotion } from './components/AmanAvatarMotion.js';
 export type { AmanAvatarMotionSources } from './components/AmanAvatarMotion.js';
+export { AmanFirstRunGuide, amanFirstRunItems, isFirstRunGuideVisible } from './components/AmanFirstRunGuide.js';
+export type { FirstRunItem, FirstRunPlacement, FirstRunTarget } from './components/AmanFirstRunGuide.js';
 export { AmanRuntimeRail } from './components/AmanRuntimeRail.js';
 export type { AmanRuntimeRailProps, AmanRuntimeRailStatus } from './components/AmanRuntimeRail.js';
 export { AmanSetupProvider, useOptionalAmanSetup } from './components/AmanSetupContext.js';
-export type { AmanSetupState, MemoryBankStatus } from './components/AmanSetupContext.js';
-export { AmanWelcome, amanSetupItems, amanWelcomeHeading } from './components/AmanWelcome.js';
+export type { AmanSetupState, FirstRunGuideState, MemoryBankStatus } from './components/AmanSetupContext.js';
+export { AmanWelcome, amanWelcomeHeading } from './components/AmanWelcome.js';
 export { BugReportProvider, useBugReport, useOptionalBugReport } from './components/BugReportContext.js';
 export type {
   AppBugReportBundle,

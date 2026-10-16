@@ -17,6 +17,7 @@ import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { WithTransaction } from '../db/transaction';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
 import { getSharedRunCodeService } from '../runtime/sessionResources';
+import { createFirstRunGuideRouter } from './firstRunGuide';
 import { createSettingsMcpServersRouter } from './mcpServers';
 import { createMemoryScreensRouter } from './memoryScreens';
 import { createMemorySummarizeRouter } from './memorySummarize';
@@ -107,6 +108,13 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
   router.route(
     '/memory-summarize',
     createMemorySummarizeRouter({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    }),
+  );
+  router.route(
+    '/first-run-guide',
+    createFirstRunGuideRouter({
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     }),

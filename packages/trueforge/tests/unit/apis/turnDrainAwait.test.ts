@@ -83,6 +83,8 @@ async function seedProfile(params: {
     assistant_name: null,
     assistant_identity: null,
     voice_guidance: null,
+    user_name: null,
+    address_as: null,
     user_profile: null,
     pinned_preferences: [],
     learned_profile: null,

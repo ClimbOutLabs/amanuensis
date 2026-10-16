@@ -21,6 +21,8 @@ function parseProfile(data: unknown): PersonalizationProfile | null {
   const profile = data as Record<string, unknown>;
   // Absent on responses from a server predating the field; read as null.
   const learnedProfile = profile.learned_profile ?? null;
+  const userName = profile.user_name ?? null;
+  const addressAs = profile.address_as ?? null;
   // A server predating the toggle sends no switch at all. Its absence is carried through rather
   // than read as off: the two are indistinguishable once a value is invented, and the write
   // request is strict, so sending an invented switch back would make every save fail.
@@ -29,6 +31,8 @@ function parseProfile(data: unknown): PersonalizationProfile | null {
     !isNullableString(profile.assistant_name) ||
     !isNullableString(profile.assistant_identity) ||
     !isNullableString(profile.voice_guidance) ||
+    !isNullableString(userName) ||
+    !isNullableString(addressAs) ||
     !isNullableString(profile.user_profile) ||
     !isNullableString(learnedProfile) ||
     (learningEnabled !== undefined && typeof learningEnabled !== 'boolean') ||
@@ -42,6 +46,8 @@ function parseProfile(data: unknown): PersonalizationProfile | null {
     assistant_name: profile.assistant_name,
     assistant_identity: profile.assistant_identity,
     voice_guidance: profile.voice_guidance,
+    user_name: userName,
+    address_as: addressAs,
     user_profile: profile.user_profile,
     pinned_preferences: profile.pinned_preferences,
     learned_profile: learnedProfile,
