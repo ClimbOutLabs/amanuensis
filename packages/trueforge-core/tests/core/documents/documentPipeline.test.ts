@@ -26,6 +26,7 @@ import {
   type NetWorthObservationInput,
 } from '../../../src/documents/netWorthReport';
 import { makeStubPublicSandbox } from '../harnessMocks';
+import { syntheticPdf, syntheticPng } from './syntheticFiles';
 
 function makePdf(pageLines: readonly (readonly string[])[]): Buffer {
   const pageCount = pageLines.length;
@@ -149,7 +150,7 @@ describe('local document pipeline', () => {
       onFileProgress: undefined,
       budget: undefined,
       pageRange: undefined,
-      downloadFile: async () => Buffer.from('synthetic image bytes'),
+      downloadFile: async () => syntheticPng(),
       runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async input => {
         calls.push({ pages: input.pages, content: Buffer.from(input.filePath) });
@@ -167,7 +168,7 @@ describe('local document pipeline', () => {
       onFileProgress: undefined,
       budget: undefined,
       pageRange: undefined,
-      downloadFile: async () => Buffer.from('synthetic image bytes'),
+      downloadFile: async () => syntheticPng(),
       runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async () => {
         throw new Error('(exit code 1): tesseract failed');
@@ -191,7 +192,7 @@ describe('local document pipeline', () => {
       onFileProgress: undefined,
       budget: undefined,
       pageRange: undefined,
-      downloadFile: async () => Buffer.from('image'),
+      downloadFile: async () => syntheticPng(),
       runNativePdfText: async () => ({ total_pages: 0, pages: [] }),
       runOcr: async () => [{ page_number: 1, text: 'x'.repeat(MAX_CHARS_PER_DOCUMENT + 100) }],
     });
@@ -464,7 +465,7 @@ describe('local document pipeline', () => {
       downloadFile: async path => {
         const filename = path.slice(path.lastIndexOf('/') + 1);
         const entry = files.find(candidate => candidate[0] === filename);
-        return filename.endsWith('.pdf') ? makePdf([entry?.[1] ?? []]) : Buffer.from('synthetic screenshot');
+        return filename.endsWith('.pdf') ? makePdf([entry?.[1] ?? []]) : syntheticPng();
       },
       runNativePdfText: async input => {
         const filename = input.filePath.slice(input.filePath.lastIndexOf('/') + 1);
@@ -532,7 +533,7 @@ describe('document page-range extraction', () => {
       onFileProgress: undefined,
       budget: overrides.budget,
       pageRange: overrides.pageRange,
-      downloadFile: async () => Buffer.from('pdf-bytes'),
+      downloadFile: async () => syntheticPdf(),
       runNativePdfText: async input => {
         const pages = Object.entries(overrides.nativePages ?? {}).map(([page, text]) => ({
           page_number: Number(page),

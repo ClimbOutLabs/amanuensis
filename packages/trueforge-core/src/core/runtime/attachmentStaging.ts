@@ -1,9 +1,16 @@
 import { createHash } from 'node:crypto';
-import { MAX_BYTES_PER_DOCUMENT } from '../../documents/documentExtraction';
+import {
+  MAX_BYTES_PER_DOCUMENT,
+  MAX_DOCUMENT_FILES,
+  MAX_TOTAL_DOCUMENT_BYTES,
+} from '../../documents/documentExtraction';
 import { InvalidFileInputError } from '../errors';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 
 const MAX_FILENAME_BYTES = 180;
+/** Controls (C0, DEL, C1), line and paragraph separators, bidi marks and overrides, and angle brackets: none belong in a name the model or a person reads. */
+const UNSAFE_NAME_CHARACTERS =
+  /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069<>]/gu;
 const MAX_EXTENSION_BYTES = 16;
 const FALLBACK_FILENAME = 'attachment';
 
@@ -47,15 +54,13 @@ function truncateToBytes(value: string, maxBytes: number): string {
 }
 
 /**
- * Repairs a name the sender chose (an email attachment): keeps the last path segment, replaces control
+ * Repairs a name the sender chose (an email attachment): keeps the last path segment, replaces unsafe
  * characters, and shortens it to the limit while keeping a short extension. A name that is empty or only
  * dots becomes `attachment`.
  */
 function sanitizeAttachmentName(raw: string): string {
   const lastSegment = raw.split(/[/\\]/).pop() ?? '';
-  const cleaned = Array.from(lastSegment, character => (containsControlCharacter(character) ? '_' : character)).join(
-    '',
-  );
+  const cleaned = lastSegment.replace(UNSAFE_NAME_CHARACTERS, '_');
   if (cleaned.trim() === '' || /^\.+$/.test(cleaned)) {
     return FALLBACK_FILENAME;
   }
@@ -78,6 +83,18 @@ function stagedFilename(filename: string, content: Buffer, ordinal: number): str
   return `attachment-${String(ordinal).padStart(2, '0')}-${digest}-${filename}`;
 }
 
+/** The caps every source of attachments shares: how many files one message may carry, and their total size. */
+export function assertAttachmentBatch(sizes: readonly number[]): void {
+  if (sizes.length > MAX_DOCUMENT_FILES) {
+    throw new InvalidFileInputError(`Message exceeds the ${String(MAX_DOCUMENT_FILES)} attachment limit`);
+  }
+  if (sizes.reduce((total, size) => total + size, 0) > MAX_TOTAL_DOCUMENT_BYTES) {
+    throw new InvalidFileInputError(
+      `Attachments exceed the ${String(MAX_TOTAL_DOCUMENT_BYTES)} byte cumulative upload limit`,
+    );
+  }
+}
+
 export interface StagedAttachment {
   /** The sanitized name the person and the model see. */
   filename: string;
@@ -91,13 +108,8 @@ export interface StagedAttachment {
   sandboxCreated: SandboxInfo | undefined;
 }
 
-/**
- * The one way a file the server holds (a chat upload, an email attachment) gets into the turn's sandbox
- * workspace: sanitized name, size cap, bytes written through the sandbox provider (the slot agent's
- * `fs_write` on slots, so the slot never fetches anything), and the file offered to `run_code` as /ingress.
- * Read it afterwards with `extractDocumentsFromSandbox` or `run_code`; rejects with the provider's message
- * when no sandbox is available.
- */
+// Consumed by chat uploads and, from their own branches, the email connector and the demo inbox.
+/** Places a file's bytes in the turn's sandbox workspace under a sanitized name and returns its in-sandbox path. */
 export async function stageAttachment({
   sandbox,
   filename,

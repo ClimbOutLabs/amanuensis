@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { SLOT_AGENT_VERSION, SLOT_PLATFORM, SLOT_RUNSC_VERSION } from '../../../../src/core/sandbox/slots/slotContract';
+import { DEFAULT_OCR_LANGUAGES } from '../../../../src/documents/documentExtraction';
 
 const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..', '..');
 
@@ -24,14 +25,13 @@ describe('the slot image and the server agree on what is deployed', () => {
 
   test('the guest image has the tools the document pipeline runs inside the sandbox', () => {
     const dockerfile = read('ops/sandbox-slot/Dockerfile');
-    const installed = captured(dockerfile, /apt-get install -y --no-install-recommends (poppler-utils[^\\\n]*)/);
-    // pdfinfo, pdftotext and pdftoppm come from poppler-utils; OCR needs tesseract and its English data.
-    expect(installed.split(/\s+/)).toEqual(
-      expect.arrayContaining(['poppler-utils', 'tesseract-ocr', 'tesseract-ocr-eng']),
+    const installed = captured(dockerfile, /apt-get install -y --no-install-recommends (poppler-utils[^\\\n]*)/).split(
+      /\s+/,
     );
-    const sandbox = read('packages/trueforge-core/src/core/sandbox/Sandbox.ts');
-    for (const tool of ['pdfinfo', 'pdftotext', 'pdftoppm', 'tesseract']) {
-      expect(sandbox).toContain(tool);
+    // pdfinfo, pdftotext and pdftoppm come from poppler-utils; OCR needs tesseract and its language data.
+    expect(installed).toEqual(expect.arrayContaining(['poppler-utils', 'tesseract-ocr']));
+    for (const language of DEFAULT_OCR_LANGUAGES.split(' ')) {
+      expect(installed).toContain(`tesseract-ocr-${language}`);
     }
   });
 

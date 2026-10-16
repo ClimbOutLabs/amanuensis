@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
+import { extensionMatchesImage, inspectImageHeader, looksLikePdf, MAX_OCR_PIXELS } from './fileSniff';
 
 const OCR_IMAGE_EXTENSIONS = new Set(['.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
 
@@ -30,6 +31,10 @@ export const MAX_TOTAL_DOCUMENT_BYTES = 100 * 1024 * 1024;
 export const MAX_PAGES_PER_DOCUMENT = 100;
 export const MAX_TOTAL_DOCUMENT_PAGES = 300;
 export const MAX_CHARS_PER_DOCUMENT = 200_000;
+/** Scanned pages read per call; a long scan continues from the page the result names, so one call cannot hold a sandbox for minutes. */
+export const MAX_OCR_PAGES_PER_CALL = 20;
+/** Languages Tesseract reads when none are configured; the sandbox image ships exactly these. */
+export const DEFAULT_OCR_LANGUAGES = 'eng hin mar';
 export const MAX_TOTAL_DOCUMENT_CHARS = 1_000_000;
 
 export type DocumentExtractionMode = 'text' | 'ocr' | 'mixed';
@@ -92,6 +97,18 @@ export interface DocumentInputFile {
 export interface DocumentOcrPage {
   page_number: number;
   text: string;
+}
+
+/** Why an image must not go to OCR, judged from its header bytes alone; undefined when it may. */
+function imageProblem(bytes: Buffer, extension: string): string | undefined {
+  const header = inspectImageHeader(bytes);
+  if (header === null || !extensionMatchesImage({ extension, format: header.format })) {
+    return 'is not a valid image of the type its name says, so it cannot be read.';
+  }
+  if (header.width * header.height > MAX_OCR_PIXELS) {
+    return `is too large to read (${String(header.width)} by ${String(header.height)} pixels). Shrink it and try again.`;
+  }
+  return undefined;
 }
 
 function linesFromText(text: string): DocumentTextLine[] {
@@ -407,7 +424,18 @@ export async function extractDocumentText(input: {
     // name the exact next page range from the pages actually shown.
     let rangeInfo: { start: number; total: number } | undefined;
     try {
-      if (extension === '.pdf') {
+      if (extension === '.pdf' && !looksLikePdf(buffer)) {
+        pushDocument(
+          {
+            ...file,
+            sha256,
+            extraction_mode: null,
+            pages: [],
+            issue: `${file.filename} is not a valid PDF, so it cannot be read.`,
+          },
+          fileStartedAt,
+        );
+      } else if (extension === '.pdf') {
         // The requested range, resolved: page_start defaults to 1, page_end
         // defaults to a full window past page_start. The schema caps the
         // width at MAX_PAGES_PER_DOCUMENT.
@@ -478,10 +506,9 @@ export async function extractDocumentText(input: {
                 fileStartedAt,
               );
             } else {
-              const emptyPages = nativePages
-                .filter(page => page.lines.length === 0)
-                .map(page => page.page_number)
-                .slice(0, MAX_PAGES_PER_DOCUMENT);
+              const scannedPages = nativePages.filter(page => page.lines.length === 0).map(page => page.page_number);
+              const emptyPages = scannedPages.slice(0, MAX_OCR_PAGES_PER_CALL);
+              const unreadScanned = scannedPages.slice(MAX_OCR_PAGES_PER_CALL);
               const ocrPages =
                 emptyPages.length > 0
                   ? await input.runOcr({
@@ -509,7 +536,12 @@ export async function extractDocumentText(input: {
                   sha256,
                   extraction_mode: 'mixed',
                   pages,
-                  issue: unresolved.length > 0 ? `OCR did not resolve page(s): ${unresolved.join(', ')}.` : null,
+                  issue:
+                    unreadScanned.length > 0
+                      ? `OCR read the first ${String(MAX_OCR_PAGES_PER_CALL)} scanned pages; for the rest call extract_document_text with page_start=${String(unreadScanned[0])}.`
+                      : unresolved.length > 0
+                        ? `OCR did not resolve page(s): ${unresolved.join(', ')}.`
+                        : null,
                 },
                 fileStartedAt,
               );
@@ -517,6 +549,7 @@ export async function extractDocumentText(input: {
           }
         }
       } else if (OCR_IMAGE_EXTENSIONS.has(extension)) {
+        const problem = imageProblem(buffer, extension);
         if (input.pageRange !== undefined) {
           pushDocument(
             {
@@ -530,6 +563,18 @@ export async function extractDocumentText(input: {
           );
           rangeInfo = undefined;
           // No continue: falls through to pendingRangeInfo.push below.
+        } else if (problem !== undefined) {
+          pushDocument(
+            {
+              ...file,
+              sha256,
+              extraction_mode: null,
+              pages: [],
+              issue: `${file.filename} ${problem}`,
+            },
+            fileStartedAt,
+          );
+          rangeInfo = undefined;
         } else {
           const pagesAllowed = reservePages(1);
           const ocrPages =

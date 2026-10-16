@@ -29,7 +29,12 @@ export interface DoctorDeps {
   /** Asks the sandbox slots the way the app does: every slot's attestation, through their control sockets. */
   slotsReadiness(options: { socketPaths: string[]; timeoutMs: number }): Promise<DriverReadiness>;
   /** Sends a few bytes into a throwaway slot workspace and asks the guest for the PDF and OCR tools. */
-  slotsAttachments(options: { socketPaths: string[]; timeoutMs: number }): Promise<SlotAttachmentProbeResult>;
+  slotsAttachments(options: {
+    socketPaths: string[];
+    timeoutMs: number;
+    treeDiskMb: number;
+    ocrLanguages: string[];
+  }): Promise<SlotAttachmentProbeResult>;
   /** The live Token Factory checks for one model; the key never appears in the results. */
   tokenFactoryChecks(options: {
     apiKey: string;
@@ -88,12 +93,18 @@ async function slotsReadiness({
 function slotsAttachments({
   socketPaths,
   timeoutMs,
+  treeDiskMb,
+  ocrLanguages,
 }: {
   socketPaths: string[];
   timeoutMs: number;
+  treeDiskMb: number;
+  ocrLanguages: string[];
 }): Promise<SlotAttachmentProbeResult> {
   return probeSlotAttachments({
     socketPaths,
+    treeDiskMb,
+    ocrLanguages,
     logger: winston.createLogger({ silent: true }),
     signal: AbortSignal.timeout(timeoutMs),
   });

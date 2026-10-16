@@ -21,6 +21,8 @@ function execReply(output: string): ReturnType<FakeHandler> {
 export function fakeWorkspaceAgent(
   pdfPages: readonly string[],
   answerShell: (command: string) => string | undefined = () => undefined,
+  /** Makes every read return other bytes than were written. */
+  corruptReads = false,
 ): { agent: FakeAgent; files: Map<string, Buffer> } {
   const files = new Map<string, Buffer>();
 
@@ -65,7 +67,13 @@ export function fakeWorkspaceAgent(
       const stored = files.get(FsReadBody.parse(request.body).path);
       return stored === undefined
         ? { status: 404, body: { error: { code: 'not_found', message: 'no such file' } } }
-        : { status: 200, body: { content_base64: stored.toString('base64'), size_bytes: stored.length } };
+        : {
+            status: 200,
+            body: {
+              content_base64: (corruptReads ? Buffer.concat([stored, Buffer.from('x')]) : stored).toString('base64'),
+              size_bytes: stored.length,
+            },
+          };
     }
     if (request.path === '/v1/destroy_session') {
       return { status: 204, body: undefined };

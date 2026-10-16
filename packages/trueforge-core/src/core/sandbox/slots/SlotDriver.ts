@@ -141,7 +141,7 @@ export class SlotDriver implements IsolationDriver {
     return {
       ready: false,
       error_code: 'slots_unavailable',
-      error: `The sandbox slots are not running. Run \`${SLOT_FIX_COMMAND}\`, then check again.`,
+      error: `The sandbox is not running. Run \`${SLOT_FIX_COMMAND}\`.`,
     };
   }
 

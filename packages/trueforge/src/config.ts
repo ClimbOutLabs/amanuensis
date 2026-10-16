@@ -21,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 import envPaths from 'env-paths';
 
 import {
+  DEFAULT_OCR_LANGUAGES,
+  DEFAULT_SESSION_DISK_MB,
   GIT_NETWORK_ENV_NAMES,
   pickGitNetworkEnv,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
@@ -1376,7 +1378,7 @@ export interface SharedServerConfiguration {
   PROFILE_LEARNING_MIN_INTERVAL_MS: number;
   /**
    * Space-separated Tesseract language codes for OCR operations.
-   * Default `eng hin mar` (English, Hindi, Marathi), which the shipped sandbox image carries; joined with + for tesseract -l. Env: `DOCUMENT_OCR_LANGUAGES`.
+   * Default `eng hin mar` (English, Hindi, Marathi), which the shipped slot sandbox image carries; joined with + for tesseract -l. Env: `DOCUMENT_OCR_LANGUAGES`.
    */
   DOCUMENT_OCR_LANGUAGES: string;
   /**
@@ -1624,7 +1626,7 @@ const shared: SharedServerConfiguration = {
   SANDBOX_SESSION_DISK_MB: parsePositiveInt({
     envKey: 'SANDBOX_SESSION_DISK_MB',
     raw: getEnv('SANDBOX_SESSION_DISK_MB'),
-    defaultValue: 2048,
+    defaultValue: DEFAULT_SESSION_DISK_MB,
   }),
   SANDBOX_IMAGE: getEnv('SANDBOX_IMAGE', { defaultValue: '' }) ?? '',
   SANDBOX_RUNS_DIR: path.join(appDataDir, 'sandbox-runs'),
@@ -1955,7 +1957,8 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('PROFILE_LEARNING_MIN_INTERVAL_MS'),
     defaultValue: 3_600_000,
   }),
-  DOCUMENT_OCR_LANGUAGES: getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: 'eng hin mar' }) ?? 'eng hin mar',
+  DOCUMENT_OCR_LANGUAGES:
+    getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: DEFAULT_OCR_LANGUAGES }) ?? DEFAULT_OCR_LANGUAGES,
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),
   SERVER_URL:
     getEnv('SERVER_URL', { defaultValue: `http://localhost:${String(port)}` }) ?? `http://localhost:${String(port)}`,

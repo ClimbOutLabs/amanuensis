@@ -36,6 +36,7 @@ export { isAgentInputUserMessage, isEmptyMessageContent, isFileContentPart } fro
 export type { AgentInputUserMessage } from './runtime/UserInputMessage';
 
 // Deterministic local document extraction/report capability.
+export { DEFAULT_OCR_LANGUAGES } from '../documents/documentExtraction';
 export type {
   DocumentExtraction,
   DocumentExtractionMode,
@@ -359,7 +360,7 @@ export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
 export { probeSlotAttachments } from './sandbox/slots/slotAttachmentProbe';
 export type { SlotAttachmentProbeResult } from './sandbox/slots/slotAttachmentProbe';
-export { slotSocketPathsIn } from './sandbox/slots/slotContract';
+export { DEFAULT_SESSION_DISK_MB, slotSocketPathsIn } from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SlotDriver } from './sandbox/slots/SlotDriver';
 export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';

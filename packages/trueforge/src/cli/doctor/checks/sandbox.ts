@@ -1,7 +1,12 @@
-import { SLOT_FIX_COMMAND, slotSocketPathsIn } from '@truefoundry/trueforge-core/core';
+import {
+  DEFAULT_OCR_LANGUAGES,
+  DEFAULT_SESSION_DISK_MB,
+  SLOT_FIX_COMMAND,
+  slotSocketPathsIn,
+} from '@truefoundry/trueforge-core/core';
 import type { DoctorDeps } from '../deps';
 import { describeNetworkError } from '../redact';
-import { failCheck, offCheck, okCheck, type Check } from '../schemas';
+import { failCheck, offCheck, okCheck, warnCheck, type Check } from '../schemas';
 
 const DEFAULT_SLOTS = 4;
 
@@ -17,7 +22,7 @@ function slotSettings({ deps, id }: { deps: DoctorDeps; id: string }): SlotSetti
       ok: false,
       check: failCheck({
         id,
-        detail: 'The sandbox settings of this instance are incomplete (SANDBOX_SLOTS_DIR or SANDBOX_SLOTS).',
+        detail: 'The sandbox settings for this instance are incomplete.',
         fix: 'Run install.sh again; it rewrites the instance compose file with the sandbox settings, then restart the instance.',
       }),
     };
@@ -25,7 +30,7 @@ function slotSettings({ deps, id }: { deps: DoctorDeps; id: string }): SlotSetti
   return { ok: true, socketPaths: slotSocketPathsIn({ dir, count }) };
 }
 
-const REPAIR = `Run "${SLOT_FIX_COMMAND}" on the host, then run doctor again.`;
+const REPAIR = `Run \`${SLOT_FIX_COMMAND}\`.`;
 
 /** run_code through the app's own slot driver: ready only when a slot proves every safety limit to it. */
 export async function checkRunCode({ deps, timeoutMs }: { deps: DoctorDeps; timeoutMs: number }): Promise<Check> {
@@ -58,7 +63,20 @@ export async function checkRunCode({ deps, timeoutMs }: { deps: DoctorDeps; time
   }
 }
 
-/** Reading PDFs, images and email attachments: ready when a file sent into a slot comes back and the guest has the PDF and OCR tools. */
+/** The per-chat quota the server runs with, which decides when a slot counts as full. */
+function sessionDiskMb(deps: DoctorDeps): number {
+  const configured = Number(deps.env['SANDBOX_SESSION_DISK_MB']);
+  return Number.isInteger(configured) && configured > 0 ? configured : DEFAULT_SESSION_DISK_MB;
+}
+
+const ATTACHMENT_PROBLEMS = {
+  sandbox_unavailable: 'The sandbox is not running, so attachments cannot be read.',
+  file_not_sent: 'A test file could not be sent into the sandbox.',
+  file_changed: 'A test file came back from the sandbox changed.',
+  tools_missing: 'This sandbox cannot read PDFs and images yet.',
+} as const;
+
+/** Reading PDFs, images and email attachments: a file sent into the sandbox comes back and the sandbox has what it needs to read it. */
 export async function checkAttachments({ deps, timeoutMs }: { deps: DoctorDeps; timeoutMs: number }): Promise<Check> {
   const id = 'attachments';
   if (deps.env['SANDBOX_BACKEND'] !== 'slots') {
@@ -72,16 +90,29 @@ export async function checkAttachments({ deps, timeoutMs }: { deps: DoctorDeps; 
   if (!settings.ok) {
     return settings.check;
   }
+  const configuredLanguages = deps.env['DOCUMENT_OCR_LANGUAGES']?.trim() || DEFAULT_OCR_LANGUAGES;
   try {
-    const probe = await deps.slotsAttachments({ socketPaths: settings.socketPaths, timeoutMs });
-    if (probe.ready) {
+    const probe = await deps.slotsAttachments({
+      socketPaths: settings.socketPaths,
+      timeoutMs,
+      treeDiskMb: sessionDiskMb(deps),
+      ocrLanguages: configuredLanguages.split(/\s+/),
+    });
+    if (probe.state === 'ready') {
       return okCheck({
         id,
-        detail:
-          'Reading attachments is ready: a file sent into the sandbox came back intact and the sandbox can read PDFs and images.',
+        detail: 'Reading attachments is ready: PDFs, images and email attachments can be read.',
       });
     }
-    return failCheck({ id, detail: probe.error, fix: REPAIR });
+    if (probe.state === 'busy') {
+      // A busy sandbox is not a broken one, and a warning does not stop an upgrade.
+      return warnCheck({
+        id,
+        detail: 'The sandbox was busy, so reading attachments could not be checked.',
+        fix: 'Run doctor again in a minute.',
+      });
+    }
+    return failCheck({ id, detail: ATTACHMENT_PROBLEMS[probe.problem], fix: REPAIR });
   } catch (error) {
     return failCheck({
       id,

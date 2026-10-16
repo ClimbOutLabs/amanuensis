@@ -46,7 +46,9 @@ export async function runInstanceChecks({
     await checkDisk({ deps }),
     checkClock({ deps }),
     await checkRunCode({ deps, timeoutMs }),
-    await checkAttachments({ deps, timeoutMs }),
+    local
+      ? offCheck({ id: 'attachments', detail: 'Skipped: the live sandbox test only runs in a full check.' })
+      : await checkAttachments({ deps, timeoutMs: DEEP_PROBE_TIMEOUT_MS }),
   ];
   // The model check spends a few tokens, so it only runs when asked for or when nothing is filtered.
   if (local) {
