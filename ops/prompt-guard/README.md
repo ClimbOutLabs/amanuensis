@@ -1,5 +1,7 @@
 # Prompt Guard sidecar
 
+Built with Llama. Llama 4 is licensed under the Llama 4 Community License, Copyright © Meta Platforms, Inc. All Rights Reserved. See [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md).
+
 This is an evaluation-only HTTP sidecar with two interchangeable backends. It
 does not make policy or workflow decisions; callers decide what to do with
 `flagged`. Read [`ADR.md`](./ADR.md) before use: neither backend is accepted
