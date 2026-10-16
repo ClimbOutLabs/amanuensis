@@ -13,7 +13,7 @@ import { grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes'
 /** What users were shown before a send, kept for the life of the process so approval and send can meet. */
 const SHARED_REVIEWS = new DraftReviewLedger();
 
-export interface GmailCapabilityOptions {
+interface GmailCapabilityOptions {
   connections: GoogleConnectionStore;
   owner: GoogleOwner;
   tracing: AgentTracing;

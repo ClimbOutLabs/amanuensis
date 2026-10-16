@@ -1259,7 +1259,7 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
   const parts = [
     `to ${displayList(content.to) === '' ? 'no one' : displayList(content.to)}`,
     ...(content.cc.length > 0 ? [`Copy: ${displayList(content.cc)}`] : []),
-    ...(content.bcc.length > 0 ? [`Hidden copy (Bcc): ${displayList(content.bcc)}`] : []),
+    ...(content.bcc.length > 0 ? [`Hidden copy: ${displayList(content.bcc)}`] : []),
   ];
   const subject = cardSubject(content.subject);
   const replaces = action.mail_replaces;
@@ -1321,12 +1321,12 @@ async function classifyGmailTool(action: SentinelAction, ctx: ClassifyContext): 
     markPrivateDataRead(ctx.web_search);
     return tier1Decision({
       reason: 'gmail_read',
-      reason_detail: `Read your email with \`${action.tool_name}\`.`,
+      reason_detail: 'Read your email.',
       sensitive_read: true,
     });
   }
   if (!isGmailWriteToolName(action.tool_name)) {
-    return failClosedDecision({ reason_detail: `Unknown Gmail tool \`${action.tool_name}\`.` });
+    return failClosedDecision({ reason_detail: 'Unknown Gmail tool.' });
   }
   if (ctx.services.unattended) {
     return autoDenyDecision({

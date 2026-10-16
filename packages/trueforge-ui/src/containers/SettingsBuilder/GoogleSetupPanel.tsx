@@ -23,7 +23,11 @@ const GOOGLE_CONSENT_SCREEN_URL = 'https://console.cloud.google.com/apis/credent
 const GOOGLE_CREDENTIALS_URL = 'https://console.cloud.google.com/apis/credentials';
 
 const STATUS_POLL_MS = 2000;
+/** 300 polls, two seconds apart: the ten minutes a consent in flight is good for. */
 const STATUS_POLL_LIMIT = 300;
+
+const OFFLINE_NOTICE = 'Gmail needs network access. Turn off offline mode in Settings to connect.';
+const CONSENT_TIMED_OUT = 'Sign-in timed out. Select Connect to try again.';
 
 type GoogleSetupPanelProps = {
   open: boolean;
@@ -39,6 +43,13 @@ const EMPTY_CLIENT: ClientEntry = { clientId: '', clientSecret: '', clientType: 
 
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(
+    () => () => {
+      clearTimeout(resetTimer.current);
+    },
+    [],
+  );
   return (
     <div className="mt-1 flex items-center gap-2">
       <code
@@ -56,7 +67,8 @@ function CopyField({ label, value }: { label: string; value: string }) {
           void navigator.clipboard.writeText(value).then(
             () => {
               setCopied(true);
-              setTimeout(() => {
+              clearTimeout(resetTimer.current);
+              resetTimer.current = setTimeout(() => {
                 setCopied(false);
               }, 1500);
             },
@@ -107,7 +119,6 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const pollRef = useRef(0);
   const offline = useOptionalSentinelApiState()?.settings?.offline_mode === true;
-  const OFFLINE_NOTICE = 'Gmail needs network access. Turn off offline mode in Settings to connect.';
 
   const refreshStatus = useCallback(async (): Promise<GoogleConnectionStatus | null> => {
     try {
@@ -148,7 +159,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
   const loadClientJson = (text: string) => {
     const parsed = parseClientJson(text);
     if (parsed === null) {
-      setError('That file is not a Google OAuth client file. Download the JSON of the client you created.');
+      setError("That file isn't the sign-in file from Google Cloud. Download it again from the client you created.");
       return;
     }
     setError(null);
@@ -176,8 +187,9 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
 
   const waitForConsent = async (before: GoogleConnectionStatus) => {
     const ticket = (pollRef.current += 1);
-    for (let attempt = 0; attempt < STATUS_POLL_LIMIT && pollRef.current === ticket; attempt += 1) {
+    for (let attempt = 0; attempt < STATUS_POLL_LIMIT; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, STATUS_POLL_MS));
+      if (pollRef.current !== ticket) return;
       const next = await refreshStatus();
       if (
         next?.state === 'connected' &&
@@ -188,6 +200,10 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
         onChanged();
         return;
       }
+    }
+    if (pollRef.current === ticket) {
+      setBegun(null);
+      setError(CONSENT_TIMED_OUT);
     }
   };
 
@@ -236,14 +252,14 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
     run(async () => {
       const result = await port.disconnectGoogle();
       setConfirmDisconnect(false);
-      if (result.disconnected) {
-        setNotice('Google is disconnected and its access was revoked.');
-        setTestMessage(null);
-        await refreshStatus();
-        onChanged();
-      } else {
-        setError('Google could not confirm the revocation yet, so nothing was removed here. Try again in a moment.');
-      }
+      setNotice(
+        result.revocationConfirmed
+          ? 'Google is disconnected and its access was revoked.'
+          : "Google didn't confirm. Aman removed the connection here; you can also remove access in your Google account settings.",
+      );
+      setTestMessage(null);
+      await refreshStatus();
+      onChanged();
     });
 
   const setup = status?.setup;
@@ -418,7 +434,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 <p className="font-medium">Add yourself as a test user</p>
                 <p className="text-text-secondary">
                   On the Audience page, under Test users, click Add users and add the Gmail address you will connect as.
-                  Without it, Google blocks sign-in with an access_denied error.
+                  Without it, Google shows an &quot;Access blocked&quot; page when you try to sign in.
                 </p>
               </li>
               <li>
@@ -611,7 +627,15 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 {pasted.trim() === '' ? <p className="text-xs text-text-secondary">Paste the address first.</p> : null}
               </>
             )}
-            <Button variant="ghost" size="small" type="button" onClick={() => setBegun(null)}>
+            <Button
+              variant="ghost"
+              size="small"
+              type="button"
+              onClick={() => {
+                pollRef.current += 1;
+                setBegun(null);
+              }}
+            >
               Cancel
             </Button>
           </section>

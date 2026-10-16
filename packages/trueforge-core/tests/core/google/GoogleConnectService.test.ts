@@ -3,10 +3,11 @@ import {
   GoogleClientError,
   GoogleConnectService,
   GoogleConsentError,
+  GoogleFeatureError,
 } from '../../../src/core/google/GoogleConnectService';
 import { GOOGLE_REVOKE_URL, GOOGLE_TOKEN_URL, hashState } from '../../../src/core/google/oauth';
 import type { GoogleSetupInfo } from '../../../src/core/google/setupMode';
-import { connectedRecord, FakeConnections, FakeGoogle, FakePending, json, OWNER } from './fakes';
+import { capturingLogger, connectedRecord, FakeConnections, FakeGoogle, FakePending, json, OWNER } from './fakes';
 
 const PROFILE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/profile';
 const READ = 'https://www.googleapis.com/auth/gmail.readonly';
@@ -31,8 +32,16 @@ function setup(now = new Date('2026-10-15T12:00:00.000Z')) {
   const pending = new FakePending();
   const google = new FakeGoogle();
   let clock = now;
-  const service = new GoogleConnectService({ connections, pending, now: () => clock, fetchImpl: google.fetch });
+  const { logger, lines: warnings } = capturingLogger();
+  const service = new GoogleConnectService({
+    connections,
+    pending,
+    now: () => clock,
+    fetchImpl: google.fetch,
+    logger,
+  });
   return {
+    warnings,
     connections,
     pending,
     google,
@@ -275,6 +284,17 @@ describe('GoogleConnectService', () => {
       expect(google.requests.some(request => request.url.startsWith(GOOGLE_REVOKE_URL))).toBe(false);
     });
 
+    it('refuses to ask for sending alone, with a plain message', async () => {
+      const { service, pending } = setup();
+      await expect(
+        service.begin({ owner: OWNER, setup: SETUP, client: CLIENT, features: ['gmail_compose'] }),
+      ).rejects.toThrow(GoogleFeatureError);
+      await expect(
+        service.begin({ owner: OWNER, setup: SETUP, client: CLIENT, features: ['gmail_compose'] }),
+      ).rejects.toThrow('Sending needs permission to read mail too');
+      expect(pending.records.size).toBe(0);
+    });
+
     it('records fewer scopes when the user unticked one on the consent screen', async () => {
       const { service, google } = setup();
       google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at', refresh_token: 'rt', scope: READ }));
@@ -315,6 +335,57 @@ describe('GoogleConnectService', () => {
       expect(await service.test(OWNER)).toEqual({ result: 'unreachable', account_email: null });
       expect((await connections.get(OWNER))?.status).toBe('connected');
     });
+
+    it('logs why a test failed, without secrets', async () => {
+      const { service, google, connections, warnings } = setup();
+      await connections.save(connectedRecord({ refresh_token: 'rt-live-secret' }));
+      google.on(GOOGLE_TOKEN_URL, () => json({ error: 'server_error' }, 503));
+      await service.test(OWNER);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('Google connection test failed');
+      expect(warnings.join('')).not.toContain('rt-live-secret');
+    });
+
+    it('does not bring back a login that was disconnected while the test ran', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord({ account_email: 'old@example.com' }));
+      google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at' }));
+      google.on(PROFILE_URL, () => {
+        connections.records.clear();
+        return json({ emailAddress: 'ada@example.com' });
+      });
+      expect(await service.test(OWNER)).toEqual({ result: 'ok', account_email: 'ada@example.com' });
+      expect(await connections.get(OWNER)).toBeNull();
+    });
+
+    it('does not overwrite a login that was reconnected while the test ran', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord({ account_email: 'old@example.com' }));
+      const reconnected = connectedRecord({
+        refresh_token: 'refresh-2',
+        account_email: 'new@example.com',
+        updated_at: '2026-10-16T00:00:00.000Z',
+      });
+      google.on(GOOGLE_TOKEN_URL, () => json({ access_token: 'at' }));
+      google.on(PROFILE_URL, () => {
+        connections.records.set(`${OWNER.tenant_id}/${OWNER.created_by}`, reconnected);
+        return json({ emailAddress: 'ada@example.com' });
+      });
+      await service.test(OWNER);
+      expect(await connections.get(OWNER)).toEqual(reconnected);
+    });
+
+    it('does not flag a reconnected login as needing a reconnect', async () => {
+      const { service, google, connections } = setup();
+      await connections.save(connectedRecord());
+      const reconnected = connectedRecord({ refresh_token: 'refresh-2', updated_at: '2026-10-16T00:00:00.000Z' });
+      google.on(GOOGLE_TOKEN_URL, () => {
+        connections.records.set(`${OWNER.tenant_id}/${OWNER.created_by}`, reconnected);
+        return json({ error: 'invalid_grant' }, 400);
+      });
+      expect(await service.test(OWNER)).toEqual({ result: 'needs_reconnect', account_email: null });
+      expect(await connections.get(OWNER)).toEqual(reconnected);
+    });
   });
 
   describe('disconnect', () => {
@@ -322,24 +393,42 @@ describe('GoogleConnectService', () => {
       const { service, google, connections } = setup();
       await connections.save(connectedRecord({ refresh_token: 'rt-live' }));
       google.on(GOOGLE_REVOKE_URL, () => new Response('', { status: 200 }));
-      expect(await service.disconnect(OWNER)).toBe('disconnected');
+      expect(await service.disconnect(OWNER)).toBe('revoked');
       expect(google.requests[0]?.body?.get('token')).toBe('rt-live');
       expect(await connections.get(OWNER)).toBeNull();
     });
 
-    it('keeps the login when Google cannot confirm the revocation', async () => {
-      const { service, google, connections } = setup();
-      await connections.save(connectedRecord());
+    it('still deletes the login when Google cannot confirm, says so, and logs without secrets', async () => {
+      const { service, google, connections, warnings } = setup();
+      await connections.save(connectedRecord({ refresh_token: 'rt-live-secret' }));
       google.on(GOOGLE_REVOKE_URL, () => new Response('', { status: 503 }));
-      expect(await service.disconnect(OWNER)).toBe('revoke_failed');
-      expect(await connections.get(OWNER)).not.toBeNull();
+      expect(await service.disconnect(OWNER)).toBe('removed_unconfirmed');
+      expect(await connections.get(OWNER)).toBeNull();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('Google did not confirm the revocation');
+      expect(warnings.join('')).not.toContain('rt-live-secret');
+      expect(warnings.join('')).not.toContain('secret-secret-secret');
+    });
+
+    it('still deletes the login when Google cannot be reached at all', async () => {
+      const { connections } = setup();
+      await connections.save(connectedRecord());
+      const unreachable = new GoogleConnectService({
+        connections,
+        pending: new FakePending(),
+        now: undefined,
+        fetchImpl: () => Promise.reject(new Error('offline')),
+        logger: capturingLogger().logger,
+      });
+      expect(await unreachable.disconnect(OWNER)).toBe('removed_unconfirmed');
+      expect(await connections.get(OWNER)).toBeNull();
     });
 
     it('clears a login Google already rejects', async () => {
       const { service, google, connections } = setup();
       await connections.save(connectedRecord({ status: 'needs_reconnect' }));
       google.on(GOOGLE_REVOKE_URL, () => json({ error: 'invalid_token' }, 400));
-      expect(await service.disconnect(OWNER)).toBe('disconnected');
+      expect(await service.disconnect(OWNER)).toBe('revoked');
       expect(await connections.get(OWNER)).toBeNull();
     });
   });

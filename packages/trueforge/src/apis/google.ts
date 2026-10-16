@@ -6,11 +6,13 @@ import {
   GoogleClientError,
   GoogleConnectService,
   GoogleConsentError,
+  GoogleFeatureError,
   type GoogleClientInput,
 } from '@truefoundry/trueforge-core/core/google/GoogleConnectService';
 import { GOOGLE_FEATURES, googleFeatureLabel, grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes';
 import type { GoogleSetupInfo } from '@truefoundry/trueforge-core/core/google/setupMode';
 import { parsePastedAddress, resolveGoogleSetup } from '@truefoundry/trueforge-core/core/google/setupMode';
+import type { MiddlewareHandler } from 'hono';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
@@ -25,7 +27,7 @@ import {
   testGoogleConnectionRoute,
 } from '../routes/googleRoutes';
 
-export interface GoogleRouterDeps {
+interface GoogleRouterDeps {
   googleConnectionStore: IGoogleConnectionStore;
   resolveRequestContext: ResolveRequestContext;
   logger: Logger;
@@ -91,6 +93,40 @@ function browserUrlOf(c: Parameters<ResolveRequestContext>[0]): string {
   }
 }
 
+const NOT_FROM_AMAN = 'That request did not come from Aman, so nothing was done.';
+
+/**
+ * Blocks a cross-site form from firing a state-changing call that has no body. A page on another site can
+ * submit a form but cannot send JSON or a same-origin Origin header; Aman's own pages do at least one.
+ */
+function requireJsonOrSameOrigin(): MiddlewareHandler {
+  return async (c, next) => {
+    const contentType = c.req.header('content-type')?.split(';')[0]?.trim().toLowerCase();
+    if (contentType === 'application/json') {
+      return next();
+    }
+    const origin = c.req.header('origin');
+    const allowed = new Set([new URL(browserUrlOf(c)).origin]);
+    try {
+      allowed.add(new URL(configuration.PUBLIC_BASE_URL).origin);
+    } catch {
+      // No usable public address configured; the request's own address is the only one.
+    }
+    if (origin !== undefined && allowed.has(origin)) {
+      return next();
+    }
+    return c.json({ error: { message: NOT_FROM_AMAN, type: 'cross_site_request' } }, 403);
+  };
+}
+
+/** A demo instance never connects Google; only the status read, which says so, is answered. */
+const refuseOnDemo: MiddlewareHandler = async (c, next) => {
+  if (configuration.DEMO_MODE) {
+    return c.json({ error: { message: 'Google cannot be connected on a demo instance.', type: 'unavailable' } }, 403);
+  }
+  return next();
+};
+
 function toClientInput(body: {
   client_id: string;
   client_secret: string;
@@ -109,6 +145,7 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
     connections: deps.googleConnectionStore,
     pending: deps.googleConnectionStore,
     fetchImpl: deps.fetchImpl,
+    logger: deps.logger,
   });
 
   const ownerOf = (c: Parameters<ResolveRequestContext>[0]) => {
@@ -147,6 +184,9 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
     } catch (error) {
       if (error instanceof GoogleClientError) {
         return c.json({ error: { message: error.message, type: 'invalid_client' } }, 400);
+      }
+      if (error instanceof GoogleFeatureError) {
+        return c.json({ error: { message: error.message, type: 'invalid_features' } }, 400);
       }
       throw error;
     }
@@ -197,10 +237,14 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
 
   const disconnectHandler: RouteHandler<typeof disconnectGoogleRoute> = async c => {
     const outcome = await service.disconnect(ownerOf(c));
-    return c.json({ data: { disconnected: outcome === 'disconnected' } }, 200);
+    return c.json({ data: { revocation_confirmed: outcome === 'revoked' } }, 200);
   };
 
   const router = new OpenAPIHono();
+  // Registered first so they guard the routes below; the status read stays open to say Google is unavailable.
+  router.use('/oauth/*', refuseOnDemo);
+  router.use('/test', refuseOnDemo, requireJsonOrSameOrigin());
+  router.use('/disconnect', refuseOnDemo, requireJsonOrSameOrigin());
   router.openapi(getGoogleConnectionStatusRoute, statusHandler);
   router.openapi(checkGoogleClientRoute, checkHandler);
   router.openapi(beginGoogleConsentRoute, beginHandler);

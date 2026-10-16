@@ -1,3 +1,4 @@
+import type { Logger } from 'winston';
 import { z } from 'zod';
 import { generateOAuthState } from '../util/oauthState';
 import { checkClientWithGoogle } from './checkClient';
@@ -42,6 +43,14 @@ export class GoogleClientError extends Error {
   }
 }
 
+/** Thrown before any consent when the features asked for cannot work together. */
+export class GoogleFeatureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GoogleFeatureError';
+  }
+}
+
 /** The consent in flight is missing, expired, or was started by a different request. */
 export class GoogleConsentError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -50,7 +59,7 @@ export class GoogleConsentError extends Error {
   }
 }
 
-export const GOOGLE_TEST_OUTCOMES = ['ok', 'not_connected', 'needs_reconnect', 'unreachable'] as const;
+const GOOGLE_TEST_OUTCOMES = ['ok', 'not_connected', 'needs_reconnect', 'unreachable'] as const;
 
 export const GoogleTestResultSchema = z.object({
   result: z.enum(GOOGLE_TEST_OUTCOMES),
@@ -58,7 +67,15 @@ export const GoogleTestResultSchema = z.object({
 });
 export type GoogleTestResult = z.infer<typeof GoogleTestResultSchema>;
 
-export type GoogleDisconnectResult = 'disconnected' | 'revoke_failed';
+/** `removed_unconfirmed`: the login is gone here, but Google did not confirm it revoked Aman's access. */
+export type GoogleDisconnectResult = 'revoked' | 'removed_unconfirmed';
+
+/** What is safe to log about a failure: its kind and Google's status and code, never a message that could carry a token. */
+function safeFailureFields(error: unknown): Record<string, string | number | null> {
+  return error instanceof GoogleOAuthError
+    ? { error_name: error.name, status: error.status, code: error.code }
+    : { error_name: error instanceof Error ? error.name : typeof error };
+}
 
 /**
  * The connect flow behind Settings, Connectors, Google. The user's own client, PKCE, one login per user.
@@ -71,13 +88,16 @@ export class GoogleConnectService {
   readonly #pending: PendingGoogleAuthorizationStore;
   readonly #now: () => Date;
   readonly #fetchImpl: typeof fetch;
+  readonly #logger: Logger;
 
   constructor(input: {
     connections: GoogleConnectionStore;
     pending: PendingGoogleAuthorizationStore;
     now: (() => Date) | undefined;
     fetchImpl: typeof fetch | undefined;
+    logger: Logger;
   }) {
+    this.#logger = input.logger;
     this.#connections = input.connections;
     this.#pending = input.pending;
     this.#now = input.now ?? (() => new Date());
@@ -141,6 +161,11 @@ export class GoogleConnectService {
       throw new GoogleClientError(problems);
     }
     const features = [...input.features, ...grantedFeatures(stored?.granted_scopes ?? [])];
+    if (!features.includes('gmail_read')) {
+      throw new GoogleFeatureError(
+        'Sending needs permission to read mail too. Tick the read box as well, then connect.',
+      );
+    }
     const scopes = scopesForFeatures(features);
     const state = generateOAuthState();
     const pkceVerifier = generatePkceVerifier();
@@ -242,32 +267,41 @@ export class GoogleConnectService {
       const access = await tokens.get();
       const accountEmail = await fetchProfileEmail({ access_token: access.access_token, fetchImpl: this.#fetchImpl });
       if (accountEmail !== record.account_email) {
-        await this.#connections.save({ ...record, account_email: accountEmail, updated_at: this.#now().toISOString() });
+        // Conditional on the row read, so a disconnect or reconnect during the test is not overwritten.
+        await this.#connections.setAccountEmail({
+          owner,
+          expected: { refresh_token: record.refresh_token, updated_at: record.updated_at },
+          account_email: accountEmail,
+          updated_at: this.#now().toISOString(),
+        });
       }
       return { result: 'ok', account_email: accountEmail };
     } catch (error) {
       if (error instanceof GoogleReconnectRequiredError) {
         return { result: 'needs_reconnect', account_email: null };
       }
+      this.#logger.warn('Google connection test failed', safeFailureFields(error));
       return { result: 'unreachable', account_email: null };
     }
   }
 
   /**
-   * Revokes the login at Google, then deletes it here. If Google cannot confirm, nothing is deleted and
-   * the login stays so Disconnect can be tried again.
+   * Revokes the login at Google, then deletes it here. When Google cannot confirm the revocation the login
+   * is still deleted, so Disconnect never gets stuck; the caller tells the user to check their Google account.
    */
   async disconnect(owner: GoogleOwner): Promise<GoogleDisconnectResult> {
     const record = await this.#connections.get(owner);
+    let result: GoogleDisconnectResult = 'revoked';
     if (record !== null) {
       try {
         await revokeToken({ token: record.refresh_token, fetchImpl: this.#fetchImpl });
-      } catch {
-        return 'revoke_failed';
+      } catch (error) {
+        this.#logger.warn('Google did not confirm the revocation', safeFailureFields(error));
+        result = 'removed_unconfirmed';
       }
     }
     await this.#pending.clearPending(owner);
     await this.#connections.delete(owner);
-    return 'disconnected';
+    return result;
   }
 }

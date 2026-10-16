@@ -20,7 +20,7 @@ export const CLIENT_PROBLEM_CODES = [
   'client_not_found',
   'unverified_response',
 ] as const;
-export type ClientProblemCode = (typeof CLIENT_PROBLEM_CODES)[number];
+type ClientProblemCode = (typeof CLIENT_PROBLEM_CODES)[number];
 
 export interface ClientProblem {
   code: ClientProblemCode;
@@ -36,7 +36,7 @@ const ClientKeysSchema = z.object({
 /** Google nests the keys under `installed` for a Desktop app and `web` for a Web application. */
 const ClientJsonSchema = z.union([z.object({ installed: ClientKeysSchema }), z.object({ web: ClientKeysSchema })]);
 
-export interface ParsedClientJson {
+interface ParsedClientJson {
   client_id: string;
   client_secret: string;
   client_type: ClientType;

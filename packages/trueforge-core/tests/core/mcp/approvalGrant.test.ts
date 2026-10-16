@@ -215,9 +215,9 @@ describe('always-allow grant eligibility', () => {
     expect(allowsToolGrant({ ...toolInfo('notes', 'lookup_note'), effect: 'inspect' })).toBe(true);
     expect(allowsToolGrant(toolInfo('notes', 'lookup_note'))).toBe(false);
     expect(allowsToolGrant({ ...toolInfo('notes', 'lookup_note'), effect: 'edit' })).toBe(false);
-    expect(
-      allowsToolGrant({ ...toolInfo('', 'current_datetime'), type: 'truefoundry-system', effect: 'inspect' }),
-    ).toBe(false);
+    expect(allowsToolGrant({ ...toolInfo('', 'current_datetime'), type: 'truefoundry-system', effect: 'inspect' })).toBe(
+      false,
+    );
   });
 
   it('end-to-end: a real read-only MCP tool that omits openWorldHint is not eligible', async () => {

@@ -76,16 +76,11 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
   );
 }
 
-/** Recipients, copies and what a change replaces, as the user would read them on an envelope. */
-function EmailRows({ email }: { email: SentinelApprovalEmail }) {
+/** What a change replaces; the recipients are in the box below, which is the one place they are listed. */
+function ReplacesRow({ replaces }: { replaces: NonNullable<SentinelApprovalEmail['replaces']> }) {
   return (
-    <dl className="space-y-1.5 rounded border border-border bg-primary-bg px-3 py-2">
-      <DetailRow label="To" value={email.to.join(', ')} />
-      {email.cc.length > 0 && <DetailRow label="Copy" value={email.cc.join(', ')} />}
-      {email.bcc.length > 0 && <DetailRow label="Hidden copy" value={email.bcc.join(', ')} />}
-      {email.replaces !== null && (
-        <DetailRow label="Replaces" value={`${email.replaces.subject} (to ${email.replaces.to.join(', ')})`} />
-      )}
+    <dl className="rounded border border-border bg-primary-bg px-3 py-2">
+      <DetailRow label="Replaces" value={`${replaces.subject} (to ${replaces.to.join(', ')})`} />
     </dl>
   );
 }
@@ -98,7 +93,7 @@ function EmailMessage({ email }: { email: SentinelApprovalEmail }) {
       <p className="break-words text-sm text-text-primary">To: {email.to.join(', ')}</p>
       {email.cc.length > 0 && <p className="break-words text-sm text-text-primary">Copy: {email.cc.join(', ')}</p>}
       {email.bcc.length > 0 && (
-        <p className="break-words text-sm text-text-primary">Hidden copy (Bcc): {email.bcc.join(', ')}</p>
+        <p className="break-words text-sm text-text-primary">Hidden copy: {email.bcc.join(', ')}</p>
       )}
       <p className="break-words text-sm text-text-primary">Subject: {email.subject}</p>
       <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-text-secondary">
@@ -193,7 +188,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           <p className="text-xs text-text-secondary">You have seen this before: {card.why_asked_again}</p>
         )}
 
-        {email !== null && <EmailRows email={email} />}
+        {email !== null && email.replaces !== null && <ReplacesRow replaces={email.replaces} />}
 
         {hasDetails && (
           <dl className="space-y-1.5 rounded border border-border bg-primary-bg px-3 py-2">

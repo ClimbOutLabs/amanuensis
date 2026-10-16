@@ -109,7 +109,7 @@ describe('Gmail write classification', () => {
     const decision = await classifyTier(gmail('send_draft', { draft_id: 'd1' }, { mail_draft: CONTENT }), makeCtx());
     expect(decision.tier).toBe(3);
     expect(decision.card?.plain_what).toBe(
-      'Send "Lease \\"final\\"" from your Gmail to grace@example.com. Hidden copy (Bcc): audit@example.com.',
+      'Send "Lease \\"final\\"" from your Gmail to grace@example.com. Hidden copy: audit@example.com.',
     );
     expect(decision.card?.email).toMatchObject({
       action: 'send',

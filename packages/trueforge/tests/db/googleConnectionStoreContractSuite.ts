@@ -28,6 +28,8 @@ function connection(overrides: Partial<GoogleConnectionRecord> = {}): GoogleConn
   };
 }
 
+const VERSION = { refresh_token: 'refresh-1', updated_at: '2026-10-15T10:00:00.000Z' };
+
 function pending(overrides: Partial<PendingGoogleAuthorization> = {}): PendingGoogleAuthorization {
   return {
     ...OWNER,
@@ -84,7 +86,7 @@ export function runGoogleConnectionStoreContractSuite(getStore: () => IGoogleCon
       await store.save(connection());
       await store.save(connection({ ...other }));
 
-      await store.markNeedsReconnect(OWNER);
+      expect(await store.markNeedsReconnect({ owner: OWNER, expected: VERSION })).toBe(true);
 
       expect((await store.get(OWNER))?.status).toBe('needs_reconnect');
       expect((await store.get(other))?.status).toBe('connected');
@@ -92,7 +94,61 @@ export function runGoogleConnectionStoreContractSuite(getStore: () => IGoogleCon
 
     it('does not invent a login when marking a user who has none', async () => {
       const store = getStore();
-      await store.markNeedsReconnect(OWNER);
+      expect(await store.markNeedsReconnect({ owner: OWNER, expected: VERSION })).toBe(false);
+      expect(await store.get(OWNER)).toBeNull();
+    });
+
+    it('leaves a login alone that was replaced after it was read', async () => {
+      const store = getStore();
+      await store.save(connection());
+      const replaced = connection({ refresh_token: 'refresh-2', updated_at: '2026-10-16T10:00:00.000Z' });
+      await store.save(replaced);
+
+      expect(await store.markNeedsReconnect({ owner: OWNER, expected: VERSION })).toBe(false);
+      expect(await store.get(OWNER)).toEqual(replaced);
+    });
+
+    it('records the account address only on the login that was read', async () => {
+      const store = getStore();
+      await store.save(connection({ account_email: 'old@example.com' }));
+
+      expect(
+        await store.setAccountEmail({
+          owner: OWNER,
+          expected: VERSION,
+          account_email: 'new@example.com',
+          updated_at: '2026-10-17T10:00:00.000Z',
+        }),
+      ).toBe(true);
+      expect(await store.get(OWNER)).toMatchObject({
+        account_email: 'new@example.com',
+        updated_at: '2026-10-17T10:00:00.000Z',
+      });
+
+      expect(
+        await store.setAccountEmail({
+          owner: OWNER,
+          expected: VERSION,
+          account_email: 'stale@example.com',
+          updated_at: '2026-10-18T10:00:00.000Z',
+        }),
+      ).toBe(false);
+      expect((await store.get(OWNER))?.account_email).toBe('new@example.com');
+    });
+
+    it('does not bring back a login that was deleted after it was read', async () => {
+      const store = getStore();
+      await store.save(connection());
+      await store.delete(OWNER);
+
+      expect(
+        await store.setAccountEmail({
+          owner: OWNER,
+          expected: VERSION,
+          account_email: 'new@example.com',
+          updated_at: '2026-10-17T10:00:00.000Z',
+        }),
+      ).toBe(false);
       expect(await store.get(OWNER)).toBeNull();
     });
 
@@ -150,6 +206,22 @@ export function runGoogleConnectionStoreContractSuite(getStore: () => IGoogleCon
       await store.savePending(pending());
 
       expect(await store.takePending({ ...other, state_hash: 'hash-1' })).toBeNull();
+    });
+
+    it('drops an expired consent on any read, not only when someone begins', async () => {
+      const store = getStore();
+      await store.savePending(pending({ created_at: '2020-01-01T00:00:00.000Z' }));
+      expect(await store.hasPending(OWNER)).toBe(false);
+
+      await store.savePending(pending({ created_at: '2020-01-01T00:00:00.000Z' }));
+      expect(await store.takePending({ ...OWNER, state_hash: 'hash-1' })).toBeNull();
+    });
+
+    it('keeps a fresh consent through a sweep', async () => {
+      const store = getStore();
+      await store.savePending(pending());
+      await store.purgeExpiredPending();
+      expect(await store.hasPending(OWNER)).toBe(true);
     });
 
     it('keeps the consent when the wrong state is offered, so the real attempt can still finish', async () => {

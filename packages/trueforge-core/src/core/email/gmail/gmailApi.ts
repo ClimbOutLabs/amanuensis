@@ -58,6 +58,52 @@ const API_OFF_REASONS = new Set(['accessNotConfigured', 'SERVICE_DISABLED']);
 const SCOPE_REASONS = new Set(['insufficientPermissions', 'ACCESS_TOKEN_SCOPE_INSUFFICIENT']);
 
 const BUSY_MESSAGE = 'Gmail is busy right now. Try again in a minute.';
+const TOO_LARGE_MESSAGE =
+  'Gmail sent back more than Aman will read at once. Ask for fewer results, or read one message.';
+
+/** Largest Gmail response read into memory; bigger ones are refused unread. Ordinary mail is far smaller. */
+const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+/** A 25 MB file arrives base64-encoded, about a third larger. */
+const MAX_ATTACHMENT_RESPONSE_BYTES = 40 * 1024 * 1024;
+const MAX_ERROR_BODY_BYTES = 64 * 1024;
+
+/**
+ * The JSON body of a response, read without ever holding more than the limit: a Content-Length over it is
+ * refused unread, and a body that has none (or lies) is counted as it streams in.
+ */
+async function readJsonCapped(input: {
+  response: Response;
+  maxBytes: number;
+}): Promise<{ ok: true; value: unknown } | { ok: false }> {
+  const declared = Number(input.response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > input.maxBytes) {
+    await input.response.body?.cancel();
+    return { ok: false };
+  }
+  const reader: ReadableStreamDefaultReader<Uint8Array> | undefined = input.response.body?.getReader();
+  if (reader === undefined) {
+    return { ok: true, value: undefined };
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    total += value.byteLength;
+    if (total > input.maxBytes) {
+      await reader.cancel();
+      return { ok: false };
+    }
+    chunks.push(value);
+  }
+  try {
+    return { ok: true, value: JSON.parse(Buffer.concat(chunks).toString('utf8')) };
+  } catch {
+    return { ok: true, value: undefined };
+  }
+}
 
 function describeFailure(input: { status: number; reason: string }): string {
   if (input.status === 429 || BUSY_REASONS.has(input.reason)) {
@@ -83,7 +129,17 @@ function describeFailure(input: { status: number; reason: string }): string {
   }
 }
 
-function isRetryable(input: { status: number; reason: string }): boolean {
+const RATE_LIMIT_REASONS = new Set(['userRateLimitExceeded', 'rateLimitExceeded']);
+
+/**
+ * Whether trying a request again is safe. A request that creates or sends is never repeated after a failure
+ * that may have happened after Gmail acted (a server error, a timeout); only a refusal for going too fast,
+ * which Gmail answers before doing anything, is retried.
+ */
+function isRetryable(input: { status: number; reason: string; method: GmailRequest['method'] }): boolean {
+  if (input.method === 'POST') {
+    return input.status === 429 || RATE_LIMIT_REASONS.has(input.reason);
+  }
   return input.status === 429 || input.status >= 500 || BUSY_REASONS.has(input.reason);
 }
 
@@ -100,15 +156,28 @@ interface GmailRequest {
   path: string;
   query: Query | undefined;
   body: unknown;
+  /** Said when the outcome is unknown (no answer, or a server error) for a request that creates or sends. */
+  unknownOutcome?: string;
+  /** Largest response read; the default fits any thread or list. */
+  maxResponseBytes?: number;
 }
 
-export interface ThreadList {
+/** A malformed response, even one nested deep enough to overflow the parser, is a failure and not a crash. */
+function safeParse<T>(input: { schema: z.ZodType<T>; value: unknown }) {
+  try {
+    return input.schema.safeParse(input.value);
+  } catch (error) {
+    return { success: false as const, error };
+  }
+}
+
+interface ThreadList {
   threadIds: string[];
   nextPageToken: string | undefined;
   resultSizeEstimate: number;
 }
 
-export interface DraftList {
+interface DraftList {
   draftIds: string[];
   nextPageToken: string | undefined;
 }
@@ -159,7 +228,7 @@ export class GmailApi {
           },
         });
       } catch (error) {
-        throw new GmailApiError({ status: 503, message: BUSY_MESSAGE, cause: error });
+        throw new GmailApiError({ status: 503, message: input.unknownOutcome ?? BUSY_MESSAGE, cause: error });
       }
       if (response.status === 401 && !refreshed) {
         // A cached token Google no longer honors: refresh once. A refresh Google refuses flips needs-reconnect.
@@ -168,26 +237,40 @@ export class GmailApi {
         continue;
       }
       if (response.ok) {
-        return await response.json().catch(() => undefined);
+        let read: Awaited<ReturnType<typeof readJsonCapped>>;
+        try {
+          read = await readJsonCapped({ response, maxBytes: input.maxResponseBytes ?? MAX_RESPONSE_BYTES });
+        } catch (error) {
+          throw new GmailApiError({ status: 503, message: input.unknownOutcome ?? BUSY_MESSAGE, cause: error });
+        }
+        if (!read.ok) {
+          throw new GmailApiError({ status: 502, message: input.unknownOutcome ?? TOO_LARGE_MESSAGE });
+        }
+        return read.value;
       }
-      const reason = reasonOf(await response.json().catch(() => undefined));
-      if (attempt + 1 < MAX_ATTEMPTS && isRetryable({ status: response.status, reason })) {
+      const errorBody = await readJsonCapped({ response, maxBytes: MAX_ERROR_BODY_BYTES }).catch(() => undefined);
+      const reason = reasonOf(errorBody?.ok === true ? errorBody.value : undefined);
+      const failure = { status: response.status, reason, method: input.method };
+      if (attempt + 1 < MAX_ATTEMPTS && isRetryable(failure)) {
         await this.#sleep(retryDelayMs({ response, attempt }));
         continue;
       }
       throw new GmailApiError({
         status: response.status,
-        message: describeFailure({ status: response.status, reason }),
+        message:
+          input.unknownOutcome !== undefined && response.status >= 500
+            ? input.unknownOutcome
+            : describeFailure({ status: response.status, reason }),
       });
     }
   }
 
   async #parsed<T>(schema: z.ZodType<T>, request: GmailRequest): Promise<T> {
-    const body = schema.safeParse(await this.#send(request));
+    const body = safeParse({ schema, value: await this.#send(request) });
     if (!body.success) {
       throw new GmailApiError({
         status: 502,
-        message: 'Gmail returned a response Aman could not read.',
+        message: request.unknownOutcome ?? 'Gmail returned a response Aman could not read.',
         cause: body.error,
       });
     }
@@ -243,6 +326,7 @@ export class GmailApi {
       body: undefined,
       method: 'GET',
       path: `/messages/${encodeURIComponent(input.messageId)}/attachments/${encodeURIComponent(input.attachmentId)}`,
+      maxResponseBytes: MAX_ATTACHMENT_RESPONSE_BYTES,
     });
     return Buffer.from((body.data ?? '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
   }
@@ -272,6 +356,7 @@ export class GmailApi {
       method: 'POST',
       path: '/drafts',
       body: { message: { raw: input.raw, ...(input.threadId === undefined ? {} : { threadId: input.threadId }) } },
+      unknownOutcome: 'The draft may have been saved. Check your Drafts folder before trying again.',
     });
   }
 
@@ -293,6 +378,7 @@ export class GmailApi {
       method: 'POST',
       path: '/drafts/send',
       body: { id: draftId },
+      unknownOutcome: 'The send may have gone through. Check your Sent folder before trying again.',
     });
   }
 }

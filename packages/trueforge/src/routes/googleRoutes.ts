@@ -25,6 +25,13 @@ const unauthorized = {
   },
 };
 
+const forbidden = {
+  403: {
+    content: { 'application/json': { schema: RequestErrorResponseSchema } },
+    description: 'Unavailable on a demo instance, or the request did not come from the Aman page.',
+  },
+};
+
 export const getGoogleConnectionStatusRoute = createRoute({
   method: 'get',
   path: '/status',
@@ -58,6 +65,7 @@ export const checkGoogleClientRoute = createRoute({
       description: 'Problems found, if any.',
     },
     ...unauthorized,
+    ...forbidden,
   },
 });
 
@@ -77,9 +85,11 @@ export const beginGoogleConsentRoute = createRoute({
     },
     400: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The client cannot be used, or no saved client exists to reuse.',
+      description:
+        'The client cannot be used, no saved client exists to reuse, or sending was asked for without reading.',
     },
     ...unauthorized,
+    ...forbidden,
   },
 });
 
@@ -119,6 +129,7 @@ export const completeGoogleConsentRoute = createRoute({
       description: 'The address has no code, or the consent expired or does not match.',
     },
     ...unauthorized,
+    ...forbidden,
   },
 });
 
@@ -136,6 +147,7 @@ export const testGoogleConnectionRoute = createRoute({
       description: 'Test outcome.',
     },
     ...unauthorized,
+    ...forbidden,
   },
 });
 
@@ -145,14 +157,15 @@ export const disconnectGoogleRoute = createRoute({
   tags: [OpenApiTag.PERSONALIZATION],
   summary: 'Disconnect Google',
   description:
-    'Revokes Aman’s access at Google, then deletes the stored login. Nothing is deleted if Google cannot confirm.',
+    'Revokes Aman’s access at Google, then deletes the stored login. The login is deleted even when Google cannot confirm.',
   'x-fern-sdk-group-name': ['settings', 'google'],
   'x-fern-sdk-method-name': 'disconnect',
   responses: {
     200: {
       content: { 'application/json': { schema: DisconnectGoogleResponseSchema } },
-      description: 'Whether the login was removed.',
+      description: 'The login was removed; says whether Google confirmed the revocation.',
     },
     ...unauthorized,
+    ...forbidden,
   },
 });

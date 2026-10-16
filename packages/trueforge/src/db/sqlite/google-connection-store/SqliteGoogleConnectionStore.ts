@@ -1,5 +1,6 @@
 import type {
   GoogleConnectionRecord,
+  GoogleConnectionVersion,
   GoogleOwner,
   PendingGoogleAuthorization,
 } from '@truefoundry/trueforge-core/core/google/connection';
@@ -10,7 +11,6 @@ import {
   PENDING_GOOGLE_AUTHORIZATION_RETENTION_MS,
   splitScopes,
 } from '../../googleConnectionStore';
-import { nowIso } from '../sqlExpressions';
 import type { Database } from '../types';
 
 export class SqliteGoogleConnectionStore implements IGoogleConnectionStore {
@@ -50,13 +50,33 @@ export class SqliteGoogleConnectionStore implements IGoogleConnectionStore {
       .execute();
   }
 
-  async markNeedsReconnect(owner: GoogleOwner): Promise<void> {
-    await this.#db
+  async markNeedsReconnect(input: { owner: GoogleOwner; expected: GoogleConnectionVersion }): Promise<boolean> {
+    const result = await this.#db
       .updateTable('google_connection')
-      .set({ status: 'needs_reconnect', updated_at: nowIso() })
-      .where('tenant_id', '=', owner.tenant_id)
-      .where('created_by', '=', owner.created_by)
-      .execute();
+      .set({ status: 'needs_reconnect', updated_at: new Date().toISOString() })
+      .where('tenant_id', '=', input.owner.tenant_id)
+      .where('created_by', '=', input.owner.created_by)
+      .where('refresh_token', '=', input.expected.refresh_token)
+      .where('updated_at', '=', input.expected.updated_at)
+      .executeTakeFirst();
+    return result.numUpdatedRows > 0n;
+  }
+
+  async setAccountEmail(input: {
+    owner: GoogleOwner;
+    expected: GoogleConnectionVersion;
+    account_email: string;
+    updated_at: string;
+  }): Promise<boolean> {
+    const result = await this.#db
+      .updateTable('google_connection')
+      .set({ account_email: input.account_email, updated_at: input.updated_at })
+      .where('tenant_id', '=', input.owner.tenant_id)
+      .where('created_by', '=', input.owner.created_by)
+      .where('refresh_token', '=', input.expected.refresh_token)
+      .where('updated_at', '=', input.expected.updated_at)
+      .executeTakeFirst();
+    return result.numUpdatedRows > 0n;
   }
 
   async delete(owner: GoogleOwner): Promise<void> {
@@ -69,8 +89,7 @@ export class SqliteGoogleConnectionStore implements IGoogleConnectionStore {
 
   async savePending(pending: PendingGoogleAuthorization): Promise<void> {
     const row = { ...pending, scopes: pending.scopes.join(' ') };
-    const cutoff = new Date(Date.now() - PENDING_GOOGLE_AUTHORIZATION_RETENTION_MS).toISOString();
-    await this.#db.deleteFrom('google_oauth_pending').where('created_at', '<', cutoff).execute();
+    await this.purgeExpiredPending();
     await this.#db
       .insertInto('google_oauth_pending')
       .values(row)
@@ -89,7 +108,13 @@ export class SqliteGoogleConnectionStore implements IGoogleConnectionStore {
       .execute();
   }
 
+  async purgeExpiredPending(): Promise<void> {
+    const cutoff = new Date(Date.now() - PENDING_GOOGLE_AUTHORIZATION_RETENTION_MS).toISOString();
+    await this.#db.deleteFrom('google_oauth_pending').where('created_at', '<', cutoff).execute();
+  }
+
   async takePending(input: GoogleOwner & { state_hash: string }): Promise<PendingGoogleAuthorization | null> {
+    await this.purgeExpiredPending();
     const row = await this.#db
       .deleteFrom('google_oauth_pending')
       .where('tenant_id', '=', input.tenant_id)
@@ -101,6 +126,7 @@ export class SqliteGoogleConnectionStore implements IGoogleConnectionStore {
   }
 
   async hasPending(owner: GoogleOwner): Promise<boolean> {
+    await this.purgeExpiredPending();
     const row = await this.#db
       .selectFrom('google_oauth_pending')
       .select('created_by')

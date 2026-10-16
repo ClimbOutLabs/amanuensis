@@ -18,8 +18,7 @@ export const PASTE_REDIRECT_URI = 'http://127.0.0.1:53682/callback';
 
 const PASTE_REDIRECT_HOST_AND_PATH = PASTE_REDIRECT_URI.replace(/^http:\/\//, '');
 
-export const GOOGLE_SETUP_MODES = ['web', 'loopback', 'paste'] as const;
-export type GoogleSetupMode = (typeof GOOGLE_SETUP_MODES)[number];
+const GOOGLE_SETUP_MODES = ['web', 'loopback', 'paste'] as const;
 
 export const GoogleSetupInfoSchema = z.object({
   mode: z
@@ -98,7 +97,7 @@ export function resolveGoogleSetup(input: { public_base_url: string; request_url
   return { mode: 'paste', client_type: 'desktop', redirect_uri: PASTE_REDIRECT_URI };
 }
 
-export type PastedAddress = { ok: true; code: string; state: string } | { ok: false; message: string };
+type PastedAddress = { ok: true; code: string; state: string } | { ok: false; message: string };
 
 /** Reads the code and state out of the address the user copied from the browser bar after consent. */
 export function parsePastedAddress(text: string): PastedAddress {
@@ -112,6 +111,13 @@ export function parsePastedAddress(text: string): PastedAddress {
     return {
       ok: false,
       message: 'That is not a web address. Copy the whole address from the browser bar, starting with http.',
+    };
+  }
+  // Any other page is refused before its parameters are read, so it can never use up the attempt in progress.
+  if (`${url.origin}${url.pathname}` !== PASTE_REDIRECT_URI) {
+    return {
+      ok: false,
+      message: `That is not the page Google sent you to. Copy the address from the page that failed to load; it starts with ${PASTE_REDIRECT_URI}.`,
     };
   }
   const error = url.searchParams.get('error');

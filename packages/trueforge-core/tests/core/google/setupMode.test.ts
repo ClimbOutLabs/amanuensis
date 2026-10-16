@@ -108,6 +108,22 @@ describe('parsePastedAddress', () => {
     });
   });
 
+  it('accepts only the return address, so a wrong page never spends the attempt', () => {
+    for (const wrong of [
+      'https://example.com/callback?state=abc&code=c',
+      'http://127.0.0.1:53682/other?state=abc&code=c',
+      'http://127.0.0.1:53683/callback?state=abc&code=c',
+      'https://127.0.0.1:53682/callback?state=abc&code=c',
+      'http://127.0.0.1:53682@evil.example.com/callback?state=abc&code=c',
+      'http://127.0.0.1:53682/callbackx?state=abc&code=c',
+      'http://localhost:53682/callback?state=abc&code=c',
+    ]) {
+      const result = parsePastedAddress(wrong);
+      expect(result).toMatchObject({ ok: false });
+      expect(result.ok ? '' : result.message).toContain('not the page Google sent you to');
+    }
+  });
+
   it('refuses a bare code, because the state could not be checked', () => {
     expect(parsePastedAddress('4/0AxYz')).toMatchObject({ ok: false });
   });

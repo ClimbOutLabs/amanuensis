@@ -736,6 +736,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     app,
     controller,
     destroyDb,
+    googleConnectionStore,
     redis,
     requestReplyRouter,
     sessionStore,
@@ -797,6 +798,7 @@ try {
     app,
     controller,
     destroyDb,
+    googleConnectionStore,
     redis,
     requestReplyRouter,
     sessionStore,
@@ -837,6 +839,14 @@ try {
     void sweepExpiredTurnArtifacts();
   }, 86_400_000);
   artifactRetentionTimer.unref();
+
+  // Abandoned Google consents hold a client secret; consent reads already purge, this covers an idle install.
+  const googlePendingPurgeTimer = setInterval(() => {
+    googleConnectionStore.purgeExpiredPending().catch((error: unknown) => {
+      logger.warn('Google pending consent purge failed', extractErrorLogFields(error));
+    });
+  }, 300_000);
+  googlePendingPurgeTimer.unref();
 
   if (
     mountFrontend(app, {
@@ -1039,6 +1049,7 @@ try {
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
       clearInterval(commandExecutionRecoveryTimer);
       clearInterval(artifactRetentionTimer);
+      clearInterval(googlePendingPurgeTimer);
       // Stop serving peer requests (waits for in-flight replies), then close
       // the clients this process owns: the subscriber duplicate and the primary.
       await requestReplyExecutor?.drain();

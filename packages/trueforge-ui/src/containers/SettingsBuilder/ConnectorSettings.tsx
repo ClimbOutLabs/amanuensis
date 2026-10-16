@@ -108,6 +108,8 @@ const ConnectorSettings = () => {
   const checkGenerationById = useRef<Map<string, number>>(new Map());
 
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null);
+  // The status is advisory, but a failed read must show: a missing row reads as "Google is not offered here".
+  const [googleStatusFailed, setGoogleStatusFailed] = useState(false);
   const [googlePanelOpen, setGooglePanelOpen] = useState(false);
 
   const [catalog, setCatalog] = useState<ConnectorCatalogEntry[]>([]);
@@ -157,7 +159,9 @@ const ConnectorSettings = () => {
       // Google is optional on the port and its status is advisory: a failure here must not hide the
       // rest of the connectors.
       if (hasGoogleSetup(connectorCatalog)) {
-        setGoogleStatus(await connectorCatalog.getGoogleStatus().catch(() => null));
+        const next = await connectorCatalog.getGoogleStatus().catch(() => null);
+        setGoogleStatus(next);
+        setGoogleStatusFailed(next === null);
       }
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to load connectors'));
@@ -607,14 +611,20 @@ const ConnectorSettings = () => {
   const renderGoogle = () => {
     const connected = googleStatus?.state === 'connected';
     const needsReconnect = googleStatus?.state === 'needs_reconnect';
-    const label = needsReconnect ? 'Reconnect needed' : connected ? 'Connected' : 'Not connected';
+    const label = googleStatusFailed
+      ? "Couldn't check Google right now"
+      : needsReconnect
+        ? 'Reconnect needed'
+        : connected
+          ? 'Connected'
+          : 'Not connected';
     return (
       <article className="flex min-h-16 w-full items-center gap-3 p-3">
         <span
-          className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-secondary-bg"
+          className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-secondary-bg text-sm font-semibold text-text-primary"
           aria-hidden
         >
-          <Icon name="mcp-server" className="size-4.5 text-text-primary" />
+          G
         </span>
         <div className="min-w-0 flex-1">
           <h5 className="truncate text-sm font-medium text-text-primary">Google</h5>
@@ -637,10 +647,14 @@ const ConnectorSettings = () => {
             size="small"
             type="button"
             onClick={() => {
-              setGooglePanelOpen(true);
+              if (googleStatusFailed) {
+                void refresh();
+              } else {
+                setGooglePanelOpen(true);
+              }
             }}
           >
-            {needsReconnect ? 'Reconnect' : connected ? 'Manage' : 'Connect'}
+            {googleStatusFailed ? 'Try again' : needsReconnect ? 'Reconnect' : connected ? 'Manage' : 'Connect'}
           </Button>
         </div>
       </article>
@@ -799,7 +813,10 @@ const ConnectorSettings = () => {
           <div className="flex flex-1 flex-col gap-5 overflow-y-auto pb-1">
             {loading ? <p className="py-8 text-center text-sm text-text-secondary">Loading…</p> : null}
 
-            {!loading && googleStatus?.available === true && googleMatchesQuery && hasGoogleSetup(connectorCatalog) ? (
+            {!loading &&
+            (googleStatus?.available === true || googleStatusFailed) &&
+            googleMatchesQuery &&
+            hasGoogleSetup(connectorCatalog) ? (
               <section aria-labelledby="google-connector-heading">
                 <h4
                   id="google-connector-heading"

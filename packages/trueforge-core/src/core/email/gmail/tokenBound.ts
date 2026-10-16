@@ -48,3 +48,40 @@ export function snippetOf(text: string): string {
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > SNIPPET_CHAR_CAP ? `${flat.slice(0, SNIPPET_CHAR_CAP)}...` : flat;
 }
+
+/** What one piece of a result costs: its serialized form, plus a token for the separator that joins it to the rest. */
+function costOf(value: unknown): number {
+  return estimateTokens(JSON.stringify(value)) + 1;
+}
+
+/**
+ * The tokens a whole result may still spend. Every piece (headers, file names, each message) is charged as it
+ * is added, so the serialized result stays inside the bound however hostile the mail is. Pieces must be charged
+ * in the form that is sent, after hidden characters and internal tags are dealt with.
+ */
+export class TokenBudget {
+  #left: number;
+
+  constructor(max: number) {
+    this.#left = max;
+  }
+
+  get left(): number {
+    return this.#left;
+  }
+
+  /** Charges a piece the result cannot do without; the budget may go negative, which leaves nothing for the rest. */
+  spend(value: unknown): void {
+    this.#left -= costOf(value);
+  }
+
+  /** Charges the piece only when it fits, and says whether it did. */
+  tryAdd(value: unknown): boolean {
+    const cost = costOf(value);
+    if (cost > this.#left) {
+      return false;
+    }
+    this.#left -= cost;
+    return true;
+  }
+}

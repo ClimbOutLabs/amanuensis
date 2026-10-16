@@ -8322,7 +8322,7 @@ await client.settings.toolOutputScreens.createOrUpdate({
 <dl>
 <dd>
 
-Revokes Aman’s access at Google, then deletes the stored login. Nothing is deleted if Google cannot confirm.
+Revokes Aman’s access at Google, then deletes the stored login. The login is deleted even when Google cannot confirm.
 </dd>
 </dl>
 </dd>

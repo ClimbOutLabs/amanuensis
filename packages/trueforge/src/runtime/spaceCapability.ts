@@ -1311,7 +1311,6 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
           workspace_cwd: input.workspace_cwd ?? null,
           web_search: this.webSearchTurn,
         }),
-        // Open item: bind `stageAttachment` to the turn's sandbox once the attachments branch is merged.
         attachmentStager: undefined,
       });
     } catch (error) {

@@ -10,7 +10,7 @@ describe("GoogleClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
         
-        const rawResponseBody = { "data" : { "disconnected" : true } };
+        const rawResponseBody = { "data" : { "revocation_confirmed" : true } };
         
         server
             .mockEndpoint()
@@ -23,7 +23,7 @@ describe("GoogleClient", () => {
                                 const response = await client.settings.google.disconnect();
                                 expect(response).toEqual({
     data: {
-        disconnected: true
+        revocationConfirmed: true
     }
 });
                               
@@ -46,6 +46,24 @@ describe("GoogleClient", () => {
             await expect(async () => {
                 return await client.settings.google.disconnect()
             }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("disconnect (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/google/disconnect").respondWith()
+            .statusCode(403).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.settings.google.disconnect()
+            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
           
     test("begin_consent (1)", async () => {
@@ -122,6 +140,27 @@ describe("GoogleClient", () => {
             }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
           
+    test("begin_consent (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "features" : [ "gmail_read" , "gmail_read" ] };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/google/oauth/begin").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(403).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.settings.google.beginConsent({
+    features: ["gmail_read", "gmail_read"]
+})
+            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+    });
+          
     test("check_client (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
@@ -180,6 +219,31 @@ describe("GoogleClient", () => {
     registeredRedirectUris: ["registered_redirect_uris", "registered_redirect_uris"]
 })
             }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("check_client (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "client" : { "client_id" : "x" , "client_secret" : "x" } , "registered_redirect_uris" : [ "registered_redirect_uris" , "registered_redirect_uris" ] };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/google/oauth/check-client").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(403).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.settings.google.checkClient({
+    client: {
+        clientId: "x",
+        clientSecret: "x"
+    },
+    registeredRedirectUris: ["registered_redirect_uris", "registered_redirect_uris"]
+})
+            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
           
     test("complete_consent (1)", async () => {
@@ -262,6 +326,27 @@ describe("GoogleClient", () => {
     address: "x"
 })
             }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("complete_consent (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "address" : "x" };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/google/oauth/complete").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(403).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.settings.google.completeConsent({
+    address: "x"
+})
+            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
           
     test("get_status (1)", async () => {
@@ -360,6 +445,24 @@ describe("GoogleClient", () => {
             await expect(async () => {
                 return await client.settings.google.testConnection()
             }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+          
+    test("test_connection (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/google/test").respondWith()
+            .statusCode(403).jsonBody(rawResponseBody)
+                .build();
+
+        
+            await expect(async () => {
+                return await client.settings.google.testConnection()
+            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
           
 });

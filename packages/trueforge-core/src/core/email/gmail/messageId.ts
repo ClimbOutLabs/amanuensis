@@ -10,7 +10,7 @@ const MESSAGE_ID = new RegExp(`^<${DOT_ATOM}@${DOT_ATOM}>$`);
 const MAX_ID_CHARS = 250;
 export const MAX_REFERENCES = 20;
 
-export function isMessageId(token: string): boolean {
+function isMessageId(token: string): boolean {
   return token.length <= MAX_ID_CHARS && !token.includes('=?') && MESSAGE_ID.test(token);
 }
 
