@@ -357,6 +357,25 @@ describe('classifyTier read-only shell commands are Tier 1', () => {
   });
 });
 
+describe('classifyTier exec reaching the internet', () => {
+  const internetNote = 'This command tries to reach the internet.';
+
+  test('the card says so in plain words when the host flagged the command as open-world', async () => {
+    const flagged: SentinelAction = {
+      ...action('exec', { command: 'curl https://example.com' }),
+      mcp_hints: { open_world_hint: true },
+    };
+    const decision = await classifyTier(flagged, makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.card?.plain_what).toContain(internetNote);
+  });
+
+  test('an unflagged command keeps its card wording', async () => {
+    const decision = await classifyTier(action('exec', { command: 'curl https://example.com' }), makeCtx());
+    expect(decision.card?.plain_what).not.toContain(internetNote);
+  });
+});
+
 describe('classifyTier tracked executables', () => {
   test('executing an agent-written script escalates to Tier 3', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sentinel-tracked-'));

@@ -105,6 +105,7 @@ export class SlotSandboxProvider implements SandboxProvider {
   readonly type = 'slots';
   /** The slots are offline, so sandbox code cannot reach connectors through a bridge. */
   readonly supportsCodeMode = false;
+  readonly network = 'none';
   /** The workspace exists only inside the slot; the slot agent walks every path with O_NOFOLLOW. */
   readonly filesystem: 'host' | 'remote' = 'remote';
 
@@ -271,6 +272,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       'SANDBOX RULES:',
       '- Every command starts in a fresh, offline sandbox. Files under /workspace persist between commands; processes do not, so a background process ends when its command returns.',
       '- Python 3, Node.js with TypeScript, bash, git and gcc/g++/make are installed. Packages cannot be downloaded.',
+      '- No network from code or the shell, by design. If a task needs the internet, say it cannot be done here and do not try another tool.',
     ].join('\n');
   }
 
