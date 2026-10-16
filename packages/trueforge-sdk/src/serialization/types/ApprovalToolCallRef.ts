@@ -6,6 +6,8 @@ import * as serializers from "../index.js";
 import { Tier3Card } from "./Tier3Card.js";
 
 export const ApprovalToolCallRef: core.serialization.ObjectSchema<serializers.ApprovalToolCallRef.Raw, TrueForge.ApprovalToolCallRef> = core.serialization.object({
+        "canAlwaysAllow": core.serialization.property("can_always_allow", core.serialization.boolean().optional()),
+        "held": core.serialization.booleanLiteral(true).optional(),
         "id": core.serialization.string(),
         "sourceEventId": core.serialization.property("source_event_id", core.serialization.string()),
         "tier": core.serialization.number().optional(),
@@ -14,6 +16,8 @@ export const ApprovalToolCallRef: core.serialization.ObjectSchema<serializers.Ap
 
 export declare namespace ApprovalToolCallRef {
     export interface Raw {
+        can_always_allow?: boolean | null;
+        held?: true | null;
         id: string;
         source_event_id: string;
         tier?: number | null;

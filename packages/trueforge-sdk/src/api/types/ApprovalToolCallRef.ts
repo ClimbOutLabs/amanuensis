@@ -3,6 +3,10 @@
 import * as TrueForge from "../index.js";
 
 export interface ApprovalToolCallRef {
+    /** Whether the owner may allow this tool for good. */
+    canAlwaysAllow?: boolean;
+    /** Set when a scheduled run held this action for the owner. The run did not wait for an answer. */
+    held?: true;
     /** Tool call id awaiting action. */
     id: string;
     /** Event id of the model.message that requested the tool call. */
