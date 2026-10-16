@@ -111,18 +111,19 @@ function buildApp(input: {
   const sentinelSettingsStore = new SqliteSentinelSettingsStore(db);
   const mcpToolGrantStore = new SqliteMcpToolGrantStore(db);
   // Same composition as main.ts, so approval tokens are durable and shared across turns.
+  const outboundSecrets = createOutboundSecretSource({
+    configured: () => [],
+    modelProviders: modelProviderStore,
+    sandboxProviders: sandboxProviderStore,
+    mcpServers: mcpServerStore,
+    tokens: tokenStore,
+  });
   const sentinelServices = createSentinelServices({
     audit: sentinelAuditStore,
     settings: sentinelSettingsStore,
     approvalTokens: new SqliteApprovalTokenStore(db),
     toolGrants: mcpToolGrantStore,
-    outboundSecrets: createOutboundSecretSource({
-      configured: () => [],
-      modelProviders: modelProviderStore,
-      sandboxProviders: sandboxProviderStore,
-      mcpServers: mcpServerStore,
-      tokens: tokenStore,
-    }),
+    outboundSecrets,
   });
   return createServerApp({
     modelCatalog: ModelCatalog.load(),
@@ -157,6 +158,7 @@ function buildApp(input: {
     oidcDiscovery: undefined,
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
+    outboundSecrets,
     resolveModelProviderStore: () => modelProviderStore,
     resolveMcpServerStore: () => mcpServerStore,
     resolveAgentStore: () => agentStore,

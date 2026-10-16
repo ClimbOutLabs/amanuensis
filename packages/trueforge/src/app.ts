@@ -2,7 +2,7 @@
 import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields, type SentinelServices } from '@truefoundry/trueforge-core/core';
 import type { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Context, ErrorHandler, MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -277,6 +277,8 @@ export interface ServerDeps<TTransaction> {
   authenticator: Authenticator;
   /** Startup-selected agent authorization policy. */
   authorizer: Authorizer;
+  /** Exact secret values this server holds; Sentinel's outbound guard and the data export both read them. */
+  outboundSecrets: SentinelServices['outboundSecrets'];
 }
 
 export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
@@ -506,9 +508,9 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         turnArtifactStore: deps.turnArtifactStore,
         tokenStore: deps.tokenStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
-        resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveAgentStore: deps.resolveAgentStore,
         authorizer: deps.authorizer,
+        outboundSecrets: deps.outboundSecrets,
         logger: deps.logger,
       }),
       authMiddleware,

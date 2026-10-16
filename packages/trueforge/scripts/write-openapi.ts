@@ -122,6 +122,7 @@ const app = createServerApp({
   oidcDiscovery: undefined,
   authenticator: new StandaloneAuthenticator(),
   authorizer: new TrueForgeAuthorizer(),
+  outboundSecrets: () => Promise.resolve([]),
 });
 
 // Runtime apps only advertise BearerAuth when OIDC is configured. The committed

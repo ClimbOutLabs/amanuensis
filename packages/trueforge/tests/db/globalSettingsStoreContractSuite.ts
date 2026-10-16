@@ -44,22 +44,6 @@ export function runGlobalSettingsStoreContractSuite(getStore: () => IGlobalSetti
     expect((await store.getSetting({ key: 'b' }))?.value).toBe('2');
   });
 
-  it('listSettings returns every row ordered by key, and reflects deletes', async () => {
-    const store = getStore();
-    expect(await store.listSettings()).toEqual([]);
-
-    await store.setSetting({ key: 'zeta', value: '1' });
-    await store.setSetting({ key: 'alpha', value: '2' });
-    await store.setSetting({ key: 'middle', value: '3' });
-
-    const listed = await store.listSettings();
-    expect(listed.map(row => row.key)).toEqual(['alpha', 'middle', 'zeta']);
-    expect(listed.map(row => row.value)).toEqual(['2', '3', '1']);
-
-    await store.deleteSetting({ key: 'middle' });
-    expect((await store.listSettings()).map(row => row.key)).toEqual(['alpha', 'zeta']);
-  });
-
   it('deleteSetting removes the row; deleting a missing key is a no-op', async () => {
     const store = getStore();
     await store.setSetting({ key: 'tool_output_screen_enabled', value: 'true' });

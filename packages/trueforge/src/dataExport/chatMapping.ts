@@ -1,7 +1,7 @@
 /**
- * Maps Aman's stored sessions onto the common chat format
- * ({@link ./commonChatFormat}). Only the main thread's conversation is
- * mapped: sub-agent threads, system prompts, tool calls, and tool results
+ * Maps Aman's stored sessions onto the common chat format (see
+ * commonChatFormat.ts). Only the main thread's conversation is mapped:
+ * sub-agent threads, system prompts, host notes, tool calls, and tool results
  * stay in the full-fidelity sessions section and are not chat messages.
  *
  * Message times come from the turns: context messages carry no timestamps,
@@ -12,7 +12,7 @@
  * time.
  */
 import { MAIN_THREAD_ID, type SessionRecord, type TurnRecord } from '@truefoundry/trueforge-core/agent-session';
-import type { ContextMessage } from '@truefoundry/trueforge-core/core';
+import { isInternalSystemMessage, type ContextMessage } from '@truefoundry/trueforge-core/core';
 
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { CommonChat, CommonChatFile, CommonChatMessage } from './commonChatFormat';
@@ -27,6 +27,11 @@ interface ExtractedContent {
   files: CommonChatFile[];
 }
 
+/** Reads one property of an unknown value without asserting its shape. */
+function field(value: unknown, key: string): unknown {
+  return typeof value === 'object' && value !== null ? Reflect.get(value, key) : undefined;
+}
+
 /** Pulls readable text and attachment names out of one context message's content. */
 function extractContent(content: unknown): ExtractedContent {
   if (typeof content === 'string') {
@@ -38,32 +43,30 @@ function extractContent(content: unknown): ExtractedContent {
   const texts: string[] = [];
   const files: CommonChatFile[] = [];
   for (const part of content) {
-    if (typeof part !== 'object' || part === null) {
-      continue;
-    }
-    const record = part as Record<string, unknown>;
-    if (record['type'] === 'text' && typeof record['text'] === 'string') {
-      texts.push(record['text']);
-    } else if (record['type'] === 'file') {
-      const file = record['file'];
-      const filename =
-        typeof file === 'object' && file !== null && typeof (file as Record<string, unknown>)['filename'] === 'string'
-          ? (file as Record<string, unknown>)['filename']
-          : undefined;
+    const type = field(part, 'type');
+    const text = field(part, 'text');
+    if (type === 'text' && typeof text === 'string') {
+      texts.push(text);
+    } else if (type === 'file') {
+      const filename = field(field(part, 'file'), 'filename');
       files.push({ name: typeof filename === 'string' && filename.length > 0 ? filename : 'attachment' });
-    } else if (record['type'] === 'image_url') {
+    } else if (type === 'image_url') {
       files.push({ name: 'image' });
     }
   }
   return { text: texts.join('\n'), files };
 }
 
+/** Host notes ride in user-role messages; they are not something the user or the assistant said. */
 function toCommonMessage(message: ContextMessage, time: string): CommonChatMessage | undefined {
-  const role = (message as { role?: unknown }).role;
+  if (isInternalSystemMessage(message)) {
+    return undefined;
+  }
+  const role = field(message, 'role');
   if (role !== 'user' && role !== 'assistant') {
     return undefined;
   }
-  const { text, files } = extractContent((message as { content?: unknown }).content);
+  const { text, files } = extractContent(field(message, 'content'));
   if (text.trim().length === 0 && files.length === 0) {
     return undefined;
   }

@@ -1,58 +1,50 @@
 /**
  * Streaming ZIP writer (stored method, no compression) for the data export.
  *
- * Same on-disk format as the privacy export's in-memory writer
- * (`../privacy/zipWriter`), but entries are written incrementally: a local
- * header with the data-descriptor flag, the entry bytes as they are
- * produced, then a descriptor carrying the CRC and sizes. The central
- * directory is emitted at the end from the recorded offsets. Peak memory is
- * one producer chunk, so a multi-gigabyte archive never sits in RAM.
+ * Each entry is a local header with the data-descriptor flag, the entry bytes
+ * as they are produced, then a descriptor carrying the CRC and sizes; the
+ * central directory is emitted at the end from the recorded offsets. Peak
+ * memory is one producer chunk, so a multi-gigabyte archive never sits in RAM.
  *
- * A hard cap on total archive bytes is enforced on every write; exceeding
- * it aborts the archive (the caller destroys the response stream, so the
- * download fails visibly instead of truncating silently).
+ * Classic ZIP only (no ZIP64), so the archive is capped below 4 GiB and holds
+ * fewer than 65535 entries; both limits fail with a plain error instead of
+ * writing an archive that readers would misparse. Exceeding the cap aborts
+ * the archive and the caller fails the response.
  */
 import type { Writable } from 'node:stream';
+import { crc32 } from 'node:zlib';
+
+/** 0xFFFFFFFF marks ZIP64 in offset and size fields, so classic ZIP stops one short of 4 GiB. */
+export const ZIP_MAX_ARCHIVE_BYTES = 0xffff_fffe;
+
+/** The 16-bit entry count reserves 0xFFFF as the ZIP64 marker. */
+export const ZIP_MAX_ENTRIES = 0xfffe;
 
 export class ZipSizeCapExceededError extends Error {
   readonly capBytes: number;
   constructor(capBytes: number) {
-    super(`Export archive exceeded the size cap of ${String(capBytes)} bytes`);
+    super(
+      `The export is larger than its size limit of ${String(capBytes)} bytes. Leave uploaded files out, or raise DATA_EXPORT_MAX_BYTES (at most ${String(ZIP_MAX_ARCHIVE_BYTES)}).`,
+    );
     this.name = 'ZipSizeCapExceededError';
     this.capBytes = capBytes;
   }
 }
 
-const CRC_TABLE: Uint32Array = (() => {
-  const table = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) {
-      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    }
-    table[n] = c;
+export class ZipEntryLimitExceededError extends Error {
+  constructor() {
+    super(
+      `The export has more than ${String(ZIP_MAX_ENTRIES)} files, which a zip archive cannot hold. Leave uploaded files out.`,
+    );
+    this.name = 'ZipEntryLimitExceededError';
   }
-  return table;
-})();
+}
 
-/** Incremental CRC-32 (same polynomial as `../privacy/zipWriter`). */
-export class IncrementalCrc32 {
-  #crc = 0xffffffff;
-
-  update(data: Uint8Array): void {
-    let crc = this.#crc;
-    for (const byte of data) {
-      const tableEntry = CRC_TABLE[(crc ^ byte) & 0xff];
-      if (tableEntry === undefined) {
-        throw new Error('IncrementalCrc32: CRC table lookup failed');
-      }
-      crc = tableEntry ^ (crc >>> 8);
-    }
-    this.#crc = crc;
-  }
-
-  digest(): number {
-    return (this.#crc ^ 0xffffffff) >>> 0;
+/** The destination closed (for example the client went away) before the archive was complete. */
+export class ZipOutputClosedError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('The export destination closed before the archive was complete.', options);
+    this.name = 'ZipOutputClosedError';
   }
 }
 
@@ -72,58 +64,138 @@ function dosDateTime(date: Date): { date: number; time: number } {
   };
 }
 
+/**
+ * A safe relative archive path: forward slashes only, no drive letter, no
+ * leading slash, no empty, `.` or `..` segments, no control characters.
+ */
+export function normalizeZipEntryName(rawName: string): string {
+  let printable = '';
+  for (const char of rawName) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code > 0x1f && code !== 0x7f) {
+      printable += char;
+    }
+  }
+  const segments = printable
+    .replace(/\\/g, '/')
+    .split('/')
+    // A drive designator (`C:`) only ever means something to the extracting machine.
+    .map(segment => segment.replace(/^[A-Za-z]:/, ''))
+    .filter(segment => segment !== '' && segment !== '.' && segment !== '..');
+  return segments.length > 0 ? segments.join('/') : 'file';
+}
+
+/** `notes.txt` becomes `notes (2).txt`; the suffix goes before the last extension of the last segment. */
+function withCollisionSuffix({ name, ordinal }: { name: string; ordinal: number }): string {
+  const slash = name.lastIndexOf('/');
+  const dot = name.lastIndexOf('.');
+  const hasExtension = dot > slash + 1;
+  const stem = hasExtension ? name.slice(0, dot) : name;
+  const extension = hasExtension ? name.slice(dot) : '';
+  return `${stem} (${String(ordinal)})${extension}`;
+}
+
 /** Sink for one entry's bytes; the writer owns CRC, sizes, and the cap. */
 export interface ZipEntrySink {
   write(chunk: Uint8Array): Promise<void>;
   writeText(text: string): Promise<void>;
 }
 
+/** Resolves on drain; rejects if the stream errors or closes first. Always removes its listeners. */
+function waitForDrain(out: Writable): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = (): void => {
+      out.off('drain', onDrain);
+      out.off('error', onError);
+      out.off('close', onClose);
+    };
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(new ZipOutputClosedError({ cause: error }));
+    };
+    const onClose = (): void => {
+      cleanup();
+      reject(new ZipOutputClosedError());
+    };
+    out.on('drain', onDrain);
+    out.on('error', onError);
+    out.on('close', onClose);
+  });
+}
+
 export class ZipStreamWriter {
   readonly #out: Writable;
   readonly #capBytes: number;
   readonly #encoder = new TextEncoder();
+  readonly #usedNames = new Set<string>();
   #bytesWritten = 0;
   #offset = 0;
   #central: CentralEntry[] = [];
-  #openEntry: { crc: IncrementalCrc32; size: number; name: string } | undefined;
+  #openEntry = false;
   #finished = false;
 
   constructor(out: Writable, options: { maxBytes: number }) {
     this.#out = out;
-    this.#capBytes = options.maxBytes;
+    this.#capBytes = Math.min(options.maxBytes, ZIP_MAX_ARCHIVE_BYTES);
   }
 
   get bytesWritten(): number {
     return this.#bytesWritten;
   }
 
+  /** Entries written so far. */
+  get entryCount(): number {
+    return this.#central.length;
+  }
+
   async #writeRaw(data: Uint8Array): Promise<void> {
+    if (this.#out.destroyed) {
+      throw new ZipOutputClosedError();
+    }
     this.#bytesWritten += data.byteLength;
     if (this.#bytesWritten > this.#capBytes) {
       throw new ZipSizeCapExceededError(this.#capBytes);
     }
     this.#offset += data.byteLength;
     if (!this.#out.write(data)) {
-      await new Promise<void>((resolve, reject) => {
-        this.#out.once('drain', resolve);
-        this.#out.once('error', reject);
-      });
+      await waitForDrain(this.#out);
     }
+  }
+
+  /** Normalized and unique ignoring case, so extraction onto a case-insensitive disk cannot overwrite an entry. */
+  #claimName(rawName: string): string {
+    const normalized = normalizeZipEntryName(rawName);
+    let candidate = normalized;
+    let ordinal = 1;
+    while (this.#usedNames.has(candidate.toLowerCase())) {
+      ordinal += 1;
+      candidate = withCollisionSuffix({ name: normalized, ordinal });
+    }
+    this.#usedNames.add(candidate.toLowerCase());
+    return candidate;
   }
 
   /**
    * Opens an entry and streams its content from `produce`. The producer
    * writes through the sink; returning closes the entry and writes its data
-   * descriptor.
+   * descriptor. Returns the name the entry was stored under.
    */
-  async addEntry(name: string, produce: (sink: ZipEntrySink) => Promise<void>): Promise<void> {
+  async addEntry(name: string, produce: (sink: ZipEntrySink) => Promise<void>): Promise<string> {
     if (this.#finished) {
       throw new Error('ZipStreamWriter: archive already finished');
     }
-    if (this.#openEntry !== undefined) {
+    if (this.#openEntry) {
       throw new Error('ZipStreamWriter: entries cannot nest');
     }
-    const nameBytes = this.#encoder.encode(name);
+    if (this.#central.length >= ZIP_MAX_ENTRIES) {
+      throw new ZipEntryLimitExceededError();
+    }
+    const storedName = this.#claimName(name);
+    const nameBytes = this.#encoder.encode(storedName);
     const { date, time } = dosDateTime(new Date());
     const localHeaderOffset = this.#offset;
     const header = new DataView(new ArrayBuffer(30));
@@ -138,11 +210,11 @@ export class ZipStreamWriter {
     await this.#writeRaw(new Uint8Array(header.buffer));
     await this.#writeRaw(nameBytes);
 
-    const state = { crc: new IncrementalCrc32(), size: 0, name };
-    this.#openEntry = state;
+    const state = { crc: 0, size: 0 };
+    this.#openEntry = true;
     const sink: ZipEntrySink = {
       write: async (chunk: Uint8Array) => {
-        state.crc.update(chunk);
+        state.crc = crc32(chunk, state.crc);
         state.size += chunk.byteLength;
         await this.#writeRaw(chunk);
       },
@@ -153,27 +225,34 @@ export class ZipStreamWriter {
     try {
       await produce(sink);
     } finally {
-      this.#openEntry = undefined;
+      this.#openEntry = false;
     }
-    const crc = state.crc.digest();
     const descriptor = new DataView(new ArrayBuffer(16));
     descriptor.setUint32(0, 0x08074b50, true); // data descriptor signature
-    descriptor.setUint32(4, crc, true);
+    descriptor.setUint32(4, state.crc, true);
     descriptor.setUint32(8, state.size, true);
     descriptor.setUint32(12, state.size, true);
     await this.#writeRaw(new Uint8Array(descriptor.buffer));
-    this.#central.push({ nameBytes, crc, size: state.size, localHeaderOffset, dosDate: date, dosTime: time });
+    this.#central.push({
+      nameBytes,
+      crc: state.crc,
+      size: state.size,
+      localHeaderOffset,
+      dosDate: date,
+      dosTime: time,
+    });
+    return storedName;
   }
 
   /** Convenience for small entries held in memory (manifest, settings). */
-  async addBufferedEntry(name: string, data: Uint8Array): Promise<void> {
-    await this.addEntry(name, async sink => {
+  async addBufferedEntry(name: string, data: Uint8Array): Promise<string> {
+    return this.addEntry(name, async sink => {
       await sink.write(data);
     });
   }
 
-  async addTextEntry(name: string, text: string): Promise<void> {
-    await this.addBufferedEntry(name, this.#encoder.encode(text));
+  async addTextEntry(name: string, text: string): Promise<string> {
+    return this.addBufferedEntry(name, this.#encoder.encode(text));
   }
 
   /** Writes the central directory and end record. Call exactly once. */

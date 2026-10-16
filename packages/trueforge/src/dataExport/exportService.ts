@@ -3,24 +3,27 @@
  * memory tree as Markdown, and uploaded files only when requested. Never
  * exported: model providers and their keys, OAuth tokens, registered OAuth
  * clients, approval tokens, always-allow grants, the audit log, sandbox
- * state, and schedule run history.
+ * state, schedule run history, and anything another user owns.
  *
  * Every JSON value and every text file passes both secret layers before it
  * is written. Sections are produced item by item, so peak memory is bounded
  * by the largest single item, not by the size of the instance.
  */
 import { existsSync } from 'node:fs';
-import { readFile, readdir } from 'node:fs/promises';
+import { lstat, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { Writable } from 'node:stream';
 
 import type {
   ISessionStore,
+  PersistedTurnEvent,
   SessionRecord,
   TokenPagination,
   TurnRecord,
 } from '@truefoundry/trueforge-core/agent-session';
 
+import { errorCode } from '../cli/errorCode';
+import type { AgentRecord } from '../db/agentStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
@@ -33,11 +36,22 @@ import type { ITurnArtifactStore, TurnArtifactRecord } from '../db/turnArtifactS
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
 import type { Persona } from '../personas/persona';
-import { vaultFilesystemNamespace } from '../runtime/memory/markdownMemoryFiles';
+import {
+  personaForVaultFilesystemNamespace,
+  personaVaultNamespace,
+  sanitizeNamespace,
+  vaultFilesystemNamespace,
+  vaultWriteNamespace,
+} from '../runtime/memory/markdownMemoryFiles';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
+import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
+import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
+import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
+import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import { sessionToCommonChat } from './chatMapping';
 import type { CommonChat } from './commonChatFormat';
-import { scrubJsonForExport, scrubTextForExport } from './secretScrub';
+import { createExportScrubber, type ExportScrubber } from './secretScrub';
+import { exportableEvents, withoutDeploymentBoundFields } from './sessionRecords';
 import { ZipStreamWriter } from './zipStreamWriter';
 
 export const EXPORT_FORMAT = 'aman-export';
@@ -48,20 +62,36 @@ const PAGE_LIMIT = 200;
 /** Same bound the memory vault API uses for one list call. */
 const MEMORY_LIST_TIMEOUT_MS = 10_000;
 
+/** Instance-wide, non-secret toggles. Anything not listed here never leaves in settings.json. */
+const EXPORTED_GLOBAL_SETTING_KEYS = [
+  DEFAULT_CHAT_MODEL_SETTING_KEY,
+  MEMORY_SCREEN_ENABLED_SETTING_KEY,
+  MEMORY_SUMMARIZE_SETTING_KEY,
+  TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,
+] as const;
+
 export interface ExportSubject {
   tenantId: string;
   subjectId: string;
-  /** Agents the caller manages; their sessions and schedules are in scope alongside the caller's own. */
-  agentIds: readonly string[];
   includeUploads: boolean;
+  /**
+   * Memory vaults and settings that belong to the whole instance (the shared and topic vaults,
+   * the global toggles) rather than to one user. Set for administrators and for an instance
+   * without sign-in; off, only the user's own persona vaults and settings are exported.
+   */
+  includeInstanceData: boolean;
 }
 
 /**
  * Where memory comes from: the Markdown backend is read from its files
  * verbatim; any other backend is read through its MemoryClient and rendered
- * into Markdown files in the same layout.
+ * into Markdown files in the same layout. `unavailable` is a backend that is
+ * selected but not set up (no provider), which skips memory with a note.
  */
-export type MemoryExportSource = { kind: 'markdown'; markdownDir: string } | { kind: 'client'; client: MemoryClient };
+export type MemoryExportSource =
+  | { kind: 'markdown'; markdownDir: string }
+  | { kind: 'client'; backend: string; client: Pick<MemoryClient, 'listEntries'> }
+  | { kind: 'unavailable'; backend: string; reason: string };
 
 export interface DataExportDeps<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
@@ -73,6 +103,8 @@ export interface DataExportDeps<TTransaction> {
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
+  /** The agents the user may manage; the entry point resolves them because access rules differ per deployment. */
+  listAgents: () => Promise<readonly AgentRecord[]>;
   memorySource: MemoryExportSource;
   /** Root dir of the per-persona knowledge SQLite files. */
   personaKnowledgeDir: string;
@@ -80,11 +112,36 @@ export interface DataExportDeps<TTransaction> {
 
 export interface DataExportRequest {
   subject: ExportSubject;
-  /** Stored secret values for scrub layer 1 (see ./secretCollection). */
+  /** Exact secret values to remove (see `normalizeSecrets`). */
   secrets: readonly string[];
   exportedAt: Date;
   appVersion: string;
   maxBytes: number;
+}
+
+export interface DataExportResult {
+  bytesWritten: number;
+  entries: number;
+  redactions: number;
+}
+
+interface MemoryReport {
+  backend: string;
+  status: 'included' | 'skipped';
+  /** Vault count that went into the archive. */
+  vaults: number;
+  /** Instance-wide vaults were left out because the caller is not an administrator. */
+  shared_vaults_included: boolean;
+  note?: string;
+}
+
+interface ExportContext<TTransaction> {
+  deps: DataExportDeps<TTransaction>;
+  zip: ZipStreamWriter;
+  scrub: ExportScrubber;
+  request: DataExportRequest;
+  /** Top-level JSON sections written so far, in order. */
+  sections: string[];
 }
 
 async function* paged<T>(
@@ -103,20 +160,21 @@ async function* paged<T>(
 
 /** Normalizes a store record to plain JSON (Dates become ISO strings) before scrubbing. */
 function toPlainJson(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value)) as unknown;
+  const plain: unknown = JSON.parse(JSON.stringify(value));
+  return plain;
 }
 
-async function writeJsonArrayEntry(
-  zip: ZipStreamWriter,
+async function writeJsonArrayEntry<TTransaction>(
+  context: ExportContext<TTransaction>,
   name: string,
   items: Iterable<unknown> | AsyncIterable<unknown>,
-  secrets: readonly string[],
 ): Promise<void> {
-  await zip.addEntry(name, async sink => {
+  context.sections.push(name);
+  await context.zip.addEntry(name, async sink => {
     await sink.writeText('[\n');
     let first = true;
     for await (const item of items) {
-      const json = JSON.stringify(scrubJsonForExport(toPlainJson(item), secrets));
+      const json = JSON.stringify(context.scrub.json(toPlainJson(item)));
       await sink.writeText(first ? json : `,\n${json}`);
       first = false;
     }
@@ -124,13 +182,13 @@ async function writeJsonArrayEntry(
   });
 }
 
-async function writeJsonEntry(
-  zip: ZipStreamWriter,
+async function writeJsonEntry<TTransaction>(
+  context: ExportContext<TTransaction>,
   name: string,
   value: unknown,
-  secrets: readonly string[],
 ): Promise<void> {
-  await zip.addTextEntry(name, JSON.stringify(scrubJsonForExport(toPlainJson(value), secrets), null, 2));
+  context.sections.push(name);
+  await context.zip.addTextEntry(name, JSON.stringify(context.scrub.json(toPlainJson(value)), null, 2));
 }
 
 async function listAllTurns<TTransaction>(
@@ -154,18 +212,21 @@ export async function runDataExport<TTransaction>(
   deps: DataExportDeps<TTransaction>,
   request: DataExportRequest,
   out: Writable,
-): Promise<{ bytesWritten: number }> {
-  const { subject, secrets } = request;
+): Promise<DataExportResult> {
+  const { subject } = request;
   const { tenantId, subjectId } = subject;
-  const scope = { created_by_subject_id: subjectId, agent_ids: subject.agentIds };
   const zip = new ZipStreamWriter(out, { maxBytes: request.maxBytes });
+  const scrub = createExportScrubber(request.secrets);
+  const context: ExportContext<TTransaction> = { deps, zip, scrub, request, sections: [] };
+  // Only what this user created: no agent-bound sessions or schedules of other users.
+  const ownScope = { created_by_subject_id: subjectId, agent_ids: [] };
 
   const folders = await deps.sessionStore.listSessionFolders({ tenant_id: tenantId, created_by: subjectId });
   const folderNameById = new Map(folders.map(folder => [folder.folder_id, folder.name]));
   const personas = await deps.personaStore.listPersonas({ tenant_id: tenantId, created_by: subjectId });
 
-  const listSessionPage = () =>
-    paged(pageToken =>
+  function sessionStream(): AsyncGenerator<SessionRecord<SessionCustom>> {
+    return paged(pageToken =>
       deps.sessionStore.listSessions({
         tenant_id: tenantId,
         limit: PAGE_LIMIT,
@@ -174,30 +235,13 @@ export async function runDataExport<TTransaction>(
         start_timestamp: undefined,
         end_timestamp: undefined,
         agent_id: undefined,
-        created_by_or_agent_ids: scope,
+        created_by_or_agent_ids: ownScope,
         metadata: undefined,
         source_type: undefined,
         source_id: undefined,
       }),
     );
-
-  function sessionStream(): AsyncGenerator<SessionRecord<SessionCustom>> {
-    return listSessionPage();
   }
-
-  // manifest.json
-  await writeJsonEntry(
-    zip,
-    'manifest.json',
-    {
-      format: EXPORT_FORMAT,
-      schema_version: EXPORT_SCHEMA_VERSION,
-      exported_at: request.exportedAt.toISOString(),
-      app_version: request.appVersion,
-      include_uploads: subject.includeUploads,
-    },
-    secrets,
-  );
 
   // chats.json: the common chat format.
   async function* chats(): AsyncGenerator<CommonChat> {
@@ -210,7 +254,7 @@ export async function runDataExport<TTransaction>(
       });
     }
   }
-  await writeJsonArrayEntry(zip, 'chats.json', chats(), secrets);
+  await writeJsonArrayEntry(context, 'chats.json', chats());
 
   // sessions.json: full fidelity (turns with snapshots, per-turn events, artifact index).
   const uploadedBlobs: { sessionId: string; artifact: TurnArtifactRecord }[] = [];
@@ -229,11 +273,11 @@ export async function runDataExport<TTransaction>(
             order: 'asc',
           }),
         );
-        const eventList: unknown[] = [];
+        const eventList: PersistedTurnEvent[] = [];
         for await (const event of events) {
           eventList.push(event);
         }
-        turnsWithEvents.push({ turn, events: eventList });
+        turnsWithEvents.push({ turn, events: exportableEvents(eventList) });
         artifacts.push(
           ...(await deps.turnArtifactStore.listArtifacts({
             tenant_id: tenantId,
@@ -242,16 +286,17 @@ export async function runDataExport<TTransaction>(
           })),
         );
       }
-      yield { session, turns: turnsWithEvents, artifacts };
+      // Artifact rows are write-once, so their last change is their creation.
+      const artifactRows = artifacts.map(artifact => ({ ...artifact, updated_at: artifact.created_at }));
+      yield withoutDeploymentBoundFields(toPlainJson({ session, turns: turnsWithEvents, artifacts: artifactRows }));
       if (subject.includeUploads) {
         uploadedBlobs.push(...artifacts.map(artifact => ({ sessionId: session.session_id, artifact })));
       }
     }
   }
-  await writeJsonArrayEntry(zip, 'sessions.json', sessions(), secrets);
+  await writeJsonArrayEntry(context, 'sessions.json', sessions());
 
-  // folders.json
-  await writeJsonArrayEntry(zip, 'folders.json', folders, secrets);
+  await writeJsonArrayEntry(context, 'folders.json', folders);
 
   // personas.json: personas with their knowledge documents and chunk text.
   function* personaEntries(): Iterable<unknown> {
@@ -259,11 +304,10 @@ export async function runDataExport<TTransaction>(
       yield { persona, knowledge: readPersonaKnowledge(deps, tenantId, persona) };
     }
   }
-  await writeJsonArrayEntry(zip, 'personas.json', personaEntries(), secrets);
+  await writeJsonArrayEntry(context, 'personas.json', personaEntries());
 
-  // personalization.json
   const profile = await deps.personalizationStore.getProfile({ tenant_id: tenantId, created_by: subjectId });
-  await writeJsonEntry(zip, 'personalization.json', profile ?? null, secrets);
+  await writeJsonEntry(context, 'personalization.json', profile ?? null);
 
   // spaces.json: each space with every revision.
   async function* spaceEntries(): AsyncIterable<unknown> {
@@ -297,21 +341,24 @@ export async function runDataExport<TTransaction>(
       offset += page.length;
     }
   }
-  await writeJsonArrayEntry(zip, 'spaces.json', spaceEntries(), secrets);
+  await writeJsonArrayEntry(context, 'spaces.json', spaceEntries());
 
-  // schedules.json: definitions only, never run history.
+  // agents.json: full definitions, so imported schedules point at the real agents.
+  await writeJsonArrayEntry(context, 'agents.json', await deps.listAgents());
+
+  // schedules.json: the user's own definitions only, never run history.
   const schedules = paged(pageToken =>
     deps.scheduleStore.listSchedules({
       tenant_id: tenantId,
       limit: PAGE_LIMIT,
       page_token: pageToken,
       agent_names: undefined,
-      created_by_or_agent_ids: scope,
+      created_by_or_agent_ids: ownScope,
     }),
   );
-  await writeJsonArrayEntry(zip, 'schedules.json', schedules, secrets);
+  await writeJsonArrayEntry(context, 'schedules.json', schedules);
 
-  // connectors.json: connector entries with no auth fields at all.
+  // connectors.json: connector entries with no auth fields and no credentials in the URL.
   async function* connectorEntries(): AsyncIterable<unknown> {
     const servers = await deps.mcpServerStore.listServers({ tenant_id: tenantId, names: undefined });
     for (const server of servers) {
@@ -323,37 +370,52 @@ export async function runDataExport<TTransaction>(
         first_party: server.first_party,
         created_at: server.created_at,
         updated_at: server.updated_at,
-        manifest,
+        manifest: { ...manifest, url: scrub.url(manifest.url) },
       };
     }
   }
-  await writeJsonArrayEntry(zip, 'connectors.json', connectorEntries(), secrets);
+  await writeJsonArrayEntry(context, 'connectors.json', connectorEntries());
 
-  // settings.json: global settings plus the caller's permission settings.
-  const globalSettings = await deps.globalSettingsStore.listSettings();
+  // settings.json: the caller's own permission settings, plus instance toggles for administrators.
   const permissionSettings = await deps.sentinelSettingsStore.get({ tenant_id: tenantId, created_by: subjectId });
-  await writeJsonEntry(
-    zip,
-    'settings.json',
-    {
-      global: globalSettings.map(setting => ({ key: setting.key, value: setting.value })),
-      permission_settings: permissionSettings,
-    },
-    secrets,
-  );
+  const instanceSettings: { key: string; value: string }[] = [];
+  if (subject.includeInstanceData) {
+    for (const key of EXPORTED_GLOBAL_SETTING_KEYS) {
+      const record = await deps.globalSettingsStore.getSetting({ key });
+      if (record !== undefined) {
+        instanceSettings.push({ key, value: record.value });
+      }
+    }
+  }
+  await writeJsonEntry(context, 'settings.json', {
+    permission_settings: permissionSettings,
+    instance: instanceSettings,
+  });
 
-  // memory/: Markdown files as stored (markdown backend) or rendered (client backends).
-  await writeMemoryEntries(zip, deps, { tenantId, personas, exportedAt: request.exportedAt }, secrets);
+  const memory = await writeMemoryEntries(context, personas);
 
-  // files/: uploaded file bytes, only when requested.
   if (subject.includeUploads) {
     for (const { sessionId, artifact } of uploadedBlobs) {
-      await writeUploadedFile(zip, deps, { tenantId, sessionId, artifact }, secrets);
+      await writeUploadedFile(context, { sessionId, artifact });
     }
   }
 
+  // Last, so the redaction count covers every section.
+  const manifest = {
+    format: EXPORT_FORMAT,
+    schema_version: EXPORT_SCHEMA_VERSION,
+    exported_at: request.exportedAt.toISOString(),
+    app_version: request.appVersion,
+    tenant_id: tenantId,
+    include_uploads: subject.includeUploads,
+    sections: context.sections,
+    redactions: scrub.redactionCount(),
+    memory,
+  };
+  await zip.addTextEntry('manifest.json', JSON.stringify(scrub.json(manifest), null, 2));
+
   await zip.finish();
-  return { bytesWritten: zip.bytesWritten };
+  return { bytesWritten: zip.bytesWritten, entries: zip.entryCount, redactions: scrub.redactionCount() };
 }
 
 function readPersonaKnowledge<TTransaction>(
@@ -383,25 +445,23 @@ function readPersonaKnowledge<TTransaction>(
   }
 }
 
-function sanitizeZipPath(rawPath: string): string {
-  const segments = rawPath.split('/').filter(segment => segment.length > 0 && segment !== '.' && segment !== '..');
-  return segments.length > 0 ? segments.join('/') : 'file';
-}
-
 async function writeUploadedFile<TTransaction>(
-  zip: ZipStreamWriter,
-  deps: DataExportDeps<TTransaction>,
-  input: { tenantId: string; sessionId: string; artifact: TurnArtifactRecord },
-  secrets: readonly string[],
+  context: ExportContext<TTransaction>,
+  input: { sessionId: string; artifact: TurnArtifactRecord },
 ): Promise<void> {
+  const { deps, zip, scrub, request } = context;
   if (input.artifact.digest === null) {
     return; // Skipped artifacts have an index row but no stored bytes.
   }
-  const blob = await deps.turnArtifactStore.getBlob({ tenant_id: input.tenantId, digest: input.artifact.digest });
+  const blob = await deps.turnArtifactStore.getBlob({
+    tenant_id: request.subject.tenantId,
+    digest: input.artifact.digest,
+  });
   if (blob === undefined) {
     return;
   }
-  const entryName = `files/${sanitizeZipPath(input.sessionId)}/${sanitizeZipPath(input.artifact.path)}`;
+  // The writer normalizes and de-duplicates the name.
+  const entryName = `files/${input.sessionId}/${input.artifact.path}`;
   // Text payloads pass both scrub layers; binary payloads ship byte-exact
   // (they are the caller's own uploaded files, behind include_uploads).
   let text: string | undefined;
@@ -411,78 +471,133 @@ async function writeUploadedFile<TTransaction>(
     text = undefined;
   }
   if (text !== undefined) {
-    await zip.addTextEntry(entryName, scrubTextForExport(text, secrets));
+    await zip.addTextEntry(entryName, scrub.text(text));
   } else {
     await zip.addBufferedEntry(entryName, blob);
   }
 }
 
-const MARKDOWN_MEMORY_FILES = ['MEMORY.md', '.vault-tombstones.md', '.vault-sharing.json'] as const;
+const MARKDOWN_MEMORY_FILES = ['MEMORY.md', '.vault-tombstones.md'] as const;
 
 async function writeMemoryEntries<TTransaction>(
-  zip: ZipStreamWriter,
-  deps: DataExportDeps<TTransaction>,
-  input: { tenantId: string; personas: Persona[]; exportedAt: Date },
-  secrets: readonly string[],
-): Promise<void> {
-  if (deps.memorySource.kind === 'markdown') {
-    await writeMarkdownMemoryFiles(
-      zip,
-      { markdownDir: deps.memorySource.markdownDir, tenantId: input.tenantId },
-      secrets,
-    );
-    return;
+  context: ExportContext<TTransaction>,
+  personas: readonly Persona[],
+): Promise<MemoryReport> {
+  const { memorySource } = context.deps;
+  const sharedIncluded = context.request.subject.includeInstanceData;
+  if (memorySource.kind === 'unavailable') {
+    return {
+      backend: memorySource.backend,
+      status: 'skipped',
+      vaults: 0,
+      shared_vaults_included: false,
+      note: memorySource.reason,
+    };
   }
-  await writeClientMemoryFiles(zip, deps.memorySource.client, input, secrets);
+  if (memorySource.kind === 'markdown') {
+    const vaults = await writeMarkdownMemoryFiles(context, { markdownDir: memorySource.markdownDir, personas });
+    return { backend: 'markdown', status: 'included', vaults, shared_vaults_included: sharedIncluded };
+  }
+  const vaults = await writeClientMemoryFiles(context, { client: memorySource.client, personas });
+  return { backend: memorySource.backend, status: 'included', vaults, shared_vaults_included: sharedIncluded };
 }
 
-/** Verbatim Markdown-backend files: MEMORY.md, daily logs, tombstones, sharing config. Derived caches stay behind. */
-async function writeMarkdownMemoryFiles(
-  zip: ZipStreamWriter,
-  input: { markdownDir: string; tenantId: string },
-  secrets: readonly string[],
-): Promise<void> {
-  if (!existsSync(input.markdownDir)) {
-    return;
+/**
+ * Vault directories this user may take from the Markdown backend: their own persona vaults,
+ * and, for instance data, the shared vault and the topic vaults (`<tenant>__<topic>`). Other
+ * users' persona vaults are never listed. Topic vaults are found by prefix, the same scope the
+ * vault API gives a tenant, so a tenant id that itself contains `__` would share that prefix.
+ */
+function markdownVaultDirs({
+  tenantId,
+  personas,
+  includeInstanceData,
+  dirNames,
+}: {
+  tenantId: string;
+  personas: readonly Persona[];
+  includeInstanceData: boolean;
+  dirNames: readonly string[];
+}): string[] {
+  const shared = sanitizeNamespace(tenantId);
+  const own = new Set(
+    personas.map(persona =>
+      sanitizeNamespace(
+        vaultWriteNamespace({
+          tenantNamespace: tenantId,
+          scope: { personaName: persona.display_name, personaId: persona.id },
+        }),
+      ),
+    ),
+  );
+  const wanted = dirNames.filter(name => {
+    if (own.has(name)) {
+      return true;
+    }
+    if (!includeInstanceData) {
+      return false;
+    }
+    return (
+      name === shared || (name.startsWith(`${shared}__`) && personaForVaultFilesystemNamespace(shared, name) === null)
+    );
+  });
+  return wanted.sort();
+}
+
+/** Regular file text, or undefined when there is no such file. Links are never followed. */
+async function regularFileText(filePath: string): Promise<string | undefined> {
+  try {
+    const info = await lstat(filePath);
+    return info.isFile() ? await readFile(filePath, 'utf8') : undefined;
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
   }
-  const tenantSegment = vaultFilesystemNamespace(input.tenantId, undefined);
-  const dirNames = (await readdir(input.markdownDir, { withFileTypes: true }))
-    .filter(entry => entry.isDirectory())
-    .map(entry => entry.name)
-    .filter(name => name === tenantSegment || name.startsWith(`${tenantSegment}__`))
-    .sort();
+}
+
+/** Verbatim Markdown-backend files: MEMORY.md, daily logs, tombstones. Derived caches and sharing config stay behind. */
+async function writeMarkdownMemoryFiles<TTransaction>(
+  context: ExportContext<TTransaction>,
+  input: { markdownDir: string; personas: readonly Persona[] },
+): Promise<number> {
+  if (!existsSync(input.markdownDir)) {
+    return 0;
+  }
+  const { subject } = context.request;
+  const dirNames = markdownVaultDirs({
+    tenantId: subject.tenantId,
+    personas: input.personas,
+    includeInstanceData: subject.includeInstanceData,
+    dirNames: (await readdir(input.markdownDir, { withFileTypes: true }))
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name),
+  });
   for (const dirName of dirNames) {
     const dirPath = path.join(input.markdownDir, dirName);
     for (const fileName of MARKDOWN_MEMORY_FILES) {
-      const filePath = path.join(dirPath, fileName);
-      if (existsSync(filePath)) {
-        await writeScrubbedTextFile(zip, { entryName: `memory/${dirName}/${fileName}`, filePath }, secrets);
+      const text = await regularFileText(path.join(dirPath, fileName));
+      if (text !== undefined) {
+        await context.zip.addTextEntry(`memory/${dirName}/${fileName}`, context.scrub.text(text));
       }
     }
     const dailyDir = path.join(dirPath, 'memory');
-    if (existsSync(dailyDir)) {
-      const dailyFiles = (await readdir(dailyDir, { withFileTypes: true }))
-        .filter(entry => entry.isFile() && /^\d{4}-\d{2}-\d{2}\.md$/.test(entry.name))
-        .map(entry => entry.name)
-        .sort();
-      for (const fileName of dailyFiles) {
-        await writeScrubbedTextFile(
-          zip,
-          { entryName: `memory/${dirName}/memory/${fileName}`, filePath: path.join(dailyDir, fileName) },
-          secrets,
-        );
+    if (!existsSync(dailyDir)) {
+      continue;
+    }
+    const dailyFiles = (await readdir(dailyDir, { withFileTypes: true }))
+      .filter(entry => entry.isFile() && /^\d{4}-\d{2}-\d{2}\.md$/.test(entry.name))
+      .map(entry => entry.name)
+      .sort();
+    for (const fileName of dailyFiles) {
+      const text = await regularFileText(path.join(dailyDir, fileName));
+      if (text !== undefined) {
+        await context.zip.addTextEntry(`memory/${dirName}/memory/${fileName}`, context.scrub.text(text));
       }
     }
   }
-}
-
-async function writeScrubbedTextFile(
-  zip: ZipStreamWriter,
-  input: { entryName: string; filePath: string },
-  secrets: readonly string[],
-): Promise<void> {
-  const text = await readFile(input.filePath, 'utf8');
-  await zip.addTextEntry(input.entryName, scrubTextForExport(text, secrets));
+  return dirNames.length;
 }
 
 /**
@@ -491,19 +606,22 @@ async function writeScrubbedTextFile(
  * for the export day, entries oldest first in the retain format
  * (`## <timestamp>` heading, then the text).
  */
-async function writeClientMemoryFiles(
-  zip: ZipStreamWriter,
-  client: MemoryClient,
-  input: { tenantId: string; personas: Persona[]; exportedAt: Date },
-  secrets: readonly string[],
-): Promise<void> {
+async function writeClientMemoryFiles<TTransaction>(
+  context: ExportContext<TTransaction>,
+  input: { client: Pick<MemoryClient, 'listEntries'>; personas: readonly Persona[] },
+): Promise<number> {
+  const { subject, exportedAt } = context.request;
   const wireNamespaces: (string | undefined)[] = [
-    undefined,
-    ...input.personas.map(persona => `persona:${persona.display_name}`),
+    ...(subject.includeInstanceData ? [undefined] : []),
+    ...input.personas.map(persona => personaVaultNamespace(persona.display_name)),
   ];
-  const fileDate = input.exportedAt.toISOString().slice(0, 10);
+  const fileDate = exportedAt.toISOString().slice(0, 10);
+  let vaults = 0;
   for (const wireNamespace of wireNamespaces) {
-    const outcome = await client.listEntries({ namespace: wireNamespace ?? '', timeoutMs: MEMORY_LIST_TIMEOUT_MS });
+    const outcome = await input.client.listEntries({
+      namespace: wireNamespace ?? '',
+      timeoutMs: MEMORY_LIST_TIMEOUT_MS,
+    });
     if (!outcome.ok) {
       // Memory is part of the export; a namespace that cannot be read fails
       // the export rather than silently shipping without those memories.
@@ -512,11 +630,13 @@ async function writeClientMemoryFiles(
     if (outcome.entries.length === 0) {
       continue;
     }
-    const fsNamespace = vaultFilesystemNamespace(input.tenantId, wireNamespace);
+    const fsNamespace = vaultFilesystemNamespace(subject.tenantId, wireNamespace);
     const rendered = [...outcome.entries]
       .reverse()
       .map(entry => `## ${entry.timestamp}\n\n${entry.text}`)
       .join('\n\n');
-    await zip.addTextEntry(`memory/${fsNamespace}/memory/${fileDate}.md`, `${scrubTextForExport(rendered, secrets)}\n`);
+    await context.zip.addTextEntry(`memory/${fsNamespace}/memory/${fileDate}.md`, `${context.scrub.text(rendered)}\n`);
+    vaults += 1;
   }
+  return vaults;
 }

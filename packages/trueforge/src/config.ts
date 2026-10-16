@@ -31,6 +31,7 @@ import {
   MEMORY_SETTINGS_LIMITS,
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
+import { ZIP_MAX_ARCHIVE_BYTES } from './dataExport/zipStreamWriter';
 import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
@@ -1083,7 +1084,7 @@ export interface SharedServerConfiguration {
   /**
    * Max total bytes of a data export archive. The export aborts (and the download fails) rather
    * than shipping a truncated archive when the cap is exceeded. Env: `DATA_EXPORT_MAX_BYTES`.
-   * Default 1 GiB.
+   * Default 1 GiB; at most 4294967294 (a zip archive without ZIP64 cannot be larger).
    */
   DATA_EXPORT_MAX_BYTES: number;
   /**
@@ -1816,6 +1817,7 @@ const shared: SharedServerConfiguration = {
     envKey: 'DATA_EXPORT_MAX_BYTES',
     raw: getEnv('DATA_EXPORT_MAX_BYTES'),
     defaultValue: 1024 * 1024 * 1024,
+    maxValue: ZIP_MAX_ARCHIVE_BYTES,
   }),
   CONTEXT_COMPACTION_THRESHOLD_TOKENS: parseOptionalPositiveInt({
     envKey: 'CONTEXT_COMPACTION_THRESHOLD_TOKENS',

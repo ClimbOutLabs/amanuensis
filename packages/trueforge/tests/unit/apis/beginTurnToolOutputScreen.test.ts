@@ -75,10 +75,6 @@ class CountingGlobalSettingsStore implements IGlobalSettingsStore {
   async deleteSetting(input: GetGlobalSettingInput): Promise<void> {
     return this.inner.deleteSetting(input);
   }
-
-  async listSettings(): Promise<GlobalSettingRecord[]> {
-    return this.inner.listSettings();
-  }
 }
 
 /** The tool-output screen config is the constructor arg carrying the screening tuning. */
