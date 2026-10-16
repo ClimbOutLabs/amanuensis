@@ -10,7 +10,7 @@
  * user is keeping. Deleting a space is a UI-only action (`DELETE /api/v1/spaces/{space_id}`,
  * exposed from the space's own page), never something a running turn can reach.
  */
-import type { AgentCapability, AgentTracing, InstructionBuilder } from '@truefoundry/trueforge-core/core';
+import type { AgentCapability, AgentTracing, InstructionBuilder, Sandbox } from '@truefoundry/trueforge-core/core';
 import {
   createSentinelHostContext,
   defineTool,
@@ -39,7 +39,7 @@ import {
   SpaceFormatSchema,
   SpaceSchema,
 } from '../schemas/space';
-import { gmailCapability } from './gmailCapability';
+import { gmailCapability, sandboxAttachmentStager } from './gmailCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
 
@@ -1272,6 +1272,13 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
   }
 
   readonly #space: SpaceTurnContext;
+  /** The run's sandbox, resolved before any thread is built; mail attachments are placed in it. */
+  private runSandbox: Sandbox | undefined;
+
+  override async resolveSandbox(input: Parameters<MemoryTurnResourceResolver['resolveSandbox']>[0]) {
+    this.runSandbox = await super.resolveSandbox(input);
+    return this.runSandbox;
+  }
 
   override async resolveAgentDefinition(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
     const resolved = await super.resolveAgentDefinition(input);
@@ -1311,8 +1318,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
           workspace_cwd: input.workspace_cwd ?? null,
           web_search: this.webSearchTurn,
         }),
-        // Open item: bind `stageAttachment` to the turn's sandbox once the attachments branch is merged.
-        attachmentStager: undefined,
+        attachmentStager: sandboxAttachmentStager(this.runSandbox),
       });
     } catch (error) {
       this.#space.logger.warn(

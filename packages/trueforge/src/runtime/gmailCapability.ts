@@ -2,7 +2,13 @@
  * Gmail for one user's turn: the read tools, mounted only when that user has a working Google login that
  * granted mail access. Without one nothing mounts, and the chat simply has no mail tools.
  */
-import type { AgentCapability, AgentTracing, SentinelHostContext } from '@truefoundry/trueforge-core/core';
+import {
+  stageAttachment,
+  type AgentCapability,
+  type AgentTracing,
+  type Sandbox,
+  type SentinelHostContext,
+} from '@truefoundry/trueforge-core/core';
 import { DraftReviewLedger } from '@truefoundry/trueforge-core/core/email/gmail/draftReview';
 import { GmailApi, LIST_DEADLINE_MS } from '@truefoundry/trueforge-core/core/email/gmail/gmailApi';
 import { GmailToolSet, type AttachmentStager } from '@truefoundry/trueforge-core/core/email/gmail/GmailToolSet';
@@ -13,12 +19,27 @@ import { grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes'
 /** What users were shown before a send, kept for the life of the process so approval and send can meet. */
 const SHARED_REVIEWS = new DraftReviewLedger();
 
+/** Puts a mail attachment in the turn's sandbox through the one staging helper; no sandbox, no stager. */
+export function sandboxAttachmentStager(
+  sandbox: Pick<Sandbox, 'uploadUserFile'> | undefined,
+): AttachmentStager | undefined {
+  if (sandbox === undefined) {
+    return undefined;
+  }
+  return {
+    stageAttachment: async input => {
+      const staged = await stageAttachment({ sandbox, ...input });
+      return { filename: staged.filename, path: staged.path, sandboxCreated: staged.sandboxCreated };
+    },
+  };
+}
+
 export interface GmailCapabilityOptions {
   connections: GoogleConnectionStore;
   owner: GoogleOwner;
   tracing: AgentTracing;
   sentinel: SentinelHostContext;
-  /** Absent until the server's `stageAttachment` helper is bound to the turn's sandbox; attachment fetch then says there is no workspace. */
+  /** Absent when the turn has no sandbox: attachment fetch is then not offered and mail results say why. */
   attachmentStager: AttachmentStager | undefined;
   /** Replaceable so tests never reach Google. */
   fetchImpl: typeof fetch | undefined;

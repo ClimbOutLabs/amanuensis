@@ -10,7 +10,7 @@ import {
 import { estimateTokens, MAX_TOKENS_PER_CALL } from '../../../../src/core/email/gmail/tokenBound';
 import { message, thread } from './fixtures';
 
-const context = { account: 'ada@example.com' };
+const context = { account: 'ada@example.com', attachmentsOpenable: true };
 
 describe('message reading', () => {
   it('prefers the plain text part and lists attachments with their ids', () => {

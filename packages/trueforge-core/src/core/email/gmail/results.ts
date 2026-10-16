@@ -32,6 +32,16 @@ export function neutralizeDeep(value: unknown): unknown {
 
 export interface ResultContext {
   account: string;
+  /** False when this chat has no sandbox to put an attachment in. */
+  attachmentsOpenable: boolean;
+}
+
+const ATTACHMENTS_OFF_NOTE =
+  'Attachments cannot be opened in this chat because the sandbox is off. Tell the user that plainly; do not guess what they contain.';
+
+/** The reason attachments cannot be read, only where a result names some and the chat cannot open them. */
+function attachmentsNote({ context, listed }: { context: ResultContext; listed: boolean }) {
+  return listed && !context.attachmentsOpenable ? { attachments_note: ATTACHMENTS_OFF_NOTE } : {};
 }
 
 function envelope(context: ResultContext) {
@@ -231,6 +241,7 @@ export function readEmailResult(input: { context: ResultContext; message: GmailM
     thread_id: input.message.threadId,
     ...messageFields(input.message),
     attachments: attachmentList(attachments),
+    ...attachmentsNote({ context: input.context, listed: attachments.length > 0 }),
     body: bounded.text,
     body_truncated: bounded.truncated,
   };
@@ -278,6 +289,7 @@ export function threadResult(input: {
     thread_id: input.thread.id,
     message_count: all.length,
     messages: rows,
+    ...attachmentsNote({ context: input.context, listed: rows.some(row => row.attachments.length > 0) }),
     ...(omittedMessages > 0 ? { omitted_older_messages: omittedMessages } : {}),
     truncated: omittedMessages > 0 || [...bodies.values()].some(body => body.omitted),
   };
@@ -333,5 +345,6 @@ export function getDraftResult(input: { context: ResultContext; draftId: string;
     thread_id: message.threadId,
     in_reply_to: inReplyTo === '' ? null : inReplyTo,
     attachments: attachmentList(attachments),
+    ...attachmentsNote({ context: input.context, listed: attachments.length > 0 }),
   };
 }

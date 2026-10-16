@@ -123,7 +123,7 @@ export interface StagedAttachment {
   sandboxCreated: SandboxInfo | undefined;
 }
 
-// Consumed by chat uploads and, from their own branches, the email connector and the demo inbox.
+// Consumed by chat uploads and the Gmail attachment tool.
 /** Places a file's bytes in the turn's sandbox workspace under a sanitized name and returns its in-sandbox path. */
 export async function stageAttachment({
   sandbox,
