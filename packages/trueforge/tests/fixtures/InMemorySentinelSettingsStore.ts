@@ -20,6 +20,7 @@ export class InMemorySentinelSettingsStore implements ISentinelSettingsStore {
     const next: SentinelUserSettings = {
       offline_mode: input.offline_mode ?? current.offline_mode,
       tier2_auto_allow: normalizeTier2AutoAllow(input.tier2_auto_allow ?? current.tier2_auto_allow),
+      search_without_asking: input.search_without_asking ?? current.search_without_asking,
     };
     this.#rows.set(this.#key(input), next);
     return next;

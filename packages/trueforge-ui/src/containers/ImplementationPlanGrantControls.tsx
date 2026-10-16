@@ -61,9 +61,20 @@ function ImplementationPlanGrantControlsWithApi({
         });
     };
     refresh();
-    const intervalId = isRunning ? setInterval(refresh, 2_000) : undefined;
+    // Skip poll ticks while the tab is hidden (matching SentinelAuditFeed) so a hidden tab
+    // fires no requests; refresh once immediately when the tab becomes visible again.
+    const intervalId = isRunning
+      ? setInterval(() => {
+          if (document.visibilityState === 'visible') refresh();
+        }, 2_000)
+      : undefined;
+    const handleVisibilityChange = () => {
+      if (isRunning && document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (intervalId !== undefined) clearInterval(intervalId);
     };
   }, [isRunning, listImplementationPlanGrants, sessionId]);

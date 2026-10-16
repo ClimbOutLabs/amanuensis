@@ -57,7 +57,7 @@ Selectors are listed in the next section. Each row is one step; the assertion mu
 3. Click `Add Custom Provider`. Assert dialog title `Add custom provider`.
 4. Fill `Name` (slug from the model id), `Base URL`, `API key`, `Model ID` (`Model name` auto-fills), `Context length`, `Max output tokens`. Assert the `Add provider` button is enabled.
 5. Click `Add provider`. Assert the dialog closes and the toast `<name> added` appears. A visible form error fails the run (key field cleared first).
-6. If the scenario has a persona: open `Model roles`, click `Add persona`, fill `Name`, choose the provider model in `Model`, fill `Instructions`, click `Create persona`. Assert a row for the persona exists.
+6. If the scenario has a persona: open `Roles and Personas`, click `Add persona`, fill `Name`, choose the provider model in `Model`, fill `Instructions`, click `Create persona`. Assert a row for the persona exists.
 7. Click `Back` to leave settings, then `Start new chat`. Assert the empty composer (`Message input`) is visible.
 8. If the scenario has a persona: click `Choose who answers this chat`, click the menu item named for the persona. Assert the `active-persona` chip text (existing test id).
 9. If no persona: open `Select model`, choose the option `<provider> <model>`. Assert the selector shows it.
@@ -68,7 +68,7 @@ Selectors are listed in the next section. Each row is one step; the assertion mu
 ### Per-turn expectation steps (in order)
 
 1. `tool`: wait for the tool card whose title is the value (`span[title="run_code"]`, scoped to the card by `data-tool-name`). Fails if the model never invokes the tool. Whether the model chooses the tool is part of what the scenario tests.
-2. `approval`: `run_code` requires explicit approval, so assert the heading `Permission needed` is visible, then click the `Approve` button. Assert the approval card is replaced or shows an approved state.
+2. `approval`: `run_code` requires explicit approval, so assert the heading `Approval needed` is visible, then click the `Approve` button. Assert the approval card is replaced or shows an approved state.
 3. Expand the card (`Expand step` inside the tool card) when collapsed, then assert the card text contains each `result_contains` string (substring, whitespace-normalised).
 4. `assistant_contains`: assert the assistant message text contains each string.
 
@@ -103,26 +103,26 @@ Existing fields (`title`, `persona`, `turns`, `shots`) stay valid. A turn may be
 
 Paths are relative to `packages/trueforge-ui/src`. "Stable" means role, label, or existing test id.
 
-| Element                   | Component                                                                  | Selector                                                                                                                                                       | Status        |
-| ------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| Settings button           | `atoms/ShellActions.tsx:54`                                                | role button, name `Settings`                                                                                                                                   | stable        |
-| Models nav                | `containers/SettingsBuilder/index.tsx:172`                                 | nav `Settings sections`, button `Models`                                                                                                                       | stable        |
-| Add custom provider       | `containers/SettingsBuilder/ModelSettings.tsx:306`                         | button `Add Custom Provider`                                                                                                                                   | stable        |
-| Provider dialog           | `CustomModelProviderForm.tsx:274`                                          | dialog title `Add custom provider`                                                                                                                             | stable        |
-| Name / Base URL / API key | `CustomModelProviderForm.tsx:297,323,346`                                  | labels `Name`, `Base URL`, `API key`; ids `custom-provider-name`, `-base-url`, `-api-key`                                                                      | stable        |
-| Model ID / name           | `CustomModelProviderForm.tsx:432,457`                                      | ids `custom-provider-model-0-id`, `-0-name`                                                                                                                    | stable        |
-| Context / max output      | `CustomModelProviderForm.tsx:509,536`                                      | ids `...-0-context-length`, `...-0-max-output-tokens` (both required, expanded by default)                                                                     | stable        |
-| Submit                    | `CustomModelProviderForm.tsx:648`                                          | button `Add provider`                                                                                                                                          | stable        |
-| Persona list and form     | `SettingsBuilder/PersonaSettings.tsx:218,69,97,117,320`                    | button `Add persona`; ids `persona-display-name`, `persona-model` (select), `persona-instructions`; button `Create persona`. Section lives under `Model roles` | stable        |
-| New chat                  | `layouts/SidebarLayout.tsx:119`                                            | button `Start new chat`                                                                                                                                        | stable        |
-| Model picker (new chat)   | `atoms/draft/DraftModelSelector.tsx:143`, `DraftModelCatalogPanel.tsx:173` | button `Select model`; option aria-label `<provider> <model>`                                                                                                  | stable        |
-| Persona picker            | `atoms/ActivePersonaIndicator.tsx:227,232,257,276`                         | button `Choose who answers this chat`; menuitem by persona name; chip `active-persona`                                                                         | stable        |
-| Composer input            | `containers/ComposerContainer.tsx:119`                                     | label `Message input`                                                                                                                                          | stable        |
-| Send                      | `atoms/ComposerSections.tsx:80`                                            | button `Send message`; while running it is replaced by `Cancel` (line 63)                                                                                      | stable        |
-| Tool card (`run_code`)    | `atoms/ToolCallCard.tsx:113`                                               | title `span[title="run_code"]`; card root has a test id only when a prefix is passed, and the generic path passes none                                         | PARTIAL       |
-| Expand                    | `atoms/agent-chat/AgentStepRow.tsx:85`                                     | button `Expand step` (needs card scope)                                                                                                                        | stable        |
-| Approval card             | `sentinel/PermissionApprovalCard.tsx:51,95`                                | heading text `Permission needed`; button `Approve`                                                                                                             | stable (text) |
-| Assistant completion      | `containers/AssistantMessageContainer.tsx:196`                             | root has only `data-role="assistant"`; `useThreadIsRunning` (line 119) is thread-wide; per-message `message.status.type` (line 123) is not exposed in the DOM  | MISSING       |
+| Element                   | Component                                                                  | Selector                                                                                                                                                              | Status        |
+| ------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| Settings button           | `atoms/ShellActions.tsx:54`                                                | role button, name `Settings`                                                                                                                                          | stable        |
+| Models nav                | `containers/SettingsBuilder/index.tsx:172`                                 | nav `Settings sections`, button `Models`                                                                                                                              | stable        |
+| Add custom provider       | `containers/SettingsBuilder/ModelSettings.tsx:306`                         | button `Add Custom Provider`                                                                                                                                          | stable        |
+| Provider dialog           | `CustomModelProviderForm.tsx:274`                                          | dialog title `Add custom provider`                                                                                                                                    | stable        |
+| Name / Base URL / API key | `CustomModelProviderForm.tsx:297,323,346`                                  | labels `Name`, `Base URL`, `API key`; ids `custom-provider-name`, `-base-url`, `-api-key`                                                                             | stable        |
+| Model ID / name           | `CustomModelProviderForm.tsx:432,457`                                      | ids `custom-provider-model-0-id`, `-0-name`                                                                                                                           | stable        |
+| Context / max output      | `CustomModelProviderForm.tsx:509,536`                                      | ids `...-0-context-length`, `...-0-max-output-tokens` (both required, expanded by default)                                                                            | stable        |
+| Submit                    | `CustomModelProviderForm.tsx:648`                                          | button `Add provider`                                                                                                                                                 | stable        |
+| Persona list and form     | `SettingsBuilder/PersonaSettings.tsx:218,69,97,117,320`                    | button `Add persona`; ids `persona-display-name`, `persona-model` (select), `persona-instructions`; button `Create persona`. Section lives under `Roles and Personas` | stable        |
+| New chat                  | `layouts/SidebarLayout.tsx:119`                                            | button `Start new chat`                                                                                                                                               | stable        |
+| Model picker (new chat)   | `atoms/draft/DraftModelSelector.tsx:143`, `DraftModelCatalogPanel.tsx:173` | button `Select model`; option aria-label `<provider> <model>`                                                                                                         | stable        |
+| Persona picker            | `atoms/ActivePersonaIndicator.tsx:227,232,257,276`                         | button `Choose who answers this chat`; menuitem by persona name; chip `active-persona`                                                                                | stable        |
+| Composer input            | `containers/ComposerContainer.tsx:119`                                     | label `Message input`                                                                                                                                                 | stable        |
+| Send                      | `atoms/ComposerSections.tsx:80`                                            | button `Send message`; while running it is replaced by `Cancel` (line 63)                                                                                             | stable        |
+| Tool card (`run_code`)    | `atoms/ToolCallCard.tsx:113`                                               | title `span[title="run_code"]`; card root has a test id only when a prefix is passed, and the generic path passes none                                                | PARTIAL       |
+| Expand                    | `atoms/agent-chat/AgentStepRow.tsx:85`                                     | button `Expand step` (needs card scope)                                                                                                                               | stable        |
+| Approval card             | `sentinel/PermissionApprovalCard.tsx:51,95`                                | heading text `Approval needed`; button `Approve`                                                                                                                      | stable (text) |
+| Assistant completion      | `containers/AssistantMessageContainer.tsx:196`                             | root has only `data-role="assistant"`; `useThreadIsRunning` (line 119) is thread-wide; per-message `message.status.type` (line 123) is not exposed in the DOM         | MISSING       |
 
 ## Required DOM hooks
 
@@ -131,7 +131,7 @@ Paths are relative to `packages/trueforge-ui/src`. "Stable" means role, label, o
 | `data-testid="tool-call-card"` and `data-tool-name={toolName}` (only when no prefix is passed) | `atoms/ToolCallCard.tsx:113`                   | Scopes `Expand step` and result text to one card; the title alone is not a card handle |
 | `data-status={messageStatus}` on the existing assistant root                                   | `containers/AssistantMessageContainer.tsx:196` | Per-message completion; values `running`, `requires-action`, `complete`, `incomplete`  |
 
-One new test id and one data attribute. The generic approval bar needs no hook: the approval step requires the `Permission needed` card, and a different card fails the step, which keeps the explicit-approval contract under test. Prefix-based ids are unchanged.
+One new test id and one data attribute. The generic approval bar needs no hook: the approval step requires the `Approval needed` card, and a different card fails the step, which keeps the explicit-approval contract under test. Prefix-based ids are unchanged.
 
 ## Privacy
 
@@ -160,5 +160,5 @@ All tests use synthetic data.
 
 ## Open questions
 
-1. If `run_code` approval does not render the `Permission needed` card in practice, the scenario fails and the contract question goes to the maintainers; the driver does not add a fallback branch.
+1. If `run_code` approval does not render the `Approval needed` card in practice, the scenario fails and the contract question goes to the maintainers; the driver does not add a fallback branch.
 2. The Tier 3 card requires the Sentinel state provider to be mounted in the app shell; if absent, the approval step fails, which is the intended signal.

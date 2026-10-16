@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { useAui, type AppendMessage } from '@assistant-ui/react';
+import { useAui, type AppendMessage, type ThreadMessageLike } from '@assistant-ui/react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { VoiceInputProvider, type VoiceAvailability, type VoiceInputApi } from '@/components/VoiceInputContext.js';
 import { canSubmitComposer, ComposerContainer } from '@/containers/ComposerContainer.js';
 import { ToasterProvider } from '@/containers/ToasterContainer.js';
 import { ComposerBusyProvider, notifyComposerBusyFailure } from '@/hooks/useComposerBusyState.js';
@@ -12,7 +13,7 @@ import {
   type CustomActionRendererProps,
 } from '@/server/CustomActionRenderersContext.js';
 import { ServerProvider } from '@/server/ServerContext.js';
-import { ShellModeProvider } from '@/server/ShellModeContext.js';
+import { ShellModeProvider, type AgentConfig } from '@/server/ShellModeContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
 import { createMockAgentUIServer } from '../server/mockServer.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
@@ -34,6 +35,8 @@ const agentSpecState: { agentSpec: { model: { name: string } } | undefined } = {
 };
 const updateAgentSpec = vi.hoisted(() => vi.fn());
 const cancelRun = vi.hoisted(() => vi.fn<() => Promise<void>>());
+
+const voiceCapture = vi.hoisted(() => ({ supported: true }));
 
 const toolResponsesState = vi.hoisted(() => ({
   pending: [] as Array<{ toolCallId: string; toolName?: string; args?: Record<string, unknown> }>,
@@ -58,6 +61,11 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
 }));
 
+vi.mock('@/atoms/lib/voiceRecorder.js', () => ({
+  isVoiceCaptureSupported: () => voiceCapture.supported,
+  startVoiceRecording: vi.fn(),
+}));
+
 function SecretSelectProbe({ onSubmit }: CustomActionRendererProps) {
   return (
     <button type="button" onClick={() => onSubmit('chosen-secret')}>
@@ -66,9 +74,9 @@ function SecretSelectProbe({ onSubmit }: CustomActionRendererProps) {
   );
 }
 
-function renderComposer(onNew?: (message: AppendMessage) => Promise<void>) {
+function renderComposer(onNew?: (message: AppendMessage) => Promise<void>, messages: ThreadMessageLike[] = []) {
   return render(
-    <RuntimeHarness messages={[]} onNew={onNew}>
+    <RuntimeHarness messages={messages} onNew={onNew}>
       <ComposerBusyProvider>
         <ComposerContainer />
       </ComposerBusyProvider>
@@ -891,7 +899,19 @@ describe('ComposerContainer', () => {
       },
     ];
 
-    renderComposer();
+    // Pending approvals are answerable only when they sit on the newest message.
+    renderComposer(undefined, [
+      {
+        role: 'assistant',
+        content: approvalsState.pending.map(item => ({
+          type: 'tool-call' as const,
+          toolCallId: item.approvalId,
+          toolName: item.toolName,
+          args: {},
+          approval: { id: item.approvalId, approved: undefined },
+        })),
+      },
+    ]);
 
     expect(screen.getByText('2 tools need your input')).toBeInTheDocument();
     expect(screen.getByText('(1/2)')).toBeInTheDocument();
@@ -955,5 +975,91 @@ describe('ComposerContainer', () => {
     // (connectors / skills / sandbox) and the model picker in the composer.
     expect(screen.getByRole('button', { name: /Add-ons/ })).toBeInTheDocument();
     expect(await screen.findByTitle('Select model')).toBeInTheDocument();
+  });
+});
+
+function voiceInput(availability: VoiceAvailability): VoiceInputApi {
+  return {
+    subscribeAvailability: listener => {
+      listener(availability);
+      return () => {};
+    },
+    transcribe: async () => ({ text: '', language: 'en', duration_ms: 0, model: 'test' }),
+  };
+}
+
+function renderShellComposer({ agentConfig, voice }: { agentConfig: AgentConfig; voice: VoiceInputApi }) {
+  const server = createMockAgentUIServer({
+    getModels: async () => [
+      {
+        id: 'gpt-4.1',
+        name: 'openai/gpt-4.1',
+        provider: { name: 'OpenAI' },
+        properties: { reasoningEfforts: ['low', 'high'] },
+      },
+    ],
+  });
+
+  return render(
+    <ServerProvider server={server}>
+      <VoiceInputProvider api={voice}>
+        <ShellModeProvider agentConfig={agentConfig}>
+          <RuntimeHarness messages={[]}>
+            <ComposerBusyProvider>
+              <ComposerContainer />
+            </ComposerBusyProvider>
+          </RuntimeHarness>
+        </ShellModeProvider>
+      </VoiceInputProvider>
+    </ServerProvider>,
+  );
+}
+
+describe('ComposerContainer voice input', () => {
+  const MIC = { name: 'Record voice message' };
+  const draftConfig: AgentConfig = {
+    mode: 'AgentLibraryWithComposer',
+    defaultAgentSpec: { model: { name: 'test/model' } },
+  };
+
+  beforeEach(() => {
+    agentSpecState.agentSpec = { model: { name: 'test/model' } };
+    voiceCapture.supported = true;
+    window.sessionStorage.clear();
+  });
+
+  it('shows the mic between the model selector and Send in the draft composer', async () => {
+    renderShellComposer({ agentConfig: draftConfig, voice: voiceInput(true) });
+
+    const mic = await screen.findByRole('button', MIC);
+    const modelSelector = await screen.findByTitle('Select model');
+    const send = screen.getByRole('button', { name: 'Send message' });
+    const buttons = screen.getAllByRole('button');
+
+    expect(buttons.indexOf(modelSelector)).toBeGreaterThanOrEqual(0);
+    expect(buttons.indexOf(mic)).toBeGreaterThan(buttons.indexOf(modelSelector));
+    expect(buttons.indexOf(send)).toBeGreaterThan(buttons.indexOf(mic));
+  });
+
+  it('hides the mic in the draft composer while voice is unavailable', async () => {
+    renderShellComposer({ agentConfig: draftConfig, voice: voiceInput(false) });
+
+    expect(await screen.findByTitle('Select model')).toBeInTheDocument();
+    expect(screen.queryByRole('button', MIC)).not.toBeInTheDocument();
+  });
+
+  it('hides the mic in the draft composer when the browser cannot capture audio', async () => {
+    voiceCapture.supported = false;
+    renderShellComposer({ agentConfig: draftConfig, voice: voiceInput(true) });
+
+    expect(await screen.findByTitle('Select model')).toBeInTheDocument();
+    expect(screen.queryByRole('button', MIC)).not.toBeInTheDocument();
+  });
+
+  it('keeps the mic beside Send for a named agent', async () => {
+    renderShellComposer({ agentConfig: { mode: 'SingleAgent', name: 'support' }, voice: voiceInput(true) });
+
+    expect(await screen.findByRole('button', MIC)).toBeInTheDocument();
+    expect(screen.queryByTitle('Select model')).not.toBeInTheDocument();
   });
 });

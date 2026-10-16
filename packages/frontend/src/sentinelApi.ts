@@ -42,6 +42,36 @@ function errorMessageFrom(body: unknown): string | undefined {
   return typeof topMessage === 'string' && topMessage !== '' ? topMessage : undefined;
 }
 
+/** Largest page the server serves for session events; a bigger `limit` is refused with a 400. */
+export const SESSION_EVENTS_PAGE_SIZE = 100;
+
+interface SessionEventsPage {
+  data: { event: unknown }[];
+  nextPageToken: string | undefined;
+}
+
+/**
+ * Reads every persisted event of a session, a page at a time. The page size stays within what the
+ * server accepts: a refused page would leave a reloaded tab with no approval cards at all.
+ */
+export async function readAllSessionEvents(
+  listPage: (input: { limit: number; pageToken?: string }) => Promise<SessionEventsPage>,
+): Promise<unknown[]> {
+  const events: unknown[] = [];
+  let pageToken: string | undefined;
+  do {
+    const page = await listPage({
+      limit: SESSION_EVENTS_PAGE_SIZE,
+      ...(pageToken === undefined ? {} : { pageToken }),
+    });
+    for (const item of page.data) {
+      events.push(item.event);
+    }
+    pageToken = page.nextPageToken;
+  } while (pageToken !== undefined);
+  return events;
+}
+
 export interface SentinelApiDeps {
   fetcher: typeof fetch;
   /** Raw persisted session events (the SDK `event` payloads), oldest or newest first. */

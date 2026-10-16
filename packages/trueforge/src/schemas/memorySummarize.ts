@@ -29,7 +29,7 @@ export const UpdateMemorySummarizeRequestSchema = z
       .nullable()
       .describe('Persisted override: `true`/`false`. `null` clears the override back to the env default.'),
   })
-  .openapi('UpdateMemorySummarizeRequest');
+  .openapi('UpdateMemorySummarizeRequest', { example: { enabled: true } });
 
 export const GetMemorySummarizeResponseSchema = z
   .object({

@@ -29,6 +29,8 @@ export function ToolCallContentBlockContainer(props: ToolCallContentBlockProps) 
         if (!hasMeasuredRef.current && isJson !== false) return;
         const renderedHeight = node.getBoundingClientRect().height;
         const height = hasMeasuredRef.current && renderedHeight > 0 ? renderedHeight : node.scrollHeight;
+        // Collapsed agent details (display: none) report zero; locking that would shrink the pane on reveal.
+        if (height <= 0) return;
         hasMeasuredRef.current = true;
         setContentHeightRem(height / 16);
       };
@@ -44,9 +46,10 @@ export function ToolCallContentBlockContainer(props: ToolCallContentBlockProps) 
       const node = contentNodeRef.current;
       if (node == null) return;
       const renderedHeight = node.getBoundingClientRect().height;
+      notifyContentHeightChange?.(height);
+      if (renderedHeight <= 0 && node.scrollHeight <= 0) return;
       hasMeasuredRef.current = true;
       setContentHeightRem((renderedHeight > 0 ? renderedHeight : Math.max(height, node.scrollHeight)) / 16);
-      notifyContentHeightChange?.(height);
     },
     [notifyContentHeightChange],
   );

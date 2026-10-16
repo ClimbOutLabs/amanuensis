@@ -30,6 +30,7 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { isFirstPartyOrigin } from '../mcp/firstParty';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { toSandboxProviderFromRecord } from '../sandbox/providerUtils';
@@ -42,6 +43,10 @@ import { buildRunCodeHarvestSink } from './artifacts/persistRunCodeHarvests';
 export interface McpConnection {
   url: string;
   headers: RemoteMcpHeaders;
+  /** The stored connector's trust marker, and only while the operator still lists its origin. */
+  first_party: boolean;
+  /** Set when the user designated this connector as their search provider: the tools it may run silently. */
+  search_provider: { tools: readonly string[] } | undefined;
 }
 
 const GITHUB_MCP_SERVER_NAME = 'github';
@@ -108,7 +113,7 @@ export async function resolveBoundRepository(input: {
 
 /**
  * Whether the agent spec has a GitHub MCP connector configured, regardless of
- * whether {@link resolveGithubGitCredentials} could resolve usable
+ * whether `resolveGithubGitToken` could resolve usable
  * credentials from it. Used to distinguish "no connector attached" from
  * "connector attached but credentials were refused" in sandbox remediation.
  */
@@ -127,14 +132,14 @@ export function isWebConnectorAttached(spec: AgentSpec): boolean {
 }
 
 /**
- * Resolve the configured GitHub connector PAT into git-credential-store format.
+ * Resolve the configured GitHub connector PAT for host-authenticated git.
  *
  * The credential is admitted only when the agent explicitly enables the GitHub
- * connector and that connector points at a GitHub-owned host. The returned
- * value is written directly into the sandbox credential file by {@link Sandbox};
- * it is never included in model context or command arguments.
+ * connector and that connector points at a GitHub-owned host. The token stays on
+ * the host: the sandbox injects it into the environment of a single
+ * validated network git process and never writes it to the sandbox.
  */
-export async function resolveGithubGitCredentials({
+export async function resolveGithubGitToken({
   tenant_id,
   spec,
   store,
@@ -168,7 +173,7 @@ export async function resolveGithubGitCredentials({
   if (token === undefined) {
     return null;
   }
-  return `https://x-access-token:${encodeURIComponent(token)}@github.com\n`;
+  return token;
 }
 
 /** Gateway header carrying stringified JSON metadata. */
@@ -473,6 +478,15 @@ export async function getMcpConnection({
   if (record === undefined) {
     return undefined;
   }
+  // The stored mark is what setup decided at save time. It counts only while the operator still
+  // lists the origin, so dropping an origin from the configuration takes effect on the next turn.
+  const firstParty =
+    record.first_party &&
+    isFirstPartyOrigin({ url: record.manifest.url, origins: configuration.FIRST_PARTY_MCP_ORIGINS });
+  const searchProvider =
+    record.manifest.type === 'remote' && record.manifest.search_provider === true
+      ? { tools: record.manifest.search_tools ?? [] }
+      : undefined;
   const needsLiveAuth = record.manifest.auth?.type === 'dcr' || record.manifest.auth?.type === 'oauth_client';
   // Only the live-auth case delegates: a with-auth store's `resolveInvokeHeaders` may be
   // TrueFoundry-managed (mid-turn re-authorization through the gateway) rather than the generic
@@ -483,6 +497,8 @@ export async function getMcpConnection({
     return {
       url: record.manifest.url,
       headers: store.resolveInvokeHeaders({ record, userRef }),
+      first_party: firstParty,
+      search_provider: searchProvider,
     };
   }
   if (needsLiveAuth && tokenStore !== undefined && clientName !== undefined) {
@@ -495,11 +511,15 @@ export async function getMcpConnection({
         clientName,
         userRef,
       }),
+      first_party: firstParty,
+      search_provider: searchProvider,
     };
   }
   return {
     url: record.manifest.url,
     headers: resolveManifestRequestHeaders(record.manifest),
+    first_party: firstParty,
+    search_provider: searchProvider,
   };
 }
 
@@ -612,7 +632,7 @@ let sharedRunCodeService: RunCodeService | undefined;
  * at startup, so construction here only fails on unexpected driver errors.
  * Keeps the first caller's logger for the service lifetime.
  */
-function getSharedRunCodeService(logger: Logger): RunCodeService {
+export function getSharedRunCodeService(logger: Logger): RunCodeService {
   if (sharedRunCodeService === undefined) {
     if (configuration.SANDBOX_ISOLATION_DRIVER !== 'docker') {
       throw new Error(
@@ -663,7 +683,7 @@ export function buildTurnSandbox(input: {
   provider: SandboxProvider;
   logger: Logger;
   gitSkills: readonly GitSkill[];
-  resolvedGitCredentialsContent?: string | null | undefined;
+  githubGitToken?: string | null | undefined;
   githubConnectorAttached?: boolean | undefined;
   webConnectorAttached?: boolean | undefined;
   fileDownloadEnabled: boolean;
@@ -706,7 +726,7 @@ export function buildTurnSandbox(input: {
     provider: input.provider,
     existingSandboxId: input.existingSandboxId,
     fileDownloadEnabled: input.fileDownloadEnabled,
-    resolvedGitCredentialsContent: input.resolvedGitCredentialsContent ?? null,
+    githubGitToken: input.githubGitToken ?? null,
     githubConnectorAttached: input.githubConnectorAttached ?? false,
     webConnectorAttached: input.webConnectorAttached ?? false,
     boundRepository: input.boundRepository,

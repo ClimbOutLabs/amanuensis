@@ -197,7 +197,7 @@ describe('DraftModelSelector', () => {
     expect(screen.queryByRole('button', { name: /Please configure Models/i })).not.toBeInTheDocument();
   });
 
-  it('renders the open menu through a portal, so an overflow-hidden ancestor (e.g. the Model roles card) cannot clip it', async () => {
+  it('renders the open menu through a portal, so an overflow-hidden ancestor (e.g. the Roles and Personas card) cannot clip it', async () => {
     const server = createMockAgentUIServer({ getModels: async () => models });
     const { container } = render(
       <div style={{ overflow: 'hidden' }}>

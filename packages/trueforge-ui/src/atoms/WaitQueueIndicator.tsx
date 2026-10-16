@@ -6,11 +6,11 @@ import {
   buildLongWaitAnnouncement,
   buildLongWaitNote,
   LONG_WAIT_MS,
-  spriteStateFor,
   type WaitQueueSnapshot,
+  type WaitStationId,
 } from '../utils/waitQueueJourney.js';
 import { cn } from './lib/cn.js';
-import { StateSprite } from './StateSprite.js';
+import { StateSprite, type StateSpriteState } from './StateSprite.js';
 
 export type WaitQueueIndicatorProps = {
   snapshot: WaitQueueSnapshot;
@@ -18,6 +18,18 @@ export type WaitQueueIndicatorProps = {
   reducedMotion: boolean;
   className?: string;
 };
+
+/**
+ * The sprite mirrors the active station. `remembering` is never the active
+ * station (it is event-sourced only), so a null station — the model thinking
+ * before tools or text — shows the remembering sprite.
+ */
+function spriteStateFor(activeStation: WaitStationId | null): StateSpriteState {
+  if (activeStation === 'doing') return 'doing';
+  if (activeStation === 'writing') return 'writing';
+  if (activeStation === 'listening') return 'listening';
+  return 'remembering';
+}
 
 /**
  * The wait queue, Disneyland-style: a winding station track (where the turn has
@@ -57,13 +69,7 @@ export function WaitQueueIndicator({ snapshot, elapsedMs, reducedMotion, classNa
         ))}
       </span>
       <span role="status" className="aui-wait-queue__line">
-        <StateSprite
-          state={spriteStateFor({
-            activeStation: snapshot.activeStation,
-            recallJustLanded: snapshot.recallJustLanded,
-            longWait,
-          })}
-        />
+        <StateSprite state={spriteStateFor(snapshot.activeStation)} />
         <span className="aui-wait-queue__microcopy">{snapshot.microcopy}</span>
         {snapshot.ticks.length > 0 && <span className="sr-only"> · {snapshot.ticks.join(' · ')}</span>}
         {announcement !== undefined && <span className="sr-only"> {announcement}</span>}

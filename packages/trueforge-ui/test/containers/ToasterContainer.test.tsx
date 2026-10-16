@@ -117,6 +117,39 @@ describe('ToasterProvider', () => {
     expect(screen.getByText('Name taken')).toBeInTheDocument();
   });
 
+  it('shows the expired-request copy, without ids, for a stale approval', async () => {
+    const staleError = Object.assign(new Error('Status code: 409'), {
+      statusCode: 409,
+      body: {
+        error: {
+          message:
+            'Approval continuation is stale: expected session tip 01m4eympt6a8mxhb8xwzk3nspf.w5oyun, current tip is 01m4npwt2kbapkxb4emesqc12y.3watv6',
+          type: 'conflict',
+          code: 'stale_approval_continuation',
+        },
+      },
+    });
+
+    render(
+      <SlotsProvider>
+        <ToasterProvider>
+          <Trigger errors={[staleError]} />
+        </ToasterProvider>
+      </SlotsProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'boom' }));
+
+    expect(await screen.findByText('This request expired')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'The chat moved on before this was answered. Nothing was approved or run. Ask again if you still want it.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Request failed/)).toBeNull();
+    expect(screen.queryByText(/01m4/)).toBeNull();
+  });
+
   it('keeps only the five most recent errors visible', async () => {
     const errors = Array.from({ length: 6 }, (_, index) => new Error(`error-${index + 1}`));
 

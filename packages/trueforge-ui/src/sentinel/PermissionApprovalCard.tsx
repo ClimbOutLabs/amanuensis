@@ -1,12 +1,15 @@
 'use client';
 
-import type { FC } from 'react';
+import { useState, type FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { Icon } from '../icons/Icon.js';
 import type { SentinelApprovalCard } from './types.js';
 
 type ApprovalCardTier = 2 | 3;
+
+/** Characters shown before a long value is folded behind "Show all". */
+const FOLD_PREVIEW_CHARS = 500;
 
 const TIER_LABELS: Record<ApprovalCardTier, string> = { 2: 'Needs your OK', 3: 'Review carefully' };
 
@@ -27,11 +30,56 @@ export type PermissionApprovalCardProps = {
   disabled?: boolean;
 };
 
+/** Text folded after a preview, cut on code points so a surrogate pair is never split. */
+function FoldedText({ text, as: Tag, className }: { text: string; as: 'pre' | 'span'; className: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const points = Array.from(text);
+  const isLong = points.length > FOLD_PREVIEW_CHARS;
+  const shown = isLong && !expanded ? `${points.slice(0, FOLD_PREVIEW_CHARS).join('')}...` : text;
+  return (
+    <>
+      <Tag className={className}>{shown}</Tag>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => {
+            setExpanded(!expanded);
+          }}
+          aria-expanded={expanded}
+          className="mt-1 block text-xs font-medium text-text-secondary underline hover:text-text-primary"
+        >
+          {expanded ? 'Show less' : `Show all (${String(points.length - FOLD_PREVIEW_CHARS)} more characters)`}
+        </button>
+      )}
+    </>
+  );
+}
+
 function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-baseline gap-2 text-sm">
       <dt className="shrink-0 text-xs font-medium uppercase tracking-wide text-text-secondary">{label}</dt>
-      <dd className={mono ? 'font-mono text-xs text-text-primary break-all' : 'text-text-primary'}>{value}</dd>
+      <dd className="min-w-0">
+        <FoldedText
+          text={value}
+          as="span"
+          className={`break-all text-text-primary ${mono ? 'font-mono text-xs' : ''}`}
+        />
+      </dd>
+    </div>
+  );
+}
+
+function OutboundBlock({ text, truncated }: { text: string; truncated: boolean }) {
+  return (
+    <div className="rounded border border-border bg-primary-bg px-3 py-2">
+      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-secondary">Exactly what will be sent</p>
+      {truncated && <p className="mb-1 text-sm text-text-primary">Part of what will be sent is not shown in full.</p>}
+      <FoldedText
+        text={text}
+        as="pre"
+        className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-text-primary"
+      />
     </div>
   );
 }
@@ -54,14 +102,18 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   disabled = false,
 }) => {
   const hasDetails =
-    card.destination !== null || card.recipient !== null || card.amount !== null || card.parsed_command !== null;
+    card.destination !== null ||
+    card.recipient !== null ||
+    card.amount !== null ||
+    card.parsed_command !== null ||
+    card.destination_host !== null;
 
   return (
     <div className="rounded-lg border border-primary-button-bg/30 bg-primary-button-bg/10">
       <div className="flex items-center justify-between gap-3 rounded-t-lg border-b border-primary-button-bg/30 px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon name="lock" className="shrink-0 text-text-secondary" aria-hidden="true" />
-          <span className="truncate text-sm font-semibold text-text-primary">Permission needed</span>
+          <span className="truncate text-sm font-semibold text-text-primary">Approval needed</span>
           <span className="min-w-0 truncate rounded bg-primary-bg px-1.5 py-0.5 font-mono text-xs text-text-secondary">
             {toolName}
           </span>
@@ -73,15 +125,12 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
 
       <div className="space-y-3 px-4 py-3">
         <p className="text-sm text-text-primary">{card.plain_what}</p>
-        {card.plain_why !== null && <p className="text-sm text-text-secondary">{card.plain_why}</p>}
+        {card.plain_why !== null && <p className="text-sm text-text-secondary">Agent says: {card.plain_why}</p>}
 
         {card.cannot_be_undone !== null && (
-          <p
-            role="note"
-            className="flex items-start gap-2 rounded-md border border-warning-bg/40 bg-warning-bg/10 px-3 py-2 text-sm text-text-primary"
-          >
-            <Icon name="triangle-exclamation" className="mt-0.5 shrink-0" aria-hidden="true" />
-            <span>Cannot be undone: {card.cannot_be_undone}</span>
+          <p className="flex items-start gap-2 text-sm text-text-secondary">
+            <Icon name="info" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+            <span>{card.cannot_be_undone}</span>
           </p>
         )}
 
@@ -95,8 +144,11 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             {card.recipient !== null && <DetailRow label="Recipient" value={card.recipient} />}
             {card.amount !== null && <DetailRow label="Amount" value={card.amount} mono />}
             {card.parsed_command !== null && <DetailRow label="Command" value={card.parsed_command} mono />}
+            {card.destination_host !== null && <DetailRow label="Sends to" value={card.destination_host} mono />}
           </dl>
         )}
+
+        {card.outbound_text !== null && <OutboundBlock text={card.outbound_text} truncated={card.outbound_truncated} />}
 
         <div className="flex gap-2">
           <Button variant="primary" size="small" onClick={onApprove} disabled={disabled} className="flex-1">

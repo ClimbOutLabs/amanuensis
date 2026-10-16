@@ -192,6 +192,8 @@ export interface SentinelUserSettingsTable {
   /** SQLite's 0/1 integer boolean. */
   offline_mode: number;
   tier2_auto_allow: JsonbColumn<Tier2ActionKind[]>;
+  /** SQLite's 0/1 integer boolean. */
+  search_without_asking: number;
   created_at: string;
   updated_at: string;
 }
@@ -228,6 +230,15 @@ export interface TurnArtifactTable {
 }
 
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
+/** "Always allow this tool" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
+export interface McpToolGrantTable {
+  tenant_id: string;
+  created_by: string;
+  mcp_server_name: string;
+  tool_name: string;
+  created_at: string;
+}
+
 export interface GlobalSettingsTable {
   key: string;
   value: string;
@@ -539,6 +550,8 @@ export interface McpServerTable {
    */
   oauth_server: JsonbColumn<OAuthServer> | null;
   oauth_client: JsonbColumn<OAuthClient> | null;
+  /** 0/1 (defaults to 0), never client-supplied: 1 only for a connector the product's own setup provisioned. */
+  first_party: Generated<number>;
   created_at: string;
   updated_at: string;
 }
@@ -674,6 +687,7 @@ export interface Database {
   persona_name_key: PersonaNameKeyTable;
   session_persona: SessionPersonaTable;
   mcp_server: McpServerTable;
+  mcp_tool_grant: McpToolGrantTable;
   oauth_token: OAuthTokenTable;
   oauth_pending_authorization: OAuthPendingAuthorizationTable;
   repository: RepositoryTable;

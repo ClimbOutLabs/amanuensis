@@ -2,15 +2,25 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { actionIdFor } from '../../../src/core/permissions/approvalTokens';
-import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
+import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import {
+  classifyHostToolCall,
+  classifyTier,
+  type ClassifyContext,
+  type SentinelAction,
+} from '../../../src/core/permissions/classifier';
+import { FIRST_PARTY_TOOL_REASON, isStandingTrustDecision } from '../../../src/core/permissions/connectorTrust';
+import {
+  createSentinelHostContext,
   defaultSentinelServices,
-  withoutTier2Relaxations,
+  forUnattendedRun,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { seedShellAllowlist, type ShellAllowlistConfig } from '../../../src/core/permissions/shellAllowlist';
 import type { Tier2ActionKind } from '../../../src/core/permissions/tier';
+import { TOOL_GRANT_REASON, type ToolGrantKey, type ToolGrantStore } from '../../../src/core/permissions/toolGrants';
+import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 import { TEST_TOKEN_SCOPE, testApprovalOwner } from './approvalTokenFixtures';
 
 /**
@@ -37,15 +47,17 @@ function makeCtx(overrides?: {
   services?: SentinelServices;
   workspace_cwd?: string | null;
   conversation_id?: string;
+  created_by?: string;
 }): ClassifyContext {
   return {
     services: overrides?.services ?? defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }),
     tenant_id: 't1',
-    created_by: 'u1',
+    created_by: overrides?.created_by ?? 'u1',
     conversation_id: overrides?.conversation_id ?? 'conv-1',
     repository_id: 'r1',
     workspace_cwd: overrides?.workspace_cwd ?? null,
     agent_intent: null,
+    web_search: createWebSearchTurnState(),
   };
 }
 
@@ -151,7 +163,7 @@ describe('classifyTier Tier 2 asks by default', () => {
   test('a scheduled session ignores relaxations', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sentinel-ws-'));
     try {
-      const unattended = withoutTier2Relaxations(
+      const unattended = forUnattendedRun(
         relaxing(defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), ['file_write']),
       );
       const decision = await classifyTier(
@@ -245,7 +257,7 @@ describe('classifyTier read-only shell commands are Tier 1', () => {
     try {
       const decision = await classifyTier(
         action('exec', { command: 'git status', cwd: workspace }),
-        makeCtx({ services: withoutTier2Relaxations(services), workspace_cwd: workspace }),
+        makeCtx({ services: forUnattendedRun(services), workspace_cwd: workspace }),
       );
       expect(decision.tier).toBe(1);
     } finally {
@@ -389,6 +401,345 @@ describe('classifyTier external services', () => {
     );
     expect(decision.tier).toBe(3);
     expect(decision.auto_deny).toBe('destination_unverifiable');
+  });
+});
+
+/** A grant store the test can revoke from, keyed exactly like the server store. */
+class RevocableGrantStore implements ToolGrantStore {
+  private readonly grants = new Set<string>();
+
+  private static id(key: ToolGrantKey): string {
+    return JSON.stringify([key.tenant_id, key.created_by, key.mcp_server_name, key.tool_name]);
+  }
+
+  hasToolGrant(key: ToolGrantKey): Promise<boolean> {
+    return Promise.resolve(this.grants.has(RevocableGrantStore.id(key)));
+  }
+
+  recordToolGrant(key: ToolGrantKey): Promise<void> {
+    this.grants.add(RevocableGrantStore.id(key));
+    return Promise.resolve();
+  }
+
+  revoke(key: ToolGrantKey): void {
+    this.grants.delete(RevocableGrantStore.id(key));
+  }
+}
+
+describe('classifyTier connector tools and standing grants', () => {
+  const closedWorldRead: SentinelAction['mcp_hints'] = { read_only_hint: true, open_world_hint: false };
+  const grantKey: ToolGrantKey = {
+    tenant_id: 't1',
+    created_by: 'u1',
+    mcp_server_name: 'notes',
+    tool_name: 'lookup_record',
+  };
+
+  function connectorAction(input?: {
+    tool_name?: string;
+    mcp_server_name?: string;
+    mcp_hints?: SentinelAction['mcp_hints'];
+    canonical_params?: Record<string, unknown>;
+  }): SentinelAction {
+    return {
+      tool_name: input?.tool_name ?? grantKey.tool_name,
+      canonical_params: input?.canonical_params ?? { id: '1' },
+      tool_type: 'mcp',
+      mcp_server_name: input?.mcp_server_name ?? grantKey.mcp_server_name,
+      mcp_hints: input?.mcp_hints ?? closedWorldRead,
+    };
+  }
+
+  function grantedServices(keys: ToolGrantKey[] = [grantKey]): {
+    services: SentinelServices;
+    grants: RevocableGrantStore;
+  } {
+    const grants = new RevocableGrantStore();
+    for (const key of keys) {
+      void grants.recordToolGrant(key);
+    }
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    services.tool_grants = grants;
+    return { services, grants };
+  }
+
+  test('a read-only, explicitly closed-world connector tool still asks: its own hints never lower it', async () => {
+    const decision = await classifyTier(connectorAction(), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('unrecognized_tool');
+  });
+
+  test('an unannotated connector tool asks', async () => {
+    const decision = await classifyTier(connectorAction({ mcp_hints: {} }), makeCtx());
+    expect(decision.tier).toBe(3);
+  });
+
+  test('a standing grant runs the tool at Tier 1 without a card', async () => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(connectorAction(), makeCtx({ services }));
+    expect(decision.tier).toBe(1);
+    expect(decision.reason).toBe(TOOL_GRANT_REASON);
+    expect(decision.card).toBeNull();
+  });
+
+  test('a grant is ignored once the tool omits openWorldHint, since absent means open-world', async () => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(
+      connectorAction({ mcp_hints: { read_only_hint: true } }),
+      makeCtx({ services }),
+    );
+    expect(decision.tier).toBe(3);
+  });
+
+  test('a grant is ignored once the tool claims to reach the open world', async () => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(
+      connectorAction({ mcp_hints: { read_only_hint: true, open_world_hint: true } }),
+      makeCtx({ services }),
+    );
+    expect(decision.tier).toBe(3);
+  });
+
+  test('a grant is ignored once the tool stops claiming to be read-only', async () => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(
+      connectorAction({ mcp_hints: { read_only_hint: false, open_world_hint: false } }),
+      makeCtx({ services }),
+    );
+    expect(decision.tier).toBe(3);
+  });
+
+  test('a destructive hint escalates over a grant', async () => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(
+      connectorAction({ mcp_hints: { ...closedWorldRead, destructive_hint: true } }),
+      makeCtx({ services }),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('mcp_destructive_hint');
+  });
+
+  test('a destructive tool name escalates over a grant', async () => {
+    const key = { ...grantKey, tool_name: 'delete_record' };
+    const { services } = grantedServices([key]);
+    const decision = await classifyTier(connectorAction({ tool_name: key.tool_name }), makeCtx({ services }));
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('destructive_action');
+  });
+
+  test('an external-service action escalates over a grant', async () => {
+    const key = { ...grantKey, tool_name: 'send_email' };
+    const { services } = grantedServices([key]);
+    const decision = await classifyTier(
+      connectorAction({ tool_name: key.tool_name, canonical_params: { to: 'someone@example.com', subject: 'hi' } }),
+      makeCtx({ services }),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('external_service');
+  });
+
+  test('a sensitive read escalates over a grant', async () => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(
+      connectorAction({ canonical_params: { path: '/home/someone/.ssh/id_ed25519' } }),
+      makeCtx({ services }),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.sensitive_read).toBe(true);
+  });
+
+  test('offline mode auto-denies a granted tool', async () => {
+    const { services } = grantedServices();
+    services.isOffline = () => Promise.resolve(true);
+    const decision = await classifyTier(connectorAction(), makeCtx({ services }));
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBe('offline_mode');
+  });
+
+  test('a grant does not cross tools, connectors, or users', async () => {
+    const { services } = grantedServices();
+    const otherTool = await classifyTier(connectorAction({ tool_name: 'lookup_other' }), makeCtx({ services }));
+    const otherConnector = await classifyTier(connectorAction({ mcp_server_name: 'tracker' }), makeCtx({ services }));
+    const otherUser = await classifyTier(connectorAction(), makeCtx({ services, created_by: 'u2' }));
+    expect([otherTool.tier, otherConnector.tier, otherUser.tier]).toEqual([3, 3, 3]);
+  });
+
+  test('a revoked grant asks again', async () => {
+    const { services, grants } = grantedServices();
+    expect((await classifyTier(connectorAction(), makeCtx({ services }))).tier).toBe(1);
+    grants.revoke(grantKey);
+    expect((await classifyTier(connectorAction(), makeCtx({ services }))).tier).toBe(3);
+  });
+
+  test('a built-in tool never reads connector grants', async () => {
+    const { services } = grantedServices();
+    const decision = await classifyTier(
+      { ...connectorAction({ mcp_hints: {} }), tool_type: 'truefoundry-system' },
+      makeCtx({ services }),
+    );
+    expect(decision.tier).toBe(3);
+  });
+
+  test('classifying a granted call writes no audit entry: the run is recorded once, at dispatch', async () => {
+    const { services } = grantedServices();
+    const recorded: AuditRecordInput[] = [];
+    services.audit = {
+      record: input => {
+        recorded.push(input);
+        return Promise.resolve();
+      },
+    };
+    const sentinel = createSentinelHostContext({ tenant_id: 't1', created_by: 'u1', conversation_id: 'c1', services });
+
+    const decision = await classifyHostToolCall({
+      sentinel,
+      repository_id: null,
+      workspace_cwd: null,
+      action: connectorAction(),
+    });
+
+    expect(decision.reason).toBe(TOOL_GRANT_REASON);
+    expect(recorded).toEqual([]);
+  });
+});
+
+describe('classifyTier first-party connector tools', () => {
+  const closedWorldRead: SentinelAction['mcp_hints'] = { read_only_hint: true, open_world_hint: false };
+
+  function connectorAction(input?: {
+    tool_name?: string;
+    mcp_first_party?: boolean;
+    mcp_hints?: SentinelAction['mcp_hints'];
+    canonical_params?: Record<string, unknown>;
+  }): SentinelAction {
+    return {
+      tool_name: input?.tool_name ?? 'ask_memory',
+      canonical_params: input?.canonical_params ?? { question: 'when is the dentist appointment' },
+      tool_type: 'mcp',
+      mcp_server_name: 'memory',
+      mcp_first_party: input?.mcp_first_party ?? true,
+      mcp_hints: input?.mcp_hints ?? closedWorldRead,
+    };
+  }
+
+  test('a read-only, explicitly closed-world tool runs at Tier 1 without a card', async () => {
+    const decision = await classifyTier(connectorAction(), makeCtx());
+    expect(decision.tier).toBe(1);
+    expect(decision.reason).toBe(FIRST_PARTY_TOOL_REASON);
+    expect(decision.card).toBeNull();
+    expect(decision.approval_token_id).toBeNull();
+    expect(isStandingTrustDecision(decision)).toBe(true);
+  });
+
+  test('the same tool on a connector that is not first-party asks', async () => {
+    const decision = await classifyTier(connectorAction({ mcp_first_party: false }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('unrecognized_tool');
+  });
+
+  test('a connector that never says whether it is first-party asks', async () => {
+    const { mcp_first_party: _omitted, ...unmarked } = connectorAction();
+    const decision = await classifyTier(unmarked, makeCtx());
+    expect(decision.tier).toBe(3);
+  });
+
+  test('a tool that omits openWorldHint asks, since absent means open-world', async () => {
+    const decision = await classifyTier(connectorAction({ mcp_hints: { read_only_hint: true } }), makeCtx());
+    expect(decision.tier).toBe(3);
+  });
+
+  test('a tool that claims to reach the open world asks', async () => {
+    const decision = await classifyTier(
+      connectorAction({ mcp_hints: { read_only_hint: true, open_world_hint: true } }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+  });
+
+  test('a tool that does not claim to be read-only asks, annotated or not', async () => {
+    const writes = await classifyTier(
+      connectorAction({ mcp_hints: { read_only_hint: false, open_world_hint: false } }),
+      makeCtx(),
+    );
+    const unannotated = await classifyTier(connectorAction({ mcp_hints: {} }), makeCtx());
+    expect([writes.tier, unannotated.tier]).toEqual([3, 3]);
+  });
+
+  test('a destructive hint escalates over first-party trust', async () => {
+    const decision = await classifyTier(
+      connectorAction({ mcp_hints: { ...closedWorldRead, destructive_hint: true } }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('mcp_destructive_hint');
+  });
+
+  test('a destructive tool name escalates over first-party trust', async () => {
+    const decision = await classifyTier(connectorAction({ tool_name: 'delete_memory' }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('destructive_action');
+  });
+
+  test('an install tool name escalates over first-party trust', async () => {
+    const decision = await classifyTier(connectorAction({ tool_name: 'install_plugin' }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('install_action');
+  });
+
+  test('an external-service action escalates over first-party trust', async () => {
+    const decision = await classifyTier(
+      connectorAction({ tool_name: 'send_email', canonical_params: { to: 'someone@example.com', subject: 'hi' } }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('external_service');
+  });
+
+  test('a sensitive read escalates over first-party trust', async () => {
+    const decision = await classifyTier(
+      connectorAction({ canonical_params: { path: '/home/someone/.ssh/id_ed25519' } }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.sensitive_read).toBe(true);
+  });
+
+  test('offline mode auto-denies a first-party tool', async () => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    services.isOffline = () => Promise.resolve(true);
+    const decision = await classifyTier(connectorAction(), makeCtx({ services }));
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBe('offline_mode');
+  });
+
+  test('a built-in tool never reads connector trust', async () => {
+    const decision = await classifyTier(
+      { ...connectorAction({ mcp_hints: {} }), tool_type: 'truefoundry-system' },
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+  });
+
+  test('classifying a first-party call writes no audit entry: the run is recorded once, at dispatch', async () => {
+    const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
+    const recorded: AuditRecordInput[] = [];
+    services.audit = {
+      record: input => {
+        recorded.push(input);
+        return Promise.resolve();
+      },
+    };
+    const sentinel = createSentinelHostContext({ tenant_id: 't1', created_by: 'u1', conversation_id: 'c1', services });
+
+    const decision = await classifyHostToolCall({
+      sentinel,
+      repository_id: null,
+      workspace_cwd: null,
+      action: connectorAction(),
+    });
+
+    expect(decision.reason).toBe(FIRST_PARTY_TOOL_REASON);
+    expect(recorded).toEqual([]);
   });
 });
 

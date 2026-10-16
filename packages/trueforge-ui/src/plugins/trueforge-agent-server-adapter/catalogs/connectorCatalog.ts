@@ -14,7 +14,9 @@ import {
   type MemoryProviderCheck,
 } from '../../../server/connectorChecks.js';
 
+import { parseToolGrants, type ConnectorToolGrants } from '../../../server/connectorToolGrants.js';
 import type { MemoryProviderFields } from '../../../server/memoryProviderTypes.js';
+import type { SearchProviderFields } from '../../../server/searchProviderTypes.js';
 import type {
   ConnectorAuth,
   ConnectorAuthPublic,
@@ -32,18 +34,20 @@ export type UiConnectorAuth = ConnectorAuth;
 export type UiConnectorAuthPublic = ConnectorAuthPublic;
 /**
  * `ConnectorBase` is the runtime's generic connector row type; it doesn't know about the
- * memory-provider flag. Widen locally rather than editing `@truefoundry/assistant-ui-runtime`.
+ * memory-provider or search-provider flags. Widen locally rather than editing
+ * `@truefoundry/assistant-ui-runtime`.
  */
-export type UiConnector = ConnectorBase & MemoryProviderFields;
-export type UiConnectorCatalogEntry = ConnectorCatalogEntry;
-/** `updateConnector` sends the full manifest; widen its request to carry the memory fields alongside it. */
-export type UiUpdateConnectorRequest = UpdateConnectorRequest & MemoryProviderFields;
+export type UiConnector = ConnectorBase & MemoryProviderFields & SearchProviderFields;
+/** A preset can offer to become the search provider; the settings screen decides whether it does. */
+export type UiConnectorCatalogEntry = ConnectorCatalogEntry & SearchProviderFields;
+/** `updateConnector` sends the full manifest; widen its request to carry the role fields alongside it. */
+export type UiUpdateConnectorRequest = UpdateConnectorRequest & MemoryProviderFields & SearchProviderFields;
 /**
  * Create carries the flag too, so pointing at a memory bank for the first time is one write that
  * the server validates once, rather than a create followed by a flag-setting update that could
  * fail and leave an unflagged row behind.
  */
-export type UiCreateConnectorRequest = CreateConnectorRequest & MemoryProviderFields;
+export type UiCreateConnectorRequest = CreateConnectorRequest & MemoryProviderFields & SearchProviderFields;
 
 /** Five seconds past the longest deadline any memory check can be configured to, server-wide or per bank. */
 const MEMORY_PROVIDER_WRITE_TIMEOUT_SECONDS = MEMORY_PROVIDER_MAX_TIMEOUT_MS / 1000 + 5;
@@ -58,17 +62,6 @@ export function memoryProviderWriteRequestOptions(memoryProvider: boolean | unde
     ? { timeoutInSeconds: MEMORY_PROVIDER_WRITE_TIMEOUT_SECONDS, maxRetries: 0 }
     : undefined;
 }
-
-/**
- * The SDK's generated `McpServerManifest` type may not yet declare the memory fields (they land
- * on the server side first; the SDK's own convention camelCases them and maps them to the
- * `memory_provider` / `memory_settings` wire names via its serializer). Widen locally so this
- * package never edits the generated SDK package to add a field.
- */
-type HarnessManifestWithMemory = TrueForgeApi.McpServerManifest & MemoryProviderFields;
-type ConfiguredMcpServerWithMemory = TrueForgeApi.ConfiguredMcpServer & {
-  manifest: HarnessManifestWithMemory;
-};
 
 const ApiErrorResponseSchema = z.object({ error: z.object({ message: z.string() }) });
 
@@ -93,12 +86,41 @@ function toConnectionFailureKind(status: number | undefined): ConnectorConnectio
 }
 
 /**
- * Calls POST /api/v1/mcp-servers/{name}/memory-check with the same base URL, token, and fetch
- * the SDK client was built from. Direct rather than through the client because the generated
- * SDK does not carry this route yet; it moves onto the client at the next regeneration.
- * Cookie auth rides along: the default base URL is same-origin, and a host pointing the UI at
- * another origin supplies its own `fetch`.
+ * Calls a `/api/v1/mcp-servers/{name}/...` route with the same base URL, token, and fetch the SDK
+ * client was built from, and returns the JSON body. Direct rather than through the client because
+ * the generated SDK does not carry these routes yet; they move onto the client at the next
+ * regeneration. Cookie auth rides along: the default base URL is same-origin, and a host pointing
+ * the UI at another origin supplies its own `fetch`.
  */
+async function requestMcpServerRoute({
+  name,
+  route,
+  method,
+  failureLabel,
+  options,
+}: {
+  name: string;
+  route: string;
+  method: 'GET' | 'POST' | 'DELETE';
+  failureLabel: string;
+  options: CreateTrueForgeClientOptions;
+}): Promise<unknown> {
+  const base = (options.baseUrl ?? '/').replace(/\/+$/, '');
+  const fetchImpl = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
+  const response = await fetchImpl(`${base}/api/v1/mcp-servers/${encodeURIComponent(name)}/${route}`, {
+    method,
+    headers: options.token === undefined ? {} : { Authorization: `Bearer ${options.token}` },
+  });
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const failure = ApiErrorResponseSchema.safeParse(body);
+    throw new Error(
+      failure.success ? failure.data.error.message : `${failureLabel} failed with HTTP ${String(response.status)}`,
+    );
+  }
+  return body;
+}
+
 async function requestMemoryProviderCheck({
   name,
   options,
@@ -106,19 +128,13 @@ async function requestMemoryProviderCheck({
   name: string;
   options: CreateTrueForgeClientOptions;
 }): Promise<MemoryProviderCheck> {
-  const base = (options.baseUrl ?? '/').replace(/\/+$/, '');
-  const fetchImpl = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
-  const response = await fetchImpl(`${base}/api/v1/mcp-servers/${encodeURIComponent(name)}/memory-check`, {
+  const body = await requestMcpServerRoute({
+    name,
+    route: 'memory-check',
     method: 'POST',
-    headers: options.token === undefined ? {} : { Authorization: `Bearer ${options.token}` },
+    failureLabel: 'Memory check',
+    options,
   });
-  const body: unknown = await response.json().catch(() => undefined);
-  if (!response.ok) {
-    const failure = ApiErrorResponseSchema.safeParse(body);
-    throw new Error(
-      failure.success ? failure.data.error.message : `Memory check failed with HTTP ${String(response.status)}`,
-    );
-  }
   return parseMemoryProviderCheck(body);
 }
 
@@ -194,6 +210,7 @@ export function toUiCatalogEntry(server: TrueForgeApi.CatalogMcpServer): UiConne
     description: server.description,
     ...(server.logo === undefined ? {} : { logo: server.logo }),
     auth: toUiAuthPublic(server.auth),
+    ...(server.searchProvider === undefined ? {} : { searchProvider: server.searchProvider }),
   };
 }
 
@@ -221,8 +238,12 @@ export function toUiTool(tool: Record<string, unknown>): ToolBase & { annotation
 }
 
 export function toUiConnector(server: TrueForgeApi.ConfiguredMcpServer): UiConnector {
-  const manifest = (server as ConfiguredMcpServerWithMemory).manifest;
+  const manifest = server.manifest;
   const auth = toUiAuthPublic(manifest.auth);
+  const remote = manifest.type === 'remote' ? manifest : undefined;
+  const memoryProvider = remote?.memoryProvider;
+  const memorySettings = remote?.memorySettings;
+  const searchProvider = remote?.searchProvider;
   return {
     id: server.name,
     name: server.name,
@@ -231,8 +252,9 @@ export function toUiConnector(server: TrueForgeApi.ConfiguredMcpServer): UiConne
     auth,
     requiresAuth: server.authStatus.status === 'auth_required',
     authenticated: server.authStatus.status !== 'auth_required',
-    ...(manifest.memoryProvider === undefined ? {} : { memoryProvider: manifest.memoryProvider }),
-    ...(manifest.memorySettings === undefined ? {} : { memorySettings: manifest.memorySettings }),
+    ...(memoryProvider === undefined ? {} : { memoryProvider }),
+    ...(memorySettings === undefined ? {} : { memorySettings }),
+    ...(searchProvider === undefined ? {} : { searchProvider }),
   };
 }
 
@@ -255,11 +277,12 @@ export function toHarnessManifest(
     url: string;
     auth: ConnectorAuth;
     description?: string;
-  } & MemoryProviderFields,
+  } & MemoryProviderFields &
+    SearchProviderFields,
 ): TrueForgeApi.McpServerManifest {
   const auth = toHarnessAuth(req.auth);
   const trimmed = req.description?.trim();
-  const manifest: HarnessManifestWithMemory = {
+  const manifest: TrueForgeApi.RemoteMcpServerManifest = {
     type: 'remote',
     name: req.name,
     url: req.url,
@@ -267,13 +290,14 @@ export function toHarnessManifest(
     ...(auth === undefined ? {} : { auth }),
     ...(req.memoryProvider === undefined ? {} : { memoryProvider: req.memoryProvider }),
     ...(req.memorySettings === undefined ? {} : { memorySettings: req.memorySettings }),
+    ...(req.searchProvider === undefined ? {} : { searchProvider: req.searchProvider }),
   };
   return manifest;
 }
 
 /**
- * The connector port plus the two connection checks, which the runtime's generic port type does
- * not declare. Widened here rather than in `@truefoundry/assistant-ui-runtime`.
+ * The connector port plus the two connection checks and the tool grants, which the runtime's
+ * generic port type does not declare. Widened here rather than in `@truefoundry/assistant-ui-runtime`.
  */
 export type HarnessConnectorCatalog = ConnectorCatalogServer<
   ToolBase,
@@ -284,7 +308,8 @@ export type HarnessConnectorCatalog = ConnectorCatalogServer<
   UiCreateConnectorRequest,
   UiUpdateConnectorRequest
 > &
-  ConnectorChecks;
+  ConnectorChecks &
+  ConnectorToolGrants;
 
 /** Settings connector port for `createTrueFoundryServer`. Delete omitted; disconnect unsupported. */
 export function createConnectorCatalog(
@@ -369,6 +394,7 @@ export function createConnectorCatalog(
             description: req.description,
             memoryProvider: req.memoryProvider,
             memorySettings: req.memorySettings,
+            searchProvider: req.searchProvider,
           }),
         },
         memoryProviderWriteRequestOptions(req.memoryProvider),
@@ -386,6 +412,7 @@ export function createConnectorCatalog(
             description: req.description,
             memoryProvider: req.memoryProvider,
             memorySettings: req.memorySettings,
+            searchProvider: req.searchProvider,
           }),
         },
         memoryProviderWriteRequestOptions(req.memoryProvider),
@@ -420,6 +447,25 @@ export function createConnectorCatalog(
       });
     },
     checkMemoryProvider: async req => requestMemoryProviderCheck({ name: req.id, options: clientOptions }),
+    listToolGrants: async req =>
+      parseToolGrants(
+        await requestMcpServerRoute({
+          name: req.id,
+          route: 'tool-grants',
+          method: 'GET',
+          failureLabel: 'Listing always-allowed tools',
+          options: clientOptions,
+        }),
+      ),
+    revokeToolGrant: async req => {
+      await requestMcpServerRoute({
+        name: req.id,
+        route: `tool-grants/${encodeURIComponent(req.toolName)}`,
+        method: 'DELETE',
+        failureLabel: 'Revoking an always-allowed tool',
+        options: clientOptions,
+      });
+    },
     testConnector: async req => {
       try {
         const tools = await listConnectorTools(req.id);

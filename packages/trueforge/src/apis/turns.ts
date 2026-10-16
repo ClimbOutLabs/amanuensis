@@ -67,6 +67,7 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
+import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
@@ -96,7 +97,7 @@ import {
   isWebConnectorAttached,
   RepositoryBindingResolutionError,
   resolveBoundRepository,
-  resolveGithubGitCredentials,
+  resolveGithubGitToken,
   resolveGitSkills,
   resolveSandboxProvider,
   withGatewayMetadataHeaders,
@@ -105,6 +106,7 @@ import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
+import { resolveTurnInternalSources } from '../runtime/turnInternalSources';
 import { isTurnPersonaResolutionCurrent, resolveTurnPersona } from '../runtime/turnPersona';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
@@ -271,6 +273,8 @@ function createTurnResolver(deps: {
   personaKnowledgeBlock?: string | undefined;
   personaKnowledgeHits?: readonly PersonaKnowledgeHit[] | undefined;
   switchNotice?: PersonaSwitchNotice | undefined;
+  /** Per-turn internal-source state shared by the knowledge lookup, recall, and the web_search policy. */
+  internalSourceState: InternalSourceState;
   boundRepository?: BoundRepository | undefined;
   repositoryStore: IRepositoryStore;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
@@ -310,6 +314,7 @@ function createTurnResolver(deps: {
     personaKnowledgeBlock,
     personaKnowledgeHits,
     switchNotice,
+    internalSourceState,
     boundRepository,
     repositoryStore,
     sessionStore,
@@ -391,6 +396,8 @@ function createTurnResolver(deps: {
             headers: connection.headers,
             metadataHeaders,
           }),
+          first_party: connection.first_party,
+          search_provider: connection.search_provider,
         };
       },
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
@@ -430,7 +437,7 @@ function createTurnResolver(deps: {
           skills: spec.skills ?? [],
           store: skillStore,
         });
-        const resolvedGitCredentialsContent = await resolveGithubGitCredentials({
+        const githubGitToken = await resolveGithubGitToken({
           tenant_id,
           spec,
           store: mcpServerStore,
@@ -439,7 +446,7 @@ function createTurnResolver(deps: {
           provider,
           logger,
           gitSkills,
-          resolvedGitCredentialsContent,
+          githubGitToken,
           githubConnectorAttached: isGithubConnectorAttached(spec),
           webConnectorAttached: isWebConnectorAttached(spec),
           fileDownloadEnabled: spec.config.sandbox.file_downloads,
@@ -505,6 +512,7 @@ function createTurnResolver(deps: {
       // run_code's own provisioning-sized deadline, derived from the sandbox
       // bounds — the 21-minute bound is scoped to sandbox/run_code alone.
       runCodeToolCallTimeoutMs: getRunCodeToolCallTimeoutMs(),
+      modelFirstResponseTimeoutMs: configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS,
       // Host-owned facts, capped and named-only, for the model-identity
       // section: what the host actually has configured, not what the model
       // is asked to believe about itself.
@@ -520,6 +528,10 @@ function createTurnResolver(deps: {
         replaceTaskChecklist: input =>
           sessionStore.replaceTaskChecklist({ tenant_id, session_id: sessionId, ...input }),
       },
+      // Once the persona library or recall has spoken (or been asked and had
+      // nothing), web_search can no longer substitute for them. Enforced at
+      // dispatch, not by instruction compliance.
+      toolCallPolicy: buildInternalSourceToolPolicy(internalSourceState, logger),
     },
     personalizationProfile,
     personaContext,
@@ -562,6 +574,7 @@ function createTurnResolver(deps: {
       providerServerName: memoryProviderServerName,
       // Will be derived from spec.config.memory.recall_enabled in resolveAgentDefinition
       recallEnabled: undefined,
+      internalSourceState,
     },
     {
       enabled: toolOutputScreenEnabled,
@@ -961,6 +974,19 @@ export async function beginTurnExecution(params: {
     deps.memorySettings,
     memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
   );
+  const internalSources = await resolveTurnInternalSources({
+    session,
+    previousTurnId,
+    persona:
+      deps.personaContext === undefined
+        ? undefined
+        : { id: deps.personaContext.persona_id, modelName: deps.personaContext.model_name },
+    turnInput: input,
+    knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+    modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+    modelProviderStore: deps.modelProviderStore,
+    logger: deps.logger,
+  });
   const resolver = createTurnResolver({
     mcpServerStore: deps.mcpServerStore,
     tokenStore: deps.tokenStore,
@@ -980,6 +1006,9 @@ export async function beginTurnExecution(params: {
     boundRepository: deps.boundRepository,
     personalizationProfile: deps.personalizationProfile,
     personaContext: deps.personaContext,
+    personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
+    personaKnowledgeHits: internalSources.personaKnowledgeHits,
+    internalSourceState: internalSources.internalSourceState,
     memoryClient: deps.memoryClient,
     memoryProviderServerName: deps.memoryProviderServerName,
     memorySettings: effectiveMemorySettings,
@@ -1000,6 +1029,7 @@ export async function beginTurnExecution(params: {
     previous_turn_id: previousTurnId,
     signal: abortController.signal,
     resolver,
+    custom: { library_near_miss: internalSources.libraryNearMiss },
     update_session_title_if_not_exist: title,
     on_command_execution_started: execution => {
       executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
@@ -1137,6 +1167,45 @@ function isSessionOwner({
 
 const FORBIDDEN_SESSION_ACCESS = 'Only the session creator can access this session';
 const FORBIDDEN_CREATE_TURN = 'Only the session creator can create turns';
+
+type RecordedApprovalResponse =
+  | { status: 200; body: { data: Turn } }
+  | { status: 409; body: { error: { message: string; type: 'conflict'; code: TurnConflictCode } } };
+
+/**
+ * Answers a resubmitted approval from stored state: the already-recorded turn when the same
+ * decision is on record, a conflict when a different one is, or undefined when none is recorded.
+ */
+async function recordedApprovalResponse({
+  session,
+  previous_turn_id,
+  input,
+}: {
+  session: SessionHandle<SessionCustom, TurnCustom>;
+  previous_turn_id: string | undefined;
+  input: TurnInputItem[] | undefined;
+}): Promise<RecordedApprovalResponse | undefined> {
+  const resubmission = await session.classifyApprovalResubmission({
+    previous_turn_id,
+    decisions: (input ?? []).filter(item => item.type === EventType.USER_TOOL_APPROVAL),
+  });
+  if (resubmission.outcome === 'replay') {
+    return { status: 200, body: { data: toWireTurn(resubmission.turn) } };
+  }
+  if (resubmission.outcome === 'conflict') {
+    return {
+      status: 409,
+      body: {
+        error: {
+          message: `Tool call ${resubmission.tool_call_id} already has a different decision on record`,
+          type: 'conflict',
+          code: TurnConflictCode.APPROVAL_CONFLICT,
+        },
+      },
+    };
+  }
+  return undefined;
+}
 
 /** DB-backed turns (mounted at /api/v1/sessions). */
 export function createTurnsRouter(deps: TurnsRouterDeps) {
@@ -1528,6 +1597,18 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       legacyParentActivation,
       latestManualActivationAfterParent,
     });
+    const internalSources = await resolveTurnInternalSources({
+      session,
+      previousTurnId,
+      previousTurn,
+      persona:
+        persona?.kind === 'persona' ? { id: persona.persona.id, modelName: persona.persona.model_name } : undefined,
+      turnInput: body.input,
+      knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
+      modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+      modelProviderStore,
+      logger: deps.logger,
+    });
     const turnCustom: TurnCustom = {
       persona:
         persona === undefined || persona.kind === 'default'
@@ -1539,6 +1620,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               source: persona.source,
             },
       manual_persona_activation_id: latestManualActivation?.id ?? null,
+      library_near_miss: internalSources.libraryNearMiss,
     };
 
     // Resolved before the turn exists, same as the model/sandbox lookups above: a missing or
@@ -1558,10 +1640,21 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             logger: deps.logger,
           })
         : undefined;
+    const vaultScope =
+      persona?.kind === 'persona'
+        ? { personaName: persona.persona.display_name, personaId: persona.persona.id }
+        : undefined;
+    // The previous turn's retain lives in the vault that turn ran under. Verifying or recovering
+    // it through another vault's client would copy that exchange across vaults, so only a turn
+    // in the same vault hands its id to memory.
+    const previousTurnPersonaName =
+      previousTurnCustom?.persona?.persona_name ?? legacyParentActivation?.persona_name ?? null;
+    const memoryPreviousTurnId = previousTurnPersonaName === (vaultScope?.personaName ?? null) ? previousTurnId : null;
     const memoryClient = createMemoryClient({
       backend: configuration.MEMORY_BACKEND,
       markdownDir: configuration.MEMORY_MARKDOWN_DIR,
       namespace: requestContext.tenant_id,
+      vaultScope,
       hindsight:
         memoryProvider === undefined
           ? undefined
@@ -1581,8 +1674,16 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           }
         : undefined,
     });
+    // The title comes from the session's first message, so it may only ride along in the vault
+    // that first turn ran under; in any other vault it would carry that turn's text across.
+    const firstTurn =
+      session.record.last_turn_id === null ? undefined : (await session.listTurns({ limit: 1 })).data[0];
+    const titleSharesVault =
+      session.record.last_turn_id === null ||
+      (firstTurn !== undefined &&
+        (firstTurn.custom?.persona?.persona_name ?? null) === (vaultScope?.personaName ?? null));
     const sessionTitleForMemory = chatTitleContext({
-      title: session.record.title ?? deriveSessionTitle(body.input),
+      title: titleSharesVault ? (session.record.title ?? deriveSessionTitle(body.input)) : undefined,
       assistantNames: [
         profile?.assistant_name,
         ...(await deps.personaStore.listPersonas({ tenant_id: requestContext.tenant_id, created_by: userRef })).flatMap(
@@ -1680,14 +1781,17 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       turnId,
       personalizationProfile: profile,
       personaContext: persona?.kind === 'persona' ? persona.context : undefined,
+      personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
+      personaKnowledgeHits: internalSources.personaKnowledgeHits,
       switchNotice: persona?.switchNotice,
+      internalSourceState: internalSources.internalSourceState,
       boundRepository,
       repositoryStore: deps.repositoryStore,
       sessionStore: deps.sessionStore,
       memoryClient,
       memoryProviderServerName: memoryProvider?.serverName,
       memorySettings: effectiveMemorySettings,
-      previousTurnId,
+      previousTurnId: memoryPreviousTurnId,
       sessionTitle: sessionTitleForMemory,
       spaceStore: deps.spaceStore,
       clientTimezone: body.client_timezone,
@@ -1719,6 +1823,25 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         return c.json({ error: { message: error.message } }, 404);
       }
       if (error instanceof SessionStoreConflictError) {
+        if (error instanceof StaleApprovalContinuationError) {
+          // The tip moved after this request read the session. A double submit or a second tab
+          // may already have recorded this exact decision; the handle read above is stale, so
+          // classify against a fresh one. A replay never runs the tool again.
+          const freshSession = await deps.sessions.get({
+            tenant_id: requestContext.tenant_id,
+            session_id: sessionId,
+          });
+          if (freshSession !== undefined) {
+            const response = await recordedApprovalResponse({
+              session: freshSession,
+              previous_turn_id: body.previous_turn_id,
+              input: body.input,
+            });
+            if (response !== undefined) {
+              return c.json(response.body, response.status);
+            }
+          }
+        }
         return c.json({ error: { message: error.message, type: 'conflict', code: turnConflictCodeFor(error) } }, 409);
       }
       if (error instanceof AgentHarnessError && !(error instanceof McpConnectionError)) {
@@ -1729,24 +1852,13 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
             // A decision the session already recorded is a resubmission, not a bad request:
             // the tool has run (or been denied) once and must not run again. Answer from
             // stored state; only a genuinely unrecorded decision keeps the 422.
-            const resubmission = await session.classifyApprovalResubmission({
+            const response = await recordedApprovalResponse({
+              session,
               previous_turn_id: body.previous_turn_id,
-              decisions: (body.input ?? []).filter(item => item.type === EventType.USER_TOOL_APPROVAL),
+              input: body.input,
             });
-            if (resubmission.outcome === 'replay') {
-              return c.json({ data: toWireTurn(resubmission.turn) }, 200);
-            }
-            if (resubmission.outcome === 'conflict') {
-              return c.json(
-                {
-                  error: {
-                    message: `Tool call ${resubmission.tool_call_id} already has a different decision on record`,
-                    type: 'conflict',
-                    code: TurnConflictCode.APPROVAL_CONFLICT,
-                  },
-                },
-                409,
-              );
+            if (response !== undefined) {
+              return c.json(response.body, response.status);
             }
             return c.json({ error: { message: error.message } }, 422);
           }

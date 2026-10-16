@@ -14,11 +14,12 @@ import type { IModelProviderStore } from '../../../src/db/modelProviderStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
-import { toRedactedSecretValue } from '../../../src/utils/secretRedaction';
+import { SECRET_REDACTION } from '../../../src/utils/secretRedaction';
 
 const model = {
   model_id: 'claude-sonnet-4-6',
@@ -38,7 +39,7 @@ const anthropicProvider = { ...anthropicBody, base_url: 'https://api.anthropic.c
 /** Wire view of anthropicProvider (secrets redacted). */
 const anthropicProviderWire = {
   ...anthropicProvider,
-  auth: { api_key: toRedactedSecretValue(anthropicProvider.auth.api_key) },
+  auth: { api_key: SECRET_REDACTION },
 };
 
 const customBody = {
@@ -51,7 +52,7 @@ const customBody = {
 
 const customBodyWire = {
   ...customBody,
-  auth: { api_key: toRedactedSecretValue(customBody.auth.api_key) },
+  auth: { api_key: SECRET_REDACTION },
 };
 
 function wrapManifest(manifest: unknown) {
@@ -81,7 +82,7 @@ function postInit(manifest: unknown): RequestInit {
 function withRedactedApiKey<T extends { auth: { api_key: string } }>(provider: T): T {
   return {
     ...provider,
-    auth: { api_key: toRedactedSecretValue(provider.auth.api_key) },
+    auth: { api_key: SECRET_REDACTION },
   };
 }
 
@@ -97,6 +98,7 @@ async function createRouters(): Promise<{
   const tokenStore = new SqliteOAuthTokenStore(db);
   return {
     settingsRouter: createSettingsRouter({
+      mcpCatalog: McpCatalog.load(),
       resolveModelProviderStore: () => modelProviderStore,
       resolveMcpServerStore: () =>
         new McpServerWithAuthStore({
@@ -105,6 +107,7 @@ async function createRouters(): Promise<{
           clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
         }),
       tokenStore,
+      toolGrantStore: new SqliteMcpToolGrantStore(db),
       resolveSkillStore: () => new SqliteSkillStore(db),
       resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
@@ -341,7 +344,7 @@ describe('model-provider secret redaction and strict PUT', () => {
       '/model-providers',
       putInit({
         ...anthropicBody,
-        auth: { api_key: toRedactedSecretValue('sk-ant-secret') },
+        auth: { api_key: SECRET_REDACTION },
       }),
     );
     expect(response.status).toBe(400);
@@ -354,7 +357,7 @@ describe('model-provider secret redaction and strict PUT', () => {
       '/model-providers',
       postInit({
         ...anthropicBody,
-        auth: { api_key: toRedactedSecretValue('sk-ant-secret') },
+        auth: { api_key: SECRET_REDACTION },
       }),
     );
     expect(response.status).toBe(400);
@@ -373,7 +376,7 @@ describe('model-provider secret redaction and strict PUT', () => {
 
     const redactedKeep = {
       ...anthropicBody,
-      auth: { api_key: toRedactedSecretValue(anthropicBody.auth.api_key) },
+      auth: { api_key: SECRET_REDACTION },
       models: [
         model,
         {
@@ -388,7 +391,7 @@ describe('model-provider secret redaction and strict PUT', () => {
     const updateBody = (await update.json()) as {
       data: { name: string; manifest: { auth: { api_key: string }; models: unknown[] } };
     };
-    expect(updateBody.data.manifest.auth.api_key).toBe(toRedactedSecretValue(anthropicBody.auth.api_key));
+    expect(updateBody.data.manifest.auth.api_key).toBe(SECRET_REDACTION);
     expect(updateBody.data.manifest.models).toHaveLength(2);
 
     const stored = await modelProviderStore.getProvider({
@@ -465,6 +468,7 @@ describe('catalog presets are configurable', () => {
     const response = await settingsRouter.request('/model-providers', putInit(body));
     expect(response.status).toBe(200);
     const json = (await response.json()) as { data: { name: string; manifest: { auth: { api_key: string } } } };
-    expect(json.data.manifest.auth.api_key).toBe(toRedactedSecretValue(`sk-${preset.type}`));
+    expect(json.data.manifest.auth.api_key).toBe(SECRET_REDACTION);
+    expect(JSON.stringify(json)).not.toContain(body.auth.api_key);
   });
 });

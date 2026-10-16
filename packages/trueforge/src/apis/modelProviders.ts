@@ -20,7 +20,7 @@ import {
   type ModelProviderManifest,
   type UpdateModelProviderRequest,
 } from '../schemas/modelProvider';
-import { MissingStoredSecretError, resolveStoredSecretValue, toRedactedSecretValue } from '../utils/secretRedaction';
+import { MissingStoredSecretError, resolveStoredSecretValue, SECRET_REDACTION } from '../utils/secretRedaction';
 
 export interface ModelProvidersRouterDeps<TTransaction> {
   resolveModelProviderStore: (c: Context) => IModelProviderStore<TTransaction>;
@@ -34,7 +34,7 @@ function redactModelProvider(manifest: ModelProviderManifest): ModelProviderMani
   }
   return {
     ...manifest,
-    auth: { api_key: toRedactedSecretValue(manifest.auth.api_key) },
+    auth: { api_key: SECRET_REDACTION },
   };
 }
 

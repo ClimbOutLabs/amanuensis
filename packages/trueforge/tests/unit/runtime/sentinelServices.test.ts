@@ -13,6 +13,7 @@ import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteApprovalTokenStore } from '../../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
+import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteSentinelSettingsStore } from '../../../src/db/sqlite/sentinel-settings-store/SqliteSentinelSettingsStore';
 import { createSentinelServices } from '../../../src/runtime/sentinelServices';
 
@@ -31,6 +32,8 @@ function composeOver(db: ReturnType<typeof createSqliteDb>): SentinelServices {
     audit: new SentinelAuditStore(db),
     settings: new SqliteSentinelSettingsStore(db),
     approvalTokens: new SqliteApprovalTokenStore(db),
+    toolGrants: new SqliteMcpToolGrantStore(db),
+    outboundSecrets: () => Promise.resolve([]),
   });
 }
 
@@ -53,16 +56,20 @@ describe('createSentinelServices', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  it('uses the given approval token store instead of the in-memory default', async () => {
+  it('uses the given approval token and tool grant stores instead of the in-memory defaults', async () => {
     const approvalTokens = new InMemoryApprovalTokenStore();
     const db = createSqliteDb(databaseFile);
+    const toolGrants = new SqliteMcpToolGrantStore(db);
     try {
       const services = createSentinelServices({
         audit: new SentinelAuditStore(db),
         settings: new SqliteSentinelSettingsStore(db),
         approvalTokens,
+        toolGrants,
+        outboundSecrets: () => Promise.resolve([]),
       });
       expect(services.token_store).toBe(approvalTokens);
+      expect(services.tool_grants).toBe(toolGrants);
     } finally {
       await db.destroy();
     }

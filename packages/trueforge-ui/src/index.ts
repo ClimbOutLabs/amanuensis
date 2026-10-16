@@ -268,6 +268,8 @@ export {
 export type { PersonalizationApi, PersonalizationProfile } from './components/PersonalizationContext.js';
 export { PersonalizationPanel } from './components/PersonalizationPanel.js';
 export type { PersonalizationPanelProps } from './components/PersonalizationPanel.js';
+export { RunCodeStatusProvider, useOptionalRunCodeStatus } from './components/RunCodeStatusContext.js';
+export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatusContext.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
 export type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from './components/VoiceInputContext.js';
 export { AgentStepsContainer } from './containers/AgentStepsContainer.js';
@@ -618,7 +620,7 @@ export type { SessionTurnView } from './utils/sessionTurnViews.js';
 
 // Utils
 export { computeAgentStepsSplit } from './utils/computeAgentStepsSplit.js';
-export type { AgentStepPart, AgentStepsSplitResult } from './utils/computeAgentStepsSplit.js';
+export type { AgentStepPart, AgentStepsRun, AgentStepsSplitResult } from './utils/computeAgentStepsSplit.js';
 export { findSubAgentAncestorsForApproval } from './utils/findApprovalAncestors.js';
 export { getErrorMessage } from './utils/getErrorMessage.js';
 
