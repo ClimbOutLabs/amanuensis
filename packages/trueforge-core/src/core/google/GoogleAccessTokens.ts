@@ -35,6 +35,11 @@ export class GoogleAccessTokens {
     this.#fetchImpl = input.fetchImpl ?? fetch;
   }
 
+  /** Forgets the cached token, so the next call refreshes. */
+  invalidate(): void {
+    this.#cached = null;
+  }
+
   async get(): Promise<GoogleAccess> {
     if (this.#cached !== null && this.#cached.expires_at_ms > this.#now()) {
       return this.#cached.access;
