@@ -6,12 +6,20 @@ const FsWriteBody = z.object({ path: z.string(), content_base64: z.string() });
 const FsReadBody = z.object({ path: z.string() });
 const ExecBody = z.object({ argv: z.array(z.string()) });
 
-function execReply(output: string): ReturnType<FakeHandler> {
+/** What a stand-in shell answers: the output, or the output of a command that failed. */
+export type ShellAnswer = string | { exitCode: number; output: string };
+
+function execReply(answer: ShellAnswer): ReturnType<FakeHandler> {
+  const { exitCode, output } = typeof answer === 'string' ? { exitCode: 0, output: answer } : answer;
   return {
     status: 200,
-    body: { exit_code: 0, output, terminated_by: 'completed', internal_error: '', duration_ms: 1 },
+    body: { exit_code: exitCode, output, terminated_by: 'completed', internal_error: '', duration_ms: 1 },
   };
 }
+
+/** The slot agent reads at most this much from an ordinary file; only the transfer directory may hold more. */
+const AGENT_READ_CAP_BYTES = 10 * 1024 * 1024;
+const TRANSFER_DIR = '/workspace/.aman/transfer/';
 
 /**
  * A slot agent stand-in with an in-memory workspace: `fs_write` and `fs_read` keep bytes by path, and the few
@@ -20,13 +28,13 @@ function execReply(output: string): ReturnType<FakeHandler> {
  */
 export function fakeWorkspaceAgent(
   pdfPages: readonly string[],
-  answerShell: (command: string) => string | undefined = () => undefined,
+  answerShell: (command: string) => ShellAnswer | undefined = () => undefined,
   /** Makes every read return other bytes than were written. */
   corruptReads = false,
 ): { agent: FakeAgent; files: Map<string, Buffer> } {
   const files = new Map<string, Buffer>();
 
-  function runShell(command: string): string {
+  function runShell(command: string): ShellAnswer {
     const answered = answerShell(command);
     if (answered !== undefined) {
       return answered;
@@ -64,7 +72,14 @@ export function fakeWorkspaceAgent(
       return { status: 204, body: undefined };
     }
     if (request.path === '/v1/fs_read') {
-      const stored = files.get(FsReadBody.parse(request.body).path);
+      const readPath = FsReadBody.parse(request.body).path;
+      const stored = files.get(readPath);
+      if (stored !== undefined && stored.length > AGENT_READ_CAP_BYTES && !readPath.startsWith(TRANSFER_DIR)) {
+        return {
+          status: 400,
+          body: { error: { code: 'invalid_request', message: 'tree: file is larger than the read cap' } },
+        };
+      }
       return stored === undefined
         ? { status: 404, body: { error: { code: 'not_found', message: 'no such file' } } }
         : {

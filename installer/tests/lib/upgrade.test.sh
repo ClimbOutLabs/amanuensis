@@ -31,6 +31,7 @@ test_check_reports_without_changing() {
   run_install upgrade --check
   assert_rc 0
   assert_contains "$OUT" "speech  aman-stt:"
+  assert_contains "$OUT" "sandbox PDF and image reading (rebuilds the sandbox image)"
   assert_eq "$(log_count "docker build")" "$builds"
   assert_eq "$(app_tag "$AMAN_HOME/release/release.json")" "$old"
   assert_no_path "$AMAN_HOME/backups"

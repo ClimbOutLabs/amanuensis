@@ -91,10 +91,13 @@ describe('attachments', () => {
     expect(asked[0]?.socketPaths[0]).toBe('/run/aman-slots/1/agent.sock');
     // The probe runs with the instance's real quota and OCR languages.
     expect(asked[0]?.treeDiskMb).toBe(4096);
-    expect(asked[0]?.ocrLanguages).toEqual(['eng', 'deu']);
+    // The configured language, plus every language a page may be read with and script detection.
+    expect(asked[0]?.ocrLanguages).toEqual(
+      expect.arrayContaining(['deu', 'eng', 'hin', 'mar', 'ara', 'chi_sim', 'jpn', 'kor', 'rus', 'osd']),
+    );
   });
 
-  it('uses the default quota and OCR languages when the instance sets none', async () => {
+  it('uses the default quota and the Latin default languages, plus the other scripts, when the instance sets none', async () => {
     let seen: { treeDiskMb: number; ocrLanguages: string[] } | undefined;
     const deps = fakeDeps({
       env: SLOT_ENV,
@@ -104,7 +107,10 @@ describe('attachments', () => {
       },
     });
     await checkAttachments({ deps, timeoutMs: 1000 });
-    expect(seen).toEqual({ treeDiskMb: 2048, ocrLanguages: ['eng', 'hin', 'mar'] });
+    expect(seen?.treeDiskMb).toBe(2048);
+    expect(seen?.ocrLanguages).toEqual(
+      expect.arrayContaining(['eng', 'por', 'spa', 'fra', 'deu', 'ita', 'nld', 'osd']),
+    );
   });
 
   it.each([

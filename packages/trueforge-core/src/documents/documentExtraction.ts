@@ -33,8 +33,6 @@ export const MAX_TOTAL_DOCUMENT_PAGES = 300;
 export const MAX_CHARS_PER_DOCUMENT = 200_000;
 /** Scanned pages read per call; a long scan continues from the page the result names, so one call cannot hold a sandbox for minutes. */
 export const MAX_OCR_PAGES_PER_CALL = 20;
-/** Languages Tesseract reads when none are configured; the sandbox image ships exactly these. */
-export const DEFAULT_OCR_LANGUAGES = 'eng hin mar';
 export const MAX_TOTAL_DOCUMENT_CHARS = 1_000_000;
 
 export type DocumentExtractionMode = 'text' | 'ocr' | 'mixed';
@@ -122,7 +120,7 @@ function linesFromText(text: string): DocumentTextLine[] {
 function issueMessage(error: unknown, filename: string): string {
   const detail = error instanceof Error ? error.message : String(error);
   if (/not found|enoent|cannot find/i.test(detail)) {
-    return `No extractable text in ${filename}; local OCR requires pinned pdftoppm and tesseract in the sandbox image.`;
+    return `No extractable text in ${filename}; local OCR requires pdftoppm and tesseract in the sandbox image.`;
   }
   return `Could not extract ${filename}: ${detail}`;
 }

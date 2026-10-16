@@ -1,7 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { SLOT_AGENT_VERSION, SLOT_PLATFORM, SLOT_RUNSC_VERSION } from '../../../../src/core/sandbox/slots/slotContract';
-import { DEFAULT_OCR_LANGUAGES } from '../../../../src/documents/documentExtraction';
+import {
+  DEFAULT_OCR_LANGUAGES,
+  requiredOcrLanguages,
+  tesseractPackageFor,
+} from '../../../../src/documents/ocrLanguages';
 
 const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..', '..');
 
@@ -23,15 +27,18 @@ describe('the slot image and the server agree on what is deployed', () => {
     expect(SLOT_RUNSC_VERSION).toBe(`runsc version release-${release}`);
   });
 
-  test('the guest image has the tools the document pipeline runs inside the sandbox', () => {
+  test('the guest image has the tools and language data the document pipeline needs', () => {
     const dockerfile = read('ops/sandbox-slot/Dockerfile');
-    const installed = captured(dockerfile, /apt-get install -y --no-install-recommends (poppler-utils[^\\\n]*)/).split(
-      /\s+/,
+    const block = captured(
+      dockerfile,
+      /(apt-get install -y --no-install-recommends poppler-utils[\s\S]*?)&& apt-get clean/,
     );
-    // pdfinfo, pdftotext and pdftoppm come from poppler-utils; OCR needs tesseract and its language data.
-    expect(installed).toEqual(expect.arrayContaining(['poppler-utils', 'tesseract-ocr']));
-    for (const language of DEFAULT_OCR_LANGUAGES.split(' ')) {
-      expect(installed).toContain(`tesseract-ocr-${language}`);
+    const installed = block.replace(/\\\n/g, ' ').split(/\s+/);
+    // pdfinfo, pdftotext and pdftoppm come from poppler-utils; poppler-data maps CJK character codes to text.
+    expect(installed).toEqual(expect.arrayContaining(['poppler-utils', 'poppler-data', 'tesseract-ocr']));
+    // Every language the server may select, and script detection, has its data package in the image.
+    for (const language of requiredOcrLanguages(DEFAULT_OCR_LANGUAGES)) {
+      expect(installed).toContain(tesseractPackageFor(language));
     }
   });
 

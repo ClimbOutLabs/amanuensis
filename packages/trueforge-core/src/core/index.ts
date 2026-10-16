@@ -36,7 +36,6 @@ export { isAgentInputUserMessage, isEmptyMessageContent, isFileContentPart } fro
 export type { AgentInputUserMessage } from './runtime/UserInputMessage';
 
 // Deterministic local document extraction/report capability.
-export { DEFAULT_OCR_LANGUAGES } from '../documents/documentExtraction';
 export type {
   DocumentExtraction,
   DocumentExtractionMode,
@@ -48,6 +47,7 @@ export type {
 } from '../documents/documentExtraction';
 export type { StructuredDocumentReport } from '../documents/documentRenderer';
 export type { NetWorthObservationInput, NetWorthReport } from '../documents/netWorthReport';
+export { DEFAULT_OCR_LANGUAGES, requiredOcrLanguages } from '../documents/ocrLanguages';
 export {
   CREATE_DOCUMENT_REPORT_TOOL_NAME,
   DOCUMENTS_SERVER_ID,

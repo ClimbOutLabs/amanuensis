@@ -65,11 +65,16 @@ RUN pip install --no-cache-dir --break-system-packages --no-deps --require-hashe
  && rm -rf /tmp/* /root/.npm /root/.cache
 
 # The document pipeline reads attachments inside the guest with pdfinfo, pdftotext and pdftoppm (poppler-utils)
-# and tesseract. Tesseract needs one data package per configured OCR language (English, Hindi and Marathi by
-# default); without them a PDF or image cannot be read on the slots. Its own layer, so changing it does not
-# rebuild the Python and npm layers above.
+# and tesseract. poppler-data carries the character maps that PDFs in Japanese, Chinese and Korean need to give
+# back text. Tesseract needs one data package per language it reads, and osd to tell a page's script so each page
+# is read with that script's languages: English, Portuguese, Spanish, French, German, Italian, Dutch, Hindi,
+# Marathi, Arabic, Russian, Chinese (simplified and traditional), Japanese and Korean. Its own layer, so changing
+# it does not rebuild the Python and npm layers above.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-hin tesseract-ocr-mar \
+ && apt-get install -y --no-install-recommends poppler-utils poppler-data tesseract-ocr tesseract-ocr-osd \
+      tesseract-ocr-eng tesseract-ocr-por tesseract-ocr-spa tesseract-ocr-fra tesseract-ocr-deu tesseract-ocr-ita \
+      tesseract-ocr-nld tesseract-ocr-hin tesseract-ocr-mar tesseract-ocr-ara tesseract-ocr-rus \
+      tesseract-ocr-chi-sim tesseract-ocr-chi-tra tesseract-ocr-jpn tesseract-ocr-kor \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/info /usr/share/locale /var/cache/* /var/log/*
 

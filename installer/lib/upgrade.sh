@@ -46,6 +46,15 @@ upgrade_on_exit() {
   fi
 }
 
+# Whether any instance runs in the sandbox, whose image an upgrade rebuilds.
+upgrade_any_sandbox() {
+  local name
+  for name in $(reg_names); do
+    if instance_sandbox_wanted "$name"; then return 0; fi
+  done
+  return 1
+}
+
 cmd_upgrade() {
   local name
   require_installed
@@ -78,6 +87,7 @@ cmd_upgrade() {
   [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] || say "  app     $CUR_APP_TAG -> $REL_APP_TAG"
   [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] || say "  speech  $CUR_STT_TAG -> $REL_STT_TAG"
   [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ] || say "  login   $CUR_DEX_IMAGE -> $REL_DEX_IMAGE"
+  if upgrade_any_sandbox; then say "  sandbox PDF and image reading (rebuilds the sandbox image)"; fi
   if [ "$OPT_CHECK" = 1 ]; then
     return 0
   fi

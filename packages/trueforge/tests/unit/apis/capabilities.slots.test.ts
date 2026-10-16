@@ -21,9 +21,10 @@ import { slotSandboxBuildStatus } from '../../../src/sandbox/slotBackend';
 
 const mockSlotStatus = slotSandboxBuildStatus as jest.Mock;
 
-const CapabilitiesBody = z.object({ data: z.object({ sandbox: z.object({ enabled: z.boolean() }) }) });
+const CapabilitiesBodySchema = z.object({ data: z.object({ sandbox: z.object({ enabled: z.boolean() }) }) });
+type CapabilitiesBody = z.infer<typeof CapabilitiesBodySchema>;
 
-async function capabilities(): Promise<z.infer<typeof CapabilitiesBody>['data']> {
+async function capabilities(): Promise<CapabilitiesBody['data']> {
   disableOidcAuth();
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -40,7 +41,7 @@ async function capabilities(): Promise<z.infer<typeof CapabilitiesBody>['data']>
       resolveRequestContext,
     }),
   );
-  return CapabilitiesBody.parse(await (await shell.request('/')).json()).data;
+  return CapabilitiesBodySchema.parse(await (await shell.request('/')).json()).data;
 }
 
 // New chats and agents start with the sandbox on exactly when this flag is on (the UI seeds its default spec from it).

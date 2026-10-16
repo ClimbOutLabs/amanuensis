@@ -18,7 +18,7 @@ test_dry_run_plans_the_sandbox() {
   assert_contains "$OUT" "install the AppArmor profile as /etc/apparmor.d/aman-sandbox-slot and load it (it loads again at every boot)"
   assert_contains "$OUT" "4 slot disk files of 16 GB under /var/lib/aman-slots"
   assert_contains "$OUT" "--sandbox-root"
-  assert_contains "$OUT" "Run code (Python, shell, files) runs in the gVisor sandbox"
+  assert_contains "$OUT" "Run code (Python, shell, files) runs in the sandbox"
   assert_contains "$OUT" "Sandbox slot image: base images, Ubuntu packages"
   assert_log_lacks "aman-sandbox.mjs"
   assert_log_lacks "docker build"
@@ -237,8 +237,7 @@ test_install_builds_then_starts_slots_then_the_instance() {
   if [ "$build" -lt "$slots" ] && [ "$slots" -lt "$up" ]; then t_pass; else t_fail "order: image build $build, slots $slots, instance $up"; fi
   assert_contains "$OUT" "Sandbox check for instance main:"
   assert_log_has "doctor sandbox --instance main"
-  assert_contains "$OUT" "Run code: on, in the gVisor sandbox"
-  assert_contains "$OUT" "Reading attachments (PDFs and images): on, in the same sandbox"
+  assert_contains "$OUT" "Run code and reading attachments (PDFs and images) use the sandbox"
   assert_contains "$OUT" "aman doctor sandbox --fix"
   assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" slots
   sandbox_drop
@@ -372,6 +371,22 @@ test_healthy_slots_need_no_root() {
   install_machine
   assert_contains "$OUT" "Sandbox slots of instance main are already healthy"
   assert_log_lacks "--fix"
+  sandbox_drop
+}
+
+test_rerun_restarts_healthy_slots_when_the_image_changed() {
+  t_begin "a plain re-run starts running slots again when the slot image was rebuilt, and leaves them alone when it was not"
+  sandbox_new
+  install_machine
+  run_install --yes
+  assert_rc 0
+  assert_not_contains "$OUT" "Starting the 4 sandbox slots"
+  printf 'rebuilt\n' >"$SB_STATE/image_id"
+  run_install --yes
+  assert_rc 0
+  assert_contains "$OUT" "Starting the 4 sandbox slots of instance main"
+  run_install --yes
+  assert_not_contains "$OUT" "Starting the 4 sandbox slots"
   sandbox_drop
 }
 
@@ -589,6 +604,7 @@ test_root_steps_with_the_flag
 test_root_steps_answered_yes_on_a_terminal
 test_root_steps_declined_on_a_terminal
 test_healthy_slots_need_no_root
+test_rerun_restarts_healthy_slots_when_the_image_changed
 test_slot_image_failure_stops_before_anything_runs
 test_image_without_the_setup_is_explained
 test_failed_verification_fails_the_install_with_the_repair

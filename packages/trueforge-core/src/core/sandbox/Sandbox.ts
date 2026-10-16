@@ -7,6 +7,7 @@ import {
   MAX_CHARS_PER_DOCUMENT,
   MAX_PAGES_PER_DOCUMENT,
 } from '../../documents/documentExtraction';
+import { ocrLanguageSelectionScript } from '../../documents/ocrLanguages';
 import {
   ImplementationPlanAdmissionBlockedError,
   StructuredEditPreconditionBlockedError,
@@ -5852,7 +5853,6 @@ export class Sandbox extends LocalToolMCP {
     const { sandboxId, canonicalFilePath } = await this.canonicalStagedFilePath(input.filePath, {
       allowSnapshots: true,
     });
-    const tesseractLangFlags = this.ocrLanguages ? ` -l ${this.ocrLanguages.split(/\s+/).join('+')}` : '';
     const requestedPages =
       input.kind === 'image'
         ? [1]
@@ -5873,7 +5873,7 @@ export class Sandbox extends LocalToolMCP {
           kind: input.kind,
           pageNumber,
           remainingChars: remaining,
-          tesseractLangFlags,
+          fallbackLanguages: this.ocrLanguages,
           signal: input.signal,
         });
         pages.push({ page_number: pageNumber, text });
@@ -5899,7 +5899,7 @@ export class Sandbox extends LocalToolMCP {
     kind: 'pdf' | 'image';
     pageNumber: number;
     remainingChars: number;
-    tesseractLangFlags: string;
+    fallbackLanguages: string;
     signal: AbortSignal | undefined;
   }): Promise<string> {
     const operationId = randomUUID().replace(/-/g, '');
@@ -5910,7 +5910,8 @@ export class Sandbox extends LocalToolMCP {
     // One OCR thread: OpenMP otherwise starts a thread per core and a single page can starve the whole slot.
     const prelude = `trap ${shellEscape(cleanup)} EXIT; set -eu; ulimit -v 2097152; export OMP_THREAD_LIMIT=1;`;
     const imageInput = input.kind === 'pdf' ? '"$page_prefix.png"' : shellEscape(input.canonicalFilePath);
-    const read = `raw_text_file=${shellEscape(`${outputPrefix}.ocr.txt`)}; text_file=${shellEscape(`${outputPrefix}.txt`)}; tesseract ${imageInput} stdout${input.tesseractLangFlags} --psm 6 > "$raw_text_file"; head -c ${String(input.remainingChars)} < "$raw_text_file" > "$text_file"; printf '%s%s\\n' ${shellEscape(`${marker}:`)} ${shellEscape(String(input.pageNumber))}; cat "$text_file"`;
+    const languages = ocrLanguageSelectionScript({ imagePath: imageInput, fallback: input.fallbackLanguages });
+    const read = `${languages}; raw_text_file=${shellEscape(`${outputPrefix}.ocr.txt`)}; text_file=${shellEscape(`${outputPrefix}.txt`)}; tesseract ${imageInput} stdout -l "$ocr_languages" --psm 6 > "$raw_text_file"; head -c ${String(input.remainingChars)} < "$raw_text_file" > "$text_file"; printf '%s%s\\n' ${shellEscape(`${marker}:`)} ${shellEscape(String(input.pageNumber))}; cat "$text_file"`;
     const command =
       input.kind === 'pdf'
         ? `${prelude} page_prefix=${shellEscape(outputPrefix)}; pdftoppm -f ${shellEscape(String(input.pageNumber))} -l ${shellEscape(String(input.pageNumber))} -png -r 150 -scale-to 4096 -singlefile ${shellEscape(input.canonicalFilePath)} "$page_prefix"; ${read}`

@@ -8,11 +8,26 @@ import { InvalidFileInputError } from '../errors';
 import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
 
 const MAX_FILENAME_BYTES = 180;
-/** Controls (C0, DEL, C1), line and paragraph separators, bidi marks and overrides, and angle brackets: none belong in a name the model or a person reads. */
-const UNSAFE_NAME_CHARACTERS =
-  /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069<>]/gu;
 const MAX_EXTENSION_BYTES = 16;
 const FALLBACK_FILENAME = 'attachment';
+
+/** Controls (C0, DEL, C1), line and paragraph separators, bidi marks and overrides, and angle brackets: none belong in a name the model or a person reads. */
+function isUnsafeNameCharacter(character: string): boolean {
+  const code = character.codePointAt(0) ?? 0;
+  return (
+    code <= 0x1f ||
+    (code >= 0x7f && code <= 0x9f) ||
+    code === 0x61c ||
+    code === 0x200e ||
+    code === 0x200f ||
+    code === 0x2028 ||
+    code === 0x2029 ||
+    (code >= 0x202a && code <= 0x202e) ||
+    (code >= 0x2066 && code <= 0x2069) ||
+    character === '<' ||
+    character === '>'
+  );
+}
 
 function containsControlCharacter(value: string): boolean {
   for (const character of value) {
@@ -60,7 +75,7 @@ function truncateToBytes(value: string, maxBytes: number): string {
  */
 function sanitizeAttachmentName(raw: string): string {
   const lastSegment = raw.split(/[/\\]/).pop() ?? '';
-  const cleaned = lastSegment.replace(UNSAFE_NAME_CHARACTERS, '_');
+  const cleaned = Array.from(lastSegment, character => (isUnsafeNameCharacter(character) ? '_' : character)).join('');
   if (cleaned.trim() === '' || /^\.+$/.test(cleaned)) {
     return FALLBACK_FILENAME;
   }

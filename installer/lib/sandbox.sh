@@ -207,10 +207,11 @@ plan_sandbox() {
     plan_add todo "Download Node.js v$(json_get "$PINS_FILE" node_version) ($(sandbox_node_platform)) from nodejs.org, checked against a pinned SHA-256, into $AMAN_HOME/runtime/node (it only runs the sandbox setup; the host needs no Node.js)"
     dl_add node-runtime
   fi
-  plan_image "$SLOT_IMAGE" "Build the sandbox slot image $SLOT_IMAGE from ops/sandbox-slot (gVisor guest, Ubuntu packages)" slot-image
+  plan_image "$SLOT_IMAGE" "Build the sandbox slot image $SLOT_IMAGE from ops/sandbox-slot (Ubuntu packages, PDF and OCR tools)" slot-image
   for name in $(reg_names); do
     instance_sandbox_wanted "$name" || continue
-    if docker_available_for_probes && sandbox_slots_running "$name" && instance_sandbox_wired "$name"; then
+    if docker_available_for_probes && sandbox_slots_running "$name" && instance_sandbox_wired "$name" &&
+      sandbox_slots_use_current_image "$name"; then
       plan_add have "Sandbox slots of instance $name are running"
     else
       pending=1
@@ -286,6 +287,24 @@ sandbox_print_root_steps() {
   say "    (creates $SLOT_COUNT sparse disk files, adds $SLOT_COUNT lines to /etc/fstab, mounts them; each only if missing)"
 }
 
+# The id Docker has for the slot image now; changes only when a rebuild changed the image.
+sandbox_image_id() {
+  D image inspect --format '{{.Id}}' "$SLOT_IMAGE" 2>/dev/null | head -n 1 || true
+}
+
+# Whether every running slot of an instance was started from the slot image as it is now. True when that cannot be told.
+sandbox_slots_use_current_image() {
+  local name=$1 current running id
+  current=$(sandbox_image_id)
+  [ -n "$current" ] || return 0
+  running=$(D ps -q --filter "label=com.docker.compose.project=$name-slots" 2>/dev/null || true)
+  [ -n "$running" ] || return 0
+  # shellcheck disable=SC2086 # one argument per container id
+  for id in $(D inspect --format '{{.Image}}' $running 2>/dev/null); do
+    [ "$id" = "$current" ] || return 1
+  done
+}
+
 # Brings up the slots of one instance, with a root step only after a yes. Runs before the instance starts, because
 # the app mounts the slots' control volumes. "refresh" starts them even when healthy, so a rebuilt image replaces
 # the running slots (an upgrade).
@@ -295,7 +314,9 @@ sandbox_ensure() {
   [ -f "$(sandbox_bundle)" ] || sandbox_install_bundle
   out=$(sandbox_run --check --json --instance "$name" 2>/dev/null || true)
   if printf '%s' "$out" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
-    if [ "$refresh" != refresh ]; then
+    # Healthy slots still run the image they started with, so a rebuilt image (new tools, new languages)
+    # needs them started again; a run that built nothing new leaves them alone.
+    if [ "$refresh" != refresh ] && sandbox_slots_use_current_image "$name"; then
       say "Sandbox slots of instance $name are already healthy"
       return 0
     fi

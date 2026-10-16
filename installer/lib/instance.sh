@@ -361,8 +361,7 @@ print_instance_summary() {
   fi
   print_model_hint "$name"
   if instance_sandbox_wanted "$name"; then
-    say "  Run code: on, in the gVisor sandbox (Settings > Sandbox shows its status). Repair: $(sandbox_repair_command)"
-    say "  Reading attachments (PDFs and images): on, in the same sandbox."
+    say "  Run code and reading attachments (PDFs and images) use the sandbox; Settings > Sandbox shows its status. Repair: $(sandbox_repair_command)"
   else
     say "  Run code and reading attachments are off (installed with --no-sandbox)."
   fi

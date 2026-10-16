@@ -1,6 +1,7 @@
 import {
   DEFAULT_OCR_LANGUAGES,
   DEFAULT_SESSION_DISK_MB,
+  requiredOcrLanguages,
   SLOT_FIX_COMMAND,
   slotSocketPathsIn,
 } from '@truefoundry/trueforge-core/core';
@@ -90,13 +91,15 @@ export async function checkAttachments({ deps, timeoutMs }: { deps: DoctorDeps; 
   if (!settings.ok) {
     return settings.check;
   }
-  const configuredLanguages = deps.env['DOCUMENT_OCR_LANGUAGES']?.trim() || DEFAULT_OCR_LANGUAGES;
+  const configured = deps.env['DOCUMENT_OCR_LANGUAGES']?.trim();
+  const configuredLanguages = configured === undefined || configured === '' ? DEFAULT_OCR_LANGUAGES : configured;
   try {
     const probe = await deps.slotsAttachments({
       socketPaths: settings.socketPaths,
       timeoutMs,
       treeDiskMb: sessionDiskMb(deps),
-      ocrLanguages: configuredLanguages.split(/\s+/),
+      // Every language a page may be read with: the configured ones, each script's, and script detection.
+      ocrLanguages: requiredOcrLanguages(configuredLanguages),
     });
     if (probe.state === 'ready') {
       return okCheck({

@@ -176,7 +176,7 @@ print_plan() {
   fi
   say ""
   if sandbox_needed; then
-    say "Run code (Python, shell, files) runs in the gVisor sandbox, and so does reading attachments (PDFs and images)."
+    say "Run code (Python, shell, files) runs in the sandbox, and so does reading attachments (PDFs and images)."
   else
     say "Run code and reading attachments stay off (no sandbox)."
   fi
@@ -367,7 +367,8 @@ install_execute() {
   release_write
   machine_up "$REL_STT_TAG"
   for name in $(reg_names); do
-    if [ "$(instance_state "$name")" != running ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; }; then
+    if [ "$(instance_state "$name")" != running ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; } ||
+      { instance_sandbox_wanted "$name" && ! sandbox_slots_use_current_image "$name"; }; then
       if instance_sandbox_wanted "$name"; then sandbox_ensure "$name"; fi
       instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
       instance_up "$name" || exit 1

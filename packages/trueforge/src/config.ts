@@ -1377,8 +1377,9 @@ export interface SharedServerConfiguration {
    */
   PROFILE_LEARNING_MIN_INTERVAL_MS: number;
   /**
-   * Space-separated Tesseract language codes for OCR operations.
-   * Default `eng hin mar` (English, Hindi, Marathi), which the shipped slot sandbox image carries; joined with + for tesseract -l. Env: `DOCUMENT_OCR_LANGUAGES`.
+   * Space-separated Tesseract language codes OCR falls back to when a page's script cannot be detected; a page
+   * whose script is detected is read with that script's languages instead. Languages the sandbox image lacks are
+   * ignored. Default: English, Portuguese, Spanish, French, German, Italian and Dutch. Env: `DOCUMENT_OCR_LANGUAGES`.
    */
   DOCUMENT_OCR_LANGUAGES: string;
   /**
