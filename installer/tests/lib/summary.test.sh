@@ -27,6 +27,43 @@ Checking the result (6 of 6)
 ------------------------------------------------------------------------
 Ready. Instance main is running.
 
+  + Open      https://192.168.1.20:8443
+              https://spark.local:8443
+              https://spark:8443
+              http://127.0.0.1:8791
+              http://localhost:8791
+  + Sign in   owner@example.invalid
+  > Model     not set: add one in Settings > Models
+  + Run code  on, in a sandbox
+  + Data      saved in Docker
+  + Backups   daily, keeps the last 7
+  Trust this computer on each device: http://192.168.1.20:8791/trust
+  On an iPhone, open it in Safari, install the profile, then turn it on
+  in Settings, General, About, Certificate Trust Settings.
+  Bookmark spark.local: it keeps working when this computer's address
+  changes.
+  Open a new terminal window to use the aman command.
+  Update later: aman upgrade
+------------------------------------------------------------------------
+SNAP
+)"
+  sandbox_drop
+}
+
+test_fresh_install_without_a_model_over_plain_http() {
+  t_begin "the ending with --tls off, over plain http: the table with the nearest addresses first, the model as a next step, the daily backup and the update line"
+  sandbox_new
+  fixture_network 192.168.1.20
+  fixture_hostname spark
+  INSTALL_EXTRA=(--tls off)
+  install_machine
+  assert_eq "$(ending)" "$(cat <<'SNAP'
+Checking the result (6 of 6)
+  + All 16 checks passed
+
+------------------------------------------------------------------------
+Ready. Instance main is running.
+
   + Open      http://192.168.1.20:8791
               http://spark.local:8791
               http://spark:8791
@@ -115,6 +152,7 @@ SNAP
 }
 
 test_fresh_install_without_a_model
+test_fresh_install_without_a_model_over_plain_http
 test_install_with_token_factory
 test_install_with_a_problem
 tests_finish

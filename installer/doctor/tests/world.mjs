@@ -54,6 +54,7 @@ case "$1" in
   logs) eval "last=\\\${$#}"; key="logs_$last" ;;
   port) key="port_$2" ;;
   exec) shift; while [ "$1" = -e ]; do shift 2; done; key="exec_$1" ;;
+  run) key=pki_info ;;
   image) eval "last=\\\${$#}"; key="image_$(sanitize "$last")" ;;
   images) key=images ;;
   rmi) key=rmi ;;
@@ -278,6 +279,49 @@ export function createWorld({ instances = ['main'] } = {}) {
         })
         .join('\\n');
       world.install('ip', `#!/usr/bin/env bash\nprintf '${lines}\\n'\n`);
+    },
+    /**
+     * An instance served over https: its record, the authority's files and what the certificate script reports about
+     * the root and the certificate. A request to https://127.0.0.1:<port>/healthz is answered with `healthz`.
+     */
+    tls(
+      name,
+      {
+        leafDays = 300,
+        rootDays = 3000,
+        leafNames = ['127.0.0.1', '192.168.1.20', 'localhost'],
+        origins = 'http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443',
+        keyMode = 0o600,
+        healthz = 200,
+        info = undefined,
+      } = {},
+    ) {
+      const dir = path.join(home, 'state', 'instances');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, `${name}.conf`),
+        `name=${name}\napp_port=8791\npublic_url=http://127.0.0.1:8791\norigins=${origins}\nextra_hosts=\ntls=local\ntls_port=8443\n`,
+      );
+      mkdirSync(path.join(home, 'tls', 'ca'), { recursive: true });
+      writeFileSync(path.join(home, 'tls', 'ca', 'root.crt'), 'certificate\n');
+      writeFileSync(path.join(home, 'tls', 'ca', 'root.key'), 'key\n', { mode: keyMode });
+      chmodSync(path.join(home, 'tls', 'ca', 'root.key'), keyMode);
+      const report =
+        info ??
+        JSON.stringify({
+          root_not_after: 'x',
+          root_days_left: rootDays,
+          leaf_not_after: 'x',
+          leaf_days_left: leafDays,
+          leaf_names: leafNames,
+        });
+      world.set('pki_info', { out: `${report}\n`, rc: 0 });
+      world.install('curl', FAKE_CURL);
+      world.curlRoute('https://127.0.0.1:8443/healthz', {
+        status: healthz,
+        rc: healthz === 0 ? 7 : 0,
+        error: 'refused',
+      });
     },
     /** `crontab -l` prints this table; without a call to this, there is no crontab command at all. */
     crontab(text) {

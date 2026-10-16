@@ -1372,6 +1372,89 @@ function runInstalled(args) {
   });
 }
 
+describe('https on the network', () => {
+  const tlsCheck = () => find(world.json().doc.machine, 'tls');
+
+  it('says nothing about an instance that is not served over https', () => {
+    make();
+    world.network('main');
+    assert.equal(tlsCheck(), undefined);
+  });
+
+  it('is ok while the certificate lasts, lists every address, and answers over https', () => {
+    make();
+    world.tls('main');
+    const check = tlsCheck();
+    assert.equal(check.state, 'ok');
+    assert.match(check.detail, /lasts 300 more days/);
+    assert.ok(world.calls().some(line => line.includes('--cacert') && line.includes('https://127.0.0.1:8443/healthz')));
+  });
+
+  it('warns, with the one fix, when the certificate is close to its end', () => {
+    make();
+    world.tls('main', { leafDays: 20 });
+    const check = tlsCheck();
+    assert.equal(check.state, 'warn');
+    assert.match(check.detail, /ends in 20 days/);
+    assert.equal(check.fix, 'Run aman doctor tls --fix');
+  });
+
+  it('fails when the certificate or the authority has run out', () => {
+    make();
+    world.tls('main', { leafDays: -2 });
+    assert.equal(tlsCheck().state, 'fail');
+    make();
+    world.tls('main', { rootDays: 0 });
+    assert.equal(tlsCheck().state, 'fail');
+  });
+
+  it('warns when the certificate leaves out an address the instance opens at', () => {
+    make();
+    world.tls('main', {
+      origins: 'http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443,https://192.168.1.77:8443',
+    });
+    const check = tlsCheck();
+    assert.equal(check.state, 'warn');
+    assert.match(check.detail, /does not list: 192\.168\.1\.77/);
+  });
+
+  it('fails when the key of the authority can be read by other users', () => {
+    make();
+    world.tls('main', { keyMode: 0o644 });
+    assert.match(tlsCheck().detail, /can be read by other users/);
+    assert.equal(tlsCheck().state, 'fail');
+  });
+
+  it('fails, naming the instance fix, when https does not answer on this computer', () => {
+    make();
+    world.tls('main', { healthz: 0 });
+    const check = tlsCheck();
+    assert.equal(check.state, 'fail');
+    assert.match(check.detail, /does not answer over https/);
+    assert.equal(check.fix, 'Run aman doctor instance --fix');
+  });
+
+  it('--fix renews through the installer and makes the key private again', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.tls('main', { leafDays: 20, keyMode: 0o644 });
+    const result = world.shim(['doctor', 'tls', '--fix', '--yes']);
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} tls`));
+    assert.equal(statSync(path.join(world.home, 'tls', 'ca', 'root.key')).mode & 0o777, 0o600);
+  });
+
+  it('knows the https addresses when it compares them with the addresses of this computer', () => {
+    make();
+    world.tls('main');
+    world.network('main', { origins: 'http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443' });
+    const registry = path.join(world.home, 'state', 'instances', 'main.conf');
+    writeFileSync(registry, `${readFileSync(registry, 'utf8')}tls=local\ntls_port=8443\n`);
+    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
+  });
+});
+
 describe('aman backup and aman upgrade', () => {
   it('run the installer from the recorded checkout, with the state directory and the arguments given', () => {
     make();

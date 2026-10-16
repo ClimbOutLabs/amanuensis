@@ -10,6 +10,8 @@ instance_dir() { printf '%s/%s' "$INSTANCES_DIR" "$1"; }
 remove_instance_dir() {
   local name=$1 dir parent resolved
   valid_name "$name" || die "refusing to remove an instance directory for an invalid name"
+  # The certificate and trust files of the instance go with it; the authority stays, since other instances use it.
+  rm -rf -- "$(tls_leaf_dir "$name")" "$(tls_trust_dir "$name")"
   dir=$(instance_dir "$name")
   if [ ! -e "$dir" ] && [ ! -L "$dir" ]; then
     return 0
@@ -92,7 +94,7 @@ machine_running() {
 
 # Rewrites compose.yaml and dex.yaml from the registry (owner and added users) and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on edge_on login_host members members_on=0 origins redirects app_ports
+  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on edge_on login_host members members_on=0 origins redirects app_ports tls_on=0 tls_port address
   dir=$(instance_dir "$name")
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
@@ -108,6 +110,19 @@ instance_render() {
   if [ -n "$origins" ]; then
     redirects=$(printf '%s\n' "$origins" | tr ',' '\n' | sed 's|^|      - |; s|$|/api/v1/auth/callback|')
     app_ports=$(network_bind_addresses "$origins" | sed "s|^|      - '|; s|\$|:$app_port:8790'|")
+    if tls_active "$name"; then
+      tls_on=1
+      tls_port=$(reg_get "$name" tls_port)
+      app_ports=''
+      while IFS= read -r address; do
+        if [ "$address" = 127.0.0.1 ]; then
+          app_ports="${app_ports:+$app_ports$'\n'}      - '127.0.0.1:$app_port:8790'"
+        else
+          app_ports="${app_ports:+$app_ports$'\n'}      - '$address:$app_port:$TLS_HTTP_IN'"
+        fi
+        app_ports="$app_ports"$'\n'"      - '$address:$tls_port:$TLS_HTTPS_IN'"
+      done < <(network_bind_addresses "$origins")
+    fi
   fi
   edge_on=0
   login_host=
@@ -119,7 +134,10 @@ instance_render() {
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
     "NAME=$name" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
-    "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" | write_if_changed "$dir/compose.yaml" 644 || true
+    "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
+    "IF_TLS=$tls_on" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
+    "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" | write_if_changed "$dir/compose.yaml" 644 || true
+  if [ "$tls_on" = 1 ]; then tls_prepare "$name" "$app_image"; fi
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
   members=$(dex_members_yaml "$name")
   if [ -n "$members" ]; then members_on=1; fi
@@ -206,6 +224,7 @@ aman_command_current() {
   for lib in $AMAN_COMMAND_LIBS; do
     cmp -s "$INSTALLER_DIR/lib/$lib.sh" "$AMAN_HOME/lib/$lib.sh" || return 1
   done
+  cmp -s "$INSTALLER_DIR/lib/pki.mjs" "$AMAN_HOME/lib/pki.mjs"
 }
 
 # Installs or refreshes the aman command and puts it on the path of new terminals.
@@ -221,6 +240,7 @@ install_doctor_shim() {
   for lib in $AMAN_COMMAND_LIBS; do
     write_if_changed "$AMAN_HOME/lib/$lib.sh" 644 <"$INSTALLER_DIR/lib/$lib.sh" || true
   done
+  write_if_changed "$AMAN_HOME/lib/pki.mjs" 644 <"$INSTALLER_DIR/lib/pki.mjs" || true
   record_source_checkout
   install_path_block
 }
@@ -303,12 +323,18 @@ instance_collect_addresses() {
   [ "$OPT_LOCAL_ONLY" != 1 ] || usage_die "--address and --local-only are opposites; pick one."
 }
 
-# --tls caddy serves the two public origins on 443 under DNS names Let's Encrypt can issue for.
+# --tls caddy serves the two public origins on 443 under DNS names Let's Encrypt can issue for. --tls local (the
+# default on a network) serves https with a certificate from this computer's own authority; --tls off keeps plain http.
 instance_collect_tls() {
   case "$I_TLS" in
     '') return 0 ;;
+    local | off)
+      [ -z "$I_PUBLIC_URL" ] || usage_die "--tls $I_TLS is for an instance opened on your network; with --public-url use --tls caddy."
+      [ "$OPT_LOCAL_ONLY" != 1 ] || usage_die "--local-only keeps Aman on this computer, where plain http is fine; --tls does not apply."
+      return 0
+      ;;
     caddy) ;;
-    *) usage_die "--tls takes caddy" ;;
+    *) usage_die "--tls takes local, off or caddy" ;;
   esac
   [ -n "$I_PUBLIC_URL" ] || usage_die "--tls caddy needs --public-url and --login-url (the two https addresses Caddy will serve)"
   [ -z "$OPT_PUBLIC_IP" ] || valid_ipv4 "$OPT_PUBLIC_IP" || usage_die "--public-ip must be an IPv4 address"
@@ -321,7 +347,7 @@ instance_derive() {
   local reserved_app reserved_login all_reserved
   reserved_app=$(reg_all app_port)
   reserved_login=$(reg_all login_port)
-  all_reserved="$reserved_app $reserved_login"
+  all_reserved="$reserved_app $reserved_login $(reg_all tls_port)"
   if [ -n "${OPT_PORT:-}" ]; then
     check_port_usable "$OPT_PORT" "$all_reserved" "--port"
     I_PORT=$OPT_PORT
@@ -335,14 +361,21 @@ instance_derive() {
     I_LOGIN_PORT=$(pick_port 5556 "$all_reserved $I_PORT") || die "no free port found on this computer for sign-in near 5556"
   fi
   I_ORIGINS=
+  I_TLS_PORT=
   I_PUBLIC_ADDRESSES=
   if [ -z "$I_PUBLIC_URL" ]; then
     # The sign-in service is only ever reached on this computer: other devices go through the app.
     I_PUBLIC_URL="http://127.0.0.1:$I_PORT"
     I_LOGIN_URL="http://127.0.0.1:$I_LOGIN_PORT"
     if [ "$OPT_LOCAL_ONLY" != 1 ]; then
+      I_TLS=${I_TLS:-local}
       # shellcheck disable=SC2086 # OPT_ADDRESSES is a list of checked hosts
-      I_ORIGINS=$(network_origin_list "$I_PORT" $OPT_ADDRESSES)
+      I_ORIGINS=$(network_origin_list "$I_PORT" '' $OPT_ADDRESSES)
+      if [ "$I_TLS" = local ] && origins_reach_the_network "$I_ORIGINS"; then
+        I_TLS_PORT=$(pick_port 8443 "$all_reserved $I_PORT $I_LOGIN_PORT") || die "no free port found on this computer for https near 8443"
+        # shellcheck disable=SC2086
+        I_ORIGINS=$(network_origin_list "$I_PORT" "$I_TLS_PORT" $OPT_ADDRESSES)
+      fi
       I_PUBLIC_ADDRESSES=$(network_public_addresses | tr '\n' ' ')
     fi
   fi
@@ -369,21 +402,35 @@ instance_address_change() { # name; prints open, close or nothing
     if [ -n "$(reg_get "$name" origins)" ] || [ "$recorded" = 0 ]; then printf 'close'; fi
   elif [ "$recorded" = 0 ]; then
     printf 'open'
+  elif [ -n "$(reg_get "$name" origins)" ] && [ "$(tls_target "$name")" != "$(reg_get "$name" tls)" ]; then
+    printf 'refresh'
   fi
 }
 
 # Writes the list of addresses of an instance into its record and its settings: read again from this computer, plus
 # the names given with --address (kept from the first install unless new ones are given). Renders and restarts nothing.
 instance_apply_addresses() { # name open|close|refresh
-  local name=$1 mode=$2 origins='' extras env
+  local name=$1 mode=$2 origins='' extras env tls='' tls_port='' app_port
   env="$(instance_dir "$name")/.env"
+  app_port=$(reg_get "$name" app_port)
   extras=${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)}
   if [ "$mode" != close ]; then
+    tls=$(tls_target "$name")
     # shellcheck disable=SC2086 # the extras are checked hosts without spaces
-    origins=$(network_origin_list "$(reg_get "$name" app_port)" $extras)
+    origins=$(network_origin_list "$app_port" '' $extras)
+    if [ "$tls" = local ] && origins_reach_the_network "$origins"; then
+      tls_port=$(reg_get "$name" tls_port)
+      if [ -z "$tls_port" ]; then
+        tls_port=$(pick_port 8443 "$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port)") || die "no free port found on this computer for https near 8443"
+      fi
+      # shellcheck disable=SC2086
+      origins=$(network_origin_list "$app_port" "$tls_port" $extras)
+    fi
   else
     extras=
   fi
+  reg_set "$name" tls "$tls"
+  reg_set "$name" tls_port "$tls_port"
   reg_set "$name" origins "$origins"
   reg_set "$name" extra_hosts "$extras"
   env_managed_set "$env" ALLOWED_ORIGINS "$origins"
@@ -428,7 +475,7 @@ instance_create() {
   created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   reg_write "$I_NAME" "name=$I_NAME" "app_port=$I_PORT" "login_port=$I_LOGIN_PORT" "public_url=$I_PUBLIC_URL" \
     "login_url=$I_LOGIN_URL" "owner_email=$I_EMAIL" "cookie_suffix=$cookie" "client_id=$client_id" \
-    "healthy=0" "origins=$I_ORIGINS" "extra_hosts=$OPT_ADDRESSES" "sandbox=$I_SANDBOX" "tls=$I_TLS" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
+    "healthy=0" "origins=$I_ORIGINS" "extra_hosts=$OPT_ADDRESSES" "sandbox=$I_SANDBOX" "tls=$I_TLS" "tls_port=$I_TLS_PORT" "token_factory=$I_TF" "tf_model=$I_TF_MODEL" \
     "tf_cap=$I_TF_CAP" "demo=$demo_on" "created=$created"
   instance_render "$I_NAME" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   if docker_volume_exists "aman_${I_NAME}_data"; then
@@ -463,8 +510,8 @@ read_password_first() {
 
 # How an address of the Open row is told apart, so the ones other devices use come first.
 origin_kind() { # origin
-  local host=${1#http://}
-  host=${host%%:*}
+  local host
+  host=$(origin_host "$1")
   case "$host" in
     127.0.0.1 | localhost) echo loopback ;;
     *.ts.net) echo tailscale ;;
@@ -495,7 +542,7 @@ print_instance_summary() {
     if [ "$first" = 1 ]; then ui_check_row ok "Open" "$origin"; else ui_check_more "$origin"; fi
     first=0
     case "$(origin_kind "$origin")" in
-      tailscale | local) if [ -z "$bookmark" ]; then bookmark=${origin#http://}; bookmark=${bookmark%%:*}; fi ;;
+      tailscale | local) if [ -z "$bookmark" ]; then bookmark=$(origin_host "$origin"); fi ;;
     esac
   done < <(origins_display_order "${origins:-$url}")
   ui_check_row ok "Sign in" "$(reg_get "$name" owner_email)"
@@ -519,11 +566,25 @@ print_instance_summary() {
   if edge_wanted "$name"; then
     edge_print_firewall_hint
   elif [ -n "$origins" ]; then
-    ui_line "Sign-in on your home network is not encrypted. Use the Tailscale address to keep it private."
+    if tls_active "$name"; then
+      print_trust_lines "$name"
+    else
+      ui_line "Sign-in on your home network is not encrypted. Use the Tailscale address to keep it private."
+    fi
     if [ -n "$bookmark" ]; then ui_line "Bookmark $bookmark: it keeps working when this computer's address changes."; fi
   elif ! is_loopback_origin "$url"; then
     print_proxy_requirements "$url" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_url)"
   fi
+}
+
+# How a device comes to trust this computer: one short link over plain http, the same link as a code for a phone, and the
+# step an iPhone needs after installing.
+print_trust_lines() { # name
+  local link
+  link=$(tls_trust_link "$1")
+  ui_line "Trust this computer on each device: $link"
+  ui_line "On an iPhone, open it in Safari, install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
+  tls_print_qr "$link"
 }
 
 # The backups row: the daily schedule and how many are kept, or how to turn it on or make one by hand.

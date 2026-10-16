@@ -146,6 +146,12 @@ backup_run() {
     fi
     n=$((n + 1))
   done
+  # The authority's key goes with every backup, so a restored computer keeps the one its devices already trust.
+  if [ -f "$(tls_ca_dir)/root.key" ]; then
+    ensure_private_dir "$dir/tls"
+    cp "$(tls_ca_dir)/root.crt" "$(tls_ca_dir)/root.key" "$dir/tls/"
+    chmod 600 "$dir/tls/root.key"
+  fi
   cp "$RELEASE_DIR/release.json" "$dir/release.json"
   chmod 600 "$dir/release.json"
   write_checksums "$dir"
@@ -167,6 +173,9 @@ cmd_backup() {
   docker_attach
   lock_acquire
   backup_run "${OPT_NAME:-}" || exit 1
+  # The daily job is also what keeps certificates from running out.
+  load_installed_release
+  tls_renew_all "$REL_APP_TAG" || warn "A certificate could not be renewed. Run: aman doctor tls --fix"
 }
 
 # restore_sqlite NAME BACKUPDIR IMAGE: puts the backed-up database back and drops stale WAL files.

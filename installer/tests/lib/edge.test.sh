@@ -499,7 +499,7 @@ test_usage_errors() {
   assert_flat_contains "$ERR" "--tls caddy needs --public-url and --login-url"
   run_install --dry-run --email owner@example.invalid --public-url "$APP_URL" --login-url "$LOGIN_URL" --tls nginx
   assert_rc 2
-  assert_flat_contains "$ERR" "--tls takes caddy"
+  assert_flat_contains "$ERR" "--tls takes local, off or caddy"
   run_install --dry-run --email owner@example.invalid --public-url https://aman.example.com:8443 --login-url "$LOGIN_URL" --tls caddy
   assert_rc 2
   assert_flat_contains "$ERR" "cannot carry a port"

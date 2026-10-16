@@ -203,28 +203,47 @@ address_problem() {
   fi
 }
 
-# The comma-separated origins for PORT: the default hosts plus any extra hosts given, each once, lowercase.
-network_origin_list() {
-  local port=$1 host list='' origin
-  shift
+# The host of an origin: http://spark.local:8791 gives spark.local.
+origin_host() {
+  local host=${1#*://}
+  printf '%s' "${host%%[:/]*}"
+}
+
+# This computer's own names for itself: they open over plain http on the app port even when other devices use https.
+is_loopback_host_name() { case "$1" in 127.0.0.1 | localhost) return 0 ;; *) return 1 ;; esac; }
+
+# The comma-separated origins: the default hosts plus any extra hosts given, each once, lowercase. With a TLS port every
+# host but this computer's own names is an https origin on that port; otherwise all are plain http on the app port.
+network_origin_list() { # app_port tls_port(empty for plain http) extra_host...
+  local port=$1 tls_port=$2 host list='' origin
+  shift 2
   for host in $(network_default_hosts) "$@"; do
-    origin="http://$(lowercase "$host"):$port"
+    host=$(lowercase "$host")
+    if [ -n "$tls_port" ] && ! is_loopback_host_name "$host"; then origin="https://$host:$tls_port"; else origin="http://$host:$port"; fi
     case ",$list," in *",$origin,"*) continue ;; esac
     list=${list:+$list,}$origin
   done
   printf '%s' "$list"
 }
 
-# The addresses to publish the app port on: 127.0.0.1 and each address of this computer that an origin list names,
-# one per line. Never a wildcard, never a public address (the list only holds private ones), and never an address that
-# belongs to another machine (an --address that only names where this one can be reached).
+# True when an origin list has an address or name other devices can open (so a web front end has something to serve).
+origins_reach_the_network() {
+  local origin
+  while IFS= read -r origin; do
+    if ! is_loopback_host_name "$(origin_host "$origin")"; then return 0; fi
+  done < <(printf '%s\n' "$1" | tr ',' '\n')
+  return 1
+}
+
+# The addresses to publish the app on: 127.0.0.1 and each address of this computer that an origin list names, one per
+# line. Never a wildcard, never a public address (the list only holds private ones), and never an address that belongs
+# to another machine (an --address that only names where this one can be reached).
 network_bind_addresses() { # origin list
   local origin host mine seen=' 127.0.0.1 '
   mine=" $(network_ipv4_addresses | tr '\n' ' ')"
   printf '%s\n' 127.0.0.1
   while IFS= read -r origin; do
-    host=${origin#http://}
-    host=${host%%:*}
+    host=$(origin_host "$origin")
     case "$seen" in *" $host "*) continue ;; esac
     case "$mine" in *" $host "*) ;; *) continue ;; esac
     if valid_ipv4 "$host" && private_ipv4 "$host"; then
