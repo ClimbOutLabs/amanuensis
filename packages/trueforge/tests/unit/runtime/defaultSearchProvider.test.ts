@@ -83,9 +83,9 @@ describe('seedDefaultSearchProvider', () => {
     if (connection?.search_provider === undefined) {
       throw new Error('expected the seeded connector to be the search provider');
     }
-    expect(f.catalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools })).toEqual(
-      { tools: ['web_search', 'web_fetch'], plumbing_fields: ['session_id', 'model_name'] },
-    );
+    expect(
+      f.catalog.searchProviderGrant({ url: connection.url, storedTools: connection.search_provider.tools }),
+    ).toEqual({ tools: ['web_search', 'web_fetch'], plumbing_fields: ['session_id', 'model_name'] });
     expect(DEFAULT_SENTINEL_USER_SETTINGS.search_without_asking).toBe(true);
   });
 
@@ -153,14 +153,18 @@ describe('seedDefaultSearchProvider', () => {
   it('adds nothing and keeps no marker when the catalog has no keyless preset, so a later catalog can still offer it', async () => {
     const f = await createFixture();
     const keyed = new McpCatalog(
-      f.catalog.list().map(entry => (entry.name === 'parallel-web' ? { ...entry, auth: { type: 'dcr' as const } } : entry)),
+      f.catalog
+        .list()
+        .map(entry => (entry.name === 'parallel-web' ? { ...entry, auth: { type: 'dcr' as const } } : entry)),
     );
 
     await expect(f.seed({ catalog: keyed })).resolves.toBe('no_preset');
     await expect(f.seed({ catalog: new McpCatalog([]) })).resolves.toBe('no_preset');
 
     expect(await f.names()).toEqual([]);
-    await expect(f.globalSettingsStore.getSetting({ key: DEFAULT_SEARCH_PROVIDER_SEEDED_KEY })).resolves.toBeUndefined();
+    await expect(
+      f.globalSettingsStore.getSetting({ key: DEFAULT_SEARCH_PROVIDER_SEEDED_KEY }),
+    ).resolves.toBeUndefined();
     await expect(f.seed()).resolves.toBe('added');
   });
 });
