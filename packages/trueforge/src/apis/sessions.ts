@@ -47,6 +47,7 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { executorFromTurnId } from '../runtime/peeringIds';
 import { validateAgentSpec } from '../runtime/sessionResources';
+import { removeSlotWorkspace, slotsBackendEnabled } from '../sandbox/slotBackend';
 import { honoQueriesToRecord } from '../schemas/deepObjectQuery';
 import { isSessionAgentNameRef, parseListSessionsQuery, type Session } from '../schemas/session';
 import { newId } from '../utils/id';
@@ -78,6 +79,26 @@ export function toWireSession(record: SessionRecord): Session {
     metadata: record.metadata,
     source: record.source,
   };
+}
+
+/** The sandbox a chat last used, so its stored workspace can be removed with the chat. */
+export async function sandboxIdOfLastTurn(input: {
+  deps: { sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getTurn'>; logger: Pick<Logger, 'warn'> };
+  record: Pick<SessionRecord, 'session_id' | 'last_turn_id'>;
+}): Promise<string | undefined> {
+  if (input.record.last_turn_id === null) {
+    return undefined;
+  }
+  try {
+    const turn = await input.deps.sessionStore.getTurn({
+      session_id: input.record.session_id,
+      turn_id: input.record.last_turn_id,
+    });
+    return turn?.snapshot.sandbox_info?.sandbox_id;
+  } catch (error) {
+    input.deps.logger.warn('Could not look up the sandbox of a chat being deleted', extractErrorLogFields(error));
+    return undefined;
+  }
 }
 
 export interface SessionsRouterDeps {
@@ -457,10 +478,14 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
     }
+    const sandboxId = slotsBackendEnabled() ? await sandboxIdOfLastTurn({ deps, record }) : undefined;
     await deps.sessionStore.deleteSession({
       tenant_id: requestContext.tenant_id,
       session_id: sessionId,
     });
+    if (sandboxId !== undefined) {
+      void removeSlotWorkspace({ sandboxId, logger: deps.logger });
+    }
     return c.body(null, 204);
   };
 

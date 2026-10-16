@@ -3,6 +3,8 @@
 import * as TrueForge from "../index.js";
 
 export interface ConfiguredModelProvider {
+    /** True when the server derives this provider from its environment; it is read-only here. */
+    envManaged?: boolean;
     manifest: TrueForge.ModelProviderManifest;
     name: TrueForge.ResourceName;
 }

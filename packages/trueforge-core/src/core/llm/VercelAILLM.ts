@@ -116,6 +116,8 @@ export interface VercelAILLMConfig {
    * before producing output is retried once on this provider (see `withFailover`).
    */
   fallbackProviderConfig?: VercelAIProviderConfig | undefined;
+  /** Called, before any output, each time a request actually fell over to the fallback provider. */
+  onFallback?: (() => void) | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -1752,7 +1754,7 @@ export class VercelAILLM implements ILLM {
   async *create(
     body: LLMCreateParamsStreaming,
   ): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
-    const { providerConfig, fallbackProviderConfig } = this.config;
+    const { providerConfig, fallbackProviderConfig, onFallback } = this.config;
     const primaryModel = buildLanguageModel(providerConfig);
     const languageModel =
       fallbackProviderConfig !== undefined
@@ -1760,6 +1762,7 @@ export class VercelAILLM implements ILLM {
             primary: primaryModel,
             secondary: buildLanguageModel(fallbackProviderConfig),
             logger: this.logger,
+            onFallback,
           })
         : primaryModel;
     const { provider, model } = providerConfig;

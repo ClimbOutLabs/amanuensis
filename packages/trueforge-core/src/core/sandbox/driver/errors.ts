@@ -13,6 +13,9 @@ export function errorCodeForTermination(input: {
   if (input.terminatedBy === 'oom' || input.oomKilled) {
     return 'memory_exceeded';
   }
+  if (input.terminatedBy === 'disk') {
+    return 'disk_exceeded';
+  }
   if (input.terminatedBy === 'killed') {
     return 'internal';
   }

@@ -1,5 +1,6 @@
 'use client';
 
+import { copyText } from '@/utils/copyText.js';
 import { useState, type ComponentType } from 'react';
 import { Icon } from '../../icons/Icon.js';
 import { useSlot } from '../../theme/SlotsProvider.js';
@@ -105,7 +106,7 @@ export default function AgentOverview({ detail }: AgentOverviewProps) {
                   title={copied ? 'Copied!' : 'Copy'}
                   aria-label={copied ? 'Copied!' : 'Copy'}
                   onClick={() => {
-                    void navigator.clipboard.writeText(instructions).then(() => {
+                    void copyText(instructions).then(() => {
                       setCopied(true);
                       setTimeout(() => setCopied(false), 2000);
                     });

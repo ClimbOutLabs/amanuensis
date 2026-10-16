@@ -12,7 +12,7 @@
  * each tick until the schema is present. The loops call the server over HTTP(S) at
  * `SERVER_URL` (mutual TLS when `TRUEFORGE_MTLS_ENABLED`), so no Redis peering is wired here.
  */
-import configuration from './config';
+import configuration, { isPlaceholderTrueForgeApiKey } from './config';
 import { runController } from './controller';
 import { createDb } from './db/postgres/client';
 import { PostgresScheduleStore } from './db/postgres/schedule-store/PostgresScheduleStore';
@@ -40,6 +40,10 @@ try {
     statementTimeoutMs: configuration.POSTGRES_STATEMENT_TIMEOUT_MS,
     idleInTransactionSessionTimeoutMs: configuration.POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS,
   });
+
+  if (isPlaceholderTrueForgeApiKey(configuration.TRUEFORGE_API_KEY)) {
+    logger.warn('TRUEFORGE_API_KEY is a well-known placeholder; set a real key before any shared deployment');
+  }
 
   logger.info('Controller starting', {
     serverUrl: configuration.SERVER_URL,

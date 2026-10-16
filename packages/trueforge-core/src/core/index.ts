@@ -219,7 +219,7 @@ export type {
   ToolResultRemediation,
 } from './events/schema';
 export { CompletionUsageSchema } from './llm/LLMTypes';
-export type { CompletionUsage } from './llm/LLMTypes';
+export type { CompletionUsage, ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from './llm/LLMTypes';
 export type { ChatCompletionContentPartRefusal, ChatCompletionContentPartText } from './llm/openaiSchemas';
 export type { ToolCallMemoSnapshot } from './mcp/executeToolCalls';
 export { InternalEventType } from './runtime/AgentThread.types';
@@ -290,6 +290,7 @@ export type {
   TurnAttachment,
 } from './sandbox/driver/RunCodeService';
 export { runCodeStatusFromReadiness } from './sandbox/driver/runCodeStatus';
+export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenticatedGit';
 export { DaytonaSandboxProvider } from './sandbox/provider/DaytonaProvider';
 export type { DaytonaSandboxProviderOptions } from './sandbox/provider/DaytonaProvider';
 export { absolutizeRelativeExecEnv } from './sandbox/provider/execEnv';
@@ -352,6 +353,11 @@ export {
 export { SANDBOX_IMAGE_URI } from './sandbox/sandboxImage';
 export { existingSandboxIdForProvider, formatSandboxId, parseSandboxId, rawSandboxId } from './sandbox/sandboxRef';
 export type { SandboxRefParts } from './sandbox/sandboxRef';
+export { GitBridge } from './sandbox/slots/git/gitBridge';
+export { execFileRunner } from './sandbox/slots/git/hostCommand';
+export { slotSocketPathsIn } from './sandbox/slots/slotContract';
+export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';
+export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';
 export type { StructuredEditPathRequest, StructuredEditPathResolution } from './sandbox/structuredEditPaths';
 

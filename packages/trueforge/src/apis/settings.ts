@@ -35,6 +35,8 @@ export interface SettingsRouterDeps<TTransaction> {
   resolveSkillStore: ResolveSkillStore<TTransaction>;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Model providers the environment owns (see `envManagedModelProviderNames`). */
+  envManagedModelProviderNames: ReadonlySet<string>;
   withTransaction: WithTransaction<TTransaction>;
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
@@ -48,6 +50,7 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
       resolveModelProviderStore: deps.resolveModelProviderStore,
       withTransaction: deps.withTransaction,
       resolveRequestContext: deps.resolveRequestContext,
+      envManagedNames: deps.envManagedModelProviderNames,
     }),
   );
   router.route(
@@ -82,7 +85,8 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
   router.route(
     '/run-code',
     createRunCodeRouter({
-      imageConfigured: () => configuration.SANDBOX_IMAGE.trim() !== '',
+      backend: () => configuration.SANDBOX_BACKEND,
+      imageConfigured: () => configuration.SANDBOX_BACKEND === 'slots' || configuration.SANDBOX_IMAGE.trim() !== '',
       ensureReady: signal => getSharedRunCodeService(deps.logger).ensureReady(signal),
     }),
   );

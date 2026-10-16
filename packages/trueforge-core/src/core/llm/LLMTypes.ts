@@ -107,6 +107,12 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       'Canonical params the approval token was minted over, when they differ from the raw arguments (sandbox normalizes structured-edit args before minting). Never model-authored.',
     ),
+  path_resolution: z
+    .enum(['host', 'remote'])
+    .optional()
+    .describe(
+      'How the Sentinel reads this call\'s file paths: the sandbox provider says "remote" when the sandbox filesystem is not the server\'s. Never model-authored.',
+    ),
   is_client_side: z.boolean().optional().describe('Whether the client must supply the tool result.'),
   // Runtime + wire: deviation from origin/main OpenAPI (which omitted this field) is accepted.
   is_thread_creation: z.boolean().optional().describe('Whether this tool call creates a subagent thread.'),
