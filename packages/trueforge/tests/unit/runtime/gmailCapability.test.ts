@@ -1,0 +1,82 @@
+import { createSentinelHostContext } from '@truefoundry/trueforge-core/core';
+import type { GoogleConnectionRecord } from '@truefoundry/trueforge-core/core/google/connection';
+import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
+import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
+import { gmailCapability } from '../../../src/runtime/gmailCapability';
+import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
+
+const OWNER = { tenant_id: 't1', created_by: 'ada' };
+const READ = 'https://www.googleapis.com/auth/gmail.readonly';
+const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
+
+function record(overrides: Partial<GoogleConnectionRecord> = {}): GoogleConnectionRecord {
+  return {
+    ...OWNER,
+    client_id: '123456789-abcdefghij.apps.googleusercontent.com',
+    client_secret: 'secret',
+    client_type: 'desktop',
+    refresh_token: 'rt',
+    granted_scopes: [READ],
+    account_email: 'ada@example.com',
+    status: 'connected',
+    created_at: '2026-10-15T00:00:00.000Z',
+    updated_at: '2026-10-15T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+async function toolNames(capability: Awaited<ReturnType<typeof gmailCapability>>): Promise<string[]> {
+  const sets = capability?.systemToolSets ?? [];
+  const listed = await Promise.all(sets.map(set => set.listTools()));
+  return listed.flatMap(response => ('result' in response ? response.result.tools.map(tool => tool.name) : []));
+}
+
+describe('gmailCapability', () => {
+  let env: SqliteTestDatabase;
+  let store: SqliteGoogleConnectionStore;
+
+  const mount = (owner = OWNER) =>
+    gmailCapability({
+      connections: store,
+      owner,
+      tracing: NOOP_AGENT_TRACING,
+      sentinel: createSentinelHostContext({ ...owner, conversation_id: 'c1' }),
+      attachmentStager: undefined,
+      fetchImpl: () => Promise.reject(new Error('no network in this test')),
+    });
+
+  beforeEach(async () => {
+    env = await createSqliteTestDatabase();
+    store = new SqliteGoogleConnectionStore(env.db);
+  }, 120_000);
+
+  afterEach(async () => {
+    await env.teardown();
+  });
+
+  it('mounts nothing for a user who never connected', async () => {
+    expect(await mount()).toBeUndefined();
+  });
+
+  it('mounts the read tools for a connected user', async () => {
+    await store.save(record());
+    expect(await toolNames(await mount())).toContain('read_email');
+  });
+
+  it('mounts nothing while the login needs reconnecting, so chat stops offering mail', async () => {
+    await store.save(record({ status: 'needs_reconnect' }));
+    expect(await mount()).toBeUndefined();
+  });
+
+  it('mounts nothing when Google did not grant mail access', async () => {
+    await store.save(record({ granted_scopes: ['openid'] }));
+    expect(await mount()).toBeUndefined();
+    await store.save(record({ granted_scopes: [COMPOSE] }));
+    expect(await mount()).toBeUndefined();
+  });
+
+  it('never mounts one user login for another', async () => {
+    await store.save(record());
+    expect(await mount({ ...OWNER, created_by: 'grace' })).toBeUndefined();
+  });
+});
