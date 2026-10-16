@@ -648,7 +648,7 @@ await client.server.getCapabilities();
 <dl>
 <dd>
 
-Streams a zip archive of everything the signed-in user owns here: chats, sessions, personas, spaces, schedules, connectors without credentials, settings, and memory. Stored secrets are removed before writing.
+Streams a zip archive of what the signed-in user owns: chats, sessions, agents, personas, spaces, schedules, connectors without credentials, settings, and memory. Administrators also get instance-wide memory. Stored secrets are removed. The JSON body is required.
 </dd>
 </dl>
 </dd>
@@ -679,7 +679,7 @@ await client.data.exportData();
 <dl>
 <dd>
 
-**request:** `TrueForge.ExportDataDataRequest`
+**request:** `TrueForge.ExportDataRequest`
 
 </dd>
 </dl>
