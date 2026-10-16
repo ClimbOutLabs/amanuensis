@@ -9,6 +9,6 @@ import { listMemoryTurnContext } from '@truefoundry/trueforge-ui/plugins/truefor
  */
 export function createMemoryRecallApi(client: TrueForge): MemoryRecallApi {
   return {
-    listMemoryTurnContext: sessionId => listMemoryTurnContext(client, { sessionId }),
+    listMemoryTurnContext: (sessionId, options) => listMemoryTurnContext(client, { sessionId, ...options }),
   };
 }

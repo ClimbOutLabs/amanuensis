@@ -108,7 +108,14 @@ case "$cmd" in
     shift
     touch "$S/networks" "$S/network_links"
     case "$sub" in
-      inspect) grep -Fxq "$1" "$S/networks"; exit $? ;;
+      inspect)
+        # With a format: the gateway of an instance's own network.
+        case "$*" in
+          *--format*) case "$1" in aman-*_default) echo "172.30.0.1 "; exit 0 ;; esac ;;
+        esac
+        grep -Fxq "$1" "$S/networks"
+        exit $?
+        ;;
       connect)
         # connect [--alias NAME] NETWORK CONTAINER
         [ "$1" = --alias ] && shift 2
@@ -231,6 +238,43 @@ case "$cmd" in
         [ -n "${STUB_NO_BUNDLE:-}" ] && exit 1
         echo "// stub sandbox setup"
         exit 0
+        ;;
+      *"/pki.mjs"*)
+        # The authority script, run for real with the host's Node.js on the folder mounted as /tls.
+        echo "$*" >>"$S/pki_runs"
+        [ -n "${STUB_PKI_FAIL:-}" ] && { echo "certificate failed" >&2; exit 1; }
+        [ -n "${STUB_REAL_NODE:-}" ] || { echo "the test host has no Node.js" >&2; exit 1; }
+        tls_dir=
+        pki=
+        last=
+        prev=
+        for a in "$@"; do
+          if [ "$prev" = -v ]; then
+            case "$a" in
+              *:/tls) tls_dir=${a%:/tls} ;;
+              *:/pki.mjs:ro) pki=${a%:/pki.mjs:ro} ;;
+            esac
+          fi
+          prev=$a
+          last=$a
+        done
+        script=$(printf '%s' "$last" | sed "s#/tls#$tls_dir#g; s#/pki.mjs#$pki#g")
+        PATH="$(dirname "$STUB_REAL_NODE"):/usr/bin:/bin" exec sh -c "$script"
+        ;;
+      *"/qr.mjs"*)
+        echo "$*" >>"$S/qr_runs"
+        [ -n "${STUB_REAL_NODE:-}" ] || exit 1
+        qr=
+        last=
+        prev=
+        for a in "$@"; do
+          if [ "$prev" = -v ]; then
+            case "$a" in *:/qr.mjs:ro) qr=${a%:/qr.mjs:ro} ;; esac
+          fi
+          prev=$a
+          last=$a
+        done
+        exec "$STUB_REAL_NODE" "$qr" "$last"
         ;;
       *"aman hash-password"*)
         cat >"$S/hash_stdin"

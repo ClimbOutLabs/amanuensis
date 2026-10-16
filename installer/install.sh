@@ -10,6 +10,7 @@
 #        install.sh upgrade [--check] [--force]
 #        install.sh docker
 #        install.sh command
+#        install.sh tls
 set -euo pipefail
 # Everything written is private unless a file is deliberately made world-readable.
 umask 077
@@ -36,6 +37,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/network.sh"
 # shellcheck source=lib/shellpath.sh
 . "$INSTALLER_DIR/lib/shellpath.sh"
+# shellcheck source=lib/tls.sh
+. "$INSTALLER_DIR/lib/tls.sh"
 # shellcheck source=lib/schedule.sh
 . "$INSTALLER_DIR/lib/schedule.sh"
 # shellcheck source=lib/ports.sh
@@ -130,6 +133,7 @@ Amanuensis installer
   install.sh upgrade [--check] [--force]
   install.sh docker               install or start Docker, or update its Compose plugin, asking before sudo
   install.sh command              put the aman command and its files back
+  install.sh tls                  renew the https certificates that are due
 
 Options
   --home DIR            state directory (default ~/.amanuensis)
@@ -160,7 +164,8 @@ Options
   --login-url URL       https address for the sign-in service behind the same proxy
   --port N              port on this computer for the app
   --login-port N        port on this computer for the sign-in service
-  --tls caddy           serve --public-url and --login-url over https with Caddy on this computer (Ubuntu package, Let's Encrypt)
+  --tls local|off|caddy  https on your network with a certificate from this computer (default), plain http, or
+                        --public-url and --login-url over https with Caddy on this computer (Ubuntu package, Let's Encrypt)
   --public-ip ADDRESS   this computer's public IPv4 address for the --tls DNS check (default: ask a lookup service)
   --confirm-name NAME   with --purge-data, the instance name typed in advance
   --print-root-steps    print the root steps for installing Docker and stop
@@ -171,6 +176,7 @@ USAGE
 }
 
 set_paths() {
+  valid_home_path "$AMAN_HOME" || usage_die "The folder for Aman data must be an absolute path of letters, digits and . _ - + @ : = , or /. Pass --home with such a path."
   STATE_DIR=$AMAN_HOME/state
   REG_DIR=$STATE_DIR/instances
   RELEASE_DIR=$AMAN_HOME/release
@@ -227,7 +233,7 @@ parse_args() {
         case "$positional:$COMMAND" in
           1:install)
             case "$arg" in
-              instance | backup | backups | upgrade | docker | command) COMMAND=$arg ;;
+              instance | backup | backups | upgrade | docker | command | tls) COMMAND=$arg ;;
               *) usage_die "unknown command $arg" ;;
             esac
             ;;
@@ -310,6 +316,8 @@ on_exit() {
 }
 
 main() {
+  # The installer's own checks run the aman command; they must not start a renewal of their own inside this run.
+  export AMAN_NO_TLS_RENEW=1
   parse_args "$@"
   set_paths
   trap on_exit EXIT
@@ -329,7 +337,7 @@ main() {
     exit 0
   fi
   if [ "$PRINT_PROXY" = 1 ]; then
-    print_proxy_requirements "https://<app-origin>" "<app port>" "https://<login-origin>" "<login port>"
+    print_proxy_requirements "https://<app-origin>" "<app port>" "https://<login-origin>"
     exit 0
   fi
   if [ "$DRY_RUN" = 1 ]; then
@@ -344,6 +352,7 @@ main() {
     backups) cmd_backups ;;
     docker) docker_fix ;;
     command) cmd_command ;;
+    tls) cmd_tls ;;
     upgrade) cmd_upgrade ;;
     instance)
       case "$SUBCOMMAND" in

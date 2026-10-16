@@ -1254,7 +1254,15 @@ print(json.dumps({
 type ReplaceTextDispatchOutcome =
   { kind: 'match_rejected'; rejection: string } | { kind: 'dispatched'; exec: ExecResult; payloadDigest: string };
 
-export const SANDBOX_EXEC_DESCRIPTION = `Execute shell commands in a persistent sandbox environment.
+/** Network sentence of the exec description; the offline wording replaces the retrieval and admission claims. */
+function execNetworkSentences({ offline }: { offline: boolean }): string {
+  return offline
+    ? 'This shell has no internet access. Never use it to fetch web content.'
+    : 'Exec provides retrieval of an already identified public source; it does not provide search or discovery. Network egress requires PermissionGate admission.';
+}
+
+export function createSandboxExecDescription({ offline }: { offline: boolean }): string {
+  return `Execute shell commands in a persistent sandbox environment.
 Use the cwd argument for the checked-out repository. Setting HOME does not change the working directory.
 IMPORTANT: Never list, print, or expose environment variables.
 Use write_file to create a new file, apply_patch for source edits, and replace_text for one exact existing-text replacement. Do not bypass these primitives with sed, Perl, Python, heredocs, or temporary shell patch files.
@@ -1262,21 +1270,31 @@ For large output, pass output.head_lines, output.tail_lines, and/or output.grep 
 Declare purpose=verify for any command whose successful result should authorize a later commit. Use purpose=commit only for running a \`git commit\` command.
 exec MUST NOT be used to run python/node code — use run_code. Interpreter invocations in exec are rejected by a harness guard; use the run_code tool instead.
 Result status is "ok" (success), "exited" (command ran, non-zero exit — check exit_code), or "failed" (host could not run it).
-Exec provides retrieval of an already identified public source; it does not provide search or discovery. Network egress requires PermissionGate admission. Make separate tool calls in one response; the host runs read-only calls concurrently.
+${execNetworkSentences({ offline })} Make separate tool calls in one response; the host runs read-only calls concurrently.
 `;
+}
+
+/** What the run_code description says is installed; the slot guest ships a smaller set than the Docker image. */
+function runCodeEnvironmentSentences({ offline }: { offline: boolean }): string {
+  return offline
+    ? 'Preinstalled: Python with pandas, numpy, matplotlib, openpyxl, pdfplumber, pypdf, Pillow, python-docx and reportlab; Node with tsx and typescript. This sandbox has no internet access. Never use it to fetch web content. No installs at runtime: if a package is missing, say so instead of installing it.'
+    : 'Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. No network and no installs at runtime: if a package is missing, say so instead of installing it.';
+}
 
 /**
- * Static base of the `run_code` tool description. The harness appends the
- * per-turn `/ingress` file list at render time (see `renderRunCodeDescription`),
- * so attachments staged by the harness are advertised without the model
- * ever base64-encoding them.
+ * Base of the `run_code` tool description. The harness appends the per-turn
+ * `/ingress` file list at render time (see `renderRunCodeDescription`), so
+ * attachments staged by the harness are advertised without the model ever
+ * base64-encoding them.
  */
-export const SANDBOX_RUN_CODE_DESCRIPTION = `Run Python or Node.js code in an isolated, offline sandbox.
+export function createSandboxRunCodeDescription({ offline }: { offline: boolean }): string {
+  return `Run Python or Node.js code in an isolated, offline sandbox.
 language is 'python' (3.13) or 'node' (22). Code runs with cwd=/scratch; read inputs from /ingress/<name>; write result files under /egress (files left in /scratch are collected too). Returns separate stdout/stderr (each capped at 256 KiB), the verbatim exit_code, and files_out metadata (name/size/sha256 — bytes never inline into context; download from the UI). Reference files_out in your response as run_code/<name> (e.g. [chart](run_code/chart.png)) — that is the path the UI uses for download. A non-zero exit is the program's own result, not an infra failure.
-Preinstalled: pandas, numpy, matplotlib, seaborn, plotly, openpyxl, pdfplumber, Pillow, requests, genson, pydantic, pyyaml, beautifulsoup4, poppler-utils, tesseract-ocr. No network and no installs at runtime: if a package is missing, say so instead of installing it.
+${runCodeEnvironmentSentences({ offline })}
 files_in is for content you compose yourself (a small CSV or JSON you write). Never re-upload an /ingress file via files_in.
-If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; interpreter invocations in exec are rejected by a harness guard. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
+If run_code fails, do NOT fall back to exec (or any shell tool) to run the code; interpreter invocations in exec are rejected by a harness guard. If a network call fails, do not retry it through exec or any shell. Fix the code, reduce the input, or report the failure. When you report a run_code failure, quote the error text exactly as returned, including any links; do not paraphrase or reword it. If the code did not run, it produced no output: NEVER state or predict what it would have printed.
 `;
+}
 
 export const SANDBOX_APPLY_PATCH_DESCRIPTION =
   "Apply one focused patch to the checked-out repository, as a git-format unified diff or OpenAI's apply_patch envelope (*** Begin Patch / *** Update File: <path> / *** End Patch). Each hunk needs a real header like @@ -1,2 +1,2 @@ with body lines starting with space, -, or +; placeholder hunk headers like @@… are rejected. Pass the patch as patch_lines, one element per line, blank lines as empty strings. If validation fails, correct the patch rather than editing through exec. This tool never stages, commits, or pushes.";
@@ -1606,6 +1624,9 @@ function execInterpreterGuardFailure(input: {
   return verdict.verdict === 'reject' ? interpreterInvocationRefusal(verdict.reason) : undefined;
 }
 
+const OFFLINE_NETWORK_COMMAND_REFUSAL =
+  'This sandbox is offline by design, so this command cannot reach the internet and was not run. Do not retry it and do not try another tool for the same job. Tell the user in plain words that you cannot open websites from here.';
+
 function sandboxExecPreflightFailure(input: {
   command: string;
   purpose: SandboxInvocationPurpose | undefined;
@@ -1614,6 +1635,7 @@ function sandboxExecPreflightFailure(input: {
   output: unknown;
   webConnectorAttached: boolean;
   webConnectorToolHint: string;
+  hasNetwork: boolean;
   resolveCache: Map<string, string | undefined>;
 }): string | undefined {
   const outputFailure = sandboxOutputPreflightFailure(input.output);
@@ -1627,6 +1649,10 @@ function sandboxExecPreflightFailure(input: {
   });
   if (interpreterGuardFailure !== undefined) {
     return interpreterGuardFailure;
+  }
+  // An impossible action must not reach an approval card.
+  if (!input.hasNetwork && sandboxCommandHasNetworkIntent(input.command)) {
+    return OFFLINE_NETWORK_COMMAND_REFUSAL;
   }
   if (input.purpose === undefined) {
     return 'A terminal invocation must declare its purpose explicitly.';
@@ -1914,14 +1940,15 @@ export class Sandbox extends LocalToolMCP {
   private tools = [
     defineTool({
       name: SANDBOX_EXEC_TOOL_NAME,
-      description: SANDBOX_EXEC_DESCRIPTION,
+      // Rendered in getTools(): the provider is not known when this field initializes.
+      description: '',
       schema: sandboxExecSchema,
       handler: (input, approvalDecision, context) => this.handleExec(input, approvalDecision, context),
     }),
     defineTool({
       name: SANDBOX_RUN_CODE_TOOL_NAME,
       // Description is rendered per turn in getTools(): the /ingress list is dynamic.
-      description: SANDBOX_RUN_CODE_DESCRIPTION,
+      description: '',
       schema: RunCodeInputSchema,
       handler: (input, _approvalDecision, context) => this.handleRunCode(input, context),
     }),
@@ -2044,6 +2071,7 @@ export class Sandbox extends LocalToolMCP {
         output,
         webConnectorAttached: this.webConnectorAttached,
         webConnectorToolHint: this.webConnectorToolHint,
+        hasNetwork: this.hasNetwork(),
         resolveCache: this.execGuardResolveCache,
       }) !== undefined;
     const invalidWriteFilePath =
@@ -2654,9 +2682,19 @@ export class Sandbox extends LocalToolMCP {
         : this.tools;
     // run_code's /ingress list is per-turn: re-render its description on every
     // tool-list read so newly staged attachments are advertised.
-    return base.map(tool =>
-      tool.name === SANDBOX_RUN_CODE_TOOL_NAME ? { ...tool, description: this.renderRunCodeDescription() } : tool,
-    );
+    return base.map(tool => {
+      if (tool.name === SANDBOX_EXEC_TOOL_NAME) {
+        return { ...tool, description: createSandboxExecDescription({ offline: !this.hasNetwork() }) };
+      }
+      return tool.name === SANDBOX_RUN_CODE_TOOL_NAME
+        ? { ...tool, description: this.renderRunCodeDescription() }
+        : tool;
+    });
+  }
+
+  /** False when the provider's sandbox cannot reach a network at all. */
+  hasNetwork(): boolean {
+    return this.provider.network !== 'none';
   }
 
   /** Atomically refreshes model-visible repository root, branch, and HEAD before each model request. */
@@ -4261,13 +4299,14 @@ export class Sandbox extends LocalToolMCP {
    * reads them directly instead of re-uploading bytes through `files_in`.
    */
   private renderRunCodeDescription(): string {
+    const runCodeDescription = createSandboxRunCodeDescription({ offline: !this.hasNetwork() });
     const staged = [...this.runCodeIngressStaging.values()];
     if (staged.length === 0) {
-      return SANDBOX_RUN_CODE_DESCRIPTION;
+      return runCodeDescription;
     }
     const lines = staged.map(attachment => `- ${attachment.name} (${String(attachment.bytes.length)} bytes)`);
     return (
-      SANDBOX_RUN_CODE_DESCRIPTION +
+      runCodeDescription +
       `Available in /ingress (read directly by filename, do NOT re-upload via files_in):\n` +
       `${lines.join('\n')}\n`
     );
@@ -4478,6 +4517,7 @@ export class Sandbox extends LocalToolMCP {
       output: resolvedInput.output,
       webConnectorAttached: this.webConnectorAttached,
       webConnectorToolHint: this.webConnectorToolHint,
+      hasNetwork: this.hasNetwork(),
       resolveCache: this.execGuardResolveCache,
     });
     if (preflightFailure !== undefined) {
@@ -5544,7 +5584,7 @@ export class Sandbox extends LocalToolMCP {
         status: persisted ? 'active' : 'submission_approved_once',
         message: persisted
           ? 'The implementation plan grant is active for this chat until revoked or repository state drifts.'
-          : 'The plan submission was allowed once, but no reusable plan grant was created. Choose Allow in this chat to create one.',
+          : 'The plan submission was approved for this call only, so no reusable plan grant was created. Choose Approve for this chat to create one.',
       }),
     });
   }

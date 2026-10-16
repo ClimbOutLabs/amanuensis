@@ -267,17 +267,17 @@ describe('a web search after the chat read mail', () => {
       return await toolSetsOf(root);
     }
 
-    it('asks an attended chat, and refuses outright in a scheduled run that nobody can approve', async () => {
+    it('asks an attended chat, and holds the search for the owner in a scheduled run', async () => {
       const attended = await resolvedForSource(null);
       await attended.mail.toolCallInfo({ name: 'read_email', arguments: { message_id: 'm1' } });
       expect((await search(attended.finder)).is_approval_required).toBe(true);
 
       const scheduled = await resolvedForSource({ type: 'schedule', id: 'sched-1', run_id: 'run-1' });
       await scheduled.mail.toolCallInfo({ name: 'read_email', arguments: { message_id: 'm1' } });
-      const refused = await search(scheduled.finder);
-      expect(refused.is_approval_required).not.toBe(true);
-      expect(refused.pre_dispatch_failure?.message).toBeDefined();
-      expect(refused.tier).not.toBe(1);
+      const held = await search(scheduled.finder);
+      expect(held.is_approval_required).toBe(true);
+      expect(held.pre_dispatch_failure).toBeUndefined();
+      expect(held.tier).toBe(3);
     });
   });
 });

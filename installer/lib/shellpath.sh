@@ -21,6 +21,7 @@ shell_profiles() {
 
 path_block() {
   local bin=$AMAN_HOME/bin keep=\$PATH home_var=\$HOME
+  valid_home_path "$bin" || die "The folder for Aman data has characters that cannot go into a shell profile"
   case "$bin" in "$HOME"/*) bin="$home_var${bin#"$HOME"}" ;; esac
   printf '%s\nexport PATH="%s:%s"\n%s\n' "$PATH_BLOCK_BEGIN" "$bin" "$keep" "$PATH_BLOCK_END"
 }

@@ -4,6 +4,8 @@
  */
 
 // Runtime
+export { HeldActionRefusedError } from './permissions/heldActions';
+export type { HeldRefusalReason } from './permissions/heldActions';
 export {
   AbnormalHandoffCauseSchema,
   mechanicalAbnormalHandoff,
@@ -361,7 +363,7 @@ export { execFileRunner } from './sandbox/slots/git/hostCommand';
 export { probeSlotAttachments } from './sandbox/slots/slotAttachmentProbe';
 export type { SlotAttachmentProbeResult } from './sandbox/slots/slotAttachmentProbe';
 export { DEFAULT_SESSION_DISK_MB, slotSocketPathsIn } from './sandbox/slots/slotContract';
-export { SLOT_FIX_COMMAND, SlotDriver } from './sandbox/slots/SlotDriver';
+export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';
 export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';
 export type { StructuredEditPathRequest, StructuredEditPathResolution } from './sandbox/structuredEditPaths';

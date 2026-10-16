@@ -477,6 +477,11 @@ export interface SandboxProvider {
    * Absent means the server's own filesystem.
    */
   readonly filesystem?: 'host' | 'remote' | undefined;
+  /**
+   * `none` means nothing run in the sandbox can reach a network, by design. The agent is then told so
+   * and network commands are refused before any approval. Absent means the sandbox may have network.
+   */
+  readonly network?: 'none' | undefined;
   /** Present when network git is done by the host; the Sandbox then never puts a token in the sandbox. */
   readonly hostGit?: HostGitCapability | undefined;
   /**

@@ -306,6 +306,11 @@ export interface AgentThreadConstructorInput {
    * Undefined means Sentinel is not active for this thread.
    */
   sentinel?: SentinelHostContext | undefined;
+  /**
+   * End the turn right after its tool step instead of calling the model. Set for a turn that only
+   * answers actions an unattended run held, so approving one runs just that call.
+   */
+  stopAfterToolResponse?: boolean | undefined;
   tracing: AgentTracing;
   logger: Logger;
 }
