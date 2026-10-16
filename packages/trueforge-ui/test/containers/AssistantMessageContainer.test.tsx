@@ -112,6 +112,22 @@ describe('AssistantMessageContainer', () => {
     expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument();
   });
 
+  it('copies the answer through the fallback over plain http, where navigator.clipboard is missing', () => {
+    Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true });
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    const exec = vi.fn(() => true);
+    Object.defineProperty(document, 'execCommand', { value: exec, configurable: true });
+    try {
+      renderAssistantMessage([{ role: 'assistant', content: 'done', createdAt: new Date('2026-07-09T14:06:04') }], {
+        isRunning: false,
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+      expect(exec).toHaveBeenCalledWith('copy');
+    } finally {
+      Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+    }
+  });
+
   it('hides the branch indicator when there is only a single branch', () => {
     renderAssistantMessage([{ role: 'assistant', content: 'hi' }]);
     expect(screen.queryByText(/^\d+ \/ \d+$/)).not.toBeInTheDocument();

@@ -18,8 +18,15 @@ export type MemoryTurnContext = {
 };
 
 export type MemoryRecallApi = {
-  /** Every `aman.memory.recall` / `aman.profile.learned` event this session has recorded, by turn. */
-  listMemoryTurnContext: (sessionId: string) => Promise<MemoryTurnContext[]>;
+  /**
+   * Every `aman.memory.recall` / `aman.profile.learned` event this session has recorded, by turn.
+   * With `afterEventId`, only events newer than that id, so a poll returns just what changed; an
+   * implementation that ignores it and returns the full history is still correct, only larger.
+   */
+  listMemoryTurnContext: (
+    sessionId: string,
+    options?: { afterEventId?: string | undefined },
+  ) => Promise<MemoryTurnContext[]>;
 };
 
 const MemoryRecallContext = createContext<MemoryRecallApi | null>(null);

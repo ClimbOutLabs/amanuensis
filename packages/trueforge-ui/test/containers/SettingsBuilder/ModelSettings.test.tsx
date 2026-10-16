@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { CustomProviderDraft } from '@/containers/SettingsBuilder/CustomModelProviderForm.js';
 import ModelSettings from '@/containers/SettingsBuilder/ModelSettings.js';
+import type { UiConfiguredModelProvider } from '@/plugins/trueforge-agent-server-adapter/catalogs/modelProviderCatalog.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { ModelProviderBase, UpdateModelProviderRequest } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
@@ -207,5 +208,62 @@ describe('ModelSettings custom provider editing', () => {
       apiKey: '',
       models: customProvider.models,
     });
+  });
+});
+
+describe('ModelSettings environment-managed provider', () => {
+  const managedProvider: UiConfiguredModelProvider = {
+    id: 'tokenfactory',
+    type: 'tokenfactory',
+    name: 'tokenfactory',
+    envManaged: true,
+    models: [{ id: 'nvidia/nemotron-3-super-120b-a12b', name: 'nemotron-3-super-120b-a12b' }],
+  };
+
+  function renderSettings(providers: UiConfiguredModelProvider[]) {
+    const server = createMockAgentUIServer({
+      catalog: createMockCatalog({
+        modelCatalog: {
+          getModelProviderCatalog: async () => [
+            {
+              type: 'tokenfactory',
+              name: 'tokenfactory',
+              models: [
+                { id: 'nvidia/nemotron-3-super-120b-a12b', name: 'nemotron-3-super-120b-a12b' },
+                { id: 'openai/gpt-oss-120b', name: 'gpt-oss-120b' },
+              ],
+            },
+          ],
+          listModelProviders: async () => providers,
+          createModelProvider: vi.fn(),
+          updateModelProvider: vi.fn(),
+          deleteModelProvider: vi.fn(async () => undefined),
+        },
+      }),
+    });
+    render(
+      <ServerProvider server={server}>
+        <ModelSettings />
+      </ServerProvider>,
+    );
+  }
+
+  it('shows it connected and read-only, with no way to change the key or models', async () => {
+    renderSettings([managedProvider]);
+
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(screen.getByText('Managed by server environment')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit tokenfactory' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove nemotron-3-super-120b-a12b' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Available to add/)).not.toBeInTheDocument();
+  });
+
+  it('keeps Edit and Remove for the same provider when the server does not manage it', async () => {
+    renderSettings([{ ...managedProvider, envManaged: false }]);
+
+    expect(await screen.findByRole('button', { name: 'Edit tokenfactory' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument();
+    expect(screen.queryByText('Managed by server environment')).not.toBeInTheDocument();
   });
 });

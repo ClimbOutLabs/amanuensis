@@ -10,6 +10,7 @@ export const GetRunCodeStatusResponseDataState = {
         SignatureUnverified: "signature_unverified",
         ImageUnavailable: "image_unavailable",
         IsolationRefused: "isolation_refused",
-        UnsupportedPlatform: "unsupported_platform"
+        UnsupportedPlatform: "unsupported_platform",
+        SlotsUnavailable: "slots_unavailable"
     } as const;
 export type GetRunCodeStatusResponseDataState = typeof GetRunCodeStatusResponseDataState[keyof typeof GetRunCodeStatusResponseDataState];

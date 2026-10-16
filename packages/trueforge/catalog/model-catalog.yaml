@@ -540,3 +540,12 @@ providers:
       - low
       - high
       - max
+- type: tokenfactory
+  base_url: https://api.tokenfactory.nebius.com/v1
+  models:
+  - model_id: nvidia/nemotron-3-super-120b-a12b
+    name: nemotron-3-super-120b-a12b
+    properties: {}
+  - model_id: openai/gpt-oss-120b
+    name: gpt-oss-120b
+    properties: {}
