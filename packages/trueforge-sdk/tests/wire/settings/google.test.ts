@@ -125,7 +125,7 @@ describe("GoogleClient", () => {
     test("check_client (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "client" : { "client_id" : "client_id" , "client_secret" : "client_secret" , "client_type" : "desktop" } , "registered_redirect_uris" : [ "registered_redirect_uris" ] };
+        const rawRequestBody = { "client" : { "client_id" : "client_id" , "client_secret" : "client_secret" } , "registered_redirect_uris" : [ "registered_redirect_uris" ] };
         const rawResponseBody = { "data" : { "ok" : true , "problems" : [ { "code" : "invalid_client_id" , "message" : "message" } ] } };
         
         server
@@ -140,8 +140,7 @@ describe("GoogleClient", () => {
                                 const response = await client.settings.google.checkClient({
     client: {
         clientId: "client_id",
-        clientSecret: "client_secret",
-        clientType: "desktop"
+        clientSecret: "client_secret"
     },
     registeredRedirectUris: ["registered_redirect_uris"]
 });
@@ -161,7 +160,7 @@ describe("GoogleClient", () => {
     test("check_client (2)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "client" : { "client_id" : "x" , "client_secret" : "x" , "client_type" : "desktop" } , "registered_redirect_uris" : [ "registered_redirect_uris" , "registered_redirect_uris" ] };
+        const rawRequestBody = { "client" : { "client_id" : "x" , "client_secret" : "x" } , "registered_redirect_uris" : [ "registered_redirect_uris" , "registered_redirect_uris" ] };
         const rawResponseBody = { "error" : { "message" : "message" } };
         
         server
@@ -176,8 +175,7 @@ describe("GoogleClient", () => {
                 return await client.settings.google.checkClient({
     client: {
         clientId: "x",
-        clientSecret: "x",
-        clientType: "desktop"
+        clientSecret: "x"
     },
     registeredRedirectUris: ["registered_redirect_uris", "registered_redirect_uris"]
 })

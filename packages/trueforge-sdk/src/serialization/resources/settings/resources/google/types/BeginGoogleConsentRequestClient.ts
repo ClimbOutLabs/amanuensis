@@ -8,7 +8,7 @@ import { BeginGoogleConsentRequestClientClientType } from "./BeginGoogleConsentR
 export const BeginGoogleConsentRequestClient: core.serialization.ObjectSchema<serializers.settings.BeginGoogleConsentRequestClient.Raw, TrueForge.settings.BeginGoogleConsentRequestClient> = core.serialization.object({
         "clientId": core.serialization.property("client_id", core.serialization.string()),
         "clientSecret": core.serialization.property("client_secret", core.serialization.string()),
-        "clientType": core.serialization.property("client_type", BeginGoogleConsentRequestClientClientType.nullable())
+        "clientType": core.serialization.property("client_type", BeginGoogleConsentRequestClientClientType.optional())
     });
 
 export declare namespace BeginGoogleConsentRequestClient {

@@ -8,13 +8,13 @@ import { GoogleClientCredentialsClientType } from "./GoogleClientCredentialsClie
 export const GoogleClientCredentials: core.serialization.ObjectSchema<serializers.GoogleClientCredentials.Raw, TrueForge.GoogleClientCredentials> = core.serialization.object({
         "clientId": core.serialization.property("client_id", core.serialization.string()),
         "clientSecret": core.serialization.property("client_secret", core.serialization.string()),
-        "clientType": core.serialization.property("client_type", GoogleClientCredentialsClientType)
+        "clientType": core.serialization.property("client_type", GoogleClientCredentialsClientType.optional())
     });
 
 export declare namespace GoogleClientCredentials {
     export interface Raw {
         client_id: string;
         client_secret: string;
-        client_type: GoogleClientCredentialsClientType.Raw;
+        client_type?: GoogleClientCredentialsClientType.Raw | null;
     }
 }

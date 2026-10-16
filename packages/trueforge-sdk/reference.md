@@ -8460,8 +8460,7 @@ Checks the client id, secret and type, then asks Google for a dry authorization 
 await client.settings.google.checkClient({
     client: {
         clientId: "client_id",
-        clientSecret: "client_secret",
-        clientType: "desktop"
+        clientSecret: "client_secret"
     },
     registeredRedirectUris: ["registered_redirect_uris"]
 });

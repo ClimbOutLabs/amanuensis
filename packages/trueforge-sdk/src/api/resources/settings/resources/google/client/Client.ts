@@ -143,8 +143,7 @@ export class GoogleClient {
      *     await client.settings.google.checkClient({
      *         client: {
      *             clientId: "client_id",
-     *             clientSecret: "client_secret",
-     *             clientType: "desktop"
+     *             clientSecret: "client_secret"
      *         },
      *         registeredRedirectUris: ["registered_redirect_uris"]
      *     })
