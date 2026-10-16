@@ -19,7 +19,14 @@ describe('createGoogleSetupApi', () => {
     const api = apiWith(async input => {
       urls.push(String(input));
       return reply({
-        data: { state: 'not_connected', account_email: null, features: [], has_saved_client: false, setup: SETUP },
+        data: {
+          state: 'not_connected',
+          account_email: null,
+          features: [],
+          has_saved_client: false,
+          available: true,
+          setup: SETUP,
+        },
       });
     });
 
@@ -63,6 +70,7 @@ describe('createGoogleSetupApi', () => {
           account_email: 'ada@example.com',
           features: [],
           has_saved_client: true,
+          available: true,
           setup: SETUP,
         },
       });

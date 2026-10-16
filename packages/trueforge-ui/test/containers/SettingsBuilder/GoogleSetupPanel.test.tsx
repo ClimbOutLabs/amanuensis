@@ -51,6 +51,7 @@ function statusOf(overrides: Partial<GoogleConnectionStatus> = {}): GoogleConnec
       { feature: 'gmail_compose', label: 'Save drafts and send email you approve', granted: false },
     ],
     hasSavedClient: false,
+    available: true,
     setup: PASTE_SETUP,
     ...overrides,
   };
@@ -104,8 +105,15 @@ describe('GoogleSetupPanel', () => {
     renderPanel(makePort().port);
 
     expect(await screen.findByLabelText('Gmail API link')).toBeInTheDocument();
-    expect(screen.getByText(/set the publishing status to Production/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Application type')).toHaveTextContent('Desktop app');
+    expect(screen.getByText('On the page, click Enable.')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /On the Audience page, click Publish app\. Until then, Google asks you to sign in again every 7 days\./,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/For application type, choose Desktop app\./)).toBeInTheDocument();
+    expect(screen.getByText('Click Create, then Download JSON.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Application type')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Redirect URI')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Copy Gmail API link' }));
     await waitFor(() => {
@@ -118,7 +126,7 @@ describe('GoogleSetupPanel', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     renderPanel(makePort({ getGoogleStatus: async () => statusOf({ setup: WEB_SETUP }) }).port);
 
-    expect(await screen.findByLabelText('Application type')).toHaveTextContent('Web application');
+    expect(await screen.findByText(/For application type, choose Web application\./)).toBeInTheDocument();
     expect(screen.getByLabelText('Redirect URI')).toHaveTextContent(WEB_SETUP.redirectUri);
     fireEvent.click(screen.getByRole('button', { name: 'Copy Redirect URI' }));
     await waitFor(() => {
@@ -128,7 +136,27 @@ describe('GoogleSetupPanel', () => {
 
   it('names the unverified-app screen before consent', async () => {
     renderPanel(makePort().port);
-    expect(await screen.findByText(/has not verified this app/)).toBeInTheDocument();
+    expect(await screen.findByText(/Google will say it hasn't verified this app/)).toBeInTheDocument();
+    expect(screen.getByText(/Click Advanced, then Go to your app, then Continue/)).toBeInTheDocument();
+    expect(screen.getByText(/allow pop-ups for this site/)).toBeInTheDocument();
+  });
+
+  it('says the client secret goes to Aman once and is never shown again', async () => {
+    renderPanel(makePort().port);
+    expect(
+      await screen.findByText('Your client secret goes to Aman once, to start sign-in, and is never shown again.'),
+    ).toBeInTheDocument();
+  });
+
+  it('explains why the buttons are disabled until a client is entered', async () => {
+    renderPanel(makePort().port);
+    await screen.findByLabelText('Client ID');
+    expect(screen.getByRole('button', { name: 'Connect Google' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Check my client' })).toBeDisabled();
+    expect(screen.getAllByText('Add your client ID and secret first.')).toHaveLength(2);
+    fillClient();
+    expect(screen.queryByText('Add your client ID and secret first.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect Google' })).toBeEnabled();
   });
 
   it('reads a dropped client JSON locally', async () => {
@@ -213,11 +241,28 @@ describe('GoogleSetupPanel', () => {
     fillClient();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     const address = 'http://127.0.0.1:53682/callback?state=s&code=c';
-    fireEvent.change(await screen.findByLabelText('Address from the browser bar'), { target: { value: address } });
+    fireEvent.change(await screen.findByLabelText('Address from the address bar'), { target: { value: address } });
     fireEvent.click(screen.getByRole('button', { name: 'Finish connecting' }));
     await waitFor(() => expect(complete).toHaveBeenCalledWith({ address }));
     expect(await screen.findByRole('status')).toHaveTextContent('Google is connected.');
     expect(onChanged).toHaveBeenCalled();
+  });
+
+  it('takes the pasted address in a plain text field, tells the user the failed page is expected, and offers a link', async () => {
+    renderPanel(makePort().port);
+    await screen.findByLabelText('Client ID');
+    fillClient();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
+    const field = await screen.findByLabelText('Address from the address bar');
+    expect(field).toHaveAttribute('type', 'text');
+    expect(screen.getByText(/This site can't be reached/)).toBeInTheDocument();
+    expect(screen.getByText(/That's expected\./)).toBeInTheDocument();
+    expect(screen.getByText(/Select All, then Copy, so you get the whole address/)).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'open Google sign-in here' });
+    expect(link).toHaveAttribute('href', 'https://accounts.example.test/auth');
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
+    expect(screen.getByRole('button', { name: 'Finish connecting' })).toBeDisabled();
+    expect(screen.getByText('Paste the address first.')).toBeInTheDocument();
   });
 
   it('shows the server message when the pasted address is refused', async () => {
@@ -231,7 +276,7 @@ describe('GoogleSetupPanel', () => {
     await screen.findByLabelText('Client ID');
     fillClient();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
-    fireEvent.change(await screen.findByLabelText('Address from the browser bar'), { target: { value: 'nope' } });
+    fireEvent.change(await screen.findByLabelText('Address from the address bar'), { target: { value: 'nope' } });
     fireEvent.click(screen.getByRole('button', { name: 'Finish connecting' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('no code or state');
   });
@@ -249,15 +294,15 @@ describe('GoogleSetupPanel', () => {
     fillClient();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Google' }));
     expect(await screen.findByText(/This panel updates by itself/)).toBeInTheDocument();
-    expect(screen.queryByLabelText('Address from the browser bar')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Address from the address bar')).not.toBeInTheDocument();
   });
 
   it('shows the account and what is on, and offers drafts and sending once', async () => {
     const { port, begin } = makePort({ getGoogleStatus: async () => connectedStatus() });
     renderPanel(port);
     expect(await screen.findByText('ada@example.com')).toBeInTheDocument();
-    expect(screen.getByText(/Read and search your email: on/)).toBeInTheDocument();
-    expect(screen.getByText(/Save drafts and send email you approve: off/)).toBeInTheDocument();
+    expect(screen.getByText(/Read and search your email: allowed/)).toBeInTheDocument();
+    expect(screen.getByText(/Save drafts and send email you approve: not allowed/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Allow drafts and sending' }));
     await waitFor(() => expect(begin).toHaveBeenCalledWith({ client: null, features: ['gmail_compose'] }));
   });
@@ -265,8 +310,8 @@ describe('GoogleSetupPanel', () => {
   it('says plainly that Google needs reconnecting and reconnects with the saved client and granted features', async () => {
     const { port, begin } = makePort({ getGoogleStatus: async () => connectedStatus({ state: 'needs_reconnect' }) });
     renderPanel(port);
-    expect(await screen.findByText('Google needs to be connected again')).toBeInTheDocument();
-    expect(screen.getByText(/still in Testing/)).toBeInTheDocument();
+    expect(await screen.findByText('Reconnect needed')).toBeInTheDocument();
+    expect(screen.getByText(/on the Audience page, click Publish app\./)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Test connection' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
     await waitFor(() => expect(begin).toHaveBeenCalledWith({ client: null, features: ['gmail_read'] }));
@@ -283,6 +328,7 @@ describe('GoogleSetupPanel', () => {
     renderPanel(makePort({ getGoogleStatus: async () => connectedStatus(), disconnectGoogle }).port);
     fireEvent.click(await screen.findByRole('button', { name: 'Disconnect' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('everywhere it is used');
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Emails already sent stay in Gmail.');
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect Google' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('nothing was removed here');
   });

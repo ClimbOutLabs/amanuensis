@@ -121,26 +121,37 @@ store backends are listed under Memory subsystem above.
 | packages/trueforge/tests/unit/apis/mcpOAuth.test.ts                                                 | Router is built with the new `toolGrantStore`                                                                                                           |
 | packages/trueforge/tests/unit/apis/modelProviders.test.ts                                           | Same                                                                                                                                                    |
 
-## Google connection (fork-only, resolution: ours)
+## Google connection and Gmail (fork-only, resolution: ours)
 
 Additive modules (no upstream counterpart): packages/trueforge-core/src/core/google/**,
-packages/trueforge/src/{apis/google.ts,routes/googleRoutes.ts,schemas/google.ts,db/googleConnectionStore.ts},
+packages/trueforge-core/src/core/email/gmail/**, packages/trueforge-core/src/core/util/oauthState.ts,
+packages/trueforge-core/src/core/capabilities/builtins/PrivateDataRead.ts,
+packages/trueforge/src/{apis/google.ts,routes/googleRoutes.ts,schemas/google.ts,db/googleConnectionStore.ts,runtime/gmailCapability.ts},
 the `google_connection` and `google_oauth_pending` tables with both stores, and the UI
-`GoogleSetupPanel` and `server/googleSetup.ts`. One Google login per user on the user's own OAuth client.
+`GoogleSetupPanel` and `server/googleSetup.ts`. One Google login per user on the user's own OAuth client; Gmail
+tools call Gmail's REST API directly with that login.
 
-Shared files carrying Google wiring:
+Shared files carrying Google or Gmail wiring:
 
-| Path                                                                         | What we added                                                                                                                                                                            |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| packages/trueforge/src/app.ts, main.ts, scripts/write-openapi.ts             | `googleConnectionStore` dependency and the `/api/v1/user/settings/google` mount                                                                                                          |
-| packages/trueforge/src/db/{sqlite,postgres}/types.ts, postgres/schema.ts     | The two Google tables                                                                                                                                                                    |
-| packages/trueforge/src/runtime/outboundSecrets.ts                            | The user's Google client secret and refresh token join the outbound secret guard                                                                                                         |
-| packages/trueforge-ui/...ConnectorSettings.tsx, catalogs/connectorCatalog.ts | A Google row and panel; the port is spread onto the connector catalog                                                                                                                    |
-| packages/trueforge-core/src/core/permissions/{classifier,webSearch}.ts       | `classifyGmailTool` (silent sensitive reads, always-asking drafts and sends, a scheduled run denied), the `unattended_run` auto-deny reason, and the `mcp_search_after_private_read` ask |
-| packages/trueforge-core/src/agent-session/TurnResourceResolver.ts            | `webSearchTurn` is protected so a subclass's tool sets share the turn's search state                                                                                                     |
-| packages/trueforge/src/runtime/spaceCapability.ts, apis/{turns,schedules}.ts | The Gmail capability is mounted for a root thread; the Google store is threaded to it                                                                                                    |
+| Path                                                                          | What we added                                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| packages/trueforge/src/app.ts, main.ts, scripts/write-openapi.ts              | `googleConnectionStore` dependency and the `/api/v1/user/settings/google` mount                                                                                                                                                   |
+| packages/trueforge/src/config.ts                                              | `DEMO_MODE`, which hides the Google connection and mounts no mail tools                                                                                                                                                           |
+| packages/trueforge/src/db/{sqlite,postgres}/types.ts, postgres/schema.ts      | The two Google tables                                                                                                                                                                                                             |
+| packages/trueforge/src/runtime/outboundSecrets.ts                             | The user's Google client secret and refresh token join the outbound secret guard                                                                                                                                                  |
+| packages/trueforge/src/mcp/auth/mcpDcr.ts                                     | State generation moved to `core/util/oauthState.ts`, shared with the Google sign-in                                                                                                                                               |
+| packages/trueforge-ui/...ConnectorSettings.tsx, catalogs/connectorCatalog.ts  | A Google row and panel; the port is spread onto the connector catalog                                                                                                                                                             |
+| packages/trueforge-ui/src/sentinel/{PermissionApprovalCard,types}.tsx         | A mail approval card: recipients, copy and hidden copy rows, and the whole message in its own scrollable box; the badge names the action                                                                                          |
+| packages/trueforge-core/src/core/permissions/tier.ts                          | `Tier3Email` and the optional `email` field of `Tier3Card`, so a send card carries the whole message; the `unattended_run` auto-deny reason                                                                                       |
+| packages/trueforge-core/src/core/permissions/{classifier,webSearch}.ts        | `classifyGmailTool` (silent sensitive reads, always-asking drafts and sends, a scheduled run denied), the mail card, the shared `markPrivateDataRead`/`hasReadPrivateData` predicates and the `mcp_search_after_private_read` ask |
+| packages/trueforge-core/src/core/mcp/ToolSet.ts                               | The `unattended_run` auto-deny message                                                                                                                                                                                            |
+| packages/trueforge-core/src/core/capabilities/builtins/EmailFetchSemantics.ts | Entries for Aman's own Gmail tools (snake_case), qualified by the `gmail` server id                                                                                                                                               |
+| packages/trueforge-core/src/agent-session/TurnResourceResolver.ts             | `webSearchTurn` is protected so a subclass's tool sets share the turn's search state; the root thread mounts the capability that keeps "this chat read private data" across turns                                                 |
+| packages/trueforge/src/runtime/spaceCapability.ts, apis/{turns,schedules}.ts  | The Gmail capability is mounted for a root thread; the Google store is threaded to it (and withheld on a demo instance)                                                                                                           |
 
-The UI maps its Google port onto the generated SDK's `settings.google` routes (`catalogs/googleSetup.ts`).
+The UI maps its Google port onto the generated SDK's `settings.google` routes (`catalogs/googleSetup.ts`). The port
+and its types stay in `packages/trueforge-ui/src/server/googleSetup.ts` beside the other Harness-only ports
+(`connectorChecks.ts`, `connectorToolGrants.ts`) because the runtime package is an external, patched dependency.
 
 ## Product docs (resolution: ours)
 

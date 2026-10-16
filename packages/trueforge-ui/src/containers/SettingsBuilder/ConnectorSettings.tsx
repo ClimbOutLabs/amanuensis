@@ -607,7 +607,7 @@ const ConnectorSettings = () => {
   const renderGoogle = () => {
     const connected = googleStatus?.state === 'connected';
     const needsReconnect = googleStatus?.state === 'needs_reconnect';
-    const label = needsReconnect ? 'Needs reconnection' : connected ? 'Connected' : 'Not connected';
+    const label = needsReconnect ? 'Reconnect needed' : connected ? 'Connected' : 'Not connected';
     return (
       <article className="flex min-h-16 w-full items-center gap-3 p-3">
         <span
@@ -619,7 +619,8 @@ const ConnectorSettings = () => {
         <div className="min-w-0 flex-1">
           <h5 className="truncate text-sm font-medium text-text-primary">Google</h5>
           <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary sm:truncate">
-            Read your email and, with your approval, draft and send it. Uses your own Google client.
+            Read your email and, with your approval, draft and send it. Uses a Google app you set up once, in your own
+            Google account.
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -639,7 +640,7 @@ const ConnectorSettings = () => {
               setGooglePanelOpen(true);
             }}
           >
-            {connected || needsReconnect ? 'Manage' : 'Connect'}
+            {needsReconnect ? 'Reconnect' : connected ? 'Manage' : 'Connect'}
           </Button>
         </div>
       </article>
@@ -798,7 +799,7 @@ const ConnectorSettings = () => {
           <div className="flex flex-1 flex-col gap-5 overflow-y-auto pb-1">
             {loading ? <p className="py-8 text-center text-sm text-text-secondary">Loading…</p> : null}
 
-            {!loading && googleStatus !== null && googleMatchesQuery && hasGoogleSetup(connectorCatalog) ? (
+            {!loading && googleStatus?.available === true && googleMatchesQuery && hasGoogleSetup(connectorCatalog) ? (
               <section aria-labelledby="google-connector-heading">
                 <h4
                   id="google-connector-heading"

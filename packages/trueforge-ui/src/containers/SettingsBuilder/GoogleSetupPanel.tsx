@@ -16,10 +16,10 @@ import type {
 } from '@/server/googleSetup.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 
-export const GOOGLE_PROJECT_URL = 'https://console.cloud.google.com/projectcreate';
-export const GOOGLE_GMAIL_API_URL = 'https://console.cloud.google.com/apis/library/gmail.googleapis.com';
-export const GOOGLE_CONSENT_SCREEN_URL = 'https://console.cloud.google.com/apis/credentials/consent';
-export const GOOGLE_CREDENTIALS_URL = 'https://console.cloud.google.com/apis/credentials';
+const GOOGLE_PROJECT_URL = 'https://console.cloud.google.com/projectcreate';
+const GOOGLE_GMAIL_API_URL = 'https://console.cloud.google.com/apis/library/gmail.googleapis.com';
+const GOOGLE_CONSENT_SCREEN_URL = 'https://console.cloud.google.com/apis/credentials/consent';
+const GOOGLE_CREDENTIALS_URL = 'https://console.cloud.google.com/apis/credentials';
 
 const STATUS_POLL_MS = 2000;
 const STATUS_POLL_LIMIT = 300;
@@ -82,9 +82,9 @@ function describeTest(result: 'ok' | 'not_connected' | 'needs_reconnect' | 'unre
     case 'not_connected':
       return 'Google is not connected.';
     case 'needs_reconnect':
-      return 'Google no longer accepts the saved login. Choose Reconnect.';
+      return 'Reconnect needed. Google no longer accepts the saved login. Click Reconnect.';
     case 'unreachable':
-      return 'Could not reach Google just now. Try again in a moment.';
+      return "Aman couldn't reach Google just now. Try again in a minute.";
   }
 }
 
@@ -263,13 +263,13 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
         {status !== null && status.state !== 'not_connected' && begun === null ? (
           <section aria-labelledby="google-connected-heading" className="space-y-3">
             <h3 id="google-connected-heading" className="font-semibold">
-              {status.state === 'needs_reconnect' ? 'Google needs to be connected again' : 'Connected'}
+              {status.state === 'needs_reconnect' ? 'Reconnect needed' : 'Connected'}
             </h3>
             {status.state === 'needs_reconnect' ? (
               <p className="rounded-md border border-warning-bg/40 bg-warning-bg/10 px-3 py-2">
-                Google no longer accepts the saved login, so Gmail is paused. Other parts of Aman keep working. Choose
-                Reconnect to sign in again. If this happens a week after connecting, your Google project is still in
-                Testing: open the consent screen and set the publishing status to Production.
+                Google no longer accepts the saved login, so Gmail is paused. Other parts of Aman keep working. Click
+                Reconnect to sign in again. If this keeps happening about once a week, your Google project is still
+                unpublished: on the Audience page, click Publish app.
               </p>
             ) : (
               <p className="text-text-secondary">{status.accountEmail ?? 'Your Google account'}</p>
@@ -277,7 +277,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
             <ul className="space-y-1 text-text-secondary">
               {status.features.map(item => (
                 <li key={item.feature}>
-                  {item.label}: {item.granted ? 'on' : 'off'}
+                  {item.label}: {item.granted ? 'allowed' : 'not allowed'}
                 </li>
               ))}
             </ul>
@@ -336,7 +336,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
               >
                 <p>
                   This removes Aman&apos;s access to your Google account everywhere it is used and deletes the saved
-                  login. You can connect again later.
+                  login. Emails already sent stay in Gmail. You can connect again later.
                 </p>
                 <div className="mt-3 flex gap-2">
                   <Button
@@ -368,25 +368,27 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
             </li>
             <li>
               <p className="font-medium">Turn on the Gmail API</p>
+              <p className="text-text-secondary">On the page, click Enable.</p>
               <CopyField label="Gmail API link" value={GOOGLE_GMAIL_API_URL} />
             </li>
             <li>
               <p className="font-medium">Set up the consent screen and publish it</p>
               <p className="text-text-secondary">
-                Choose External and add your own address as a test user. Then set the publishing status to Production. A
-                project left in Testing makes the connection expire after 7 days.
+                Choose External, then fill in an app name and your email address. On the Audience page, click Publish
+                app. Until then, Google asks you to sign in again every 7 days.
               </p>
               <CopyField label="Consent screen link" value={GOOGLE_CONSENT_SCREEN_URL} />
             </li>
             <li>
               <p className="font-medium">Create the client</p>
               <p className="text-text-secondary">
+                For application type, choose {clientTypeName}.
                 {setup.clientType === 'web'
-                  ? 'This install has a public address, so choose Web application and add this exact authorized redirect URI:'
-                  : 'Choose Desktop app. It needs no redirect address.'}
+                  ? ' This install has a public address, so add this exact authorized redirect URI:'
+                  : ' It needs no redirect address.'}
               </p>
-              <CopyField label="Application type" value={clientTypeName} />
               {setup.clientType === 'web' ? <CopyField label="Redirect URI" value={setup.redirectUri} /> : null}
+              <p className="mt-1 text-text-secondary">Click Create, then Download JSON.</p>
               <CopyField label="Credentials link" value={GOOGLE_CREDENTIALS_URL} />
             </li>
             <li>
@@ -430,6 +432,9 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                   }}
                 />
                 <p className="text-xs text-text-secondary">The file is read in this browser.</p>
+                <p className="text-xs text-text-secondary">
+                  Your client secret goes to Aman once, to start sign-in, and is never shown again.
+                </p>
               </div>
               <div className="mt-2">
                 <Button
@@ -441,6 +446,9 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 >
                   Check my client
                 </Button>
+                {!hasClient ? (
+                  <p className="mt-1 text-xs text-text-secondary">Add your client ID and secret first.</p>
+                ) : null}
               </div>
               {check !== null ? (
                 check.ok ? (
@@ -468,8 +476,9 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 <span>Also let Aman save drafts and send email. Every draft and every send still asks you first.</span>
               </label>
               <p className="mt-2 text-text-secondary">
-                Google will say it has not verified this app, because the client is yours. Choose Advanced, then
-                continue to your app.
+                Google will say it hasn&apos;t verified this app. That&apos;s because you made the app yourself. Click
+                Advanced, then Go to your app, then Continue. A window opens for this, so allow pop-ups for this site if
+                nothing appears.
               </p>
               <div className="mt-2">
                 <Button
@@ -485,6 +494,9 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 >
                   Connect Google
                 </Button>
+                {!hasClient ? (
+                  <p className="mt-1 text-xs text-text-secondary">Add your client ID and secret first.</p>
+                ) : null}
               </div>
             </li>
           </ol>
@@ -495,24 +507,40 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
             <h3 id="google-consent-heading" className="font-semibold">
               Finish in the Google window
             </h3>
+            <p className="text-text-secondary">
+              If no window opened, allow pop-ups for this site, or{' '}
+              <a
+                href={begun.authorizationUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-text-primary"
+              >
+                open Google sign-in here
+              </a>
+              .
+            </p>
             {begun.setup.mode !== 'paste' ? (
               <p className="text-text-secondary">Waiting for you to approve access. This panel updates by itself.</p>
             ) : (
               <>
                 <p className="text-text-secondary">
-                  After you approve, your browser lands on a page that says it cannot be reached. That is expected. Copy
-                  the whole address from the browser bar of that page and paste it here. Anyone who sees it could
-                  connect your mail, so paste it only where no one else can see.
+                  After you approve, your browser shows a page that says &quot;This site can&apos;t be reached&quot;.
+                  That&apos;s expected. Copy the whole address from the address bar of that page and paste it here. On
+                  an iPhone or iPad, tap the address bar, choose Select All, then Copy, so you get the whole address.
+                  The address works once, for this sign-in only.
                 </p>
                 <label className="block text-xs font-medium text-text-secondary" htmlFor="google-pasted-address">
-                  Address from the browser bar
+                  Address from the address bar
                 </label>
                 <input
                   id="google-pasted-address"
-                  type="password"
+                  type="text"
+                  inputMode="url"
                   className={auiInputClass('h-10')}
                   value={pasted}
                   autoComplete="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   onChange={event => setPasted(event.target.value)}
                 />
                 <Button
@@ -523,6 +551,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
                 >
                   Finish connecting
                 </Button>
+                {pasted.trim() === '' ? <p className="text-xs text-text-secondary">Paste the address first.</p> : null}
               </>
             )}
             <Button variant="ghost" size="small" type="button" onClick={() => setBegun(null)}>

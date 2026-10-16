@@ -2,7 +2,7 @@
 export const MAX_TOKENS_PER_CALL = 8000;
 
 /** Longest snippet a result carries. */
-export const SNIPPET_CHAR_CAP = 200;
+const SNIPPET_CHAR_CAP = 200;
 
 /**
  * A cheap, conservative token estimate. Latin text runs near four characters a token, but other scripts take
