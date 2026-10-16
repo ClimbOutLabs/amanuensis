@@ -281,11 +281,14 @@ describe('RFC 2047 encoded words in headers', () => {
       body: 'hi',
     });
     expect(headerOf({ message: mail, name: 'From' })).toBe('José Müller <jose@example.com>');
-    const result = readEmailResult({ context: { account: 'ada@example.com' }, message: mail });
+    const result = readEmailResult({
+      context: { account: 'ada@example.com', attachmentsOpenable: true },
+      message: mail,
+    });
     expect(result.from).toBe('José Müller <jose@example.com>');
     expect(result.subject).toBe('会議の予定');
     const list = listThreadsResult({
-      context: { account: 'ada@example.com' },
+      context: { account: 'ada@example.com', attachmentsOpenable: true },
       threads: [{ id: 't1', messages: [mail] }],
       providerEstimate: 1,
       nextPageToken: undefined,

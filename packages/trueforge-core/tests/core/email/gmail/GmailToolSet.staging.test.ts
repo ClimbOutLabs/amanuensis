@@ -14,7 +14,7 @@ import { build, route, text } from './harness';
 
 const UPLOADS_DIR = '/workspace/.aman/uploads';
 const PDF_BYTES = Buffer.from('%PDF-1.4 synthetic');
-const CREATED: SandboxInfo = { sandbox_id: 'sb-1', sandbox_provider: 'slots' };
+const CREATED: SandboxInfo = { sandbox_id: 'sb-1' };
 
 /** One line per script the document reader is installed for, as a PDF extractor returns them. */
 const MULTILINGUAL_PAGES = [

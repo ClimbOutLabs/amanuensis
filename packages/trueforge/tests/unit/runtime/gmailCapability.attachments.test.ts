@@ -2,7 +2,7 @@ import type { SandboxInfo } from '@truefoundry/trueforge-core/core';
 import { sandboxAttachmentStager } from '../../../src/runtime/gmailCapability';
 
 const PDF_BYTES = Buffer.from('%PDF-1.4 synthetic');
-const CREATED: SandboxInfo = { sandbox_id: 'sb-1', sandbox_provider: 'slots' };
+const CREATED: SandboxInfo = { sandbox_id: 'sb-1' };
 
 function recordingSandbox(options: { created?: SandboxInfo } = {}) {
   const uploads: { fileName: string; content: Buffer; mime: string }[] = [];
