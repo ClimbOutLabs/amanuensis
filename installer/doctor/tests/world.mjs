@@ -36,6 +36,9 @@ const SYSTEM_TOOLS = [
   'grep',
   'uname',
   'wc',
+  'find',
+  'id',
+  'chmod',
 ];
 
 const FAKE_DOCKER = `#!/usr/bin/env bash

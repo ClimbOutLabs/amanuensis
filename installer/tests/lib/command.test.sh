@@ -27,6 +27,27 @@ test_the_path_line_is_managed_once() {
   sandbox_drop
 }
 
+test_an_unsafe_folder_never_reaches_a_profile() {
+  t_begin "a data folder with shell syntax in it is refused before anything is written, and a plain one is quoted"
+  sandbox_new
+  local bad
+  # shellcheck disable=SC2016 # the shell syntax is the point: none of it may be expanded
+  for bad in '/tmp/x$(touch /tmp/pwned)' '/tmp/x"; touch /tmp/pwned; "' '/tmp/x`id`' 'relative/path' '/tmp/../etc' "/tmp/it's"; do
+    run_install --home "$bad" --yes --email owner@example.invalid
+    assert_rc 2
+    case "$(flat "$ERR")" in
+      *"character that is not allowed"* | *"must be an absolute path"*) t_pass ;;
+      *) t_fail "no clear refusal for $bad: $ERR" ;;
+    esac
+  done
+  assert_no_path "$(home_dir)/.bashrc"
+  assert_no_path /tmp/pwned
+  RUN_ENV_EXTRA=(SHELL=/bin/bash)
+  install_machine
+  assert_contains "$(cat "$(home_dir)/.bashrc")" "export PATH=\"$AMAN_HOME/bin:\$PATH\""
+  sandbox_drop
+}
+
 test_zsh_gets_its_own_profile() {
   t_begin "a zsh user gets the line in .zshrc"
   sandbox_new
@@ -136,6 +157,7 @@ test_the_proxy_requirements_belong_to_public_urls() {
 }
 
 test_the_path_line_is_managed_once
+test_an_unsafe_folder_never_reaches_a_profile
 test_zsh_gets_its_own_profile
 test_the_plan_names_the_command_row
 test_upgrade_restores_the_command_and_its_files

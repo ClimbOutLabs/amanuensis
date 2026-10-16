@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -1234,7 +1243,9 @@ describe('network address check', () => {
   it('is ok while every address of this computer is listed, and calls the open app port intended', () => {
     make();
     world.network('main');
-    world.set('port_c1', { out: '8790/tcp -> 0.0.0.0:8791\n5556/tcp -> 127.0.0.1:5556\n' });
+    world.set('port_c1', {
+      out: '8790/tcp -> 127.0.0.1:8791\n8790/tcp -> 192.168.1.20:8791\n5556/tcp -> 127.0.0.1:5556\n',
+    });
     const result = world.json();
     assert.equal(find(result.doc.instances.main, 'network').state, 'ok');
     assert.match(find(result.doc.instances.main, 'network').detail, /3 addresses/);
@@ -1242,12 +1253,20 @@ describe('network address check', () => {
     assert.match(find(result.doc.instances.main, 'ports').detail, /on purpose/);
   });
 
-  it('fails when the sign-in port is open to the network, even for an instance opened on the network', () => {
-    make();
-    world.network('main');
-    world.set('port_c1', { out: '8790/tcp -> 0.0.0.0:8791\n5556/tcp -> 0.0.0.0:5556\n' });
-    assert.equal(find(world.json().doc.instances.main, 'ports').state, 'fail');
-  });
+  for (const [label, out] of [
+    ['the sign-in port', '8790/tcp -> 127.0.0.1:8791\n5556/tcp -> 0.0.0.0:5556\n'],
+    ['the app port on every interface', '8790/tcp -> 0.0.0.0:8791\n5556/tcp -> 127.0.0.1:5556\n'],
+    ['the app port on every interface (v6)', '8790/tcp -> [::]:8791\n5556/tcp -> 127.0.0.1:5556\n'],
+  ]) {
+    it(`fails when ${label} is open to the whole network, even for an instance opened on the network`, () => {
+      make();
+      world.network('main');
+      world.set('port_c1', { out });
+      const ports = find(world.json().doc.instances.main, 'ports');
+      assert.equal(ports.state, 'fail');
+      assert.match(ports.fix, /aman doctor instance --fix/);
+    });
+  }
 
   it('counts a name given at install as listed', () => {
     make();
@@ -1370,6 +1389,53 @@ describe('aman backup and aman upgrade', () => {
     const result = runInstalled(['backup']);
     assert.equal(result.status, 0, result.stderr);
     assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
+  });
+});
+
+describe('the folder Aman runs its installer from', () => {
+  function checkoutWith(mode) {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    chmodSync(path.join(repo, 'installer', 'install.sh'), mode);
+    return repo;
+  }
+
+  it('is not used when another user can change its installer, for aman backup and the nightly job', () => {
+    checkoutWith(0o666);
+    const result = world.shim(['backup']);
+    assert.equal(result.code, 1);
+    assert.match(
+      result.stderr.replace(/\s+/g, ' '),
+      /can be changed by other users, so Aman will not run its installer from it\. Run aman doctor checkout --fix/,
+    );
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+  });
+
+  it('is not used when the folder itself can be written by the group', () => {
+    const repo = checkoutWith(0o755);
+    chmodSync(repo, 0o775);
+    assert.equal(world.shim(['upgrade', '--check']).code, 1);
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+  });
+
+  it('is reported by the doctor with the one fix, and --fix makes it private to the user again', () => {
+    const repo = checkoutWith(0o666);
+    const shown = world.shim(['doctor', 'checkout']);
+    assert.equal(shown.code, 1);
+    assert.match(shown.stdout.replace(/\s+/g, ' '), /Next: Run aman doctor checkout --fix/);
+    const fixed = world.shim(['doctor', 'checkout', '--fix', '--yes']);
+    assert.equal(fixed.code, 0, fixed.stdout + fixed.stderr);
+    assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o022, 0);
+    assert.equal(world.shim(['backup']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
+  });
+
+  it('says nothing about a folder that is private to the user', () => {
+    checkoutWith(0o755);
+    const result = world.shim(['doctor', 'checkout']);
+    assert.equal(result.code, 0);
+    assert.doesNotMatch(result.stdout, /can be changed/);
   });
 });
 

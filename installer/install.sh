@@ -171,6 +171,7 @@ USAGE
 }
 
 set_paths() {
+  valid_home_path "$AMAN_HOME" || usage_die "The folder for Aman data must be an absolute path of letters, digits and . _ - + @ : = , or /. Pass --home with such a path."
   STATE_DIR=$AMAN_HOME/state
   REG_DIR=$STATE_DIR/instances
   RELEASE_DIR=$AMAN_HOME/release
