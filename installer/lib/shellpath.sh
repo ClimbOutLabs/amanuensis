@@ -61,3 +61,24 @@ install_path_block() {
     path_profile_apply "$file"
   done < <(shell_profiles)
 }
+
+# Takes the managed block out of a profile; everything else in the file stays as it was.
+path_profile_remove() { # file
+  local file=$1 tmp
+  [ -f "$file" ] && grep -Fqx "$PATH_BLOCK_BEGIN" "$file" || return 0
+  tmp=$(umask 077 && mktemp "${TMPDIR:-/tmp}/aman-profile.XXXXXX")
+  awk -v b="$PATH_BLOCK_BEGIN" -v e="$PATH_BLOCK_END" '
+    $0 == b { skip = 1; next }
+    skip && $0 == e { skip = 0; next }
+    !skip { print }' "$file" >"$tmp"
+  # Written through the file itself so its mode, owner and any symlink stay as they are.
+  cat "$tmp" >"$file"
+  rm -f "$tmp"
+}
+
+path_profiles_remove() {
+  local file
+  while IFS= read -r file; do
+    path_profile_remove "$file"
+  done < <(shell_profiles)
+}

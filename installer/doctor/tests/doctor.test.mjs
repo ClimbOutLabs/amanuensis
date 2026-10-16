@@ -1270,6 +1270,25 @@ describe('network address check', () => {
     });
   }
 
+  it('says Aman listens on this computer only on Docker Desktop, even when the record lists network addresses', () => {
+    make();
+    world.info({ os: 'Docker Desktop' });
+    world.network('main');
+    world.set('port_c1', { out: '8790/tcp -> 127.0.0.1:8791\n5556/tcp -> 127.0.0.1:5556\n' });
+    const ports = find(world.json().doc.instances.main, 'ports');
+    assert.equal(ports.state, 'ok');
+    assert.match(ports.detail, /listens on this computer only/);
+  });
+
+  it('says Aman listens on this computer only when the record lists only this computer', () => {
+    make();
+    world.network('main', { origins: 'http://127.0.0.1:8791,http://localhost:8791' });
+    world.set('port_c1', { out: '8790/tcp -> 127.0.0.1:8791\n5556/tcp -> 127.0.0.1:5556\n' });
+    const ports = find(world.json().doc.instances.main, 'ports');
+    assert.equal(ports.state, 'ok');
+    assert.match(ports.detail, /listens on this computer only/);
+  });
+
   it('counts a name given at install as listed', () => {
     make();
     world.network('main', {

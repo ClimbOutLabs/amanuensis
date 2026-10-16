@@ -186,7 +186,7 @@ _ui_follow() {
     if [ "$UI_VERBOSE" = 1 ]; then
       _ui_block "    $(_ui_s 2 'Details:') " 13 "$2" 2
     else
-      _ui_block "    $(_ui_s 2 'Details:') " 13 "--verbose" 2
+      _ui_block "    $(_ui_s 2 'Details:') " 13 "run again with --verbose to see them" 2
     fi
   fi
 }

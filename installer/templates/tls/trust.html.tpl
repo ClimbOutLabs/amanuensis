@@ -28,7 +28,7 @@
 <p>Open this page in Safari, not inside another app.</p>
 <ol>
   <li>Tap the iPhone download, then Allow.</li>
-  <li>Open Settings and tap "Profile Downloaded" near the top. Tap Install and enter your passcode. Do this within 8 minutes.</li>
+  <li>Open Settings and tap "Profile Downloaded" near the top. Tap Install and enter your passcode. Do this within 8 minutes. The profile says "Not Signed": that is expected, because this computer made it. Tap Install anyway.</li>
   <li>Open Settings, General, About, Certificate Trust Settings, and turn on full trust for "Amanuensis home server".</li>
 </ol>
 

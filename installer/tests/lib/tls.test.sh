@@ -155,7 +155,7 @@ test_the_plan_and_the_summary() {
   RUN_ENV_EXTRA=(CLICOLOR_FORCE=1 LANG=C.UTF-8 TERM=xterm)
   install_machine
   assert_flat_contains "$OUT" "Open https://192.168.1.20:8443"
-  assert_flat_contains "$OUT" "Trust this computer on each device: http://192.168.1.20:8791/trust"
+  assert_flat_contains "$OUT" "On a phone or another computer, open this page first and follow its steps: http://192.168.1.20:8791/trust"
   assert_flat_contains "$OUT" "install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
   assert_not_contains "$OUT" "not encrypted"
   assert_contains "$OUT" "▀" "a code a phone can scan"
@@ -173,7 +173,7 @@ test_no_code_without_colors() {
   lan
   RUN_ENV_EXTRA=(LANG=C)
   install_machine
-  assert_flat_contains "$OUT" "Trust this computer on each device: http://192.168.1.20:8791/trust"
+  assert_flat_contains "$OUT" "On a phone or another computer, open this page first and follow its steps: http://192.168.1.20:8791/trust"
   assert_not_contains "$OUT" "▀"
   assert_no_path "$STUB_STATE/qr_runs"
   sandbox_drop
@@ -274,7 +274,7 @@ test_an_existing_instance_moves_to_https_and_back() {
   assert_eq "$(env_value main OIDC_CLIENT_SECRET)" "$secret" "secrets stay as they were"
   assert_log_has "--force-recreate"
   assert_not_contains "$(cat "$STUB_LOG")" "volume rm" "no data was removed"
-  assert_flat_contains "$OUT" "Trust this computer on each device"
+  assert_flat_contains "$OUT" "On a phone or another computer, open this page first and follow its steps"
   run_install --yes
   assert_flat_contains "$OUT" "Nothing to do."
   run_install --yes --tls off
@@ -401,17 +401,19 @@ test_the_front_end_is_locked_down() {
 }
 
 test_the_fingerprint_is_shown_where_trust_is_given() {
-  t_begin "the fingerprint of the authority is in the ending, on the trust page and in the doctor, with the words to compare it"
+  t_begin "the ending tells the person to compare the fingerprint the trust page shows; the page and the doctor carry the fingerprint itself"
   sandbox_new
   lan
   install_machine
   local fingerprint
   fingerprint=$(cat "$AMAN_HOME/tls/ca/root.fingerprint")
   assert_contains "$fingerprint" ":"
-  assert_flat_contains "$OUT" "Before you trust it, check that the fingerprint your device shows is $fingerprint. If it differs, stop."
+  assert_flat_contains "$OUT" "The page shows a fingerprint; compare it with the one your device shows before you trust it."
+  assert_not_contains "$OUT" "$fingerprint"
   local page
   page=$(cat "$AMAN_HOME/tls/trust/main/index.html")
   assert_contains "$page" "<code>$fingerprint</code>"
+  assert_contains "$page" "Not Signed"
   assert_contains "$page" "If it does not match, stop and do not trust it."
   assert_eq "$(pki_info | sed -n 's/.*"root_fingerprint":"\([^"]*\)".*/\1/p')" "$fingerprint"
   sandbox_drop
@@ -450,7 +452,7 @@ test_a_new_name_makes_the_authority_again_and_says_so() {
   rm -f "$AMAN_HOME/tls/ca/root.names"
   run_install tls
   assert_rc 0
-  assert_flat_contains "$OUT" "Trust this computer on each device"
+  assert_flat_contains "$OUT" "On a phone or another computer, open this page first and follow its steps"
   assert_flat_contains "$OUT" "certificate authority was made again"
   sandbox_drop
 }

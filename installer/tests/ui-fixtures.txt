@@ -37,7 +37,7 @@ Checking this computer (1 of 6)
     Next: aman doctor disk --fix
   ✗ Docker Compose is missing
     Next: aman doctor docker --fix
-    Details: --verbose
+    Details: run again with --verbose to see them
   · Run code and attachments: not in this version
   Enter keeps the value in brackets.
 
@@ -52,7 +52,7 @@ Checking this computer (1 of 6)
     Next: aman doctor disk --fix
   ✗ Docker Compose is missing
     Next: aman doctor docker --fix
-    Details: --verbose
+    Details: run again with --verbose to see them
   · Run code and attachments: not in this version
   Enter keeps the value in brackets.
 
@@ -67,7 +67,7 @@ Checking this computer (1 of 6)
     Next: aman doctor disk --fix
   x Docker Compose is missing
     Next: aman doctor docker --fix
-    Details: --verbose
+    Details: run again with --verbose to see them
   - Run code and attachments: not in this version
   Enter keeps the value in brackets.
 

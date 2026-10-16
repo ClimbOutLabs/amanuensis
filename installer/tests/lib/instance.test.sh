@@ -267,6 +267,40 @@ test_removing_the_last_instance_takes_the_machine_project_with_it() {
   sandbox_drop
 }
 
+test_the_last_purge_takes_out_the_path_block_and_the_images() {
+  t_begin "purging the last instance removes the aman line from the shell profiles and the Aman images, and keeps the rest"
+  sandbox_new
+  printf 'alias ll="ls -l"\n' >"$SB/user/.bashrc"
+  RUN_ENV_EXTRA=(SHELL=/bin/bash)
+  install_machine
+  assert_contains "$(cat "$SB/user/.bashrc")" "amanuensis (managed by the installer)"
+  printf '%s\n' "aman-app:v1" "aman-stt:v1" "amanuensis-sandbox-slot:local" "dexidp/dex:v2" >>"$SB_STATE/images"
+  run_install instance remove main --purge-data --confirm-name main
+  assert_rc 0
+  assert_contains "$(cat "$SB/user/.bashrc")" 'alias ll="ls -l"'
+  assert_not_contains "$(cat "$SB/user/.bashrc")" "amanuensis"
+  assert_contains "$(cat "$SB_STATE/images_removed")" "aman-app:v1"
+  assert_contains "$(cat "$SB_STATE/images_removed")" "aman-stt:v1"
+  assert_contains "$(cat "$SB_STATE/images_removed")" "amanuensis-sandbox-slot:local"
+  assert_not_contains "$(cat "$SB_STATE/images_removed")" "dexidp/dex"
+  assert_contains "$(cat "$SB_STATE/images")" "dexidp/dex:v2"
+  sandbox_drop
+}
+
+test_a_purge_of_one_of_two_instances_keeps_the_path_block_and_the_images() {
+  t_begin "purging one of two instances leaves the aman line and the images alone"
+  sandbox_new
+  RUN_ENV_EXTRA=(SHELL=/bin/bash)
+  install_machine
+  add_instance second
+  printf '%s\n' "aman-app:v1" >>"$SB_STATE/images"
+  run_install instance remove second --purge-data --confirm-name second
+  assert_rc 0
+  assert_contains "$(cat "$SB/user/.bashrc")" "amanuensis (managed by the installer)"
+  assert_contains "$(cat "$SB_STATE/images")" "aman-app:v1"
+  sandbox_drop
+}
+
 test_removing_one_of_two_instances_leaves_the_machine_project() {
   t_begin "purging one of two instances leaves the shared project running"
   sandbox_new
@@ -296,6 +330,7 @@ test_a_failed_first_install_names_its_cleanup() {
     *"install.sh instance remove main --purge-data") t_pass ;;
     *) t_fail "the error output does not end with the cleanup command: [$ERR]" ;;
   esac
+  assert_flat_contains "$ERR" "Nothing of yours was made yet. Run install.sh again to continue; to remove what this run left behind instead, run: install.sh instance remove main --purge-data"
   printf '%s\n' "main-slots c-left" >"$SB_STATE/leftover_containers"
   printf '%s\n' main_slot_ctl_1 >>"$SB_STATE/volumes"
   run_install instance remove main --purge-data --confirm-name main
@@ -521,6 +556,8 @@ test_purge_needs_typed_name
 test_yes_does_not_bypass_purge_confirmation
 test_purge_removes_leftovers_that_were_never_saved
 test_removing_the_last_instance_takes_the_machine_project_with_it
+test_the_last_purge_takes_out_the_path_block_and_the_images
+test_a_purge_of_one_of_two_instances_keeps_the_path_block_and_the_images
 test_removing_one_of_two_instances_leaves_the_machine_project
 test_a_failed_first_install_names_its_cleanup
 test_name_validation

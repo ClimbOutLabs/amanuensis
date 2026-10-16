@@ -273,6 +273,7 @@ sandbox_print_root_steps() {
     ui_hint "It adds a security rule for the sandbox, which the system loads again at every start."
   fi
   ui_hint "It sets up $SLOT_COUNT disks of up to $SLOT_DISK_GB GB that use space only as they fill."
+  ui_hint "Type y and then your password; pressing Enter stops the install here (nothing is lost; run install.sh again to continue)."
 }
 
 # Brings up the slots of one instance, with a root step only after a yes. Runs before the instance starts, because

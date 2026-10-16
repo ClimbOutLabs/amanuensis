@@ -7,7 +7,7 @@ description: "Install Amanuensis with the one-command installer: Docker prerequi
 
 The installer sets up Amanuensis on your own machine with one command and a few prompts. Docker is the only prerequisite. The installer builds the app and its helpers locally, starts one stack per person, and gives each person a private login. Nothing is uploaded anywhere, and nothing is pushed to any registry.
 
-One instance serves one person. If two people in the same household need it, they run two instances.
+Each person gets a new instance.
 
 ## What you need
 
@@ -15,7 +15,7 @@ One instance serves one person. If two people in the same household need it, the
 - 10 GB of free disk space, and on Linux 20 GB more under `/var/lib` for the sandbox disks (they are sparse and use real space only as code runs).
 - Nothing else: no Node.js is needed. For the sandbox setup the installer downloads a pinned Node.js from nodejs.org (about 35 MB, checked against a SHA-256 pinned in the repository) into `~/.amanuensis/runtime/node`, and uses it only to run that setup. `--use-host-node` uses your own Node.js 22.14 or newer instead; `--no-sandbox` skips all of it.
 - Docker needs at least 6 GB of memory for the first build. The installer blocks below 6 GB and warns between 6 and 8 GB; 8 GB or more is recommended.
-- Your own model: the address of a model server you already run, for example `http://host.docker.internal:11434/v1`. API keys are entered in the app afterwards, not in the installer. The installer never scans your machine for models; you type the endpoint yourself.
+- A model of your own. After the install, paste its key in the app under Settings › Models. The installer never asks for a key and never scans your machine for models.
 - A git checkout of this repository. The installer runs from the checkout and builds the images from source.
 
 ## The one command
@@ -38,15 +38,20 @@ The installer works in phases and shows you a printed plan before changing anyth
 
 ### What it asks
 
-For the first instance it prompts, with defaults in brackets:
+For the first instance it asks, with defaults in brackets:
 
 - Instance name `[main]`
-- Owner email
-- Address you will use from other devices (press Enter to use this computer only)
-- If you give a public address: address for the sign-in service (its own https address, never a path of the first one)
-- Token Factory key (optional; typed hidden, never echoed). Giving one makes Nebius Token Factory the default model and skips the next question
-- Model server address (optional; skipped when you gave a Token Factory key)
-- Password (typed twice, never echoed; at least 8 characters, at most 72 bytes)
+- Your email
+- Daily backup `[Y/n]`
+- The plan, then Go ahead `[Y/n]`
+- Your password, typed twice (never shown on screen)
+
+On native Linux only, near the end, it also asks:
+
+- Set up the sandbox now? `[y/N]`
+- Make Docker start with this computer? `[y/N]`
+
+Type `y` for both; the first one then asks for your computer's password. Pressing Enter stops the install there, and nothing is lost: run `install.sh` again to continue.
 
 Everything else is generated: ports, secrets, and the login setup.
 
@@ -76,7 +81,7 @@ The printed plan lists every first-run download with its approximate size, inclu
 
 ### Feeding the Token Factory key safely
 
-Type the key at the hidden prompt, or read it hidden into a shell variable and hand it over on stdin. A command-line value or `echo KEY |` would put the key in your shell history and in the process list, so the installer refuses the first and these docs never use the second.
+Read the key hidden into a shell variable and hand it over on stdin. A command-line value or `echo KEY |` would put the key in your shell history and in the process list, so the installer refuses the first and these docs never use the second.
 
 ```bash
 read -rs KEY                                   # type or paste the key; nothing is shown
@@ -102,7 +107,7 @@ Your password is never stored anywhere. The installer hashes it once and keeps o
 
 ## Adding people
 
-Each person gets their own instance with their own ports, secrets, data, and login.
+Each person gets a new instance, with its own ports, secrets, data, and login.
 
 ```bash
 installer/install.sh instance add <name>    # create and start another instance
@@ -118,7 +123,7 @@ installer/install.sh instance remove <name> # stop and remove it; data volumes a
 installer/install.sh instance remove <name> --purge-data
 ```
 
-This asks you to type the instance name to confirm (or pass it in advance with `--confirm-name`). The installer never deletes a volume otherwise.
+This asks you to type the instance name to confirm (or pass it in advance with `--confirm-name`). The installer never deletes a volume otherwise. When it is the last instance, this also takes the `aman` command out of your shell profiles and removes the Aman images; your backups folder is kept, and the installer says so.
 
 An instance served with `--tls caddy` also has a site file in `/etc/caddy/aman.d`. `instance remove` prints the root steps that delete it and reload Caddy (`sudo rm -f /etc/caddy/aman.d/<name>.caddyfile`, then `systemctl reload-or-restart caddy`) and runs them after you answer yes or pass `--tls-root`. Without consent the instance is still removed, a warning says that Caddy keeps serving its names, and the steps stay yours to run.
 
@@ -138,7 +143,13 @@ Members can chat and see their own history. Only the owner is an admin: members 
 
 ## Using it from other devices
 
-The first run is local only. To reach an instance from another device on your network, you put your own reverse proxy in front of it. The installer configures nothing outside the machine; it only prints what your proxy must satisfy:
+On Linux, Aman opens on this computer (`127.0.0.1`) and on your home network, and nowhere else. Open one of the https addresses the installer printed from any phone or computer on the same network, after that device has trusted this computer once (see [First login](#first-login)). Aman is never opened on every network address, so a laptop on public Wi-Fi is not reachable. `--local-only` keeps it on this computer alone. If this computer gets a new address, run `aman doctor network --fix`.
+
+### Opening Aman from another device (Mac and Windows)
+
+On a Mac, with Docker Desktop, and in WSL2 on Windows, Docker runs in a virtual machine and cannot open the app on your home-network address. Aman therefore opens on `127.0.0.1` only (in WSL2, `127.0.0.1` is the `localhost` of the Windows PC), and it is never opened on all addresses.
+
+To open Aman from your phone, run a reverse proxy on the Mac or PC itself. Make it listen on the computer's home-network address and forward to `http://127.0.0.1:8791` (the app port the installer printed) and `http://127.0.0.1:5556` (sign-in), then install with `--public-url` and `--login-url`. `install.sh --print-proxy-requirements` lists what the proxy must do:
 
 - One HTTPS origin per instance, plus one HTTPS origin per login server. Never a path prefix.
 - The `Host` header forwarded to the instance.
@@ -146,12 +157,6 @@ The first run is local only. To reach an instance from another device on your ne
 - Every name resolvable from inside the containers, not just from your browser.
 
 When you set a public URL, that instance's URL and its login issuer switch to HTTPS behind your proxy. An HTTP login issuer is only allowed for loopback addresses.
-
-### Opening Aman from another device (Mac and Windows)
-
-On a Mac, with Docker Desktop, and in WSL2 on Windows, Docker runs in a virtual machine and cannot publish the app on your home-network address. The installer therefore opens Aman on `127.0.0.1` only (in WSL2, `127.0.0.1` is the `localhost` of the Windows PC), and it never opens it on all addresses: a laptop on public Wi-Fi would then be open to everyone on that network.
-
-To open Aman from your phone, run a reverse proxy on the Mac or PC itself. Make it listen on the computer's home-network address and forward to `http://127.0.0.1:8791` (the app port the installer printed) and `http://127.0.0.1:5556` (sign-in), then install with `--public-url` and `--login-url` as described above. `install.sh --print-proxy-requirements` lists what the proxy must do.
 
 ### Https with Caddy
 
@@ -173,11 +178,7 @@ Both names are served with `Strict-Transport-Security`, `X-Content-Type-Options`
 
 ## Doctor
 
-The doctor binary is not on your PATH. It lives at `~/.amanuensis/bin/aman`. Either run it with the full path, or add the folder to your PATH:
-
-```bash
-export PATH="$HOME/.amanuensis/bin:$PATH"   # add to your shell profile to keep it
-```
+The installer adds the `aman` command to your shell profile. Open a new terminal window to use it. If the command is still not found, run `./installer/install.sh command` from the checkout, then open a new terminal window.
 
 Doctor checks the whole setup and tells you exactly what to do about anything it finds:
 
@@ -229,7 +230,7 @@ installer/install.sh backup          # back up every instance
 installer/install.sh backup main     # back up one instance
 ```
 
-Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the five most recent.
+Backups land in `~/.amanuensis/backups/<timestamp>/` with restricted permissions. The installer keeps the last 7.
 
 ```bash
 installer/install.sh upgrade --check   # compare the installed version with the checkout (no network call)

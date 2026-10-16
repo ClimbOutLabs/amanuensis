@@ -58,6 +58,20 @@ case "$cmd" in
       exit 1
     fi
     ;;
+  images)
+    cat "$S/images"
+    exit 0
+    ;;
+  rmi)
+    for ref in "$@"; do
+      grep -Fxq "$ref" "$S/images" || { echo "No such image: $ref" >&2; exit 1; }
+      case " ${STUB_RMI_FAIL:-} " in *" $ref "*) echo "image is in use" >&2; exit 1 ;; esac
+      grep -Fxv "$ref" "$S/images" >"$S/images.new" || true
+      mv "$S/images.new" "$S/images"
+      echo "$ref" >>"$S/images_removed"
+    done
+    exit 0
+    ;;
   build)
     tag=
     while [ "$#" -gt 0 ]; do

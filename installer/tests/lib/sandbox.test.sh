@@ -336,6 +336,7 @@ Set up the sandbox now?=>y"
   assert_eq "$RC" 0
   assert_flat_contains "$OUT" "The sandbox needs administrator rights on this computer."
   assert_flat_contains "$OUT" "sets up 4 disks of up to 16 GB"
+  assert_flat_contains "$OUT" "Type y and then your password; pressing Enter stops the install here (nothing is lost; run install.sh again to continue)."
   assert_not_contains "$OUT" "loads again at every start" "only the missing part is listed"
   assert_log_has "--fix --yes"
   sandbox_drop

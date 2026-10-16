@@ -627,7 +627,11 @@ print_instance_summary() {
       local) if [ -z "$bookmark" ]; then bookmark=$(origin_host "$origin"); fi ;;
     esac
   done < <(origins_display_order "${origins:-$url}")
+  if tls_active "$name"; then
+    ui_line "On this computer open http://localhost:$(reg_get "$name" app_port). The https addresses are for your phone and other devices, once each one trusts this computer (see below)."
+  fi
   ui_check_row ok "Sign in" "$(reg_get "$name" owner_email)"
+  ui_check_more "click Let's Get Started, then enter this email and your password"
   print_model_row "$name"
   if instance_sandbox_wanted "$name"; then
     case "$SANDBOX_FAILED_NAMES " in
@@ -664,9 +668,9 @@ print_instance_summary() {
 print_trust_lines() { # name
   local link
   link=$(tls_trust_link "$1")
-  ui_line "Trust this computer on each device: $link"
+  ui_line "On a phone or another computer, open this page first and follow its steps: $link"
   ui_line "On an iPhone, open it in Safari, install the profile, then turn it on in Settings, General, About, Certificate Trust Settings."
-  ui_line "Before you trust it, check that the fingerprint your device shows is $(tls_fingerprint). If it differs, stop."
+  ui_line "The page shows a fingerprint; compare it with the one your device shows before you trust it."
   if [ "$TLS_AUTHORITY_REPLACED" = 1 ]; then
     ui_line "This computer's certificate authority was made again (it did not cover a name now in use, or was from an earlier version), so each device must trust it again."
   fi
@@ -941,8 +945,29 @@ machine_has_leftovers() {
   [ -n "$(project_objects containers aman-machine)$(project_objects networks aman-machine)$(machine_volumes)" ]
 }
 
-# After the last instance is purged: the shared speech-to-text project with its volumes, the daily backup job and
-# the installer's own folders. The removal log and the backups stay; backups are the person's data.
+# The images this installer built: the app, the speech-to-text service and the sandbox.
+aman_images() {
+  local image
+  while IFS= read -r image; do
+    case "$image" in aman-app:* | aman-stt:* | "$SLOT_IMAGE") printf '%s\n' "$image" ;; esac
+  done < <(D images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)
+}
+
+# Removes the built images; one that is still in use is left and named in a warning.
+aman_images_remove() {
+  local image failed=
+  while IFS= read -r image; do
+    [ -n "$image" ] || continue
+    D rmi "$image" >/dev/null 2>&1 || failed="$failed $image"
+  done < <(aman_images)
+  if [ -n "$failed" ]; then
+    warn "could not remove the images:$failed. Remove them with: docker rmi$failed"
+  fi
+}
+
+# After the last instance is purged: the shared speech-to-text project with its volumes, the daily backup job, the aman
+# command in the shell profiles, the built images and the installer's own folders. The removal log and the backups
+# stay; backups are the person's data.
 machine_purge() {
   if [ -f "$MACHINE_DIR/compose.yaml" ] && [ -f "$MACHINE_DIR/.env" ]; then
     dcm down --volumes --remove-orphans >/dev/null 2>&1 || warn "could not stop the speech-to-text service cleanly; continuing with the removal"
@@ -951,6 +976,8 @@ machine_purge() {
   # shellcheck disable=SC2046 # volume names are single words
   volumes_purge $(machine_volumes) || exit 1
   backup_schedule_disable
+  path_profiles_remove
+  aman_images_remove
   installer_state_remove
 }
 
@@ -968,7 +995,7 @@ installer_state_remove() {
 # On a failed run that may have left parts of a new instance in Docker: the one command that removes them.
 instance_pending_notice() {
   [ -n "$INSTANCE_PENDING" ] || return 0
-  printf 'To clean up what this run left behind, run: install.sh instance remove %s --purge-data\n' "$INSTANCE_PENDING" >&2
+  printf 'Nothing of yours was made yet. Run install.sh again to continue; to remove what this run left behind instead, run: install.sh instance remove %s --purge-data\n' "$INSTANCE_PENDING" >&2
 }
 
 # Deletes the given volumes. Every failure is reported and the return code says so.

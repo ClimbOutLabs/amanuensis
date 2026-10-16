@@ -33,17 +33,22 @@ Ready. Instance main is running.
               https://spark:8443
               http://127.0.0.1:8791
               http://localhost:8791
+  On this computer open http://localhost:8791. The https addresses are
+  for your phone and other devices, once each one trusts this computer
+  (see below).
   + Sign in   owner@example.invalid
+              click Let's Get Started, then enter this email and your
+              password
   > Model     not set: add one in Settings > Models
   + Run code  on, in a sandbox
   + Data      saved in Docker
   + Backups   daily, keeps the last 7
-  Trust this computer on each device: http://192.168.1.20:8791/trust
+  On a phone or another computer, open this page first and follow its
+  steps: http://192.168.1.20:8791/trust
   On an iPhone, open it in Safari, install the profile, then turn it on
   in Settings, General, About, Certificate Trust Settings.
-  Before you trust it, check that the fingerprint your device shows is
-  <fingerprint>.
-  If it differs, stop.
+  The page shows a fingerprint; compare it with the one your device
+  shows before you trust it.
   Bookmark spark.local: it keeps working when this computer's address
   changes.
   Open a new terminal window to use the aman command.
@@ -74,6 +79,8 @@ Ready. Instance main is running.
               http://127.0.0.1:8791
               http://localhost:8791
   + Sign in   owner@example.invalid
+              click Let's Get Started, then enter this email and your
+              password
   > Model     not set: add one in Settings > Models
   + Run code  on, in a sandbox
   + Data      saved in Docker
@@ -109,6 +116,8 @@ Ready. Instance main is running.
 
   + Open      http://127.0.0.1:8791
   + Sign in   owner@example.invalid
+              click Let's Get Started, then enter this email and your
+              password
   + Model     Token Factory, nvidia/nemotron-3-super-120b-a12b, limit
               500000 tokens a day
   + Run code  on, in a sandbox
@@ -143,6 +152,8 @@ Running, but the checks found a problem (listed above).
 
   + Open      http://127.0.0.1:8791
   + Sign in   owner@example.invalid
+              click Let's Get Started, then enter this email and your
+              password
   > Model     not set: add one in Settings > Models
   ! Run code  not ready: aman doctor sandbox --fix
   + Data      saved in Docker

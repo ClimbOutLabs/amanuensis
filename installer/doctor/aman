@@ -796,7 +796,8 @@ check_instance_containers() { # name; sets APP_CONTAINER
           *"(health: starting)"*) starting="${starting}|$(container_words "$name" "$service")" ;;
         esac
         ports=$(bounded "$PROBE_SECONDS" docker port "$id" 2>/dev/null)
-        # An instance opened on the network publishes the app on each of its own addresses, never on a wildcard.
+        # An instance opened on the network publishes the app on each of its own addresses, never on a wildcard; on
+        # Docker Desktop and WSL2 it publishes on 127.0.0.1 alone.
         case "$ports" in
           *"0.0.0.0:"* | *"[::]:"* | *":::"*) exposed="${exposed}|$(container_words "$name" "$service")" ;;
         esac
@@ -836,7 +837,7 @@ check_instance_containers() { # name; sets APP_CONTAINER
   if [ -n "$exposed" ]; then
     words=$(join_words "$exposed")
     record "$name" ports fail "$(capitalize "$words") $(is_are "$exposed") open to the whole network, not just this computer." "$INSTANCE_FIX"
-  elif [ -n "$(registry_value "$name" origins)" ]; then
+  elif origins_reach_the_network "$(registry_value "$name" origins)" && ! network_publishes_on_loopback_only; then
     record "$name" ports ok "The app is open to your network on purpose, so other devices can open Aman; sign-in stays on this computer." ""
   else
     record "$name" ports ok "Aman listens on this computer only." ""
