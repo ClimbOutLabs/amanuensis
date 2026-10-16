@@ -23,7 +23,7 @@ import {
   type VerifiedWorkspaceCommitResult,
 } from '../provider/Provider';
 import { SlotClient, type SlotCallError, type SlotCallResult } from './SlotClient';
-import { attestationProblem, SLOT_FIX_COMMAND } from './SlotDriver';
+import { attestationProblem, SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE } from './SlotDriver';
 import { GitBridge, type BridgeGuest } from './git/gitBridge';
 import {
   SLOT_AGENT_TIMEOUT_MARGIN_MS,
@@ -92,7 +92,7 @@ function describeAgentError(error: SlotCallError): string {
     return STORAGE_FULL_MESSAGE;
   }
   if (error.kind === 'unreachable') {
-    return `The sandbox slot for this chat is not reachable. Run \`${SLOT_FIX_COMMAND}\`, then try again.`;
+    return SLOT_NOT_READY_MESSAGE;
   }
   return `The sandbox failed: ${error.message}`;
 }
@@ -455,10 +455,8 @@ export class SlotSandboxProvider implements SandboxProvider {
         reason: `The sandbox is full: every slot already holds as many chats as its disk fits (${full.join('; ')}). Delete old chats, then try again.`,
       };
     }
-    return {
-      ok: false,
-      reason: `The sandbox is not available: ${problems.join('; ') || 'no slots are configured'}. Run \`${SLOT_FIX_COMMAND}\`, then try again.`,
-    };
+    this.logger.warn('no sandbox slot is usable', { problems });
+    return { ok: false, reason: SLOT_NOT_READY_MESSAGE };
   }
 
   private toExecResult(input: { response: SlotExecResponse; timeoutMs: number }): ExecResult {

@@ -356,7 +356,7 @@ export type { SandboxRefParts } from './sandbox/sandboxRef';
 export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
 export { slotSocketPathsIn } from './sandbox/slots/slotContract';
-export { SLOT_FIX_COMMAND, SlotDriver } from './sandbox/slots/SlotDriver';
+export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';
 export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';
 export type { StructuredEditPathRequest, StructuredEditPathResolution } from './sandbox/structuredEditPaths';

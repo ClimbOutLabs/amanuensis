@@ -78,6 +78,8 @@ export type DriverReadiness =
         | 'unsupported_platform';
       /** Human-actionable remediation text, shown to the user. */
       error: string;
+      /** True when `error` is already the complete message, so it reaches the model and the chat unchanged. */
+      verbatim?: true | undefined;
       reason?: DriverReadinessReason | undefined;
     };
 

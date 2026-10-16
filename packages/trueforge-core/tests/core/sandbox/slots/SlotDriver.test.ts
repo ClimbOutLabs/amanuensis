@@ -5,7 +5,7 @@ import type { DriverRunParams } from '../../../../src/core/sandbox/driver/Isolat
 import { ISOLATION_REFUSED_MARKER, OUTPUT_EXCEEDED_MARKER } from '../../../../src/core/sandbox/driver/IsolationDriver';
 import { runCodeStatusFromReadiness } from '../../../../src/core/sandbox/driver/runCodeStatus';
 import { SlotRunCodeRequestSchema } from '../../../../src/core/sandbox/slots/slotContract';
-import { attestationProblem, SlotDriver } from '../../../../src/core/sandbox/slots/SlotDriver';
+import { attestationProblem, SLOT_NOT_READY_MESSAGE, SlotDriver } from '../../../../src/core/sandbox/slots/SlotDriver';
 import { makeSilentLogger } from '../../harnessMocks';
 import { attestation, bodyOf, errorBody, FakeAgent, type FakeHandler } from './fakeAgent';
 
@@ -137,7 +137,7 @@ describe('SlotDriver', () => {
     expect(await bad.ensureReady()).toMatchObject({ ready: false, error_code: 'slots_unavailable' });
   });
 
-  test('every slot failing its checks is isolation_refused and names the cause', async () => {
+  test('every slot failing its checks is isolation_refused and gets the plain message, the cause going to the log', async () => {
     const refusing: FakeHandler = () => ({
       status: 200,
       body: { busy: false, sessions: 0, attestation: attestation({ failing: ['apparmor'] }) },
@@ -145,7 +145,7 @@ describe('SlotDriver', () => {
     const { driver } = await driverFor([refusing, refusing]);
     const readiness = await driver.ensureReady();
     expect(readiness).toMatchObject({ ready: false, reason: 'isolation_refused' });
-    expect(!readiness.ready && readiness.error).toContain('apparmor');
+    expect(!readiness.ready && readiness.error).toBe(SLOT_NOT_READY_MESSAGE);
     expect(runCodeStatusFromReadiness(readiness).state).toBe('isolation_refused');
   });
 
@@ -158,7 +158,9 @@ describe('SlotDriver', () => {
     });
     const readiness = await driver.ensureReady();
     expect(readiness).toMatchObject({ ready: false, error_code: 'slots_unavailable' });
-    expect(!readiness.ready && readiness.error).toContain('aman doctor sandbox --fix');
+    expect(!readiness.ready && readiness.error).toBe(SLOT_NOT_READY_MESSAGE);
+    expect(!readiness.ready && readiness.verbatim).toBe(true);
+    expect(!readiness.ready && readiness.error).not.toMatch(/slot|daemon|docker|sandbox backend/i);
     expect(runCodeStatusFromReadiness(readiness).state).toBe('slots_unavailable');
   });
 
