@@ -7,6 +7,7 @@ import {
   SUPPORTED_REASONING_EFFORTS,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   VERCEL_AI_PROVIDER_NAMES,
+  getModelOutputExceedsContextError,
 } from '@truefoundry/trueforge-core/core';
 import { NameSchema, uniqueNames, type ResourceName } from './common';
 
@@ -31,6 +32,22 @@ export const ModelPropertiesSchema = z
     vision: z.boolean().optional().describe('Whether the model can read images directly. Absent means false.'),
   })
   .strict()
+  .superRefine((properties, ctx) => {
+    // A model that reserves its whole context window for output leaves no room
+    // for input, so every turn fails the token pre-flight guard. Reject the
+    // combination at the boundary instead of failing silently at runtime.
+    const message = getModelOutputExceedsContextError({
+      context_length: properties.context_length,
+      max_output_tokens: properties.max_output_tokens,
+    });
+    if (message != null) {
+      ctx.addIssue({
+        code: 'custom',
+        message,
+        path: ['max_output_tokens'],
+      });
+    }
+  })
   .describe('Optional model capability metadata.')
   .openapi('ModelProperties');
 
@@ -235,6 +252,10 @@ export const ConfiguredModelProviderSchema = z
   .object({
     name: NameSchema,
     manifest: ModelProviderManifestSchema,
+    env_managed: z
+      .boolean()
+      .optional()
+      .describe('True when the server derives this provider from its environment; it is read-only here.'),
   })
   .strict()
   .openapi('ConfiguredModelProvider');

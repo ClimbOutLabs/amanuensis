@@ -20,6 +20,7 @@ import {
   AgentHarnessError,
   existingSandboxIdForProvider,
   extractErrorLogFields,
+  HeldActionRefusedError,
   isAgentInputUserMessage,
   isFileContentPart,
   McpConnectionError,
@@ -29,6 +30,7 @@ import {
   SandboxNotAvailableError,
   VercelAILLM,
   type BoundRepository,
+  type HeldRefusalReason,
 } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -103,6 +105,7 @@ import {
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
 import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
+import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
 import { TurnExecutionDeadline } from '../runtime/turnExecutionDeadline';
@@ -166,7 +169,10 @@ export const TurnConflictCode = {
   APPROVAL_CONFLICT: 'approval_conflict',
 } as const;
 
-export type TurnConflictCode = (typeof TurnConflictCode)[keyof typeof TurnConflictCode];
+/** An answer to a held action that cannot run now; `error.code` says why, e.g. `held_action_expired`. */
+export type HeldActionConflictCode = `held_action_${HeldRefusalReason}`;
+
+export type TurnConflictCode = (typeof TurnConflictCode)[keyof typeof TurnConflictCode] | HeldActionConflictCode;
 
 /** The conflict code for a store rejection, or null when the store raised one we do not name. */
 export function turnConflictCodeFor(error: SessionStoreConflictError): TurnConflictCode | null {
@@ -202,6 +208,8 @@ export interface TurnsRouterDeps {
   turnArtifactStore: ITurnArtifactStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore;
+  /** Per-instance daily Token Factory cap; a no-op without `TOKEN_FACTORY_DAILY_TOKEN_CAP`. */
+  tokenFactoryBudget: TokenFactoryBudget;
   /** Resumable live turn-event transport: create-turn writes, subscribe polls. */
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore;
@@ -222,7 +230,7 @@ const CONFIGURED_MODELS_PROMPT_LIMIT = 20;
  */
 export type BeginTurnExecutionDeps = Pick<
   TurnsRouterDeps,
-  'activeTurns' | 'turnDrains' | 'eventSubscriptions' | 'logger' | 'globalSettingsStore'
+  'activeTurns' | 'turnDrains' | 'eventSubscriptions' | 'logger' | 'globalSettingsStore' | 'tokenFactoryBudget'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -295,6 +303,8 @@ function createTurnResolver(deps: {
    * caller, never per tool call.
    */
   toolOutputScreenEnabled: boolean;
+  /** Limits and counts the turn's Token Factory calls against the daily cap. */
+  tokenFactoryBudget: TokenFactoryBudget;
 }): SpaceTurnResourceResolver {
   const {
     mcpServerStore,
@@ -327,6 +337,7 @@ function createTurnResolver(deps: {
     turnArtifactStore,
     clientTimezone,
     toolOutputScreenEnabled,
+    tokenFactoryBudget,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -357,16 +368,30 @@ function createTurnResolver(deps: {
             ...(providerConfig.provider.type === 'tokenfactory' ? {} : metadataHeaders),
           },
         });
-        return {
-          modelClient: new VercelAILLM({
+        const buildClient = ({ withFailover, onFailover }: { withFailover: boolean; onFailover: () => void }) =>
+          new VercelAILLM({
             providerConfig: withMetadataHeaders(routed.providerConfig),
-            ...(routed.fallbackProviderConfig !== undefined
-              ? { fallbackProviderConfig: withMetadataHeaders(routed.fallbackProviderConfig) }
+            ...(withFailover && routed.fallbackProviderConfig !== undefined
+              ? { fallbackProviderConfig: withMetadataHeaders(routed.fallbackProviderConfig), onFallback: onFailover }
               : {}),
             logger,
             signal,
             streamTimeout: resolved.streamTimeout,
-          }),
+          });
+        const role = tokenFactoryRole({
+          primaryType: routed.providerConfig.provider.type,
+          fallbackType: routed.fallbackProviderConfig?.provider.type,
+        });
+        // A new turn on a Token Factory model is refused up front once today's budget is gone; the
+        // metered client re-checks before every model call after that.
+        if (role === 'primary') {
+          await tokenFactoryBudget.assertWithinCap();
+        }
+        return {
+          modelClient:
+            role === undefined
+              ? buildClient({ withFailover: true, onFailover: () => undefined })
+              : new TokenFactoryMeteredLLM({ role, budget: tokenFactoryBudget, logger, build: buildClient }),
           defaultModelParams: resolved.defaultModelParams,
           // The upstream identifier actually sent to the provider, not
           // `name` (the configured catalog alias), so the model-identity
@@ -419,9 +444,10 @@ function createTurnResolver(deps: {
           currentProviderType: provider.type,
         });
         // A fresh Daytona sandbox is cloned from the release snapshot, so the build must be ready first.
+        // Slots attest themselves when the sandbox is created.
         // Restoring an existing sandbox goes through daytona.get and never touches the snapshot.
         // Local fallback has no image build.
-        if (carriedSandboxId === undefined && provider.type !== 'local') {
+        if (carriedSandboxId === undefined && provider.type !== 'local' && provider.type !== 'slots') {
           const status = await checkSnapshotStatus({ store: sandboxProviderStore, tenant_id, logger });
           if (status?.status !== 'ready') {
             throw new HTTPException(422, {
@@ -437,6 +463,7 @@ function createTurnResolver(deps: {
           skills: spec.skills ?? [],
           store: skillStore,
         });
+        // Sandbox slots are offline; their provider keeps the token on the host and runs git there.
         const githubGitToken = await resolveGithubGitToken({
           tenant_id,
           spec,
@@ -597,6 +624,27 @@ function createTurnResolver(deps: {
 
 const MAX_SESSION_TITLE_LENGTH = 50;
 
+/** Grapheme segmentation for title truncation (locale-independent per UAX #29). */
+const titleSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/**
+ * Caps a title at MAX_SESSION_TITLE_LENGTH UTF-16 units without splitting a
+ * grapheme cluster: clusters that would cross the cap (emoji with skin tones or
+ * ZWJ sequences, which read as one unit but span several) are dropped whole.
+ */
+function truncateSessionTitle(title: string): string {
+  let truncated = '';
+  let length = 0;
+  for (const { segment } of titleSegmenter.segment(title)) {
+    if (length + segment.length > MAX_SESSION_TITLE_LENGTH) {
+      break;
+    }
+    truncated += segment;
+    length += segment.length;
+  }
+  return truncated;
+}
+
 /**
  * Derives a session title from the first user message of the first turn. Returns the
  * trimmed text (capped at {@link MAX_SESSION_TITLE_LENGTH}) or `undefined` when no usable
@@ -620,7 +668,13 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
   if (!trimmed) {
     return undefined;
   }
-  return trimmed.slice(0, MAX_SESSION_TITLE_LENGTH);
+  const title = truncateSessionTitle(trimmed);
+  // A single cluster longer than the cap truncates to nothing; treat it as no usable title
+  // so the store keeps the title unset instead of persisting a blank first-write-wins value.
+  if (!title) {
+    return undefined;
+  }
+  return title;
 }
 
 /**
@@ -933,6 +987,8 @@ export async function beginTurnExecution(params: {
   previous_turn_id: string | undefined;
   userRef: string;
   deps: BeginTurnExecutionDeps;
+  /** No person watches this turn (a scheduled run): what would ask is held for the owner. */
+  unattended?: boolean | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const { session, input, previous_turn_id: previousTurnId, userRef, deps } = params;
   const sessionId = session.session_id;
@@ -959,6 +1015,7 @@ export async function beginTurnExecution(params: {
     sessionId,
     tenantId: tenant_id,
     modelProviderStore: deps.modelProviderStore,
+    tokenFactoryBudget: deps.tokenFactoryBudget,
     agentStore: deps.agentStore,
     personaModelName: deps.personaContext?.model_name,
     sessionAgent: session.record.agent,
@@ -985,6 +1042,7 @@ export async function beginTurnExecution(params: {
     knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
     modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
     modelProviderStore: deps.modelProviderStore,
+    tokenFactoryBudget: deps.tokenFactoryBudget,
     logger: deps.logger,
   });
   const resolver = createTurnResolver({
@@ -1017,6 +1075,7 @@ export async function beginTurnExecution(params: {
     clientTimezone: deps.clientTimezone,
     toolOutputScreenEnabled,
     turnArtifactStore: deps.turnArtifactStore,
+    tokenFactoryBudget: deps.tokenFactoryBudget,
   });
 
   // First turn only: derive the title from the first user message. The store
@@ -1035,6 +1094,7 @@ export async function beginTurnExecution(params: {
       executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
     },
     command_execution_owner_id: configuration.EXECUTOR_ID,
+    unattended: params.unattended,
   });
 
   executionDeadline.arm();
@@ -1082,6 +1142,7 @@ export async function startTurnInProcess(params: {
   previous_turn_id: string | undefined;
   userRef: string;
   deps: BeginTurnExecutionDeps;
+  unattended?: boolean | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -1607,6 +1668,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       knowledgeDir: configuration.PERSONA_KNOWLEDGE_DIR,
       modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
       modelProviderStore,
+      tokenFactoryBudget: deps.tokenFactoryBudget,
       logger: deps.logger,
     });
     const turnCustom: TurnCustom = {
@@ -1710,6 +1772,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           personalizationStore: deps.personalizationStore,
           eventStore: deps.sessionStore,
           modelProviderStore,
+          tokenFactoryBudget: deps.tokenFactoryBudget,
           memoryClient,
           tenantId: requestContext.tenant_id,
           createdBy: userRef,
@@ -1739,6 +1802,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       sessionId,
       tenantId: requestContext.tenant_id,
       modelProviderStore,
+      tokenFactoryBudget: deps.tokenFactoryBudget,
       agentStore,
       personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
       sessionAgent: session.record.agent,
@@ -1797,11 +1861,18 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       clientTimezone: body.client_timezone,
       toolOutputScreenEnabled,
       turnArtifactStore: deps.turnArtifactStore,
+      tokenFactoryBudget: deps.tokenFactoryBudget,
     });
 
     // First turn only: derive the title from the first user message. The store
     // never overwrites an existing title.
     const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
+
+    // Answering actions a scheduled run held runs just those calls; the chat is not asked anything new.
+    const stopAfterToolResponse = await session.answersOnlyHeldActions({
+      previous_turn_id: body.previous_turn_id,
+      input: body.input,
+    });
 
     let turn;
     try {
@@ -1817,6 +1888,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           executionDeadline.extendForRegisteredCommand(execution.timeout_ms);
         },
         command_execution_owner_id: configuration.EXECUTOR_ID,
+        stop_after_tool_response: stopAfterToolResponse,
       });
     } catch (error) {
       if (error instanceof SessionStoreNotFoundError) {
@@ -1849,6 +1921,19 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           case 'invalid_file_input':
             return c.json({ error: { message: error.message } }, 400);
           case 'invalid_send_input': {
+            // A held action that cannot run is a conflict with what is stored, and says why by code.
+            if (error instanceof HeldActionRefusedError) {
+              return c.json(
+                {
+                  error: {
+                    message: error.message,
+                    type: 'conflict',
+                    code: `held_action_${error.reason}` satisfies HeldActionConflictCode,
+                  },
+                },
+                409,
+              );
+            }
             // A decision the session already recorded is a resubmission, not a bad request:
             // the tool has run (or been denied) once and must not run again. Answer from
             // stored state; only a genuinely unrecorded decision keeps the 422.

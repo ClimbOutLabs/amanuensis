@@ -1,0 +1,9 @@
+{
+  "name": "aman-sandbox-guest-tools",
+  "private": true,
+  "description": "Global command line tools baked into the sandbox guest image; the lockfile pins every transitive package.",
+  "dependencies": {
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  }
+}

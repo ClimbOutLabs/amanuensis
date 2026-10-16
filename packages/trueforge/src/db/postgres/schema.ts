@@ -50,6 +50,7 @@ export const TABLES_TO_MOVE = [
   'artifact_blob',
   'turn_artifact',
   'global_settings',
+  'token_factory_usage',
   'sentinel_audit',
   'sentinel_user_settings',
   'approval_token',

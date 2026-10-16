@@ -9,8 +9,7 @@ import monacoEditorPlugin from 'vite-plugin-monaco-editor-esm';
 
 import { rewriteShellAssetUrls } from './src/shellBaseToken';
 
-const rootDir = path.dirname(fileURLToPath(import.meta.url));
-const gatewaySdkStub = path.join(rootDir, 'src/gatewaySdkStubs.ts');
+const gatewaySdkStub = fileURLToPath(new URL('./src/gatewaySdkStub.ts', import.meta.url));
 
 const SERVER = process.env.VITE_SERVER_URL ?? 'http://localhost:8790';
 const PORT = Number(process.env.FRONTEND_PORT ?? 3000);
@@ -66,11 +65,7 @@ export default defineConfig(({ command }) => ({
     // Never add 'import'/'require' here: Vite applies those per import kind, and
     // forcing 'import' makes CJS deps require @babel/runtime's ESM helpers.
     conditions: ['trueforge-dev', ...defaultClientConditions],
-    alias: {
-      'truefoundry-gateway-sdk/agents/private': gatewaySdkStub,
-      'truefoundry-gateway-sdk/agents': gatewaySdkStub,
-      'truefoundry-gateway-sdk': gatewaySdkStub,
-    },
+    alias: [{ find: /^truefoundry-gateway-sdk(\/.*)?$/, replacement: gatewaySdkStub }],
     dedupe: ['react', 'react-dom', '@assistant-ui/core', '@assistant-ui/store', '@assistant-ui/react'],
   },
   server: {

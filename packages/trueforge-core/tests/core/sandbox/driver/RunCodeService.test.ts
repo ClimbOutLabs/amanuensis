@@ -188,6 +188,15 @@ describe('RunCodeService', () => {
     expect(driver.runs).toHaveLength(0);
   });
 
+  it('hands a readiness message marked verbatim to the model and the chat unchanged', async () => {
+    const message =
+      "Code can't run on this computer yet. To turn it on, run `aman doctor sandbox --fix` on the computer where Aman is installed, then try again.";
+    driver.readiness = { ready: false, error_code: 'slots_unavailable', error: message, verbatim: true };
+    const result = await service.runCode(VALID_INPUT);
+    expect(result).toMatchObject({ status: 'failed', error_code: 'daemon_unavailable', error: message });
+    expect(driver.runs).toHaveLength(0);
+  });
+
   it('maps the isolation-refused marker onto isolation_refused with the exact message', async () => {
     const message = "I can't run this safely, the sandbox couldn't apply all isolation guarantees.";
     driver.runBehavior = () =>

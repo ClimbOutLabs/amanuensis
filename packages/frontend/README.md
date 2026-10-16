@@ -28,7 +28,8 @@ For the full host workflow (standalone or non-standalone), see the root
 [`README.md`](../../README.md).
 
 ```bash
-pnpm standalone:dev   # zero-env: SQLite, Vite :3000 + API :8790
+pnpm dev:login        # once, second terminal: Dex login; add its OIDC_* lines to packages/trueforge/.env
+pnpm standalone:dev   # SQLite, Vite :3000 + API :8790 (needs the OIDC_* lines)
 # or:
 pnpm dev:infra        # then in another terminal:
 pnpm dev              # Postgres + Redis, Vite :3000 + API :8790

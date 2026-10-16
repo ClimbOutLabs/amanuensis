@@ -19,6 +19,10 @@ import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
+import {
+  ListAvailableModelsResponseSchema,
+  ListModelProvidersResponseSchema,
+} from '../../../src/schemas/modelProvider';
 import { SECRET_REDACTION } from '../../../src/utils/secretRedaction';
 
 const model = {
@@ -86,16 +90,18 @@ function withRedactedApiKey<T extends { auth: { api_key: string } }>(provider: T
   };
 }
 
-async function createRouters(): Promise<{
+async function createRouters(options: { envManagedNames?: ReadonlySet<string> } = {}): Promise<{
   settingsRouter: ReturnType<typeof createSettingsRouter>;
   catalogRouter: ReturnType<typeof createCatalogRouter>;
   modelsRouter: ReturnType<typeof createModelsRouter>;
   modelProviderStore: IModelProviderStore;
+  globalSettingsStore: SqliteGlobalSettingsStore;
 }> {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const modelProviderStore = new SqliteModelProviderStore(db);
   const tokenStore = new SqliteOAuthTokenStore(db);
+  const globalSettingsStore = new SqliteGlobalSettingsStore(db);
   return {
     settingsRouter: createSettingsRouter({
       mcpCatalog: McpCatalog.load(),
@@ -110,7 +116,8 @@ async function createRouters(): Promise<{
       toolGrantStore: new SqliteMcpToolGrantStore(db),
       resolveSkillStore: () => new SqliteSkillStore(db),
       resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
-      globalSettingsStore: new SqliteGlobalSettingsStore(db),
+      globalSettingsStore,
+      envManagedModelProviderNames: options.envManagedNames ?? new Set(),
       withTransaction: callback => db.transaction().execute(callback),
       logger: winston.createLogger({ silent: true }),
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
@@ -125,8 +132,11 @@ async function createRouters(): Promise<{
       resolveModelProviderStore: () => modelProviderStore,
       withTransaction: callback => db.transaction().execute(callback),
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+      globalSettingsStore,
+      logger: winston.createLogger({ silent: true }),
     }),
     modelProviderStore,
+    globalSettingsStore,
   };
 }
 
@@ -470,5 +480,157 @@ describe('catalog presets are configurable', () => {
     const json = (await response.json()) as { data: { name: string; manifest: { auth: { api_key: string } } } };
     expect(json.data.manifest.auth.api_key).toBe(SECRET_REDACTION);
     expect(JSON.stringify(json)).not.toContain(body.auth.api_key);
+  });
+});
+
+describe('model token limits', () => {
+  const badModel = {
+    ...model,
+    properties: { context_length: 8000, max_output_tokens: 7600 }, // 7600 + 512 reaches 8000
+  };
+  const badBody = { ...customBody, models: [badModel] };
+
+  it('PUT rejects a model whose max output plus the safety reserve reaches the context length', async () => {
+    const { settingsRouter, modelProviderStore } = await createRouters();
+    const response = await settingsRouter.request('/model-providers', putInit(badBody));
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(await response.json())).toContain(
+      'Max output tokens must be less than the context length (8,000) minus a small reserve.',
+    );
+    expect(await modelProviderStore.listProviders({ tenant_id: 'default' })).toEqual([]);
+  });
+
+  it('an already-stored bad config still loads but cannot be re-saved until fixed', async () => {
+    const { settingsRouter, modelsRouter, modelProviderStore } = await createRouters();
+    await modelProviderStore.upsertProvider({ tenant_id: 'default', name: 'internal', manifest: badBody });
+
+    const list = await settingsRouter.request('/model-providers');
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual({ data: [configured('internal', withRedactedApiKey(badBody))] });
+    const models = await modelsRouter.request('/');
+    expect(models.status).toBe(200);
+
+    expect((await settingsRouter.request('/model-providers', putInit(badBody))).status).toBe(400);
+
+    const fixed = {
+      ...customBody,
+      models: [{ ...model, properties: { context_length: 8000, max_output_tokens: 4096 } }],
+    };
+    expect((await settingsRouter.request('/model-providers', putInit(fixed))).status).toBe(200);
+  });
+});
+
+describe('environment-managed Token Factory provider', () => {
+  const tokenFactoryBody = {
+    type: 'tokenfactory' as const,
+    auth: { api_key: 'sk-nebius-secret' },
+    models: [{ model_id: 'nvidia/nemotron-3-super-120b-a12b', name: 'nemotron-3-super-120b-a12b', properties: {} }],
+  };
+
+  async function createManaged() {
+    const routers = await createRouters({ envManagedNames: new Set(['tokenfactory']) });
+    await routers.modelProviderStore.upsertProvider({
+      tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id,
+      name: 'tokenfactory',
+      manifest: { ...tokenFactoryBody, base_url: 'https://api.tokenfactory.nebius.com/v1' },
+    });
+    return routers;
+  }
+
+  it('marks the provider env_managed on list and keeps the key redacted', async () => {
+    const { settingsRouter } = await createManaged();
+    await settingsRouter.request('/model-providers', putInit(anthropicBody));
+
+    const list = await settingsRouter.request('/model-providers');
+    const body = await list.json();
+
+    expect(body).toEqual({
+      data: [
+        configured('anthropic', anthropicProviderWire),
+        {
+          name: 'tokenfactory',
+          env_managed: true,
+          manifest: {
+            ...tokenFactoryBody,
+            base_url: 'https://api.tokenfactory.nebius.com/v1',
+            auth: { api_key: SECRET_REDACTION },
+          },
+        },
+      ],
+    });
+    expect(JSON.stringify(body)).not.toContain('sk-nebius-secret');
+  });
+
+  it('does not mark the provider when the environment does not own it', async () => {
+    const { settingsRouter, modelProviderStore } = await createRouters();
+    await modelProviderStore.upsertProvider({
+      tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id,
+      name: 'tokenfactory',
+      manifest: { ...tokenFactoryBody, base_url: 'https://api.tokenfactory.nebius.com/v1' },
+    });
+
+    const list = await settingsRouter.request('/model-providers');
+    const { data } = ListModelProvidersResponseSchema.parse(await list.json());
+
+    expect(data[0]).not.toHaveProperty('env_managed');
+  });
+
+  it('refuses PUT, POST and DELETE on it with a typed 409 and leaves the stored key alone', async () => {
+    const { settingsRouter, modelProviderStore } = await createManaged();
+    const conflict = {
+      error: {
+        message: 'Model provider tokenfactory is managed by the server environment and cannot be changed here.',
+        type: 'conflict',
+        code: 'env_managed_provider',
+      },
+    };
+
+    const put = await settingsRouter.request(
+      '/model-providers',
+      putInit({ ...tokenFactoryBody, auth: { api_key: 'sk-other' } }),
+    );
+    const post = await settingsRouter.request('/model-providers', postInit(tokenFactoryBody));
+    const del = await settingsRouter.request('/model-providers/tokenfactory', { method: 'DELETE' });
+
+    for (const response of [put, post, del]) {
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual(conflict);
+    }
+    const stored = await modelProviderStore.getProvider({
+      tenant_id: STANDALONE_REQUEST_CONTEXT.tenant_id,
+      name: 'tokenfactory',
+      model_name: '',
+    });
+    expect(stored?.manifest.auth?.api_key).toBe('sk-nebius-secret');
+  });
+
+  it('still lets other providers be written', async () => {
+    const { settingsRouter } = await createManaged();
+    const response = await settingsRouter.request('/model-providers', putInit(anthropicBody));
+    expect(response.status).toBe(200);
+  });
+});
+
+describe('GET /models default chat model', () => {
+  it('lists the stored default chat model first and keeps the rest in order', async () => {
+    const { settingsRouter, modelsRouter, globalSettingsStore } = await createRouters();
+    await settingsRouter.request('/model-providers', putInit(anthropicBody));
+    await settingsRouter.request('/model-providers', putInit(customBody));
+    await globalSettingsStore.setSetting({ key: 'default_chat_model', value: 'internal/claude-sonnet-4-6' });
+
+    const response = await modelsRouter.request('/');
+    const { data } = ListAvailableModelsResponseSchema.parse(await response.json());
+
+    expect(data.map(item => item.name)).toEqual(['internal/claude-sonnet-4-6', 'anthropic/claude-sonnet-4-6']);
+  });
+
+  it('ignores a stored default that is no longer listed', async () => {
+    const { settingsRouter, modelsRouter, globalSettingsStore } = await createRouters();
+    await settingsRouter.request('/model-providers', putInit(anthropicBody));
+    await globalSettingsStore.setSetting({ key: 'default_chat_model', value: 'tokenfactory/gone' });
+
+    const { data } = ListAvailableModelsResponseSchema.parse(await (await modelsRouter.request('/')).json());
+
+    expect(data.map(item => item.name)).toEqual(['anthropic/claude-sonnet-4-6']);
   });
 });

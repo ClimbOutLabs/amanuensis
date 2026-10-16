@@ -55,3 +55,26 @@ export const GIT_HARDENING_ENV: Readonly<Record<string, string>> = {
   GIT_CONFIG_PARAMETERS: '',
   GIT_ATTR_NOSYSTEM: '1',
 };
+
+/**
+ * Config for git that only touches local objects on the server (a scratch repository and a bundle file):
+ * no remote protocol except `file`, which bundles use, and objects are checked as they arrive.
+ */
+export function gitLocalImportHardeningConfigEntries(): GitConfigEntry[] {
+  return [
+    ['core.askPass', ''],
+    ['fetch.recurseSubmodules', 'false'],
+    ['protocol.allow', 'never'],
+    ['protocol.file.allow', 'always'],
+  ];
+}
+
+/** Rejects malformed or booby-trapped objects instead of storing them. */
+export function gitObjectCheckConfigEntries(): GitConfigEntry[] {
+  return [
+    ['transfer.fsckObjects', 'true'],
+    ['fetch.fsckObjects', 'true'],
+    ['receive.fsckObjects', 'true'],
+    ['gc.auto', '0'],
+  ];
+}
