@@ -9,8 +9,6 @@ import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracin
 import { connectedRecord, FakeConnections, OWNER } from '../../google/fakes';
 import { b64url, message } from './fixtures';
 
-const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
-
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }

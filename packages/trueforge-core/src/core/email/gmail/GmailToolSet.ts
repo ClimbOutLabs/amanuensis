@@ -177,7 +177,7 @@ export class GmailToolSet extends LocalToolMCP {
       workspace_cwd: null,
       action: {
         tool_name: params.name,
-        canonical_params: typeof params.arguments === 'object' && params.arguments !== null ? params.arguments : {},
+        canonical_params: params.arguments ?? {},
         tool_type: 'truefoundry-system',
         mcp_server_name: GMAIL_SERVER_ID,
         mcp_hints: {

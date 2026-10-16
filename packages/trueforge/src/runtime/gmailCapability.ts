@@ -22,7 +22,7 @@ export interface GmailCapabilityOptions {
 
 export async function gmailCapability(options: GmailCapabilityOptions): Promise<AgentCapability | undefined> {
   const record = await options.connections.get(options.owner);
-  if (record === null || record.status !== 'connected') {
+  if (record?.status !== 'connected') {
     return undefined;
   }
   const features = grantedFeatures(record.granted_scopes);

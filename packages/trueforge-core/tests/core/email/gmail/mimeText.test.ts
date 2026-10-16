@@ -141,7 +141,13 @@ describe('RFC 2047 encoded words in headers', () => {
   it('is applied to every header a result shows', () => {
     const encoded = ENCODED_WORD_SAMPLES.find(item => item.name === 'display name');
     const subject = ENCODED_WORD_SAMPLES.find(item => item.name === 'iso-2022-jp base64');
-    const mail = message({ id: 'm1', threadId: 't1', from: encoded?.header, subject: subject?.header, body: 'hi' });
+    const mail = message({
+      id: 'm1',
+      threadId: 't1',
+      from: encoded?.header ?? '',
+      subject: subject?.header ?? '',
+      body: 'hi',
+    });
     expect(headerOf({ message: mail, name: 'From' })).toBe('José Müller <jose@example.com>');
     const result = readEmailResult({ context: { account: 'ada@example.com' }, message: mail });
     expect(result.from).toBe('José Müller <jose@example.com>');
