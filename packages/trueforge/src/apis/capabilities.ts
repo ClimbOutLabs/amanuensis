@@ -16,6 +16,7 @@ import { readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { readToolOutputScreenSetting } from '../runtime/toolOutputScreenSettings';
 import { isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import { checkSnapshotStatus, readPersistedSnapshotStatus } from '../sandbox/providerUtils';
+import { slotSandboxBuildStatus, slotsBackendEnabled } from '../sandbox/slotBackend';
 import type {
   BuildIdentity,
   GetCapabilitiesResponseSchema,
@@ -42,6 +43,8 @@ type MemoryEmbeddingsCapabilityData = z.infer<typeof MemoryEmbeddingsCapabilityS
  * Why skills are unavailable, keyed off the sandbox build status.
  * `pending` is transient (retry); everything else (no provider / failed / unknown) reads as not configured.
  */
+const SLOT_SKILLS_REASON = 'Skills need network access, which the offline sandbox does not have yet.';
+
 function skillDisabledReason(status: SandboxBuildStatus | undefined): string {
   if (status === 'pending') {
     return 'Skills run in a sandbox whose image is still being prepared — retry shortly.';
@@ -260,7 +263,11 @@ async function capabilitiesFromSandboxStatus({
   const sandboxEnabled = status === 'ready' || (status === undefined && isLocalSandboxFallbackEnabled());
   return {
     sandbox: { enabled: sandboxEnabled },
-    skill: sandboxEnabled ? { enabled: true } : { enabled: false, reason: skillDisabledReason(status) },
+    // Skills download from the network, which the slots do not have.
+    skill:
+      sandboxEnabled && !slotsBackendEnabled()
+        ? { enabled: true }
+        : { enabled: false, reason: slotsBackendEnabled() ? SLOT_SKILLS_REASON : skillDisabledReason(status) },
     settings: { enabled: isAdmin },
     voice: { enabled: isVoiceAvailable() },
     memory_screen: await memoryScreenCapability({
@@ -288,6 +295,17 @@ export async function computeCapabilitiesData<TTransaction>(
   deps: ComputeCapabilitiesDataDeps<TTransaction>,
 ): Promise<CapabilitiesData> {
   let status: SandboxBuildStatus | undefined;
+  if (slotsBackendEnabled()) {
+    status = (await slotSandboxBuildStatus({ logger: deps.logger })).status;
+    return capabilitiesFromSandboxStatus({
+      status,
+      isAdmin: deps.isAdmin,
+      tenantId: deps.tenantId ?? TENANT_ID,
+      mcpServerStore: deps.mcpServerStore,
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    });
+  }
   try {
     const refreshed = await checkSnapshotStatus({
       store: deps.sandboxProviderStore,
@@ -319,6 +337,17 @@ export async function readLocalCapabilitiesData<TTransaction>(
   deps: ComputeCapabilitiesDataDeps<TTransaction>,
 ): Promise<CapabilitiesData> {
   let status: SandboxBuildStatus | undefined;
+  if (slotsBackendEnabled()) {
+    status = (await slotSandboxBuildStatus({ logger: deps.logger })).status;
+    return capabilitiesFromSandboxStatus({
+      status,
+      isAdmin: deps.isAdmin,
+      tenantId: deps.tenantId ?? TENANT_ID,
+      mcpServerStore: deps.mcpServerStore,
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    });
+  }
   try {
     const persisted = await readPersistedSnapshotStatus({
       store: deps.sandboxProviderStore,

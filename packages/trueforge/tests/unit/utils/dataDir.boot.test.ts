@@ -8,6 +8,13 @@ import { join, resolve } from 'node:path';
  * cannot use and asserts the fail-fast boot check: non-zero exit and output
  * naming the env var instead of a bare EACCES/ENOTDIR.
  */
+// Standalone refuses to boot without login, and that gate runs before the storage check under test.
+const BOOT_OIDC_ENV = {
+  OIDC_ISSUER_URL: 'http://127.0.0.1:1/dex',
+  OIDC_CLIENT_ID: 'boot-storage-test',
+  OIDC_CLIENT_SECRET: 'boot-storage-test-secret',
+};
+
 describe('server boot storage check', () => {
   let root: string;
 
@@ -28,7 +35,7 @@ describe('server boot storage check', () => {
 
     const child = spawn(process.execPath, ['--env-file', envFile, tsxCli, entry], {
       cwd: root,
-      env: { ...process.env, NODE_OPTIONS: '--conditions=trueforge-dev', ...env },
+      env: { ...process.env, NODE_OPTIONS: '--conditions=trueforge-dev', ...BOOT_OIDC_ENV, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let output = '';

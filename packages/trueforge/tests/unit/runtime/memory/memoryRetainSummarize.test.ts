@@ -9,6 +9,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Writable } from 'stream';
 import winston from 'winston';
+import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 import { createMemoryClient } from '../../../../src/runtime/memory/createMemoryClient';
 
@@ -70,6 +71,7 @@ function summarizeContext() {
     tenantId: 'tenant-1',
     modelProviderStore: fakeModelProviderStore(),
     summarizationModelFqn: 'openai/gpt-4o',
+    tokenFactoryBudget: uncappedTokenFactoryBudget,
   };
 }
 

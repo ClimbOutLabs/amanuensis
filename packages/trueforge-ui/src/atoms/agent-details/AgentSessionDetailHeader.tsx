@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { copyText } from '@/utils/copyText.js';
 import { Icon } from '../../icons/Icon.js';
 import { useSlot } from '../../theme/SlotsProvider.js';
 import { buildAgentSessionShareUrl } from '../../utils/sessionShareUrl.js';
@@ -36,7 +37,7 @@ export function AgentSessionDetailHeader({
 
   const copySessionLink = async () => {
     try {
-      await navigator.clipboard.writeText(buildAgentSessionShareUrl({ sessionId, agentId, createdAt, view }));
+      await copyText(buildAgentSessionShareUrl({ sessionId, agentId, createdAt, view }));
       setCopied(true);
     } catch {
       // Clipboard may be unavailable; ignore.

@@ -252,6 +252,10 @@ export const ConfiguredModelProviderSchema = z
   .object({
     name: NameSchema,
     manifest: ModelProviderManifestSchema,
+    env_managed: z
+      .boolean()
+      .optional()
+      .describe('True when the server derives this provider from its environment; it is read-only here.'),
   })
   .strict()
   .openapi('ConfiguredModelProvider');

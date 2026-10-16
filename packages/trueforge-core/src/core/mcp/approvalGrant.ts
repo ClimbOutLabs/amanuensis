@@ -87,7 +87,13 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
  * that is read-only inspection, for the same argument-blindness reason as a chat grant.
  */
 export function allowsToolGrant(info: InternalToolCallInfo): boolean {
-  return info.type === 'mcp' && info.effect === 'inspect' && info.implementation_plan_grant === undefined;
+  // A grant has no effect on the designated search provider, which has its own guarded path.
+  return (
+    info.type === 'mcp' &&
+    info.effect === 'inspect' &&
+    info.implementation_plan_grant === undefined &&
+    info.search_provider_call !== true
+  );
 }
 
 /**

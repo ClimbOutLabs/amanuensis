@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Test double for `launchctl`: records the call.
+printf 'launchctl %s\n' "$*" >>"$STUB_LOG"
+exit 0
