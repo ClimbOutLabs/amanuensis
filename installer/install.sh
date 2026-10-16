@@ -311,6 +311,7 @@ on_exit() {
   AMAN_TF_KEY=
   ui_step_abort
   upgrade_on_exit
+  if [ "$rc" != 0 ]; then instance_pending_notice; fi
   lock_release
   exit "$rc"
 }

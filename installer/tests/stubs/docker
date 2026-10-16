@@ -116,6 +116,23 @@ case "$cmd" in
         echo "$1 $2" >>"$S/network_links"
         exit 0
         ;;
+      ls)
+        # Leftover networks of a Compose project: lines "project id" in $S/leftover_networks.
+        case "$*" in
+          *label=com.docker.compose.project=*)
+            all_args="$*"
+            proj=${all_args##*label=com.docker.compose.project=}
+            proj=${proj%% *}
+            [ -f "$S/leftover_networks" ] && awk -v p="$proj" '$1 == p {print $2}' "$S/leftover_networks"
+            ;;
+        esac
+        exit 0
+        ;;
+      rm)
+        [ -f "$S/leftover_networks" ] && { grep -v " $1\$" "$S/leftover_networks" >"$S/leftover_networks.new" || true; mv "$S/leftover_networks.new" "$S/leftover_networks"; }
+        echo "$1" >>"$S/networks_removed"
+        exit 0
+        ;;
       disconnect)
         [ "$1" = -f ] && shift
         grep -Fxv "$1 $2" "$S/network_links" >"$S/network_links.new" || true
@@ -143,7 +160,15 @@ case "$cmd" in
         exit 0
         ;;
       ls)
+        # Without a filter, every volume.
+        case "$*" in *--filter*) ;; *) cat "$S/volumes"; exit 0 ;; esac
         case "$*" in
+          *label=com.docker.compose.project=*)
+            all_args="$*"
+            proj=${all_args##*label=com.docker.compose.project=}
+            proj=${proj%% *}
+            [ -f "$S/volume_projects" ] && awk -v p="$proj" '$2 == p {print $1}' "$S/volume_projects" | grep -Fxf - "$S/volumes"
+            ;;
           *label=com.amanuensis.instance=*)
             inst=${*##*label=com.amanuensis.instance=}
             inst=${inst%% *}
@@ -176,7 +201,7 @@ case "$cmd" in
     all=
     for a in "$@"; do
       case "$a" in
-        -a) all=1 ;;
+        -a | -aq) all=1 ;;
         label=com.docker.compose.project=*) proj=${a#label=com.docker.compose.project=} ;;
         '{{'*) formatted=1 ;;
       esac
@@ -184,6 +209,10 @@ case "$cmd" in
     if [ -n "$all" ] && [ -f "$S/failed/$proj" ]; then
       echo c-app
       exit 0
+    fi
+    # Leftover containers of a Compose project: lines "project id" in $S/leftover_containers.
+    if [ -n "$all" ] && [ -f "$S/leftover_containers" ]; then
+      awk -v p="$proj" '$1 == p {print $2}' "$S/leftover_containers"
     fi
     if [ -f "$S/up/$proj" ]; then
       case "$proj" in
@@ -199,6 +228,15 @@ case "$cmd" in
           ;;
       esac
     fi
+    exit 0
+    ;;
+  rm)
+    # docker rm -f ID...
+    for id in "$@"; do
+      [ "$id" = -f ] && continue
+      [ -f "$S/leftover_containers" ] && { grep -v " $id\$" "$S/leftover_containers" >"$S/leftover_containers.new" || true; mv "$S/leftover_containers.new" "$S/leftover_containers"; }
+      echo "$id" >>"$S/containers_removed"
+    done
     exit 0
     ;;
   exec)
@@ -355,7 +393,7 @@ case "$cmd" in
         grep -o 'name: aman_[a-z0-9_-]*' "$file" | sed 's/name: //' | while read -r v; do
           case "$v" in
             *_stt) grep -Fxq "$v" "$S/networks" 2>/dev/null || echo "$v" >>"$S/networks" ;;
-            *) grep -Fxq "$v" "$S/volumes" || echo "$v" >>"$S/volumes" ;;
+            *) grep -Fxq "$v" "$S/volumes" || echo "$v" >>"$S/volumes"; echo "$v $proj" >>"$S/volume_projects" ;;
           esac
         done
         exit 0
@@ -377,6 +415,17 @@ case "$cmd" in
         ;;
       down)
         rm -f "$S/up/$proj"
+        case " $* " in
+          *" --volumes "*)
+            if [ -f "$S/volume_projects" ]; then
+              awk -v p="$proj" '$2 == p {print $1}' "$S/volume_projects" | while read -r v; do
+                grep -Fxv "$v" "$S/volumes" >"$S/volumes.new" || true
+                mv "$S/volumes.new" "$S/volumes"
+                echo "$v" >>"$S/volumes_removed"
+              done
+            fi
+            ;;
+        esac
         n=aman_${proj#aman-}_stt
         grep -Fxv "$n" "$S/networks" >"$S/networks.new" 2>/dev/null; mv "$S/networks.new" "$S/networks" 2>/dev/null
         exit 0
