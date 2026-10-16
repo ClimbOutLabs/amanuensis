@@ -26,6 +26,11 @@ charts/*/charts/
 .env.*
 !.env.example
 !.env.test
+# The test mailbox sender's credentials file (scripts/send-test-mailbox.mjs).
+# Already covered by .env.* above; spelled out so the name is easy to grep
+# for and stays ignored even if the wildcard is ever narrowed. The private
+# data scan also fails if this file is ever tracked.
+.env.test-mailbox
 *.pem
 *.key
 *.p12

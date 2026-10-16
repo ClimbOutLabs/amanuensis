@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Fails (exit 1) if any file TRACKED by git looks like private material:
-// private keys, database/dump files, high-signal credential strings, or a
-// real (non-example/test) .env file with populated values.
+// private keys, database/dump files, high-signal credential strings, a
+// real (non-example/test) .env file with populated values, or the test
+// mailbox credentials file (.env.test-mailbox), which must never be
+// tracked at all.
 //
 // Scope is deliberately narrow: the default scans `git ls-files -z`, while
 // `--tree` scans blobs tracked by that commit. Untracked and ignored files are
@@ -73,6 +75,14 @@ const CREDENTIAL_PATTERNS = [
 // their content.
 const ENV_CANDIDATE_RE = /(^|\/)\.env(\.[^/]*)?$/i;
 const ENV_ALLOWED_NAME_RE = /^\.env\.(example|sample|template|test)(\.[^/]*)?$/i;
+
+// (e) The test mailbox sender's credentials file. scripts/send-test-mailbox.mjs
+// reads SMTP credentials from a .env.test-mailbox file, which is local-only
+// and gitignored — but gitignore does not stop a force-add, and the generic
+// .env rule above only fires on populated non-placeholder values, so a copy
+// full of dummy-looking values would slip through. The name alone is enough:
+// this file must never be tracked, wherever it sits in the tree.
+const FORBIDDEN_TRACKED_BASENAME = '.env.test-mailbox';
 
 // Values that read as placeholders rather than real secrets, for the .env
 // files that aren't allowed by name outright.
@@ -381,6 +391,11 @@ export function scanPrivateData({ rootDirectory = rootDir, treeish } = {}) {
     }
     if (DB_DUMP_FILENAME_RE.test(relPath)) {
       reasons.push('filename matches a database/dump pattern (*.sqlite/*.sqlite3/*.db/*.mdb/*.bundle/etc.)');
+    }
+    if (basename === FORBIDDEN_TRACKED_BASENAME) {
+      reasons.push(
+        'the test mailbox credentials file (.env.test-mailbox) is tracked; it holds SMTP credentials for scripts/send-test-mailbox.mjs and must stay local and untracked',
+      );
     }
 
     const isEnvCandidate = ENV_CANDIDATE_RE.test(relPath);
