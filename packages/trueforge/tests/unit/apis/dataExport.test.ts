@@ -16,6 +16,7 @@ import type { Authenticator } from '../../../src/auth/authenticator';
 import type { RequestContext } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import { CommonChatExportFileSchema } from '../../../src/dataExport/commonChatFormat';
+import { EXPORTED_GLOBAL_SETTING_KEYS } from '../../../src/dataExport/exportService';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -384,6 +385,18 @@ describe('Data export route', () => {
         auth: { type: 'header', headers: { Authorization: `Bearer ${CONNECTOR_HEADER_SECRET}` } },
       },
     });
+    await mcpStore.createServer({
+      tenant_id: TENANT_ID,
+      name: 'oauth-connector',
+      first_party: false,
+      manifest: {
+        type: 'remote',
+        name: 'oauth-connector',
+        url: 'https://oauth.example.com/mcp',
+        description: 'Connector that signs in with OAuth.',
+        auth: { type: 'dcr' },
+      },
+    });
     await new SqliteOAuthTokenStore(db).saveToken({
       id: connector.id,
       userRef: 'alice',
@@ -634,6 +647,8 @@ describe('Data export route', () => {
       })
       .parse(zipEntryJson(entries, 'settings.json'));
     expect(settings.instance).toEqual([{ key: 'tool_output_screen_enabled', value: 'true' }]);
+    expect(EXPORTED_GLOBAL_SETTING_KEYS).toContain('tool_output_screen_enabled');
+    expect(EXPORTED_GLOBAL_SETTING_KEYS).not.toContain('export_test_unlisted_setting');
     expect(settings.permission_settings.offline_mode).toBe(true);
 
     // No uploaded file bytes without the tick.
@@ -730,11 +745,14 @@ describe('Data export route', () => {
   it('exports connectors without credentials, query strings or token path segments', async () => {
     const entries = readZipEntries(await exportZip('alice'));
     const connectors = z
-      .array(z.object({ name: z.string(), manifest: z.object({ url: z.string() }).passthrough() }))
+      .array(z.object({ name: z.string(), manifest: z.object({ url: z.string(), auth: z.unknown().optional() }) }))
       .parse(zipEntryJson(entries, 'connectors.json'));
     const planted = connectors.find(connector => connector.name === 'planted-connector');
     expect(planted?.manifest).not.toHaveProperty('auth');
     expect(planted?.manifest.url).toBe('https://connector.example.com/mcp/[redacted]/v1');
+    // An OAuth connector keeps a bare marker, so it arrives asking for sign-in rather than looking connected.
+    const oauth = connectors.find(connector => connector.name === 'oauth-connector');
+    expect(oauth?.manifest.auth).toEqual({ type: 'dcr' });
   });
 
   it('leaves out deployment-bound session fields', async () => {

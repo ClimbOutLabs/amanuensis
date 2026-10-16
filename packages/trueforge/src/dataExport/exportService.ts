@@ -63,7 +63,7 @@ const PAGE_LIMIT = 200;
 const MEMORY_LIST_TIMEOUT_MS = 10_000;
 
 /** Instance-wide, non-secret toggles. Anything not listed here never leaves in settings.json. */
-const EXPORTED_GLOBAL_SETTING_KEYS = [
+export const EXPORTED_GLOBAL_SETTING_KEYS = [
   DEFAULT_CHAT_MODEL_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
@@ -363,7 +363,12 @@ export async function runDataExport<TTransaction>(
     const servers = await deps.mcpServerStore.listServers({ tenant_id: tenantId, names: undefined });
     for (const server of servers) {
       const manifest = { ...server.manifest };
-      delete manifest.auth;
+      // Credentials never leave; a bare marker keeps an OAuth connector asking for sign-in.
+      if (manifest.auth?.type === 'dcr') {
+        manifest.auth = { type: 'dcr' };
+      } else {
+        delete manifest.auth;
+      }
       yield {
         id: server.id,
         name: server.name,
