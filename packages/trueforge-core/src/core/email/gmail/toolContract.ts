@@ -3,7 +3,7 @@
  * snake_case like the sandbox tools; the mapping onto Gmail's own field names stays inside the API client.
  */
 import { z } from 'zod';
-import { hasHiddenCharacters } from './mimeText';
+import { countIdeographicSelectors, hasHiddenCharacters, MAX_IDEOGRAPHIC_SELECTORS } from './mimeText';
 
 export const GMAIL_SERVER_ID = 'gmail';
 
@@ -94,8 +94,16 @@ const DraftContentShape = {
   in_reply_to: id.optional(),
 };
 
-export const DraftEmailSchema = z.object(DraftContentShape).strict();
-export const UpdateDraftSchema = z.object({ draft_id: id, ...DraftContentShape }).strict();
+/** A draft may carry only a few ideographic variation selectors, so it stays one Aman can send. */
+const fewSelectors = (draft: { subject: string; body: string }) =>
+  countIdeographicSelectors(draft.subject) + countIdeographicSelectors(draft.body) <= MAX_IDEOGRAPHIC_SELECTORS;
+const TOO_MANY_SELECTORS = { message: 'The text has more variation selectors than a name or word needs. Remove them.' };
+
+export const DraftEmailSchema = z.object(DraftContentShape).strict().refine(fewSelectors, TOO_MANY_SELECTORS);
+export const UpdateDraftSchema = z
+  .object({ draft_id: id, ...DraftContentShape })
+  .strict()
+  .refine(fewSelectors, TOO_MANY_SELECTORS);
 
 export type DraftContent = z.infer<typeof DraftEmailSchema>;
 

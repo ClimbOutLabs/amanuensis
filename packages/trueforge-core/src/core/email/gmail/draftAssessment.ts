@@ -6,7 +6,13 @@
 import type { ReviewableDraft } from './draftReview';
 import type { GmailMessage } from './gmailWire';
 import { decodedHeaderOf, headerOf, headerOverflows, rawHeaderOf, readMessage } from './message';
-import { contentTypeCharset, hasAmbiguousEncodedWord, hasHiddenCharacters } from './mimeText';
+import {
+  contentTypeCharset,
+  countIdeographicSelectors,
+  hasAmbiguousEncodedWord,
+  hasHiddenCharacters,
+  MAX_IDEOGRAPHIC_SELECTORS,
+} from './mimeText';
 import { addressesIn, addressListIsPlain } from './results';
 
 /** Longest body a send card shows; anything longer is refused because no one reads it in full. */
@@ -71,6 +77,8 @@ const REFUSALS = {
     'This draft has formatting or parts that Aman cannot show you in full, usually because it was edited in Gmail. Ask me to write it again.',
   headers:
     'This draft sets headers that Aman cannot show you, such as a reply address or sender. Ask me to write it again.',
+  selectors:
+    'This draft has more variation selectors than a name or word needs, and they do not show, so it cannot be sent. Ask me to write it again.',
   charset:
     'This draft uses a text encoding (such as UTF-7) that Aman cannot read for certain, so it cannot show you what would be sent. Ask me to write it again.',
   whitespace:
@@ -129,6 +137,16 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
     return { ok: false, reason: REFUSALS.charset };
   }
   const decodedSubject = decodedHeaderOf({ message, name: 'Subject' });
+  const selectors = [
+    read.plainText,
+    decodedSubject,
+    ...['To', 'Cc', 'Bcc'].map(name => decodedHeaderOf({ message, name })),
+  ]
+    .map(countIdeographicSelectors)
+    .reduce((sum, count) => sum + count, 0);
+  if (selectors > MAX_IDEOGRAPHIC_SELECTORS) {
+    return { ok: false, reason: REFUSALS.selectors };
+  }
   const hiddenInHeaders = ['Subject', 'To', 'Cc', 'Bcc'].some(name =>
     hasHiddenCharacters(decodedHeaderOf({ message, name })),
   );

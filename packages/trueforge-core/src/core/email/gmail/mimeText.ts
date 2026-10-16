@@ -211,7 +211,7 @@ export function decodeEncodedWords(header: string): string {
  * Characters that change what a reader sees without being visible, decided by Unicode properties rather than a
  * hand-made list: everything Unicode marks Default_Ignorable (tag characters, variation selectors, soft hyphen,
  * combining grapheme joiner, the Hangul and Braille fillers, bidi and format controls), control characters
- * other than tab, newline and carriage return, private-use and unassigned code points, line and paragraph
+ * other than tab, newline and carriage return, private-use code points, line and paragraph
  * separators, and the interlinear marks.
  *
  * A few of those have a real use and are allowed only where it applies, never anywhere else:
@@ -221,7 +221,7 @@ export function decodeEncodedWords(header: string): string {
  *  - the emoji marker after a pictograph that needs one (not one that is already an emoji), and in a keycap;
  *  - the text-style marker after a pictograph, an ideographic variation selector after a Han character, and a
  *    Mongolian free variation selector after a Mongolian letter;
- *  - the tag characters of a subdivision flag: a black flag, two to six tag letters or digits, and the cancel tag.
+ *  - the tag characters of the England, Scotland and Wales flags, and no other tag sequence.
  * Every other use is hidden data and is refused or escaped.
  */
 const TAG_CHARACTER = '[\\u{E0030}-\\u{E0039}\\u{E0061}-\\u{E007A}]';
@@ -262,21 +262,28 @@ const PICTOGRAPH_OR_MODIFIER = '[\\p{Extended_Pictographic}\\p{Emoji_Modifier}]'
 /** A character matched only when it is not in a place it is allowed: the cheap test for the character comes first. */
 const outOfContext = (character: string, allowed: string) => `(?=${character})(?!${allowed})${character}`;
 
-/** Every way a run of two to six tag characters can sit inside a flag: how many come before and after this one. */
-const FLAG_TAG_POSITIONS = Array.from({ length: 5 }, (_unused, before) => before)
-  .flatMap(before =>
-    Array.from({ length: 6 - before }, (_unused, after) => ({ before, after })).filter(
-      ({ before: b, after: a }) => b + 1 + a >= 2,
-    ),
-  )
-  .map(
-    ({ before, after }) =>
-      `(?<=${BLACK_FLAG}${TAG_CHARACTER}{${String(before)}})(?=${TAG_CHARACTER}{${String(after + 1)}}${CANCEL_TAG})`,
-  )
-  .join('|');
+/**
+ * The only tag sequences that are allowed: the three subdivision flags emoji keyboards offer (England,
+ * Scotland, Wales). A tag run is a way to carry text nobody sees, so any other run, whatever its length, is
+ * hidden. For each flag, a tag character is allowed when it is the one at its place in that exact sequence.
+ */
+const FLAG_REGIONS: readonly (readonly string[])[] = [
+  ['g', 'b', 'e', 'n', 'g'],
+  ['g', 'b', 's', 'c', 't'],
+  ['g', 'b', 'w', 'l', 's'],
+];
+const tagCodes = (letters: readonly string[]) =>
+  letters.map(letter => `\\u{${(0xe0000 + letter.charCodeAt(0)).toString(16).toUpperCase()}}`).join('');
+const FLAG_TAG_POSITIONS = FLAG_REGIONS.flatMap(region =>
+  region.map(
+    (_letter, index) =>
+      `(?<=${BLACK_FLAG}${tagCodes(region.slice(0, index))})(?=${tagCodes(region.slice(index))}${CANCEL_TAG})`,
+  ),
+).join('|');
+const FLAG_ENDINGS = FLAG_REGIONS.map(region => `${BLACK_FLAG}${tagCodes(region)}${CANCEL_TAG}`).join('|');
 
 const HIDDEN_SOURCE = [
-  '(?!\\t|\\n|\\r|\\u200B|\\u200C|\\u200D|\\uFE0E|\\uFE0F|\\u180B|\\u180C|\\u180D|\\u180F|[\\u{E0100}-\\u{E01EF}]|[\\u{E0030}-\\u{E0039}\\u{E0061}-\\u{E007A}\\u{E007F}])[\\p{Default_Ignorable_Code_Point}\\p{Cc}\\p{Zl}\\p{Zp}\\p{Co}\\p{Cn}\\u2800\\uFFF9-\\uFFFB]',
+  '(?!\\t|\\n|\\r|\\u200B|\\u200C|\\u200D|\\uFE0E|\\uFE0F|\\u180B|\\u180C|\\u180D|\\u180F|[\\u{E0100}-\\u{E01EF}]|[\\u{E0030}-\\u{E0039}\\u{E0061}-\\u{E007A}\\u{E007F}])[\\p{Default_Ignorable_Code_Point}\\p{Cc}\\p{Zl}\\p{Zp}\\p{Co}\\u2800\\uFFF9-\\uFFFB]',
   outOfContext(
     '\\u200D',
     `(?<=${PICTOGRAPH_OR_MODIFIER}\\uFE0F?)(?=\\u200D\\p{Extended_Pictographic})|(?<=${INDIC})(?=\\u200D${INDIC})|(?<=${INDIC_MARK})`,
@@ -288,7 +295,7 @@ const HIDDEN_SOURCE = [
   outOfContext('[\\u{E0100}-\\u{E01EF}]', '(?<=\\p{Script=Han})'),
   outOfContext('[\\u180B\\u180C\\u180D\\u180F]', '(?<=[\\p{L}&&\\p{Script=Mongolian}])'),
   `(?=${TAG_CHARACTER})(?!${FLAG_TAG_POSITIONS})${TAG_CHARACTER}`,
-  `${CANCEL_TAG}(?<!${BLACK_FLAG}${TAG_CHARACTER}{2,6}${CANCEL_TAG})`,
+  `${CANCEL_TAG}(?<!${FLAG_ENDINGS})`,
 ].join('|');
 const HIDDEN_EVERYWHERE = new RegExp(HIDDEN_SOURCE, 'gv');
 const HIDDEN_ANYWHERE = new RegExp(HIDDEN_SOURCE, 'v');
@@ -300,6 +307,14 @@ export function stripInvisible(text: string): string {
 /** Rewrites each hidden character with `render`, so a display can show what stripping would have removed. */
 export function replaceHiddenCharacters(text: string, render: (character: string) => string): string {
   return text.replace(HIDDEN_EVERYWHERE, render);
+}
+
+/** Most ideographic variation selectors one message may carry: names need a few, and each can hide a byte. */
+export const MAX_IDEOGRAPHIC_SELECTORS = 16;
+
+/** How many ideographic variation selectors the text holds, which are allowed after a Han character but carry data. */
+export function countIdeographicSelectors(text: string): number {
+  return (text.match(/[\u{E0100}-\u{E01EF}]/gu) ?? []).length;
 }
 
 /** The one test for "this text has a character that would not show", so what is read or sent is what is seen. */
