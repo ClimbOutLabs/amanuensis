@@ -268,7 +268,7 @@ docker_runtime_problem() {
   engine=$(D version --format '{{.Server.Version}}' 2>/dev/null || true)
   major=${engine%%.*}
   case "$major" in
-    '' | *[!0-9]*)
+    '' | *[![:digit:]]*)
       RUNTIME_PROBLEM="Could not read the Docker Engine version."
       return 0
       ;;
@@ -279,7 +279,7 @@ docker_runtime_problem() {
   fi
   compose=$(D compose version --short 2>/dev/null || true)
   compose=${compose#v}
-  if [[ ! $compose =~ ^([0-9]+)\.[0-9]+ ]]; then
+  if [[ ! $compose =~ ^([[:digit:]]+)\.[[:digit:]]+ ]]; then
     RUNTIME_PROBLEM="Docker Compose is missing; version $DOCKER_MIN_COMPOSE_MAJOR is needed. Run install.sh docker to install it, then run this again."
     return 0
   fi
@@ -366,7 +366,7 @@ docker_fix() {
   compose=$(D compose version --short 2>/dev/null || true)
   compose=${compose#v}
   major=${compose%%.*}
-  if [[ ! $major =~ ^[0-9]+$ ]] || [ "$major" -lt "$DOCKER_MIN_COMPOSE_MAJOR" ]; then
+  if [[ ! $major =~ ^[[:digit:]]+$ ]] || [ "$major" -lt "$DOCKER_MIN_COMPOSE_MAJOR" ]; then
     docker_install_compose
   fi
   docker_runtime_check

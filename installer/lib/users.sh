@@ -16,14 +16,14 @@ valid_user_name() {
 
 # Upper-case form of a user name that is legal in an environment variable name (hyphens cannot be, and names hold no
 # underscores, so two names never share a key).
-user_key() { printf '%s' "$1" | tr 'a-z-' 'A-Z_'; }
+user_key() { printf '%s' "$1" | LC_ALL=C tr 'a-z-' 'A-Z_'; }
 
 # Environment variable that carries one user's hash into Dex.
 user_hash_var() { printf 'DEX_USER_PASSWORD_HASH_%s' "$(user_key "$1")"; }
 
 # Registry names of an instance's added users, one per line.
 user_names() {
-  sed -n 's/^user_\([a-z0-9-]*\)=.*/\1/p' "$(reg_file "$1")" | sort
+  LC_ALL=C sed -n 's/^user_\([a-z0-9-]*\)=.*/\1/p' "$(reg_file "$1")" | sort
 }
 
 user_record() { reg_get "$1" "user_$2"; }

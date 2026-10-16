@@ -196,8 +196,11 @@ has_control_chars() {
   [[ $1 == *[[:cntrl:]]* ]]
 }
 
-# Whole-string match of $1 against the extended regex $2, never accepting control characters.
+# Whole-string match of $1 against the extended regex $2, never accepting control characters. Bracket ranges follow
+# the locale's collation on macOS (bash 3.2 with a UTF-8 locale: [A-Z] also matches lowercase letters), so every
+# range in this installer is matched as plain ASCII under LC_ALL=C.
 matches_whole() {
+  local LC_ALL=C
   has_control_chars "$1" && return 1
   [[ $1 =~ $2 ]]
 }
@@ -209,6 +212,11 @@ valid_name() {
 valid_email() {
   [ "${#1}" -le 254 ] && matches_whole "$1" '^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'
 }
+
+name_has_capitals() { local LC_ALL=C; [[ $1 == *[A-Z]* ]]; }
+name_starts_with_letter() { local LC_ALL=C; [[ $1 == [a-z]* ]]; }
+# What is left of $1 once the allowed characters are removed; whole characters, so the caller can show the first.
+name_other_chars() { local LC_ALL=C; printf '%s' "${1//[a-z0-9-]/}"; }
 
 # The reason a value is refused, as one sentence, or nothing when it is fine. The prompts show it and ask again.
 name_problem() {
@@ -223,12 +231,11 @@ name_problem() {
     echo "\"$v\" has an underscore; use lowercase letters, digits or hyphens."
   elif [[ $v == *[[:space:]]* ]]; then
     echo "\"$v\" has a space; use lowercase letters, digits or hyphens."
-  elif [[ $v == *[A-Z]* ]]; then
+  elif name_has_capitals "$v"; then
     echo "\"$v\" has capital letters; use lowercase letters, digits or hyphens."
-  elif [[ $v == [!a-z]* ]]; then
+  elif ! name_starts_with_letter "$v"; then
     echo "\"$v\" must start with a letter."
-  elif [[ $v == *[!a-z0-9-]* ]]; then
-    rest=${v//[a-z0-9-]/}
+  elif rest=$(name_other_chars "$v") && [ -n "$rest" ]; then
     echo "\"$v\" has the character ${rest:0:1}; use lowercase letters, digits or hyphens."
   elif [ "${#v}" -gt 24 ]; then
     echo "\"$v\" is longer than 24 characters."

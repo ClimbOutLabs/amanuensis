@@ -268,12 +268,12 @@ rfc3339_to_epoch() {
   IFS=- read -r y m d <<<"$date_part"
   IFS=: read -r hh mm ss <<<"$time_part"
   case "$y$m$d$hh$mm$ss" in
-    '' | *[!0-9]*) return 1 ;;
+    '' | *[![:digit:]]*) return 1 ;;
   esac
   if [ -n "${tz:-}" ]; then
     IFS=: read -r offset_h offset_m <<<"$tz"
     case "${offset_h}${offset_m}" in
-      '' | *[!0-9]*) return 1 ;;
+      '' | *[![:digit:]]*) return 1 ;;
     esac
     offset=$((sign * (10#$offset_h * 3600 + 10#$offset_m * 60)))
   fi
@@ -360,7 +360,7 @@ check_docker() {
   compose=$(bounded "$PROBE_SECONDS" docker compose version --short 2>&1)
   rc=$?
   compose=${compose#v}
-  if [ "$rc" -eq 0 ] && [[ $compose =~ ^([0-9]+)\.[0-9]+ ]]; then
+  if [ "$rc" -eq 0 ] && [[ $compose =~ ^([[:digit:]]+)\.[[:digit:]]+ ]]; then
     compose_major=$((10#${BASH_REMATCH[1]}))
   else
     compose_major=0
@@ -485,7 +485,7 @@ check_disk() {
   fi
   kb=$(df -Pk "$DOCKER_ROOT" 2>/dev/null | awk 'NR == 2 { print $4 }')
   case "$kb" in
-    '' | *[!0-9]*)
+    '' | *[![:digit:]]*)
       record machine disk warn "The free space for Docker data could not be read." "Run aman doctor disk --fix"
       return
       ;;
@@ -509,7 +509,7 @@ check_docker_memory() {
     return
   fi
   case "$DOCKER_MEM" in
-    '' | *[!0-9]*)
+    '' | *[![:digit:]]*)
       record machine docker_memory off "Skipped: Docker did not report how much memory it has." ""
       return
       ;;
@@ -552,7 +552,7 @@ check_clock() {
 backup_mode_is_recent() {
   local mtime
   mtime=$(file_mtime "$(backups_mode_file)")
-  case "$mtime" in '' | *[!0-9]*) return 1 ;; esac
+  case "$mtime" in '' | *[![:digit:]]*) return 1 ;; esac
   [ $(($(now_epoch) - mtime)) -lt 172800 ]
 }
 
@@ -562,7 +562,7 @@ check_backup() {
   for entry in "$dir"/*/; do
     [ -d "$entry" ] || continue
     mtime=$(file_mtime "$entry")
-    case "$mtime" in '' | *[!0-9]*) continue ;; esac
+    case "$mtime" in '' | *[![:digit:]]*) continue ;; esac
     if [ "$mtime" -gt "$newest_time" ]; then
       newest_time=$mtime
       newest=$entry
@@ -653,8 +653,8 @@ check_tls() {
     if [ "$DOCKER_OK" = 1 ] && [ -n "$image" ] && [ -f "$ca_dir/root.crt" ]; then
       info=$(bounded 30 docker run --rm --network none --user "$(id -u):$(id -g)" -v "${AMAN_HOME}/tls:/tls:ro" -v "$(lib_file pki.mjs):/pki.mjs:ro" \
         --entrypoint node "$image" /pki.mjs info /tls/ca "/tls/leaf/$name" 2>/dev/null)
-      root_days=$(printf '%s' "$info" | sed -n 's/.*"root_days_left":\(-\{0,1\}[0-9]*\).*/\1/p')
-      leaf_days=$(printf '%s' "$info" | sed -n 's/.*"leaf_days_left":\(-\{0,1\}[0-9]*\).*/\1/p')
+      root_days=$(printf '%s' "$info" | LC_ALL=C sed -n 's/.*"root_days_left":\(-\{0,1\}[0-9]*\).*/\1/p')
+      leaf_days=$(printf '%s' "$info" | LC_ALL=C sed -n 's/.*"leaf_days_left":\(-\{0,1\}[0-9]*\).*/\1/p')
       names=$(printf '%s' "$info" | sed -n 's/.*"leaf_names":\[\([^]]*\)\].*/\1/p' | tr -d '"' | tr ',' ' ')
       constrained=$(printf '%s' "$info" | sed -n 's/.*"root_constrained":\(true\|false\).*/\1/p')
       covers=$(printf '%s' "$info" | sed -n 's/.*"root_covers_leaf":\(true\|false\).*/\1/p')
@@ -741,7 +741,7 @@ summarize_users() { # instance dir
   USERS_SUMMARY=""
   USERS_SHORT=0
   [ -f "${1}/dex.env" ] || return 0
-  users=$(awk '/^DEX_USER_PASSWORD_HASH(_[A-Z0-9_]+)?=/ { n++ } END { print n + 0 }' "${1}/dex.env" 2>/dev/null)
+  users=$(LC_ALL=C awk '/^DEX_USER_PASSWORD_HASH(_[A-Z0-9_]+)?=/ { n++ } END { print n + 0 }' "${1}/dex.env" 2>/dev/null)
   users=${users:-0}
   members=0
   if [ "$users" -gt 0 ]; then members=$((users - 1)); fi
@@ -1194,12 +1194,18 @@ print_summary() {
   ui_hint "$passed other checks passed. Full report: aman doctor"
 }
 
+# Ranges follow the locale's collation on macOS, so this ASCII test runs under LC_ALL=C.
+instance_name_shape_ok() {
+  local LC_ALL=C
+  case "$1" in
+    '' | *[!a-z0-9-]* | -*) return 1 ;;
+  esac
+}
+
 select_instances() {
   INSTANCES=()
   if [ -n "$ONLY_INSTANCE" ]; then
-    case "$ONLY_INSTANCE" in
-      '' | *[!a-z0-9-]* | -*) die_usage "Instance names use lowercase letters, digits and hyphens." ;;
-    esac
+    instance_name_shape_ok "$ONLY_INSTANCE" || die_usage "Instance names use lowercase letters, digits and hyphens."
     [ -d "${AMAN_HOME}/instances/${ONLY_INSTANCE}" ] || die_usage "No instance named \"${ONLY_INSTANCE}\" under ${AMAN_HOME}/instances."
     INSTANCES=("$ONLY_INSTANCE")
   else
@@ -1564,7 +1570,7 @@ renew_tls_if_due() {
     name=${name%.conf}
     [ "$(registry_value "$name" tls)" = local ] && [ -n "$(registry_value "$name" tls_port)" ] || continue
     ends=$(head -n 1 "${AMAN_HOME}/tls/leaf/${name}/leaf.notafter" 2>/dev/null)
-    case "$ends" in '' | *[!0-9]*) continue ;; esac
+    case "$ends" in '' | *[![:digit:]]*) continue ;; esac
     if [ $((ends - now)) -le $((60 * 86400)) ]; then due=1; fi
   done
   [ "$due" = 1 ] || return 0

@@ -167,7 +167,7 @@ preflight_sandbox() {
   if sandbox_native_linux; then
     free=$(free_kb "$SLOT_DISK_ROOT")
     case "${free:-}" in
-      '' | *[!0-9]*) ;;
+      '' | *[![:digit:]]*) ;;
       *)
         if [ "$free" -lt "$SLOT_MIN_FREE_KB" ]; then
           check_block "Less than 20 GB free for the sandbox disks under $SLOT_DISK_ROOT ($((free / 1024 / 1024)) GB free)" "Free space, or pass --no-sandbox to install without run code."
@@ -289,7 +289,7 @@ sandbox_ensure() {
       return 0
     fi
   fi
-  step=$(printf '%s' "$out" | sed -n 's/.*"step"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' | head -n 1)
+  step=$(printf '%s' "$out" | LC_ALL=C sed -n 's/.*"step"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' | head -n 1)
   case "$step" in
     apparmor | disk)
       sandbox_print_root_steps "$step"

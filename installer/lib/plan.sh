@@ -92,7 +92,7 @@ preflight_docker_space() {
   fi
   free=$(free_kb "$root")
   case "${free:-}" in
-    '' | *[!0-9]*) ;;
+    '' | *[![:digit:]]*) ;;
     *)
       if [ "$free" -lt "$MIN_FREE_KB" ]; then
         check_block "Less than 10 GB free on the disk holding Docker's data ($root): $((free / 1024 / 1024)) GB free" "Free space with: docker system prune"
@@ -108,7 +108,7 @@ preflight_docker_memory() {
   local bytes gb
   case "$DOCKER_ACCESS" in direct | sg) ;; *) return 0 ;; esac
   bytes=$(D info --format '{{.MemTotal}}' 2>/dev/null || true)
-  case "${bytes:-}" in '' | *[!0-9]*) return 0 ;; esac
+  case "${bytes:-}" in '' | *[![:digit:]]*) return 0 ;; esac
   gb=$(awk -v b="$bytes" 'BEGIN {printf "%.1f", b / 1073741824}')
   if [ "$bytes" -lt "$DOCKER_MEM_BLOCK_BYTES" ]; then
     check_block "Docker has only $gb GB of memory and needs at least 6 GB to build the app" "Raise it in Docker Desktop under Settings, Resources, Memory. On Linux, free up memory or add swap, then run install.sh again."
@@ -146,7 +146,7 @@ preflight_system() {
   fi
   free=$(free_kb "$AMAN_HOME")
   case "${free:-}" in
-    '' | *[!0-9]*) ;;
+    '' | *[![:digit:]]*) ;;
     *)
       if [ "$free" -lt "$MIN_FREE_KB" ]; then
         check_block "Less than 10 GB free on the disk holding $(ui_path "$AMAN_HOME") ($((free / 1024 / 1024)) GB free)" "Free some space there, then run install.sh again."
@@ -651,7 +651,7 @@ check_result() {
 # The plan row of an instance that answers at every address of this computer.
 plan_instance_with_addresses() {
   local hosts
-  hosts=$(printf '%s' "$I_ORIGINS" | sed "s|https\{0,1\}://||g; s|:[0-9]*||g; s|,|, |g")
+  hosts=$(printf '%s' "$I_ORIGINS" | LC_ALL=C sed "s|https\{0,1\}://||g; s|:[0-9]*||g; s|,|, |g")
   if [ -n "$I_TLS_PORT" ]; then
     plan_add todo "Create instance $I_NAME for $I_EMAIL" \
       "It opens over https on port $I_TLS_PORT at: $hosts, with a certificate from an authority Aman makes on this computer. The sign-in service stays on this computer (port $I_LOGIN_PORT)." \

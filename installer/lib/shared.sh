@@ -4,7 +4,8 @@
 SANDBOX_NODE_MAJOR=22
 SANDBOX_NODE_MINOR=14
 
-lowercase() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+# ASCII only: a Turkish locale would turn I into a dotless i and break comparisons with plain words.
+lowercase() { printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'; }
 
 # True when the Node.js on this computer is new enough to run the sandbox setup.
 sandbox_node_ok() {
@@ -15,7 +16,7 @@ sandbox_node_ok() {
   major=${v%%.*}
   minor=${v#*.}
   minor=${minor%%.*}
-  case "$major$minor" in '' | *[!0-9]*) return 1 ;; esac
+  case "$major$minor" in '' | *[![:digit:]]*) return 1 ;; esac
   [ "$major" -gt "$SANDBOX_NODE_MAJOR" ] || { [ "$major" -eq "$SANDBOX_NODE_MAJOR" ] && [ "$minor" -ge "$SANDBOX_NODE_MINOR" ]; }
 }
 

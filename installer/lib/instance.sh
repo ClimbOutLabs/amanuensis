@@ -38,7 +38,7 @@ dcm() {
 stt_threads() {
   local n
   n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
-  case "$n" in '' | *[!0-9]*) n=4 ;; esac
+  case "$n" in '' | *[![:digit:]]*) n=4 ;; esac
   if [ "$n" -gt 4 ]; then n=4; fi
   if [ "$n" -lt 1 ]; then n=1; fi
   printf '%s' "$n"

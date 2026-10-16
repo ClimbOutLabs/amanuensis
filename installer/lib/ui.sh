@@ -24,7 +24,7 @@ ui_init() {
   local loc=${LC_ALL:-} term=${TERM:-} cols=
   if [ -z "$loc" ]; then loc=${LC_CTYPE:-}; fi
   if [ -z "$loc" ]; then loc=${LANG:-}; fi
-  loc=$(printf '%s' "$loc" | tr '[:upper:]' '[:lower:]')
+  loc=$(printf '%s' "$loc" | LC_ALL=C tr '[:upper:]' '[:lower:]')
   UI_UTF8=0
   case "$loc" in *utf-8* | *utf8*) UI_UTF8=1 ;; esac
   if [ "$term" = dumb ]; then UI_UTF8=0; fi
@@ -45,13 +45,13 @@ ui_init() {
   if [ -t 2 ]; then
     cols=${COLUMNS:-}
     case "$cols" in
-      '' | *[!0-9]*)
+      '' | *[![:digit:]]*)
         cols=
         if command -v stty >/dev/null 2>&1; then cols=$(stty size <&2 2>/dev/null | awk '{print $2}'); fi
         ;;
     esac
     case "$cols" in
-      '' | *[!0-9]*) ;;
+      '' | *[![:digit:]]*) ;;
       *) if [ "$cols" -lt "$UI_WIDTH" ]; then UI_WIDTH=$cols; fi ;;
     esac
     if [ "$UI_WIDTH" -lt 40 ]; then UI_WIDTH=40; fi
@@ -326,7 +326,7 @@ ui_confirm() { # question y|n
       printf '\n' >&2
       return 1
     fi
-    case "$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')" in
+    case "$(printf '%s' "$answer" | LC_ALL=C tr '[:upper:]' '[:lower:]')" in
       y | yes) return 0 ;;
       n | no) return 1 ;;
       '') [ "$def" = y ] && return 0 || return 1 ;;

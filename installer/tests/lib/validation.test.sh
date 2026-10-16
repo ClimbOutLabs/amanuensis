@@ -64,6 +64,60 @@ CHECK
   sandbox_drop
 }
 
+# A UTF-8 en_US locale that works here, or nothing. Where only the locale source is installed (most Linux images) it
+# is compiled into the sandbox. On macOS a range like [A-Z] follows collation in that locale.
+en_us_locale() {
+  if [ "$(env LC_ALL=en_US.UTF-8 locale charmap 2>/dev/null)" = UTF-8 ]; then
+    echo en_US.UTF-8
+  elif command -v localedef >/dev/null 2>&1 && localedef -i en_US -f UTF-8 "$SB/locales/en_US.UTF-8" >/dev/null 2>&1; then
+    echo en_US.UTF-8
+  fi
+}
+
+test_validators_ignore_the_locale() {
+  t_begin "name, user, email, address and template checks answer the same in UTF-8 locales"
+  sandbox_new
+  mkdir -p "$SB/locales"
+  printf '%s\n' 'x=@@KEY@@' 'y=@@lower@@' >"$SB/tpl"
+  cat >"$SB/check.sh" <<'CHECK'
+yes_no() { if "$@"; then echo ok; else echo no; fi; }
+for v in mac mac-trial a abc-1 Mac mAc MAC 1ab -ab 'a b' a_b café; do echo "problem $v: $(name_problem "$v")"; done
+for v in mac mac-trial Mac café a-; do echo "name $v: $(yes_no valid_name "$v") user $v: $(yes_no valid_user_name "$v")"; done
+for v in you@example.com You@Example.com yé@example.com; do echo "email $v: $(yes_no valid_email "$v")"; done
+for v in https://aman.example.com https://amé.example.com; do echo "origin $v: $(yes_no valid_origin "$v")"; done
+for v in 192.168.1.20 192.168.1.256 spark.local SPARK café; do echo "private $v: $(yes_no private_host "$v")"; done
+echo "address Spark.Local: [$(address_problem Spark.Local)]"
+echo "address café: [$(address_problem café)]"
+echo "template: $(render_template "$SB_TPL" KEY=1 2>&1 | tr '\n' '|')"
+CHECK
+  local loc out first=''
+  for loc in C.UTF-8 en_US.UTF-8; do
+    if [ "$loc" = en_US.UTF-8 ]; then
+      loc=$(en_us_locale)
+      [ -n "$loc" ] || continue
+    fi
+    out=$(LC_ALL=$loc LOCPATH=$SB/locales SB_TPL=$SB/tpl in_lib ". '$INSTALLER_DIR/lib/shared.sh'; . '$INSTALLER_DIR/lib/network.sh'; . '$INSTALLER_DIR/lib/users.sh'; . '$SB/check.sh'" 2>&1 || true)
+    [ -n "$first" ] || first=$out
+    assert_eq "$out" "$first" "answers in $loc differ from C.UTF-8"
+    assert_contains "$out" "problem mac: " "mac is fine in $loc"
+    assert_contains "$out" "problem mac-trial: "$'\n' "mac-trial is fine in $loc"
+    assert_contains "$out" 'problem Mac: "Mac" has capital letters' "capitals are refused in $loc"
+    assert_contains "$out" 'problem mAc: "mAc" has capital letters' "a middle capital is refused in $loc"
+    assert_contains "$out" 'problem 1ab: "1ab" must start with a letter.' "a leading digit is refused in $loc"
+    assert_contains "$out" 'problem café: "café" has the character é' "an accented letter is refused whole in $loc"
+    assert_contains "$out" "name mac: ok user mac: ok" "valid_name and valid_user_name take lowercase in $loc"
+    assert_contains "$out" "name Mac: no user Mac: no" "valid_name and valid_user_name refuse capitals in $loc"
+    assert_contains "$out" "name café: no user café: no" "valid_name and valid_user_name refuse accents in $loc"
+    assert_contains "$out" "email You@Example.com: ok" "capitals are fine in an email in $loc"
+    assert_contains "$out" "email yé@example.com: no" "an accent in an email is refused in $loc"
+    assert_contains "$out" "origin https://amé.example.com: no" "an accent in an origin is refused in $loc"
+    assert_contains "$out" "private SPARK: ok" "a single-label name is private whatever its case in $loc"
+    assert_contains "$out" "private café: no" "an accented name is not a host in $loc"
+    assert_contains "$out" "template: x=1|y=@@lower@@|" "a lowercase @@word@@ is not a placeholder in $loc"
+  done
+  sandbox_drop
+}
+
 test_removal_is_confined_to_instances() {
   t_begin "the directory removal refuses a symbolic link or a path outside instances/"
   sandbox_new
@@ -84,5 +138,6 @@ test_removal_is_confined_to_instances() {
 test_bad_names_are_refused
 test_values_with_newlines_are_refused
 test_validators_match_whole_strings
+test_validators_ignore_the_locale
 test_removal_is_confined_to_instances
 tests_finish
