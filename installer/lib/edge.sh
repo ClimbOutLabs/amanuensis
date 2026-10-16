@@ -31,7 +31,7 @@ edge_render() {
   local name=$1
   render_template "$TEMPLATES_DIR/edge/Caddyfile.tpl" \
     "NAME=$name" "APP_HOST=$(edge_host "$(reg_get "$name" public_url)")" "LOGIN_HOST=$(edge_host "$(reg_get "$name" login_url)")" \
-    "APP_PORT=$(reg_get "$name" app_port)" "LOGIN_PORT=$(reg_get "$name" login_port)" | write_if_changed "$(edge_file "$name")" 644 || true
+    "APP_PORT=$(reg_get "$name" app_port)" | write_if_changed "$(edge_file "$name")" 644 || true
 }
 
 # Caddy runs as its own user and cannot read the private install directory, so the file is copied, not linked.

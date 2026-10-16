@@ -27,6 +27,27 @@ test_the_path_line_is_managed_once() {
   sandbox_drop
 }
 
+test_an_unsafe_folder_never_reaches_a_profile() {
+  t_begin "a data folder with shell syntax in it is refused before anything is written, and a plain one is quoted"
+  sandbox_new
+  local bad
+  # shellcheck disable=SC2016 # the shell syntax is the point: none of it may be expanded
+  for bad in '/tmp/x$(touch /tmp/pwned)' '/tmp/x"; touch /tmp/pwned; "' '/tmp/x`id`' 'relative/path' '/tmp/../etc' "/tmp/it's"; do
+    run_install --home "$bad" --yes --email owner@example.invalid
+    assert_rc 2
+    case "$(flat "$ERR")" in
+      *"character that is not allowed"* | *"must be an absolute path"*) t_pass ;;
+      *) t_fail "no clear refusal for $bad: $ERR" ;;
+    esac
+  done
+  assert_no_path "$(home_dir)/.bashrc"
+  assert_no_path /tmp/pwned
+  RUN_ENV_EXTRA=(SHELL=/bin/bash)
+  install_machine
+  assert_contains "$(cat "$(home_dir)/.bashrc")" "export PATH=\"$AMAN_HOME/bin:\$PATH\""
+  sandbox_drop
+}
+
 test_zsh_gets_its_own_profile() {
   t_begin "a zsh user gets the line in .zshrc"
   sandbox_new
@@ -64,6 +85,21 @@ test_upgrade_restores_the_command_and_its_files() {
   assert_eq "$(cmp -s "$SB_INSTALLER/doctor/aman" "$AMAN_HOME/bin/aman" && echo same)" same
   assert_eq "$(cmp -s "$SB_INSTALLER/lib/schedule.sh" "$AMAN_HOME/lib/schedule.sh" && echo same)" same
   assert_eq "$(block_count "$(home_dir)/.bashrc")" 1
+  sandbox_drop
+}
+
+test_a_group_writable_checkout_is_made_private_once() {
+  t_begin "a checkout made with a permissive umask is made private to its owner at install, with one plain line, and left alone after"
+  sandbox_new
+  mkdir -p "$REPO/installer"
+  chmod -R g+w "$REPO"
+  chmod g+w "$SB"
+  install_machine
+  assert_flat_contains "$OUT" "private to you, so only you can change what the installer runs"
+  assert_eq "$(find "$REPO" "$REPO/installer" "$SB" -maxdepth 0 -perm -g+w | wc -l | tr -d ' ')" 0 "the folder, its installer and the folder holding it"
+  assert_eq "$(find "$REPO/installer" -perm -g+w | wc -l | tr -d ' ')" 0
+  run_install --yes
+  assert_not_contains "$OUT" "private to you"
   sandbox_drop
 }
 
@@ -136,9 +172,11 @@ test_the_proxy_requirements_belong_to_public_urls() {
 }
 
 test_the_path_line_is_managed_once
+test_an_unsafe_folder_never_reaches_a_profile
 test_zsh_gets_its_own_profile
 test_the_plan_names_the_command_row
 test_upgrade_restores_the_command_and_its_files
+test_a_group_writable_checkout_is_made_private_once
 test_the_command_subcommand_puts_the_files_back
 test_a_rerun_with_nothing_to_do_still_checks_run_code
 test_a_busy_port_moves_the_instance

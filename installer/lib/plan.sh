@@ -177,7 +177,7 @@ dl_add() {
 }
 
 print_network_destinations() {
-  local line fid hosts all=
+  local line fid hosts all='' skipped iface addr
   while IFS='|' read -r fid _ _ hosts; do
     case "$fid" in '' | '#'*) continue ;; esac
     all="$all $hosts"
@@ -187,6 +187,14 @@ print_network_destinations() {
     say "  $line"
   done
   say "Nothing is scanned and nothing is reported to the project."
+  skipped=$(network_skipped_addresses)
+  if [ -n "$skipped" ]; then
+    say ""
+    say "Addresses of this computer that Aman does not open at, because other devices cannot reach them (virtual or VPN networks):"
+    while read -r iface addr; do
+      say "  $addr ($iface)"
+    done <<<"$skipped"
+  fi
 }
 
 # One plan row per entry: a status word and a sentence, the detail dim underneath.
@@ -339,6 +347,7 @@ plan_build() {
   plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps dockerfile-frontend
   plan_image "$REL_STT_TAG" "The speech-to-text service is built" "Build the speech-to-text service" stt-base stt-deps
   plan_image "$REL_DEX_IMAGE" "The sign-in service is downloaded" "Download the sign-in service" dex
+  plan_tls
 
   plan_sandbox
 
@@ -409,16 +418,42 @@ plan_aman_command() {
 }
 
 # An instance from before addresses were listed is opened on the network like a new one, unless --local-only says not to.
+# One already open on the network changes between https and plain http when --tls says so, or moves to https by default.
 plan_existing_addresses() { # name
-  local name=$1 hosts
+  local name=$1 hosts port
+  port=$(reg_get "$name" app_port)
   if [ "$(instance_address_change "$name")" = close ]; then
     plan_add todo "Open instance $name on this computer only" "It stops answering at other addresses."
     return 0
   fi
-  hosts=$(network_origin_list "$(reg_get "$name" app_port)" | sed "s|http://||g; s|:$(reg_get "$name" app_port)||g; s|,|, |g")
+  # shellcheck disable=SC2086 # the extra hosts are checked hosts without spaces
+  hosts=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)} | sed "s|http://||g; s|:$port||g; s|,|, |g")
+  if [ "$(tls_target "$name")" = local ]; then
+    plan_add todo "Serve instance $name over https on your network" \
+      "It will answer at: $hosts, with a certificate from an authority Aman makes on this computer. The old plain address sends devices to https." \
+      "Each device trusts that authority once. Its data and sign-in stay as they are."
+    return 0
+  fi
   plan_add todo "Open instance $name on your network" \
     "It will answer at: $hosts. Sign-in works from each, and the port is open to your network on private addresses only." \
     "Its data and sign-in stay as they are."
+}
+
+# The https front end and the local authority, when an instance is about to be served over https.
+plan_tls() {
+  local name change need=0
+  if need_new_instance && [ -n "${I_TLS_PORT:-}" ]; then need=1; fi
+  for name in $(reg_names); do
+    change=$(instance_address_change "$name")
+    if tls_active "$name" || { [ -n "$change" ] && [ "$change" != close ] && [ "$(tls_target "$name")" = local ]; }; then need=1; fi
+  done
+  [ "$need" = 1 ] || return 0
+  plan_image "$(tls_image)" "The https front end is downloaded" "Download the https front end" https-front
+  if [ -f "$(tls_ca_dir)/root.crt" ]; then
+    plan_add have "This computer's certificate authority exists"
+  else
+    plan_add todo "Make this computer's certificate authority" "Your devices trust it once, so https works. Its key stays private on this computer."
+  fi
 }
 
 # The daily backup: asked once (or given with --backups), default yes.
@@ -610,7 +645,13 @@ check_result() {
 # The plan row of an instance that answers at every address of this computer.
 plan_instance_with_addresses() {
   local hosts
-  hosts=$(printf '%s' "$I_ORIGINS" | sed "s|http://||g; s|:$I_PORT||g; s|,|, |g")
+  hosts=$(printf '%s' "$I_ORIGINS" | sed "s|https\{0,1\}://||g; s|:[0-9]*||g; s|,|, |g")
+  if [ -n "$I_TLS_PORT" ]; then
+    plan_add todo "Create instance $I_NAME for $I_EMAIL" \
+      "It opens over https on port $I_TLS_PORT at: $hosts, with a certificate from an authority Aman makes on this computer. The sign-in service stays on this computer (port $I_LOGIN_PORT)." \
+      "Port $I_PORT only sends devices to https. $(plan_public_address_note)"
+    return 0
+  fi
   if [ -n "${I_PUBLIC_ADDRESSES// /}" ]; then
     plan_add todo "Create instance $I_NAME for $I_EMAIL" \
       "It opens on port $I_PORT at: $hosts. Sign-in works from each, and the port is open to your network. The sign-in service stays on this computer (port $I_LOGIN_PORT)." \
@@ -618,6 +659,13 @@ plan_instance_with_addresses() {
   else
     plan_add todo "Create instance $I_NAME for $I_EMAIL" \
       "It opens on port $I_PORT at: $hosts. Sign-in works from each, and the port is open to your network. The sign-in service stays on this computer (port $I_LOGIN_PORT)."
+  fi
+}
+
+# The line about this computer's public address, when it has one; nothing otherwise.
+plan_public_address_note() {
+  if [ -n "${I_PUBLIC_ADDRESSES// /}" ]; then
+    printf "This computer's public address (%s) is not used. For the internet use --tls caddy." "${I_PUBLIC_ADDRESSES% }"
   fi
 }
 

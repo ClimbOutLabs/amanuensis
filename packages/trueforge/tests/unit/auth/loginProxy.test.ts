@@ -171,6 +171,13 @@ describe('login proxy', () => {
     expect(res.headers.get('content-security-policy')).toBe("default-src 'self'; frame-ancestors 'none'");
     expect(res.headers.get('x-frame-options')).toBe('DENY');
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('forbids caching and referrers even when the sign-in service allows them', async () => {
+    answer = () => new Response('x', { headers: { 'cache-control': 'public, max-age=3600' } });
+    expect((await get('/dex/static/main.css')).headers.get('cache-control')).toBe('no-store');
   });
 
   it.each([
@@ -249,6 +256,66 @@ describe('login proxy', () => {
       expect((await get('/dex/auth/local/login?back=&state=s')).status).toBe(200);
     });
 
+    it('lets no more password attempts reach the sign-in service than the limit when many arrive at once', async () => {
+      globalThis.fetch = (input, init) => {
+        calls.push({
+          url: String(input),
+          method: init?.method ?? 'GET',
+          redirect: init?.redirect,
+          headers: new Headers(init?.headers),
+          body: undefined,
+        });
+        return new Promise(resolve => {
+          setTimeout(() => {
+            resolve(new Response('<html>login</html>', { status: 200 }));
+          }, 20);
+        });
+      };
+      const responses = await Promise.all(Array.from({ length: 60 }, () => login()));
+      expect(calls).toHaveLength(5);
+      expect(responses.filter(res => res.status === 429)).toHaveLength(55);
+    });
+
+    it('does not count a sign-in service that did not answer as a failed password', async () => {
+      globalThis.fetch = () => Promise.reject(new Error('ECONNREFUSED'));
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        expect((await login()).status).toBe(502);
+      }
+    });
+
+    it('counts guesses at one account across a sign-in to another, from the same address', async () => {
+      const post = (account: string) =>
+        get('/dex/auth/local/login?back=&state=s', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: `login=${account}&password=guess`,
+        });
+      answer = () => new Response('<html>form</html>', { status: 200 });
+      for (let round = 0; round < 3; round += 1) {
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          expect((await post('owner%40example.com')).status).toBe(200);
+        }
+        answer = () => new Response(null, { status: 303, headers: { location: '/dex/approval?req=a' } });
+        expect((await post('member%40example.com')).status).toBe(303);
+        answer = () => new Response('<html>form</html>', { status: 200 });
+        await post('owner%40example.com');
+        expect((await post('owner%40example.com')).status).toBe(429);
+        clock += 31 * 60_000;
+      }
+    });
+
+    it('limits how often one address can start a sign-in, which stores a request in the sign-in service', async () => {
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        expect((await get('/dex/auth?client_id=x&state=s')).status).toBe(200);
+      }
+      const res = await get('/dex/auth?client_id=x&state=s');
+      expect(res.status).toBe(429);
+      expect(res.headers.get('retry-after')).toBe('60');
+      expect((await get('/dex/static/main.css')).status).toBe(200);
+      clock += 60_000;
+      expect((await get('/dex/auth/local?client_id=x')).status).toBe(200);
+    });
+
     it('makes everyone wait when many addresses fail together', async () => {
       let n = 0;
       const many = new Hono();
@@ -275,6 +342,126 @@ describe('login proxy', () => {
       });
       expect(res.status).toBe(429);
     });
+  });
+});
+
+describe('login proxy in front of a public sign-in address', () => {
+  const realFetch = globalThis.fetch;
+  const seen: string[] = [];
+
+  beforeEach(() => {
+    seen.length = 0;
+    globalThis.fetch = input => {
+      seen.push(String(input));
+      return Promise.resolve(
+        new Response(null, { status: 302, headers: { location: 'https://login.example.com/dex/approval?req=1' } }),
+      );
+    };
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  function gateway(clientKey?: () => string): Hono {
+    const hono = new Hono();
+    hono.all(
+      '*',
+      createLoginProxy({
+        issuerUrl: 'https://login.example.com/dex',
+        upstreamUrl: 'http://127.0.0.1:5556/dex',
+        allowedOrigins: ['https://login.example.com'],
+        ...(clientKey === undefined ? {} : { clientKey }),
+      }),
+    );
+    return hono;
+  }
+
+  it('reaches the sign-in service on this computer and keeps the browser on the public address', async () => {
+    const res = await gateway().request('https://login.example.com/dex/auth/local/login', {
+      method: 'POST',
+      headers: { host: 'login.example.com' },
+    });
+    expect(seen).toEqual(['http://127.0.0.1:5556/dex/auth/local/login']);
+    expect(res.headers.get('location')).toBe('https://login.example.com/dex/approval?req=1');
+  });
+
+  it('limits each visitor behind a reverse proxy on this computer by the address it recorded, and ignores that header elsewhere', async () => {
+    globalThis.fetch = () => Promise.resolve(new Response('form', { status: 200 }));
+    const app = gateway();
+    const post = (remoteAddress: string, forwardedFor: string) =>
+      app.fetch(
+        new Request('https://login.example.com/dex/auth/local/login', {
+          method: 'POST',
+          headers: { host: 'login.example.com', 'x-forwarded-for': forwardedFor },
+        }),
+        { incoming: { socket: { remoteAddress } } },
+      );
+    for (let i = 0; i < 5; i += 1) {
+      expect((await post('127.0.0.1', '203.0.113.5')).status).toBe(200);
+    }
+    expect((await post('127.0.0.1', '203.0.113.5')).status).toBe(429);
+    expect((await post('127.0.0.1', '198.51.100.7')).status).toBe(200);
+    for (let i = 0; i < 5; i += 1) {
+      expect((await post('192.168.1.40', `10.0.0.${String(i)}`)).status).toBe(200);
+    }
+    expect((await post('192.168.1.40', '10.9.9.9')).status).toBe(429);
+  });
+
+  it('believes X-Forwarded-For from a configured proxy address, and from no other address', async () => {
+    globalThis.fetch = () => Promise.resolve(new Response('form', { status: 200 }));
+    const hono = new Hono();
+    hono.all(
+      '*',
+      createLoginProxy({
+        issuerUrl: 'https://login.example.com/dex',
+        upstreamUrl: 'http://127.0.0.1:5556/dex',
+        allowedOrigins: ['https://login.example.com'],
+        trustedProxies: ['172.17.0.1'],
+      }),
+    );
+    const post = (remoteAddress: string, forwardedFor: string) =>
+      hono.fetch(
+        new Request('https://login.example.com/dex/auth/local/login', {
+          method: 'POST',
+          headers: {
+            host: 'login.example.com',
+            'x-forwarded-for': forwardedFor,
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+          body: 'login=a%40b.c&password=x',
+        }),
+        { incoming: { socket: { remoteAddress } } },
+      );
+    for (let i = 0; i < 5; i += 1) {
+      expect((await post('172.17.0.1', '203.0.113.5')).status).toBe(200);
+    }
+    expect((await post('172.17.0.1', '203.0.113.5')).status).toBe(429);
+    expect((await post('::ffff:172.17.0.1', '198.51.100.7')).status).toBe(200);
+    for (let i = 0; i < 5; i += 1) {
+      expect((await post('172.18.0.9', `10.0.0.${String(i)}`)).status).toBe(200);
+    }
+    expect((await post('172.18.0.9', '10.9.9.9')).status).toBe(429);
+  });
+
+  it('needs the service to have the same path in both places', () => {
+    expect(() =>
+      createLoginProxy({
+        issuerUrl: 'https://login.example.com/other',
+        upstreamUrl: 'http://127.0.0.1:5556/dex',
+        allowedOrigins: [],
+      }),
+    ).toThrow(/same path/);
+  });
+
+  it('refuses an upstream that is not on this computer', () => {
+    expect(() =>
+      createLoginProxy({
+        issuerUrl: 'https://login.example.com/dex',
+        upstreamUrl: 'http://10.0.0.5:5556/dex',
+        allowedOrigins: [],
+      }),
+    ).toThrow(/loopback/);
   });
 });
 

@@ -147,7 +147,9 @@ test_the_caddyfile_holds_exactly_the_two_origins() {
   assert_eq "$(grep -c '^[^#[:space:]}].* {$' "$file")" 2 "two site blocks"
   assert_contains "$(grep '^[^#[:space:]}].* {$' "$file" | tr '\n' ' ')" "aman.example.com { login.example.com {"
   assert_contains "$(cat "$file")" "reverse_proxy 127.0.0.1:18790 {"
-  assert_contains "$(cat "$file")" "reverse_proxy 127.0.0.1:15556"
+  assert_contains "$(grep -v '{' "$file" | grep 'reverse_proxy')" "reverse_proxy 127.0.0.1:18790" "the login name goes through the app, which limits password guessing"
+  assert_not_contains "$(cat "$file")" "15556" "the sign-in service is never exposed directly"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/.env")" "LOGIN_UPSTREAM_URL=http://127.0.0.1:15556/dex"
   assert_contains "$(cat "$file")" "flush_interval -1"
   assert_contains "$(cat "$file")" "max_size 40MB"
   assert_not_contains "$(cat "$file")" "encode" "streamed replies are never compressed or buffered"
@@ -497,7 +499,7 @@ test_usage_errors() {
   assert_flat_contains "$ERR" "--tls caddy needs --public-url and --login-url"
   run_install --dry-run --email owner@example.invalid --public-url "$APP_URL" --login-url "$LOGIN_URL" --tls nginx
   assert_rc 2
-  assert_flat_contains "$ERR" "--tls takes caddy"
+  assert_flat_contains "$ERR" "--tls takes local, off or caddy"
   run_install --dry-run --email owner@example.invalid --public-url https://aman.example.com:8443 --login-url "$LOGIN_URL" --tls caddy
   assert_rc 2
   assert_flat_contains "$ERR" "cannot carry a port"

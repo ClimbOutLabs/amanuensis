@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -1234,7 +1244,9 @@ describe('network address check', () => {
   it('is ok while every address of this computer is listed, and calls the open app port intended', () => {
     make();
     world.network('main');
-    world.set('port_c1', { out: '8790/tcp -> 0.0.0.0:8791\n5556/tcp -> 127.0.0.1:5556\n' });
+    world.set('port_c1', {
+      out: '8790/tcp -> 127.0.0.1:8791\n8790/tcp -> 192.168.1.20:8791\n5556/tcp -> 127.0.0.1:5556\n',
+    });
     const result = world.json();
     assert.equal(find(result.doc.instances.main, 'network').state, 'ok');
     assert.match(find(result.doc.instances.main, 'network').detail, /3 addresses/);
@@ -1242,12 +1254,20 @@ describe('network address check', () => {
     assert.match(find(result.doc.instances.main, 'ports').detail, /on purpose/);
   });
 
-  it('fails when the sign-in port is open to the network, even for an instance opened on the network', () => {
-    make();
-    world.network('main');
-    world.set('port_c1', { out: '8790/tcp -> 0.0.0.0:8791\n5556/tcp -> 0.0.0.0:5556\n' });
-    assert.equal(find(world.json().doc.instances.main, 'ports').state, 'fail');
-  });
+  for (const [label, out] of [
+    ['the sign-in port', '8790/tcp -> 127.0.0.1:8791\n5556/tcp -> 0.0.0.0:5556\n'],
+    ['the app port on every interface', '8790/tcp -> 0.0.0.0:8791\n5556/tcp -> 127.0.0.1:5556\n'],
+    ['the app port on every interface (v6)', '8790/tcp -> [::]:8791\n5556/tcp -> 127.0.0.1:5556\n'],
+  ]) {
+    it(`fails when ${label} is open to the whole network, even for an instance opened on the network`, () => {
+      make();
+      world.network('main');
+      world.set('port_c1', { out });
+      const ports = find(world.json().doc.instances.main, 'ports');
+      assert.equal(ports.state, 'fail');
+      assert.match(ports.fix, /aman doctor instance --fix/);
+    });
+  }
 
   it('counts a name given at install as listed', () => {
     make();
@@ -1277,14 +1297,23 @@ describe('network address check', () => {
     assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
   });
 
-  it('does not offer a carrier-grade address unless Tailscale is on this computer', () => {
+  it('does not offer a carrier-grade address unless it is on the Tailscale link', () => {
     make();
-    world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', '100.101.102.103'] });
-    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
     world.install('tailscale', '#!/usr/bin/env bash\nexit 1\n');
+    world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', 'eth1:100.101.102.103'] });
+    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
+    world.network('main', { addresses: ['127.0.0.1', '192.168.1.20', 'tailscale0:100.101.102.103'] });
     const check = find(world.json().doc.instances.main, 'network');
     assert.equal(check.state, 'warn');
     assert.match(check.detail, /100\.101\.102\.103/);
+  });
+
+  it('does not offer an address on a container or VPN link', () => {
+    make();
+    world.network('main', {
+      addresses: ['127.0.0.1', '192.168.1.20', 'docker0:172.17.0.1', 'wg0:10.7.0.2', 'tun0:10.8.0.2'],
+    });
+    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
   });
 
   it('--fix refreshes the instance through the installer, after a yes', () => {
@@ -1344,6 +1373,89 @@ function runInstalled(args) {
   });
 }
 
+describe('https on the network', () => {
+  const tlsCheck = () => find(world.json().doc.machine, 'tls');
+
+  it('says nothing about an instance that is not served over https', () => {
+    make();
+    world.network('main');
+    assert.equal(tlsCheck(), undefined);
+  });
+
+  it('is ok while the certificate lasts, lists every address, and answers over https', () => {
+    make();
+    world.tls('main');
+    const check = tlsCheck();
+    assert.equal(check.state, 'ok');
+    assert.match(check.detail, /lasts 300 more days/);
+    assert.ok(world.calls().some(line => line.includes('--cacert') && line.includes('https://127.0.0.1:8443/healthz')));
+  });
+
+  it('warns, with the one fix, when the certificate is close to its end', () => {
+    make();
+    world.tls('main', { leafDays: 20 });
+    const check = tlsCheck();
+    assert.equal(check.state, 'warn');
+    assert.match(check.detail, /ends in 20 days/);
+    assert.equal(check.fix, 'Run aman doctor tls --fix');
+  });
+
+  it('fails when the certificate or the authority has run out', () => {
+    make();
+    world.tls('main', { leafDays: -2 });
+    assert.equal(tlsCheck().state, 'fail');
+    make();
+    world.tls('main', { rootDays: 0 });
+    assert.equal(tlsCheck().state, 'fail');
+  });
+
+  it('warns when the certificate leaves out an address the instance opens at', () => {
+    make();
+    world.tls('main', {
+      origins: 'http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443,https://192.168.1.77:8443',
+    });
+    const check = tlsCheck();
+    assert.equal(check.state, 'warn');
+    assert.match(check.detail, /does not list: 192\.168\.1\.77/);
+  });
+
+  it('fails when the key of the authority can be read by other users', () => {
+    make();
+    world.tls('main', { keyMode: 0o644 });
+    assert.match(tlsCheck().detail, /can be read by other users/);
+    assert.equal(tlsCheck().state, 'fail');
+  });
+
+  it('fails, naming the instance fix, when https does not answer on this computer', () => {
+    make();
+    world.tls('main', { healthz: 0 });
+    const check = tlsCheck();
+    assert.equal(check.state, 'fail');
+    assert.match(check.detail, /does not answer over https/);
+    assert.equal(check.fix, 'Run aman doctor instance --fix');
+  });
+
+  it('--fix renews through the installer and makes the key private again', () => {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    world.tls('main', { leafDays: 20, keyMode: 0o644 });
+    const result = world.shim(['doctor', 'tls', '--fix', '--yes']);
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} tls`));
+    assert.equal(statSync(path.join(world.home, 'tls', 'ca', 'root.key')).mode & 0o777, 0o600);
+  });
+
+  it('knows the https addresses when it compares them with the addresses of this computer', () => {
+    make();
+    world.tls('main');
+    world.network('main', { origins: 'http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443' });
+    const registry = path.join(world.home, 'state', 'instances', 'main.conf');
+    writeFileSync(registry, `${readFileSync(registry, 'utf8')}tls=local\ntls_port=8443\n`);
+    assert.equal(find(world.json().doc.instances.main, 'network').state, 'ok');
+  });
+});
+
 describe('aman backup and aman upgrade', () => {
   it('run the installer from the recorded checkout, with the state directory and the arguments given', () => {
     make();
@@ -1373,6 +1485,94 @@ describe('aman backup and aman upgrade', () => {
   });
 });
 
+describe('the folder Aman runs its installer from', () => {
+  function checkoutWith(mode) {
+    make();
+    const repo = world.sandbox();
+    world.installerStub(repo);
+    chmodSync(path.join(repo, 'installer', 'install.sh'), mode);
+    return repo;
+  }
+
+  it('is not used when another user can change its installer, for aman backup and the nightly job', () => {
+    checkoutWith(0o666);
+    const result = world.shim(['backup']);
+    assert.equal(result.code, 1);
+    assert.match(
+      result.stderr.replace(/\s+/g, ' '),
+      /can be changed by other users, so Aman will not run its installer from it\. Run aman doctor checkout --fix/,
+    );
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+  });
+
+  it('is not used when the folder itself can be written by the group', () => {
+    const repo = checkoutWith(0o755);
+    chmodSync(repo, 0o775);
+    assert.equal(world.shim(['upgrade', '--check']).code, 1);
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
+  });
+
+  it('is reported by the doctor with the one fix, and --fix makes it private to the user again', () => {
+    const repo = checkoutWith(0o666);
+    const shown = world.shim(['doctor', 'checkout']);
+    assert.equal(shown.code, 1);
+    assert.match(shown.stdout.replace(/\s+/g, ' '), /Next: Run aman doctor checkout --fix/);
+    const fixed = world.shim(['doctor', 'checkout', '--fix', '--yes']);
+    assert.equal(fixed.code, 0, fixed.stdout + fixed.stderr);
+    assert.equal(statSync(path.join(repo, 'installer', 'install.sh')).mode & 0o022, 0);
+    assert.equal(world.shim(['backup']).code, 0);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
+  });
+
+  it('is not used when its installer holds a link, which could point at a file anyone can change', () => {
+    const repo = checkoutWith(0o755);
+    const elsewhere = path.join(world.root, 'elsewhere.sh');
+    writeFileSync(elsewhere, '#!/bin/sh\necho pwned\n', { mode: 0o666 });
+    rmSync(path.join(repo, 'installer', 'install.sh'));
+    symlinkSync(elsewhere, path.join(repo, 'installer', 'install.sh'));
+    const result = world.shim(['backup']);
+    assert.equal(result.code, 1);
+    assert.match(
+      result.stderr.replace(/\s+/g, ' '),
+      /contains links, so Aman will not run it\. Copy the folder to one of yours/,
+    );
+    const shown = world.shim(['doctor', 'checkout']);
+    assert.equal(shown.code, 1);
+    assert.match(shown.stdout.replace(/\s+/g, ' '), /contains links/);
+    assert.equal(
+      world.shim(['doctor', 'checkout', '--fix', '--yes']).code,
+      1,
+      'a link is never made right by changing modes',
+    );
+  });
+
+  it('is not used when the folder that holds it can be changed by other users, until --fix makes it private', () => {
+    checkoutWith(0o755);
+    chmodSync(world.root, 0o775);
+    const refused = world.shim(['backup']);
+    assert.equal(refused.code, 1);
+    assert.match(
+      refused.stderr.replace(/\s+/g, ' '),
+      /folder that holds the folder Aman was installed from can be changed by other users/,
+    );
+    assert.match(
+      world.shim(['doctor', 'checkout']).stdout.replace(/\s+/g, ' '),
+      /Next: Run aman doctor checkout --fix/,
+    );
+    const fixed = world.shim(['doctor', 'checkout', '--fix', '--yes']);
+    assert.equal(fixed.code, 0, fixed.stdout + fixed.stderr);
+    assert.equal(statSync(world.root).mode & 0o022, 0);
+    assert.equal(world.shim(['backup']).code, 0);
+  });
+
+  it('says nothing about a folder that is private to the user', () => {
+    checkoutWith(0o755);
+    const result = world.shim(['doctor', 'checkout']);
+    assert.equal(result.code, 0);
+    assert.doesNotMatch(result.stdout, /can be changed/);
+  });
+});
+
 describe('aman with its helper files missing', () => {
   /** An installer stand-in whose `command` puts the helper files back, as the real one does. */
   function restoringInstaller(repo, { rc = 0 } = {}) {
@@ -1388,15 +1588,30 @@ exit ${rc}
     );
   }
 
-  it('puts a missing file back through the installer and carries on', () => {
+  it('puts a missing helper file back through the installer and carries on', () => {
+    make();
+    const repo = world.sandbox();
+    restoringInstaller(repo);
+    installCommand({ libs: true });
+    rmSync(path.join(world.home, 'lib', 'network.sh'));
+    const result = runInstalled(['backup']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} command`));
+    assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
+  });
+
+  it('runs nothing by itself when the file with the safety checks is the one that is missing, and prints the command', () => {
     make();
     const repo = world.sandbox();
     restoringInstaller(repo);
     installCommand({ libs: false });
     const result = runInstalled(['backup']);
-    assert.equal(result.status, 0, result.stderr);
-    assert.ok(world.calls().includes(`install.sh --home ${world.home} command`));
-    assert.ok(world.calls().includes(`install.sh --home ${world.home} backup`));
+    assert.equal(result.status, 1);
+    assert.equal(
+      result.stderr.trim(),
+      `Aman is missing one of its own files. Run: bash ${path.join(repo, 'installer', 'install.sh')} --home ${world.home} command`,
+    );
+    assert.ok(!world.calls().some(line => line.startsWith('install.sh')));
   });
 
   it('puts back one missing file among the others', () => {
@@ -1414,7 +1629,8 @@ exit ${rc}
     make();
     const repo = world.sandbox();
     restoringInstaller(repo, { rc: 1 });
-    installCommand({ libs: false });
+    installCommand({ libs: true });
+    rmSync(path.join(world.home, 'lib', 'schedule.sh'));
     const result = runInstalled(['backup']);
     assert.equal(result.status, 1);
     assert.equal(

@@ -1,21 +1,28 @@
 import type { Context } from 'hono';
 
-/** Default ports are dropped so `example.com` and `example.com:443` compare equal. */
-export function canonicalPort(port: string): string {
-  return port === '80' || port === '443' ? '' : port;
-}
+const DEFAULT_PORTS: Record<string, string> = { 'http:': '80', 'https:': '443' };
 
-/** Host and port of a Host header, or undefined when it is not a bare `host[:port]`. */
+/** Host and port of a Host header (the port as written, empty when absent), or undefined when it is not a bare `host[:port]`. */
 export function parseHostHeader(raw: string): { hostname: string; port: string } | undefined {
   try {
     const url = new URL(`http://${raw}`);
     if (url.username !== '' || url.password !== '' || url.pathname !== '/' || url.search !== '' || url.hash !== '') {
       return undefined;
     }
-    return { hostname: url.hostname, port: canonicalPort(url.port) };
+    const written = /:(\d+)$/.exec(raw)?.[1];
+    return { hostname: url.hostname, port: written === undefined ? '' : String(Number(written)) };
   } catch {
     return undefined;
   }
+}
+
+/** Same name, and the same port once each side's default is filled in for the URL's scheme: `:80` is only ever http. */
+export function hostMatchesUrl({ host, url }: { host: { hostname: string; port: string }; url: URL }): boolean {
+  const fallback = DEFAULT_PORTS[url.protocol] ?? '';
+  return (
+    host.hostname === url.hostname &&
+    (host.port === '' ? fallback : host.port) === (url.port === '' ? fallback : url.port)
+  );
 }
 
 /**
@@ -36,10 +43,7 @@ export function findAllowedOrigin({
   if (host === undefined) {
     return undefined;
   }
-  return allowedOrigins.find(origin => {
-    const listed = new URL(origin);
-    return listed.hostname === host.hostname && canonicalPort(listed.port) === host.port;
-  });
+  return allowedOrigins.find(origin => hostMatchesUrl({ host, url: new URL(origin) }));
 }
 
 /** The listed origin this request came to. Forwarded-* headers are never read. */

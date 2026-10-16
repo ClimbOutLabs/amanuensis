@@ -6,7 +6,7 @@
 #   aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
 #   aman doctor instance|network [--fix [--yes]] [--instance NAME]
 #   aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
-#   aman doctor docker|disk|backup [--fix [--yes]]
+#   aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
 #   aman backup [NAME]
 #   aman upgrade [--check] [--force]
 #
@@ -47,7 +47,7 @@ LOCAL=0
 ONLY=""
 ONLY_INSTANCE=""
 
-MACHINE_IDS="docker runtime credentials images disk docker_memory clock backup"
+MACHINE_IDS="docker runtime credentials images disk docker_memory clock backup checkout tls"
 INSTANCE_IDS="config containers ports service login database disk clock run_code attachments demo model public_url public_login network"
 IN_IMAGE_IDS="service login database disk clock run_code attachments demo model"
 
@@ -78,7 +78,7 @@ usage() {
 Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [--local]
        aman doctor instance|network [--fix [--yes]] [--instance NAME]
        aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
-       aman doctor docker|disk|backup [--fix [--yes]]
+       aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
        aman backup [NAME]
        aman upgrade [--check] [--force]
 USAGE
@@ -91,8 +91,8 @@ die_usage() {
 }
 
 # Helper files sit in ../lib beside this file's folder, installed and in a checkout alike.
-load_lib() { # name: sources ../lib/<name>.sh; returns 1 when it is not there
-  local src=${BASH_SOURCE[0]} target file
+lib_file() { # file name with its extension: where it is beside this command
+  local src=${BASH_SOURCE[0]} target
   while [ -L "$src" ] && command -v readlink >/dev/null 2>&1; do
     target=$(readlink "$src")
     case "$target" in
@@ -100,33 +100,68 @@ load_lib() { # name: sources ../lib/<name>.sh; returns 1 when it is not there
       *) src="$(dirname "$src")/$target" ;;
     esac
   done
-  file="$(dirname "$src")/../lib/$1.sh"
+  printf '%s/../lib/%s' "$(dirname "$src")" "$1"
+}
+
+load_lib() { # name: sources ../lib/<name>.sh; returns 1 when it is not there
+  local file
+  file=$(lib_file "$1.sh")
   [ -r "$file" ] || return 1
   # shellcheck source=/dev/null
   . "$file"
 }
 
-# The installer of the folder Aman was installed from; it is what fixes the machine.
-checkout_installer() {
+# The folder Aman was installed from, or nothing when none is recorded or it is gone.
+checkout_dir() {
   local source="${AMAN_HOME}/state/source" repo
   [ -r "$source" ] || return 1
   repo=$(head -n 1 "$source")
   [ -f "${repo}/installer/install.sh" ] || return 1
+  printf '%s' "$repo"
+}
+
+# The installer of the folder Aman was installed from; it is what fixes the machine. A folder other users can change
+# is never run: the installer runs as the person, and often as root.
+checkout_installer() {
+  local repo
+  repo=$(checkout_dir) || return 1
+  if checkout_problem "$repo" >/dev/null; then return 1; fi
   printf '%s' "${repo}/installer/install.sh"
+}
+
+# The words and the fix when no installer can be used: the folder is gone, or it is not safe to run.
+installer_failure() { # prints "sentence|fix"
+  local repo problem
+  if ! repo=$(checkout_dir); then
+    printf 'Aman cannot find the folder it was installed from.|Run install.sh again from that folder.'
+  elif problem=$(checkout_problem "$repo"); then
+    checkout_problem_words "$problem"
+  fi
+}
+
+fail_no_installer() {
+  local failure
+  failure=$(installer_failure)
+  ui_fail "${failure%%|*}" "${failure#*|}"
 }
 
 # Loads a helper file; one that went missing is put back by the installer once, and if that cannot be done the exact
 # command that does it is printed.
+# The checks that keep the installer's folder safe to run live in shared.sh, so when that file is the one missing nothing
+# is run by itself: the command that puts it back is printed for the person to run.
 require_lib() { # name
-  local installer
+  local repo installer problem words
   load_lib "$1" && return 0
-  if installer=$(checkout_installer) && bash "$installer" --home "$AMAN_HOME" command >/dev/null 2>&1 && load_lib "$1"; then
+  if [ "$1" != shared ] && installer=$(checkout_installer) && bash "$installer" --home "$AMAN_HOME" command >/dev/null 2>&1 && load_lib "$1"; then
     return 0
   fi
-  if [ -n "${installer:-}" ]; then
-    printf 'Aman is missing one of its own files. Run: bash %s --home %s command\n' "$installer" "$AMAN_HOME" >&2
-  else
+  if ! repo=$(checkout_dir); then
     printf 'Aman is missing one of its own files and cannot find the folder it was installed from. Run the installer there: installer/install.sh command\n' >&2
+  elif [ "$1" != shared ] && problem=$(checkout_problem "$repo"); then
+    words=$(checkout_problem_words "$problem")
+    printf 'Aman is missing one of its own files. %s\n' "${words%%|*}" >&2
+  else
+    printf 'Aman is missing one of its own files. Run: bash %s/installer/install.sh --home %s command\n' "$repo" "$AMAN_HOME" >&2
   fi
   exit 1
 }
@@ -573,6 +608,93 @@ check_backup() {
   esac
 }
 
+# Nothing is recorded until Aman has been installed from a folder.
+check_checkout() {
+  local repo problem words
+  repo=$(checkout_dir) || return 0
+  if problem=$(checkout_problem "$repo"); then
+    words=$(checkout_problem_words "$problem")
+    record machine checkout fail "${words%%|*}" "${words#*|}"
+  else
+    record machine checkout ok "The folder Aman was installed from can only be changed by you." ""
+  fi
+}
+
+# Https on the instances opened on the network: the authority and its key, the certificate (how long it lasts, which
+# addresses it lists) and a real answer over https from this computer. One line for the worst thing found.
+check_tls() {
+  local name release image info root_days leaf_days names host origin expected missing='' status any=0 state=ok detail='' fix=''
+  local ca_dir="${AMAN_HOME}/tls/ca" mode
+  tls_note() { # state detail fix: keeps the worst
+    case "$1:$state" in
+      fail:*) ;;
+      warn:ok) ;;
+      *) return 0 ;;
+    esac
+    state=$1
+    detail=$2
+    fix=$3
+  }
+  for name in $(list_instances); do
+    [ "$(registry_value "$name" tls)" = local ] && [ -n "$(registry_value "$name" tls_port)" ] || continue
+    any=1
+  done
+  [ "$any" = 1 ] || return 0
+  mode=$(file_mode "$ca_dir/root.key")
+  if [ ! -f "$ca_dir/root.crt" ] || [ -z "$mode" ]; then
+    tls_note fail "The certificate authority of this computer is missing, so devices cannot trust Aman." "Run aman doctor tls --fix"
+  elif [ "$mode" != 600 ]; then
+    tls_note fail "The key of this computer's certificate authority can be read by other users." "Run aman doctor tls --fix"
+  fi
+  release="${AMAN_HOME}/release/release.json"
+  image=$(json_value "$release" app_image)
+  for name in $(list_instances); do
+    [ "$(registry_value "$name" tls)" = local ] && [ -n "$(registry_value "$name" tls_port)" ] || continue
+    if [ "$DOCKER_OK" = 1 ] && [ -n "$image" ] && [ -f "$ca_dir/root.crt" ]; then
+      info=$(bounded 30 docker run --rm --network none --user "$(id -u):$(id -g)" -v "${AMAN_HOME}/tls:/tls:ro" -v "$(lib_file pki.mjs):/pki.mjs:ro" \
+        --entrypoint node "$image" /pki.mjs info /tls/ca "/tls/leaf/$name" 2>/dev/null)
+      root_days=$(printf '%s' "$info" | sed -n 's/.*"root_days_left":\(-\{0,1\}[0-9]*\).*/\1/p')
+      leaf_days=$(printf '%s' "$info" | sed -n 's/.*"leaf_days_left":\(-\{0,1\}[0-9]*\).*/\1/p')
+      names=$(printf '%s' "$info" | sed -n 's/.*"leaf_names":\[\([^]]*\)\].*/\1/p' | tr -d '"' | tr ',' ' ')
+      if [ -z "$leaf_days" ]; then
+        tls_note fail "The https certificate of instance $name is missing." "Run aman doctor tls --fix"
+      elif [ "$leaf_days" -le 0 ] || [ "${root_days:-1}" -le 0 ]; then
+        tls_note fail "The https certificate of instance $name has run out, so devices refuse it." "Run aman doctor tls --fix"
+      elif [ "$leaf_days" -lt 60 ] || [ "${root_days:-1000}" -lt 60 ]; then
+        tls_note warn "The https certificate of instance $name ends in $([ "$leaf_days" -lt "${root_days:-1000}" ] && echo "$leaf_days" || echo "$root_days") days." "Run aman doctor tls --fix"
+      else
+        missing=''
+        while IFS= read -r origin; do
+          host=$(origin_host "$origin")
+          case " $names " in *" $host "*) ;; *) missing="$missing $host" ;; esac
+        done < <(registry_value "$name" origins | tr ',' '\n')
+        if [ -n "$missing" ]; then
+          tls_note warn "The https certificate of instance $name does not list:${missing}." "Run aman doctor tls --fix"
+        elif [ "$state" = ok ]; then
+          detail="Https is on; the certificate of instance $name lasts $leaf_days more days and is renewed by the daily backup."
+        fi
+      fi
+    fi
+    if command -v curl >/dev/null 2>&1 && [ -f "$ca_dir/root.crt" ]; then
+      status=$(bounded 10 curl -sS --max-time 8 --cacert "$ca_dir/root.crt" -o /dev/null -w '%{http_code}' \
+        "https://127.0.0.1:$(registry_value "$name" tls_port)/healthz" 2>/dev/null | awk 'NF { last = $0 } END { print last }')
+      if [ "$status" != 200 ]; then
+        tls_note fail "Instance $name does not answer over https on this computer." "$INSTANCE_FIX"
+      fi
+    fi
+  done
+  if [ "$state" = ok ] && [ -z "$detail" ]; then detail="Https is on, with a certificate from this computer's own authority."; fi
+  record machine tls "$state" "$detail" "$fix"
+}
+
+# The one repair that needs no installer: other users lose the right to change the installer's files.
+fix_checkout() {
+  local repo
+  repo=$(checkout_dir) || return 0
+  tighten_checkout "$repo" || true
+  ! checkout_problem "$repo" >/dev/null
+}
+
 # ---------------------------------------------------------------- instance checks
 
 check_instance_config() {
@@ -664,8 +786,7 @@ check_instance_containers() { # name; sets APP_CONTAINER
           *"(health: starting)"*) starting="${starting}|$(container_words "$name" "$service")" ;;
         esac
         ports=$(bounded "$PROBE_SECONDS" docker port "$id" 2>/dev/null)
-        # An instance opened on the network publishes the app port (8790 inside) on every interface on purpose.
-        if [ -n "$(registry_value "$name" origins)" ]; then ports=$(printf '%s\n' "$ports" | grep -v '^8790/tcp' || true); fi
+        # An instance opened on the network publishes the app on each of its own addresses, never on a wildcard.
         case "$ports" in
           *"0.0.0.0:"* | *"[::]:"* | *":::"*) exposed="${exposed}|$(container_words "$name" "$service")" ;;
         esac
@@ -843,17 +964,19 @@ check_instance() {
 # network, a changed DHCP lease, Tailscale coming up) is not on the list until the instance is refreshed, and sign-in
 # is refused there. Nothing is recorded for an instance that is open on this computer only.
 check_instance_network() {
-  local name=$1 origins port host missing='' count
+  local name=$1 origins port host missing='' count expected tls_port=''
   origins=$(registry_value "$name" origins)
   [ -n "$origins" ] || return 0
   port=$(registry_value "$name" app_port)
+  case "$origins" in *https://*) tls_port=$(registry_value "$name" tls_port) ;; esac
   # shellcheck disable=SC2046,SC2086 # the extra hosts are checked names without spaces
-  for host in $(network_default_hosts) $(registry_value "$name" extra_hosts); do
+  expected=$(network_origin_list "$port" "$tls_port" $(registry_value "$name" extra_hosts))
+  while IFS= read -r host; do
     case ",${origins}," in
-      *",http://${host}:${port},"*) ;;
-      *) missing="${missing} ${host}" ;;
+      *",${host},"*) ;;
+      *) missing="${missing} $(origin_host "$host")" ;;
     esac
-  done
+  done < <(printf '%s\n' "$expected" | tr ',' '\n')
   if [ -n "$missing" ]; then
     record "$name" network warn "This computer has addresses Aman is not set up for:${missing}. Until they are added, every page opened at them is refused." \
       "Run aman doctor network --fix"
@@ -951,7 +1074,7 @@ text_checks() { # scope
     esac
     flush_skipped
     # Two checks that pass without saying anything useful are counted but not shown, unless asked for.
-    if [ "$state" = ok ] && [ "$UI_VERBOSE" != 1 ] && in_list "$id" "runtime credentials"; then continue; fi
+    if [ "$state" = ok ] && [ "$UI_VERBOSE" != 1 ] && in_list "$id" "runtime credentials checkout"; then continue; fi
     label=$detail
     if [ "$UI_VERBOSE" = 1 ]; then label="$detail ($id)"; fi
     case "$state" in
@@ -1200,7 +1323,7 @@ doctor_sandbox() {
         continue
       fi
       if ! installer=$(checkout_installer); then
-        ui_fail "Aman cannot find the folder it was installed from." "Run install.sh again from that folder."
+        fail_no_installer
         failed=1
         continue
       fi
@@ -1298,7 +1421,7 @@ doctor_repair() { # kind
       continue
     fi
     if ! installer=$(checkout_installer); then
-      ui_fail "Aman cannot find the folder it was installed from." "Run install.sh again from that folder."
+      fail_no_installer
       failed=1
       continue
     fi
@@ -1343,7 +1466,7 @@ fix_disk() {
   fi
 }
 
-# aman doctor docker|disk|backup [--fix [--yes]]: the machine checks of one area and, with --fix, the one repair.
+# aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]: the machine checks of one area and, with --fix, the one repair.
 doctor_machine_repair() { # kind
   local kind=$1 fix=0 yes=0 installer failed=0
   shift
@@ -1375,17 +1498,30 @@ doctor_machine_repair() { # kind
       check_disk
       ;;
     backup) check_backup ;;
+    checkout) check_checkout ;;
+    tls)
+      check_docker
+      check_tls
+      ;;
   esac
   text_checks machine
   count_checks machine
   if [ "$N_FAIL" -gt 0 ]; then failed=1; fi
   if [ $((N_WARN + N_FAIL)) -eq 0 ] || [ "$fix" != 1 ]; then exit "$failed"; fi
+  if [ "$kind" = checkout ]; then
+    if fix_checkout; then ui_ok "Only you can change the folder Aman runs its installer from now"; exit 0; fi
+    exit 1
+  fi
   if ! installer=$(checkout_installer); then
-    ui_fail "Aman cannot find the folder it was installed from." "Run install.sh again from that folder."
+    fail_no_installer
     exit 1
   fi
   case "$kind" in
     docker) bash "$installer" --home "$AMAN_HOME" docker || exit 1 ;;
+    tls)
+      if [ -f "${AMAN_HOME}/tls/ca/root.key" ]; then chmod 600 "${AMAN_HOME}/tls/ca/root.key"; fi
+      bash "$installer" --home "$AMAN_HOME" tls || exit 1
+      ;;
     disk) fix_disk ;;
     backup)
       bash "$installer" --home "$AMAN_HOME" --yes backups daily || exit 1
@@ -1397,9 +1533,10 @@ doctor_machine_repair() { # kind
 
 # aman backup [NAME] and aman upgrade [...]: the installer the sandbox tools were set up from, run for the person.
 run_installer() { # command args...
-  local installer
+  local installer failure
   if ! installer=$(checkout_installer); then
-    printf 'Aman cannot find the folder it was installed from. Run install.sh again from that folder.\n' >&2
+    failure=$(installer_failure)
+    printf '%s %s\n' "${failure%%|*}" "${failure#*|}" >&2
     exit 1
   fi
   exec bash "$installer" --home "$AMAN_HOME" "$@"
@@ -1427,7 +1564,7 @@ case "${1:-}" in
     shift
     doctor_repair "$kind" "$@"
     ;;
-  docker | disk | backup)
+  docker | disk | backup | checkout | tls)
     kind=$1
     shift
     doctor_machine_repair "$kind" "$@"
@@ -1477,6 +1614,8 @@ check_disk
 check_docker_memory
 check_clock
 check_backup
+check_checkout
+check_tls
 for instance_name in "${INSTANCES[@]+"${INSTANCES[@]}"}"; do
   check_instance "$instance_name"
 done

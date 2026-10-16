@@ -146,6 +146,7 @@ import {
 import {
   ABILITY_BOUNDARIES_PROMPT,
   assistantMessageContentToStringForSubAgent,
+  createSourceDiscoveryContract,
   EMPTY_ANSWER_NUDGE_MESSAGE,
   emptyInspectionNudgeMessage,
   estimateTokensForContextMessages,
@@ -169,9 +170,9 @@ import {
   makeUnknownToolInfo,
   NO_TASK_NO_TOOLS_PROMPT,
   noProgressNudgeMessage,
+  PLAIN_SPEECH_PROMPT,
   policyBlockedNudgeMessage,
   scanApprovalDecisions,
-  SOURCE_DISCOVERY_CONTRACT,
   toEnrichedToolCall,
   toToolCallInfo,
   UNTRUSTED_TOOL_OUTPUT_PROMPT,
@@ -1599,9 +1600,13 @@ export class AgentThread {
     const capabilities = builder.beginSection('agent-capabilities');
     capabilities.addSection('internal-messages', INTERNAL_SYSTEM_PROMPT);
     capabilities.addSection('untrusted-tool-output', UNTRUSTED_TOOL_OUTPUT_PROMPT);
-    capabilities.addSection('source-discovery', SOURCE_DISCOVERY_CONTRACT);
+    capabilities.addSection(
+      'source-discovery',
+      createSourceDiscoveryContract({ shellCanFetch: this.sandbox?.hasNetwork() ?? true }),
+    );
     capabilities.addSection('ability-boundaries', ABILITY_BOUNDARIES_PROMPT);
     capabilities.addSection('no-task-no-tools', NO_TASK_NO_TOOLS_PROMPT);
+    capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
 
     if (this.sandbox) {
       this.sandbox.buildInstruction(capabilities);

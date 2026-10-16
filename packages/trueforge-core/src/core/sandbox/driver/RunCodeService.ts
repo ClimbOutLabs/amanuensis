@@ -361,7 +361,10 @@ export class RunCodeService implements RunCodeBackend {
             : 'daemon_unavailable';
       return this.failedResult({
         error_code: code,
-        error: errorTextForCode({ error_code: code, detail: readiness.error }),
+        error:
+          readiness.verbatim === true
+            ? readiness.error
+            : errorTextForCode({ error_code: code, detail: readiness.error }),
         runRoot: '',
         stdout: '',
         stderr: '',
