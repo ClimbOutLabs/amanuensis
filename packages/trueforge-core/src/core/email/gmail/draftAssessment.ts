@@ -6,7 +6,7 @@
 import type { ReviewableDraft } from './draftReview';
 import type { GmailMessage } from './gmailWire';
 import { decodedHeaderOf, headerOf, headerOverflows, rawHeaderOf, readMessage } from './message';
-import { hasAmbiguousEncodedWord, hasHiddenCharacters } from './mimeText';
+import { contentTypeCharset, hasAmbiguousEncodedWord, hasHiddenCharacters } from './mimeText';
 import { addressesIn, addressListIsPlain } from './results';
 
 /** Longest body a send card shows; anything longer is refused because no one reads it in full. */
@@ -30,6 +30,9 @@ const ALLOWED_HEADERS = new Set([
   'content-type',
   'content-transfer-encoding',
 ]);
+
+/** The transfer encodings a reader decodes the same way. */
+const TRANSFER_ENCODINGS = new Set(['7bit', '8bit', 'binary', 'quoted-printable', 'base64']);
 
 /** Longest subject a send may have, so the card's header cap can never hide any of it. */
 const MAX_SENDABLE_SUBJECT_CHARS = 300;
@@ -102,6 +105,14 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
     }
     seen.add(name);
   }
+  const contentType = contentTypeCharset(rawHeaderOf({ part: payload, name: 'content-type' }));
+  if (contentType.kind !== 'one') {
+    return { ok: false, reason: REFUSALS.charset };
+  }
+  const transferEncoding = rawHeaderOf({ part: payload, name: 'content-transfer-encoding' }).trim().toLowerCase();
+  if (transferEncoding !== '' && !TRANSFER_ENCODINGS.has(transferEncoding)) {
+    return { ok: false, reason: REFUSALS.formatting };
+  }
   const from = fromAddress(rawHeaderOf({ part: payload, name: 'from' }));
   if (from !== input.account.toLowerCase()) {
     return { ok: false, reason: 'This draft is set to send from a different address than your Gmail account.' };
@@ -144,7 +155,7 @@ export function assessDraft(input: { message: GmailMessage; account: string; for
           'This draft has a subject too long to show you in full, so it was not offered for sending. Ask me to shorten it.',
       };
     }
-    if (!hasOrdinaryEdges(draft.body)) {
+    if (decodedSubject !== decodedSubject.trim() || !hasOrdinaryEdges(draft.body)) {
       return { ok: false, reason: REFUSALS.whitespace };
     }
     if (draft.body.length > MAX_SENDABLE_BODY_CHARS) {

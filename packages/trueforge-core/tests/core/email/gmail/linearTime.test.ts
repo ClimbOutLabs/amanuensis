@@ -6,7 +6,7 @@ import { assessDraft } from '../../../../src/core/email/gmail/draftAssessment';
 import { decodeEntities, htmlToText } from '../../../../src/core/email/gmail/htmlText';
 import { headerOf, readMessage } from '../../../../src/core/email/gmail/message';
 import {
-  charsetOf,
+  contentTypeCharset,
   decodeEncodedWords,
   hasHiddenCharacters,
   sniffHtmlCharset,
@@ -59,6 +59,14 @@ const HOSTILE: [string, string][] = [
   ['a word and a megabyte of spaces', `re${' '.repeat(MB)}`],
   ['variation selectors', '️'.repeat(MB)],
   ['tag characters', '\u{E0049}'.repeat(MB / 2)],
+  ['flag tag sequences', '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}'.repeat(MB / 14)],
+  ['tag letters and no end', `\u{1F3F4}${'\u{E0067}'.repeat(MB / 2)}`],
+  ['black flags and tags', '\u{1F3F4}\u{E0067}'.repeat(MB / 4)],
+  ['joiners in Indic text', 'ශ්\u200Dර'.repeat(MB / 4)],
+  ['spaces between Thai letters', 'ก\u200Bข'.repeat(MB / 3)],
+  ['keycaps', '1\uFE0F\u20E3'.repeat(MB / 3)],
+  ['Mongolian selectors', 'ᠠ\u180B'.repeat(MB / 2)],
+  ['private-use characters', '\uE000'.repeat(MB)],
   ['emoji and markers', '\u{1F600}️'.repeat(MB / 3)],
 ];
 
@@ -69,7 +77,7 @@ describe.each(HOSTILE)('1 MB of %s', (_name, text) => {
     ['addressesOf', () => addressesOf(text)],
     ['addressListIsPlain', () => addressListIsPlain(text)],
     ['decodeEncodedWords', () => decodeEncodedWords(text)],
-    ['charsetOf', () => charsetOf(text)],
+    ['contentTypeCharset', () => contentTypeCharset(text)],
     ['sniffHtmlCharset', () => sniffHtmlCharset(Buffer.from(text))],
     ['decodeEntities', () => decodeEntities(text)],
     ['htmlToText', () => htmlToText(text)],

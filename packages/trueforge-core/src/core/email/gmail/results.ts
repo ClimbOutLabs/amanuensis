@@ -94,7 +94,7 @@ export function addressesOf(rawHeader: string): string[] {
 /** One mailbox address: a single `@`, and nothing a parser could read as a comment, group, quote or route. */
 const PLAIN_ADDRESS = /^[^\s,;:"<>()[\]\\@]+@[^\s,;:"<>()[\]\\@]+$/u;
 /** A display name without anything a parser could read as a comment, address or escape. */
-const PLAIN_NAME = /^[^"()<>[\]\\:;,@]*$/u;
+const PLAIN_NAME = /^[^"()<>[\]\\:;,@\r\n]*$/u;
 
 function isPlainMailbox(part: string): boolean {
   const value = part.trim();
@@ -111,7 +111,7 @@ function isPlainMailbox(part: string): boolean {
   }
   const name = value.slice(0, open).trim();
   const quoted = name.length >= 2 && name.startsWith('"') && name.endsWith('"');
-  return quoted ? !name.slice(1, -1).includes('"') && !name.includes('\\') : PLAIN_NAME.test(name);
+  return quoted ? !/["\\\r\n]/.test(name.slice(1, -1)) : PLAIN_NAME.test(name);
 }
 
 /**

@@ -1,6 +1,11 @@
 import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
 import { headerOf, readMessage } from '../../../../src/core/email/gmail/message';
-import { charsetOf, decodeBytes, decodeEncodedWords, stripInvisible } from '../../../../src/core/email/gmail/mimeText';
+import {
+  contentTypeCharset,
+  decodeBytes,
+  decodeEncodedWords,
+  stripInvisible,
+} from '../../../../src/core/email/gmail/mimeText';
 import { addressesIn, listThreadsResult, readEmailResult } from '../../../../src/core/email/gmail/results';
 import { CHARSET_SAMPLES, ENCODED_WORD_SAMPLES } from './charsetFixtures';
 import { message } from './fixtures';
@@ -28,17 +33,30 @@ function charsetMessage(input: {
   };
 }
 
-describe('charsetOf', () => {
+describe('contentTypeCharset', () => {
   it.each([
     ['text/plain; charset=ISO-8859-1', 'iso-8859-1'],
     ['text/html; format=flowed; charset="Shift_JIS"', 'shift_jis'],
     ['text/plain;charset=utf-8;format=flowed', 'utf-8'],
+    ['text/plain; format="a;b"; charset=utf-8', 'utf-8'],
   ])('reads %s', (header, expected) => {
-    expect(charsetOf(header)).toBe(expected);
+    expect(contentTypeCharset(header)).toEqual({ kind: 'one', charset: expected });
   });
 
-  it('is null when none is declared', () => {
-    expect(charsetOf('text/plain')).toBeNull();
+  it('is none when none is declared, and ignores a charset that only appears inside a quoted value', () => {
+    expect(contentTypeCharset('text/plain')).toEqual({ kind: 'none' });
+    expect(contentTypeCharset('text/plain; name="x; charset=utf-7"')).toEqual({ kind: 'none' });
+  });
+
+  it.each([
+    ['a repeated charset', 'text/plain; charset=utf-8; charset=utf-7'],
+    ['an extended charset', "text/plain; charset*=utf-7''x"],
+    ['a charset continuation', 'text/plain; charset*0=utf-; charset*1=7'],
+    ['a charset continuation beside a plain one', 'text/plain; charset=utf-8; charset*0=utf-; charset*1=7'],
+    ['different case', 'text/plain; CHARSET=utf-8; Charset=utf-7'],
+    ['an unclosed quote', 'text/plain; name="x; charset=utf-8'],
+  ])('is ambiguous for %s', (_name, header) => {
+    expect(contentTypeCharset(header)).toEqual({ kind: 'ambiguous' });
   });
 });
 

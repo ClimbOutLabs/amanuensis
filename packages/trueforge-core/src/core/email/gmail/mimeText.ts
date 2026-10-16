@@ -34,11 +34,55 @@ export function isUsableCharset(label: string): boolean {
   }
 }
 
-/** The `charset` parameter of a Content-Type header value, or null when it names none. */
-export function charsetOf(contentType: string): string | null {
-  const match = /;\s*charset\s*=\s*(?:"([^"]*)"|([^\s;]+))/i.exec(contentType);
-  const label = (match?.[1] ?? match?.[2] ?? '').trim().toLowerCase();
-  return label === '' ? null : label;
+/** What a Content-Type header says about its charset. */
+export type ContentTypeCharset =
+  | { kind: 'none' }
+  | { kind: 'one'; charset: string }
+  /** More than one `charset`, or a `charset*` form (RFC 2231), which readers resolve differently. */
+  | { kind: 'ambiguous' };
+
+/**
+ * The `charset` parameter of a Content-Type header value. Exactly one plain `charset=` is read; none is
+ * `none`; a repeated parameter or any `charset*` continuation or extended form is `ambiguous`, because readers
+ * disagree about which one wins. Parameters are split outside quotes in one pass.
+ */
+export function contentTypeCharset(contentType: string): ContentTypeCharset {
+  const params: string[] = [];
+  let inQuotes = false;
+  let start = 0;
+  for (let index = 0; index < contentType.length; index += 1) {
+    const character = contentType[index];
+    if (character === '"') {
+      inQuotes = !inQuotes;
+    } else if (character === ';' && !inQuotes) {
+      params.push(contentType.slice(start, index));
+      start = index + 1;
+    }
+  }
+  params.push(contentType.slice(start));
+  const charsets: string[] = [];
+  for (const param of params.slice(1)) {
+    const equals = param.indexOf('=');
+    const name = (equals === -1 ? param : param.slice(0, equals)).trim().toLowerCase();
+    if (name.startsWith('charset') && name !== 'charset') {
+      return { kind: 'ambiguous' };
+    }
+    if (name === 'charset') {
+      charsets.push(
+        param
+          .slice(equals + 1)
+          .trim()
+          .replace(/^"(.*)"$/s, '$1')
+          .trim()
+          .toLowerCase(),
+      );
+    }
+  }
+  if (inQuotes || charsets.length > 1) {
+    return { kind: 'ambiguous' };
+  }
+  const [only] = charsets;
+  return only === undefined || only === '' ? { kind: 'none' } : { kind: 'one', charset: only };
 }
 
 /** The charset an HTML document declares in a leading `<meta>` tag, or null. Reads only the first 2 KB. */
@@ -167,28 +211,86 @@ export function decodeEncodedWords(header: string): string {
  * Characters that change what a reader sees without being visible, decided by Unicode properties rather than a
  * hand-made list: everything Unicode marks Default_Ignorable (tag characters, variation selectors, soft hyphen,
  * combining grapheme joiner, the Hangul and Braille fillers, bidi and format controls), control characters
- * other than tab, newline and carriage return, line and paragraph separators, and the interlinear marks.
+ * other than tab, newline and carriage return, private-use and unassigned code points, line and paragraph
+ * separators, and the interlinear marks.
  *
- * Three characters have a legitimate use and are allowed only where it applies: the zero-width joiner between
- * two pictographs (emoji sequences), the zero-width non-joiner between two Arabic, Persian or Indic letters,
- * and the emoji presentation marker straight after a pictograph that needs it (a pictograph that is already
- * shown as an emoji needs none, so one there carries nothing but hidden data).
+ * A few of those have a real use and are allowed only where it applies, never anywhere else:
+ *  - the zero-width joiner between two pictographs (emoji sequences) and in Indic scripts (half forms, chillu);
+ *  - the zero-width non-joiner between Arabic or Indic letters and marks;
+ *  - the zero-width space between Thai, Lao, Khmer or Myanmar letters;
+ *  - the emoji marker after a pictograph that needs one (not one that is already an emoji), and in a keycap;
+ *  - the text-style marker after a pictograph, an ideographic variation selector after a Han character, and a
+ *    Mongolian free variation selector after a Mongolian letter;
+ *  - the tag characters of a subdivision flag: a black flag, two to six tag letters or digits, and the cancel tag.
+ * Every other use is hidden data and is refused or escaped.
  */
-const INDIC_OR_ARABIC_LETTER =
-  '[[\\p{L}\\p{M}]&&[\\p{Script=Arabic}\\p{Script=Devanagari}\\p{Script=Bengali}\\p{Script=Gurmukhi}\\p{Script=Gujarati}\\p{Script=Oriya}\\p{Script=Tamil}\\p{Script=Telugu}\\p{Script=Kannada}\\p{Script=Malayalam}\\p{Script=Sinhala}]]';
+const TAG_CHARACTER = '[\\u{E0030}-\\u{E0039}\\u{E0061}-\\u{E007A}]';
+const BLACK_FLAG = '\\u{1F3F4}';
+const CANCEL_TAG = '\\u{E007F}';
+const LETTER_OR_MARK = '[\\p{L}\\p{M}]';
+const scriptsOf = (...names: string[]) => `[${names.map(name => `\\p{Script_Extensions=${name}}`).join('')}]`;
+const INDIC_SCRIPTS = scriptsOf(
+  'Devanagari',
+  'Bengali',
+  'Gurmukhi',
+  'Gujarati',
+  'Oriya',
+  'Tamil',
+  'Telugu',
+  'Kannada',
+  'Malayalam',
+  'Sinhala',
+);
+const INDIC = `[${LETTER_OR_MARK}&&${INDIC_SCRIPTS}]`;
+const INDIC_MARK = `[\\p{Mn}&&${INDIC_SCRIPTS}]`;
+const ARABIC_OR_INDIC = `[${LETTER_OR_MARK}&&${scriptsOf(
+  'Arabic',
+  'Devanagari',
+  'Bengali',
+  'Gurmukhi',
+  'Gujarati',
+  'Oriya',
+  'Tamil',
+  'Telugu',
+  'Kannada',
+  'Malayalam',
+  'Sinhala',
+)}]`;
+const SOUTHEAST_ASIAN = `[${LETTER_OR_MARK}&&${scriptsOf('Thai', 'Lao', 'Khmer', 'Myanmar')}]`;
 const PICTOGRAPH_OR_MODIFIER = '[\\p{Extended_Pictographic}\\p{Emoji_Modifier}]';
+
+/** A character matched only when it is not in a place it is allowed: the cheap test for the character comes first. */
+const outOfContext = (character: string, allowed: string) => `(?=${character})(?!${allowed})${character}`;
+
+/** Every way a run of two to six tag characters can sit inside a flag: how many come before and after this one. */
+const FLAG_TAG_POSITIONS = Array.from({ length: 5 }, (_unused, before) => before)
+  .flatMap(before =>
+    Array.from({ length: 6 - before }, (_unused, after) => ({ before, after })).filter(
+      ({ before: b, after: a }) => b + 1 + a >= 2,
+    ),
+  )
+  .map(
+    ({ before, after }) =>
+      `(?<=${BLACK_FLAG}${TAG_CHARACTER}{${String(before)}})(?=${TAG_CHARACTER}{${String(after + 1)}}${CANCEL_TAG})`,
+  )
+  .join('|');
+
 const HIDDEN_SOURCE = [
-  '(?![\\t\\n\\r\\u200C\\u200D\\uFE0F])[\\p{Default_Ignorable_Code_Point}\\p{Cc}\\p{Zl}\\p{Zp}\\u2800\\uFFF9-\\uFFFB]',
-  `(?<!${PICTOGRAPH_OR_MODIFIER}\\uFE0F?)\\u200D`,
-  '\\u200D(?!\\p{Extended_Pictographic})',
-  `(?<!${INDIC_OR_ARABIC_LETTER})\\u200C`,
-  `\\u200C(?!${INDIC_OR_ARABIC_LETTER})`,
-  '(?<![\\p{Extended_Pictographic}--\\p{Emoji_Presentation}])\\uFE0F',
+  '(?!\\t|\\n|\\r|\\u200B|\\u200C|\\u200D|\\uFE0E|\\uFE0F|\\u180B|\\u180C|\\u180D|\\u180F|[\\u{E0100}-\\u{E01EF}]|[\\u{E0030}-\\u{E0039}\\u{E0061}-\\u{E007A}\\u{E007F}])[\\p{Default_Ignorable_Code_Point}\\p{Cc}\\p{Zl}\\p{Zp}\\p{Co}\\p{Cn}\\u2800\\uFFF9-\\uFFFB]',
+  outOfContext(
+    '\\u200D',
+    `(?<=${PICTOGRAPH_OR_MODIFIER}\\uFE0F?)(?=\\u200D\\p{Extended_Pictographic})|(?<=${INDIC})(?=\\u200D${INDIC})|(?<=${INDIC_MARK})`,
+  ),
+  outOfContext('\\u200C', `(?<=${ARABIC_OR_INDIC})(?=\\u200C${ARABIC_OR_INDIC})`),
+  outOfContext('\\u200B', `(?<=${SOUTHEAST_ASIAN})(?=\\u200B${SOUTHEAST_ASIAN})`),
+  outOfContext('\\uFE0F', '(?<=[\\p{Extended_Pictographic}--\\p{Emoji_Presentation}])|(?<=[0-9#*])(?=\\uFE0F\\u20E3)'),
+  outOfContext('\\uFE0E', '(?<=\\p{Extended_Pictographic})'),
+  outOfContext('[\\u{E0100}-\\u{E01EF}]', '(?<=\\p{Script=Han})'),
+  outOfContext('[\\u180B\\u180C\\u180D\\u180F]', '(?<=[\\p{L}&&\\p{Script=Mongolian}])'),
+  `(?=${TAG_CHARACTER})(?!${FLAG_TAG_POSITIONS})${TAG_CHARACTER}`,
+  `${CANCEL_TAG}(?<!${BLACK_FLAG}${TAG_CHARACTER}{2,6}${CANCEL_TAG})`,
 ].join('|');
-// The lint rule cannot tell the joiners above are tested in context (lookarounds), not combined in a class.
-// eslint-disable-next-line no-misleading-character-class
 const HIDDEN_EVERYWHERE = new RegExp(HIDDEN_SOURCE, 'gv');
-// eslint-disable-next-line no-misleading-character-class
 const HIDDEN_ANYWHERE = new RegExp(HIDDEN_SOURCE, 'v');
 
 export function stripInvisible(text: string): string {

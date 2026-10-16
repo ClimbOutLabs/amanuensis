@@ -2,7 +2,7 @@
 import type { GmailMessage, MessagePart } from './gmailWire';
 import { htmlToText } from './htmlText';
 import {
-  charsetOf,
+  contentTypeCharset,
   decodeBytes,
   decodeEncodedWords,
   isUsableCharset,
@@ -57,8 +57,13 @@ export function headerOf(input: { message: GmailMessage; name: string }): string
 
 function decodePart(input: { part: MessagePart; data: string }): { text: string; usable: boolean } {
   const bytes = Uint8Array.from(Buffer.from(input.data, 'base64url'));
-  const declared = charsetOf(rawHeaderOf({ part: input.part, name: 'content-type' }));
-  const charset = declared ?? (input.part.mimeType === 'text/html' ? sniffHtmlCharset(bytes) : null);
+  const declared = contentTypeCharset(rawHeaderOf({ part: input.part, name: 'content-type' }));
+  if (declared.kind === 'ambiguous') {
+    // Readers disagree about which charset applies, so the bytes are shown as they are.
+    return { text: Buffer.from(bytes).toString('latin1'), usable: false };
+  }
+  const charset =
+    declared.kind === 'one' ? declared.charset : input.part.mimeType === 'text/html' ? sniffHtmlCharset(bytes) : null;
   return { text: decodeBytes({ bytes, charset }), usable: charset === null || isUsableCharset(charset) };
 }
 
