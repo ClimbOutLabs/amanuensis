@@ -19,6 +19,6 @@ export const NeedsYourOk: FC<{ children: ReactNode }> = ({ children }) => (
       {NEEDS_YOUR_OK_TITLE}
     </h3>
     <p className="mt-1 text-sm text-text-secondary">{NEEDS_YOUR_OK_INTRO}</p>
-    <ul className="mt-3 space-y-3">{children}</ul>
+    <ul className="mt-3 list-none space-y-3 p-0">{children}</ul>
   </section>
 );

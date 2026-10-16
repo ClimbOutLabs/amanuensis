@@ -92,7 +92,7 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
   const canAnswer = status.kind === 'waiting' || status.kind === 'failed';
 
   return (
-    <li className="rounded-lg border border-border bg-primary-bg" data-role="held-action">
+    <li className="list-none rounded-lg border border-border bg-primary-bg" data-role="held-action">
       <div className="space-y-3 px-4 py-3">
         {provenance != null && provenance !== '' && (
           <p className="text-xs text-text-secondary" data-role="held-action-provenance">
