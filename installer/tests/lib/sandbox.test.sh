@@ -479,6 +479,60 @@ test_existing_instance_without_wiring_gets_it() {
   sandbox_drop
 }
 
+test_rerun_turns_the_sandbox_on_and_keeps_the_data() {
+  t_begin "re-running for an instance installed with --no-sandbox turns the sandbox on, keeps its volumes and restarts its app"
+  sandbox_new
+  INSTALL_EXTRA=(--no-sandbox)
+  install_machine
+  assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" off
+  printf 'aman_main_data\n' >>"$SB_STATE/volumes"
+  : >"$STUB_LOG"
+  run_install --dry-run --name main
+  assert_rc 0
+  assert_flat_contains "$OUT" "Turn on the sandbox for instance main (run code, PDF and image reading)"
+  assert_flat_contains "$OUT" "Build the sandbox"
+  assert_not_contains "$OUT" "Start 4 sandboxes for main"
+  assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" off "a dry run changes nothing"
+  run_install --yes --name main
+  assert_rc 0
+  assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" slots
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "SANDBOX_BACKEND: slots"
+  assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --build-only"
+  assert_log_has "node $AMAN_HOME/bin/aman-sandbox.mjs --instance main --repo-root $REPO"
+  assert_log_has "up -d --force-recreate"
+  assert_log_lacks "volume rm"
+  assert_log_lacks " down"
+  assert_contains "$(cat "$SB_STATE/volumes")" "aman_main_data" "the data volume is still there"
+  assert_flat_contains "$OUT" "Run code on, in a sandbox, with PDF and image reading"
+  run_install --yes --name main
+  assert_contains "$OUT" "The 4 sandboxes of instance main are running"
+  assert_not_contains "$OUT" "Turn on the sandbox"
+  sandbox_drop
+}
+
+test_no_sandbox_flag_leaves_a_sandboxed_instance_alone() {
+  t_begin "--no-sandbox on an instance that has the sandbox changes nothing and says so"
+  sandbox_new
+  install_machine
+  run_install --dry-run --name main --no-sandbox
+  assert_rc 0
+  assert_flat_contains "$OUT" "Instance main keeps its sandbox"
+  assert_not_contains "$OUT" "Turn on the sandbox"
+  run_install --yes --name main --no-sandbox
+  assert_eq "$(sed -n 's/^sandbox=//p' "$AMAN_HOME/state/instances/main.conf")" slots
+  sandbox_drop
+}
+
+test_rerun_with_no_sandbox_keeps_it_off() {
+  t_begin "--no-sandbox on an instance installed without the sandbox keeps it off and plans nothing"
+  sandbox_new
+  INSTALL_EXTRA=(--no-sandbox)
+  install_machine
+  run_install --dry-run --name main --no-sandbox
+  assert_not_contains "$OUT" "Turn on the sandbox"
+  sandbox_drop
+}
+
 test_upgrade_refreshes_the_setup_and_image() {
   t_begin "an upgrade takes the new setup out of the new app image and rebuilds the slot image"
   sandbox_new
@@ -594,6 +648,9 @@ test_second_instance_gets_its_own_slots
 test_instance_add_without_the_sandbox
 test_remove_stops_the_slots
 test_existing_instance_without_wiring_gets_it
+test_rerun_turns_the_sandbox_on_and_keeps_the_data
+test_no_sandbox_flag_leaves_a_sandboxed_instance_alone
+test_rerun_with_no_sandbox_keeps_it_off
 test_upgrade_refreshes_the_setup_and_image
 test_node_calls_use_the_docker_access_of_the_run
 test_docker_is_enabled_at_boot_with_consent

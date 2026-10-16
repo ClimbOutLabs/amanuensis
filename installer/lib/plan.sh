@@ -569,7 +569,7 @@ cmd_install() {
 }
 
 install_execute() {
-  local name demo_name='' change recreate ADDRESS_CHANGED=''
+  local name demo_name='' change recreate enabled='' ADDRESS_CHANGED=''
   ensure_private_dir "$AMAN_HOME"
   lock_acquire
   ensure_private_dir "$STATE_DIR/logs"
@@ -590,6 +590,10 @@ install_execute() {
     release_write
   fi
   ui_phase "Starting services" 5 6
+  if sandbox_enable_wanted; then
+    enabled=$OPT_NAME
+    sandbox_enable "$enabled"
+  fi
   for name in $(reg_names); do
     change=$(instance_address_change "$name")
     if [ -n "$change" ]; then
@@ -605,7 +609,8 @@ install_execute() {
       recreate=
       case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
       if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; }; then
-        if instance_sandbox_wanted "$name"; then sandbox_ensure "$name"; fi
+        if [ "$name" = "$enabled" ]; then recreate=recreate; fi
+        if instance_sandbox_wanted "$name" && [ "$name" != "$enabled" ]; then sandbox_ensure "$name"; fi
         instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
         instance_up "$name" ${recreate:+"$recreate"} || exit 1
       fi
