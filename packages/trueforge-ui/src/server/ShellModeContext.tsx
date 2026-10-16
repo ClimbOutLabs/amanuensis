@@ -76,12 +76,14 @@ export type SettingsSection =
   | 'model-roles'
   | 'connectors'
   | 'memory'
-  | 'memory-vault'
   | 'skills'
   | 'sandbox'
   | 'personalization'
   | 'themes'
   | 'permissions';
+
+/** Sub-tabs inside the Memory settings section. */
+export type SettingsMemoryTab = 'memories' | 'sharing' | 'settings';
 
 export type HistoryAgentFilter = {
   agentId?: string;
@@ -101,7 +103,11 @@ type ShellModeContextValue = {
   isNewChatEnabled: boolean;
   settingsOpen: boolean;
   settingsSection: SettingsSection;
-  setSettingsOpen: (open: boolean, section?: SettingsSection) => void;
+  /** Memory sub-tab requested by the last `setSettingsOpen` call that named one (e.g. the
+   * welcome screen's memory setup link asks for 'settings'); undefined means no request, so
+   * the Memory section picks its own default. Cleared whenever a section is named without one. */
+  settingsMemoryTab: SettingsMemoryTab | undefined;
+  setSettingsOpen: (open: boolean, section?: SettingsSection, memoryTab?: SettingsMemoryTab) => void;
   agentConfigOpen: boolean;
   setAgentConfigOpen: (open: boolean) => void;
   /** Agents main-pane overlay (sidebar layout). */
@@ -277,6 +283,7 @@ export function ShellModeProvider({
   const [agentsListEpoch, setAgentsListEpoch] = useState(0);
   const [settingsOpenState, setSettingsOpenState] = useState(initialSettingsOpen);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('models');
+  const [settingsMemoryTab, setSettingsMemoryTab] = useState<SettingsMemoryTab | undefined>(undefined);
   const [agentConfigOpenState, setAgentConfigOpenState] = useState(false);
   const [libraryOpenState, setLibraryOpenState] = useState(false);
   const [sessionsOpenState, setSessionsOpenState] = useState(false);
@@ -360,9 +367,10 @@ export function ShellModeProvider({
     setLibraryAgentId(null);
   }, []);
   const setSettingsOpen = useCallback(
-    (open: boolean, section?: SettingsSection) => {
+    (open: boolean, section?: SettingsSection, memoryTab?: SettingsMemoryTab) => {
       if (section !== undefined) {
         setSettingsSection(section);
+        setSettingsMemoryTab(memoryTab);
       }
       if (open) {
         setAgentConfigOpenState(false);
@@ -714,6 +722,7 @@ export function ShellModeProvider({
       isNewChatEnabled,
       settingsOpen,
       settingsSection,
+      settingsMemoryTab,
       setSettingsOpen,
       agentConfigOpen,
       setAgentConfigOpen,
@@ -759,6 +768,7 @@ export function ShellModeProvider({
       isNewChatEnabled,
       settingsOpen,
       settingsSection,
+      settingsMemoryTab,
       setSettingsOpen,
       agentConfigOpen,
       setAgentConfigOpen,
