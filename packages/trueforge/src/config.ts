@@ -163,7 +163,8 @@ export function parseOidcScopes(raw: string): string[] {
 
 /**
  * Parses `OIDC_ALLOWED_EMAILS`: comma-separated exact addresses and/or globs
- * (`*@company.com`). Empty / unset → no allowlist (any authenticated user may sign in).
+ * (`*@company.com`). Empty / unset → no allowlist (any authenticated user may sign in);
+ * standalone refuses that at startup.
  */
 export function parseOidcAllowedEmails(raw: string | undefined): string[] {
   if (raw === undefined || raw.trim() === '') {
@@ -849,7 +850,8 @@ export interface OIDCConfig {
   /**
    * Optional allowlist of emails that may sign in. Env: `OIDC_ALLOWED_EMAILS`.
    * Comma-separated exact addresses and/or `*` globs (e.g. `alice@acme.com,*@partner.com`).
-   * Matching is case-insensitive against the ID token `email` claim. Empty = unrestricted.
+   * Matching is case-insensitive against the ID token `email` claim. Empty = unrestricted when distributed;
+   * standalone requires exactly one literal address, the owner's.
    */
   OIDC_ALLOWED_EMAILS: string[];
 }
@@ -2444,6 +2446,45 @@ export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement
       'or set REQUIRE_AUTH=false to explicitly accept this risk.',
   );
 }
+
+export interface SingleOwnerSignIn {
+  /** True for `STANDALONE=true`. */
+  standalone: boolean;
+  oidc: Pick<OIDCConfig, 'OIDC_ALLOWED_EMAILS'> | undefined;
+}
+
+/**
+ * A standalone instance has exactly one account, the owner, because memory and history are not
+ * separated between accounts. Sign-in must therefore be limited to one literal address
+ * (`OIDC_ALLOWED_EMAILS`); distributed mode keeps its multi-user allowlist. Runs at load, so the
+ * server never starts with a wider list.
+ */
+export function assertSingleOwnerSignIn({ standalone, oidc }: SingleOwnerSignIn): void {
+  if (!standalone || oidc === undefined) {
+    return;
+  }
+  const allowed = oidc.OIDC_ALLOWED_EMAILS;
+  const owner = allowed[0];
+  if (allowed.length === 1 && owner !== undefined && owner.includes('@') && !owner.includes('*')) {
+    return;
+  }
+  const fix = "Set OIDC_ALLOWED_EMAILS to the owner's email address only.";
+  if (allowed.length === 0) {
+    throw new Error(
+      `Refusing to start: OIDC_ALLOWED_EMAILS must hold the email address of the owner. ${fix}`,
+    );
+  }
+  if (allowed.length > 1) {
+    throw new Error(
+      `Refusing to start: OIDC_ALLOWED_EMAILS lists ${String(allowed.length)} addresses, but a standalone instance has exactly one account. ${fix}`,
+    );
+  }
+  throw new Error(
+    `Refusing to start: OIDC_ALLOWED_EMAILS must be one exact email address, not a pattern. ${fix}`,
+  );
+}
+
+assertSingleOwnerSignIn({ standalone: configuration.STANDALONE, oidc: configuration.OIDC });
 
 if (isTrueFoundryModeEnabled(configuration)) {
   // TrueFoundry authenticates each caller with their own gateway token, so browser SSO must be off.

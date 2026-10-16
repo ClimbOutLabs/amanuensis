@@ -2,7 +2,6 @@
 # Amanuensis installer: plan, local image builds, shared speech-to-text, per-person instances and their sandbox.
 # Usage: install.sh [--dry-run] [--yes] [options]
 #        install.sh instance add|list|remove <name>
-#        install.sh instance add-user|remove-user|list-users
 #        install.sh instance demo-seed [--reset]
 #        install.sh instance refresh <name>
 #        install.sh backup [<name>]
@@ -59,8 +58,6 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/edge.sh"
 # shellcheck source=lib/instance.sh
 . "$INSTALLER_DIR/lib/instance.sh"
-# shellcheck source=lib/users.sh
-. "$INSTALLER_DIR/lib/users.sh"
 # shellcheck source=lib/demo.sh
 . "$INSTALLER_DIR/lib/demo.sh"
 # shellcheck source=lib/backup.sh
@@ -95,7 +92,6 @@ OPT_BACKUPS_ARG=
 OPT_RESET=0
 OPT_NAME=
 OPT_INSTANCE=
-OPT_ROLE=
 OPT_EMAIL=
 OPT_PUBLIC_URL=
 OPT_LOGIN_URL=
@@ -106,7 +102,6 @@ OPT_PUBLIC_IP=
 OPT_TF_MODEL=
 OPT_TF_CAP=
 OPT_CONFIRM_NAME=
-OPT_DEMO_USER=
 COMMAND=install
 SUBCOMMAND=
 LOCK_HELD=0
@@ -123,10 +118,7 @@ Amanuensis installer
   install.sh instance add <name>  add another person's instance
   install.sh instance list
   install.sh instance remove <name> [--purge-data]
-  install.sh instance add-user <name> --email ADDRESS [--role member] [--instance NAME] [--password-stdin]
-  install.sh instance remove-user <name> [--instance NAME]
-  install.sh instance list-users [--instance NAME]
-  install.sh instance demo-seed [--reset] [--instance NAME] [--demo-user ADDRESS]
+  install.sh instance demo-seed [--reset] [--instance NAME]
   install.sh instance refresh <name>
   install.sh backup [<name>]
   install.sh backups daily|off
@@ -147,15 +139,13 @@ Options
   --verbose             show technical details and the full list of downloads
   --dry-run             stop after printing the plan
   --name NAME           first instance name (default main)
-  --email ADDRESS       owner email (with add-user: the new user's email)
-  --instance NAME       the instance a user command applies to (default: the only one)
-  --role member         role of an added user; members chat but cannot change server settings (the only role)
-  --password-stdin      read the owner password (with add-user: the new user's password; otherwise one is generated and shown once) from the first line of stdin, before any prompt
+  --email ADDRESS       owner email
+  --instance NAME       the instance demo-seed applies to (default: the only one)
+  --password-stdin      read the owner password (otherwise one is generated and shown once) from the first line of stdin, before any prompt
   --token-factory-key-stdin  read the Token Factory key from stdin (the line after the password with --password-stdin); the key is never a command-line value
   --token-factory-model ID   Token Factory model the app uses (default nvidia/nemotron-3-super-120b-a12b)
   --token-factory-daily-cap N  stop answering after N Token Factory tokens per day (default: no cap)
   --demo                mark the instance as a demo (DEMO_MODE=true) and seed its synthetic demo world once it is healthy
-  --demo-user ADDRESS   the user the demo world is seeded for (default: the owner)
   --reset               with instance demo-seed, remove the synthetic demo records instead of seeding
   --local-only          open Aman only at 127.0.0.1 on this computer (by default it answers at every address this computer has on a private network, and at its names)
   --backups daily|off   back up every day (default) or not, without asking
@@ -218,12 +208,12 @@ parse_args() {
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
-      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --demo-user)
+      --home | --name | --instance | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --demo-user=*)
+      --home=* | --name=* | --instance=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -254,7 +244,6 @@ set_option() {
     --home) AMAN_HOME=$2 ;;
     --name) OPT_NAME=$2 ;;
     --instance) OPT_INSTANCE=$2 ;;
-    --role) OPT_ROLE=$2 ;;
     --email) OPT_EMAIL=$2 ;;
     --public-url) OPT_PUBLIC_URL=$2 ;;
     --login-url) OPT_LOGIN_URL=$2 ;;
@@ -273,7 +262,6 @@ set_option() {
       ;;
     --token-factory-model) OPT_TF_MODEL=$2 ;;
     --token-factory-daily-cap) OPT_TF_CAP=$2 ;;
-    --demo-user) OPT_DEMO_USER=$2 ;;
   esac
   safe_value "$2" || usage_die "$1 contains a character that is not allowed"
 }
@@ -285,7 +273,7 @@ print_signout_note() {
   fi
 }
 
-# --demo and --demo-user belong to install, instance add and instance demo-seed; --reset only to demo-seed.
+# --demo belongs to install and instance add; --reset only to instance demo-seed.
 check_demo_options() {
   local seeding=0
   if [ "$COMMAND:$SUBCOMMAND" = instance:demo-seed ]; then seeding=1; fi
@@ -297,10 +285,6 @@ check_demo_options() {
   fi
   if [ "$OPT_LOCAL_ONLY" = 1 ] && [ -n "$OPT_PUBLIC_URL" ]; then
     usage_die "--local-only and --public-url are opposites; pick one."
-  fi
-  if [ -n "$OPT_DEMO_USER" ]; then
-    [ "$OPT_DEMO" = 1 ] || [ "$seeding" = 1 ] || usage_die "--demo-user applies with --demo or instance demo-seed"
-    valid_email "$OPT_DEMO_USER" || usage_die "--demo-user must be an email address"
   fi
 }
 
@@ -359,12 +343,9 @@ main() {
         add) cmd_instance_add ;;
         list) cmd_instance_list ;;
         remove) cmd_instance_remove ;;
-        add-user) cmd_instance_add_user ;;
-        remove-user) cmd_instance_remove_user ;;
-        list-users) cmd_instance_list_users ;;
         demo-seed) cmd_instance_demo_seed ;;
         refresh) cmd_instance_refresh ;;
-        *) usage_die "usage: install.sh instance add|list|remove|add-user|remove-user|list-users|demo-seed|refresh" ;;
+        *) usage_die "usage: install.sh instance add|list|remove|demo-seed|refresh" ;;
       esac
       ;;
   esac

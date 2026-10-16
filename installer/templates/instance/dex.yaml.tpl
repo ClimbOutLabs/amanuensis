@@ -31,7 +31,6 @@ staticPasswords:
     hashFromEnv: DEX_USER_PASSWORD_HASH
     username: 'owner'
     userID: 'owner'
-@@IF_MEMBERS@@@@MEMBER_USERS@@
 
 staticClients:
   - id: @@CLIENT_ID@@

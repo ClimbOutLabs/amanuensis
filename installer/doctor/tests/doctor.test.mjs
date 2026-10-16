@@ -651,46 +651,78 @@ describe('instance settings file', () => {
     assert.doesNotMatch(world.json().stdout, /SENTINEL-hash/);
   });
 
-  it('reports the sign-in user count without printing a hash', () => {
-    make();
-    const file = path.join(world.instanceDir('main'), 'dex.env');
-    writeFileSync(
-      file,
-      [
-        "DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'",
-        "DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'",
-        "DEX_USER_PASSWORD_HASH_JUDGE_TWO='SENTINEL-judge2-hash'",
-        '',
-      ].join('\n'),
-    );
-    chmodSync(file, 0o600);
-    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=o@x.invalid,a@x.invalid,b@x.invalid\n');
-    const check = find(world.json().doc.instances.main, 'config');
-    assert.equal(check.state, 'ok');
-    assert.match(check.detail, /3 sign-in user\(s\): the owner and 2 member\(s\)/);
-    assert.doesNotMatch(world.json().stdout, /SENTINEL/);
-  });
+  describe('one account per instance', () => {
+    const OWNER = 'owner@x.invalid';
+    const fixCommand = 'Run aman doctor instance --fix';
 
-  it('warns when fewer emails are allowed than there are users', () => {
-    make();
-    const file = path.join(world.instanceDir('main'), 'dex.env');
-    writeFileSync(file, "DEX_USER_PASSWORD_HASH='h1'\nDEX_USER_PASSWORD_HASH_JUDGE1='h2'\n");
-    chmodSync(file, 0o600);
-    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=o@x.invalid\n');
-    const check = find(world.json().doc.instances.main, 'config');
-    assert.equal(check.state, 'warn');
-    assert.match(check.detail, /2 sign-in user\(s\)/);
-    assert.match(check.detail, /Fewer emails are allowed/);
-    assert.match(check.fix, /add-user/);
-  });
+    function setUp({ allowed, hashes = [], registered = true }) {
+      world?.dispose();
+      make();
+      const file = path.join(world.instanceDir('main'), 'dex.env');
+      writeFileSync(file, ["DEX_USER_PASSWORD_HASH='SENTINEL-owner-hash'", ...hashes, ''].join('\n'));
+      chmodSync(file, 0o600);
+      world.writeEnv('main', 0o600, allowed === undefined ? '' : `OIDC_ALLOWED_EMAILS=${allowed}\n`);
+      if (registered) {
+        const dir = path.join(world.home, 'state', 'instances');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, 'main.conf'), `name=main\nowner_email=${OWNER}\n`);
+      }
+      return find(world.json().doc.instances.main, 'config');
+    }
 
-  it('does not warn about a wildcard allowlist', () => {
-    make();
-    const file = path.join(world.instanceDir('main'), 'dex.env');
-    writeFileSync(file, "DEX_USER_PASSWORD_HASH='h1'\nDEX_USER_PASSWORD_HASH_JUDGE1='h2'\n");
-    chmodSync(file, 0o600);
-    world.writeEnv('main', 0o600, 'OIDC_ALLOWED_EMAILS=*@x.invalid\n');
-    assert.equal(find(world.json().doc.instances.main, 'config').state, 'ok');
+    it('is quiet when only the owner can sign in', () => {
+      const check = setUp({ allowed: OWNER });
+      assert.equal(check.state, 'ok');
+      assert.equal(check.detail, 'The settings files exist and are private to you.');
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('warns with the fix command and names the extra emails left from add-user', () => {
+      const check = setUp({
+        allowed: `${OWNER},a@x.invalid,B@x.invalid`,
+        hashes: [
+          "DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'",
+          "DEX_USER_PASSWORD_HASH_JUDGE_TWO='SENTINEL-judge2-hash'",
+        ],
+      });
+      assert.equal(check.state, 'warn');
+      assert.match(check.detail, /more than the owner can sign in: a@x\.invalid, b@x\.invalid\./);
+      assert.match(check.detail, /one account/);
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('does not mistake the owner in another case or with spaces for an extra user', () => {
+      const check = setUp({ allowed: ` ${OWNER.toUpperCase()} ` });
+      assert.equal(check.state, 'ok');
+    });
+
+    it('takes the first allowed email for the owner when the record is gone', () => {
+      assert.equal(setUp({ allowed: OWNER, registered: false }).state, 'ok');
+      const check = setUp({ allowed: `${OWNER},a@x.invalid`, registered: false });
+      assert.equal(check.state, 'warn');
+      assert.match(check.detail, /: a@x\.invalid\./);
+    });
+
+    it('warns about a pattern, which lets more than the owner in', () => {
+      const check = setUp({ allowed: '*@x.invalid' });
+      assert.equal(check.state, 'warn');
+      assert.match(check.detail, /\*@x\.invalid/);
+      assert.equal(check.fix, fixCommand);
+    });
+
+    it('warns about left-over password hashes even when the emails are already the owner only', () => {
+      const check = setUp({ allowed: OWNER, hashes: ["DEX_USER_PASSWORD_HASH_JUDGE1='SENTINEL-judge1-hash'"] });
+      assert.equal(check.state, 'warn');
+      assert.match(check.detail, /1 extra sign-in password\(s\)/);
+      assert.equal(check.fix, fixCommand);
+      assert.doesNotMatch(world.json().stdout, /SENTINEL/);
+    });
+
+    it('no longer mentions members or add-user', () => {
+      const check = setUp({ allowed: `${OWNER},a@x.invalid` });
+      assert.doesNotMatch(`${check.detail} ${check.fix}`, /member|add-user|list-users/i);
+    });
   });
 
   it('fails when the file is missing', () => {

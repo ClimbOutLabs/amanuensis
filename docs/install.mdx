@@ -122,20 +122,6 @@ This asks you to type the instance name to confirm (or pass it in advance with `
 
 An instance served with `--tls caddy` also has a site file in `/etc/caddy/aman.d`. `instance remove` prints the root steps that delete it and reload Caddy (`sudo rm -f /etc/caddy/aman.d/<name>.caddyfile`, then `systemctl reload-or-restart caddy`) and runs them after you answer yes or pass `--tls-root`. Without consent the instance is still removed, a warning says that Caddy keeps serving its names, and the steps stay yours to run.
 
-## Adding sign-in users to an instance
-
-To let other people (for example hackathon judges) sign in to one instance without giving them their own, add members:
-
-```bash
-installer/install.sh instance add-user <name> --email <address> [--role member] [--instance <instance>]
-installer/install.sh instance list-users
-installer/install.sh instance remove-user <name>
-```
-
-`add-user` generates a password, prints it once, and stores only its hash in the instance's `dex.env`. To choose the password yourself, pass `--password-stdin` and give it on the first line of stdin; it is never a command-line value. The command adds the user to the sign-in service and to the app's `OIDC_ALLOWED_EMAILS`, then restarts both. Running it again for the same user changes nothing and keeps the password; to reset a password, run `remove-user` and `add-user`.
-
-Members can chat and see their own history. Only the owner is an admin: members cannot open server settings (model providers, connectors, sandbox, skills) and see only their own sessions. `--role member` is the only role. Users are kept in the installer's registry, so a re-run, an upgrade or an instance restart keeps them. `list-users` shows names, emails and roles, never hashes, and `aman doctor` reports the user count. With several instances, pass `--instance`.
-
 ## Using it from other devices
 
 The first run is local only. To reach an instance from another device on your network, you put your own reverse proxy in front of it. The installer configures nothing outside the machine; it only prints what your proxy must satisfy:

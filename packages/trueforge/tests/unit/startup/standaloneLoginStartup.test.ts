@@ -125,6 +125,30 @@ describe('standalone login startup', () => {
     );
   });
 
+  it.each([
+    ['no allowed email', {}, /OIDC_ALLOWED_EMAILS must hold the email address of the owner/],
+    [
+      'two allowed emails',
+      { OIDC_ALLOWED_EMAILS: 'owner@example.invalid,guest@example.invalid' },
+      /lists 2 addresses.*exactly one account/,
+    ],
+  ])('refuses to start with OIDC and %s', async (_label, extra, message) => {
+    const booted = boot(
+      {
+        PORT: String(await freePort()),
+        OIDC_ISSUER_URL: `http://127.0.0.1:${String(await freePort())}/dex`,
+        OIDC_CLIENT_ID: 'client-a',
+        OIDC_CLIENT_SECRET: 'secret-a',
+        ...extra,
+      },
+      dataDir,
+    );
+    running.push(booted);
+
+    expect(await booted.exited).toBe(1);
+    expect(booted.output()).toMatch(message);
+  });
+
   it('starts when the home directory cannot be created, keeping its data under APP_DATA_DIR', async () => {
     const port = await freePort();
     // A path below a regular file can never be created, as for a runtime user whose home directory is missing.
@@ -139,6 +163,7 @@ describe('standalone login startup', () => {
         OIDC_ISSUER_URL: `http://127.0.0.1:${String(await freePort())}/dex`,
         OIDC_CLIENT_ID: 'client-a',
         OIDC_CLIENT_SECRET: 'secret-a',
+        OIDC_ALLOWED_EMAILS: 'owner@example.invalid',
       },
       dataDir,
     );
@@ -160,6 +185,7 @@ describe('standalone login startup', () => {
         OIDC_ISSUER_URL: `http://127.0.0.1:${String(idpPort)}/dex`,
         OIDC_CLIENT_ID: 'client-a',
         OIDC_CLIENT_SECRET: 'secret-a',
+        OIDC_ALLOWED_EMAILS: 'owner@example.invalid',
         AUTH_COOKIE_SUFFIX: '_a',
       },
       dataDir,

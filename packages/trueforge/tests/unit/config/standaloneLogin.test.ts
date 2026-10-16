@@ -1,8 +1,10 @@
-const OIDC_ENV = {
+const OIDC_WITHOUT_ALLOWLIST = {
   OIDC_ISSUER_URL: 'http://localhost:5556/dex',
   OIDC_CLIENT_ID: 'client-a',
   OIDC_CLIENT_SECRET: 'secret-a',
 };
+
+const OIDC_ENV = { ...OIDC_WITHOUT_ALLOWLIST, OIDC_ALLOWED_EMAILS: 'owner@example.invalid' };
 
 const MANAGED_KEYS = [
   'STANDALONE',
@@ -12,6 +14,7 @@ const MANAGED_KEYS = [
   'OIDC_ISSUER_URL',
   'OIDC_CLIENT_ID',
   'OIDC_CLIENT_SECRET',
+  'OIDC_ALLOWED_EMAILS',
   'REQUIRE_AUTH',
   'TRUEFORGE_API_KEY',
 ] as const;
@@ -103,6 +106,53 @@ describe('standalone login configuration', () => {
     });
 
     expect(config.getPublicBaseUrl()).toBe('https://amanuensis.example/app');
+  });
+
+  it('keeps the owner as the only allowed email', async () => {
+    const config = await loadConfig(OIDC_ENV);
+
+    expect(config.default.OIDC?.OIDC_ALLOWED_EMAILS).toEqual(['owner@example.invalid']);
+  });
+
+  it.each([
+    ['no allowed email', undefined, /OIDC_ALLOWED_EMAILS must hold the email address of the owner/],
+    ['an empty list', ' ', /OIDC_ALLOWED_EMAILS must hold the email address of the owner/],
+    ['two addresses', 'owner@example.invalid,guest@example.invalid', /lists 2 addresses.*exactly one account/],
+    ['a pattern', '*@example.invalid', /one exact email address, not a pattern/],
+    ['a pattern next to the owner', 'owner@example.invalid,*@example.invalid', /lists 2 addresses/],
+    ['text that is not an address', 'owner', /one exact email address/],
+  ])('refuses to start with %s', async (_label, allowed, message) => {
+    await expect(
+      loadConfig(
+        allowed === undefined ? OIDC_WITHOUT_ALLOWLIST : { ...OIDC_WITHOUT_ALLOWLIST, OIDC_ALLOWED_EMAILS: allowed },
+      ),
+    ).rejects.toThrow(message);
+  });
+
+  it('names the fix in the message', async () => {
+    await expect(
+      loadConfig({ ...OIDC_ENV, OIDC_ALLOWED_EMAILS: 'owner@example.invalid,guest@example.invalid' }),
+    ).rejects.toThrow(/Set OIDC_ALLOWED_EMAILS to the owner's email address only/);
+  });
+
+  it('leaves a distributed server with several allowed emails and no REQUIRE_AUTH alone', async () => {
+    const config = await loadConfig({
+      ...OIDC_ENV,
+      STANDALONE: 'false',
+      TRUEFORGE_API_KEY: 'k',
+      REQUIRE_AUTH: 'false',
+      OIDC_ALLOWED_EMAILS: 'a@example.invalid,*@partner.example',
+    });
+
+    expect(config.default.STANDALONE).toBe(false);
+    expect(config.default.OIDC?.OIDC_ALLOWED_EMAILS).toEqual(['a@example.invalid', '*@partner.example']);
+  });
+
+  it('leaves a distributed server without OIDC or an allowlist alone, as the smoke stack runs', async () => {
+    const config = await loadConfig({ STANDALONE: 'false', TRUEFORGE_API_KEY: 'k', REQUIRE_AUTH: 'false' });
+
+    expect(config.default.STANDALONE).toBe(false);
+    expect(config.default.OIDC).toBeUndefined();
   });
 
   it('reads AUTH_COOKIE_SUFFIX and rejects unsafe characters', async () => {
