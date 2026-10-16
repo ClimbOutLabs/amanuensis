@@ -22,7 +22,8 @@ export const LARGE_MARKDOWN_THROTTLE_MS = 100;
  * Enabling the hook immediately catches up to the current raw prefix, then coalesces subsequent
  * stream updates to one commit per `throttleMs`. Completion always bypasses the timer so the final
  * document is exact. While disabled, the hook mirrors `text` and stays ready for a monotonic
- * transition into catch-up mode.
+ * transition into catch-up mode. Changing `resetKey` (e.g. the message id) drops all reveal state
+ * so a shorter new text is shown immediately instead of being held back by the anti-rewind guard.
  */
 export function useThrottledMarkdownText(
   text: string,

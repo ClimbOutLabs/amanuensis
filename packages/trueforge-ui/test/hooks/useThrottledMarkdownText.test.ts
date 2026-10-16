@@ -89,8 +89,7 @@ describe('useThrottledMarkdownText', () => {
 
   it('resets to the new text when resetKey changes, even if shorter', () => {
     const { result, rerender } = renderHook(
-      ({ text, resetKey }) =>
-        useThrottledMarkdownText(text, { enabled: true, isComplete: false, resetKey }),
+      ({ text, resetKey }) => useThrottledMarkdownText(text, { enabled: true, isComplete: false, resetKey }),
       { initialProps: { text: 'previous turn response', resetKey: 'msg-1' } },
     );
 
@@ -104,8 +103,7 @@ describe('useThrottledMarkdownText', () => {
 
   it('does not reset when resetKey is unchanged', () => {
     const { result, rerender } = renderHook(
-      ({ text, resetKey }) =>
-        useThrottledMarkdownText(text, { enabled: true, isComplete: false, resetKey }),
+      ({ text, resetKey }) => useThrottledMarkdownText(text, { enabled: true, isComplete: false, resetKey }),
       { initialProps: { text: 'abcdef', resetKey: 'msg-1' } },
     );
 
