@@ -345,7 +345,7 @@ describe('runSandboxSlots', () => {
         : undefined,
     );
     expect(result).toMatchObject({ ok: false, step: 'attest' });
-    expect(!result.ok && result.error).toContain('Slot 3');
+    expect(!result.ok && result.error).toContain('Sandbox 3');
   });
 });
 

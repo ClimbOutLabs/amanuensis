@@ -51,7 +51,7 @@ export function checkLogin(probe: LoginProbe): Check {
       return failCheck({
         id,
         detail: `The login provider at ${probe.issuer} did not answer (${probe.reason}).`,
-        fix: 'Run `aman doctor instance --fix`; it restarts the sign-in service. If you set a public address, make sure its reverse proxy forwards the login address and that this machine can resolve the name.',
+        fix: 'Run aman doctor instance --fix',
       });
     case 'answered':
       if (probe.response.status !== 200 || !hasIssuer(probe.response.json)) {

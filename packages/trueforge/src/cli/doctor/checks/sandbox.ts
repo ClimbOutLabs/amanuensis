@@ -21,7 +21,7 @@ export async function checkRunCode({ deps, timeoutMs }: { deps: DoctorDeps; time
     return failCheck({
       id,
       detail: 'The sandbox settings of this instance are incomplete (SANDBOX_SLOTS_DIR or SANDBOX_SLOTS).',
-      fix: 'Run install.sh again; it rewrites the instance compose file with the sandbox settings, then restart the instance.',
+      fix: 'Run aman doctor sandbox --fix',
     });
   }
   try {

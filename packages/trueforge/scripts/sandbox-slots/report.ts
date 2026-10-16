@@ -13,16 +13,16 @@ const STAGES_BY_MODE: Record<SlotsMode, readonly SlotsStage[]> = {
 
 const TITLES: Record<SlotsStage, string> = {
   docker: 'Checking Docker',
-  image: 'Building the slot image',
+  image: 'Building the sandbox',
   profile: 'Safety profile',
-  disks: 'Slot disks',
-  start: 'Starting slots',
+  disks: 'Sandbox disks',
+  start: 'Starting sandboxes',
   attest: 'Safety checks',
 };
 
 const MIN_SHOWN_SECONDS = 5;
 
-export interface ReporterOptions {
+interface ReporterOptions {
   ui: Ui;
   mode: SlotsMode;
   /** Inside another front end's phases: no title, phase headers or closing block, and no lines about Docker itself. */
@@ -56,9 +56,7 @@ export class SlotsReporter {
 
   start(): void {
     if (!this.options.embedded) {
-      this.options.ui.title(
-        this.options.mode === 'check' ? 'Checking the sandbox slots' : 'Setting up the sandbox slots',
-      );
+      this.options.ui.title(this.options.mode === 'check' ? 'Checking the sandboxes' : 'Setting up the sandboxes');
     }
   }
 
@@ -69,13 +67,13 @@ export class SlotsReporter {
     this.stage = stage;
     this.stageHadOutput = false;
     if (!this.options.embedded) {
-      const title = stage === 'image' && this.options.mode === 'check' ? 'Checking the slot image' : TITLES[stage];
+      const title = stage === 'image' && this.options.mode === 'check' ? 'Checking the sandbox' : TITLES[stage];
       this.options.ui.phase({ text: title, n: this.stages.indexOf(stage) + 1, total: this.stages.length });
     }
     if (stage === 'image' && this.options.mode !== 'check') {
-      this.beginStep('Building the slot image');
+      this.beginStep('Building the sandbox');
     } else if (stage === 'start') {
-      this.beginStep('Starting the slots');
+      this.beginStep('Starting the sandboxes');
     }
   }
 
@@ -86,7 +84,7 @@ export class SlotsReporter {
     }
     this.stageHadOutput = true;
     if (this.step !== undefined && (check.step === 'build' || check.step === 'start')) {
-      const text = check.step === 'build' ? 'Built the slot image' : check.message;
+      const text = check.step === 'build' ? 'Built the sandbox' : check.message;
       this.step.end({ status: 'ok', text });
       this.step = undefined;
       return;
@@ -148,10 +146,10 @@ export class SlotsReporter {
     }
     const verdict =
       mode === 'check'
-        ? 'Ready. The sandbox slots are healthy.'
+        ? 'Ready. The sandboxes are healthy.'
         : mode === 'build'
-          ? 'The slot image is built.'
-          : `Ready. ${String(SLOT_COUNT)} sandbox slots are running.`;
+          ? 'The sandbox is built.'
+          : `Ready. ${String(SLOT_COUNT)} sandboxes are running.`;
     ui.summary({ status: 'ok', verdict });
     if (imageSizeMb !== undefined) {
       ui.row({ label: 'Image', value: `${(imageSizeMb / 1024).toFixed(1)} GB` });

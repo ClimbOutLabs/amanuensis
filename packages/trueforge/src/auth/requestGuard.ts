@@ -2,7 +2,7 @@ import type { MiddlewareHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 
 import { isLoopbackHost } from '../config';
-import { canonicalPort, findAllowedOrigin, parseHostHeader } from './allowedOrigins';
+import { ADDRESS_NOT_LISTED_MESSAGE, canonicalPort, findAllowedOrigin, parseHostHeader } from './allowedOrigins';
 import { readBearerToken } from './token';
 
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -61,6 +61,9 @@ export function createRequestGuardMiddleware(options: {
           (isLoopbackHost(host.hostname) && loopbackPorts.has(host.port)) ||
           findAllowedOrigin({ hostHeader: rawHost, allowedOrigins }) !== undefined);
       if (!allowed) {
+        if (allowedOrigins.length > 0) {
+          return c.text(ADDRESS_NOT_LISTED_MESSAGE, 421);
+        }
         throw new HTTPException(421, { message: 'Misdirected request: unrecognized Host' });
       }
     }

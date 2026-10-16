@@ -53,5 +53,9 @@ export function requestAllowedOrigin({
   return findAllowedOrigin({ hostHeader: context.req.header('host'), allowedOrigins });
 }
 
+/** Shown in place of a page when a request names an address the instance was not set up for. */
+export const ADDRESS_NOT_LISTED_MESSAGE =
+  "This address is not one Aman is set up for. If this computer's address changed, run this on the computer that runs Aman: aman doctor network --fix";
+
 /** Raised when a request names an address the instance was not set up for. */
 export class OriginNotAllowedError extends Error {}

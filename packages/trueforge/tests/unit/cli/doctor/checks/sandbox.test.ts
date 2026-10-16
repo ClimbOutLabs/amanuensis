@@ -58,7 +58,7 @@ describe('run_code', () => {
     const deps = fakeDeps({ env: { SANDBOX_BACKEND: 'slots' } });
     const check = await checkRunCode({ deps, timeoutMs: 1000 });
     expect(check.state).toBe('fail');
-    expect(check.fix).toContain('install.sh');
+    expect(check.fix).toBe('Run aman doctor sandbox --fix');
   });
 });
 

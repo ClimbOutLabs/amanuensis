@@ -334,7 +334,7 @@ class Slots {
       step: 'apparmor',
       status: 'info',
       message: present
-        ? 'AppArmor is on in this Docker host, so the slots must run under the aman-sandbox-slot profile'
+        ? 'AppArmor is on in this Docker host, so the sandboxes must run under the aman-sandbox-slot profile'
         : 'No AppArmor in this Docker host; the other safety checks still apply',
     });
     return present;
@@ -344,7 +344,7 @@ class Slots {
   private warnings(): string[] {
     if (this.options.platform === 'linux' && this.diskMode === 'off') {
       return [
-        `The slots have no disk of their own, so a runaway program could fill this machine's disk. Run ${this.options.command} --fix to give each slot a fixed-size disk.`,
+        `The sandboxes have no disk of their own, so a runaway program could fill this computer's disk. Run ${this.options.command} --fix to give each sandbox a fixed-size disk.`,
       ];
     }
     return [];
@@ -355,7 +355,7 @@ class Slots {
       this.record({
         step: 'disk',
         status: 'info',
-        message: 'Per-slot disks are off (--no-hard-disk-limit); only the per-chat disk limit applies',
+        message: 'Per-sandbox disks are off (--no-hard-disk-limit); only the per-chat disk limit applies',
       });
       return 'off';
     }
@@ -370,7 +370,7 @@ class Slots {
         step: 'disk',
         status: 'info',
         message:
-          "Docker runs in a virtual machine here, so the VM's disk limit bounds the slot workspaces; there is no per-slot disk to set up",
+          "Docker runs in a virtual machine here, so the VM's disk limit bounds the sandbox workspaces; there is no per-sandbox disk to set up",
       });
       return 'vm';
     }
@@ -441,14 +441,14 @@ class Slots {
       this.record({
         step: 'disk',
         status: 'ok',
-        message: `Each slot has its own ${String(Math.round(mounted / 2 ** 30))} GB disk under ${root}`,
+        message: `Each sandbox has its own ${String(Math.round(mounted / 2 ** 30))} GB disk under ${root}`,
       });
       return;
     }
     if (!this.mayFix) {
       throw new StepFailure(
         'disk',
-        "The slot workspaces do not have a disk limit of their own yet, so a runaway program could fill this machine's disk.",
+        "The sandbox workspaces do not have a disk limit of their own yet, so a runaway program could fill this computer's disk.",
         `Run ${this.options.command} --fix. It asks first, then your password once, to create four fixed-size disk files that fill only as they are used.`,
       );
     }
@@ -462,7 +462,7 @@ class Slots {
     if (!agreed) {
       throw new StepFailure(
         'disk',
-        'Setting up the slot disks was not confirmed, so nothing was changed.',
+        'Setting up the sandbox disks was not confirmed, so nothing was changed.',
         `Run ${this.options.command} --fix again and answer yes. Add --yes when no one is at the keyboard.`,
       );
     }
@@ -477,7 +477,7 @@ class Slots {
         throw new StepFailure(
           'disk',
           failed.message,
-          `Stop anything that still uses the sandbox slots, then run ${this.options.command} --fix again.`,
+          `Stop anything that still uses the sandboxes, then run ${this.options.command} --fix again.`,
           undefined,
           failed.detail,
         );
@@ -486,7 +486,7 @@ class Slots {
     if (mounted === undefined) {
       const created = await this.runDiskScript(['setup', root, String(this.options.diskGb), String(SLOT_COUNT)]);
       if (created.exitCode !== 0) {
-        const failed = withDetail({ sentence: 'Creating the slot disks failed', detail: tail(created.stderr) });
+        const failed = withDetail({ sentence: 'Creating the sandbox disks failed', detail: tail(created.stderr) });
         throw new StepFailure(
           'disk',
           failed.message,
@@ -500,7 +500,7 @@ class Slots {
     if (after === undefined) {
       throw new StepFailure(
         'disk',
-        'The slot disks were created but are not mounted.',
+        'The sandbox disks were created but are not mounted.',
         `Run ${this.options.command} --fix again; if it keeps failing, run ${this.options.command} --no-hard-disk-limit.`,
       );
     }
@@ -509,7 +509,7 @@ class Slots {
     this.record({
       step: 'disk',
       status: 'ok',
-      message: `Created ${String(SLOT_COUNT)} slot disks of ${String(Math.round(after / 2 ** 30))} GB under ${root}`,
+      message: `Created ${String(SLOT_COUNT)} sandbox disks of ${String(Math.round(after / 2 ** 30))} GB under ${root}`,
     });
   }
 
@@ -529,7 +529,7 @@ class Slots {
       throw error;
     }
     if (this.packs.length > 0) {
-      this.record({ step: 'packs', status: 'ok', message: `Toolchain packs in the image: ${this.packs.join(', ')}` });
+      this.record({ step: 'packs', status: 'ok', message: `Toolchain packs in the sandbox: ${this.packs.join(', ')}` });
     }
   }
 
@@ -545,7 +545,7 @@ class Slots {
         failed.detail,
       );
     }
-    this.record({ step: 'build', status: 'ok', message: `Built ${SLOT_IMAGE}` });
+    this.record({ step: 'build', status: 'ok', message: 'Built the sandbox' });
   }
 
   private async checkImage(): Promise<void> {
@@ -553,11 +553,11 @@ class Slots {
     if (inspect.exitCode !== 0) {
       throw new StepFailure(
         'build',
-        `The sandbox image ${SLOT_IMAGE} is not on this machine.`,
+        'The sandbox is not built on this computer.',
         `Run ${this.options.command} --fix to build it.`,
       );
     }
-    this.record({ step: 'build', status: 'ok', message: `The image ${SLOT_IMAGE} is present` });
+    this.record({ step: 'build', status: 'ok', message: 'The sandbox is built' });
   }
 
   private async profileLoaded(): Promise<boolean> {
@@ -642,7 +642,7 @@ class Slots {
     if (up.exitCode !== 0) {
       const logs = await this.run({ args: this.composeArgs(['logs', '--no-color', '--tail', '15']) });
       const failed = withDetail({
-        sentence: 'The slots did not become healthy',
+        sentence: 'The sandboxes did not become healthy',
         detail: tail(`${up.stderr} ${logs.stdout} ${logs.stderr}`),
       });
       throw new StepFailure(
@@ -653,7 +653,7 @@ class Slots {
         failed.detail,
       );
     }
-    this.record({ step: 'start', status: 'ok', message: `Started ${String(SLOT_COUNT)} slots` });
+    this.record({ step: 'start', status: 'ok', message: `Started ${String(SLOT_COUNT)} sandboxes` });
   }
 
   private async attest(): Promise<void> {
@@ -669,7 +669,7 @@ class Slots {
       });
       if (result.exitCode !== 0) {
         const failed = withDetail({
-          sentence: `Slot ${String(slot)} failed its safety checks`,
+          sentence: `Sandbox ${String(slot)} failed its safety checks`,
           detail: tail(`${result.stdout} ${result.stderr}`),
         });
         throw new StepFailure(
@@ -681,7 +681,11 @@ class Slots {
         );
       }
     }
-    this.record({ step: 'attest', status: 'ok', message: `All ${String(SLOT_COUNT)} slots passed every safety check` });
+    this.record({
+      step: 'attest',
+      status: 'ok',
+      message: `All ${String(SLOT_COUNT)} sandboxes passed every safety check`,
+    });
   }
 
   private async imageSizeMb(): Promise<number | undefined> {

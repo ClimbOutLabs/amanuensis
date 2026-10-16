@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { Configuration } from 'openid-client';
 import winston from 'winston';
 import { createAuthRouter } from '../../../src/apis/auth';
+import { ADDRESS_NOT_LISTED_MESSAGE } from '../../../src/auth/allowedOrigins';
 import { createAuthMiddleware } from '../../../src/auth/middleware';
 import { disableOidcAuth, initOidc } from '../../../src/auth/oidc';
 import { OidcAuthenticator } from '../../../src/auth/oidcAuthenticator';
@@ -20,56 +21,28 @@ const ORIGINS = [
   'https://aman.example.com',
 ];
 
-jest.mock('../../../src/config', () => {
-  const actual = jest.requireActual<typeof import('../../../src/config')>('../../../src/config');
-  const OIDC = {
-    OIDC_ISSUER_URL: 'http://127.0.0.1:5556/dex',
-    OIDC_CLIENT_ID: 'network-client',
-    OIDC_CLIENT_SECRET: 'network-secret',
-    OIDC_USER_REFERENCE_CLAIM: 'sub',
-    OIDC_USER_DISPLAY_NAME_CLAIM: 'name',
-    OIDC_USER_ROLE_CLAIM: 'email',
-    OIDC_ADMIN_ROLE_VALUE: 'owner@example.com',
-    OIDC_SCOPES: ['openid', 'profile', 'email'],
-    OIDC_ALLOWED_EMAILS: [] as string[],
-  };
-  const config = {
-    STANDALONE: false as const,
-    PUBLIC_BASE_URL: 'http://192.168.1.20:8791',
-    NODE_ENV: 'development',
-    OIDC,
-    PORT: 8790,
-  };
-  const publicBase = { ...actual.default, PUBLIC_BASE_URL: config.PUBLIC_BASE_URL, NODE_ENV: 'development' };
-  return {
-    ...actual,
-    __esModule: true,
-    default: config,
-    getPublicBaseUrl: jest.fn(() => actual.getPublicBaseUrl(publicBase)),
-    getPublicUiBasePath: jest.fn(() => actual.getPublicUiBasePath(publicBase)),
-    getAllowedOrigins: jest.fn(() => [
-      'http://127.0.0.1:8791',
-      'http://localhost:8791',
-      'http://192.168.1.20:8791',
-      'http://100.101.102.103:8791',
-      'http://spark.local:8791',
-      'http://spark.example.ts.net:8791',
-      'https://aman.example.com',
-    ]),
-    isTrueFoundryModeEnabled: jest.fn(() => false),
-  };
-});
-
-if (configuration.STANDALONE || !configuration.OIDC) {
-  throw new Error('OIDC test configuration is missing');
-}
-
 const ISSUER = 'http://127.0.0.1:5556/dex';
+const NO_EMAILS: string[] = [];
+const OIDC_CONFIG = {
+  OIDC_ISSUER_URL: ISSUER,
+  OIDC_CLIENT_ID: 'network-client',
+  OIDC_CLIENT_SECRET: 'network-secret',
+  OIDC_USER_REFERENCE_CLAIM: 'sub',
+  OIDC_USER_DISPLAY_NAME_CLAIM: 'name',
+  OIDC_USER_ROLE_CLAIM: 'email',
+  OIDC_ADMIN_ROLE_VALUE: 'owner@example.com',
+  OIDC_SCOPES: ['openid', 'profile', 'email'],
+  OIDC_ALLOWED_EMAILS: NO_EMAILS,
+};
 const CLIENT_ID = 'network-client';
 const STATE_COOKIE = 'oauth_state';
 const ID_TOKEN_COOKIE = 'id_token';
 const ACCESS_TOKEN = 'access-1';
-const configuredOidc = configuration.OIDC;
+const savedConfiguration = {
+  OIDC: configuration.OIDC,
+  PUBLIC_BASE_URL: configuration.PUBLIC_BASE_URL,
+  ALLOWED_ORIGINS: configuration.ALLOWED_ORIGINS,
+};
 const logger = winston.createLogger({ silent: true });
 
 function json(body: unknown): Response {
@@ -108,12 +81,21 @@ describe('signing in to an instance opened on several addresses', () => {
   let upstream: string[];
 
   beforeAll(async () => {
+    Object.assign(configuration, {
+      OIDC: OIDC_CONFIG,
+      PUBLIC_BASE_URL: 'http://192.168.1.20:8791',
+      ALLOWED_ORIGINS: ORIGINS,
+    });
     const keyPair = await generateKeyPair('RS256');
     privateKey = keyPair.privateKey;
     publicJwk = await exportJWK(keyPair.publicKey);
     publicJwk.kid = 'test-kid';
     publicJwk.alg = 'RS256';
     publicJwk.use = 'sig';
+  });
+
+  afterAll(() => {
+    Object.assign(configuration, savedConfiguration);
   });
 
   beforeEach(async () => {
@@ -158,7 +140,7 @@ describe('signing in to an instance opened on several addresses', () => {
       }
       return new Response(`unexpected url: ${url}`, { status: 404 });
     };
-    const discovered = await initOidc(configuredOidc);
+    const discovered = await initOidc(OIDC_CONFIG);
     if (!discovered) {
       throw new Error('OIDC client was not initialized');
     }
@@ -227,7 +209,7 @@ describe('signing in to an instance opened on several addresses', () => {
       expect(res.status).toBe(400);
       expect(res.headers.get('location')).toBeNull();
       expect(res.headers.getSetCookie()).toEqual([]);
-      expect(await res.text()).toBe('This address is not one Aman is set up for.');
+      expect(await res.text()).toBe(ADDRESS_NOT_LISTED_MESSAGE);
     }
   });
 
@@ -254,6 +236,17 @@ describe('signing in to an instance opened on several addresses', () => {
       headers: { host: 'evil.example' },
     });
     expect(odd.status).toBe(400);
+  });
+
+  it('clears the session cookie with the same Secure flag the origin sets it with, so the clear is not dropped', async () => {
+    const app = router();
+    const plain = await browserRequest(app, 'http://192.168.1.20:8791/logout', { method: 'POST' });
+    expect(plain.status).toBe(204);
+    expect(cookieHeader(plain, ID_TOKEN_COOKIE)).toMatch(/Max-Age=0/i);
+    expect(cookieHeader(plain, ID_TOKEN_COOKIE)).not.toMatch(/;\s*Secure/i);
+    const tls = await browserRequest(app, 'https://aman.example.com/logout', { method: 'POST' });
+    expect(cookieHeader(tls, ID_TOKEN_COOKIE)).toMatch(/Max-Age=0/i);
+    expect(cookieHeader(tls, ID_TOKEN_COOKIE)).toMatch(/;\s*Secure/i);
   });
 
   it('sets the sign-in cookies without Secure over plain http and with it over https', async () => {

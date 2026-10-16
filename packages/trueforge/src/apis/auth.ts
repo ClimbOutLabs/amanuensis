@@ -2,7 +2,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context, MiddlewareHandler } from 'hono';
 import type { Logger } from 'winston';
-import { requestAllowedOrigin } from '../auth/allowedOrigins';
+import { ADDRESS_NOT_LISTED_MESSAGE, requestAllowedOrigin } from '../auth/allowedOrigins';
 import { clearAuthCookie, ID_TOKEN_COOKIE, OAUTH_STATE_COOKIE, readOAuthStateCookie } from '../auth/cookies';
 import { resolveRequestContext } from '../auth/identity';
 import { resolveOidcRequestContext } from '../auth/middleware';
@@ -71,7 +71,7 @@ export function createAuthRouter(params: {
   const requireListedAddress: MiddlewareHandler = async (c, next) => {
     const allowedOrigins = getAllowedOrigins();
     if (allowedOrigins.length > 0 && requestAllowedOrigin({ context: c, allowedOrigins }) === undefined) {
-      return c.text('This address is not one Aman is set up for.', 400);
+      return c.text(ADDRESS_NOT_LISTED_MESSAGE, 400);
     }
     return next();
   };

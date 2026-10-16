@@ -13,10 +13,11 @@ import {
 } from 'openid-client';
 import type { Logger } from 'winston';
 import { getAllowedOrigins, getPublicBaseUrl, type OIDCConfig } from '../config';
-import { OriginNotAllowedError, requestAllowedOrigin } from './allowedOrigins';
+import { ADDRESS_NOT_LISTED_MESSAGE, OriginNotAllowedError, requestAllowedOrigin } from './allowedOrigins';
 import { buildAuthorizationRequestParams, type IdTokenClaims } from './claims';
 import { ID_TOKEN_COOKIE, OAUTH_STATE_COOKIE, setAuthCookie } from './cookies';
 import { assertEmailAllowed } from './emailAllowlist';
+import { isProxiableIssuer } from './loginProxy';
 import { safeReturnTo } from './safeReturnTo';
 
 const CALLBACK_PATH = '/api/v1/auth/callback';
@@ -140,14 +141,14 @@ export function startOidcDiscovery(params: { oidc: OIDCConfig; logger: Logger })
  * be opened at; sign-in then starts and ends at the one the request came to, so the sign-in cookies (set per host) are
  * sent back. An address that is not listed is refused, never redirected to. Without a list it is the public address.
  */
-export function browserOrigin(context: Context): string {
+function browserOrigin(context: Context): string {
   const allowedOrigins = getAllowedOrigins();
   if (allowedOrigins.length === 0) {
     return new URL(getPublicBaseUrl()).origin;
   }
   const origin = requestAllowedOrigin({ context, allowedOrigins });
   if (origin === undefined) {
-    throw new OriginNotAllowedError('This address is not one Aman is set up for.');
+    throw new OriginNotAllowedError(ADDRESS_NOT_LISTED_MESSAGE);
   }
   return origin;
 }
@@ -164,7 +165,7 @@ function authCallbackUrl(context: Context): string {
  * device, so with a list of addresses the page is opened on the app's own origin, where `/dex` is passed through.
  */
 function browserAuthorizationUrl({ context, url, issuer }: { context: Context; url: URL; issuer: string }): URL {
-  if (getAllowedOrigins().length === 0 || url.origin !== new URL(issuer).origin) {
+  if (getAllowedOrigins().length === 0 || !isProxiableIssuer(issuer) || url.origin !== new URL(issuer).origin) {
     return url;
   }
   const origin = new URL(browserOrigin(context));

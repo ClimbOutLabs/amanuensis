@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
   assertNetworkAuthRequirement,
   assertOidcIssuerTransportAllowed,
@@ -358,41 +360,41 @@ describe('parseTokenFactoryMode', () => {
   });
 });
 
+/** The hosts and classes the installer's tests read as well, so the app and the installer agree on what is private. */
+function readSharedHosts(): { kind: string; host: string }[] {
+  const file = path.resolve(__dirname, '../../../../../installer/tests/private-hosts.txt');
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(line => line.trim() !== '' && !line.startsWith('#'))
+    .map(line => {
+      const [kind = '', host = ''] = line.trim().split(/\s+/);
+      return { kind, host };
+    });
+}
+
 describe('isPrivateNetworkHost', () => {
-  it.each([
-    'localhost',
-    '127.0.0.1',
-    '[::1]',
-    '10.1.2.3',
-    '172.16.0.1',
-    '172.31.255.254',
-    '192.168.0.9',
-    '100.64.0.1',
-    '100.127.255.254',
-    '169.254.1.1',
-    'spark',
-    'spark.local',
-    'spark.example.ts.net',
-  ])('accepts %s', host => {
-    expect(isPrivateNetworkHost(host)).toBe(true);
+  const hosts = readSharedHosts();
+
+  it('reads a list with every class', () => {
+    expect(new Set(hosts.map(entry => entry.kind))).toEqual(
+      new Set(['private', 'cgnat', 'public', 'app-private', 'app-public']),
+    );
   });
 
-  it.each([
-    '8.8.8.8',
-    '203.0.113.9',
-    '172.15.0.1',
-    '172.32.0.1',
-    '100.63.255.255',
-    '100.128.0.1',
-    '192.169.1.1',
-    '0.0.0.0',
-    '[fd00::1]',
-    'aman.example.com',
-    'spark.local.example.com',
-    'a..b',
-    '',
-  ])('rejects %s', host => {
+  it.each(hosts.filter(entry => ['private', 'app-private', 'cgnat'].includes(entry.kind)))(
+    'accepts $host ($kind), since a listed address is the operator choice',
+    ({ host }) => {
+      expect(isPrivateNetworkHost(host)).toBe(true);
+    },
+  );
+
+  it.each(hosts.filter(entry => ['public', 'app-public'].includes(entry.kind)))('rejects $host', ({ host }) => {
     expect(isPrivateNetworkHost(host)).toBe(false);
+  });
+
+  it('rejects an empty host and a doubled dot', () => {
+    expect(isPrivateNetworkHost('a..b')).toBe(false);
+    expect(isPrivateNetworkHost('')).toBe(false);
   });
 });
 

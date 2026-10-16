@@ -32,7 +32,7 @@ const MIN_SHOWN_SECONDS = 5;
 const COLOR = { green: '32', yellow: '33', red: '31', cyan: '36', bold: '1', dim: '2' } as const;
 const VERDICT_COLOR = { ok: '1;32', warn: '1;33', fail: '1;31' } as const;
 
-export type Verdict = keyof typeof VERDICT_COLOR;
+type Verdict = keyof typeof VERDICT_COLOR;
 type Target = 'out' | 'err';
 
 interface Symbols {
@@ -42,6 +42,7 @@ interface Symbols {
   prompt: string;
   skip: string;
   rule: string;
+  ellipsis: string;
   frames: readonly string[];
 }
 
@@ -52,6 +53,7 @@ const UTF8_SYMBOLS: Symbols = {
   prompt: '›',
   skip: '·',
   rule: '─',
+  ellipsis: '…',
   frames: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧'],
 };
 const ASCII_SYMBOLS: Symbols = {
@@ -61,6 +63,7 @@ const ASCII_SYMBOLS: Symbols = {
   prompt: '>',
   skip: '-',
   rule: '-',
+  ellipsis: '...',
   frames: ['|', '/', '-', '\\'],
 };
 
@@ -111,9 +114,14 @@ export class UiStep {
       const draw = (): void => {
         const symbol = ui.symbols.frames[frame % ui.symbols.frames.length] ?? '';
         frame += 1;
-        let line = `  ${symbol} ${this.text}  ${formatElapsed(Math.floor((Date.now() - t0) / 1000))}`;
+        const seconds = Math.floor((Date.now() - t0) / 1000);
+        let line = `  ${symbol} ${this.text}${seconds >= MIN_SHOWN_SECONDS ? `  ${formatElapsed(seconds)}` : ''}`;
         if (this.note !== '' && line.length + 3 + this.note.length < ui.width) {
           line = `${line}   ${this.note}`;
+        }
+        // One line never wraps, since a wrapped line cannot be redrawn in place.
+        if (line.length >= ui.width) {
+          line = `${line.slice(0, ui.width - 4)}${ui.symbols.ellipsis}`;
         }
         ui.writeProgress(`\r${' '.repeat(this.shown)}\r${line}`);
         this.shown = line.length;

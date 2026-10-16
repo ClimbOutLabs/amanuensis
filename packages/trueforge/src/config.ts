@@ -944,7 +944,7 @@ export interface SharedServerConfiguration {
   /**
    * Parent directory for per-run run_code isolation dirs
    * (`<dir>/sandbox-runs/<runId>/{ingress,scratch,egress}`).
-   * Derived: `{app data dir}/sandbox-runs` (both topologies — the Docker
+   * Derived: `{app data dir}/sandbox-runs` (both topologies: the Docker
    * driver is host-local even in distributed mode).
    */
   SANDBOX_RUNS_DIR: string;
@@ -1582,15 +1582,17 @@ const standalone = parseBoolean({
  * Env: `APP_DATA_DIR` (optional absolute path). Default: the env-paths data dir, which sits under the
  * home directory. Images that run as a user with no home set this to a path on the data volume.
  */
-function resolveAppDataDir(): string {
-  const override = resolveOptionalPathEnv('APP_DATA_DIR');
-  if (override !== undefined) {
-    return override;
+export function resolveAppDataDir({ override, suffix }: { override: string | undefined; suffix: string }): string {
+  if (override !== undefined && override.trim() !== '') {
+    return path.resolve(override);
   }
-  return envPaths(ENV_PATHS_APP_NAME, { suffix: getEnv('APP_DATA_DIR_SUFFIX', { defaultValue: '' }) ?? '' }).data;
+  return envPaths(ENV_PATHS_APP_NAME, { suffix }).data;
 }
 
-const appDataDir = resolveAppDataDir();
+const appDataDir = resolveAppDataDir({
+  override: getEnv('APP_DATA_DIR'),
+  suffix: getEnv('APP_DATA_DIR_SUFFIX', { defaultValue: '' }) ?? '',
+});
 
 const port = parsePort(getEnv('PORT'));
 const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;

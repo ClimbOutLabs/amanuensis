@@ -88,27 +88,27 @@ describe('SlotsReporter', () => {
       'profile',
       'disks',
       'start',
-      check('start', 'Started 4 slots'),
+      check('start', 'Started 4 sandboxes'),
       'attest',
-      check('attest', 'All 4 slots passed every safety check'),
+      check('attest', 'All 4 sandboxes passed every safety check'),
     ]);
     reporter.finish({ result: OK, imageSizeMb: 1842 });
     const text = c.all();
-    expect(text).toContain('Setting up the sandbox slots');
+    expect(text).toContain('Setting up the sandboxes');
     for (const [n, title] of [
       [1, 'Checking Docker'],
-      [2, 'Building the slot image'],
+      [2, 'Building the sandbox'],
       [3, 'Safety profile'],
-      [4, 'Slot disks'],
-      [5, 'Starting slots'],
+      [4, 'Sandbox disks'],
+      [5, 'Starting sandboxes'],
       [6, 'Safety checks'],
     ] as const) {
       expect(text).toContain(`${title} (${String(n)} of 6)`);
     }
     expect(text).toContain('+ Docker 29.1.0 aarch64 is running');
-    expect(text).toContain('+ Built the slot image');
-    expect(text).toContain('+ Started 4 slots');
-    expect(text).toContain('Ready. 4 sandbox slots are running.');
+    expect(text).toContain('+ Built the sandbox');
+    expect(text).toContain('+ Started 4 sandboxes');
+    expect(text).toContain('Ready. 4 sandboxes are running.');
     expect(text).toContain('Image     1.8 GB');
     expect(text).toContain('Disks     4 of 16 GB under /var/lib/aman-slots/aman');
     expect(text).toContain('Log       ~/.amanuensis/state/sandbox.log');
@@ -123,7 +123,7 @@ describe('SlotsReporter', () => {
       'profile',
       'disks',
       'start',
-      check('start', 'Started 4 slots'),
+      check('start', 'Started 4 sandboxes'),
       'attest',
       check('attest', 'ok'),
     ]);
@@ -195,7 +195,7 @@ describe('SlotsReporter', () => {
     ]);
     reporter.finish({ result: OK });
     const text = c.all();
-    expect(text).toContain('+ Built the slot image');
+    expect(text).toContain('+ Built the sandbox');
     expect(text).not.toContain('Setting up');
     expect(text).not.toContain('(1 of');
     expect(text).not.toContain('Docker 29.1.0');
@@ -207,9 +207,9 @@ describe('SlotsReporter', () => {
     const c = capture();
     const reporter = reporterFor({ capture: c, mode: 'build' });
     play(reporter, ['docker', 'image', check('build', 'Built amanuensis-sandbox-slot:local')]);
-    reporter.finish({ result: { ...OK, warnings: ['The slots have no disk of their own.'] } });
-    expect(c.out().match(/The slots have no disk of their own\./g)).toHaveLength(2);
-    expect(c.out()).toContain('The slot image is built.');
+    reporter.finish({ result: { ...OK, warnings: ['The sandboxes have no disk of their own.'] } });
+    expect(c.out().match(/The sandboxes have no disk of their own\./g)).toHaveLength(2);
+    expect(c.out()).toContain('The sandbox is built.');
   });
 
   it('shows the elapsed time of a long run in the closing block and leaves a short one out', () => {

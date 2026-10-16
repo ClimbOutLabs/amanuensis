@@ -39,7 +39,8 @@ import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
 import { resolveRequestContext } from './auth/identity';
-import { createLoginProxy } from './auth/loginProxy';
+import { listedOriginMiddleware } from './auth/listedOriginContext';
+import { createLoginProxy, isProxiableIssuer } from './auth/loginProxy';
 import {
   createAdminAuthMiddleware,
   createApiKeyAuthMiddleware,
@@ -326,12 +327,24 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       }),
     );
   }
+  // Connector sign-in returns to the listed address the request came to, however deep in the request it is built.
+  if (configuration.STANDALONE && getAllowedOrigins().length > 0) {
+    app.use('*', listedOriginMiddleware(getAllowedOrigins));
+  }
   app.use('*', createRequestBodyLimitMiddleware(configuration.MAX_REQUEST_BODY_BYTES));
 
   // An instance opened on several addresses serves its sign-in service under the app's own origin.
-  if (configuration.STANDALONE && configuration.OIDC !== undefined && getAllowedOrigins().length > 0) {
+  if (
+    configuration.STANDALONE &&
+    configuration.OIDC !== undefined &&
+    getAllowedOrigins().length > 0 &&
+    isProxiableIssuer(configuration.OIDC.OIDC_ISSUER_URL)
+  ) {
     const issuerPath = new URL(configuration.OIDC.OIDC_ISSUER_URL).pathname.replace(/\/$/, '');
-    app.all(`${issuerPath}/*`, createLoginProxy({ issuerUrl: configuration.OIDC.OIDC_ISSUER_URL }));
+    app.all(
+      `${issuerPath}/*`,
+      createLoginProxy({ issuerUrl: configuration.OIDC.OIDC_ISSUER_URL, allowedOrigins: getAllowedOrigins() }),
+    );
   }
 
   app.get('/healthz', c => c.json({ status: 'ok', version: PACKAGE_VERSION }));
