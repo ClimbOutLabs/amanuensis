@@ -128,7 +128,7 @@ test_install_with_the_flag_runs_the_root_steps() {
   assert_contains "$script" "systemctl reload-or-restart caddy"
   assert_contains "$OUT" "Root steps for HTTPS with Caddy" "the steps were printed before they ran"
   assert_contains "$OUT" "HTTPS answers at $APP_URL"
-  assert_flat_contains "$OUT" "HTTPS Caddy on this computer, certificates from Let"
+  assert_flat_contains "$OUT" "HTTPS on, with certificates from Let"
   assert_flat_contains "$OUT" "Open only TCP 443"
   assert_contains "$(grep '^curl' "$STUB_LOG")" "$APP_URL/healthz"
   assert_eq "$(sed -n 's/^tls=//p' "$AMAN_HOME/state/instances/main.conf")" caddy
@@ -195,8 +195,9 @@ test_answering_yes_on_a_terminal() {
   dns_ready
   run_install_tty "Instance name=>
 Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
-Password for the owner account=>$SENTINEL_PASSWORD
+Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD
 Install Caddy and apply this configuration now?=>y" "${TLS_ARGS[@]}"
   assert_eq "$RC" 0
@@ -211,8 +212,9 @@ test_declining_on_a_terminal() {
   dns_ready
   run_install_tty "Instance name=>
 Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
-Password for the owner account=>$SENTINEL_PASSWORD
+Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD
 Install Caddy and apply this configuration now?=>n" "${TLS_ARGS[@]}"
   assert_eq "$RC" 1
@@ -256,7 +258,7 @@ test_certificates_slow_to_arrive_only_warn() {
   install_tls --tls-root
   assert_rc 0
   assert_flat_contains "$ERR" "did not answer over https yet"
-  assert_flat_contains "$ERR" "journalctl -u caddy"
+  assert_flat_contains "$ERR" "Run aman doctor to see why"
   sandbox_drop
 }
 

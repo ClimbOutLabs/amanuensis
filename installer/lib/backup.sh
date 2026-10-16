@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Backups: the CLI writes into a scratch volume and every archive is streamed over stdout, so no host bind mounts are involved.
 
-BACKUP_KEEP=5
+BACKUP_KEEP=7
 LAST_BACKUP_DIR=
 
 write_checksums() {
@@ -37,21 +37,39 @@ backup_scratch_prune() {
   done
 }
 
+# Whether the database file is there: 0 yes, 1 no (the folder is missing or readable and holds none), 2 or more when
+# it cannot be told (the folder is not readable, or the check itself failed), which is an error and never "no data".
+database_probe() { # name image path
+  local name=$1 image=$2 path=$3 dir rc=0
+  dir=$(dirname "$path")
+  D run --rm --network none -v "aman_${name}_data:/data:ro" "$image" test -f "$path" >/dev/null 2>&1 || rc=$?
+  [ "$rc" = 0 ] && return 0
+  [ "$rc" = 1 ] || return 2
+  D run --rm --network none -v "aman_${name}_data:/data:ro" "$image" test ! -e "$dir" -o -x "$dir" >/dev/null 2>&1 || return 2
+  return 1
+}
+
 # backup_data NAME DESTDIR IMAGE: runs `aman backup --target` into a scratch volume mounted at
 # /backup, then streams that volume into DESTDIR as tar. The scratch volume is always removed again.
 # The CLI opens the live database through SQLite's online backup API, safe beside the running app.
 backup_data() {
-  local name=$1 dest=$2 image=$3 scratch env_file sqlite rc=0 probe=0
+  local name=$1 dest=$2 image=$3 scratch env_file sqlite rc=0
   scratch="aman_${name}_backup_scratch"
   env_file="$(instance_dir "$name")/.env"
   sqlite=$(env_get "$env_file" SQLITE_PATH)
   # An instance that never got as far as creating its database has no data yet; that is not a failed backup.
-  D run --rm --network none -v "aman_${name}_data:/data:ro" "$image" test -f "$sqlite" >/dev/null 2>&1 || probe=$?
-  if [ "$probe" = 1 ]; then
-    say "Instance $name has no database yet, so there is nothing to back up for it; its settings are saved."
-    return 0
-  fi
-  [ "$probe" = 0 ] || return 1
+  database_probe "$name" "$image" "$sqlite" || {
+    case $? in
+      1)
+        say "Instance $name has no database yet, so there is nothing to back up for it; its settings are saved."
+        return 0
+        ;;
+      *)
+        warn "Instance $name has data Aman cannot read. This is a bug in Aman, not a problem on your computer."
+        return 1
+        ;;
+    esac
+  }
   D volume create --label "$BACKUP_SCRATCH_LABEL" "$scratch" >/dev/null || return 1
   D run --rm --network none -v "aman_${name}_data:/data" -v "$scratch:/backup" "$image" aman backup \
     --target /backup \
@@ -161,4 +179,20 @@ restore_sqlite() {
   D run --rm -i --network none -v "aman_${name}_data:/data" "$image" sh -c \
     'mkdir -p /data/db && cat > /data/db/db.sqlite.restore && rm -f /data/db/db.sqlite-wal /data/db/db.sqlite-shm && mv /data/db/db.sqlite.restore /data/db/db.sqlite' \
     <"$dir/$name/db.sqlite"
+}
+
+# install.sh backups daily|off: turns the automatic daily backup on or off.
+cmd_backups() {
+  case "$OPT_BACKUPS_ARG" in
+    daily | off) ;;
+    *) usage_die "usage: install.sh backups daily|off" ;;
+  esac
+  if ! backups_apply "$OPT_BACKUPS_ARG"; then
+    die "This computer has no way to schedule a backup without admin rights (no user timer, launchd or crontab)."
+  fi
+  if [ "$OPT_BACKUPS_ARG" = daily ]; then
+    ui_ok "A backup is made every day, keeping the last $BACKUP_KEEP"
+  else
+    ui_ok "Automatic backups are off"
+  fi
 }

@@ -173,7 +173,7 @@ docker_prepare() {
       print_root_steps
       ui_hint "Members of the docker group have root-equivalent access to this computer."
       if ! consent_root "Install Docker Engine now?" "$OPT_INSTALL_DOCKER"; then
-        die "Docker is required and nothing was installed. Install Docker Engine with the steps above (or: install.sh --print-root-steps), then run this again. To let this installer run them, answer yes when asked, or pass --install-docker; --yes alone never installs software."
+        die "Docker is required and nothing was installed. Run this installer again and answer yes when asked, or pass --install-docker (--yes alone never installs software)."
       fi
       run_root sh -c "$(docker_root_steps_script)" || die "the Docker install steps failed; nothing else was changed"
       NEEDS_SIGNOUT=1
@@ -185,7 +185,7 @@ docker_prepare() {
     ui_line "Your user cannot reach the Docker socket. Adding it to the docker group needs administrator rights (sudo)."
     ui_hint "Members of the docker group have root-equivalent access to this computer."
     if ! consent_root "Add $(current_user) to the docker group?" "$OPT_ADD_DOCKER_GROUP"; then
-      die "Docker needs access you have not granted, so nothing was changed. Run: sudo usermod -aG docker $(current_user)   then sign out and back in (or run: newgrp docker) and run this again. To let this installer do it, answer yes when asked, or pass --add-docker-group; --yes alone never changes groups."
+      die "Docker needs access you have not granted, so nothing was changed. Run this installer again and answer yes when asked, or pass --add-docker-group (--yes alone never changes groups)."
     fi
     run_root usermod -aG docker "$(current_user)" || die "usermod failed; add your user to the docker group and run this again"
     NEEDS_SIGNOUT=1
@@ -218,11 +218,11 @@ docker_blocked_parts() {
       ;;
     down)
       DB_HEAD="Docker is installed but not running"
-      DB_NEXT="Start it (Linux: sudo systemctl start docker; macOS and Windows: open Docker Desktop), then run install.sh again."
+      DB_NEXT="Start it (macOS and Windows: open Docker Desktop; Linux: run install.sh docker), then run install.sh again."
       ;;
     denied)
-      DB_HEAD="Your user cannot reach the Docker socket"
-      DB_NEXT="Add it to the docker group (sudo usermod -aG docker \$USER), sign out and in, then run install.sh again."
+      DB_HEAD="Your user cannot use Docker yet"
+      DB_NEXT="Run install.sh docker to give it access, asking before sudo, then run install.sh again."
       ;;
     *)
       DB_HEAD="Docker did not answer"
@@ -280,11 +280,11 @@ docker_runtime_problem() {
   compose=$(D compose version --short 2>/dev/null || true)
   compose=${compose#v}
   if [[ ! $compose =~ ^([0-9]+)\.[0-9]+ ]]; then
-    RUNTIME_PROBLEM="Could not read the Docker Compose version (got '${compose}'). Docker Compose v$DOCKER_MIN_COMPOSE_MAJOR or newer is required (docker compose). Install the docker-compose-plugin package, then run this again."
+    RUNTIME_PROBLEM="Docker Compose is missing; version $DOCKER_MIN_COMPOSE_MAJOR is needed. Run install.sh docker to install it, then run this again."
     return 0
   fi
   if [ "$((10#${BASH_REMATCH[1]}))" -lt "$DOCKER_MIN_COMPOSE_MAJOR" ]; then
-    RUNTIME_PROBLEM="Docker Compose $compose is too old; v$DOCKER_MIN_COMPOSE_MAJOR or newer is required (docker compose). Install the docker-compose-plugin package, then run this again."
+    RUNTIME_PROBLEM="Docker Compose $compose is too old; version $DOCKER_MIN_COMPOSE_MAJOR is needed. Run install.sh docker to update it, then run this again."
     return 0
   fi
   DOCKER_ENGINE_VERSION=$engine
@@ -326,4 +326,50 @@ docker_attach() {
     direct | sg) AMAN_DOCKER_MODE=$DOCKER_ACCESS ;;
     *) docker_fail_message ;;
   esac
+}
+
+# ---- aman doctor docker --fix -----------------------------------------------------------------
+
+# Installs the Compose plugin where the system's packages have it; every sudo is asked about first.
+docker_install_compose() {
+  if ! docker_install_supported; then
+    die "Docker Compose 2 is needed. Docker Desktop includes it: update Docker Desktop, then run aman doctor."
+  fi
+  ui_line "Docker Compose 2 is missing or too old. Installing it needs administrator rights (sudo)."
+  consent_root "Install the Docker Compose plugin now?" 0 ||
+    die "Docker Compose was not installed. Run aman doctor docker --fix again and answer yes."
+  run_root apt-get install -y docker-compose-plugin || die "Installing the Docker Compose plugin failed; nothing else was changed."
+}
+
+# Starts the Docker engine where it is a service of this computer.
+docker_start_engine() {
+  if [ "$(uname -s)" != Linux ] || ! command -v systemctl >/dev/null 2>&1; then
+    die "Docker is not running. Open Docker Desktop and wait until it says it is running, then run aman doctor."
+  fi
+  ui_line "Docker is installed but not running. Starting it needs administrator rights (sudo)."
+  consent_root "Start Docker now?" 0 || die "Docker was not started. Run aman doctor docker --fix again and answer yes."
+  run_root systemctl start docker || die "Docker did not start; nothing else was changed."
+}
+
+# Installs or starts Docker, gives this user access, and brings Compose up to date, asking before each sudo.
+docker_fix() {
+  local compose major
+  docker_probe
+  if [ "$DOCKER_STATE" = down ]; then
+    docker_start_engine
+    docker_probe
+  fi
+  case "$DOCKER_STATE" in
+    missing | denied) docker_prepare ;;
+    error) die "$(docker_blocked_text)" ;;
+  esac
+  compose=$(D compose version --short 2>/dev/null || true)
+  compose=${compose#v}
+  major=${compose%%.*}
+  if [[ ! $major =~ ^[0-9]+$ ]] || [ "$major" -lt "$DOCKER_MIN_COMPOSE_MAJOR" ]; then
+    docker_install_compose
+  fi
+  docker_runtime_check
+  ui_ok "Docker is ready"
+  if [ "$NEEDS_SIGNOUT" = 1 ]; then ui_line "Open a new terminal window so every terminal can use Docker."; fi
 }

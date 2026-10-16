@@ -95,7 +95,7 @@ tf_rotation_apply() {
   log_event "token factory key replaced for instance $name"
   say "Token Factory key updated; restarting the app"
   dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 240 app ||
-    die "the app of instance $name did not restart healthy with the new key. Look at: docker compose -p aman-$name logs --tail 50 app"
+    die "The app of instance $name did not restart healthy with the new key. Run: aman doctor instance --fix"
 }
 
 tf_plan_detail() {

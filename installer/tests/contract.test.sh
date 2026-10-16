@@ -17,10 +17,10 @@ test_doctor_reads_what_the_installer_wrote() {
   out=$(real_doctor --json --instance main) || rc=$?
   assert_eq "$rc" 0 "doctor exit code on a fresh install"
   assert_contains "$out" '"instances":{"main":[' "instance discovered under instances/"
-  assert_contains "$out" '"id":"images","state":"ok","detail":"All 3 images are present' "app_image, dex_image and stt_image read from release.json"
+  assert_contains "$out" '"id":"images","state":"ok","detail":"All 3 images are ready.' "app_image, dex_image and stt_image read from release.json"
   assert_contains "$out" '"id":"config","state":"ok"' ".env mode 0600 accepted"
-  assert_contains "$out" '"id":"containers","state":"ok","detail":"All 3 containers are running.'
-  assert_contains "$out" '"id":"backup","state":"ok","detail":"No backup yet' "a fresh install is not warned about backups"
+  assert_contains "$out" '"id":"containers","state":"ok","detail":"All 3 parts of instance main are running.'
+  assert_contains "$out" '"id":"backup","state":"ok","detail":"Daily backups are on' "a fresh install is not warned about backups"
   assert_log_has "docker ps -a --filter label=com.docker.compose.project=aman-main"
   assert_log_has "aman doctor --text"
   assert_log_has "docker exec -e AMAN_HOST_EPOCH="
@@ -110,7 +110,7 @@ test_public_base_url_is_the_host_facing_origin() {
   assert_contains "$env" "PORT=8790"
   assert_contains "$env" "PUBLIC_BASE_URL=http://127.0.0.1:18790"
   assert_contains "$env" "OIDC_ISSUER_URL=http://127.0.0.1:15556/dex"
-  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '18790:8790'"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "- '127.0.0.1:18790:8790'"
   assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "http://127.0.0.1:18790/api/v1/auth/callback"
   sandbox_drop
 }

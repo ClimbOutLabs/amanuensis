@@ -13,14 +13,11 @@ SLOT_DISK_GB=16
 SLOT_MIN_FREE_KB=$((20 * 1024 * 1024))
 SLOT_APPARMOR_FILE=/etc/apparmor.d/aman-sandbox-slot
 SANDBOX_DOCKER_BOOT_CHECKED=0
-SANDBOX_NODE_MAJOR=22
-SANDBOX_NODE_MINOR=14
 SANDBOX_BUNDLE_IN_IMAGE=/app/packages/trueforge/dist/sandbox-slots.js
 SANDBOX_VERIFY_FAILED=0
 SANDBOX_FAILED_NAMES=''
 
-# The doctor is not on PATH, so every repair line names it by its path.
-sandbox_repair_command() { printf '%s doctor sandbox --fix' "$(ui_path "$(doctor_shim)")"; }
+sandbox_repair_command() { printf 'aman doctor sandbox --fix'; }
 
 sandbox_bundle() { printf '%s/bin/aman-sandbox.mjs' "$AMAN_HOME"; }
 sandbox_log() { printf '%s/sandbox.log' "$STATE_DIR"; }
@@ -35,18 +32,6 @@ sandbox_needed() {
     if instance_sandbox_wanted "$name"; then return 0; fi
   done
   need_new_instance && [ "$OPT_NO_SANDBOX" != 1 ]
-}
-
-sandbox_node_ok() {
-  local v major minor
-  command -v node >/dev/null 2>&1 || return 1
-  v=$(node --version 2>/dev/null) || return 1
-  v=${v#v}
-  major=${v%%.*}
-  minor=${v#*.}
-  minor=${minor%%.*}
-  case "$major$minor" in '' | *[!0-9]*) return 1 ;; esac
-  [ "$major" -gt "$SANDBOX_NODE_MAJOR" ] || { [ "$major" -eq "$SANDBOX_NODE_MAJOR" ] && [ "$minor" -ge "$SANDBOX_NODE_MINOR" ]; }
 }
 
 sandbox_node_text() {
@@ -111,7 +96,7 @@ sandbox_runtime_install() {
   file=node-v$version-$platform.tar.gz
   expected=$(json_get "$PINS_FILE" "node_sha256_${platform//-/_}")
   tmp=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/aman-node.XXXXXX")
-  step_begin node-download "Downloading Node.js v$version for $platform from nodejs.org (it only runs the sandbox setup)"
+  step_begin node-download "Downloading Node.js v$version for $platform (only the sandbox setup uses it)"
   if ! download_file "https://nodejs.org/dist/v$version/$file" "$tmp/$file" 2>"$STEP_LOG"; then
     rm -rf "$tmp"
     UI_FD=2 ui_step_end fail "Node.js could not be downloaded from nodejs.org"
@@ -185,7 +170,7 @@ preflight_sandbox() {
       '' | *[!0-9]*) ;;
       *)
         if [ "$free" -lt "$SLOT_MIN_FREE_KB" ]; then
-          check_block "Less than 20 GB free for the sandbox slot disks under $SLOT_DISK_ROOT ($((free / 1024 / 1024)) GB free)" "Free space, or pass --no-sandbox to install without run code."
+          check_block "Less than 20 GB free for the sandbox disks under $SLOT_DISK_ROOT ($((free / 1024 / 1024)) GB free)" "Free space, or pass --no-sandbox to install without run code."
         fi
         ;;
     esac
@@ -206,33 +191,31 @@ plan_sandbox() {
   local name pending=0
   sandbox_needed || return 0
   if sandbox_use_host_node; then
-    plan_add have "Node.js on this computer runs the sandbox setup (--use-host-node)"
+    plan_add have "Node.js on this computer sets up the sandbox (--use-host-node)"
   elif sandbox_runtime_present; then
-    plan_add have "Pinned Node.js v$(json_get "$PINS_FILE" node_version) for the sandbox setup" "At $(ui_path "$(sandbox_runtime_node)")"
+    plan_add have "Node.js v$(json_get "$PINS_FILE" node_version) for the sandbox setup is downloaded" "At $(ui_path "$(sandbox_runtime_node)")"
   else
-    plan_add todo "Download Node.js v$(json_get "$PINS_FILE" node_version) ($(sandbox_node_platform)) from nodejs.org" "Checked against a pinned SHA-256 and kept in $(ui_path "$AMAN_HOME")/runtime/node. It only runs the sandbox setup; this computer needs no Node.js of its own."
+    plan_add todo "Download Node.js v$(json_get "$PINS_FILE" node_version) ($(sandbox_node_platform)) from nodejs.org" "Checked before use. Only the sandbox setup uses it; nothing is installed system-wide."
     dl_add node-runtime
   fi
-  plan_image "$SLOT_IMAGE" "Build the sandbox slot image $SLOT_IMAGE" slot-image
+  plan_image "$SLOT_IMAGE" "The sandbox is built" "Build the sandbox" slot-image
   for name in $(reg_names); do
     instance_sandbox_wanted "$name" || continue
     if docker_available_for_probes && sandbox_slots_running "$name" && instance_sandbox_wired "$name"; then
-      plan_add have "Sandbox slots of instance $name are running"
+      plan_add have "The $SLOT_COUNT sandboxes of instance $name are running"
     else
       pending=1
-      plan_add todo "Start the $SLOT_COUNT sandbox slots of instance $name" "Connects its app to them for run code: Python, shell and files."
+      plan_add todo "Start $SLOT_COUNT sandboxes for $name" "Run code (Python, shell and files) uses them."
     fi
   done
   if need_new_instance && [ "$OPT_NO_SANDBOX" != 1 ]; then
     pending=1
-    plan_add todo "Start the $SLOT_COUNT sandbox slots of instance $I_NAME" "Connects its app to them for run code: Python, shell and files."
+    plan_add todo "Start $SLOT_COUNT sandboxes for $I_NAME" "Run code (Python, shell and files) uses them."
   fi
   if [ "$pending" = 1 ] && sandbox_native_linux; then
     plan_add root "Set up the sandbox on this computer" \
-      "Installs the AppArmor profile $SLOT_APPARMOR_FILE and loads it, now and at every boot." \
-      "Creates $SLOT_COUNT disk files of $SLOT_DISK_GB GB under $SLOT_DISK_ROOT; they use real space only as the slots write." \
-      "Adds $SLOT_COUNT lines to /etc/fstab and mounts them." \
-      "Each part runs only if it is not already in place."
+      "Needs admin. Adds a security rule for the sandbox and sets up $SLOT_COUNT disks of up to $SLOT_DISK_GB GB that use space only as they fill." \
+      "Each part is skipped if it is already in place."
   fi
 }
 
@@ -260,7 +243,7 @@ sandbox_install_bundle() {
 # terminal; --embedded keeps its title, phase headers and closing block out, since this run prints its own.
 sandbox_run() {
   as_docker_user env DOCKER_BUILDKIT=1 "$(sandbox_node)" "$(sandbox_bundle)" "$@" \
-    --repo-root "$REPO_ROOT" --log-file "$(sandbox_log)" --command-name "$(doctor_shim) doctor sandbox" --embedded
+    --repo-root "$REPO_ROOT" --log-file "$(sandbox_log)" --command-name "aman doctor sandbox" --embedded
 }
 
 # Execute phase of the images step: the bundle, then the slot image (cached when nothing changed).
@@ -270,7 +253,7 @@ sandbox_images_ensure() {
   sandbox_runtime_ensure
   sandbox_install_bundle
   sandbox_run --build-only --instance "$(sandbox_first_instance)" ||
-    die "the sandbox slot image build failed; the build log is $(sandbox_log). Run install.sh again after fixing it, or pass --no-sandbox to install without run code."
+    die "Building the sandbox failed; the log is $(ui_path "$(sandbox_log)"). Run install.sh again once it is fixed, or pass --no-sandbox to install without run code."
 }
 
 sandbox_first_instance() {
@@ -305,7 +288,7 @@ sandbox_ensure() {
   out=$(sandbox_run --check --json --instance "$name" 2>/dev/null || true)
   if printf '%s' "$out" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
     if [ "$refresh" != refresh ]; then
-      ui_skip "Sandbox slots of instance $name are already healthy"
+      ui_skip "The sandboxes of instance $name are already healthy"
       return 0
     fi
   fi
@@ -320,7 +303,7 @@ sandbox_ensure() {
       ;;
   esac
   sandbox_run --instance "$name" ${fix_args[@]+"${fix_args[@]}"} ||
-    die "the sandbox slots of instance $name did not come up. The fix: $(sandbox_repair_command)   (build log: $(sandbox_log))"
+    die "The sandboxes of instance $name did not come up. Run: $(sandbox_repair_command)   (details: $(ui_path "$(sandbox_log)"))"
   sandbox_docker_boot_ensure
 }
 
@@ -335,9 +318,9 @@ sandbox_docker_boot_ensure() {
   ui_line "Docker does not start at boot here, so the sandbox would stay down after a restart. This needs administrator rights (sudo):"
   say "    sudo systemctl enable docker"
   if consent_root "Run it now?" "$OPT_SANDBOX_ROOT"; then
-    run_root systemctl enable docker || warn "could not enable Docker at boot; run: sudo systemctl enable docker"
+    run_root systemctl enable docker || warn "Could not make Docker start at boot. Run: aman doctor sandbox --fix"
   else
-    warn "Docker was left as it was; after a restart the sandbox stays down until you run: sudo systemctl enable docker"
+    warn "Docker was left as it was; after a restart the sandbox stays down until you run: aman doctor sandbox --fix"
   fi
 }
 
@@ -363,9 +346,9 @@ sandbox_finish() {
 sandbox_down() {
   local name=$1 purge=${2:-0} args=(--down)
   if [ ! -f "$(sandbox_bundle)" ] || [ ! -x "$(sandbox_node)" ]; then
-    warn "could not stop the sandbox slots of $name (no sandbox setup or Node.js runtime here); stop them with: docker compose -p $name-slots down"
+    warn "The sandboxes of $name could not be stopped (the sandbox tools are missing here). Run aman upgrade, then remove the instance again."
     return 0
   fi
   if [ "$purge" = 1 ]; then args+=(--purge); fi
-  sandbox_run "${args[@]}" --instance "$name" || warn "could not stop the sandbox slots of $name; stop them with: docker compose -p $name-slots down"
+  sandbox_run "${args[@]}" --instance "$name" || warn "The sandboxes of $name could not be stopped. Run aman doctor sandbox --fix, then remove the instance again."
 }

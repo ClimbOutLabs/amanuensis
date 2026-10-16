@@ -20,6 +20,8 @@ PLAN_FS=$'\037'
 PLAN_RS=$'\036'
 INSTALL_T0=0
 DOCTOR_PROBLEMS=0
+# daily or off: the choice for the automatic backup.
+B_MODE=
 
 # Results of the checks on this computer print as they are made; a blocker also stops the run before any question.
 check_ok() { ui_ok "$1"; }
@@ -221,9 +223,9 @@ print_plan() {
   fi
   if [ -n "$PLAN_UPGRADE_NOTE" ]; then ui_line "$PLAN_UPGRADE_NOTE"; fi
   print_plan_rows
-  ui_hint "Images are built here and never pushed anywhere."
+  ui_hint "Everything is built on this computer; nothing is pushed anywhere."
   if [ "$PLAN_ROOT" -gt 0 ]; then
-    ui_hint "Steps marked needs admin use sudo and only run after you say yes (or pass --install-docker, --add-docker-group, --sandbox-root or --tls-root; --yes alone does not allow them). The docker group is root-equivalent."
+    ui_hint "Steps marked needs admin use sudo and only run after you say yes (or pass --install-docker, --add-docker-group, --sandbox-root or --tls-root; --yes alone does not allow them). The docker group gives full control of this computer."
   fi
   if [ "$EDGE_IN_PLAN" = 1 ]; then
     edge_print_firewall_hint
@@ -242,7 +244,7 @@ print_plan() {
     fi
   fi
   if sandbox_needed; then
-    ui_hint "Run code (Python, shell, files) runs in the gVisor sandbox."
+    ui_hint "Run code (Python, shell, files) runs in a sandbox."
   else
     ui_hint "Run code stays off (installed with --no-sandbox)."
   fi
@@ -317,9 +319,9 @@ plan_build() {
     have_release=1
   fi
   if [ -d "$AMAN_HOME" ] && [ -f "$STATE_DIR/installed" ]; then
-    plan_add have "State directory $(ui_path "$AMAN_HOME")"
+    plan_add have "The folder $(ui_path "$AMAN_HOME") exists"
   else
-    plan_add todo "Create the state directory $(ui_path "$AMAN_HOME")"
+    plan_add todo "Create the folder $(ui_path "$AMAN_HOME")"
   fi
   INSTALL_UPGRADE=0
   PLAN_UPGRADE_NOTE=
@@ -334,24 +336,20 @@ plan_build() {
     fi
   fi
 
-  plan_image "$REL_APP_TAG" "Build the app image $REL_APP_TAG" app-base app-deps dockerfile-frontend
-  plan_image "$REL_STT_TAG" "Build the speech-to-text image $REL_STT_TAG" stt-base stt-deps
-  plan_image "$REL_DEX_IMAGE" "Download the sign-in image, pinned by digest" dex
+  plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps dockerfile-frontend
+  plan_image "$REL_STT_TAG" "The speech-to-text service is built" "Build the speech-to-text service" stt-base stt-deps
+  plan_image "$REL_DEX_IMAGE" "The sign-in service is downloaded" "Download the sign-in service" dex
 
   plan_sandbox
 
-  if [ -x "$(doctor_shim)" ]; then
-    plan_add have "Doctor command at $(ui_path "$(doctor_shim)")"
-  elif [ -f "$INSTALLER_DIR/doctor/aman" ]; then
-    plan_add todo "Install the doctor command at $(ui_path "$(doctor_shim)")"
-  fi
+  plan_aman_command
 
   if ! docker_available_for_probes; then
-    plan_add todo "Start the shared speech-to-text service" "One container, no CPU pinning."
+    plan_add todo "Start the speech-to-text service"
   elif machine_running; then
-    plan_add have "Shared speech-to-text service is running"
+    plan_add have "The speech-to-text service is running"
   else
-    plan_add todo "Start the shared speech-to-text service" "One container, no CPU pinning."
+    plan_add todo "Start the speech-to-text service"
   fi
   if ! docker_available_for_probes || ! docker_volume_exists aman_stt_cache; then
     dl_add stt-weights
@@ -361,6 +359,8 @@ plan_build() {
     for name in $(reg_names); do
       if [ "$INSTALL_UPGRADE" = 1 ]; then
         plan_add todo "Restart instance $name on the new version"
+      elif [ -n "$(instance_address_change "$name")" ]; then
+        plan_existing_addresses "$name"
       elif docker_available_for_probes && [ "$(instance_state "$name")" = running ]; then
         plan_add have "Instance $name is running"
       else
@@ -392,7 +392,61 @@ plan_build() {
   if ! need_new_instance && [ "$OPT_TF_KEY_STDIN" = 1 ]; then
     plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) and restart its app" "The key goes only into the instance .env."
   fi
+  plan_backups
   plan_edge
+}
+
+# The plan row of the aman command: the command itself and the line that puts it on the path of new terminals.
+plan_aman_command() {
+  local profiles
+  [ -f "$INSTALLER_DIR/doctor/aman" ] || return 0
+  if aman_command_current && path_ready; then
+    plan_add have "The aman command is installed"
+    return 0
+  fi
+  profiles=$(shell_profiles | while IFS= read -r f; do ui_path "$f"; done | tr '\n' ' ')
+  plan_add todo "Install the aman command" "At $(ui_path "$(doctor_shim)"), with a line in ${profiles% } so new terminals find it."
+}
+
+# An instance from before addresses were listed is opened on the network like a new one, unless --local-only says not to.
+plan_existing_addresses() { # name
+  local name=$1 hosts
+  if [ "$(instance_address_change "$name")" = close ]; then
+    plan_add todo "Open instance $name on this computer only" "It stops answering at other addresses."
+    return 0
+  fi
+  hosts=$(network_origin_list "$(reg_get "$name" app_port)" | sed "s|http://||g; s|:$(reg_get "$name" app_port)||g; s|,|, |g")
+  plan_add todo "Open instance $name on your network" \
+    "It will answer at: $hosts. Sign-in works from each, and the port is open to your network on private addresses only." \
+    "Its data and sign-in stay as they are."
+}
+
+# The daily backup: asked once (or given with --backups), default yes.
+backups_collect() {
+  B_MODE=${OPT_BACKUPS:-$(backups_mode)}
+  [ -z "$B_MODE" ] || return 0
+  B_MODE=daily
+  if [ -z "$(backup_scheduler)" ]; then
+    B_MODE=off
+    if [ "$DRY_RUN" != 1 ]; then ui_warn "Automatic backups are not possible here" "This computer has no scheduler that works without admin rights."; fi
+    return 0
+  fi
+  if [ "$DRY_RUN" != 1 ] && ! ui_confirm "Back up automatically every day?" y; then B_MODE=off; fi
+}
+
+plan_backups() {
+  case "$B_MODE" in
+    daily)
+      if [ "$(backups_mode)" = daily ] && backup_schedule_present; then
+        plan_add have "Daily backups are on"
+      else
+        plan_add todo "Back up every day, keeping the last $BACKUP_KEEP" "Runs at $(printf '%02d:%02d' "$BACKUP_HOUR" "$BACKUP_MINUTE") with $(backup_scheduler_label)."
+      fi
+      ;;
+    off)
+      if backup_schedule_present; then plan_add todo "Turn off the daily backups"; fi
+      ;;
+  esac
 }
 
 docker_available_for_probes() {
@@ -400,11 +454,11 @@ docker_available_for_probes() {
 }
 
 # plan_image TAG TEXT download-ids...
-plan_image() {
-  local tag=$1 text=$2 dl
-  shift 2
+plan_image() { # tag, have text, todo text, download ids...
+  local tag=$1 have=$2 text=$3 dl
+  shift 3
   if docker_available_for_probes && docker_image_exists "$tag"; then
-    plan_add have "Image $tag is present"
+    plan_add have "$have"
   else
     plan_add todo "$text"
     for dl in "$@"; do dl_add "$dl"; done
@@ -438,6 +492,7 @@ cmd_install() {
     ui_skip "Instance $(reg_names | tr '\n' ' ')is already set up; nothing to ask"
     tf_rotation_collect
   fi
+  backups_collect
   plan_build
   print_plan
   if [ -n "$PLAN_BLOCKERS" ]; then
@@ -449,12 +504,22 @@ cmd_install() {
     exit 0
   fi
   if [ "$PLAN_TODO" = 0 ]; then
-    ui_summary ok "Nothing to do."
+    # Nothing is claimed that was not looked at: the checks run again before the table says what is on.
+    docker_attach
+    ui_phase "Checking the result" 6 6
+    check_result
+    if [ "$DOCTOR_PROBLEMS" = 1 ] || [ "$SANDBOX_VERIFY_FAILED" = 1 ]; then
+      ui_summary warn "Nothing to change, but the checks found a problem (listed above)."
+    else
+      ui_summary ok "Nothing to do."
+    fi
     print_signout_note
     for name in $(reg_names); do
       print_instance_summary "$name"
     done
+    print_closing_lines
     ui_summary_end
+    sandbox_finish
     exit 0
   fi
   if ! ui_confirm "Go ahead?" y; then
@@ -465,7 +530,7 @@ cmd_install() {
 }
 
 install_execute() {
-  local name demo_name=
+  local name demo_name='' change recreate ADDRESS_CHANGED=''
   ensure_private_dir "$AMAN_HOME"
   lock_acquire
   ensure_private_dir "$STATE_DIR/logs"
@@ -486,15 +551,24 @@ install_execute() {
     release_write
   fi
   ui_phase "Starting services" 5 6
+  for name in $(reg_names); do
+    change=$(instance_address_change "$name")
+    if [ -n "$change" ]; then
+      instance_apply_addresses "$name" "$change"
+      ADDRESS_CHANGED="$ADDRESS_CHANGED $name "
+    fi
+  done
   if [ "$INSTALL_UPGRADE" = 1 ]; then
     upgrade_switch
   else
     machine_up "$REL_STT_TAG"
     for name in $(reg_names); do
-      if [ "$(instance_state "$name")" != running ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; }; then
+      recreate=
+      case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
+      if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; }; then
         if instance_sandbox_wanted "$name"; then sandbox_ensure "$name"; fi
         instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
-        instance_up "$name" || exit 1
+        instance_up "$name" ${recreate:+"$recreate"} || exit 1
       fi
     done
   fi
@@ -508,20 +582,28 @@ install_execute() {
     edge_ensure "$name"
   done
   if [ "$OPT_DEMO" = 1 ]; then demo_install_apply "$demo_name"; fi
+  if [ -n "$B_MODE" ]; then
+    backups_apply "$B_MODE" || warn "The daily backup could not be set up. Run: aman doctor backup --fix"
+  fi
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REL_APP_TAG" >"$STATE_DIR/installed"
   log_event "install complete $REL_APP_TAG"
   ui_phase "Checking the result" 6 6
-  if [ -x "$(doctor_shim)" ]; then
-    # Includes the model and the public https checks, which wait on the network.
-    DOCTOR_TIMEOUT=180 run_doctor --summary || DOCTOR_PROBLEMS=1
-    for name in $(reg_names); do
-      if instance_sandbox_wanted "$name"; then sandbox_verify "$name"; fi
-    done
-  fi
+  check_result
   print_install_summary
   sandbox_finish
   edge_finish
   [ "$DEMO_FAILED" = 0 ] || exit 1
+}
+
+# The doctor's one line (or only its problems), and a quiet look at the sandbox of each instance that has one.
+check_result() {
+  local name
+  [ -x "$(doctor_shim)" ] || return 0
+  # Includes the model and the public https checks, which wait on the network.
+  DOCTOR_TIMEOUT=180 run_doctor --summary || DOCTOR_PROBLEMS=1
+  for name in $(reg_names); do
+    if instance_sandbox_wanted "$name"; then sandbox_verify "$name"; fi
+  done
 }
 
 # The plan row of an instance that answers at every address of this computer.
@@ -554,6 +636,6 @@ print_install_summary() {
   for name in $names; do
     print_instance_summary "$name"
   done
-  print_upgrade_line
+  print_closing_lines
   ui_summary_end "$(_ui_elapsed_since "$INSTALL_T0")"
 }

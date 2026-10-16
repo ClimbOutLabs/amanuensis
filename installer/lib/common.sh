@@ -60,7 +60,7 @@ password_problem() {
   if [ "${#1}" -lt 8 ]; then
     echo "The password needs at least 8 characters."
   elif [ "${#1}" -gt 72 ]; then
-    echo "The password can be at most 72 bytes long (accented and non-Latin characters count as several)."
+    echo "The password can have at most 72 characters; accented or non-Latin letters take more room."
   fi
 }
 
@@ -79,7 +79,7 @@ ask_password() {
   fi
   while [ "$__tries" -lt "$UI_MAX_TRIES" ]; do
     if [ -t 0 ]; then
-      ui_password __first "Password for the owner account (8 to 72 characters)" || die "No password was entered, so nothing more was changed."
+      ui_password __first "Password for ${I_EMAIL:-the owner account}, 8 to 72 characters" || die "No password was entered, so nothing more was changed."
       ui_password __second "Repeat the password" || die "No password was entered, so nothing more was changed."
     else
       IFS= read -r __first || die "No password was provided on stdin."
@@ -89,7 +89,7 @@ ask_password() {
     if [ -n "$__problem" ]; then
       UI_FD=2 ui_fail "$__problem"
     elif [ "$__first" != "$__second" ]; then
-      UI_FD=2 ui_fail "The two entries differ."
+      UI_FD=2 ui_fail "The passwords do not match. Type them again."
     else
       printf -v "$__var" '%s' "$__first"
       return 0

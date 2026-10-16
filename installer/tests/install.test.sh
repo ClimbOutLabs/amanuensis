@@ -14,8 +14,8 @@ test_dry_run_changes_nothing() {
   assert_contains "$OUT" "Downloads: about"
   assert_contains "$OUT" "Full list of downloads and sources: --verbose"
   assert_not_contains "$OUT" "Whisper small speech model weights" "the long list waits for --verbose"
-  assert_flat_contains "$OUT" "Images are built here and never pushed anywhere"
-  assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in the gVisor sandbox"
+  assert_flat_contains "$OUT" "Everything is built on this computer; nothing is pushed anywhere"
+  assert_flat_contains "$OUT" "Run code (Python, shell, files) runs in a sandbox"
   assert_contains "$OUT" "Dry run: nothing was changed."
   assert_not_contains "$OUT" "will do" "the plan words are done, to do and needs admin"
   run_install --dry-run --verbose
@@ -94,7 +94,7 @@ test_first_install() {
   assert_contains "$compose" "name: aman_main_dex"
   assert_contains "$compose" "ghcr.io/dexidp/dex@sha256:"
   assert_not_contains "$compose" "@@" "no unfilled placeholder"
-  assert_contains "$compose" "- '8791:8790'"
+  assert_contains "$compose" "- '127.0.0.1:8791:8790'"
   assert_contains "$compose" "- '127.0.0.1:5556:5556'"
   sandbox_drop
 }

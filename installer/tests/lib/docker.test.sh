@@ -36,7 +36,7 @@ test_old_engine_and_compose_v1() {
   STUB_COMPOSE_VERSION=1.29.2
   run_install --dry-run
   assert_rc 1
-  assert_flat_contains "$OUT$ERR" "Compose 1.29.2 is too old; v2 or newer is required"
+  assert_flat_contains "$OUT$ERR" "Compose 1.29.2 is too old; version 2 is needed"
   sandbox_drop
 }
 
@@ -61,7 +61,7 @@ test_unreadable_compose_version_is_named() {
     STUB_COMPOSE_VERSION=$version
     run_install --dry-run
     assert_rc 1
-    assert_flat_contains "$OUT$ERR" "Could not read the Docker Compose version (got '$version')"
+    assert_flat_contains "$OUT$ERR" "Docker Compose is missing; version 2 is needed"
     sandbox_drop
   done
 }
@@ -102,7 +102,7 @@ test_group_member_without_relogin_uses_sg() {
   STUB_DOCKER_DENIED=1
   printf 'testuser\n' >"$SB_STATE/group_members"
   install_machine
-  assert_contains "$OUT" "Sign out and back in"
+  assert_contains "$OUT" "Open a new terminal window"
   assert_contains "$OUT" "without a re-login"
   assert_log_has "sg docker -c"
   assert_log_lacks "usermod"
@@ -145,7 +145,7 @@ test_non_member_is_added_then_sg() {
   install_machine
   assert_log_has "sudo usermod -aG docker testuser"
   assert_log_has "sg docker -c"
-  assert_contains "$OUT" "Sign out and back in"
+  assert_contains "$OUT" "Open a new terminal window"
   assert_file "$AMAN_HOME/state/instances/main.conf"
   sandbox_drop
 }
@@ -156,6 +156,7 @@ test_install_offer_declined() {
   os_release_ubuntu
   rm -f "$SB_BIN/docker"
   with_input "
+
 
 y
 n
@@ -181,7 +182,7 @@ test_install_offer_accepted() {
   assert_log_has "sudo sh -c"
   assert_contains "$OUT" "Root steps to install Docker Engine"
   assert_contains "$OUT" "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
-  assert_contains "$OUT" "Sign out and back in"
+  assert_contains "$OUT" "Open a new terminal window"
   assert_file "$AMAN_HOME/state/instances/main.conf"
   sandbox_drop
 }
@@ -241,12 +242,13 @@ test_group_decline_stops_without_sudo() {
   : >"$SB_STATE/group_members"
   with_input "
 
+
 y
 n
 "
   run_install --name main --email owner@example.invalid
   assert_rc 1
-  assert_flat_contains "$ERR" "sudo usermod -aG docker testuser"
+  assert_flat_contains "$ERR" "--add-docker-group"
   assert_flat_contains "$ERR" "nothing was changed"
   assert_log_lacks "usermod -aG"
   assert_log_lacks "sudo docker"

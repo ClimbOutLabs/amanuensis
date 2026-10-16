@@ -6,8 +6,9 @@ set -euo pipefail
 
 ANSWERS="Instance name=>
 Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
-Password for the owner account=>$SENTINEL_PASSWORD
+Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"
 
 test_password_is_not_echoed() {
@@ -15,7 +16,7 @@ test_password_is_not_echoed() {
   sandbox_new
   run_install_tty "$ANSWERS"
   assert_rc 0
-  assert_contains "$OUT" "Password for the owner account"
+  assert_contains "$OUT" "Password for owner@example.invalid"
   assert_contains "$OUT" "Repeat the password"
   assert_contains "$OUT" "owner@example.invalid" "ordinary answers are echoed, so the transcript is a real terminal"
   assert_not_contains "$OUT" "$SENTINEL_PASSWORD"

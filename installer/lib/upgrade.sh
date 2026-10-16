@@ -35,7 +35,7 @@ upgrade_rollback() {
     say "Rolled back to the previous version. The database is restored from $UPGRADE_BACKUP."
   else
     rc=2
-    warn "the rollback did not fully complete. Your backup is at ${UPGRADE_BACKUP:-none}; run install.sh again after fixing the error above."
+    warn "The rollback did not fully complete. Your backup is at ${UPGRADE_BACKUP:-none}; run aman doctor instance --fix after fixing the error above."
   fi
   lock_release
   exit "$rc"
@@ -56,7 +56,7 @@ upgrade_health_gate() {
   for name in $(reg_names); do
     instance_ever_healthy "$name" || continue
     run_doctor --json --local --instance "$name" >/dev/null 2>&1 ||
-      die "The doctor reports a failure for instance $name, which was healthy before. Fix it first (run: $(ui_path "$(doctor_shim)") doctor), or run upgrade --force."
+      die "The doctor reports a failure for instance $name, which was healthy before. Run aman doctor to see it and aman doctor instance --fix to repair it, or run aman upgrade --force."
   done
 }
 
@@ -92,6 +92,8 @@ cmd_upgrade() {
   release_load "$RELEASE_DIR/release.json" || die "the recorded release is unreadable; run install.sh again"
   docker_attach
   release_resolve
+  # The aman command and its helper files come from this checkout too, so an upgrade brings them along.
+  if [ "$OPT_CHECK" != 1 ] && [ "$DRY_RUN" != 1 ]; then install_doctor_shim; fi
   if [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] && [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] && [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ]; then
     if docker_image_exists "$REL_APP_TAG" && docker_image_exists "$REL_STT_TAG" && docker_image_exists "$REL_DEX_IMAGE"; then
       say "Already up to date ($REL_APP_TAG). Nothing to do."

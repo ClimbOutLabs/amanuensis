@@ -54,12 +54,12 @@ machine_render() {
 machine_up() {
   local name rc=0
   machine_render "$1"
-  step_begin start-machine "Starting the shared speech-to-text service"
+  step_begin start-machine "Starting the speech-to-text service"
   dcm up -d >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
-    step_fail "The shared speech-to-text service could not start" "Run install.sh again once the cause in the log is fixed."
+    step_fail "The speech-to-text service could not start" "Run install.sh again once the cause in the log is fixed."
   fi
-  step_ok "Shared speech-to-text service is running"
+  step_ok "The speech-to-text service is running"
   # A recreated speech container loses the extra networks it was connected to, so reconnect them all.
   for name in $(reg_names); do
     if D network inspect "aman_${name}_stt" >/dev/null 2>&1; then
@@ -92,7 +92,7 @@ machine_running() {
 
 # Rewrites compose.yaml and dex.yaml from the registry (owner and added users) and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on edge_on login_host members members_on=0 bind=127.0.0.1: origins redirects
+  local name=$1 app_image=$2 dex_image=$3 dir app_port login_port public_url login_url email client_id sandbox_on edge_on login_host members members_on=0 origins redirects app_ports
   dir=$(instance_dir "$name")
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
@@ -101,13 +101,13 @@ instance_render() {
   email=$(reg_get "$name" owner_email)
   client_id=$(reg_get "$name" client_id)
   if instance_sandbox_wanted "$name"; then sandbox_on=1; else sandbox_on=0; fi
-  # An instance opened on the network publishes the app on every interface; sign-in stays on 127.0.0.1 and reaches
-  # other devices through the app. Any other instance stays on 127.0.0.1 entirely.
+  # An instance opened on the network publishes the app on each private address it lists; any other stays on 127.0.0.1.
   origins=$(reg_get "$name" origins)
   redirects="      - $public_url/api/v1/auth/callback"
+  app_ports="      - '127.0.0.1:$app_port:8790'"
   if [ -n "$origins" ]; then
-    bind=
     redirects=$(printf '%s\n' "$origins" | tr ',' '\n' | sed 's|^|      - |; s|$|/api/v1/auth/callback|')
+    app_ports=$(network_bind_addresses "$origins" | sed "s|^|      - '|; s|\$|:$app_port:8790'|")
   fi
   edge_on=0
   login_host=
@@ -119,7 +119,7 @@ instance_render() {
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
     "NAME=$name" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
-    "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "BIND=$bind" | write_if_changed "$dir/compose.yaml" 644 || true
+    "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" | write_if_changed "$dir/compose.yaml" 644 || true
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
   members=$(dex_members_yaml "$name")
   if [ -n "$members" ]; then members_on=1; fi
@@ -196,20 +196,33 @@ record_source_checkout() {
   printf '%s\n' "$REPO_ROOT" | write_if_changed "$STATE_DIR/source" 600 || true
 }
 
-# The shim finds its display and diagnosis helpers at ../lib next to its folder, here and in a checkout alike.
+# The files the aman command is made of: the shim and the helper files it finds at ../lib next to its folder, here and
+# in a checkout alike.
+AMAN_COMMAND_LIBS="ui shared diagnose network schedule"
+
+aman_command_current() {
+  local lib
+  [ -x "$(doctor_shim)" ] && cmp -s "$INSTALLER_DIR/doctor/aman" "$(doctor_shim)" || return 1
+  for lib in $AMAN_COMMAND_LIBS; do
+    cmp -s "$INSTALLER_DIR/lib/$lib.sh" "$AMAN_HOME/lib/$lib.sh" || return 1
+  done
+}
+
+# Installs or refreshes the aman command and puts it on the path of new terminals.
 install_doctor_shim() {
   local src="$INSTALLER_DIR/doctor/aman" lib
   if [ ! -f "$src" ]; then
-    warn "The doctor command was not found in the installer, so it will be unavailable."
+    warn "The aman command was not found in the installer, so it will be unavailable."
     return 0
   fi
   ensure_private_dir "$AMAN_HOME/bin"
   ensure_private_dir "$AMAN_HOME/lib"
   write_if_changed "$AMAN_HOME/bin/aman" 755 <"$src" || true
-  for lib in ui diagnose network; do
+  for lib in $AMAN_COMMAND_LIBS; do
     write_if_changed "$AMAN_HOME/lib/$lib.sh" 644 <"$INSTALLER_DIR/lib/$lib.sh" || true
   done
   record_source_checkout
+  install_path_block
 }
 
 # Runs the doctor shim with a time bound; prints nothing when it is not installed.
@@ -337,6 +350,39 @@ issuer_check() {
   esac
 }
 
+# ---- addresses of an existing instance ----------------------------------------------------------
+
+# An instance from before addresses were listed has no `origins` record at all. A plain re-run opens it on the network
+# like a new one; --local-only keeps it (or puts it back) on this computer only.
+instance_address_change() { # name; prints open, close or nothing
+  local name=$1 recorded=0
+  grep -q '^origins=' "$(reg_file "$name")" && recorded=1
+  is_loopback_origin "$(reg_get "$name" public_url)" || return 0
+  if [ "$OPT_LOCAL_ONLY" = 1 ]; then
+    if [ -n "$(reg_get "$name" origins)" ] || [ "$recorded" = 0 ]; then printf 'close'; fi
+  elif [ "$recorded" = 0 ]; then
+    printf 'open'
+  fi
+}
+
+# Writes the list of addresses of an instance into its record and its settings: read again from this computer, plus
+# the names given with --address (kept from the first install unless new ones are given). Renders and restarts nothing.
+instance_apply_addresses() { # name open|close|refresh
+  local name=$1 mode=$2 origins='' extras env
+  env="$(instance_dir "$name")/.env"
+  extras=${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)}
+  if [ "$mode" != close ]; then
+    # shellcheck disable=SC2086 # the extras are checked hosts without spaces
+    origins=$(network_origin_list "$(reg_get "$name" app_port)" $extras)
+  else
+    extras=
+  fi
+  reg_set "$name" origins "$origins"
+  reg_set "$name" extra_hosts "$extras"
+  env_managed_set "$env" ALLOWED_ORIGINS "$origins"
+  log_event "instance $name addresses $mode"
+}
+
 # ---- create / list / remove -------------------------------------------------------------------
 
 instance_create() {
@@ -407,31 +453,57 @@ read_password_first() {
   fi
 }
 
+# How an address of the Open row is told apart, so the ones other devices use come first.
+origin_kind() { # origin
+  local host=${1#http://}
+  host=${host%%:*}
+  case "$host" in
+    127.0.0.1 | localhost) echo loopback ;;
+    *.ts.net) echo tailscale ;;
+    *.local) echo local ;;
+    *) if valid_ipv4 "$host"; then echo address; else echo name; fi ;;
+  esac
+}
+
+# The origins of a comma list, one per line: addresses of this computer on the network first, then its names, then the
+# ones that only work on this computer.
+origins_display_order() { # comma list
+  local kind origin
+  for kind in address tailscale local name loopback; do
+    while IFS= read -r origin; do
+      if [ "$(origin_kind "$origin")" = "$kind" ]; then printf '%s\n' "$origin"; fi
+    done < <(printf '%s\n' "$1" | tr ',' '\n')
+  done
+}
+
 # The closing table of one instance: what to open, who signs in, and where the model, sandbox, data and backups stand.
 print_instance_summary() {
-  local name=$1 url count origin first=1 origins
+  local name=$1 url count origin first=1 origins bookmark=
   url=$(reg_get "$name" public_url)
   origins=$(reg_get "$name" origins)
   count=$(reg_names | wc -l | tr -d ' ')
   if [ "$count" -gt 1 ]; then ui_heading "Instance $name"; fi
-  for origin in $(printf '%s\n' "${origins:-$url}" | tr ',' ' '); do
+  while IFS= read -r origin; do
     if [ "$first" = 1 ]; then ui_check_row ok "Open" "$origin"; else ui_check_more "$origin"; fi
     first=0
-  done
+    case "$(origin_kind "$origin")" in
+      tailscale | local) if [ -z "$bookmark" ]; then bookmark=${origin#http://}; bookmark=${bookmark%%:*}; fi ;;
+    esac
+  done < <(origins_display_order "${origins:-$url}")
   ui_check_row ok "Sign in" "$(reg_get "$name" owner_email)"
   print_model_row "$name"
   if instance_sandbox_wanted "$name"; then
     case "$SANDBOX_FAILED_NAMES " in
       *" $name "*) ui_check_row warn "Run code" "not ready: $(sandbox_repair_command)" ;;
-      *) ui_check_row ok "Run code" "on, in the gVisor sandbox" ;;
+      *) ui_check_row ok "Run code" "on, in a sandbox" ;;
     esac
   else
     ui_check_row skip "Run code" "off (installed with --no-sandbox)"
   fi
-  ui_check_row ok "Data" "Docker volumes aman_${name}_data and aman_${name}_dex"
+  ui_check_row ok "Data" "saved in Docker"
   print_backups_row
   if edge_wanted "$name"; then
-    ui_check_row ok "HTTPS" "Caddy on this computer, certificates from Let's Encrypt"
+    ui_check_row ok "HTTPS" "on, with certificates from Let's Encrypt"
   fi
   if demo_env_on "$name"; then
     ui_check_row ok "Demo" "on. Reseed: $(demo_seed_command "$name") [--reset]"
@@ -439,35 +511,50 @@ print_instance_summary() {
   if edge_wanted "$name"; then
     edge_print_firewall_hint
   elif [ -n "$origins" ]; then
-    ui_line "On your home network sign-in is not encrypted; Tailscale encrypts it."
+    ui_line "Sign-in on your home network is not encrypted. Use the Tailscale address to keep it private."
+    if [ -n "$bookmark" ]; then ui_line "Bookmark $bookmark: it keeps working when this computer's address changes."; fi
   elif ! is_loopback_origin "$url"; then
     print_proxy_requirements "$url" "$(reg_get "$name" app_port)" "$(reg_get "$name" login_url)" "$(reg_get "$name" login_port)"
   fi
 }
 
-# How many backups there are, or how to make the first one.
+# The backups row: the daily schedule and how many are kept, or how to turn it on or make one by hand.
 print_backups_row() {
   local count=0
   if [ -d "$BACKUPS_DIR" ]; then count=$(find "$BACKUPS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' '); fi
-  if [ "$count" -gt 0 ]; then
-    ui_check_row ok "Backups" "$count kept in $(ui_path "$BACKUPS_DIR")"
-  else
-    ui_check_row todo "Backups" "none yet. Make one: $(ui_path "$INSTALLER_DIR")/install.sh backup"
-  fi
+  case "$(backups_mode)" in
+    daily)
+      if backup_schedule_present; then
+        ui_check_row ok "Backups" "daily, keeps the last $BACKUP_KEEP"
+      else
+        ui_check_row warn "Backups" "the daily schedule is missing: aman doctor backup --fix"
+      fi
+      ;;
+    off) ui_check_row skip "Backups" "off. Turn on: aman doctor backup --fix" ;;
+    *)
+      if [ "$count" -gt 0 ]; then
+        ui_check_row ok "Backups" "$count kept"
+      else
+        ui_check_row todo "Backups" "none yet. Make one: aman backup"
+      fi
+      ;;
+  esac
 }
 
-# The last line of a finished run, only when the installer it names is there.
-print_upgrade_line() {
-  if [ -f "$INSTALLER_DIR/install.sh" ]; then
-    ui_line "Upgrade later: $(ui_path "$INSTALLER_DIR")/install.sh upgrade"
-  fi
+# The last lines of a finished run: how to reach the aman command from this terminal, and how to update later.
+print_closing_lines() {
+  case ":$PATH:" in
+    *":$AMAN_HOME/bin:"*) ;;
+    *) ui_line "Open a new terminal window to use the aman command." ;;
+  esac
+  ui_line "Update later: aman upgrade"
 }
 
 # The framed closing block of `instance add`.
 print_instance_block() {
   ui_summary ok "Instance $1 is ready."
   print_instance_summary "$1"
-  print_upgrade_line
+  print_closing_lines
   ui_summary_end
 }
 
@@ -488,7 +575,7 @@ load_installed_release() {
 # Renders an instance again from its record and restarts it. For an instance opened on the network the addresses are read
 # again first, so a new address of this computer works for sign-in. Data and secrets stay as they are.
 cmd_instance_refresh() {
-  local name=${OPT_NAME:-} origins port env extras
+  local name=${OPT_NAME:-} change
   [ -n "$name" ] || usage_die "usage: install.sh instance refresh <name>"
   valid_name "$name" || usage_die "$(name_problem "$name")"
   reg_exists "$name" || die "Instance $name does not exist."
@@ -496,17 +583,11 @@ cmd_instance_refresh() {
   docker_prepare
   lock_acquire
   load_installed_release
-  origins=$(reg_get "$name" origins)
-  if [ -n "$origins" ]; then
-    port=$(reg_get "$name" app_port)
-    env="$(instance_dir "$name")/.env"
-    # The extra names given at install stay: they are the part of the list this computer cannot work out again.
-    extras=$(reg_get "$name" extra_hosts)
-    # shellcheck disable=SC2086 # the extras are checked hosts without spaces
-    origins=$(network_origin_list "$port" $extras)
-    reg_set "$name" origins "$origins"
-    env_managed_set "$env" ALLOWED_ORIGINS "$origins"
-    log_event "instance $name addresses refreshed"
+  change=$(instance_address_change "$name")
+  if [ -n "$change" ]; then
+    instance_apply_addresses "$name" "$change"
+  elif [ -n "$(reg_get "$name" origins)" ]; then
+    instance_apply_addresses "$name" refresh
   fi
   instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
   instance_up "$name" recreate

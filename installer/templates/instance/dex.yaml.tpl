@@ -20,6 +20,8 @@ telemetry:
 
 oauth2:
   responseTypes: ['code']
+  # The app only signs people in with the code flow. Naming it alone leaves the device, refresh and password grants off.
+  grantTypes: ['authorization_code']
   skipApprovalScreen: true
 
 enablePasswordDB: true

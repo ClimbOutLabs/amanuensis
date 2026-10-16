@@ -6,7 +6,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
 
 ESC=$'\033'
-PASSWORD_ANSWERS="Password for the owner account=>$SENTINEL_PASSWORD
+PASSWORD_ANSWERS="Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"
 
 test_prompts_state_their_rule() {
@@ -14,6 +14,7 @@ test_prompts_state_their_rule() {
   sandbox_new
   run_install_tty "Instance name=>
 Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
   assert_eq "$RC" 0
@@ -22,7 +23,7 @@ $PASSWORD_ANSWERS"
   assert_contains "$OUT" "Your email, used to sign in"
   assert_contains "$OUT" "Example: you@example.com"
   assert_contains "$OUT" "Go ahead? [Y/n]"
-  assert_contains "$OUT" "Password for the owner account (8 to 72 characters) (not shown)"
+  assert_contains "$OUT" "Password for owner@example.invalid, 8 to 72 characters (not shown)"
   assert_contains "$OUT" "Repeat the password (not shown)"
   sandbox_drop
 }
@@ -33,6 +34,7 @@ test_an_invalid_name_asks_again_with_the_reason() {
   run_install_tty "Instance name=>My_Name
 Instance name=>main
 Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
   assert_eq "$RC" 0
@@ -52,6 +54,7 @@ Instance name=>main-
 Instance name=>machine
 Instance name=>main
 Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>n"
   assert_flat_contains "$OUT" "\"Main\" has capital letters"
   assert_flat_contains "$OUT" "\"1main\" must start with a letter."
@@ -61,6 +64,7 @@ Go ahead?=>n"
   run_install_tty "Instance name=>abcdefghijklmnopqrstuvwxyz
 Instance name=>main
 Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>n"
   assert_flat_contains "$OUT" "\"abcdefghijklmnopqrstuvwxyz\" is longer than 24 characters."
   assert_eq "$RC" 0
@@ -73,6 +77,7 @@ test_an_invalid_email_asks_again() {
   run_install_tty "Instance name=>
 Your email=>not-an-email
 Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
 $PASSWORD_ANSWERS"
   assert_eq "$RC" 0
@@ -133,14 +138,15 @@ test_a_short_password_asks_again_and_states_the_rule_each_time() {
   sandbox_new
   run_install_tty "Instance name=>
 Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
-Password for the owner account=>short
+Password for owner@example.invalid=>short
 Repeat the password=>short
-Password for the owner account=>$SENTINEL_PASSWORD
+Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
   assert_flat_contains "$OUT" "The password needs at least 8 characters."
-  assert_eq "$(printf '%s' "$OUT" | grep -c 'Password for the owner account (8 to 72 characters)')" 2 "the rule is in both questions"
+  assert_eq "$(printf '%s' "$OUT" | grep -c 'Password for owner@example.invalid, 8 to 72 characters')" 2 "the rule is in both questions"
   assert_not_contains "$OUT" "short"
   assert_not_contains "$OUT" "$SENTINEL_PASSWORD"
   sandbox_drop
@@ -151,16 +157,17 @@ test_five_bad_passwords_stop() {
   sandbox_new
   run_install_tty "Instance name=>
 Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
-Password for the owner account=>a1
+Password for owner@example.invalid=>a1
 Repeat the password=>a1
-Password for the owner account=>a2
+Password for owner@example.invalid=>a2
 Repeat the password=>a2
-Password for the owner account=>a3
+Password for owner@example.invalid=>a3
 Repeat the password=>a3
-Password for the owner account=>a4
+Password for owner@example.invalid=>a4
 Repeat the password=>a4
-Password for the owner account=>a5
+Password for owner@example.invalid=>a5
 Repeat the password=>a5"
   assert_eq "$RC" 1
   assert_flat_contains "$OUT" "No valid password after 5 tries, so nothing was changed."
@@ -177,7 +184,7 @@ Your email=>owner@example.invalid
 "
   assert_eq "$RC" 1
   assert_contains "$OUT" "x Docker Compose 1.29.2 is too old"
-  assert_flat_contains "$OUT" "Next: Install the docker-compose-plugin package, then run this again."
+  assert_flat_contains "$OUT" "Next: Run install.sh docker to update it, then run this again."
   assert_flat_contains "$OUT" "Stopped before changing anything."
   assert_not_contains "$OUT" "Instance name"
   assert_not_contains "$OUT" "Go ahead?"
@@ -197,13 +204,13 @@ test_plan_words_and_nothing_printed_twice() {
   assert_not_contains "$OUT$ERR" "will do"
   assert_not_contains "$OUT$ERR" "[done]"
   assert_not_contains "$OUT$ERR" "[root]"
-  assert_flat_contains "$OUT" "> to do Create the state directory"
+  assert_flat_contains "$OUT" "> to do Create the folder"
   local after
   after=${OUT#*Building images (4 of 6)}
   assert_not_contains "$after" "to do" "the plan is not printed again"
-  assert_flat_contains "$after" "+ Built the app image"
-  assert_flat_contains "$after" "+ Built the speech-to-text image"
-  assert_flat_contains "$after" "+ Downloaded the sign-in image"
+  assert_flat_contains "$after" "+ Built the Aman app"
+  assert_flat_contains "$after" "+ Built the speech-to-text service"
+  assert_flat_contains "$after" "+ Downloaded the sign-in service"
   assert_flat_contains "$after" "+ Instance main is running and healthy"
   sandbox_drop
 }
@@ -213,7 +220,7 @@ test_status_words_in_ascii_by_default() {
   sandbox_new
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
-  assert_contains "$OUT" "> to do        Create the state directory"
+  assert_contains "$OUT" "> to do        Create the folder"
   assert_contains "$OUT" "! needs admin  Set up the sandbox on this computer"
   assert_not_contains "$OUT" "$ESC"
   sandbox_drop
@@ -225,7 +232,7 @@ test_utf8_symbols_without_color_when_not_a_terminal() {
   RUN_ENV_EXTRA=(LANG=C.UTF-8 TERM=xterm)
   run_install --dry-run --email owner@example.invalid
   assert_contains "$OUT" "✓ Linux on"
-  assert_contains "$OUT" "› to do        Create the state directory"
+  assert_contains "$OUT" "› to do        Create the folder"
   assert_contains "$OUT" "! needs admin  Set up the sandbox on this computer"
   assert_not_contains "$OUT$ERR" "$ESC"
   assert_not_contains "$OUT$ERR" $'\r'
@@ -243,11 +250,11 @@ test_color_is_on_markers_and_status_words_only() {
   run_install --dry-run --email owner@example.invalid
   assert_rc 0
   assert_contains "$OUT" "${ESC}[32m✓${ESC}[0m Linux on"
-  assert_contains "$OUT" "${ESC}[36m›${ESC}[0m ${ESC}[36mto do${ESC}[0m        Create the state directory"
+  assert_contains "$OUT" "${ESC}[36m›${ESC}[0m ${ESC}[36mto do${ESC}[0m        Create the folder"
   assert_contains "$OUT" "${ESC}[33m!${ESC}[0m ${ESC}[33mneeds admin${ESC}[0m  Set up the sandbox on this computer"
   assert_contains "$OUT" "${ESC}[1mThe plan${ESC}[0m ${ESC}[2m(3 of 6)${ESC}[0m"
   assert_contains "$OUT" "${ESC}[1;32mDry run: nothing was changed.${ESC}[0m"
-  assert_not_contains "$OUT" "${ESC}[36mCreate the state directory"
+  assert_not_contains "$OUT" "${ESC}[36mCreate the folder"
   sandbox_drop
 }
 
@@ -277,7 +284,7 @@ test_docker_output_stays_in_a_log() {
   assert_rc 0
   assert_not_contains "$OUT$ERR" "building with"
   assert_not_contains "$OUT$ERR" "Pulling from"
-  assert_flat_contains "$ERR" "Building the app image (the long step) log: $AMAN_HOME/state/logs/build-app.log"
+  assert_flat_contains "$ERR" "Building the Aman app (the long step) log: $AMAN_HOME/state/logs/build-app.log"
   assert_contains "$(cat "$AMAN_HOME/state/logs/build-app.log")" "building with"
   assert_mode "$AMAN_HOME/state/logs/build-app.log" 600
   assert_mode "$AMAN_HOME/state/logs" 700
@@ -294,7 +301,7 @@ test_a_failed_build_shows_the_log_tail_and_its_path() {
   run_install --yes --password-stdin --email owner@example.invalid
   clear_input
   assert_rc 1
-  assert_flat_contains "$ERR" "The app image build failed"
+  assert_flat_contains "$ERR" "Building the Aman app failed"
   assert_flat_contains "$ERR" "Last lines of the log:"
   assert_contains "$ERR" "build failed"
   assert_flat_contains "$ERR" "Full log: $AMAN_HOME/state/logs/build-app.log"

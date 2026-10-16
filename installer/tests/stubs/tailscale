@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# Test double for `tailscale`: the address in $STUB_TS_IP and the MagicDNS name in $STUB_TS_NAME.
+# Test double for `tailscale`: the address in $STUB_TS_IP and the MagicDNS name in $STUB_TS_NAME, with another machine
+# on the tailnet listed after this one. $STUB_TS_HANG makes it hang, like a wedged tailscaled.
+if [ -n "${STUB_TS_HANG:-}" ]; then sleep 30; fi
 case "$*" in
   "ip -4") echo "${STUB_TS_IP:-}" ;;
-  "status --json") printf '{\n  "Self": {\n    "DNSName": "%s.",\n    "TailscaleIPs": ["%s"]\n  }\n}\n' "${STUB_TS_NAME:-}" "${STUB_TS_IP:-}" ;;
+  "status --json")
+    printf '{\n  "Self": {\n    "HostName": "me",\n    "DNSName": "%s.",\n    "TailscaleIPs": ["%s"]\n  },\n  "Peer": {\n    "nodekey:abc": {\n      "DNSName": "other.example.ts.net.",\n      "TailscaleIPs": ["100.64.9.9"]\n    }\n  }\n}\n' \
+      "${STUB_TS_NAME:-}" "${STUB_TS_IP:-}"
+    ;;
   *) exit 1 ;;
 esac

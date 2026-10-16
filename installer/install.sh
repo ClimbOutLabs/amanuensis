@@ -6,7 +6,9 @@
 #        install.sh instance demo-seed [--reset]
 #        install.sh instance refresh <name>
 #        install.sh backup [<name>]
+#        install.sh backups daily|off
 #        install.sh upgrade [--check] [--force]
+#        install.sh docker
 set -euo pipefail
 # Everything written is private unless a file is deliberately made world-readable.
 umask 077
@@ -21,6 +23,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 
 # shellcheck source=lib/ui.sh
 . "$INSTALLER_DIR/lib/ui.sh"
+# shellcheck source=lib/shared.sh
+. "$INSTALLER_DIR/lib/shared.sh"
 # shellcheck source=lib/common.sh
 . "$INSTALLER_DIR/lib/common.sh"
 # shellcheck source=lib/diagnose.sh
@@ -29,6 +33,10 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/docker.sh"
 # shellcheck source=lib/network.sh
 . "$INSTALLER_DIR/lib/network.sh"
+# shellcheck source=lib/shellpath.sh
+. "$INSTALLER_DIR/lib/shellpath.sh"
+# shellcheck source=lib/schedule.sh
+. "$INSTALLER_DIR/lib/schedule.sh"
 # shellcheck source=lib/ports.sh
 . "$INSTALLER_DIR/lib/ports.sh"
 # shellcheck source=lib/secrets.sh
@@ -78,6 +86,8 @@ OPT_PURGE=0
 OPT_DEMO=0
 OPT_LOCAL_ONLY=0
 OPT_ADDRESSES=
+OPT_BACKUPS=
+OPT_BACKUPS_ARG=
 OPT_RESET=0
 OPT_NAME=
 OPT_INSTANCE=
@@ -115,7 +125,9 @@ Amanuensis installer
   install.sh instance demo-seed [--reset] [--instance NAME] [--demo-user ADDRESS]
   install.sh instance refresh <name>
   install.sh backup [<name>]
+  install.sh backups daily|off
   install.sh upgrade [--check] [--force]
+  install.sh docker               install or start Docker, or update its Compose plugin, asking before sudo
 
 Options
   --home DIR            state directory (default ~/.amanuensis)
@@ -140,6 +152,7 @@ Options
   --demo-user ADDRESS   the user the demo world is seeded for (default: the owner)
   --reset               with instance demo-seed, remove the synthetic demo records instead of seeding
   --local-only          open Aman only at 127.0.0.1 on this computer (by default it answers at every address this computer has on a private network, and at its names)
+  --backups daily|off   back up every day (default) or not, without asking
   --address HOST        also answer at this name or private address; repeat for more (for example --address spark.local)
   --public-url URL      https address of Aman behind your own reverse proxy; the ports then stay on 127.0.0.1
   --login-url URL       https address for the sign-in service behind the same proxy
@@ -197,12 +210,12 @@ parse_args() {
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
       --local-only) OPT_LOCAL_ONLY=1 ;;
-      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --token-factory-model | --token-factory-daily-cap | --demo-user)
+      --home | --name | --instance | --role | --email | --public-url | --login-url | --port | --login-port | --confirm-name | --tls | --public-ip | --address | --backups | --token-factory-model | --token-factory-daily-cap | --demo-user)
         [ "$#" -ge 2 ] || usage_die "$arg needs a value"
         set_option "$arg" "$2"
         shift
         ;;
-      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --token-factory-model=* | --token-factory-daily-cap=* | --demo-user=*)
+      --home=* | --name=* | --instance=* | --role=* | --email=* | --public-url=* | --login-url=* | --port=* | --login-port=* | --confirm-name=* | --tls=* | --public-ip=* | --address=* | --backups=* | --token-factory-model=* | --token-factory-daily-cap=* | --demo-user=*)
         set_option "${arg%%=*}" "${arg#*=}"
         ;;
       -*) usage_die "unknown option $arg" ;;
@@ -212,12 +225,13 @@ parse_args() {
         case "$positional:$COMMAND" in
           1:install)
             case "$arg" in
-              instance | backup | upgrade) COMMAND=$arg ;;
+              instance | backup | backups | upgrade | docker) COMMAND=$arg ;;
               *) usage_die "unknown command $arg" ;;
             esac
             ;;
           2:instance) SUBCOMMAND=$arg ;;
           3:instance | 2:backup) OPT_NAME=$arg ;;
+          2:backups) OPT_BACKUPS_ARG=$arg ;;
           *) usage_die "unexpected argument $arg" ;;
         esac
         ;;
@@ -246,6 +260,9 @@ set_option() {
       [ -z "$problem" ] || usage_die "$problem"
       OPT_ADDRESSES="${OPT_ADDRESSES:+$OPT_ADDRESSES }$2"
       ;;
+    --backups)
+      case "$2" in daily | off) OPT_BACKUPS=$2 ;; *) usage_die "--backups takes daily or off" ;; esac
+      ;;
     --token-factory-model) OPT_TF_MODEL=$2 ;;
     --token-factory-daily-cap) OPT_TF_CAP=$2 ;;
     --demo-user) OPT_DEMO_USER=$2 ;;
@@ -256,7 +273,7 @@ set_option() {
 print_signout_note() {
   if [ "$NEEDS_SIGNOUT" = 1 ]; then
     ui_newline
-    ui_warn "Docker access: this run used your new docker group membership without a re-login." "Sign out and back in (or run: newgrp docker) once so docker works in your other terminals."
+    ui_warn "Docker access: this run used your new docker group membership without a re-login." "Open a new terminal window once so Docker works in your other terminals."
   fi
 }
 
@@ -322,6 +339,8 @@ main() {
   case "$COMMAND" in
     install) cmd_install ;;
     backup) cmd_backup ;;
+    backups) cmd_backups ;;
+    docker) docker_fix ;;
     upgrade) cmd_upgrade ;;
     instance)
       case "$SUBCOMMAND" in

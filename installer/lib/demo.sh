@@ -44,7 +44,7 @@ demo_enable() {
   log_event "demo mode turned on for instance $name"
   say "Demo mode on for instance $name; restarting the app"
   dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 240 app || {
-    warn "the app of instance $name did not restart healthy. Look at: docker compose -p aman-$name logs --tail 50 app"
+    warn "The app of instance $name did not restart healthy. Run: aman doctor instance --fix"
     return 1
   }
 }

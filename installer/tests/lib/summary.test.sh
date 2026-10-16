@@ -15,7 +15,7 @@ ending() {
 TF_KEY=tf-key-0123456789abcdef
 
 test_fresh_install_without_a_model() {
-  t_begin "the ending of a fresh install with no model: the table, the model as a next step, and the upgrade line"
+  t_begin "the ending of a fresh install with no model: the table with the nearest addresses first, the model as a next step, the daily backup and the update line"
   sandbox_new
   fixture_network 192.168.1.20
   fixture_hostname spark
@@ -27,19 +27,22 @@ Checking the result (6 of 6)
 ------------------------------------------------------------------------
 Ready. Instance main is running.
 
-  + Open      http://127.0.0.1:8791
-              http://localhost:8791
-              http://192.168.1.20:8791
-              http://spark:8791
+  + Open      http://192.168.1.20:8791
               http://spark.local:8791
+              http://spark:8791
+              http://127.0.0.1:8791
+              http://localhost:8791
   + Sign in   owner@example.invalid
   > Model     not set: add one in Settings > Models
-  + Run code  on, in the gVisor sandbox
-  + Data      Docker volumes aman_main_data and aman_main_dex
-  > Backups   none yet. Make one:
-              <checkout>/installer/install.sh backup
-  On your home network sign-in is not encrypted; Tailscale encrypts it.
-  Upgrade later: <checkout>/installer/install.sh upgrade
+  + Run code  on, in a sandbox
+  + Data      saved in Docker
+  + Backups   daily, keeps the last 7
+  Sign-in on your home network is not encrypted. Use the Tailscale
+  address to keep it private.
+  Bookmark spark.local: it keeps working when this computer's address
+  changes.
+  Open a new terminal window to use the aman command.
+  Update later: aman upgrade
 ------------------------------------------------------------------------
 SNAP
 )"
@@ -67,11 +70,11 @@ Ready. Instance main is running.
   + Sign in   owner@example.invalid
   + Model     Token Factory, nvidia/nemotron-3-super-120b-a12b, limit
               500000 tokens a day
-  + Run code  on, in the gVisor sandbox
-  + Data      Docker volumes aman_main_data and aman_main_dex
-  > Backups   none yet. Make one:
-              <checkout>/installer/install.sh backup
-  Upgrade later: <checkout>/installer/install.sh upgrade
+  + Run code  on, in a sandbox
+  + Data      saved in Docker
+  + Backups   daily, keeps the last 7
+  Open a new terminal window to use the aman command.
+  Update later: aman upgrade
 ------------------------------------------------------------------------
 SNAP
 )"
@@ -100,12 +103,11 @@ Running, but the checks found a problem (listed above).
   + Open      http://127.0.0.1:8791
   + Sign in   owner@example.invalid
   > Model     not set: add one in Settings > Models
-  ! Run code  not ready: <home>/bin/aman doctor
-              sandbox --fix
-  + Data      Docker volumes aman_main_data and aman_main_dex
-  > Backups   none yet. Make one:
-              <checkout>/installer/install.sh backup
-  Upgrade later: <checkout>/installer/install.sh upgrade
+  ! Run code  not ready: aman doctor sandbox --fix
+  + Data      saved in Docker
+  + Backups   daily, keeps the last 7
+  Open a new terminal window to use the aman command.
+  Update later: aman upgrade
 ------------------------------------------------------------------------
 SNAP
 )"

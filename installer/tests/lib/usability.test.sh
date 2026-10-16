@@ -70,14 +70,14 @@ test_password_length_is_checked_up_front() {
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 2
-  assert_flat_contains "$ERR" "at most 72 bytes"
+  assert_flat_contains "$ERR" "at most 72 characters"
   assert_log_lacks "docker build"
   assert_no_path "$AMAN_HOME/state/instances"
   with_input "$wide
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 2
-  assert_flat_contains "$ERR" "at most 72 bytes"
+  assert_flat_contains "$ERR" "at most 72 characters"
   with_input "$long72
 "
   run_install --yes --password-stdin --email owner@example.invalid
@@ -125,8 +125,9 @@ test_end_of_input_at_the_password_prompt_aborts() {
   sandbox_new
   run_install_tty "Instance name=>
 Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
-Password for the owner account=><EOF>"
+Password for owner@example.invalid=><EOF>"
   assert_eq "$RC" 1
   assert_contains "$OUT" "No password was entered"
   assert_no_path "$AMAN_HOME/state/instances/main.conf"
@@ -140,13 +141,14 @@ test_prompts_and_summary_use_plain_words() {
   sandbox_new
   run_install_tty "Instance name=>
 Your email=>owner@example.invalid
+Back up automatically=>y
 Go ahead?=>y
-Password for the owner account=>$SENTINEL_PASSWORD
+Password for owner@example.invalid=>$SENTINEL_PASSWORD
 Repeat the password=>$SENTINEL_PASSWORD"
   assert_eq "$RC" 0
   assert_contains "$OUT" "Instance name (a-z, 0-9, hyphen; starts with a letter)"
   assert_contains "$OUT" "Your email, used to sign in"
-  assert_contains "$OUT" "Password for the owner account (8 to 72 characters)"
+  assert_contains "$OUT" "Password for owner@example.invalid, 8 to 72 characters"
   assert_not_contains "$OUT" "Address you will use" "no question about the address is asked"
   assert_not_contains "$(printf '%s' "$OUT" | tr '[:upper:]' '[:lower:]')" "loopback"
   assert_not_contains "$OUT" "not a page to open" "the sign-in service is not presented at all"

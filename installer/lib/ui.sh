@@ -18,7 +18,7 @@ UI_STEP_T0=0
 UI_STATUS_WIDTH=11
 UI_MAX_TRIES=5
 UI_FRAMES=("|" "/" "-" "\\")
-S_OK=+ S_WARN=! S_FAIL=x S_PROMPT=">" S_SKIP=- S_RULE=-
+S_OK=+ S_WARN=! S_FAIL=x S_PROMPT=">" S_SKIP=- S_RULE=- S_ELL=...
 
 # Decides symbols, color and width once. Color needs a terminal and no NO_COLOR; CLICOLOR_FORCE=1 is for tests.
 ui_init() {
@@ -58,10 +58,10 @@ ui_init() {
     if [ "$UI_WIDTH" -lt 40 ]; then UI_WIDTH=40; fi
   fi
   if [ "$UI_UTF8" = 1 ]; then
-    S_OK=✓ S_WARN=! S_FAIL=✗ S_PROMPT=› S_SKIP=· S_RULE=─
+    S_OK=✓ S_WARN=! S_FAIL=✗ S_PROMPT=› S_SKIP=· S_RULE=─ S_ELL=…
     UI_FRAMES=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧)
   else
-    S_OK=+ S_WARN=! S_FAIL=x S_PROMPT=">" S_SKIP=- S_RULE=-
+    S_OK=+ S_WARN=! S_FAIL=x S_PROMPT=">" S_SKIP=- S_RULE=- S_ELL=...
     UI_FRAMES=("|" "/" "-" "\\")
   fi
 }
@@ -333,7 +333,7 @@ ui_confirm() { # question y|n
       '') [ "$def" = y ] && return 0 || return 1 ;;
     esac
     tries=$((tries + 1))
-    ui_fail "Please answer yes or no."
+    ui_fail "Type y or n."
   done
   return 1
 }
@@ -362,8 +362,12 @@ ui_step_start() { # text [log file]
       n=${#UI_FRAMES[@]}
       shown=0
       while :; do
-        line="  ${UI_FRAMES[$((i % n))]} $text  $(ui_fmt_elapsed $((SECONDS - t0)))"
+        e=$((SECONDS - t0))
+        line="  ${UI_FRAMES[$((i % n))]} $text"
+        # A few seconds is noise; and one line never wraps, since a wrapped line cannot be redrawn in place.
+        if [ "$e" -ge 5 ]; then line="$line  $(ui_fmt_elapsed "$e")"; fi
         if [ -n "$note" ] && [ $((${#line} + 3 + ${#note})) -lt "$UI_WIDTH" ]; then line="$line   $note"; fi
+        if [ "${#line}" -ge "$UI_WIDTH" ]; then line="${line:0:$((UI_WIDTH - 4))}$S_ELL"; fi
         printf '\r%*s\r%s' "$shown" '' "$line" >&2
         shown=${#line}
         i=$((i + 1))

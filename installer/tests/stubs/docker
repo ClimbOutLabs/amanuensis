@@ -247,6 +247,11 @@ case "$cmd" in
         [ -f "$S/no_db/$vol" ] && exit 1
         exit 0
         ;;
+      *" test ! -e "*)
+        # Whether the folder is missing or searchable; a data volume listed in $S/unreadable is neither.
+        [ -f "$S/unreadable/$vol" ] && exit 1
+        exit 0
+        ;;
       *" tar "*)
         if [ -d "$S/scratchfs/$vol" ]; then
           tar -C "$S/scratchfs/$vol" -cf - .

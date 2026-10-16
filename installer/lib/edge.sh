@@ -207,7 +207,7 @@ edge_wait_ready() {
     i=$((i + 1))
     [ "$i" -lt "$EDGE_WAIT_TRIES" ] && sleep 5
   done
-  warn "$url did not answer over https yet. Caddy keeps trying; read why with: sudo journalctl -u caddy --no-pager -n 50"
+  warn "$url did not answer over https yet. Caddy keeps trying. Run aman doctor to see why."
   return 0
 }
 

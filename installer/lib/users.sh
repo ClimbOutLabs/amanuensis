@@ -30,7 +30,6 @@ user_record() { reg_get "$1" "user_$2"; }
 user_role() { local r; r=$(user_record "$1" "$2"); printf '%s' "${r%%:*}"; }
 user_email() { local r; r=$(user_record "$1" "$2"); printf '%s' "${r#*:}"; }
 
-lowercase() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 # The name of the user (owner included) who already signs in with this email, if any.
 user_with_email() {
@@ -149,7 +148,7 @@ users_apply() {
   fi
   say "Restarting the sign-in service and the app of instance $name"
   dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 240 dex app ||
-    die "instance $name did not restart healthy. Look at: docker compose -p aman-$name logs --tail 50"
+    die "Instance $name did not restart healthy. Run: aman doctor instance --fix"
 }
 
 # A readable one-time password: 96 random bits, grouped for typing.

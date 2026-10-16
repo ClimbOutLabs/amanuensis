@@ -20,7 +20,23 @@ export const DAEMON_TIME = '2026-10-10T12:00:00.123456789Z';
 export const GIB_KB = 1024 * 1024;
 export const GIB = 1024 * 1024 * 1024;
 
-const SYSTEM_TOOLS = ['bash', 'sed', 'awk', 'tr', 'cut', 'head', 'date', 'stat', 'timeout', 'cat', 'env', 'dirname', 'grep', 'uname', 'wc'];
+const SYSTEM_TOOLS = [
+  'bash',
+  'sed',
+  'awk',
+  'tr',
+  'cut',
+  'head',
+  'date',
+  'stat',
+  'timeout',
+  'cat',
+  'env',
+  'dirname',
+  'grep',
+  'uname',
+  'wc',
+];
 
 const FAKE_DOCKER = `#!/usr/bin/env bash
 dir="$FAKE_DOCKER_DIR"
@@ -36,6 +52,9 @@ case "$1" in
   port) key="port_$2" ;;
   exec) shift; while [ "$1" = -e ]; do shift 2; done; key="exec_$1" ;;
   image) eval "last=\\\${$#}"; key="image_$(sanitize "$last")" ;;
+  images) key=images ;;
+  rmi) key=rmi ;;
+  builder) key=builder ;;
   *) key=unknown ;;
 esac
 if [ ! -e "$dir/$key.out" ] && [ ! -e "$dir/$key.rc" ] && [ ! -e "$dir/$key.err" ]; then
@@ -121,6 +140,8 @@ export function createWorld({ instances = ['main'] } = {}) {
       symlinkSync(found, path.join(tools, tool));
     }
   }
+
+  writeFileSync(path.join(root, 'os-release'), 'ID=ubuntu\n');
 
   const world = {
     root,
@@ -209,7 +230,7 @@ export function createWorld({ instances = ['main'] } = {}) {
       for (const name of wired) {
         writeFileSync(
           path.join(world.instanceDir(name), 'compose.yaml'),
-          'services:\n  app:\n    environment:\n      SANDBOX_BACKEND: slots\n',
+          "services:\n  app:\n    environment:\n      SANDBOX_BACKEND: slots\n      SANDBOX_SLOTS: '4'\n      SANDBOX_SLOTS_DIR: /run/aman-slots\n",
         );
       }
       return repo;
@@ -233,21 +254,38 @@ export function createWorld({ instances = ['main'] } = {}) {
       writeFileSync(path.join(fake, `curl_${key}.body`), body);
     },
     /** An instance opened on the local network: its record lists the origins it answers at and `ip` reports this computer's addresses. */
-    network(name, { origins = 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791', addresses = ['127.0.0.1', '192.168.1.20'], extraHosts = '' } = {}) {
+    network(
+      name,
+      {
+        origins = 'http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791',
+        addresses = ['127.0.0.1', '192.168.1.20'],
+        extraHosts = '',
+      } = {},
+    ) {
       const dir = path.join(home, 'state', 'instances');
       mkdirSync(dir, { recursive: true });
       writeFileSync(
         path.join(dir, `${name}.conf`),
         `name=${name}\napp_port=8791\npublic_url=http://127.0.0.1:8791\norigins=${origins}\nextra_hosts=${extraHosts}\n`,
       );
-      const lines = addresses.map((address, index) => `${index + 1}: eth0    inet ${address}/24 scope global eth0`).join('\\n');
+      const lines = addresses
+        .map((address, index) => `${index + 1}: eth0    inet ${address}/24 scope global eth0`)
+        .join('\\n');
       world.install('ip', `#!/usr/bin/env bash\nprintf '${lines}\\n'\n`);
+    },
+    /** `crontab -l` prints this table; without a call to this, there is no crontab command at all. */
+    crontab(text) {
+      world.install('crontab', '#!/usr/bin/env bash\ncase "$1" in -l) cat "$FAKE_DOCKER_DIR/crontab" ;; esac\n');
+      writeFileSync(path.join(fake, 'crontab'), text);
     },
     /** A stand-in for the installer in the recorded checkout, so a fix can be seen to call it. */
     installerStub(repo, { rc = 0 } = {}) {
       const dir = path.join(repo, 'installer');
       mkdirSync(dir, { recursive: true });
-      writeFileSync(path.join(dir, 'install.sh'), `#!/usr/bin/env bash\necho "install.sh $*" >> "$FAKE_DOCKER_DIR/calls.log"\nexit ${rc}\n`);
+      writeFileSync(
+        path.join(dir, 'install.sh'),
+        `#!/usr/bin/env bash\necho "install.sh $*" >> "$FAKE_DOCKER_DIR/calls.log"\nexit ${rc}\n`,
+      );
     },
     psLine({ id, name, state = 'running', status = 'Up 2 minutes', service }) {
       return `${id}|${name}|${state}|${status}|${service}`;
@@ -274,6 +312,7 @@ export function createWorld({ instances = ['main'] } = {}) {
           DOCKER_CONFIG: dockerConfig,
           FAKE_DOCKER_DIR: fake,
           AMAN_DOCTOR_NOW: String(world.now),
+          AMAN_OS_RELEASE: path.join(root, 'os-release'),
           ...env,
         },
       });
