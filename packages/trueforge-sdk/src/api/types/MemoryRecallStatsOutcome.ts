@@ -2,10 +2,10 @@
 
 /** ok: recall returned memory. empty: recall found none. timeout/error: recall failed; the turn proceeded anyway. skipped: recall was skipped (e.g., user disabled memory for this session, or for sandbox sessions). The curated and reflect layers (see `layers`) can still put a block in front of the model when recall itself found nothing. */
 export const MemoryRecallStatsOutcome = {
-    Ok: "ok",
-    Empty: "empty",
-    Timeout: "timeout",
-    Error: "error",
-    Skipped: "skipped",
-} as const;
-export type MemoryRecallStatsOutcome = (typeof MemoryRecallStatsOutcome)[keyof typeof MemoryRecallStatsOutcome];
+        Ok: "ok",
+        Empty: "empty",
+        Timeout: "timeout",
+        Error: "error",
+        Skipped: "skipped"
+    } as const;
+export type MemoryRecallStatsOutcome = typeof MemoryRecallStatsOutcome[keyof typeof MemoryRecallStatsOutcome];

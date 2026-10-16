@@ -11,9 +11,22 @@ import { TurnSchema, type Turn, type TurnInputItem } from '@truefoundry/trueforg
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import { ListSessionEventsResponseSchema, TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema, ListTurnsResponseSchema } from '../../../src/schemas/turn';
-import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
-import { INERT_ECHO_TOOL, INERT_READ_TOOL, INERT_SERVER_NAME, INERT_WRITE_TOOL } from '../../fixtures/inertMcpServer';
-import { RUN_DIRECTIVE_PREFIX } from '../../fixtures/scriptedModelServer';
+import {
+  INERT_MEMORY_SERVER_NAME,
+  MODEL_FQN,
+  startApprovalTestServer,
+  type ApprovalTestServer,
+} from '../../fixtures/approvalTestServer';
+import {
+  INERT_ASK_MEMORY_TOOL,
+  INERT_ECHO_TOOL,
+  INERT_READ_TOOL,
+  INERT_SERVER_NAME,
+  INERT_UNANNOTATED_TOOL,
+  INERT_WRITE_TOOL,
+  startInertMcpServer,
+} from '../../fixtures/inertMcpServer';
+import { RUN_DIRECTIVE_PREFIX, THREE_AT_ONCE_DIRECTIVE } from '../../fixtures/scriptedModelServer';
 
 const TURN_TIMEOUT_MS = 60_000;
 
@@ -53,6 +66,33 @@ const AGENT_SPEC = {
   },
 };
 
+/** AGENT_SPEC without the literal that force-gates `inert_read`, so an Always allow grant can take effect. */
+const UNFORCED_AGENT_SPEC = {
+  ...AGENT_SPEC,
+  mcp_servers: [
+    { name: INERT_SERVER_NAME, preload: true, require_approval_for_tools: ['@write', '@destructive', '@unclassified'] },
+  ],
+};
+
+/**
+ * Mounts the memory-provider connector, which the server marked first-party when it was set up.
+ * Same default gating as UNFORCED_AGENT_SPEC.
+ */
+function firstPartyAgentSpec(requireApprovalForTools: string[] = ['@write', '@destructive', '@unclassified']) {
+  return {
+    ...AGENT_SPEC,
+    mcp_servers: [
+      { name: INERT_MEMORY_SERVER_NAME, preload: true, require_approval_for_tools: requireApprovalForTools },
+    ],
+  };
+}
+
+const ToolGrantsResponseSchema = z.object({ data: z.array(z.object({ tool_name: z.string() }).loose()) });
+
+const AuditLogResponseSchema = z.object({
+  entries: z.array(z.object({ tier: z.number(), tool_name: z.string(), outcome: z.string() }).loose()),
+});
+
 function jsonInit(body: unknown): RequestInit {
   return { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
@@ -68,13 +108,13 @@ function approvalInput({
 }: {
   thread_id: string;
   tool_call_id: string;
-  approval: { status: 'allow'; scope?: 'once' | 'chat' } | { status: 'deny'; reason?: string };
+  approval: { status: 'allow'; scope?: 'once' | 'chat' | 'always' } | { status: 'deny'; reason?: string };
 }): TurnInputItem[] {
   return [{ type: 'user.tool_approval', thread_id, tool_call_id, approval }];
 }
 
-async function createSession(server: ApprovalTestServer): Promise<string> {
-  const response = await server.request('/api/v1/sessions', jsonInit({ agent: { spec: AGENT_SPEC } }));
+async function createSession(server: ApprovalTestServer, spec: object = AGENT_SPEC): Promise<string> {
+  const response = await server.request('/api/v1/sessions', jsonInit({ agent: { spec } }));
   const body: unknown = await response.json();
   if (response.status !== 201) {
     throw new Error(`session create failed (${String(response.status)}): ${JSON.stringify(body)}`);
@@ -282,11 +322,43 @@ async function pauseOnRead(server: ApprovalTestServer): Promise<{ sessionId: str
   return { sessionId, turn };
 }
 
+async function auditEntries({ server, sessionId }: { server: ApprovalTestServer; sessionId: string }) {
+  const audit = await server.request(`/api/v1/sessions/${sessionId}/audit-log`);
+  expect(audit.status).toBe(200);
+  return AuditLogResponseSchema.parse(await audit.json()).entries;
+}
+
+/** Saves the memory connector the way the settings page does, so the server re-decides its trust. */
+async function saveMemoryConnector({
+  server,
+  url,
+  memoryProvider,
+}: {
+  server: ApprovalTestServer;
+  url: string;
+  memoryProvider: boolean;
+}) {
+  const response = await server.request('/api/v1/settings/mcp-servers', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      manifest: {
+        type: 'remote',
+        name: INERT_MEMORY_SERVER_NAME,
+        url,
+        description: 'Inert connector registered as the memory provider.',
+        ...(memoryProvider ? { memory_provider: true } : {}),
+      },
+    }),
+  });
+  expect(response.status).toBe(200);
+}
+
 describe('approval gate over an inert connector', () => {
   let server: ApprovalTestServer;
 
   beforeAll(async () => {
-    server = await startApprovalTestServer();
+    server = await startApprovalTestServer({ memoryProvider: true });
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -298,17 +370,163 @@ describe('approval gate over an inert connector', () => {
   });
 
   it(
-    'autoruns a read-only annotated tool without requiring an action',
+    'asks before a read-only tool on a user-added connector runs, whatever its hints claim',
     async () => {
-      const sessionId = await createSession(server);
-      const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ECHO_TOOL) });
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const echo = await runTurn({ server, sessionId, input: userMessage(INERT_ECHO_TOOL) });
+      expect(pendingApproval(echo)).toBeDefined();
+      expect(server.mcp.echoInvocations()).toBe(0);
 
-      expect(requiredActions(turn)).toEqual([]);
-      expect(server.mcp.echoInvocations()).toBe(1);
-      expect(server.mcp.writeInvocations()).toBe(0);
+      const otherSessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const read = await runTurn({ server, sessionId: otherSessionId, input: userMessage(INERT_READ_TOOL) });
+      expect(pendingApproval(read)).toBeDefined();
+      expect(server.mcp.readInvocations()).toBe(0);
     },
     TURN_TIMEOUT_MS,
   );
+
+  describe('first-party connector (the memory provider)', () => {
+    it(
+      'autoruns a read-only annotated tool and records the run in the audit log',
+      async () => {
+        const sessionId = await createSession(server, firstPartyAgentSpec());
+        const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+
+        expect(requiredActions(turn)).toEqual([]);
+        expect(server.mcp.askMemoryInvocations()).toBe(1);
+        expect(await auditEntries({ server, sessionId })).toEqual([
+          expect.objectContaining({
+            tier: 1,
+            tool_name: INERT_ASK_MEMORY_TOOL,
+            outcome: 'logged',
+            description: expect.stringContaining('First-party'),
+          }),
+        ]);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'asks for the same tool on a user-added connector with identical hints',
+      async () => {
+        const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+
+        expect(pendingApproval(turn)).toBeDefined();
+        expect(server.mcp.askMemoryInvocations()).toBe(0);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it.each([
+      ['a read-only tool that does not declare itself closed-world', INERT_ECHO_TOOL, 'echoInvocations'],
+      ['a write tool', INERT_WRITE_TOOL, 'writeInvocations'],
+      ['an unannotated tool', INERT_UNANNOTATED_TOOL, 'unannotatedInvocations'],
+    ] as const)(
+      'still asks for %s',
+      async (_label, tool, invocations) => {
+        const sessionId = await createSession(server, firstPartyAgentSpec());
+        const turn = await runTurn({ server, sessionId, input: userMessage(tool) });
+
+        expect(pendingApproval(turn)).toBeDefined();
+        expect(server.mcp[invocations]()).toBe(0);
+        expect(await auditEntries({ server, sessionId })).toEqual([]);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'still asks when an explicit require-approval selector names the tool, and audits no autorun',
+      async () => {
+        const spec = firstPartyAgentSpec(['@write', '@destructive', '@unclassified', INERT_ASK_MEMORY_TOOL]);
+        const sessionId = await createSession(server, spec);
+        const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+
+        expect(pendingApproval(turn)).toBeDefined();
+        expect(server.mcp.askMemoryInvocations()).toBe(0);
+        expect(await auditEntries({ server, sessionId })).toEqual([]);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'refuses a listed origin that answers with a redirect to another host, so the tool never runs there',
+      async () => {
+        // An origin the operator never listed, which would serve the same routes if it were followed.
+        const elsewhere = await startInertMcpServer();
+        try {
+          server.mcp.redirectAllTo({ to: elsewhere.origin, status: 302 });
+          const sessionId = await createSession(server, firstPartyAgentSpec());
+          const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+
+          expect(turn.state).toMatchObject({
+            status: 'error',
+            message: `Failed to connect to remote MCP server '${INERT_MEMORY_SERVER_NAME}': server answered HTTP 302 with a redirect to ${elsewhere.origin}, and this connection does not follow redirects`,
+          });
+          expect(server.mcp.askMemoryInvocations()).toBe(0);
+          expect(elsewhere.requestsSeen()).toBe(0);
+          expect(elsewhere.askMemoryInvocations()).toBe(0);
+        } finally {
+          await elsewhere.close();
+        }
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'refuses the same redirect when the connector page tests the connection',
+      async () => {
+        const elsewhere = await startInertMcpServer();
+        try {
+          // A 307 keeps the request, so following it would have reached a server that answers.
+          server.mcp.redirectAllTo({ to: elsewhere.origin, status: 307 });
+          const response = await server.request(`/api/v1/mcp-servers/${INERT_MEMORY_SERVER_NAME}/tools`);
+
+          expect(response.status).toBe(502);
+          expect(await response.json()).toEqual({
+            error: {
+              message: `Failed to connect to remote MCP server '${INERT_MEMORY_SERVER_NAME}': server answered HTTP 307 with a redirect to ${elsewhere.origin}, and this connection does not follow redirects`,
+            },
+          });
+          expect(elsewhere.requestsSeen()).toBe(0);
+        } finally {
+          await elsewhere.close();
+        }
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    // Last in this block: it repoints the shared connector, then restores it through setup.
+    it(
+      'keeps trust on another bank of the same origin, and asks once the connector moves to an origin the operator did not list',
+      async () => {
+        // Answers the memory provider check like any server, but the operator never listed its origin.
+        const elsewhere = await startInertMcpServer();
+        try {
+          await saveMemoryConnector({ server, url: `${server.mcp.url}/other`, memoryProvider: true });
+          const sameOrigin = await createSession(server, firstPartyAgentSpec());
+          const ran = await runTurn({ server, sessionId: sameOrigin, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+          expect(requiredActions(ran)).toEqual([]);
+          expect(server.mcp.askMemoryInvocations()).toBe(1);
+
+          await saveMemoryConnector({ server, url: elsewhere.memoryProviderUrl, memoryProvider: true });
+          const moved = await createSession(server, firstPartyAgentSpec());
+          const asked = await runTurn({ server, sessionId: moved, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+          expect(pendingApproval(asked)).toBeDefined();
+          expect(elsewhere.askMemoryInvocations()).toBe(0);
+        } finally {
+          await saveMemoryConnector({ server, url: server.mcp.memoryProviderUrl, memoryProvider: true });
+          await elsewhere.close();
+        }
+
+        const restored = await createSession(server, firstPartyAgentSpec());
+        const again = await runTurn({ server, sessionId: restored, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+        expect(requiredActions(again)).toEqual([]);
+        expect(server.mcp.askMemoryInvocations()).toBe(2);
+      },
+      TURN_TIMEOUT_MS,
+    );
+  });
 
   it(
     'pauses the write tool before it executes',
@@ -318,6 +536,24 @@ describe('approval gate over an inert connector', () => {
       expect(requiredActions(turn)).not.toEqual([]);
       expect(pendingApproval(turn)).toBeDefined();
       expect(server.mcp.writeInvocations()).toBe(0);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'carries the Tier 3 tier and plain-language card on the pending approval',
+    async () => {
+      // The approval UI renders its Tier 3 card from these fields; the wire tool_info omits them.
+      const { turn } = await pauseOnWrite(server);
+      if (turn.state.status !== 'done') {
+        throw new Error(`turn is not done: ${JSON.stringify(turn.state)}`);
+      }
+      const action = turn.state.required_actions.find(entry => entry.type === 'tool.approval_required');
+      const ref = action?.type === 'tool.approval_required' ? action.tool_calls[0] : undefined;
+
+      expect(ref?.tier).toBe(3);
+      expect(ref?.tier3_card?.plain_what).toEqual(expect.any(String));
+      expect(ref?.tier3_card?.plain_what).not.toBe('');
     },
     TURN_TIMEOUT_MS,
   );
@@ -440,6 +676,158 @@ describe('approval gate over an inert connector', () => {
     },
     TURN_TIMEOUT_MS,
   );
+
+  describe('Always allow this tool', () => {
+    async function listToolGrants(): Promise<string[]> {
+      const response = await server.request(`/api/v1/mcp-servers/${INERT_SERVER_NAME}/tool-grants`);
+      expect(response.status).toBe(200);
+      return ToolGrantsResponseSchema.parse(await response.json()).data.map(grant => grant.tool_name);
+    }
+
+    async function revokeToolGrant(toolName: string): Promise<void> {
+      const response = await server.request(`/api/v1/mcp-servers/${INERT_SERVER_NAME}/tool-grants/${toolName}`, {
+        method: 'DELETE',
+      });
+      expect(response.status).toBe(200);
+    }
+
+    async function alwaysAllow(toolName: string): Promise<void> {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const paused = await runTurn({ server, sessionId, input: userMessage(toolName) });
+      const pending = pendingApproval(paused);
+      if (!pending) {
+        throw new Error(`expected ${toolName} to ask before its first run`);
+      }
+      const resumed = await runTurn({
+        server,
+        sessionId,
+        input: approvalInput({ ...pending, approval: { status: 'allow', scope: 'always' } }),
+      });
+      expect(requiredActions(resumed)).toEqual([]);
+    }
+
+    afterEach(async () => {
+      for (const toolName of await listToolGrants()) {
+        await revokeToolGrant(toolName);
+      }
+    });
+
+    it(
+      'runs the approved call, skips the card in a later chat, and records the auto-run in the audit log',
+      async () => {
+        await alwaysAllow(INERT_READ_TOOL);
+        expect(server.mcp.readInvocations()).toBe(1);
+        expect(await listToolGrants()).toEqual([INERT_READ_TOOL]);
+
+        const laterSessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        const later = await runTurn({ server, sessionId: laterSessionId, input: userMessage(INERT_READ_TOOL) });
+        expect(requiredActions(later)).toEqual([]);
+        expect(server.mcp.readInvocations()).toBe(2);
+
+        const audit = await server.request(`/api/v1/sessions/${laterSessionId}/audit-log`);
+        expect(audit.status).toBe(200);
+        expect(AuditLogResponseSchema.parse(await audit.json()).entries).toEqual([
+          expect.objectContaining({ tier: 1, tool_name: INERT_READ_TOOL, outcome: 'logged' }),
+        ]);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'still shows a card when a selector gates a call the standing grant let through',
+      async () => {
+        await alwaysAllow(INERT_READ_TOOL);
+
+        // AGENT_SPEC force-gates inert_read by name, so the grant makes it Tier 1 but the selector still asks.
+        const sessionId = await createSession(server);
+        const gated = await runTurn({ server, sessionId, input: userMessage(INERT_READ_TOOL) });
+        if (gated.state.status !== 'done') {
+          throw new Error(`turn is not done: ${JSON.stringify(gated.state)}`);
+        }
+        const ref = gated.state.required_actions.flatMap(action =>
+          action.type === 'tool.approval_required' ? action.tool_calls : [],
+        )[0];
+
+        expect(ref?.tier).toBe(3);
+        expect(ref?.tier3_card?.plain_what).toContain(INERT_READ_TOOL);
+        expect(ref?.tier3_card?.outbound_text).toContain('text: inert');
+        expect(server.mcp.readInvocations()).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'covers only the approved tool on that connector',
+      async () => {
+        await alwaysAllow(INERT_READ_TOOL);
+
+        const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        const other = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+        expect(pendingApproval(other)).toBeDefined();
+        expect(server.mcp.askMemoryInvocations()).toBe(0);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'asks again once the grant is revoked from settings',
+      async () => {
+        await alwaysAllow(INERT_READ_TOOL);
+        await revokeToolGrant(INERT_READ_TOOL);
+        expect(await listToolGrants()).toEqual([]);
+
+        const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        const again = await runTurn({ server, sessionId, input: userMessage(INERT_READ_TOOL) });
+        expect(pendingApproval(again)).toBeDefined();
+        expect(server.mcp.readInvocations()).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'still asks when an explicit require-approval selector names the always-allowed tool',
+      async () => {
+        await alwaysAllow(INERT_READ_TOOL);
+
+        const sessionId = await createSession(server);
+        const gated = await runTurn({ server, sessionId, input: userMessage(INERT_READ_TOOL) });
+        expect(pendingApproval(gated)).toBeDefined();
+        expect(server.mcp.readInvocations()).toBe(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'refuses Always allow for a read-only tool that does not declare itself closed-world',
+      async () => {
+        const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+        const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ECHO_TOOL) });
+        const pending = pendingApproval(turn);
+        expect(pending).toBeDefined();
+        if (!pending) {
+          return;
+        }
+
+        const response = await server.request(
+          `/api/v1/sessions/${sessionId}/turns`,
+          jsonInit({
+            input: approvalInput({ ...pending, approval: { status: 'allow', scope: 'always' } }),
+            stream: false,
+          }),
+        );
+        expect(response.status).toBe(422);
+        const parsed = RequestErrorResponseSchema.safeParse(await response.json());
+        expect(parsed.success).toBe(true);
+        if (parsed.success) {
+          expect(parsed.data.error.message).toContain('always-allow approval is not available');
+        }
+        expect(server.mcp.echoInvocations()).toBe(0);
+        expect(await listToolGrants()).toEqual([]);
+        expect(pendingApproval(await getTurn({ server, sessionId, turnId: turn.id }))).toEqual(pending);
+      },
+      TURN_TIMEOUT_MS,
+    );
+  });
 
   it(
     'denies with a reason, runs nothing, and lets the model continue to a terminal state',
@@ -650,6 +1038,382 @@ describe('approval gate over an inert connector', () => {
         expect(results.filter(result => result.tool_call_id === callId)).toHaveLength(1);
       }
       expect(server.mcp.writeInvocations()).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('memory provider on an origin the operator did not list', () => {
+  let server: ApprovalTestServer;
+
+  beforeAll(async () => {
+    // No origin is listed, as on any server that never set FIRST_PARTY_MCP_ORIGINS.
+    server = await startApprovalTestServer();
+  }, TURN_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  beforeEach(() => {
+    server.mcp.resetInvocations();
+  });
+
+  it(
+    'keeps a hostile memory provider user-added, so its read-only closed-world tool still asks',
+    async () => {
+      // The server answers the setup check and declares ask_memory read-only and closed-world,
+      // which is everything a hostile server needs to say.
+      await saveMemoryConnector({ server, url: server.mcp.memoryProviderUrl, memoryProvider: true });
+      const sessionId = await createSession(server, firstPartyAgentSpec());
+      const turn = await runTurn({ server, sessionId, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+
+      expect(pendingApproval(turn)).toBeDefined();
+      expect(server.mcp.askMemoryInvocations()).toBe(0);
+      expect(await auditEntries({ server, sessionId })).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'trusts it only once the operator lists the origin and the provider is saved again, and stops when the origin is removed',
+    async () => {
+      await saveMemoryConnector({ server, url: server.mcp.memoryProviderUrl, memoryProvider: true });
+
+      // Listing the origin changes nothing for a provider that was saved before.
+      server.setFirstPartyOrigins([server.mcp.origin]);
+      const beforeSave = await createSession(server, firstPartyAgentSpec());
+      const asked = await runTurn({ server, sessionId: beforeSave, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+      expect(pendingApproval(asked)).toBeDefined();
+      expect(server.mcp.askMemoryInvocations()).toBe(0);
+
+      // Saving it again re-runs the setup check and marks it.
+      await saveMemoryConnector({ server, url: server.mcp.memoryProviderUrl, memoryProvider: true });
+      const afterSave = await createSession(server, firstPartyAgentSpec());
+      const ran = await runTurn({ server, sessionId: afterSave, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+      expect(requiredActions(ran)).toEqual([]);
+      expect(server.mcp.askMemoryInvocations()).toBe(1);
+
+      // Removing the origin takes effect on the next turn, with no save.
+      server.setFirstPartyOrigins([]);
+      const afterRemoval = await createSession(server, firstPartyAgentSpec());
+      const askedAgain = await runTurn({ server, sessionId: afterRemoval, input: userMessage(INERT_ASK_MEMORY_TOOL) });
+      expect(pendingApproval(askedAgain)).toBeDefined();
+      expect(server.mcp.askMemoryInvocations()).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('web search provider over an inert connector', () => {
+  let server: ApprovalTestServer;
+
+  /** Assembled at run time so no literal here looks like a credential to a scanner. */
+  const syntheticAwsKeyId = ['AKI', 'A', 'ABCDEFGH', 'IJKLMNOP'].join('');
+
+  /** The user's own switch, set through the same route the settings page uses. */
+  async function setSearchWithoutAsking(value: boolean) {
+    const response = await server.request('/api/v1/user/settings/sentinel', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ search_without_asking: value }),
+    });
+    expect(response.status).toBe(200);
+  }
+
+  /** Designates the inert connector (or clears the role) the way the settings page does. */
+  async function designateSearchProvider(designated: boolean) {
+    const response = await server.request('/api/v1/settings/mcp-servers', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        manifest: {
+          type: 'remote',
+          name: INERT_SERVER_NAME,
+          url: server.mcp.url,
+          description: 'Inert connector used by approval-flow tests.',
+          ...(designated ? { search_provider: true } : {}),
+        },
+      }),
+    });
+    expect(response.status).toBe(200);
+  }
+
+  function searchMessage(text: string): TurnInputItem[] {
+    return [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}${INERT_ECHO_TOOL} text:${text}` }];
+  }
+
+  /** The `silent_search_query` the server stamped on any tool call of the session, as the chat would draw its chip. */
+  async function stampedQueries(sessionId: string): Promise<string[]> {
+    const ToolCallsSchema = z.object({
+      type: z.literal('model.message'),
+      tool_calls: z
+        .array(z.object({ tool_info: z.object({ silent_search_query: z.string().optional() }).loose() }).loose())
+        .optional(),
+    });
+    const queries: string[] = [];
+    for (const item of await listSessionEvents(server, sessionId)) {
+      const parsed = ToolCallsSchema.safeParse(item.event);
+      for (const call of parsed.success ? (parsed.data.tool_calls ?? []) : []) {
+        if (call.tool_info.silent_search_query !== undefined) {
+          queries.push(call.tool_info.silent_search_query);
+        }
+      }
+    }
+    return queries;
+  }
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer();
+  }, TURN_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  beforeEach(async () => {
+    server.mcp.resetInvocations();
+    await setSearchWithoutAsking(true);
+    await designateSearchProvider(true);
+  });
+
+  it(
+    'runs the designated provider’s tool without asking, stamps the chip text on the call, and audits the run',
+    async () => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: searchMessage('tallest-building-in-Lisbon') });
+
+      expect(requiredActions(turn)).toEqual([]);
+      expect(server.mcp.echoInvocations()).toBe(1);
+      expect(await stampedQueries(sessionId)).toEqual(['tallest-building-in-Lisbon']);
+      expect(await auditEntries({ server, sessionId })).toEqual([
+        expect.objectContaining({
+          tier: 1,
+          tool_name: INERT_ECHO_TOOL,
+          outcome: 'logged',
+          description: 'Searched: tallest-building-in-Lisbon',
+        }),
+      ]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'still asks for the same tool once the connector is no longer the designated provider',
+    async () => {
+      await designateSearchProvider(false);
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: searchMessage('tallest-building-in-Lisbon') });
+
+      expect(pendingApproval(turn)).toBeDefined();
+      expect(server.mcp.echoInvocations()).toBe(0);
+      expect(await stampedQueries(sessionId)).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it.each([
+    ['an unannotated tool', INERT_UNANNOTATED_TOOL, 'unannotatedInvocations'],
+    ['a write tool', INERT_WRITE_TOOL, 'writeInvocations'],
+  ] as const)(
+    'still asks for %s on the designated connector, because the role does not make a connector’s other tools silent',
+    async (_label, tool, counter) => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: userMessage(tool) });
+
+      expect(pendingApproval(turn)).toBeDefined();
+      expect(server.mcp[counter]()).toBe(0);
+      expect(await stampedQueries(sessionId)).toEqual([]);
+      expect(await auditEntries({ server, sessionId })).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'asks when the user switched searches to Ask, and runs again once they switch back',
+    async () => {
+      await setSearchWithoutAsking(false);
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const asked = await runTurn({ server, sessionId, input: searchMessage('tallest-building-in-Lisbon') });
+      expect(pendingApproval(asked)).toBeDefined();
+      expect(server.mcp.echoInvocations()).toBe(0);
+
+      await setSearchWithoutAsking(true);
+      const otherSessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const ran = await runTurn({
+        server,
+        sessionId: otherSessionId,
+        input: searchMessage('tallest-building-in-Lisbon'),
+      });
+      expect(requiredActions(ran)).toEqual([]);
+      expect(server.mcp.echoInvocations()).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'holds a query that carries a key for approval instead of running it, with the exact query on the card',
+    async () => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const turn = await runTurn({ server, sessionId, input: searchMessage(syntheticAwsKeyId) });
+
+      expect(pendingApproval(turn)).toBeDefined();
+      expect(server.mcp.echoInvocations()).toBe(0);
+      expect(await stampedQueries(sessionId)).toEqual([]);
+      const events = await listSessionEvents(server, sessionId);
+      expect(JSON.stringify(events)).toContain(syntheticAwsKeyId);
+      expect(await auditEntries({ server, sessionId })).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'runs the held query only after the user approves it, once',
+    async () => {
+      const sessionId = await createSession(server, UNFORCED_AGENT_SPEC);
+      const held = await runTurn({ server, sessionId, input: searchMessage(syntheticAwsKeyId) });
+      const pending = pendingApproval(held);
+      if (pending === undefined) {
+        throw new Error('expected the query to wait for approval');
+      }
+
+      const approved = await runTurn({
+        server,
+        sessionId,
+        previousTurnId: held.id,
+        input: approvalInput({ ...pending, approval: { status: 'allow' } }),
+      });
+      expect(requiredActions(approved)).toEqual([]);
+      expect(server.mcp.echoInvocations()).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('three connector calls pending in one turn', () => {
+  let server: ApprovalTestServer;
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer({ memoryProvider: true });
+  }, TURN_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  beforeEach(() => {
+    server.mcp.resetInvocations();
+  });
+
+  /** Every pending approval of a paused turn, in the order the model asked for them. */
+  function pendingApprovals(turn: Turn): PendingApproval[] {
+    if (turn.state.status !== 'done') {
+      throw new Error(`turn is not done: ${JSON.stringify(turn.state)}`);
+    }
+    return turn.state.required_actions.flatMap(action =>
+      action.type === 'tool.approval_required'
+        ? action.tool_calls.map(call => ({ thread_id: action.thread_id, tool_call_id: call.id }))
+        : [],
+    );
+  }
+
+  async function pauseOnThree(): Promise<{ sessionId: string; turn: Turn; pending: PendingApproval[] }> {
+    const sessionId = await createSession(server);
+    const turn = await runTurn({ server, sessionId, input: userMessage(THREE_AT_ONCE_DIRECTIVE) });
+    return { sessionId, turn, pending: pendingApprovals(turn) };
+  }
+
+  it(
+    'asks once per call, each with its own card, and runs nothing until answered',
+    async () => {
+      const { turn, pending } = await pauseOnThree();
+
+      expect(pending).toHaveLength(3);
+      expect(new Set(pending.map(call => call.tool_call_id)).size).toBe(3);
+      expect(server.mcp.unannotatedInvocations()).toBe(0);
+      if (turn.state.status !== 'done') {
+        throw new Error(`turn is not done: ${JSON.stringify(turn.state)}`);
+      }
+      const refs = turn.state.required_actions.flatMap(action =>
+        action.type === 'tool.approval_required' ? action.tool_calls : [],
+      );
+      expect(refs.map(ref => ref.tier)).toEqual([3, 3, 3]);
+      for (const ref of refs) {
+        expect(ref.tier3_card?.outbound_text).toContain('text: ');
+      }
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'approves two and denies one in one answer: the turn continues, and each call runs or is refused as decided',
+    async () => {
+      const { sessionId, turn, pending } = await pauseOnThree();
+      const [first, second, third] = pending;
+      if (first === undefined || second === undefined || third === undefined) {
+        throw new Error('expected three pending approvals');
+      }
+
+      const resumed = await runTurn({
+        server,
+        sessionId,
+        previousTurnId: turn.id,
+        input: [
+          ...approvalInput({ ...first, approval: { status: 'allow', scope: 'once' } }),
+          ...approvalInput({ ...second, approval: { status: 'deny', reason: 'not this one' } }),
+          ...approvalInput({ ...third, approval: { status: 'allow', scope: 'once' } }),
+        ],
+      });
+
+      expect(resumed.state.status).toBe('done');
+      expect(requiredActions(resumed)).toEqual([]);
+      expect(server.mcp.unannotatedInvocations()).toBe(2);
+      const responses = await toolResponses(server, sessionId);
+      const byCall = new Map(responses.map(response => [response.tool_call_id, response.content]));
+      expect(byCall.get(second.tool_call_id)).toMatch(/denied/i);
+      expect(byCall.get(first.tool_call_id)).not.toMatch(/denied/i);
+      expect(byCall.get(third.tool_call_id)).not.toMatch(/denied/i);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'refuses a partial answer by name, runs nothing, and still accepts the full answer afterwards',
+    async () => {
+      const { sessionId, turn, pending } = await pauseOnThree();
+      const [first, second, third] = pending;
+      if (first === undefined || second === undefined || third === undefined) {
+        throw new Error('expected three pending approvals');
+      }
+
+      // The client collects every decision before sending, so a lone answer is a client bug:
+      // the server says exactly which calls are missing instead of resuming half a batch.
+      const partial = await server.request(
+        `/api/v1/sessions/${sessionId}/turns`,
+        jsonInit({
+          input: approvalInput({ ...first, approval: { status: 'allow', scope: 'once' } }),
+          stream: true,
+          previous_turn_id: turn.id,
+        }),
+      );
+      expect(partial.status).toBe(422);
+      const partialBody = z.object({ error: z.object({ message: z.string() }) }).parse(await partial.json());
+      expect(partialBody.error.message).toContain(second.tool_call_id);
+      expect(partialBody.error.message).toContain(third.tool_call_id);
+      expect(server.mcp.unannotatedInvocations()).toBe(0);
+
+      const done = await runTurn({
+        server,
+        sessionId,
+        previousTurnId: turn.id,
+        input: [
+          ...approvalInput({ ...first, approval: { status: 'allow', scope: 'once' } }),
+          ...approvalInput({ ...second, approval: { status: 'deny' } }),
+          ...approvalInput({ ...third, approval: { status: 'allow', scope: 'once' } }),
+        ],
+      });
+      expect(requiredActions(done)).toEqual([]);
+      expect(server.mcp.unannotatedInvocations()).toBe(2);
     },
     TURN_TIMEOUT_MS,
   );

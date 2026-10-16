@@ -9,6 +9,7 @@ import { useOptionalPersonas } from '@/components/PersonaContext.js';
 import { Icon } from '@/icons/Icon.js';
 import {
   memoryVaultErrorMessage,
+  personaVaultNamespace,
   type MemoryVaultCatalog,
   type MemoryVaultEntry,
   type MemoryVaultSharing,
@@ -32,10 +33,6 @@ function hasMemoryVaultPort(server: object): server is { memoryVault: MemoryVaul
 
 type NamespaceOption = { value: string; label: string };
 
-function personaNamespace(displayName: string): string {
-  return `persona:${displayName}`;
-}
-
 /** Browse, edit, export, and import long-lived memory facts. */
 export function MemoryVaultPage() {
   const server = useOptionalServer();
@@ -53,7 +50,7 @@ export function MemoryVaultPage() {
   const namespaceOptions = useMemo<NamespaceOption[]>(() => {
     const options: NamespaceOption[] = [{ value: SHARED_NAMESPACE, label: 'Shared vault' }];
     for (const persona of personas) {
-      options.push({ value: personaNamespace(persona.displayName), label: `${persona.displayName} vault` });
+      options.push({ value: personaVaultNamespace(persona.displayName), label: `${persona.displayName} vault` });
     }
     return options;
   }, [personas]);
@@ -188,17 +185,11 @@ export function MemoryVaultPage() {
     setCustomNamespace('');
   }
 
-  const allNamespaces = useMemo(
-    () => [...namespaceOptions, ...topicNamespaces],
-    [namespaceOptions, topicNamespaces],
-  );
+  const allNamespaces = useMemo(() => [...namespaceOptions, ...topicNamespaces], [namespaceOptions, topicNamespaces]);
 
   const sharingNamespaces = useMemo(
-    () =>
-      allNamespaces
-        .filter(option => option.value !== SHARED_NAMESPACE && !option.value.startsWith('persona:'))
-        .map(option => ({ value: option.value, label: option.label.replace(/ vault$/, '') })),
-    [allNamespaces],
+    () => topicNamespaces.map(option => ({ value: option.value, label: option.label.replace(/ vault$/, '') })),
+    [topicNamespaces],
   );
 
   return (
@@ -206,8 +197,8 @@ export function MemoryVaultPage() {
       <div>
         <h2 className="text-base font-semibold text-text-primary">Memory vault</h2>
         <p className="text-sm text-text-secondary">
-          Facts the assistant remembers across chats. Edits and deletes keep the original entry in
-          history; the vault shows the current version.
+          Facts the assistant remembers across chats. Edits and deletes keep the original entry in history; the vault
+          shows the current version.
         </p>
       </div>
 

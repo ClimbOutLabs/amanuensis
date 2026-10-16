@@ -2,7 +2,7 @@
 
 /** Which host template was used for the summary. */
 export const ContextCompactionEventMode = {
-    Coding: "coding",
-    Conversation: "conversation",
-} as const;
-export type ContextCompactionEventMode = (typeof ContextCompactionEventMode)[keyof typeof ContextCompactionEventMode];
+        Coding: "coding",
+        Conversation: "conversation"
+    } as const;
+export type ContextCompactionEventMode = typeof ContextCompactionEventMode[keyof typeof ContextCompactionEventMode];

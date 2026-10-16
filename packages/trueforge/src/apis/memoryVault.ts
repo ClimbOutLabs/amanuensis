@@ -7,21 +7,12 @@
  * append-only; edits and deletes are recorded as markers, never rewrites.
  * Only the markdown backend serves the vault; anything else answers 501.
  */
-import { randomUUID } from 'node:crypto';
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import type { Context } from 'hono';
+import { randomUUID } from 'node:crypto';
 import type { Logger } from 'winston';
-import configuration from '../config';
 import type { ResolveRequestContext } from '../auth/identity';
-import { getEmbeddingSubsystem } from '../runtime/memory/embeddingRetrieval';
-import { MarkdownMemoryClient } from '../runtime/memory/markdownMemoryClient';
-import {
-  readVaultSharing,
-  sanitizeNamespace,
-  vaultFilesystemNamespace,
-  writeVaultSharing,
-  type VaultSharing,
-} from '../runtime/memory/markdownMemoryFiles';
+import configuration from '../config';
 import {
   deleteMemoryVaultEntryRoute,
   exportMemoryVaultRoute,
@@ -31,6 +22,15 @@ import {
   putMemoryVaultSharingRoute,
   updateMemoryVaultEntryRoute,
 } from '../routes/memoryVaultRoutes';
+import { getEmbeddingSubsystem } from '../runtime/memory/embeddingRetrieval';
+import { MarkdownMemoryClient } from '../runtime/memory/markdownMemoryClient';
+import {
+  readVaultSharing,
+  sanitizeNamespace,
+  vaultFilesystemNamespace,
+  writeVaultSharing,
+  type VaultSharing,
+} from '../runtime/memory/markdownMemoryFiles';
 
 export interface MemoryVaultRouterDeps {
   resolveRequestContext: ResolveRequestContext;
@@ -51,13 +51,14 @@ function vaultClient(deps: MemoryVaultRouterDeps, tenantId: string): MarkdownMem
     baseDir: configuration.MEMORY_MARKDOWN_DIR,
     namespace: tenantId,
     embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED
-      ? getEmbeddingSubsystem({
-          baseDir: configuration.MEMORY_MARKDOWN_DIR,
-          namespace: sanitizeNamespace(tenantId),
-          modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
-          batchSize: configuration.MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE,
-          log: (message: string) => deps.logger.info(message),
-        })
+      ? namespace =>
+          getEmbeddingSubsystem({
+            baseDir: configuration.MEMORY_MARKDOWN_DIR,
+            namespace,
+            modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
+            batchSize: configuration.MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE,
+            log: (message: string) => deps.logger.info(message),
+          })
       : undefined,
   });
 }
@@ -81,7 +82,8 @@ function vaultNamespaceLabel(namespace: string | undefined): string {
 
 /**
  * Validates and normalizes a sharing payload. Returns the error message, or the
- * normalized shares when valid.
+ * normalized shares when valid. Keys are persona ids (what the vault UI saves) or
+ * persona names; turn-time recall honors both.
  */
 function normalizeSharing(shares: Record<string, string[]>): { shares: Record<string, string[]> } | { error: string } {
   const entries = Object.entries(shares);
@@ -92,7 +94,7 @@ function normalizeSharing(shares: Record<string, string[]>): { shares: Record<st
   for (const [persona, namespaces] of entries) {
     const name = persona.trim();
     if (name === '' || name.length > 64) {
-      return { error: 'Persona names must be 1 to 64 characters.' };
+      return { error: 'Persona ids or names must be 1 to 64 characters.' };
     }
     if (!Array.isArray(namespaces) || namespaces.length > MAX_SHARING_NAMESPACES) {
       return { error: `Persona "${name}" can read at most ${String(MAX_SHARING_NAMESPACES)} namespaces.` };

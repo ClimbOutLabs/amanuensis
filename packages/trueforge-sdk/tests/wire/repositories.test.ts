@@ -5,259 +5,227 @@ import { TrueForge } from "../../src/Client";
 import { mockServerPool } from "../mock-server/MockServerPool";
 
 describe("RepositoriesClient", () => {
+    
     test("list (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {
-            data: [
-                {
-                    clone_url: "clone_url",
-                    created_at: "2024-01-15T09:30:00Z",
-                    default_branch: "default_branch",
-                    id: "id",
-                    name: "name",
-                    revision: 1,
-                    updated_at: "2024-01-15T09:30:00Z",
-                },
-            ],
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : [ { "clone_url" : "clone_url" , "created_at" : "2024-01-15T09:30:00Z" , "default_branch" : "default_branch" , "id" : "id" , "name" : "name" , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" } ] };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/repositories")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/repositories").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.repositories.list();
-        expect(response).toEqual({
-            data: [
-                {
-                    cloneUrl: "clone_url",
-                    createdAt: new Date("2024-01-15T09:30:00.000Z"),
-                    defaultBranch: "default_branch",
-                    id: "id",
-                    name: "name",
-                    revision: 1,
-                    updatedAt: new Date("2024-01-15T09:30:00.000Z"),
-                },
-            ],
-        });
+        
+                        
+                                const response = await client.repositories.list();
+                                expect(response).toEqual({
+    data: [{
+            cloneUrl: "clone_url",
+            createdAt: new Date("2024-01-15T09:30:00.000Z"),
+            defaultBranch: "default_branch",
+            id: "id",
+            name: "name",
+            revision: 1,
+            updatedAt: new Date("2024-01-15T09:30:00.000Z")
+        }]
+});
+                              
+                    
     });
-
+          
     test("list (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/repositories")
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/repositories").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.repositories.list();
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.repositories.list()
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("create (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { repository: { clone_url: "clone_url", name: "name" } };
-        const rawResponseBody = {
-            data: {
-                clone_url: "clone_url",
-                created_at: "2024-01-15T09:30:00Z",
-                default_branch: "default_branch",
-                id: "id",
-                name: "name",
-                revision: 1,
-                updated_at: "2024-01-15T09:30:00Z",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "repository" : { "clone_url" : "clone_url" , "name" : "name" } };
+        const rawResponseBody = { "data" : { "clone_url" : "clone_url" , "created_at" : "2024-01-15T09:30:00Z" , "default_branch" : "default_branch" , "id" : "id" , "name" : "name" , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/repositories")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/repositories").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.repositories.create({
-            repository: {
-                cloneUrl: "clone_url",
-                name: "name",
-            },
-        });
-        expect(response).toEqual({
-            data: {
-                cloneUrl: "clone_url",
-                createdAt: new Date("2024-01-15T09:30:00.000Z"),
-                defaultBranch: "default_branch",
-                id: "id",
-                name: "name",
-                revision: 1,
-                updatedAt: new Date("2024-01-15T09:30:00.000Z"),
-            },
-        });
+        
+                        
+                                const response = await client.repositories.create({
+    repository: {
+        cloneUrl: "clone_url",
+        name: "name"
+    }
+});
+                                expect(response).toEqual({
+    data: {
+        cloneUrl: "clone_url",
+        createdAt: new Date("2024-01-15T09:30:00.000Z"),
+        defaultBranch: "default_branch",
+        id: "id",
+        name: "name",
+        revision: 1,
+        updatedAt: new Date("2024-01-15T09:30:00.000Z")
+    }
+});
+                              
+                    
     });
-
+          
     test("create (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { repository: { clone_url: "x", name: "x" } };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "repository" : { "clone_url" : "x" , "name" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/repositories")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(400)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/repositories").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(400).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.repositories.create({
-                repository: {
-                    cloneUrl: "x",
-                    name: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        
+            await expect(async () => {
+                return await client.repositories.create({
+    repository: {
+        cloneUrl: "x",
+        name: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-
+          
     test("create (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { repository: { clone_url: "x", name: "x" } };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "repository" : { "clone_url" : "x" , "name" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/repositories")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/repositories").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.repositories.create({
-                repository: {
-                    cloneUrl: "x",
-                    name: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.repositories.create({
+    repository: {
+        cloneUrl: "x",
+        name: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("create (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { repository: { clone_url: "x", name: "x" } };
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        const rawRequestBody = { "repository" : { "clone_url" : "x" , "name" : "x" } };
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .post("/api/v1/repositories")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(409)
-            .jsonBody(rawResponseBody)
-            .build();
+            .post("/api/v1/repositories").jsonBody(rawRequestBody)
+                .respondWith()
+            .statusCode(409).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.repositories.create({
-                repository: {
-                    cloneUrl: "x",
-                    name: "x",
-                },
-            });
-        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        
+            await expect(async () => {
+                return await client.repositories.create({
+    repository: {
+        cloneUrl: "x",
+        name: "x"
+    }
+})
+            }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-
+          
     test("get (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = {
-            data: {
-                clone_url: "clone_url",
-                created_at: "2024-01-15T09:30:00Z",
-                default_branch: "default_branch",
-                id: "id",
-                name: "name",
-                revision: 1,
-                updated_at: "2024-01-15T09:30:00Z",
-            },
-        };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "data" : { "clone_url" : "clone_url" , "created_at" : "2024-01-15T09:30:00Z" , "default_branch" : "default_branch" , "id" : "id" , "name" : "name" , "revision" : 1 , "updated_at" : "2024-01-15T09:30:00Z" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/repositories/repository_id")
-            .respondWith()
-            .statusCode(200)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/repositories/repository_id").respondWith()
+            .statusCode(200).jsonBody(rawResponseBody)
+                .build();
 
-        const response = await client.repositories.get("repository_id");
-        expect(response).toEqual({
-            data: {
-                cloneUrl: "clone_url",
-                createdAt: new Date("2024-01-15T09:30:00.000Z"),
-                defaultBranch: "default_branch",
-                id: "id",
-                name: "name",
-                revision: 1,
-                updatedAt: new Date("2024-01-15T09:30:00.000Z"),
-            },
-        });
+        
+                        
+                                const response = await client.repositories.get("repository_id");
+                                expect(response).toEqual({
+    data: {
+        cloneUrl: "clone_url",
+        createdAt: new Date("2024-01-15T09:30:00.000Z"),
+        defaultBranch: "default_branch",
+        id: "id",
+        name: "name",
+        revision: 1,
+        updatedAt: new Date("2024-01-15T09:30:00.000Z")
+    }
+});
+                              
+                    
     });
-
+          
     test("get (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/repositories/repository_id")
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/repositories/repository_id").respondWith()
+            .statusCode(401).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.repositories.get("repository_id");
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        
+            await expect(async () => {
+                return await client.repositories.get("repository_id")
+            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-
+          
     test("get (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
+        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
+        
+        const rawResponseBody = { "error" : { "message" : "message" } };
+        
         server
             .mockEndpoint()
-            .get("/api/v1/repositories/repository_id")
-            .respondWith()
-            .statusCode(404)
-            .jsonBody(rawResponseBody)
-            .build();
+            .get("/api/v1/repositories/repository_id").respondWith()
+            .statusCode(404).jsonBody(rawResponseBody)
+                .build();
 
-        await expect(async () => {
-            return await client.repositories.get("repository_id");
-        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        
+            await expect(async () => {
+                return await client.repositories.get("repository_id")
+            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
+          
 });

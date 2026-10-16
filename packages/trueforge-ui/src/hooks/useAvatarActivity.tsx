@@ -82,11 +82,7 @@ export function AvatarActivityProvider({
   // sticking. For a stable callback this fires exactly once, at mount.
   useEffect(() => {
     const delivered = deliveredToRef.current;
-    if (
-      delivered !== null &&
-      delivered.callback === onActivity &&
-      delivered.activity === lastEmittedRef.current
-    ) {
+    if (delivered !== null && delivered.callback === onActivity && delivered.activity === lastEmittedRef.current) {
       return;
     }
     deliveredToRef.current = { callback: onActivity, activity: lastEmittedRef.current };
@@ -124,8 +120,7 @@ export function AvatarActivityProvider({
       if (errorArmedRef.current && input.isBusy) {
         disarmError();
       }
-      const candidate =
-        errorArmedRef.current && !input.isBusy ? 'error' : deriveActivity(input);
+      const candidate = errorArmedRef.current && !input.isBusy ? 'error' : deriveActivity(input);
       emit(candidate);
     },
     [disarmError, emit],

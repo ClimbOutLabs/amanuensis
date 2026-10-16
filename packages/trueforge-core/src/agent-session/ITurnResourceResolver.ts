@@ -1,13 +1,14 @@
 import type { Logger } from 'winston';
 import type { AgentCapability } from '../core/capabilities/AgentCapability';
+import type { CompactionModel } from '../core/capabilities/builtins/ContextCompaction';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
-import type { ILLM } from '../core/llm/ILLM';
-import type { AgentDefinition, ModelParams } from '../core/runtime/AgentDefinition';
+import type { ModelMessageEvent } from '../core/events/schema';
+import type { SentinelHostContext } from '../core/permissions';
+import type { AgentDefinition } from '../core/runtime/AgentDefinition';
 import type { AgentInfo } from '../core/runtime/AgentThread.types';
+import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { BoundRepository, Sandbox, SandboxInfo } from '../core/sandbox/Sandbox';
 import type { AgentTracing } from '../core/tracing/AgentTracing';
-import type { ModelMessageEvent } from '../core/events/schema';
-import type { HostToolCallPolicy } from '../core/runtime/HostToolCallPolicy';
 import type { TurnRecord } from './models/TurnRecord';
 import type { AgentSpec } from './schemas/agentSpec';
 
@@ -24,7 +25,7 @@ export interface ResolvedAgentDefinition {
    * of truth for "no override" and changing the main model carries an
    * inheriting compaction role with it.
    */
-  compactionModel?: { modelClient: ILLM; modelParams: ModelParams } | undefined;
+  compactionModel?: CompactionModel | undefined;
 }
 
 /**
@@ -35,9 +36,9 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
   /** Host-owned durable task state shared by the root thread's checklist and compaction. */
   readonly compactionContext?: TaskChecklistAccess | undefined;
   /**
-   * Host instance-wide default for `config.context_management.compaction.compaction_threshold_tokens`,
-   * used only when the agent spec leaves that field unset; an explicit spec value always wins.
-   * Undefined falls back to the built-in default (see DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS).
+   * Host instance-wide compaction trigger in tokens, used only when the agent spec sets no
+   * `config.context_management.compaction.trigger`; an explicit spec value always wins.
+   * Undefined leaves the threshold to the model's context length (see resolveCompactionThresholdTokens).
    */
   readonly compactionThresholdTokensDefault?: number | undefined;
   /**
@@ -107,6 +108,8 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
     turn_id: string;
     signal: AbortSignal;
     tracing: AgentTracing;
+    /** Session-scoped Sentinel context; sandbox approvals must use the session's services. */
+    sentinel: SentinelHostContext;
   }): Promise<Sandbox | undefined>;
   /**
    * Called once per thread (rebuild or live sub-agent spawn); calls for different
@@ -174,7 +177,5 @@ export interface ITurnResourceResolver<TTurnCustom extends object = Record<strin
    * are non-durable transport; the repaired terminal event is what live
    * clients settle on.
    */
-  readonly finalizeAssistantOutput?:
-    | ((output: ModelMessageEvent) => ModelMessageEvent | undefined)
-    | undefined;
+  readonly finalizeAssistantOutput?: ((output: ModelMessageEvent) => ModelMessageEvent | undefined) | undefined;
 }

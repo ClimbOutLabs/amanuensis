@@ -1,8 +1,8 @@
 'use client';
 
 import { act, render } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AVATAR_ACTIVITY_ERROR_AUTO_CLEAR_MS,

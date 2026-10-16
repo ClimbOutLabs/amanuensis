@@ -1,3 +1,4 @@
+import type { TextStreamPart, ToolSet } from 'ai';
 import type {
   AgentContextProcessorOutput,
   AgentThreadExecutionContext,
@@ -14,7 +15,6 @@ import { InternalEventType } from '../../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../../src/core/runtime/contextUsage';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
-import type { TextStreamPart, ToolSet } from 'ai';
 
 /** A stream whose async iterable breaks before producing any content: the shape a provider
  * closing the connection mid-response takes (see VercelAILLM.mapStreamToChunks). */
@@ -155,9 +155,8 @@ describe('ModelStreamFault retry', () => {
       await Promise.resolve();
       throw new ModelOutputRepetitionError('reasoning');
     }
-    const create = jest.fn(
-      (): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
-        repetitionFaultStream(),
+    const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
+      repetitionFaultStream(),
     );
     const modelClient: ILLM = { create, createNonStream: jest.fn() };
     const thread = new AgentThread({

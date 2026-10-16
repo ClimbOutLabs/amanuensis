@@ -494,7 +494,8 @@ function summarizeSingleEmail(input: {
   const body = root['bodyText'] ?? root['body'];
   const bodyText = typeof body === 'string' ? body : '';
   const excerpt = bodyText.slice(0, SINGLE_BODY_EXCERPT_CHARS);
-  const cleanCut = excerpt.length < bodyText.length ? excerpt.slice(0, Math.max(0, excerpt.lastIndexOf('\n'))) : excerpt;
+  const cleanCut =
+    excerpt.length < bodyText.length ? excerpt.slice(0, Math.max(0, excerpt.lastIndexOf('\n'))) : excerpt;
   const shown = cleanCut.length > 0 ? cleanCut.length : excerpt.length;
   return {
     result_kind: 'text',

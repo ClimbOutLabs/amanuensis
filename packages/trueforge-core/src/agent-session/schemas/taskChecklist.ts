@@ -5,7 +5,11 @@ export const MAX_TASK_CHECKLIST_ITEMS = 50;
 const TaskChecklistItemSchema = z
   .object({
     id: z.string().trim().min(1).max(128),
-    text: z.string().trim().min(1).max(1_000),
+    text: z
+      .string()
+      .trim()
+      .min(1)
+      .refine(v => v.length <= 1_000, 'must be at most 1000 characters'),
     done: z.boolean(),
   })
   .strict();

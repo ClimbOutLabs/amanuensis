@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -23,11 +24,10 @@ describe('parseToolTier', () => {
 });
 
 describe('parseTier2ActionKind', () => {
-  it('accepts the four backend kinds and nothing else', () => {
+  it('accepts the backend kinds and nothing else', () => {
     expect(parseTier2ActionKind('file_write')).toBe('file_write');
-    expect(parseTier2ActionKind('shell')).toBe('shell');
-    expect(parseTier2ActionKind('runner')).toBe('runner');
-    expect(parseTier2ActionKind('branch')).toBe('branch');
+    expect(parseTier2ActionKind('shell')).toBeUndefined();
+    expect(parseTier2ActionKind('runner')).toBeUndefined();
     expect(parseTier2ActionKind('file.write')).toBeUndefined();
     expect(parseTier2ActionKind(undefined)).toBeUndefined();
   });
@@ -58,8 +58,7 @@ describe('extractSentinelFromEvent', () => {
   };
 
   it('parses per-tool-call approval cards with the backend field names', () => {
-    const { approvals, notices } = extractSentinelFromEvent(approvalEvent);
-    expect(notices).toEqual([]);
+    const approvals = extractSentinelFromEvent(approvalEvent);
     expect(approvals).toHaveLength(2);
     const first = approvals[0];
     expect(first?.toolCallId).toBe('call-1');
@@ -72,10 +71,116 @@ describe('extractSentinelFromEvent', () => {
     expect(first?.card.amount).toBe('$250');
     expect(first?.card.why_asked_again).toBeNull();
     expect(first?.card.parsed_command).toBeNull();
+    expect(first?.card.outbound_text).toBeNull();
+    expect(first?.card.destination_host).toBeNull();
+  });
+
+  it('parses outbound_text and destination_host from the card', () => {
+    const event = {
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          tool_call_id: 'call-9',
+          tier: 3,
+          tier3_card: {
+            plain_what: 'Run web_search',
+            outbound_text: 'query: my secret query',
+            destination_host: 'mcp.exa.ai',
+          },
+        },
+      ],
+    };
+    const approvals = extractSentinelFromEvent(event);
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]?.card.outbound_text).toBe('query: my secret query');
+    expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
+  });
+
+  it('reads outboundText and destinationHost from a camel-cased card', () => {
+    const approvals = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      toolCalls: [
+        {
+          id: 'call-11',
+          tier: 3,
+          tier3Card: {
+            plainWhat: 'Search the web',
+            outboundText: 'query: tides',
+            destinationHost: 'mcp.exa.ai',
+            outboundTruncated: true,
+          },
+        },
+      ],
+    });
+    expect(approvals[0]?.card.outbound_text).toBe('query: tides');
+    expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
+    expect(approvals[0]?.card.outbound_truncated).toBe(true);
+  });
+
+  it('parses an approval event after the SDK deserializes it', () => {
+    // Live and reloaded events reach the UI through the SDK, which camel-cases known keys.
+    const parsed = ToolApprovalRequiredEvent.parseOrThrow(
+      {
+        type: 'tool.approval_required',
+        id: 'evt-1',
+        created_at: '2026-01-01T00:00:00.000Z',
+        thread_id: 'main',
+        tool_calls: [
+          {
+            id: 'call-9',
+            source_event_id: 'evt-0',
+            tier: 3,
+            tier3_card: {
+              plain_what: 'Run code in the sandbox',
+              plain_why: null,
+              cannot_be_undone: 'Runs once.',
+              destination: null,
+              recipient: null,
+              amount: null,
+              parsed_command: null,
+              why_asked_again: null,
+              outbound_text: 'query: tides',
+              destination_host: 'mcp.exa.ai',
+              outbound_truncated: true,
+            },
+          },
+        ],
+      },
+      { unrecognizedObjectKeys: 'passthrough', allowUnrecognizedUnionMembers: true, allowUnrecognizedEnumValues: true },
+    );
+    const approvals = extractSentinelFromEvent(parsed);
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]?.toolCallId).toBe('call-9');
+    expect(approvals[0]?.tier).toBe(3);
+    expect(approvals[0]?.card.plain_what).toBe('Run code in the sandbox');
+    expect(approvals[0]?.card.cannot_be_undone).toBe('Runs once.');
+    expect(approvals[0]?.card.outbound_text).toBe('query: tides');
+    expect(approvals[0]?.card.destination_host).toBe('mcp.exa.ai');
+    expect(approvals[0]?.card.outbound_truncated).toBe(true);
+  });
+
+  it('reads a camel-cased card from a regenerated SDK shape', () => {
+    const approvals = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      toolCalls: [
+        {
+          id: 'call-10',
+          tier: 3,
+          tier3Card: {
+            plainWhat: 'Run code in the sandbox',
+            plainWhy: 'Asked to compute a total.',
+            parsedCommand: null,
+          },
+        },
+      ],
+    });
+    expect(approvals[0]?.card.plain_what).toBe('Run code in the sandbox');
+    expect(approvals[0]?.card.plain_why).toBe('Asked to compute a total.');
+    expect(approvals[0]?.card.parsed_command).toBeNull();
   });
 
   it('accepts the provisional `card` field name', () => {
-    const { approvals } = extractSentinelFromEvent({
+    const approvals = extractSentinelFromEvent({
       type: 'tool.approval_required',
       tool_calls: [
         {
@@ -92,49 +197,52 @@ describe('extractSentinelFromEvent', () => {
     expect(approvals[0]?.card.why_asked_again).toBe('the previous approval expired');
   });
 
-  it('parses a Tier 2 notice with kind, undo/stop flags, and tier2 files', () => {
-    const { approvals, notices } = extractSentinelFromEvent({
-      type: 'tool.tier2_notice',
+  it('parses a Tier 2 approval card next to a Tier 3 one', () => {
+    const approvals = extractSentinelFromEvent({
+      type: 'tool.approval_required',
       tool_calls: [
-        {
-          tool_call_id: 'call-3',
-          tier: 2,
-          tier2_kind: 'shell',
-          message: 'Ran the test suite',
-          undoable: true,
-          stoppable: false,
-          tier2_files: ['src/a.ts', 'src/b.ts'],
-          notice_id: 'notice-3',
-        },
+        { id: 'call-3', tier: 2, tier3_card: { plain_what: 'Change `notes.md` in your workspace.' } },
+        { id: 'call-4', tier: 3, tier3_card: { plain_what: 'Send $250 to Acme Corp' } },
       ],
     });
-    expect(approvals).toEqual([]);
-    expect(notices).toHaveLength(1);
-    const notice = notices[0];
-    expect(notice?.toolCallId).toBe('call-3');
-    expect(notice?.kind).toBe('shell');
-    expect(notice?.message).toBe('Ran the test suite');
-    expect(notice?.undoable).toBe(true);
-    expect(notice?.stoppable).toBe(false);
-    expect(notice?.tracked_files).toEqual(['src/a.ts', 'src/b.ts']);
-    expect(notice?.notice_id).toBe('notice-3');
+    expect(approvals.map(approval => [approval.toolCallId, approval.tier])).toEqual([
+      ['call-3', 2],
+      ['call-4', 3],
+    ]);
   });
 
-  it('falls back to the tool call id when the notice has no notice_id', () => {
-    const { notices } = extractSentinelFromEvent({
-      type: 'tool.tier2_notice',
-      tool_call_id: 'call-4',
-      tier: 2,
-      message: 'Ran the test suite',
-      undoable: false,
-      stoppable: true,
+  it('records the asking event and thread on each approval', () => {
+    const approvals = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      id: 'evt-7',
+      thread_id: 'sub-agent',
+      tool_calls: [{ id: 'call-1', tier: 2, tier3_card: { plain_what: 'Edit notes.md' } }],
     });
-    expect(notices[0]?.notice_id).toBe('call-4');
-    expect(notices[0]?.kind).toBeNull();
+    expect(approvals[0]?.eventId).toBe('evt-7');
+    expect(approvals[0]?.threadId).toBe('sub-agent');
+    const camel = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      id: 'evt-8',
+      threadId: 'main',
+      toolCalls: [{ id: 'call-2', tier: 2, tier3Card: { plainWhat: 'Edit notes.md' } }],
+    });
+    expect(camel[0]?.eventId).toBe('evt-8');
+    expect(camel[0]?.threadId).toBe('main');
+  });
+
+  it('no longer reads Tier 2 notice events', () => {
+    expect(
+      extractSentinelFromEvent({
+        type: 'tool.tier2_notice',
+        tool_call_id: 'call-3',
+        tier: 2,
+        message: 'Ran the test suite',
+      }),
+    ).toEqual([]);
   });
 
   it('reads per-action fields at the event top level for single-action events', () => {
-    const { approvals } = extractSentinelFromEvent({
+    const approvals = extractSentinelFromEvent({
       type: 'tool.approval_required',
       tool_call_id: 'call-5',
       tier: 3,
@@ -145,11 +253,11 @@ describe('extractSentinelFromEvent', () => {
   });
 
   it('ignores events without Sentinel data and drops malformed refs', () => {
-    expect(extractSentinelFromEvent({ type: 'model.message' })).toEqual({ approvals: [], notices: [] });
-    expect(extractSentinelFromEvent(null)).toEqual({ approvals: [], notices: [] });
-    expect(extractSentinelFromEvent('nope')).toEqual({ approvals: [], notices: [] });
+    expect(extractSentinelFromEvent({ type: 'model.message' })).toEqual([]);
+    expect(extractSentinelFromEvent(null)).toEqual([]);
+    expect(extractSentinelFromEvent('nope')).toEqual([]);
     // Tier without a card is not an approval card; a card without plain_what is dropped.
-    const { approvals } = extractSentinelFromEvent({
+    const approvals = extractSentinelFromEvent({
       type: 'tool.approval_required',
       tool_calls: [
         { tool_call_id: 'call-6', tier: 3 },
@@ -164,27 +272,12 @@ describe('extractSentinelFromEvent', () => {
 describe('extractSentinelSessionContext', () => {
   it('folds events to one record per tool call, later events winning', () => {
     const context = extractSentinelSessionContext([
-      {
-        type: 'tool.tier2_notice',
-        tool_call_id: 'call-1',
-        tier: 2,
-        message: 'First',
-        undoable: false,
-        stoppable: false,
-      },
-      {
-        type: 'tool.tier2_notice',
-        tool_call_id: 'call-1',
-        tier: 2,
-        message: 'Second',
-        undoable: true,
-        stoppable: false,
-      },
+      { type: 'tool.approval_required', tool_call_id: 'call-1', tier: 2, tier3_card: { plain_what: 'First' } },
+      { type: 'tool.approval_required', tool_call_id: 'call-1', tier: 3, tier3_card: { plain_what: 'Second' } },
     ]);
-    expect(context.notices).toHaveLength(1);
-    expect(context.notices[0]?.message).toBe('Second');
-    expect(context.notices[0]?.undoable).toBe(true);
-    expect(context.approvals).toEqual([]);
+    expect(context.approvals).toHaveLength(1);
+    expect(context.approvals[0]?.card.plain_what).toBe('Second');
+    expect(context.approvals[0]?.tier).toBe(3);
   });
 });
 
@@ -243,28 +336,45 @@ describe('parseAuditEntries', () => {
   });
 
   it('covers every audit outcome', () => {
-    const outcomes = ['logged', 'ran', 'stopped_by_user', 'undone', 'approved', 'denied', 'auto_denied'];
+    const outcomes = ['logged', 'ran', 'approved', 'denied', 'auto_denied'];
     for (const outcome of outcomes) {
       const parsed = parseAuditEntries([{ ...entry, id: outcome, outcome }]);
       expect(parsed[0]?.outcome).toBe(outcome);
     }
     expect(parseAuditEntries([{ ...entry, outcome: 'maybe' }])).toEqual([]);
+    expect(parseAuditEntries([{ ...entry, outcome: 'undone' }])).toEqual([]);
   });
 });
 
 describe('parseUserSettings', () => {
-  it('defaults to offline off and no escalated kinds', () => {
-    expect(parseUserSettings(null)).toEqual({ offline_mode: false, tier2_always_ask: [] });
-    expect(parseUserSettings({})).toEqual({ offline_mode: false, tier2_always_ask: [] });
-    expect(parseUserSettings({ offline_mode: 'yes', tier2_always_ask: ['file.write', 42] })).toEqual({
-      offline_mode: false,
-      tier2_always_ask: [],
-    });
+  it('defaults to offline off, nothing relaxed and searches running without asking', () => {
+    const defaults = { offline_mode: false, tier2_auto_allow: [], search_without_asking: true };
+    expect(parseUserSettings(null)).toEqual(defaults);
+    expect(parseUserSettings({})).toEqual(defaults);
+    expect(parseUserSettings({ data: null })).toEqual(defaults);
+    expect(parseUserSettings({ data: { offline_mode: 'yes', tier2_auto_allow: ['file.write', 42] } })).toEqual(
+      defaults,
+    );
   });
 
-  it('keeps explicit values and drops unknown kinds', () => {
+  it('reads the server envelope, keeping known kinds once', () => {
     expect(
-      parseUserSettings({ offline_mode: true, tier2_always_ask: ['shell', 'file_write', 'nope'] }),
-    ).toEqual({ offline_mode: true, tier2_always_ask: ['shell', 'file_write'] });
+      parseUserSettings({
+        data: { offline_mode: true, tier2_auto_allow: ['shell', 'file_write', 'nope', 'file_write'] },
+      }),
+    ).toEqual({ offline_mode: true, tier2_auto_allow: ['file_write'], search_without_asking: true });
+  });
+
+  it('reads the search setting, and falls back to running without asking when it is not a boolean', () => {
+    expect(parseUserSettings({ data: { search_without_asking: false } }).search_without_asking).toBe(false);
+    expect(parseUserSettings({ data: { search_without_asking: 'no' } }).search_without_asking).toBe(true);
+  });
+
+  it('does not read a bare settings object', () => {
+    expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['file_write'] })).toEqual({
+      offline_mode: false,
+      tier2_auto_allow: [],
+      search_without_asking: true,
+    });
   });
 });

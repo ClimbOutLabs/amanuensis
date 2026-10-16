@@ -11,7 +11,7 @@
  * capability's sweep is the retry loop for retain operations, and a failed recall simply
  * degrades to no memory for that turn.
  */
-import type { RemoteMcpHeaders } from '@truefoundry/trueforge-core/core';
+import { isRedirectStatus, redirectTargetOrigin, type RemoteMcpHeaders } from '@truefoundry/trueforge-core/core';
 import configuration from '../../config';
 import type { MemoryProviderFailureCode } from '../../schemas/memoryProvider';
 import { readBodyWithinCap } from './boundedBodyReader';
@@ -25,6 +25,9 @@ import type {
 
 /** Upper bound on the upstream error text carried into a reason line, a log field, or the UI. */
 const ERROR_DETAIL_MAX_CHARS = 200;
+
+/** Fetch mode that hands a redirect back as the answer instead of following it. */
+const REFUSE_REDIRECT: NonNullable<RequestInit['redirect']> = 'manual';
 
 export interface RecallItem {
   id: string;
@@ -396,6 +399,11 @@ export interface HindsightClientConfig {
   fetchImpl?: typeof fetch;
   /** Overrides `configuration.MEMORY_MAX_RESPONSE_BYTES`; primarily for tests. */
   maxResponseBytes?: number;
+  /**
+   * Fail a redirect instead of following it. The save-time check sets it, so a provider cannot
+   * pass by pointing at another host; turns keep the default of following.
+   */
+  refuseRedirects?: boolean;
 }
 
 /** Small typed client over one Hindsight bank's recall / retain / operations endpoints. */
@@ -405,6 +413,7 @@ export class HindsightClient implements MemoryClient {
   private readonly headers: RemoteMcpHeaders;
   private readonly fetchImpl: typeof fetch;
   private readonly maxResponseBytes: number;
+  private readonly refuseRedirects: boolean;
 
   constructor(input: HindsightClientConfig) {
     this.apiBase = input.apiBase.replace(/\/+$/, '');
@@ -412,6 +421,7 @@ export class HindsightClient implements MemoryClient {
     this.headers = input.headers;
     this.fetchImpl = input.fetchImpl ?? fetch;
     this.maxResponseBytes = input.maxResponseBytes ?? configuration.MEMORY_MAX_RESPONSE_BYTES;
+    this.refuseRedirects = input.refuseRedirects === true;
   }
 
   async recall(params: {
@@ -743,6 +753,7 @@ export class HindsightClient implements MemoryClient {
           ...(input.body !== undefined ? { 'content-type': 'application/json' } : {}),
         },
         ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
+        ...(this.refuseRedirects ? { redirect: REFUSE_REDIRECT } : {}),
         signal: timeoutSignal,
       });
       return { ok: true, response, timeout };
@@ -809,6 +820,18 @@ export class HindsightClient implements MemoryClient {
    */
   private async httpFailure(input: { sent: SentRequest; operation: string }): Promise<MemoryFailure> {
     const status = input.sent.response.status;
+    if (this.refuseRedirects && isRedirectStatus(status)) {
+      const target = redirectTargetOrigin({ response: input.sent.response, requestUrl: input.sent.response.url });
+      await input.sent.response.body?.cancel().catch(() => {
+        // The answer is already refused; a body that will not cancel changes nothing.
+      });
+      return {
+        ok: false,
+        code: 'http_error',
+        httpStatus: status,
+        reason: `${input.operation} returned HTTP ${String(status)}, a redirect${target === undefined ? '' : ` to ${target}`}; redirects are not followed`,
+      };
+    }
     const detail = await this.readErrorDetail(input.sent);
     const suffix = detail === undefined ? '' : `: ${detail}`;
     return {

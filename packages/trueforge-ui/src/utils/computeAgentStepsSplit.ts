@@ -1,68 +1,100 @@
 import type { PartState } from '@assistant-ui/core/react';
+import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 
 export type AgentStepPart = {
   type: PartState['type'];
   text?: string;
+  toolName?: string;
 };
 
+/** A contiguous run of parts folded into agent internals; `end` is exclusive. */
+export interface AgentStepsRun {
+  start: number;
+  end: number;
+  toolCount: number;
+  thinkingCount: number;
+}
+
 export interface AgentStepsSplitResult {
-  cutIndex: number;
+  /** Folded runs in part order; every part outside them renders in the main flow. */
+  runs: readonly AgentStepsRun[];
   hasFinal: boolean;
   toolCount: number;
   thinkingCount: number;
 }
 
+const SHORT_NARRATION_MAX_CHARS = 80;
+const FINAL_HOLDBACK_CHARS = 500;
+
+function isShortNarration(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.length < SHORT_NARRATION_MAX_CHARS && !trimmed.includes('\n');
+}
+
+/** A map is the answer the user asked to see, so its call never folds into agent internals. */
+function isMapsCall(part: AgentStepPart): boolean {
+  return part.type === 'tool-call' && part.toolName !== undefined && isMapsToolName(part.toolName);
+}
+
+function collectRuns({ parts, folded }: { parts: readonly AgentStepPart[]; folded: readonly boolean[] }) {
+  const runs: AgentStepsRun[] = [];
+  let current: AgentStepsRun | undefined;
+  parts.forEach((part, index) => {
+    if (!folded[index]) {
+      current = undefined;
+      return;
+    }
+    if (!current) {
+      current = { start: index, end: index, toolCount: 0, thinkingCount: 0 };
+      runs.push(current);
+    }
+    current.end = index + 1;
+    if (part.type === 'tool-call') current.toolCount++;
+    else if (part.type === 'reasoning') current.thinkingCount++;
+  });
+  return runs;
+}
+
+/**
+ * Decides which parts fold into agent internals. Tool calls (except maps), reasoning and short narration fold;
+ * substantive text before a tool call stays in the main flow. The trailing text run is the final
+ * answer, held back while streaming until it is long enough to not flicker out of the steps.
+ */
 export function computeAgentStepsSplit(parts: readonly AgentStepPart[], isRunning: boolean): AgentStepsSplitResult {
-  const finalTexts: Array<{ index: number; content: string }> = [];
-  let cutIdx = parts.length;
+  let trailingStart = parts.length;
+  while (trailingStart > 0 && parts[trailingStart - 1]?.type === 'text') trailingStart--;
 
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const part = parts[i];
-    if (!part) continue;
+  const trailingTexts = parts.slice(trailingStart).map(part => part.text ?? '');
+  const trailingChars = trailingTexts.reduce((sum, text) => sum + (text.trim() ? text.length : 0), 0);
 
-    if (part.type === 'text') {
-      const text = part.text ?? '';
-      const trimmed = text.trim();
+  // Pure-text responses are always the final answer and must stream directly, not be held back.
+  const hasAgentStepsBeforeTrailing = parts
+    .slice(0, trailingStart)
+    .some(part => (part.type === 'tool-call' && !isMapsCall(part)) || part.type === 'reasoning');
 
-      if (trimmed) {
-        finalTexts.unshift({ index: i, content: text });
-        cutIdx = i;
-      } else {
-        cutIdx = i;
-      }
-    } else {
-      break;
+  const finalConfirmed =
+    trailingChars > 0 && (!isRunning || trailingChars >= FINAL_HOLDBACK_CHARS || !hasAgentStepsBeforeTrailing);
+
+  const folded = parts.map((part, index) => {
+    if (index >= trailingStart) return !finalConfirmed;
+    if (isMapsCall(part)) return false;
+    return part.type !== 'text' || isShortNarration(part.text ?? '');
+  });
+
+  // Narration with no step beside it has nothing to fold into; keep it visible rather than dropping it.
+  for (const run of collectRuns({ parts, folded })) {
+    if (run.toolCount + run.thinkingCount > 0) continue;
+    for (let i = run.start; i < run.end; i++) {
+      const part = parts[i];
+      if (part?.type === 'text' && part.text?.trim()) folded[i] = false;
     }
   }
 
-  const trailingChars = finalTexts.reduce((sum, t) => sum + t.content.length, 0);
-
-  // Only apply the 500-char holdback when there are actual agent steps (tool calls or
-  // reasoning) before the text. For pure-text responses the text is always the final
-  // answer and must stream directly, not be hidden inside the "Agent steps" accordion.
-  const hasAgentStepsBeforeCut = parts.slice(0, cutIdx).some(p => p.type === 'tool-call' || p.type === 'reasoning');
-
-  const finalConfirmed = finalTexts.length > 0 && (!isRunning || trailingChars >= 500 || !hasAgentStepsBeforeCut);
-
-  const actualCutIndex = finalConfirmed ? cutIdx : parts.length;
-
-  let toolCount = 0;
-  let thinkingCount = 0;
-  for (let i = 0; i < actualCutIndex; i++) {
-    const part = parts[i];
-    if (!part) continue;
-
-    if (part.type === 'tool-call') {
-      toolCount++;
-    } else if (part.type === 'reasoning') {
-      thinkingCount++;
-    }
-  }
-
+  const runs = collectRuns({ parts, folded });
   return {
-    cutIndex: actualCutIndex,
+    runs,
     hasFinal: finalConfirmed,
-    toolCount,
-    thinkingCount,
+    toolCount: runs.reduce((sum, run) => sum + run.toolCount, 0),
+    thinkingCount: runs.reduce((sum, run) => sum + run.thinkingCount, 0),
   };
 }

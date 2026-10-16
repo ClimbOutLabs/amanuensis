@@ -348,14 +348,10 @@ describe('queriesAskSameQuestion', () => {
   it('evaluates single-token queries by initialism equality', () => {
     // web_search("qa") after a "quality assurance certification" near-miss:
     // "qa" is allowlisted as the "quality assurance" initialism.
-    expect(
-      queriesAskSameQuestion({ a: tokenize('qa'), b: tokenize('quality assurance certification') }),
-    ).toBe(true);
+    expect(queriesAskSameQuestion({ a: tokenize('qa'), b: tokenize('quality assurance certification') })).toBe(true);
     // But generic two-letter aliases are not generated: a lone "ai" does not
     // match "artificial intelligence policy" — the collision is avoided.
-    expect(
-      queriesAskSameQuestion({ a: tokenize('ai'), b: tokenize('artificial intelligence policy') }),
-    ).toBe(false);
+    expect(queriesAskSameQuestion({ a: tokenize('ai'), b: tokenize('artificial intelligence policy') })).toBe(false);
   });
 
   it('only generates the allowlisted two-letter initialism, not generic ones', () => {
@@ -364,13 +360,11 @@ describe('queriesAskSameQuestion', () => {
       queriesAskSameQuestion({ a: tokenize('qa certification'), b: tokenize('quality assurance certification') }),
     ).toBe(true);
     // "qa" does not match other q-a expansions: 0/2.
-    expect(
-      queriesAskSameQuestion({ a: tokenize('qa rig'), b: tokenize('quantum algorithms certification') }),
-    ).toBe(false);
+    expect(queriesAskSameQuestion({ a: tokenize('qa rig'), b: tokenize('quantum algorithms certification') })).toBe(
+      false,
+    );
     // And "ai" no longer abbreviates anything at all: 1/2 < 0.6.
-    expect(
-      queriesAskSameQuestion({ a: tokenize('ai policy'), b: tokenize('annual income policy') }),
-    ).toBe(false);
+    expect(queriesAskSameQuestion({ a: tokenize('ai policy'), b: tokenize('annual income policy') })).toBe(false);
   });
 
   it('never counts alias-on-both-sides intersections toward the threshold', () => {
@@ -397,18 +391,12 @@ describe('tokenize', () => {
   it('keeps version compounds whole so they overlap as one token', () => {
     // Behavioral: the compound must survive as a single matchable token,
     // not how the token array is spelled.
-    expect(
-      queriesAskSameQuestion({ a: tokenize('v4.2.1 release'), b: tokenize('v4.2.1 release notes') }),
-    ).toBe(true);
-    expect(
-      queriesAskSameQuestion({ a: tokenize('v4 release'), b: tokenize('v4.2.1 release notes') }),
-    ).toBe(false);
+    expect(queriesAskSameQuestion({ a: tokenize('v4.2.1 release'), b: tokenize('v4.2.1 release notes') })).toBe(true);
+    expect(queriesAskSameQuestion({ a: tokenize('v4 release'), b: tokenize('v4.2.1 release notes') })).toBe(false);
   });
 
   it('stems plurals symmetrically and drops stopwords for overlap purposes', () => {
-    expect(
-      queriesAskSameQuestion({ a: tokenize('QA versions'), b: tokenize('qa version') }),
-    ).toBe(true);
+    expect(queriesAskSameQuestion({ a: tokenize('QA versions'), b: tokenize('qa version') })).toBe(true);
     expect(queriesAskSameQuestion({ a: tokenize('the version'), b: tokenize('version') })).toBe(true);
   });
 });

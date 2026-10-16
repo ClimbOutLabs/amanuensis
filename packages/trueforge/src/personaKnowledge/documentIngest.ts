@@ -1,6 +1,6 @@
+import { extractRawText } from 'mammoth';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { extractRawText } from 'mammoth';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
 
@@ -88,7 +88,7 @@ export async function extractTextFromUpload(input: {
   });
   switch (kind) {
     case 'pdf':
-      return { kind, ...await extractPdfText(input.bytes) };
+      return { kind, ...(await extractPdfText(input.bytes)) };
     case 'docx':
       return { kind, text: await extractDocxText(input.bytes) };
     case 'txt':
@@ -536,10 +536,7 @@ function privateHostError(hostname: string): Error {
  * Redirects are capped and the body is byte-capped. HTML becomes text; a PDF
  * link is parsed as a PDF.
  */
-export async function fetchUrlSnapshot(
-  rawUrl: string,
-  options?: FetchSnapshotOptions,
-): Promise<UrlSnapshot> {
+export async function fetchUrlSnapshot(rawUrl: string, options?: FetchSnapshotOptions): Promise<UrlSnapshot> {
   const fetchImpl = options?.fetchImpl ?? undiciFetch;
   const timeoutMs = options?.timeoutMs ?? URL_FETCH_TIMEOUT_MS;
   const maxBytes = options?.maxBytes ?? MAX_URL_BYTES;

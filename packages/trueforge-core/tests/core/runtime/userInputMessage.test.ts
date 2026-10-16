@@ -229,9 +229,9 @@ describe('UserInputMessage validation', () => {
   it('advertises /ingress paths when run_code is available', async () => {
     const localSandbox = makeStubPublicSandbox();
     jest.spyOn(localSandbox, 'isRunCodeAvailable').mockReturnValue(true);
-    const uploadUserFile = jest.spyOn(localSandbox, 'uploadUserFile').mockImplementation(input =>
-      Promise.resolve({ filePath: `/tmp/uploads/${input.fileName}` }),
-    );
+    const uploadUserFile = jest
+      .spyOn(localSandbox, 'uploadUserFile')
+      .mockImplementation(input => Promise.resolve({ filePath: `/tmp/uploads/${input.fileName}` }));
     const msg: AgentInputUserMessage = {
       type: EventType.USER_MESSAGE,
       content: [
@@ -252,9 +252,9 @@ describe('UserInputMessage validation', () => {
 
   it('omits the /ingress note when run_code is unavailable', async () => {
     const localSandbox = makeStubPublicSandbox();
-    jest.spyOn(localSandbox, 'uploadUserFile').mockImplementation(input =>
-      Promise.resolve({ filePath: `/tmp/uploads/${input.fileName}` }),
-    );
+    jest
+      .spyOn(localSandbox, 'uploadUserFile')
+      .mockImplementation(input => Promise.resolve({ filePath: `/tmp/uploads/${input.fileName}` }));
     const msg: AgentInputUserMessage = {
       type: EventType.USER_MESSAGE,
       content: [

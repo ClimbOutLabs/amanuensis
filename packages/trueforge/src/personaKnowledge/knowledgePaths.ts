@@ -35,10 +35,7 @@ export function personaKnowledgeLocation(input: {
 }
 
 /** Creates the knowledge root (and tenant directory) if missing. Idempotent. */
-export async function ensurePersonaKnowledgeRoot(input: {
-  knowledgeDir: string;
-  tenantId: string;
-}): Promise<void> {
+export async function ensurePersonaKnowledgeRoot(input: { knowledgeDir: string; tenantId: string }): Promise<void> {
   if (!SAFE_SEGMENT_PATTERN.test(input.tenantId)) {
     throw new Error('Refusing to create a knowledge directory for an unsafe tenantId.');
   }

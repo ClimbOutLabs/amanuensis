@@ -1,6 +1,13 @@
+import type { AgentCapability } from '../../../src/core/capabilities/AgentCapability';
+import type {
+  AgentContextProcessorOutput,
+  AgentThreadExecutionContext,
+} from '../../../src/core/capabilities/AgentContextProcessor';
+import { EventType, newEventId } from '../../../src/core/events/schema';
 import type { ILLM } from '../../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
+import type { ModelParams } from '../../../src/core/runtime/AgentDefinition';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type {
   AgentThreadEvent,
@@ -8,13 +15,6 @@ import type {
   InternalThreadDoneEvent,
 } from '../../../src/core/runtime/AgentThread.types';
 import { InternalEventType } from '../../../src/core/runtime/AgentThread.types';
-import type { AgentCapability } from '../../../src/core/capabilities/AgentCapability';
-import type {
-  AgentContextProcessorOutput,
-  AgentThreadExecutionContext,
-} from '../../../src/core/capabilities/AgentContextProcessor';
-import { EventType, newEventId } from '../../../src/core/events/schema';
-import type { ModelParams } from '../../../src/core/runtime/AgentDefinition';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 
@@ -232,9 +232,11 @@ describe('token-based pre-flight guard', () => {
     const { thread, create } = makeThread({
       context: OVER_LIMIT_CONTEXT,
       modelProperties: { contextLength: 4096 },
-      capabilities: [makeNormalCompactionCapability(() => {
-        forcedPasses += 1;
-      })],
+      capabilities: [
+        makeNormalCompactionCapability(() => {
+          forcedPasses += 1;
+        }),
+      ],
     });
     const events = await drainEvents(thread, new AbortController().signal);
 

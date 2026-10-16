@@ -1,0 +1,345 @@
+import {
+  GIT_HARDENING_ENV,
+  gitHardeningConfigEntries,
+  gitNetworkHardeningConfigEntries,
+  type GitConfigEntry,
+} from '../permissions/gitHardening';
+import { parseSimpleCommand } from '../permissions/shellAllowlist';
+import { shellEscape } from './provider/Provider';
+
+/** Absolute so a model-writable PATH entry (venv, mcp-client/bin) cannot shadow the binary that receives the token. */
+export const HOST_AUTHENTICATED_GIT_BINARY = '/usr/bin/git';
+
+const TOKEN_ENV_KEY = 'TRUEFORGE_GIT_TOKEN';
+
+/** Absolute so the env wrapper, like git, is found without any PATH lookup. */
+const ENV_BINARY = '/usr/bin/env';
+
+/**
+ * Inherited variables that can redirect, trace or inject code into git; the model cannot set them, the image might.
+ * GIT_SSL_CAINFO and GIT_SSL_CAPATH stay: images may supply their only CA bundle through them.
+ */
+const SCRUBBED_ENV_KEYS: readonly string[] = [
+  'GIT_EXEC_PATH',
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_NAMESPACE',
+  'GIT_CONFIG',
+  'GIT_CONFIG_SYSTEM',
+  'GIT_EXTERNAL_DIFF',
+  'GIT_PAGER',
+  'GIT_SSH',
+  'GIT_SSH_COMMAND',
+  'GIT_PROXY_COMMAND',
+  'GIT_SSL_NO_VERIFY',
+  'GIT_SSL_CERT',
+  'GIT_SSL_KEY',
+  'GIT_CURL_VERBOSE',
+  'GIT_TRACE',
+  'GIT_TRACE_CURL',
+  'GIT_TRACE_CURL_NO_DATA',
+  'GIT_TRACE_PACKET',
+  'GIT_TRACE_PERFORMANCE',
+  'GIT_TRACE_SETUP',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'LD_AUDIT',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+];
+
+/** Home and config dirs that exist nowhere, so no per-user git, curl or netrc file is read. */
+const PINNED_HOME_ENV: Readonly<Record<string, string>> = {
+  HOME: '/nonexistent',
+  XDG_CONFIG_HOME: '/nonexistent',
+  PATH: '/usr/bin:/bin',
+};
+
+/** True when an exec env carries the token, so callers can keep it out of any PATH-resolving wrapper. */
+export function carriesHostAuthenticatedGitToken(env: Readonly<Record<string, string>> | undefined): boolean {
+  return env?.[TOKEN_ENV_KEY] !== undefined;
+}
+
+export type HostAuthenticatedGitSubcommand = 'clone' | 'fetch' | 'pull' | 'push' | 'ls-remote';
+
+export interface HostAuthenticatedGitPlan {
+  subcommand: HostAuthenticatedGitSubcommand;
+  args: readonly string[];
+  /** The command reads the checkout's own config, so it must be proven free of program-running keys first. */
+  readsRepositoryConfig: boolean;
+  /** Outside a repository the command reads no local config, so a missing one is not a refusal. */
+  allowsMissingRepository: boolean;
+}
+
+type OperandShape = 'clone' | 'remote_and_refspecs' | 'ls_remote';
+
+interface SubcommandPolicy {
+  flags: ReadonlySet<string>;
+  valued: Readonly<Record<string, RegExp>>;
+  operands: OperandShape;
+  readsRepositoryConfig: boolean;
+  allowsMissingRepository: boolean;
+}
+
+const POSITIVE_INTEGER = /^[1-9][0-9]{0,5}$/u;
+const BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/u;
+const GITHUB_REPOSITORY_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?(?:\.git)?\/?$/u;
+const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+const REFSPEC = /^\+?[A-Za-z0-9._/@:^~{}*-]{1,255}$/u;
+
+const POLICIES: Readonly<Record<HostAuthenticatedGitSubcommand, SubcommandPolicy>> = {
+  clone: {
+    flags: new Set(['--single-branch', '--no-single-branch', '--no-tags', '-q', '--quiet']),
+    valued: { '--depth': POSITIVE_INTEGER, '--branch': BRANCH_NAME, '-b': BRANCH_NAME },
+    operands: 'clone',
+    readsRepositoryConfig: false,
+    allowsMissingRepository: false,
+  },
+  fetch: {
+    flags: new Set([
+      '--all',
+      '--prune',
+      '-p',
+      '--tags',
+      '-t',
+      '--no-tags',
+      '--force',
+      '-f',
+      '--unshallow',
+      '--dry-run',
+      '-n',
+      '-q',
+      '--quiet',
+    ]),
+    valued: { '--depth': POSITIVE_INTEGER },
+    operands: 'remote_and_refspecs',
+    readsRepositoryConfig: true,
+    allowsMissingRepository: false,
+  },
+  pull: {
+    flags: new Set([
+      '--ff-only',
+      '--rebase',
+      '-r',
+      '--no-rebase',
+      '--no-edit',
+      '--autostash',
+      '--prune',
+      '-p',
+      '--tags',
+      '-q',
+      '--quiet',
+    ]),
+    valued: { '--depth': POSITIVE_INTEGER },
+    operands: 'remote_and_refspecs',
+    readsRepositoryConfig: true,
+    allowsMissingRepository: false,
+  },
+  push: {
+    flags: new Set([
+      '-u',
+      '--set-upstream',
+      '--force-with-lease',
+      '--force',
+      '-f',
+      '--delete',
+      '-d',
+      '--tags',
+      '--follow-tags',
+      '--dry-run',
+      '-n',
+      '--no-verify',
+      '--atomic',
+      '-q',
+      '--quiet',
+    ]),
+    valued: {},
+    operands: 'remote_and_refspecs',
+    readsRepositoryConfig: true,
+    allowsMissingRepository: false,
+  },
+  'ls-remote': {
+    flags: new Set(['--heads', '-h', '--tags', '-t', '--refs', '-q', '--quiet']),
+    valued: {},
+    operands: 'ls_remote',
+    readsRepositoryConfig: true,
+    allowsMissingRepository: true,
+  },
+};
+
+function isHostAuthenticatedSubcommand(value: string): value is HostAuthenticatedGitSubcommand {
+  return Object.hasOwn(POLICIES, value);
+}
+
+/** True when `git` is followed, possibly after global options, by a network subcommand, however the rest is spelled. */
+export function isGitNetworkCommand(command: string): boolean {
+  return /(?:^|[\s;&|(])git\s(?:[^;&|]*\s)?(?:clone|fetch|pull|push|ls-remote)(?:\s|$)/u.test(command);
+}
+
+function isSafeRelativeDirectory(value: string): boolean {
+  return (
+    value !== '' &&
+    !value.startsWith('/') &&
+    !value.startsWith('-') &&
+    !value.startsWith('~') &&
+    !value.split('/').includes('..')
+  );
+}
+
+function operandsAreValid(input: { shape: OperandShape; operands: readonly string[] }): boolean {
+  const [first, ...rest] = input.operands;
+  switch (input.shape) {
+    case 'clone':
+      return (
+        first !== undefined &&
+        GITHUB_REPOSITORY_URL.test(first) &&
+        rest.length <= 1 &&
+        rest.every(isSafeRelativeDirectory)
+      );
+    case 'ls_remote':
+      return first !== undefined && GITHUB_REPOSITORY_URL.test(first) && rest.every(item => REFSPEC.test(item));
+    case 'remote_and_refspecs':
+      return (
+        first === undefined ||
+        ((REMOTE_NAME.test(first) || GITHUB_REPOSITORY_URL.test(first)) && rest.every(item => REFSPEC.test(item)))
+      );
+  }
+}
+
+/**
+ * Parses a model-authored command into a host-authenticated git plan, or
+ * undefined when it is anything but one plain network git command whose every
+ * flag and operand is allowlisted. Global options (`-c`, `-C`, `--exec-path`),
+ * `--upload-pack`/`--receive-pack`, submodule recursion and non-GitHub URLs are
+ * therefore never authenticated.
+ */
+export function planHostAuthenticatedGit(input: { command: string }): HostAuthenticatedGitPlan | undefined {
+  const parsed = parseSimpleCommand(input.command);
+  if (parsed?.wrapper !== null) {
+    return undefined;
+  }
+  const [name, subcommand, ...tokens] = parsed.argv;
+  if (name !== 'git' || subcommand === undefined || !isHostAuthenticatedSubcommand(subcommand)) {
+    return undefined;
+  }
+  const policy = POLICIES[subcommand];
+  const args: string[] = [];
+  const operands: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === undefined) {
+      return undefined;
+    }
+    if (!token.startsWith('-')) {
+      operands.push(token);
+      args.push(token);
+      continue;
+    }
+    const equals = token.startsWith('--') ? token.indexOf('=') : -1;
+    const flagName = equals === -1 ? token : token.slice(0, equals);
+    const valuePattern = Object.hasOwn(policy.valued, flagName) ? policy.valued[flagName] : undefined;
+    if (valuePattern !== undefined) {
+      const value = equals === -1 ? tokens[index + 1] : token.slice(equals + 1);
+      if (value === undefined || !valuePattern.test(value)) {
+        return undefined;
+      }
+      args.push(token);
+      if (equals === -1) {
+        args.push(value);
+        index += 1;
+      }
+      continue;
+    }
+    if (equals === -1 && policy.flags.has(token)) {
+      args.push(token);
+      continue;
+    }
+    return undefined;
+  }
+  if (!operandsAreValid({ shape: policy.operands, operands })) {
+    return undefined;
+  }
+  return {
+    subcommand,
+    args,
+    readsRepositoryConfig: policy.readsRepositoryConfig,
+    allowsMissingRepository: policy.allowsMissingRepository,
+  };
+}
+
+const CREDENTIAL_HELPER = `!f() { test "$1" = get && printf 'username=x-access-token\\npassword=%s\\n' "$${TOKEN_ENV_KEY}"; }; f`;
+
+/** Config passed as env pairs so no argv carries it; system and global files are ignored. */
+function gitConfigEnv(input: { entries: readonly GitConfigEntry[] }): Record<string, string> {
+  const env: Record<string, string> = {
+    ...GIT_HARDENING_ENV,
+    ...PINNED_HOME_ENV,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: '',
+    GIT_EDITOR: 'true',
+    GIT_MERGE_AUTOEDIT: 'no',
+    GIT_CONFIG_COUNT: String(input.entries.length),
+  };
+  input.entries.forEach(([key, value], index) => {
+    env[`GIT_CONFIG_KEY_${String(index)}`] = key;
+    env[`GIT_CONFIG_VALUE_${String(index)}`] = value;
+  });
+  return env;
+}
+
+function hardeningEntries(workspaceRoot: string | undefined): GitConfigEntry[] {
+  return [...gitHardeningConfigEntries({ workspaceRoot }), ...gitNetworkHardeningConfigEntries()];
+}
+
+/** Every binary is absolute: nothing here may be resolved through a model-writable PATH entry. */
+function pinnedGitCommand(gitArguments: readonly string[]): string {
+  return [
+    ENV_BINARY,
+    ...SCRUBBED_ENV_KEYS.flatMap(key => ['-u', key]),
+    HOST_AUTHENTICATED_GIT_BINARY,
+    '--no-pager',
+    '--no-optional-locks',
+    ...gitArguments,
+  ]
+    .map(shellEscape)
+    .join(' ');
+}
+
+export interface HostAuthenticatedGitExec {
+  command: string;
+  env: Record<string, string>;
+}
+
+/**
+ * Network git is the one place a token must reach the sandbox: providers offer
+ * no stdin or secret channel. It appears only in this process env, scoped by git
+ * to credential requests for https://github.com (every other helper is reset),
+ * and callers must run the command without a PATH-resolving wrapper.
+ */
+export function buildHostAuthenticatedGit(input: {
+  plan: HostAuthenticatedGitPlan;
+  token: string;
+  workspaceRoot: string | undefined;
+}): HostAuthenticatedGitExec {
+  const command = pinnedGitCommand([input.plan.subcommand, ...input.plan.args]);
+  const env = gitConfigEnv({
+    entries: [
+      ...hardeningEntries(input.workspaceRoot),
+      ['credential.helper', ''],
+      ['credential.https://github.com.helper', CREDENTIAL_HELPER],
+    ],
+  });
+  return { command, env: { ...env, [TOKEN_ENV_KEY]: input.token } };
+}
+
+/** Token-free probe listing the checkout's local config key names, run before any command that reads that config. */
+export function buildHostAuthenticatedGitConfigProbe(input: {
+  workspaceRoot: string | undefined;
+}): HostAuthenticatedGitExec {
+  const command = pinnedGitCommand(['config', '--local', '--no-includes', '--list', '--name-only']);
+  return { command, env: gitConfigEnv({ entries: hardeningEntries(input.workspaceRoot) }) };
+}

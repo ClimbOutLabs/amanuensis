@@ -9,11 +9,12 @@ const mockModel: {
 } = {
   ready: true,
   ensureReady: async () => mockModel.ready,
-  embedPassages: async texts => texts.map(() => {
-    const vector = new Array<number>(384).fill(0);
-    vector[0] = 1;
-    return vector;
-  }),
+  embedPassages: async texts =>
+    texts.map(() => {
+      const vector = new Array<number>(384).fill(0);
+      vector[0] = 1;
+      return vector;
+    }),
 };
 
 jest.mock('../../../src/runtime/memory/embeddingModel', () => ({
@@ -21,14 +22,15 @@ jest.mock('../../../src/runtime/memory/embeddingModel', () => ({
   getSharedEmbeddingModel: () => mockModel,
 }));
 
-import { PersonaKnowledgeIndexer, describeUserFacingFailure, writeKnowledgeBlob } from '../../../src/personaKnowledge/knowledgeIndexer';
 import {
-  DataDirConfigurationError,
-  USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
-} from '../../../src/utils/dataDir';
+  PersonaKnowledgeIndexer,
+  describeUserFacingFailure,
+  writeKnowledgeBlob,
+} from '../../../src/personaKnowledge/knowledgeIndexer';
 import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import type { KnowledgeDocumentStatus } from '../../../src/schemas/personaKnowledge';
+import { DataDirConfigurationError, USER_FACING_STORAGE_UNAVAILABLE_MESSAGE } from '../../../src/utils/dataDir';
 
 const logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 
@@ -107,7 +109,12 @@ describe('PersonaKnowledgeIndexer', () => {
     mockModel.ready = true;
     const knowledgeDir = mkdtempSync(path.join(tmpdir(), 'pk-indexer-'));
     const indexer = new PersonaKnowledgeIndexer({ knowledgeDir, modelDir: path.join(knowledgeDir, 'm'), logger });
-    const documentId = await addTextDocument(knowledgeDir, indexer, 'zara', 'The solo project sold for twenty million dollars. '.repeat(20));
+    const documentId = await addTextDocument(
+      knowledgeDir,
+      indexer,
+      'zara',
+      'The solo project sold for twenty million dollars. '.repeat(20),
+    );
 
     await waitForStatus(knowledgeDir, 'zara', documentId, 'ready');
 

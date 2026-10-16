@@ -4,6 +4,7 @@ import { useAuiState } from '@assistant-ui/react';
 import { useTrueFoundryReload } from '@truefoundry/assistant-ui-runtime';
 import { useCallback, useEffect, useRef } from 'react';
 
+import { useToasterOptional } from '../containers/ToasterContainer.js';
 import {
   APPROVAL_AUTO_DENY_MINUTES,
   approvalAutoDenyReason,
@@ -11,8 +12,8 @@ import {
   type HarnessChatServerExtensions,
   type SessionTipInfo,
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
-import { useToasterOptional } from '../containers/ToasterContainer.js';
 import { useOptionalServer } from '../server/ServerContext.js';
+import { isStaleApprovalError, subscribeToStaleApproval } from '../utils/staleApproval.js';
 
 /**
  * Structural check: the trueforge adapter attaches the session-resync port
@@ -86,8 +87,12 @@ export function useSessionEventSync(): {
   const lastTipRef = useRef<string | undefined>(undefined);
 
   const syncNow = useCallback((_reason: SessionEventSyncReason) => {
-    const { server: currentServer, reload: currentReload, toaster: currentToaster, sessionId: currentSessionId } =
-      liveRef.current;
+    const {
+      server: currentServer,
+      reload: currentReload,
+      toaster: currentToaster,
+      sessionId: currentSessionId,
+    } = liveRef.current;
     if (syncInFlightRef.current) return;
     if (currentServer == null || !hasSessionResync(currentServer) || currentSessionId == null) return;
     if (typeof document !== 'undefined' && document.hidden) return;
@@ -99,10 +104,17 @@ export function useSessionEventSync(): {
         if (tip.pendingApprovals.length > 0) {
           const oldestMs = Math.min(...tip.pendingApprovals.map(approval => Date.parse(approval.createdAt)));
           if (Number.isFinite(oldestMs) && Date.now() - oldestMs > APPROVAL_AUTO_DENY_MINUTES * 60_000) {
-            const result = await currentServer.dismissPendingApprovals({
-              sessionId: currentSessionId,
-              reason: approvalAutoDenyReason(),
-            });
+            const result = await currentServer
+              .dismissPendingApprovals({
+                sessionId: currentSessionId,
+                reason: approvalAutoDenyReason(),
+              })
+              .catch((error: unknown) => {
+                // The chat moved on while we looked; nothing to deny. A background cleanup
+                // must not surface an error the user did not cause.
+                if (isStaleApprovalError(error)) return { dismissed: 0, alreadyResolved: true };
+                throw error;
+              });
             if (!result.alreadyResolved) {
               const plural = result.dismissed === 1 ? '' : 's';
               currentToaster?.showSuccess({
@@ -122,9 +134,7 @@ export function useSessionEventSync(): {
         }
         lastTipRef.current = tip.turnId;
       } catch (error) {
-        currentToaster?.showError(
-          error instanceof Error ? error : new Error('Could not reach the chat server.'),
-        );
+        currentToaster?.showError(error instanceof Error ? error : new Error('Could not reach the chat server.'));
       } finally {
         syncInFlightRef.current = false;
       }
@@ -140,6 +150,9 @@ export function useSessionEventSync(): {
  */
 export function ForegroundEventSync(): null {
   const { syncNow } = useSessionEventSync();
+  const reload = useTrueFoundryReload();
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
   const syncNowRef = useRef(syncNow);
   syncNowRef.current = syncNow;
 
@@ -180,7 +193,9 @@ export function ForegroundEventSync(): null {
     window.addEventListener('focus', onFocus);
     window.addEventListener('online', onOnline);
     const unsubscribeBlockedSend = subscribeToBlockedSend(onBlockedSend);
+    const unsubscribeStaleApproval = subscribeToStaleApproval(() => reloadRef.current());
     return () => {
+      unsubscribeStaleApproval();
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('online', onOnline);

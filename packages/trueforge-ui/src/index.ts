@@ -268,40 +268,8 @@ export {
 export type { PersonalizationApi, PersonalizationProfile } from './components/PersonalizationContext.js';
 export { PersonalizationPanel } from './components/PersonalizationPanel.js';
 export type { PersonalizationPanelProps } from './components/PersonalizationPanel.js';
-export {
-  SentinelApiProvider,
-  useOptionalSentinelApi,
-  useOptionalSentinelApiState,
-} from './sentinel/SentinelApiContext.js';
-export type { SentinelApiState } from './sentinel/SentinelApiContext.js';
-export { SentinelAuditFeed } from './sentinel/SentinelAuditFeed.js';
-export type { SentinelAuditFeedProps } from './sentinel/SentinelAuditFeed.js';
-export { OfflineIndicator } from './sentinel/OfflineIndicator.js';
-export { SentinelSettings } from './sentinel/SentinelSettings.js';
-export { Tier2EscalationToggle } from './sentinel/Tier2EscalationToggle.js';
-export type { Tier2EscalationToggleProps } from './sentinel/Tier2EscalationToggle.js';
-export { Tier2Indicator } from './sentinel/Tier2Indicator.js';
-export type { Tier2IndicatorProps } from './sentinel/Tier2Indicator.js';
-export { Tier3ApprovalCard } from './sentinel/Tier3ApprovalCard.js';
-export type { Tier3ApprovalCardProps } from './sentinel/Tier3ApprovalCard.js';
-export {
-  extractSentinelFromEvent,
-  extractSentinelSessionContext,
-  parseAuditEntries,
-  parseToolTier,
-  parseUserSettings,
-} from './sentinel/types.js';
-export type {
-  SentinelApi,
-  SentinelApprovalCard,
-  SentinelApprovalInfo,
-  SentinelAuditEntry,
-  SentinelAuditOutcome,
-  SentinelSessionContext,
-  SentinelUserSettings,
-  Tier2Notice,
-  ToolTier,
-} from './sentinel/types.js';
+export { RunCodeStatusProvider, useOptionalRunCodeStatus } from './components/RunCodeStatusContext.js';
+export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatusContext.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
 export type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from './components/VoiceInputContext.js';
 export { AgentStepsContainer } from './containers/AgentStepsContainer.js';
@@ -380,6 +348,37 @@ export { useResourcePermissions } from './hooks/useResourcePermissions.js';
 export type { UseResourcePermissionsOptions, UseResourcePermissionsResult } from './hooks/useResourcePermissions.js';
 export { useRuntimeConnectivity } from './hooks/useRuntimeConnectivity.js';
 export type { RuntimeConnectivity, UseRuntimeConnectivityOptions } from './hooks/useRuntimeConnectivity.js';
+export { OfflineIndicator } from './sentinel/OfflineIndicator.js';
+export { PermissionApprovalCard } from './sentinel/PermissionApprovalCard.js';
+export type { PermissionApprovalCardProps } from './sentinel/PermissionApprovalCard.js';
+export {
+  SentinelApiProvider,
+  useOptionalSentinelApi,
+  useOptionalSentinelApiState,
+} from './sentinel/SentinelApiContext.js';
+export type { SentinelApiState } from './sentinel/SentinelApiContext.js';
+export { SentinelAuditFeed } from './sentinel/SentinelAuditFeed.js';
+export type { SentinelAuditFeedProps } from './sentinel/SentinelAuditFeed.js';
+export { SentinelSettings } from './sentinel/SentinelSettings.js';
+export { Tier2RelaxationToggle } from './sentinel/Tier2RelaxationToggle.js';
+export type { Tier2RelaxationToggleProps } from './sentinel/Tier2RelaxationToggle.js';
+export {
+  extractSentinelFromEvent,
+  extractSentinelSessionContext,
+  parseAuditEntries,
+  parseToolTier,
+  parseUserSettings,
+} from './sentinel/types.js';
+export type {
+  SentinelApi,
+  SentinelApprovalCard,
+  SentinelApprovalInfo,
+  SentinelAuditEntry,
+  SentinelAuditOutcome,
+  SentinelSessionContext,
+  SentinelUserSettings,
+  ToolTier,
+} from './sentinel/types.js';
 export {
   IMAGE_MAX_EDGE,
   IMAGE_PASSTHROUGH_BYTES,
@@ -621,7 +620,7 @@ export type { SessionTurnView } from './utils/sessionTurnViews.js';
 
 // Utils
 export { computeAgentStepsSplit } from './utils/computeAgentStepsSplit.js';
-export type { AgentStepPart, AgentStepsSplitResult } from './utils/computeAgentStepsSplit.js';
+export type { AgentStepPart, AgentStepsRun, AgentStepsSplitResult } from './utils/computeAgentStepsSplit.js';
 export { findSubAgentAncestorsForApproval } from './utils/findApprovalAncestors.js';
 export { getErrorMessage } from './utils/getErrorMessage.js';
 

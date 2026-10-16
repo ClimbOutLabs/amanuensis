@@ -41,6 +41,8 @@ export async function probeMemoryProvider(input: {
     apiBase: input.apiBase,
     bank: input.bank,
     headers: input.headers,
+    // A provider that only passes by redirecting elsewhere has not shown it serves this origin.
+    refuseRedirects: true,
     ...(input.fetchImpl === undefined ? {} : { fetchImpl: input.fetchImpl }),
   });
   try {

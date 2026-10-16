@@ -1,9 +1,10 @@
 'use client';
 
 import { useAuiState } from '@assistant-ui/react';
-import { useTrueFoundryApprovals, useTrueFoundryToolResponses } from '@truefoundry/assistant-ui-runtime';
+import { useTrueFoundryToolResponses } from '@truefoundry/assistant-ui-runtime';
 
 import { useOptionalCustomActionRenderers } from '../server/CustomActionRenderersContext.js';
+import { useAnswerableApprovals } from './useAnswerableApprovals.js';
 
 export type ThreadPauseState = {
   thread: {
@@ -35,7 +36,7 @@ export type ComposerPauseView =
 export function useComposerPauseView(): ComposerPauseView {
   const mcpPending = useAuiState(threadHasPendingMcpAuth);
   const { pending: toolResponsesPending } = useTrueFoundryToolResponses();
-  const { pending: approvalsPending } = useTrueFoundryApprovals();
+  const { pending: approvalsPending } = useAnswerableApprovals();
   const customActionRenderers = useOptionalCustomActionRenderers();
 
   if (mcpPending) {

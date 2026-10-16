@@ -83,7 +83,7 @@ function applyBudgetedTools(value: TrueForgeAgentRuntimeConfig, budgetedTools: s
   };
 }
 
-const NO_SANDBOX_PROVIDER_HINT = 'No sandbox provider yet, add one in Settings → Sandbox';
+const SANDBOX_UNAVAILABLE_HINT = 'The sandbox is not available on this server';
 
 type RuntimeSwitchField = {
   label: string;
@@ -131,7 +131,7 @@ export function AgentRuntimeConfigFields({
     checked: sandboxEnabled,
     disabled: !sandboxAvailable || hasSkills,
     disabledTooltip: !sandboxAvailable
-      ? NO_SANDBOX_PROVIDER_HINT
+      ? SANDBOX_UNAVAILABLE_HINT
       : hasSkills
         ? 'Always on while skills are attached — remove them to turn it off'
         : undefined,
@@ -165,7 +165,7 @@ export function AgentRuntimeConfigFields({
     description: 'Move large tool output to the sandbox and retain a preview.',
     checked: value.contextManagement?.largeToolResponse?.enabled ?? true,
     disabled: !sandboxAvailable,
-    disabledTooltip: !sandboxAvailable ? `Offloading needs a sandbox. ${NO_SANDBOX_PROVIDER_HINT}` : undefined,
+    disabledTooltip: !sandboxAvailable ? `Offloading needs a sandbox. ${SANDBOX_UNAVAILABLE_HINT}` : undefined,
     update: enabled => ({
       ...value,
       contextManagement: {

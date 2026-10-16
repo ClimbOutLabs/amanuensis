@@ -173,10 +173,7 @@ function sanitizeAppendedAssistantMessages(
   return result.every((message, index) => message === messages[index]) ? messages : result;
 }
 
-function sanitizeOneAssistantMessage(
-  message: ContextMessage,
-  sanitize: (text: string) => string,
-): ContextMessage {
+function sanitizeOneAssistantMessage(message: ContextMessage, sanitize: (text: string) => string): ContextMessage {
   if (!('role' in message) || message.role !== 'assistant') {
     return message;
   }
@@ -193,9 +190,7 @@ function sanitizeOneAssistantMessage(
       const cleaned = sanitize(part.text);
       return cleaned === part.text ? part : { ...part, text: cleaned };
     });
-    return parts.every((part, index) => part === content[index])
-      ? message
-      : { ...message, content: parts };
+    return parts.every((part, index) => part === content[index]) ? message : { ...message, content: parts };
   }
   return message;
 }

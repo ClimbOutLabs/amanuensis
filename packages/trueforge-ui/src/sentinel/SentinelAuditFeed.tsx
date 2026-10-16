@@ -5,13 +5,12 @@ import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 import { MessageTimestamp } from '../atoms/MessageTimestamp.js';
 import { Icon } from '../icons/Icon.js';
 import { useOptionalSentinelApiState } from './SentinelApiContext.js';
-import { Tier2EscalationToggle } from './Tier2EscalationToggle.js';
+import { Tier2RelaxationToggle } from './Tier2RelaxationToggle.js';
 import {
   TIER2_ACTION_KINDS,
   TIER2_ACTION_LABELS,
   type SentinelAuditEntry,
   type SentinelAuditOutcome,
-  type SentinelUserSettings,
   type Tier2ActionKind,
 } from './types.js';
 
@@ -21,8 +20,6 @@ const AUDIT_POLL_MS = 5000;
 const OUTCOME_LABELS: Record<SentinelAuditOutcome, string> = {
   logged: 'Logged',
   ran: 'Ran',
-  stopped_by_user: 'Stopped by user',
-  undone: 'Undone',
   approved: 'Approved',
   denied: 'Denied',
   auto_denied: 'Auto-denied',
@@ -32,8 +29,6 @@ function outcomeTone(outcome: SentinelAuditOutcome): string {
   switch (outcome) {
     case 'approved':
     case 'ran':
-    case 'undone':
-    case 'stopped_by_user':
       return 'text-text-secondary';
     case 'denied':
     case 'auto_denied':
@@ -46,13 +41,8 @@ function outcomeTone(outcome: SentinelAuditOutcome): string {
 const AuditEntryRow: FC<{ entry: SentinelAuditEntry }> = ({ entry }) => (
   <li className="border-b border-border/60 px-3 py-2 last:border-b-0">
     <div className="flex items-baseline justify-between gap-2">
-      <span className="min-w-0 truncate font-mono text-[0.6875rem] text-text-secondary">
-        {entry.action_type}
-      </span>
-      <MessageTimestamp
-        createdAt={entry.created_at}
-        className="text-[0.6875rem] font-normal"
-      />
+      <span className="min-w-0 truncate font-mono text-[0.6875rem] text-text-secondary">{entry.action_type}</span>
+      <MessageTimestamp createdAt={entry.created_at} className="text-[0.6875rem] font-normal" />
     </div>
     <p className="mt-0.5 text-xs text-text-primary">{entry.description}</p>
     <p className={`mt-0.5 text-[0.6875rem] font-medium ${outcomeTone(entry.outcome)}`}>
@@ -70,9 +60,9 @@ export type SentinelAuditFeedProps = {
 
 /**
  * Live permissions audit feed for the right rail. Polls the host's audit-log API for
- * the active session: Tier 1 sensitive reads (`logged`), Tier 2 executions (`ran`,
- * `stopped_by_user`, `undone`) and Tier 3 decisions (`approved`, `denied`,
- * `auto_denied` with the reason). Each Tier 2 action kind gets an "always ask me"
+ * the active session: Tier 1 sensitive reads (`logged`), Tier 2 and Tier 3 decisions
+ * (`approved`, `denied`), relaxed Tier 2 executions (`ran`) and auto-denials
+ * (`auto_denied` with the reason). Each Tier 2 action kind gets a "run without asking"
  * toggle beside it, wired to the user settings API.
  */
 export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => {
@@ -107,14 +97,17 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
   const tier2ActionKinds: Tier2ActionKind[] = useMemo(() => [...TIER2_ACTION_KINDS], []);
 
   const handleToggle = useCallback(
-    async (input: { actionType: Tier2ActionKind; escalated: boolean }) => {
+    async (input: { actionType: Tier2ActionKind; relaxed: boolean }) => {
       if (sentinel === null) return;
-      const current = sentinel.settings?.tier2_always_ask ?? [];
-      const next: Tier2ActionKind[] = input.escalated
-        ? (current.includes(input.actionType) ? current : [...current, input.actionType])
-        : current.filter(kind => kind !== input.actionType);
-      const patch: Partial<SentinelUserSettings> = { tier2_always_ask: next };
-      await sentinel.updateSettings(patch);
+      // Derived from the latest saved settings, not this render's snapshot, so a toggle of
+      // another kind that is still saving is not overwritten.
+      await sentinel.updateSettings(({ tier2_auto_allow: current }) => ({
+        tier2_auto_allow: input.relaxed
+          ? current.includes(input.actionType)
+            ? current
+            : [...current, input.actionType]
+          : current.filter(kind => kind !== input.actionType),
+      }));
     },
     [sentinel],
   );
@@ -130,12 +123,11 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
         <ul className="space-y-1.5">
           {tier2ActionKinds.map(kind => (
             <li key={kind} className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate text-[0.6875rem] text-text-secondary">
-                {TIER2_ACTION_LABELS[kind]}
-              </span>
-              <Tier2EscalationToggle
+              <span className="min-w-0 truncate text-[0.6875rem] text-text-secondary">{TIER2_ACTION_LABELS[kind]}</span>
+              <Tier2RelaxationToggle
                 actionType={kind}
-                escalated={settings?.tier2_always_ask.includes(kind) ?? false}
+                relaxed={settings?.tier2_auto_allow.includes(kind) ?? false}
+                disabled={settings === null}
                 onChange={handleToggle}
               />
             </li>
@@ -147,20 +139,14 @@ export const SentinelAuditFeed: FC<SentinelAuditFeedProps> = ({ sessionId }) => 
         <p className="flex items-center gap-1.5 px-3 py-2 text-xs text-failure-bg" role="alert">
           <Icon name="circle-exclamation" className="shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1 break-words">Could not load the audit feed: {error}</span>
-          <button
-            type="button"
-            className="shrink-0 underline"
-            onClick={() => void load()}
-          >
+          <button type="button" className="shrink-0 underline" onClick={() => void load()}>
             Retry
           </button>
         </p>
       )}
 
       {entries.length === 0 && error === null ? (
-        <p className="px-3 py-4 text-center text-xs text-text-secondary">
-          No permission activity in this session yet.
-        </p>
+        <p className="px-3 py-4 text-center text-xs text-text-secondary">No permission activity in this session yet.</p>
       ) : (
         <ul className="min-h-0 overflow-y-auto">
           {entries.map(entry => (

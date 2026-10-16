@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useCallback } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -8,6 +8,9 @@ import { ToolCallContentBlockContainer } from '@/containers/ToolCallContentBlock
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
 
 let observedNodes: Element[] = [];
+let observers: ResizeObserverProbe[] = [];
+let contentScrollHeight = 64;
+let reportMonacoHeight: ((height: number) => void) | undefined;
 let disconnectCount = 0;
 let reportContentHeight = true;
 let renderedContentHeight = 0;
@@ -17,6 +20,7 @@ class ResizeObserverProbe implements ResizeObserver {
 
   constructor(callback: ResizeObserverCallback) {
     this.callback = callback;
+    observers.push(this);
   }
 
   observe(target: Element) {
@@ -47,12 +51,13 @@ function ToolCallContentBlockProbe({
   const measuredContentRef = useCallback(
     (node: HTMLDivElement | null) => {
       if (node !== null) {
-        Object.defineProperty(node, 'scrollHeight', { configurable: true, value: 64 });
+        Object.defineProperty(node, 'scrollHeight', { configurable: true, get: () => contentScrollHeight });
         Object.defineProperty(node, 'getBoundingClientRect', {
           configurable: true,
           value: () => new DOMRect(0, 0, 100, renderedContentHeight),
         });
       }
+      reportMonacoHeight = onContentHeightChange;
       if (resizable) {
         contentRef?.(node);
         if (node !== null && reportContentHeight) onContentHeightChange?.(64);
@@ -102,6 +107,9 @@ function TestSubject({ resizable = false }: { resizable?: boolean }) {
 describe('ToolCallContentBlockContainer', () => {
   beforeEach(() => {
     observedNodes = [];
+    observers = [];
+    contentScrollHeight = 64;
+    reportMonacoHeight = undefined;
     disconnectCount = 0;
     reportContentHeight = true;
     renderedContentHeight = 0;
@@ -156,6 +164,33 @@ describe('ToolCallContentBlockContainer', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('content-block-probe')).toHaveAttribute('data-content-height', '4.5');
+    });
+  });
+
+  describe('when the agent details are collapsed after measuring', () => {
+    // A display: none ancestor reports a zero box; the measured height must survive until the pane is revealed.
+    it('keeps the measured height when the observer reports a zero-size box', async () => {
+      render(<TestSubject resizable />);
+      await waitFor(() => {
+        expect(screen.getByTestId('content-block-probe')).toHaveAttribute('data-content-height', '4');
+      });
+
+      contentScrollHeight = 0;
+      act(() => observers.forEach(observer => observer.callback([], observer)));
+
+      expect(screen.getByTestId('content-block-probe')).toHaveAttribute('data-content-height', '4');
+    });
+
+    it('keeps the measured height when Monaco reports while the pane has no box', async () => {
+      render(<TestSubject resizable />);
+      await waitFor(() => {
+        expect(screen.getByTestId('content-block-probe')).toHaveAttribute('data-content-height', '4');
+      });
+
+      contentScrollHeight = 0;
+      act(() => reportMonacoHeight?.(168));
+
+      expect(screen.getByTestId('content-block-probe')).toHaveAttribute('data-content-height', '4');
     });
   });
 });

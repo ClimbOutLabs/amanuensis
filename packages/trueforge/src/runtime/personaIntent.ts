@@ -1007,8 +1007,7 @@ function intentIdentities(input: Pick<PersonaIntentInput, 'defaultAssistantName'
 
 /** Discriminated validation result for a deterministic invocation the grammar already matched. */
 export type DirectPersonaInvocationCheck =
-  | { ok: true }
-  | { ok: false; reason: 'ambiguous' | 'negated' | 'quoted' | 'no-match'; candidateKeys?: string[] };
+  { ok: true } | { ok: false; reason: 'ambiguous' | 'negated' | 'quoted' | 'no-match'; candidateKeys?: string[] };
 
 /**
  * Keeps the zero-model-call direct-address path only for an unambiguous,
@@ -1079,5 +1078,3 @@ export function isUnambiguousDirectPersonaInvocation(input: {
   });
   return everyClauseClean ? { ok: true } : { ok: false, reason: 'no-match' };
 }
-
-

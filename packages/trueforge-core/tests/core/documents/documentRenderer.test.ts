@@ -130,16 +130,9 @@ describe('createStructuredDocumentDocx report modes', () => {
   });
 
   it('renders a 208-row financial plan end to end in full mode', async () => {
-    const sections = [
-      'Income',
-      'Expenses',
-      'Accounts',
-      'Tax',
-      'Estate',
-      'Insurance',
-      'Timeline',
-      'Assumptions',
-    ].map((heading, i) => makeSection(heading, 26, i * 26));
+    const sections = ['Income', 'Expenses', 'Accounts', 'Tax', 'Estate', 'Insurance', 'Timeline', 'Assumptions'].map(
+      (heading, i) => makeSection(heading, 26, i * 26),
+    );
     const report: StructuredDocumentReport = {
       title: 'CFP Financial Plan',
       summary: 'Synthetic 208-row plan used to exercise full-report mode.',
@@ -168,9 +161,7 @@ describe('createStructuredDocumentDocx report modes', () => {
       sections: [{ heading: 'A', rows: [{ label: longLabel, value: 'v', status: 'info', sources: [] }] }],
       notes: [],
     };
-    await expect(createStructuredDocumentDocx(report, { mode: 'full' })).rejects.toThrow(
-      /bounded renderer contract/,
-    );
+    await expect(createStructuredDocumentDocx(report, { mode: 'full' })).rejects.toThrow(/bounded renderer contract/);
   });
 
   it('documents the compact caps as exported constants', () => {

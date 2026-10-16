@@ -6,6 +6,7 @@
  */
 import { AgentSpecSchema, type AgentSpec } from '../../src/agent-session/schemas/agentSpec';
 import { TurnResourceResolver } from '../../src/agent-session/TurnResourceResolver';
+import { createSentinelHostContext } from '../../src/core/permissions/context';
 import type { Sandbox } from '../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger, makeStubPublicSandbox } from '../core/harnessMocks';
@@ -41,6 +42,12 @@ function resolveInput(spec: AgentSpec) {
     turn_id: 'turn-1',
     signal: new AbortController().signal,
     tracing: NOOP_AGENT_TRACING,
+    sentinel: createSentinelHostContext({
+      tenant_id: 'tenant-1',
+      created_by: 'user-1',
+      conversation_id: 'session-1',
+      workspace_cwd: null,
+    }),
   };
 }
 
